@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="How Dalfox finds the inputs that matter, and how to steer the discovery phase.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Parameters &amp; Discovery · Dalfox</title>
+  <meta property="og:title" content="Parameters &amp; Discovery">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/guide/parameters/">
+  <meta property="og:description" content="How Dalfox finds the inputs that matter, and how to steer the discovery phase.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/guide-parameters.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Parameters &amp; Discovery">
+  <meta name="twitter:description" content="How Dalfox finds the inputs that matter, and how to steer the discovery phase.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/guide-parameters.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/parameters/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/parameters/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/guide/parameters/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Parameters \u0026 Discovery","url":"https://dalfox.hahwul.com/guide/parameters/","description":"How Dalfox finds the inputs that matter, and how to steer the discovery phase.","image":"https://dalfox.hahwul.com/og-images/guide-parameters.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://dalfox.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Parameters \u0026 Discovery"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/guide/parameters/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Parameters &amp; Discovery</h1>
+          <p>Finding XSS starts with finding the right parameter. Dalfox's discovery engine is a multi-stage pipeline; you rarely need to understand all of it, but knowing the moving parts helps when you want to tune a scan.</p>
+<h2 id="the-pipeline-briefly">The pipeline, briefly</h2>
+<ol>
+<li><strong>Discovery:</strong> Extract parameters from the URL, body, headers, cookies, path, fragment, and form fields.</li>
+<li><strong>Mining:</strong> Extend with DOM analysis (parameter names embedded in JS), dictionary wordlists, and framework-specific patterns.</li>
+<li><strong>Active probing:</strong> Fire a probe for each parameter to learn which special characters survive.</li>
+<li><strong>Fast probe:</strong> A single sandwich-marker request per discovered parameter. If neither a partial nor a full reflection shows up, the heavy payload loops are skipped for that parameter.</li>
+<li><strong>Payload generation:</strong> Build context-aware payloads (HTML, JS, attribute, CSS).</li>
+<li><strong>Reflection check:</strong> Send the payload, then see whether it comes back.</li>
+<li><strong>DOM verification:</strong> Parse the response and confirm the payload forms a real element. AST-based DOM-XSS analysis runs in parallel using the response captured during the fast probe.</li>
+</ol>
+<h2 id="targeting-specific-parameters">Targeting specific parameters</h2>
+<p>Tell Dalfox exactly which parameters to test:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api \
+  -p q \
+  -p id:query \
+  -p auth:header \
+  -p token:cookie
+</code></pre>
+<p>Locations: <code>query</code>, <code>body</code>, <code>json</code>, <code>multipart</code>, <code>cookie</code>, <code>header</code>. Prefer <code>name:location</code> when the injection point is not the query string.</p>
+<p>Without a location hint (<code>-p q</code> only):</p>
+<ol>
+<li>If discovery/mining already found a param with that name, it is kept (filter).</li>
+<li>Otherwise Dalfox <strong>synthesizes</strong> it: location is inferred from the request (URL query → body → cookies → headers), defaulting to <code>query</code>.</li>
+</ol>
+<p>That means recipes like <code>-p q --skip-discovery --skip-mining</code> still test <code>q</code> instead of silently scanning nothing.</p>
+<h2 id="mining-with-wordlists">Mining with wordlists</h2>
+<p>Even if a parameter isn't in the URL, Dalfox can try common names:</p>
+<pre><code class="language-bash hljs"># Local wordlist
+dalfox https://target.app -W ./params.txt
+
+# Remote wordlists (cached after first fetch)
+dalfox https://target.app --remote-wordlists burp,assetnote
+</code></pre>
+<h3 id="auto-collapse">Auto-collapse</h3>
+<p>Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this two ways:</p>
+<ul>
+<li><strong>Sentinel pre-probe:</strong> Before iterating the wordlist, three random parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic <code>any</code> Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (&gt;15 entries) for the pre-probe to pay off.</li>
+<li><strong>EWMA collapse:</strong> While iterating, Dalfox watches the rolling reflection ratio. Once it stays ≥85% after at least 15 attempts, mining stops and any Query params already collected are folded into the same <code>any</code> placeholder.</li>
+</ul>
+<p>Both routes produce identical downstream state: Stage 5–7 sees one Query injection point regardless of which trigger fired.</p>
+<h2 id="pruning-the-noise">Pruning the noise</h2>
+<p>Ignore specific parameters:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --ignore-param csrf --ignore-param __RequestVerificationToken
+</code></pre>
+<p>Scope by URL pattern:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt \
+  --include-url '^https://api\.target\.app/' \
+  --exclude-url '/static/|/health'
+</code></pre>
+<p>Out-of-scope domain list:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt --out-of-scope-file scope-block.txt
+# or inline, with wildcards
+dalfox scan urls.txt --out-of-scope '*.google.com,*.cdn.cloudflare.net'
+</code></pre>
+<h2 id="only-discover-dont-attack">Only discover, don't attack</h2>
+<p>Dry-run mode discovers and prints the attack plan without sending payloads:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --dry-run
+</code></pre>
+<p>Discovery-only mode is similar but completes the probing stage:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-discovery
+</code></pre>
+<p>Both help with scoping and CI pre-checks.</p>
+<h2 id="skipping-stages">Skipping stages</h2>
+<p>To move faster or work around a fragile target, skip parts of the pipeline:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Skips</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-discovery</code></td>
+<td>Entire discovery stage</td>
+</tr>
+<tr>
+<td><code>--skip-mining</code></td>
+<td>All wordlist/DOM mining</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dict</code></td>
+<td>Dictionary mining only</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dom</code></td>
+<td>DOM mining only</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-header</code></td>
+<td>Header reflection checks</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-cookie</code></td>
+<td>Cookie reflection checks</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-path</code></td>
+<td>Path reflection checks</td>
+</tr>
+</tbody>
+</table>
+<h2 id="injection-markers">Injection markers</h2>
+<p>Some endpoints need the payload in a specific location (e.g., inside a JWT). Use <code>--inject-marker</code>:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api \
+  --inject-marker FUZZ \
+  -d '{&quot;filter&quot;:&quot;FUZZ&quot;}'
+</code></pre>
+<p>Dalfox replaces every <code>FUZZ</code> with each payload and sends the request.</p>
+<h2 id="auto-pre-encoding">Auto pre-encoding</h2>
+<p>Some endpoints don't accept a payload as raw text. They expect it wrapped in some structural encoding (base64, JSON, JWT, and so on). Dalfox inspects each parameter's existing value during discovery and, when it recognises a structure, builds a transparent encoding pipeline so payloads round-trip through the same wrapping. There's nothing to configure: look for <code>pre_encoding</code> or <code>pre_encoding_pipeline</code> in debug output.</p>
+<p>Single-step encodings are detected on the existing parameter value:</p>
+<table>
+<thead>
+<tr>
+<th>Detected</th>
+<th>Encodes payload as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base64</code></td>
+<td><code>BASE64(payload)</code></td>
+</tr>
+<tr>
+<td><code>2base64</code></td>
+<td><code>BASE64(BASE64(payload))</code></td>
+</tr>
+<tr>
+<td><code>2url</code> / <code>3url</code></td>
+<td>Two- or three-round URL encoding</td>
+</tr>
+</tbody>
+</table>
+<p>Composable pipelines turn the value's structure into a chain of transformations. When the existing value decodes as a structured wrapper, Dalfox enumerates every leaf string field as its own virtual sub-parameter:</p>
+<table>
+<thead>
+<tr>
+<th>Wrapper shape</th>
+<th>Pipeline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Base64-of-JSON <code>?qs=eyJ…</code></td>
+<td><code>JsonField(/leaf) → Base64</code></td>
+</tr>
+<tr>
+<td>Base64URL-of-JSON</td>
+<td><code>JsonField(/leaf) → Base64Url</code></td>
+</tr>
+<tr>
+<td>Bare URL-encoded JSON <code>?blob=%7B…%7D</code></td>
+<td><code>JsonField(/leaf)</code></td>
+</tr>
+<tr>
+<td>JWT/JWS <code>?token=h.p.s</code></td>
+<td><code>JsonField(/leaf) → Base64Url → JwtAssemble</code></td>
+</tr>
+</tbody>
+</table>
+<p>Each leaf is registered as a separate Param using bracket-style display naming. A payload at the <code>move_url</code> field of <code>qs</code> shows up as <code>qs[move_url]</code>, and an array element appears as <code>qs[items][0]</code>. The wire-level substitution still targets the original parent param (<code>qs</code>), so the request looks normal to the server.</p>
+<p>For JWTs the original header and signature segments are preserved verbatim. The signature won't match the modified payload, so this only fires on endpoints that don't verify the token. Properly-signed JWTs return no findings. That's expected behaviour, not a miss.</p>
+<p>If your target uses a wrapping that Dalfox doesn't auto-detect, you can still force the injection point with <code>--inject-marker</code> (see below).</p>
+<h2 id="reflection-probe-shape">Reflection probe shape</h2>
+<p>Every discovery and mining probe sends a sandwich marker (<code>OPEN + INNER + CLOSE</code>) instead of a single token. The response is then classified into one of four cases:</p>
+<table>
+<thead>
+<tr>
+<th>Reflection</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Full</strong></td>
+<td>The complete <code>OPEN+INNER+CLOSE</code> survived. Standard reflection.</td>
+</tr>
+<tr>
+<td><strong>PrefixOnly</strong></td>
+<td><code>OPEN+INNER</code> is present, <code>CLOSE</code> was stripped. Suggests a suffix-strip filter.</td>
+</tr>
+<tr>
+<td><strong>SuffixOnly</strong></td>
+<td><code>INNER+CLOSE</code> is present, <code>OPEN</code> was stripped. Suggests a prefix-strip filter.</td>
+</tr>
+<tr>
+<td><strong>InnerOnly</strong></td>
+<td>Only <code>INNER</code> survives. Suggests a regex extract or both wraps removed.</td>
+</tr>
+</tbody>
+</table>
+<p>All four are treated as &quot;reflected&quot;: discovery records the parameter and the scan proceeds. A naive single-token check would have missed every case except <em>Full</em>, leaving prefix-/suffix-stripping endpoints undetected. The marker tokens are scan-unique (<code>dlx</code>/<code>dlxmid</code>/<code>xld</code> prefixes plus 8 hex chars per scan), so accidental collisions in HTML are negligible.</p>
+<h2 id="what-makes-a-finding-verified">What makes a finding &quot;verified&quot;</h2>
+<table>
+<thead>
+<tr>
+<th>Result</th>
+<th>How it&#39;s confirmed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>V</strong> (Verified)</td>
+<td>Dalfox parses the response DOM and finds direct evidence of execution. The <code>evidence</code> field tags the path that proved it: DOM marker (CSS selector hit), executable URL (<code>javascript:</code>/<code>data:</code> in a dangerous attribute), HTML structural (an injected element with an <code>on*</code> handler whose value is a sink call), or JS-context AST (a sink call inside <code>&lt;script&gt;</code> that the parsed AST shows is covered by the payload&#39;s byte range).</td>
+</tr>
+<tr>
+<td><strong>A</strong> (AST-detected)</td>
+<td>Static JavaScript analysis traced a user-controlled source to a dangerous sink (e.g., <code>innerHTML = location.hash</code>).</td>
+</tr>
+<tr>
+<td><strong>R</strong> (Reflected)</td>
+<td>Payload text appeared in the response body, but no DOM evidence yet. Still worth investigating manually.</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> and <code>A</code> are the signals. <code>R</code> is a hint.</p>
+<h2 id="safe-contexts">Safe contexts</h2>
+<p>Dalfox ignores reflections inside <code>&lt;textarea&gt;</code>, <code>&lt;title&gt;</code>, <code>&lt;noscript&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;xmp&gt;</code>, and <code>&lt;plaintext&gt;</code>. Content there doesn't execute, so it would only produce false positives.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li>See how payloads are built in <a href="../payloads/">Payloads &amp; Encoding</a>.</li>
+<li>Dealing with a WAF? Jump to <a href="../waf-bypass/">WAF Bypass</a>.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#the-pipeline-briefly">The pipeline, briefly</a></li><li><a href="#targeting-specific-parameters">Targeting specific parameters</a></li><li><a href="#mining-with-wordlists">Mining with wordlists</a><ul><li><a href="#auto-collapse">Auto-collapse</a></li></ul></li><li><a href="#pruning-the-noise">Pruning the noise</a></li><li><a href="#only-discover-dont-attack">Only discover, don't attack</a></li><li><a href="#skipping-stages">Skipping stages</a></li><li><a href="#injection-markers">Injection markers</a></li><li><a href="#auto-pre-encoding">Auto pre-encoding</a></li><li><a href="#reflection-probe-shape">Reflection probe shape</a></li><li><a href="#what-makes-a-finding-verified">What makes a finding &quot;verified&quot;</a></li><li><a href="#safe-contexts">Safe contexts</a></li><li><a href="#next">Next</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/parameters.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

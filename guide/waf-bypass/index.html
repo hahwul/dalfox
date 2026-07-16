@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Detect WAFs automatically and apply per-WAF evasion strategies.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>WAF Bypass · Dalfox</title>
+  <meta property="og:title" content="WAF Bypass">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/guide/waf-bypass/">
+  <meta property="og:description" content="Detect WAFs automatically and apply per-WAF evasion strategies.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/guide-waf-bypass.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="WAF Bypass">
+  <meta name="twitter:description" content="Detect WAFs automatically and apply per-WAF evasion strategies.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/guide-waf-bypass.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/waf-bypass/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/guide/waf-bypass/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"WAF Bypass","url":"https://dalfox.hahwul.com/guide/waf-bypass/","description":"Detect WAFs automatically and apply per-WAF evasion strategies.","image":"https://dalfox.hahwul.com/og-images/guide-waf-bypass.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://dalfox.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"WAF Bypass"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/guide/waf-bypass/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>WAF Bypass</h1>
+          <p>Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatically chooses an evasion strategy: extra encoders and payload mutations tuned to that specific WAF's rules.</p>
+<h2 id="how-it-works">How it works</h2>
+<ol>
+<li>Dalfox sends a small set of <strong>fingerprint probes</strong> to the target.</li>
+<li>If a known WAF signature shows up (headers like <code>cf-ray</code>, body markers like &quot;Attention required!&quot;, or a 429/403 shape), Dalfox notes the WAF and its confidence.</li>
+<li>The scanner merges the WAF's <strong>extra encoders</strong> into your encoder list and adds the WAF's <strong>mutation list</strong> to the payload generator.</li>
+<li>Payload mutations are capped (4 variants per base payload) so request volume stays sane. The cap only applies once a WAF is detected, so the extra effort lands exactly on the scans that need it.</li>
+</ol>
+<p>This is all on by default. You only touch flags if you want to disable or steer it.</p>
+<h2 id="supported-wafs">Supported WAFs</h2>
+<ul>
+<li>Cloudflare</li>
+<li>AWS WAF</li>
+<li>Akamai</li>
+<li>Imperva / Incapsula</li>
+<li>ModSecurity</li>
+<li>OWASP CRS</li>
+<li>Sucuri</li>
+<li>F5 BIG-IP</li>
+<li>Barracuda</li>
+<li>FortiWeb</li>
+<li>Azure WAF</li>
+<li>Google Cloud Armor</li>
+<li>Fastly</li>
+<li>Wordfence</li>
+</ul>
+<p>Unrecognised WAFs trigger a generic fallback strategy.</p>
+<h2 id="tuning-the-behaviour">Tuning the behaviour</h2>
+<h3 id="auto-default">Auto (default)</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app
+# equivalent to:
+dalfox https://target.app --waf-bypass auto
+</code></pre>
+<h3 id="force-a-specific-waf">Force a specific WAF</h3>
+<p>Skip fingerprinting and apply a chosen WAF's strategy directly:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app \
+  --waf-bypass force \
+  --force-waf cloudflare
+</code></pre>
+<p>Handy when the WAF masks its headers or sits behind a CDN.</p>
+<h3 id="disable-waf-logic">Disable WAF logic</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-bypass off
+</code></pre>
+<p>No extra encoders, no mutations: just your configured payloads.</p>
+<h3 id="skip-the-probe">Skip the probe</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --skip-waf-probe
+</code></pre>
+<p>Still uses header-based passive detection, but no provocation requests. Use when the target is flaky and you don't want to burn rate limit on a probe.</p>
+<h3 id="evasion-throttle">Evasion throttle</h3>
+<p>When a WAF is detected, <code>--waf-evasion</code> switches Dalfox to <strong>adaptive timing</strong> instead of a blunt slowdown: it randomizes the inter-request interval (jitter) so the cadence can't be fingerprinted, and escalates a cooldown pause whenever it sees a cluster of blocked responses (403/406/429/503). The per-WAF pacing hint is also applied automatically on detection, even without the flag.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-evasion
+</code></pre>
+<p>For a hard ceiling on the request rate — independent of WAF detection and shared across <strong>all</strong> workers and targets — combine it with <code>--rate-limit</code> (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since <code>--delay</code> only spaces a single worker:</p>
+<pre><code class="language-bash hljs"># At most 15 requests/second across the whole scan, with adaptive evasion
+dalfox https://target.app --rate-limit 15 --waf-evasion
+</code></pre>
+<p>Transient failures (5xx, timeouts, connection resets) can be retried with <code>--retries</code> / <code>--retry-delay</code>; HTTP 429 is always retried with <code>Retry-After</code> honored.</p>
+<h3 id="filter-weak-fingerprints">Filter weak fingerprints</h3>
+<p>Each fingerprint carries a confidence score (0.0–1.0). Generic markers like <code>Request blocked</code> (0.3) or <code>Server: Google Frontend</code> (0.15) sometimes false-positive on benign origins. Use <code>--waf-min-confidence</code> to discard anything below the threshold:</p>
+<pre><code class="language-bash hljs"># Keep only confident matches (drops 0.3/0.15 noise)
+dalfox https://target.app --waf-min-confidence 0.7
+</code></pre>
+<p>Default is <code>0.3</code> (suppresses weak/generic matches like <code>Server: Google Frontend</code>). Pass <code>--waf-min-confidence 0.0</code> to keep every match, or raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.</p>
+<h2 id="mutation-tactics-under-the-hood">Mutation tactics (under the hood)</h2>
+<p>Different WAFs fall to different tricks. A small sample:</p>
+<table>
+<thead>
+<tr>
+<th>Mutation</th>
+<th>Example</th>
+<th>Works against</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTML comment split</strong></td>
+<td><code>&lt;scr&lt;!----&gt;ipt&gt;</code></td>
+<td>Signature regex</td>
+</tr>
+<tr>
+<td><strong>JS comment split</strong></td>
+<td><code>al/**/ert(1)</code></td>
+<td>Keyword filters</td>
+</tr>
+<tr>
+<td><strong>Backtick call</strong></td>
+<td>`<code> alert</code>1<code> </code>`</td>
+<td><code>alert(</code> regex</td>
+</tr>
+<tr>
+<td><strong>Constructor chain</strong></td>
+<td><code>[].constructor.constructor(&#39;alert(1)&#39;)()</code></td>
+<td>Heavy keyword blocks</td>
+</tr>
+<tr>
+<td><strong>Unicode JS escape</strong></td>
+<td><code>alert(1)</code></td>
+<td>JS-token filters</td>
+</tr>
+<tr>
+<td><strong>Slash separator</strong></td>
+<td><code>&lt;svg/onload=alert(1)/class=x&gt;</code></td>
+<td>CRS 941160</td>
+</tr>
+<tr>
+<td><strong>SVG animate</strong></td>
+<td><code>&lt;svg&gt;&lt;animate onbegin=alert(1) attributeName=x&gt;</code></td>
+<td>CRS 941110</td>
+</tr>
+<tr>
+<td><strong>HTML entity parens</strong></td>
+<td><code>alert&amp;#40;1&amp;#41;</code></td>
+<td>CRS 941370</td>
+</tr>
+<tr>
+<td><strong>Exotic whitespace</strong></td>
+<td>form-feed / vertical tab</td>
+<td>CRS 941320</td>
+</tr>
+<tr>
+<td><strong>Case alternation</strong></td>
+<td><code>&lt;ScRiPt&gt;</code></td>
+<td>Case-sensitive rules</td>
+</tr>
+<tr>
+<td><strong>zwsp insertion</strong></td>
+<td><code>al​ert(1)</code></td>
+<td>Lexer-based detection</td>
+</tr>
+<tr>
+<td><strong>Keyword entity encode</strong></td>
+<td><code>onerror=&amp;#97;lert(1)</code></td>
+<td><code>alert</code>/handler keyword regex (attribute-decoded)</td>
+</tr>
+<tr>
+<td><strong>Multi-slash</strong></td>
+<td><code>&lt;img/src=x/onerror=alert(1)&gt;</code></td>
+<td>Regexes anchored on <code>\s</code> between later attributes</td>
+</tr>
+<tr>
+<td><strong>Scheme break</strong></td>
+<td><code>href=java&amp;#9;script:alert(1)</code></td>
+<td>Literal <code>javascript:</code> scheme regex (URL-parser strips the TAB)</td>
+</tr>
+<tr>
+<td><strong>Entity scheme</strong></td>
+<td><code>href=&amp;#106;avascript:alert(1)</code></td>
+<td>Literal <code>javascript:</code> scheme regex (attribute-decoded)</td>
+</tr>
+</tbody>
+</table>
+<p>The last four exploit that the HTML tokenizer decodes character references <strong>inside attribute values</strong> before the URL parser or the event-handler JS compiler sees them. They fire only in attribute / event-handler / <code>javascript:</code>-URL context and are skipped for bare body text and <code>&lt;script&gt;</code>/<code>&lt;style&gt;</code> payloads, where no entity decoding happens.</p>
+<p>You don't configure these directly; they're selected automatically per WAF. To inspect what's happening, run with <code>--debug</code>.</p>
+<h2 id="inspection-window-overflow">Inspection-window overflow</h2>
+<p>Some WAFs (e.g. AWS WAF-style configs) only inspect the <strong>first N bytes</strong> of a parameter value. A vector at the start of the value trips a block, but the same vector reflects untouched once it's pushed past the inspected window.</p>
+<p>During active probing, when a parameter's special-character probe comes back fully blocked, Dalfox re-tries it behind a long benign filler prefix. If the characters now reflect, it concludes the value sits behind a size-limited inspection window and automatically prepends that filler to every payload for the parameter — so the real vector always lands past the window. The reported PoC URL includes the filler, so it reproduces as-is. This is automatic; nothing to configure.</p>
+<h2 id="combining-with-encoders">Combining with encoders</h2>
+<p>Your <code>--encoders</code> list and the WAF's extra encoders are merged. So this:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -e url,base64
+# Cloudflare detected → extra encoders: unicode, zwsp
+# Effective: url, base64, unicode, zwsp
+</code></pre>
+<p>De-duplicates automatically, preserves order.</p>
+<h2 id="rate-limiting-backoff">Rate limiting &amp; backoff</h2>
+<p>Dalfox tracks consecutive WAF blocks and automatically backs off with exponential sleep to avoid permanent blocks. You can help it along with <code>--delay</code> (per-request ms) and smaller <code>--workers</code> for fragile targets.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --delay 500 --workers 10
+</code></pre>
+<h2 id="debugging">Debugging</h2>
+<p>Turn on the debug stream to see fingerprint decisions and the active strategy:</p>
+<pre><code class="language-bash hljs">dalfox --debug https://target.app 2&gt;&amp;1 | grep -i waf
+</code></pre>
+<h2 id="next">Next</h2>
+<ul>
+<li><a href="../stored-xss/">Stored XSS</a> covers the inject-here-verify-there pattern, which often interacts with WAFs.</li>
+<li><a href="../output/">Output &amp; Reports</a> for integrating findings into your pipeline.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#how-it-works">How it works</a></li><li><a href="#supported-wafs">Supported WAFs</a></li><li><a href="#tuning-the-behaviour">Tuning the behaviour</a><ul><li><a href="#auto-default">Auto (default)</a></li><li><a href="#force-a-specific-waf">Force a specific WAF</a></li><li><a href="#disable-waf-logic">Disable WAF logic</a></li><li><a href="#skip-the-probe">Skip the probe</a></li><li><a href="#evasion-throttle">Evasion throttle</a></li><li><a href="#filter-weak-fingerprints">Filter weak fingerprints</a></li></ul></li><li><a href="#mutation-tactics-under-the-hood">Mutation tactics (under the hood)</a></li><li><a href="#inspection-window-overflow">Inspection-window overflow</a></li><li><a href="#combining-with-encoders">Combining with encoders</a></li><li><a href="#rate-limiting-backoff">Rate limiting &amp; backoff</a></li><li><a href="#debugging">Debugging</a></li><li><a href="#next">Next</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/waf-bypass.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Dalfox가 중요한 입력값을 찾아내는 방식과 탐색 단계를 제어하는 방법을 설명합니다.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>파라미터와 탐색 · Dalfox</title>
+  <meta property="og:title" content="파라미터와 탐색">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/guide/parameters/">
+  <meta property="og:description" content="Dalfox가 중요한 입력값을 찾아내는 방식과 탐색 단계를 제어하는 방법을 설명합니다.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-guide-parameters.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="파라미터와 탐색">
+  <meta name="twitter:description" content="Dalfox가 중요한 입력값을 찾아내는 방식과 탐색 단계를 제어하는 방법을 설명합니다.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-guide-parameters.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/parameters/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/parameters/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/guide/parameters/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"파라미터와 탐색","url":"https://dalfox.hahwul.com/ko/guide/parameters/","description":"Dalfox가 중요한 입력값을 찾아내는 방식과 탐색 단계를 제어하는 방법을 설명합니다.","image":"https://dalfox.hahwul.com/og-images/ko-guide-parameters.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://dalfox.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"파라미터와 탐색"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/guide/parameters/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>파라미터와 탐색</h1>
+          <p>XSS를 찾는 일은 올바른 파라미터를 찾는 데서 시작합니다. Dalfox의 탐색 엔진은 여러 단계로 이루어진 파이프라인입니다. 전체를 이해할 필요는 거의 없지만, 각 구성 요소를 알아두면 스캔을 튜닝하고 싶을 때 도움이 됩니다.</p>
+<h2 id="파이프라인-개요">파이프라인 개요</h2>
+<ol>
+<li><strong>Discovery(탐색):</strong> URL, 본문, 헤더, 쿠키, 경로, 프래그먼트, 폼 필드에서 파라미터를 추출합니다.</li>
+<li><strong>Mining(마이닝):</strong> DOM 분석(JS에 내장된 파라미터 이름), 사전 워드리스트, 프레임워크별 패턴으로 확장합니다.</li>
+<li><strong>Active probing(능동 프로빙):</strong> 각 파라미터마다 프로브를 발사하여 어떤 특수 문자가 살아남는지 파악합니다.</li>
+<li><strong>Fast probe(빠른 프로브):</strong> 탐색된 파라미터마다 샌드위치 마커 요청을 한 번씩 보냅니다. 부분 반사도 전체 반사도 나타나지 않으면 해당 파라미터에 대한 무거운 페이로드 루프를 건너뜁니다.</li>
+<li><strong>Payload generation(페이로드 생성):</strong> 컨텍스트를 인식하는 페이로드(HTML, JS, 속성, CSS)를 생성합니다.</li>
+<li><strong>Reflection check(반사 확인):</strong> 페이로드를 보낸 뒤 그것이 돌아오는지 확인합니다.</li>
+<li><strong>DOM verification(DOM 검증):</strong> 응답을 파싱하여 페이로드가 실제 요소를 형성하는지 확인합니다. AST 기반 DOM-XSS 분석은 빠른 프로브 중에 캡처한 응답을 사용해 병렬로 실행됩니다.</li>
+</ol>
+<h2 id="특정-파라미터-지정하기">특정 파라미터 지정하기</h2>
+<p>테스트할 파라미터를 Dalfox에 정확히 지정합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api \
+  -p q \
+  -p id:query \
+  -p auth:header \
+  -p token:cookie
+</code></pre>
+<p>위치(Location): <code>query</code>, <code>body</code>, <code>json</code>, <code>multipart</code>, <code>cookie</code>, <code>header</code>. 주입 지점이 쿼리 문자열이 아닌 경우 <code>name:location</code> 형식을 사용하는 것이 좋습니다.</p>
+<p>위치 힌트가 없는 경우(<code>-p q</code> 만 지정):</p>
+<ol>
+<li>탐색/마이닝이 이미 해당 이름의 파라미터를 찾았다면, 그대로 유지합니다(필터).</li>
+<li>그렇지 않으면 Dalfox가 이를 <strong>합성(synthesize)</strong> 합니다. 위치는 요청에서 추론하며(URL 쿼리 → 본문 → 쿠키 → 헤더), 기본값은 <code>query</code> 입니다.</li>
+</ol>
+<p>즉, <code>-p q --skip-discovery --skip-mining</code> 같은 레시피도 아무것도 스캔하지 않고 조용히 지나가는 대신 여전히 <code>q</code> 를 테스트합니다.</p>
+<h2 id="워드리스트로-마이닝하기">워드리스트로 마이닝하기</h2>
+<p>URL에 파라미터가 없더라도 Dalfox는 흔히 쓰이는 이름을 시도해 볼 수 있습니다:</p>
+<pre><code class="language-bash hljs"># 로컬 워드리스트
+dalfox https://target.app -W ./params.txt
+
+# 원격 워드리스트(첫 조회 이후 캐시됨)
+dalfox https://target.app --remote-wordlists burp,assetnote
+</code></pre>
+<h3 id="자동-축소auto-collapse">자동 축소(Auto-collapse)</h3>
+<p>반사가 매우 심한 사이트(예: 모든 것을 그대로 되돌려주는 검색 페이지)는 워드리스트 마이닝을 폭발적으로 늘릴 수 있습니다. Dalfox는 두 가지 방법으로 이를 방어합니다:</p>
+<ul>
+<li><strong>Sentinel 사전 프로브(pre-probe):</strong> 워드리스트를 순회하기 전에, 실제 필드와 절대 충돌하지 않을 무작위 파라미터 이름 세 개를 테스트합니다. 세 개가 모두 반사되면 그 페이지는 거울(mirror)이므로 마이닝을 건너뛰고 단일 합성 <code>any</code> Query 파라미터로 대체합니다. 비용 상한: 워드리스트 크기와 무관하게 3개 요청. 사전 프로브가 이득이 될 만큼 워드리스트가 충분히 클 때(&gt;15개 항목)만 실행됩니다.</li>
+<li><strong>EWMA 축소:</strong> 순회하는 동안 Dalfox는 이동 반사 비율(rolling reflection ratio)을 관찰합니다. 최소 15회 시도 이후에도 그 값이 ≥85%로 유지되면 마이닝을 중단하고, 이미 수집된 Query 파라미터들을 동일한 <code>any</code> 플레이스홀더로 접어 넣습니다.</li>
+</ul>
+<p>두 경로 모두 동일한 다운스트림 상태를 만듭니다. 어느 트리거가 발동했든 5~7단계에서는 하나의 Query 주입 지점만 보게 됩니다.</p>
+<h2 id="노이즈-정리하기">노이즈 정리하기</h2>
+<p>특정 파라미터 무시:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --ignore-param csrf --ignore-param __RequestVerificationToken
+</code></pre>
+<p>URL 패턴으로 범위 지정:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt \
+  --include-url '^https://api\.target\.app/' \
+  --exclude-url '/static/|/health'
+</code></pre>
+<p>범위 밖(out-of-scope) 도메인 목록:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt --out-of-scope-file scope-block.txt
+# 또는 와일드카드를 사용해 인라인으로
+dalfox scan urls.txt --out-of-scope '*.google.com,*.cdn.cloudflare.net'
+</code></pre>
+<h2 id="탐색만-하고-공격하지-않기">탐색만 하고 공격하지 않기</h2>
+<p>Dry-run 모드는 페이로드를 보내지 않고 공격 계획을 탐색하여 출력합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --dry-run
+</code></pre>
+<p>Discovery-only 모드는 이와 비슷하지만 프로빙 단계까지 완료합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-discovery
+</code></pre>
+<p>두 모드 모두 범위 지정과 CI 사전 점검에 도움이 됩니다.</p>
+<h2 id="단계-건너뛰기">단계 건너뛰기</h2>
+<p>더 빠르게 진행하거나 취약한 대상을 우회하려면 파이프라인의 일부를 건너뛰세요:</p>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>건너뛰는 대상</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-discovery</code></td>
+<td>탐색 단계 전체</td>
+</tr>
+<tr>
+<td><code>--skip-mining</code></td>
+<td>모든 워드리스트/DOM 마이닝</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dict</code></td>
+<td>사전 마이닝만</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dom</code></td>
+<td>DOM 마이닝만</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-header</code></td>
+<td>헤더 반사 확인</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-cookie</code></td>
+<td>쿠키 반사 확인</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-path</code></td>
+<td>경로 반사 확인</td>
+</tr>
+</tbody>
+</table>
+<h2 id="주입-마커injection-markers">주입 마커(Injection markers)</h2>
+<p>일부 엔드포인트는 페이로드가 특정 위치(예: JWT 내부)에 있어야 합니다. <code>--inject-marker</code> 를 사용하세요:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api \
+  --inject-marker FUZZ \
+  -d '{&quot;filter&quot;:&quot;FUZZ&quot;}'
+</code></pre>
+<p>Dalfox는 모든 <code>FUZZ</code> 를 각 페이로드로 치환하여 요청을 보냅니다.</p>
+<h2 id="자동-사전-인코딩auto-pre-encoding">자동 사전 인코딩(Auto pre-encoding)</h2>
+<p>일부 엔드포인트는 페이로드를 원시 텍스트로 받아들이지 않습니다. 이들은 어떤 구조적 인코딩(base64, JSON, JWT 등)으로 감싸진 형태를 기대합니다. Dalfox는 탐색 중 각 파라미터의 기존 값을 검사하고, 구조를 인식하면 페이로드가 동일한 래핑을 통해 왕복(round-trip)하도록 투명한 인코딩 파이프라인을 구성합니다. 설정할 것은 없습니다. 디버그 출력에서 <code>pre_encoding</code> 또는 <code>pre_encoding_pipeline</code> 을 찾아보세요.</p>
+<p>단일 단계 인코딩은 기존 파라미터 값에서 탐지됩니다:</p>
+<table>
+<thead>
+<tr>
+<th>탐지된 형태</th>
+<th>페이로드 인코딩 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base64</code></td>
+<td><code>BASE64(payload)</code></td>
+</tr>
+<tr>
+<td><code>2base64</code></td>
+<td><code>BASE64(BASE64(payload))</code></td>
+</tr>
+<tr>
+<td><code>2url</code> / <code>3url</code></td>
+<td>2회 또는 3회 URL 인코딩</td>
+</tr>
+</tbody>
+</table>
+<p>조합 가능한 파이프라인은 값의 구조를 변환 체인으로 바꿉니다. 기존 값이 구조화된 래퍼로 디코딩되면, Dalfox는 모든 리프(leaf) 문자열 필드를 각각 별도의 가상 하위 파라미터로 열거합니다:</p>
+<table>
+<thead>
+<tr>
+<th>래퍼 형태</th>
+<th>파이프라인</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Base64로 감싼 JSON <code>?qs=eyJ…</code></td>
+<td><code>JsonField(/leaf) → Base64</code></td>
+</tr>
+<tr>
+<td>Base64URL로 감싼 JSON</td>
+<td><code>JsonField(/leaf) → Base64Url</code></td>
+</tr>
+<tr>
+<td>순수 URL 인코딩된 JSON <code>?blob=%7B…%7D</code></td>
+<td><code>JsonField(/leaf)</code></td>
+</tr>
+<tr>
+<td>JWT/JWS <code>?token=h.p.s</code></td>
+<td><code>JsonField(/leaf) → Base64Url → JwtAssemble</code></td>
+</tr>
+</tbody>
+</table>
+<p>각 리프는 대괄호 스타일의 표시 이름을 사용해 별도의 Param으로 등록됩니다. <code>qs</code> 의 <code>move_url</code> 필드에 있는 페이로드는 <code>qs[move_url]</code> 로 표시되고, 배열 요소는 <code>qs[items][0]</code> 로 나타납니다. 와이어 수준의 치환은 여전히 원래 부모 파라미터(<code>qs</code>)를 대상으로 하므로, 요청은 서버에 정상적으로 보입니다.</p>
+<p>JWT의 경우 원래 헤더와 서명 세그먼트는 그대로(verbatim) 보존됩니다. 서명은 수정된 페이로드와 일치하지 않으므로, 이는 토큰을 검증하지 않는 엔드포인트에서만 발동합니다. 올바르게 서명된 JWT는 탐지 결과를 반환하지 않습니다. 이는 놓친 것이 아니라 의도된 동작입니다.</p>
+<p>대상이 Dalfox가 자동 탐지하지 못하는 래핑을 사용한다면, <code>--inject-marker</code> 로 주입 지점을 강제로 지정할 수 있습니다(아래 참조).</p>
+<h2 id="반사-프로브-형태">반사 프로브 형태</h2>
+<p>모든 탐색 및 마이닝 프로브는 단일 토큰 대신 샌드위치 마커(<code>OPEN + INNER + CLOSE</code>)를 보냅니다. 그런 다음 응답은 네 가지 경우 중 하나로 분류됩니다:</p>
+<table>
+<thead>
+<tr>
+<th>반사</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Full</strong></td>
+<td>완전한 <code>OPEN+INNER+CLOSE</code> 가 살아남음. 표준 반사.</td>
+</tr>
+<tr>
+<td><strong>PrefixOnly</strong></td>
+<td><code>OPEN+INNER</code> 는 존재하고 <code>CLOSE</code> 가 제거됨. 접미사 제거 필터를 시사.</td>
+</tr>
+<tr>
+<td><strong>SuffixOnly</strong></td>
+<td><code>INNER+CLOSE</code> 는 존재하고 <code>OPEN</code> 이 제거됨. 접두사 제거 필터를 시사.</td>
+</tr>
+<tr>
+<td><strong>InnerOnly</strong></td>
+<td><code>INNER</code> 만 살아남음. 정규식 추출 또는 양쪽 래핑 모두 제거를 시사.</td>
+</tr>
+</tbody>
+</table>
+<p>네 가지 모두 &quot;반사됨&quot;으로 취급됩니다. 탐색은 해당 파라미터를 기록하고 스캔이 진행됩니다. 단순한 단일 토큰 확인이었다면 <em>Full</em> 을 제외한 모든 경우를 놓쳐, 접두사/접미사를 제거하는 엔드포인트를 탐지하지 못했을 것입니다. 마커 토큰은 스캔마다 고유합니다(<code>dlx</code>/<code>dlxmid</code>/<code>xld</code> 접두사에 스캔당 8자리 16진수가 붙음). 따라서 HTML에서 우연히 충돌할 가능성은 무시할 만합니다.</p>
+<h2 id="탐지-결과가-검증됨이-되는-기준">탐지 결과가 &quot;검증됨&quot;이 되는 기준</h2>
+<table>
+<thead>
+<tr>
+<th>결과</th>
+<th>확인 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>V</strong> (Verified, 검증됨)</td>
+<td>Dalfox가 응답 DOM을 파싱하여 실행에 대한 직접적인 증거를 찾습니다. <code>evidence</code> 필드는 이를 입증한 경로를 태깅합니다: DOM 마커(CSS 셀렉터 적중), 실행 가능한 URL(위험한 속성 내의 <code>javascript:</code>/<code>data:</code>), HTML 구조적 증거(값이 싱크 호출인 <code>on*</code> 핸들러를 가진 주입된 요소), 또는 JS 컨텍스트 AST(파싱된 AST가 페이로드의 바이트 범위에 포함됨을 보여주는 <code>&lt;script&gt;</code> 내부의 싱크 호출).</td>
+</tr>
+<tr>
+<td><strong>A</strong> (AST-detected, AST 탐지)</td>
+<td>정적 JavaScript 분석이 사용자 제어 소스를 위험한 싱크로 추적함(예: <code>innerHTML = location.hash</code>).</td>
+</tr>
+<tr>
+<td><strong>R</strong> (Reflected, 반사됨)</td>
+<td>페이로드 텍스트가 응답 본문에 나타났지만 아직 DOM 증거는 없음. 여전히 수동으로 조사할 가치가 있음.</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> 와 <code>A</code> 는 신호입니다. <code>R</code> 은 힌트입니다.</p>
+<h2 id="안전한-컨텍스트">안전한 컨텍스트</h2>
+<p>Dalfox는 <code>&lt;textarea&gt;</code>, <code>&lt;title&gt;</code>, <code>&lt;noscript&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;xmp&gt;</code>, <code>&lt;plaintext&gt;</code> 내부의 반사를 무시합니다. 그곳의 콘텐츠는 실행되지 않으므로, 오탐(false positive)만 발생시킬 뿐입니다.</p>
+<h2 id="다음-단계">다음 단계</h2>
+<ul>
+<li>페이로드가 어떻게 구성되는지는 <a href="../payloads/">Payloads &amp; Encoding</a>에서 확인하세요.</li>
+<li>WAF를 상대하고 있나요? <a href="../waf-bypass/">WAF Bypass</a>로 이동하세요.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#파이프라인-개요">파이프라인 개요</a></li><li><a href="#특정-파라미터-지정하기">특정 파라미터 지정하기</a></li><li><a href="#워드리스트로-마이닝하기">워드리스트로 마이닝하기</a><ul><li><a href="#자동-축소auto-collapse">자동 축소(Auto-collapse)</a></li></ul></li><li><a href="#노이즈-정리하기">노이즈 정리하기</a></li><li><a href="#탐색만-하고-공격하지-않기">탐색만 하고 공격하지 않기</a></li><li><a href="#단계-건너뛰기">단계 건너뛰기</a></li><li><a href="#주입-마커injection-markers">주입 마커(Injection markers)</a></li><li><a href="#자동-사전-인코딩auto-pre-encoding">자동 사전 인코딩(Auto pre-encoding)</a></li><li><a href="#반사-프로브-형태">반사 프로브 형태</a></li><li><a href="#탐지-결과가-검증됨이-되는-기준">탐지 결과가 &quot;검증됨&quot;이 되는 기준</a></li><li><a href="#안전한-컨텍스트">안전한 컨텍스트</a></li><li><a href="#다음-단계">다음 단계</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/parameters.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

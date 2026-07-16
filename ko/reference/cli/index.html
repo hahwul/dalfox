@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Dalfox가 지원하는 모든 서브커맨드와 플래그.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>CLI 레퍼런스 · Dalfox</title>
+  <meta property="og:title" content="CLI 레퍼런스">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/reference/cli/">
+  <meta property="og:description" content="Dalfox가 지원하는 모든 서브커맨드와 플래그.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-reference-cli.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="CLI 레퍼런스">
+  <meta name="twitter:description" content="Dalfox가 지원하는 모든 서브커맨드와 플래그.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-reference-cli.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/reference/cli/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/reference/cli/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/reference/cli/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"CLI 레퍼런스","url":"https://dalfox.hahwul.com/ko/reference/cli/","description":"Dalfox가 지원하는 모든 서브커맨드와 플래그.","image":"https://dalfox.hahwul.com/og-images/ko-reference-cli.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"레퍼런스","item":"https://dalfox.hahwul.com/ko/reference/"},{"@type":"ListItem","position":3,"name":"CLI 레퍼런스"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/reference/cli/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>CLI 레퍼런스</h1>
+          <p>Dalfox는 네 개의 서브커맨드로 구성되어 있습니다. 기본값(대상만 전달했을 때)은 <code>scan</code>입니다.</p>
+<pre><code>dalfox [SUBCOMMAND] [TARGET] [FLAGS]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>서브커맨드</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scan</code></td>
+<td>대상에서 XSS를 스캔합니다 (생략 시 기본값)</td>
+</tr>
+<tr>
+<td><code>server</code></td>
+<td>REST API 서버를 실행합니다</td>
+</tr>
+<tr>
+<td><code>payload</code></td>
+<td>내장/원격 페이로드를 나열하거나 가져옵니다</td>
+</tr>
+<tr>
+<td><code>mcp</code></td>
+<td>Model Context Protocol stdio 서버를 실행합니다</td>
+</tr>
+<tr>
+<td><code>help</code></td>
+<td>임의의 서브커맨드에 대한 도움말을 출력합니다</td>
+</tr>
+</tbody>
+</table>
+<h2 id="전역-플래그">전역 플래그</h2>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--config &lt;FILE&gt;</code></td>
+<td>설정 파일 경로(TOML 또는 JSON). 기본 검색 경로를 덮어씁니다.</td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td>디버그 로깅을 활성화합니다.</td>
+</tr>
+<tr>
+<td><code>-h</code>, <code>--help</code></td>
+<td>도움말을 출력합니다.</td>
+</tr>
+<tr>
+<td><code>-V</code>, <code>--version</code></td>
+<td>버전을 출력합니다.</td>
+</tr>
+</tbody>
+</table>
+<p>종료 코드:</p>
+<table>
+<thead>
+<tr>
+<th>코드</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>성공, 탐지 결과 없음</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>성공, 탐지 결과 보고됨</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>입력 / 설정 / 런타임 오류</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dalfox-scan"><code>dalfox scan</code></h2>
+<p>대상에서 XSS를 스캔합니다. 서브커맨드를 생략해도 동일합니다.</p>
+<pre><code class="language-bash hljs">dalfox scan [TARGETS]... [FLAGS]
+</code></pre>
+<h3 id="입력">입력</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>약칭</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--input-type</code></td>
+<td><code>-i</code></td>
+<td><code>auto</code></td>
+<td><code>auto</code>, <code>url</code>, <code>file</code>, <code>pipe</code>, <code>raw-http</code>, <code>har</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="출력">출력</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>약칭</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--format</code></td>
+<td><code>-f</code></td>
+<td><code>plain</code></td>
+<td><code>plain</code>, <code>json</code>, <code>jsonl</code>, <code>markdown</code>, <code>sarif</code>, <code>toml</code></td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>-o</code></td>
+<td>—</td>
+<td>출력을 파일에 씁니다</td>
+</tr>
+<tr>
+<td><code>--include-request</code></td>
+<td>—</td>
+<td>false</td>
+<td>출력에 HTTP 요청을 포함합니다</td>
+</tr>
+<tr>
+<td><code>--include-response</code></td>
+<td>—</td>
+<td>false</td>
+<td>출력에 응답 본문을 포함합니다</td>
+</tr>
+<tr>
+<td><code>--include-all</code></td>
+<td>—</td>
+<td>false</td>
+<td>두 include 플래그의 축약형</td>
+</tr>
+<tr>
+<td><code>--no-color</code></td>
+<td>—</td>
+<td>false</td>
+<td>ANSI 색상을 비활성화합니다</td>
+</tr>
+<tr>
+<td><code>--silence</code></td>
+<td><code>-S</code></td>
+<td>false</td>
+<td>STDOUT에 탐지 결과만 출력합니다</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>—</td>
+<td>false</td>
+<td>페이로드를 보내지 않고 탐색 및 계획만 수행합니다</td>
+</tr>
+<tr>
+<td><code>--stream-findings</code></td>
+<td>—</td>
+<td>false</td>
+<td>스캔 종료 요약 이후가 아니라 각 탐지 결과가 검증되는 즉시 출력합니다 (plain 형식만; <code>--output</code>, <code>--limit</code>, <code>--only-poc</code> 사용 시 자동 비활성화)</td>
+</tr>
+<tr>
+<td><code>--poc-type</code></td>
+<td>—</td>
+<td><code>plain</code></td>
+<td><code>plain</code>, <code>curl</code>, <code>httpie</code>, <code>http-request</code></td>
+</tr>
+<tr>
+<td><code>--limit</code></td>
+<td>—</td>
+<td>—</td>
+<td>표시되는 전체 결과 수를 제한합니다</td>
+</tr>
+<tr>
+<td><code>--limit-result-type</code></td>
+<td>—</td>
+<td><code>all</code></td>
+<td><code>--limit</code>에 집계되는 유형: <code>all</code>, <code>v</code>, <code>r</code>, <code>a</code></td>
+</tr>
+<tr>
+<td><code>--only-poc</code></td>
+<td>—</td>
+<td>—</td>
+<td>쉼표로 구분된 필터: <code>v</code>, <code>r</code>, <code>a</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="대상-형태-지정">대상 형태 지정</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>약칭</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--param</code></td>
+<td><code>-p</code></td>
+<td>—</td>
+<td>분석할 파라미터; <code>name:location</code> 형식 지원 (위치: <code>query</code>, <code>body</code>, <code>json</code>, <code>cookie</code>, <code>header</code>)</td>
+</tr>
+<tr>
+<td><code>--data</code></td>
+<td><code>-d</code></td>
+<td>—</td>
+<td>요청 본문</td>
+</tr>
+<tr>
+<td><code>--headers</code></td>
+<td><code>-H</code></td>
+<td>—</td>
+<td>추가 HTTP 헤더 (반복 지정 가능)</td>
+</tr>
+<tr>
+<td><code>--cookies</code></td>
+<td>—</td>
+<td>—</td>
+<td>쿠키 (반복 지정 가능)</td>
+</tr>
+<tr>
+<td><code>--method</code></td>
+<td><code>-X</code></td>
+<td><code>GET</code></td>
+<td>HTTP 메서드 재정의 (<code>GET</code>, <code>POST</code>, <code>PUT</code>, <code>DELETE</code>, <code>HEAD</code>, <code>OPTIONS</code>, <code>PATCH</code>, <code>QUERY</code> / RFC 10008)</td>
+</tr>
+<tr>
+<td><code>--user-agent</code></td>
+<td>—</td>
+<td>—</td>
+<td>사용자 지정 User-Agent</td>
+</tr>
+<tr>
+<td><code>--cookie-from-raw</code></td>
+<td>—</td>
+<td>—</td>
+<td>raw HTTP 요청 파일에서 쿠키를 불러옵니다</td>
+</tr>
+</tbody>
+</table>
+<h3 id="범위">범위</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--include-url</code></td>
+<td>—</td>
+<td>포함할 URL의 정규식 패턴</td>
+</tr>
+<tr>
+<td><code>--exclude-url</code></td>
+<td>—</td>
+<td>제외할 URL의 정규식 패턴</td>
+</tr>
+<tr>
+<td><code>--ignore-param</code></td>
+<td>—</td>
+<td>건너뛸 파라미터 이름</td>
+</tr>
+<tr>
+<td><code>--out-of-scope</code></td>
+<td>—</td>
+<td>건너뛸 와일드카드 도메인 패턴</td>
+</tr>
+<tr>
+<td><code>--out-of-scope-file</code></td>
+<td>—</td>
+<td>범위 외 도메인을 나열한 파일</td>
+</tr>
+</tbody>
+</table>
+<h3 id="탐색">탐색</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--only-discovery</code></td>
+<td>false</td>
+<td>탐색 후 중지하고 XSS 페이로드를 보내지 않습니다</td>
+</tr>
+<tr>
+<td><code>--skip-discovery</code></td>
+<td>false</td>
+<td>모든 탐색을 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-header</code></td>
+<td>false</td>
+<td>헤더 기반 반사 검사를 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-cookie</code></td>
+<td>false</td>
+<td>쿠키 기반 반사 검사를 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-path</code></td>
+<td>false</td>
+<td>경로 기반 반사 검사를 건너뜁니다</td>
+</tr>
+</tbody>
+</table>
+<h3 id="마이닝">마이닝</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>약칭</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--mining-dict-word</code></td>
+<td><code>-W</code></td>
+<td>—</td>
+<td>파라미터 워드리스트 파일</td>
+</tr>
+<tr>
+<td><code>--remote-wordlists</code></td>
+<td>—</td>
+<td>—</td>
+<td>원격 소스: <code>burp</code>, <code>assetnote</code></td>
+</tr>
+<tr>
+<td><code>--skip-mining</code></td>
+<td>—</td>
+<td>false</td>
+<td>모든 마이닝을 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dict</code></td>
+<td>—</td>
+<td>false</td>
+<td>사전 마이닝을 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dom</code></td>
+<td>—</td>
+<td>false</td>
+<td>DOM 마이닝을 건너뜁니다</td>
+</tr>
+</tbody>
+</table>
+<h3 id="네트워크">네트워크</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>약칭</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--timeout</code></td>
+<td>—</td>
+<td><code>10</code></td>
+<td>요청당 타임아웃(초) (네트워크 한정; 전체 스캔 시간을 제한하지 않음)</td>
+</tr>
+<tr>
+<td><code>--scan-timeout</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>스캔 단계(프리플라이트 이후)에 대한 대상별 하드 실제 시간 상한(초). 초과 시 해당 대상을 중단합니다. 여러 순차 단계가 부분적으로 멈춘 엔드포인트에 대해 각각 요청당 <code>--timeout</code> 비용을 치를 때 유용합니다. <code>0</code>은 비활성화합니다.</td>
+</tr>
+<tr>
+<td><code>--delay</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>요청 간 지연(ms), 워커별</td>
+</tr>
+<tr>
+<td><code>--rate-limit</code></td>
+<td><code>-r</code>, <code>--rl</code></td>
+<td><code>0</code></td>
+<td>모든 워커와 대상에 걸쳐 공유되는 <strong>전역</strong> 아웃바운드 요청 속도를 초당 요청 수로 제한합니다 (<code>0</code> = 무제한). 하나의 워커만 간격을 두는 <code>--delay</code>와 달리, <code>workers × concurrent targets</code>에서 발생하는 총 동시 진행 버스트를 제한하여 공유 IP / 엣지 WAF 임계값에 더 친화적입니다.</td>
+</tr>
+<tr>
+<td><code>--retries</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>HTTP 5xx 및 일시적 전송 오류(타임아웃, 연결 재설정) 시 실패한 요청을 이 횟수만큼 재시도합니다 (<code>0</code> = 끔). HTTP 429는 항상 재시도됩니다.</td>
+</tr>
+<tr>
+<td><code>--retry-delay</code></td>
+<td>—</td>
+<td><code>1000</code></td>
+<td><code>--retries</code> 시도 사이의 지수 백오프 기본 지연(ms) (시도마다 두 배로 증가, 내부적으로 상한 적용). 429에서는 서버의 <code>Retry-After</code> 헤더가 우선합니다.</td>
+</tr>
+<tr>
+<td><code>--proxy</code></td>
+<td>—</td>
+<td>—</td>
+<td>프록시 URL (<code>http://</code>, <code>socks5://</code>)</td>
+</tr>
+<tr>
+<td><code>--insecure</code></td>
+<td>—</td>
+<td><code>true</code></td>
+<td>TLS/SSL 인증서 검증을 건너뜁니다 (자체 서명, 만료, 호스트명 불일치 인증서 허용). 스캐너 사용을 위해 기본적으로 켜져 있으며, 인증서 검증을 강제하려면 <code>--insecure=false</code>를 전달합니다.</td>
+</tr>
+<tr>
+<td><code>--follow-redirects</code></td>
+<td><code>-F</code></td>
+<td>false</td>
+<td>3xx 응답을 따라갑니다</td>
+</tr>
+<tr>
+<td><code>--ignore-return</code></td>
+<td>—</td>
+<td>—</td>
+<td>무시할 HTTP 상태 코드</td>
+</tr>
+</tbody>
+</table>
+<h3 id="엔진">엔진</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--workers</code></td>
+<td><code>50</code></td>
+<td>대상별 동시 워커 수</td>
+</tr>
+<tr>
+<td><code>--max-concurrent-targets</code></td>
+<td><code>50</code></td>
+<td>전역 동시 대상 수</td>
+</tr>
+<tr>
+<td><code>--max-targets-per-host</code></td>
+<td><code>100</code></td>
+<td>호스트별 상한</td>
+</tr>
+</tbody>
+</table>
+<h3 id="xss-스캐닝">XSS 스캐닝</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>약칭</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--encoders</code></td>
+<td><code>-e</code></td>
+<td><code>url,html</code></td>
+<td>쉼표로 구분된 인코더</td>
+</tr>
+<tr>
+<td><code>--remote-payloads</code></td>
+<td>—</td>
+<td>—</td>
+<td><code>portswigger</code>, <code>payloadbox</code></td>
+</tr>
+<tr>
+<td><code>--custom-blind-xss-payload</code></td>
+<td>—</td>
+<td>—</td>
+<td>사용자 지정 블라인드 페이로드 템플릿 파일</td>
+</tr>
+<tr>
+<td><code>--blind</code></td>
+<td><code>-b</code></td>
+<td>—</td>
+<td>블라인드 XSS 콜백 URL</td>
+</tr>
+<tr>
+<td><code>--blind-oob[=servers]</code></td>
+<td>—</td>
+<td>—</td>
+<td>interactsh를 통한 OOB/OAST 블라인드 XSS를 활성화합니다; 선택적으로 쉼표로 구분된 서버 도메인 (기본값: 공용 메시). <code>=</code> 형식이 필요합니다: <code>--blind-oob=oast.fun,oast.me</code></td>
+</tr>
+<tr>
+<td><code>--blind-oob-secret</code></td>
+<td>—</td>
+<td>—</td>
+<td>자체 호스팅 interactsh 서버용 인증 토큰 (register/poll/deregister 시 <code>Authorization</code>으로 전송)</td>
+</tr>
+<tr>
+<td><code>--blind-oob-wait</code></td>
+<td>—</td>
+<td><code>30</code></td>
+<td>모든 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) (<code>0</code> = 스캔 종료 후 추가 대기 없음)</td>
+</tr>
+<tr>
+<td><code>--custom-payload</code></td>
+<td>—</td>
+<td>—</td>
+<td>사용자 지정 페이로드 파일</td>
+</tr>
+<tr>
+<td><code>--only-custom-payload</code></td>
+<td>—</td>
+<td>false</td>
+<td>사용자 지정 페이로드만 사용합니다</td>
+</tr>
+<tr>
+<td><code>--custom-alert-value</code></td>
+<td>—</td>
+<td><code>1</code></td>
+<td><code>alert()</code>/<code>prompt()</code>/<code>confirm()</code> 안에 들어가는 값</td>
+</tr>
+<tr>
+<td><code>--custom-alert-type</code></td>
+<td>—</td>
+<td><code>none</code></td>
+<td><code>none</code> 또는 <code>str</code></td>
+</tr>
+<tr>
+<td><code>--inject-marker</code></td>
+<td>—</td>
+<td>—</td>
+<td>이 토큰을 페이로드로 치환합니다 (예: <code>FUZZ</code>)</td>
+</tr>
+<tr>
+<td><code>--skip-xss-scanning</code></td>
+<td>—</td>
+<td>false</td>
+<td>페이로드 주입을 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--deep-scan</code></td>
+<td>—</td>
+<td>false</td>
+<td>첫 탐지 결과 이후에도 계속 테스트합니다</td>
+</tr>
+<tr>
+<td><code>--sxss</code></td>
+<td>—</td>
+<td>false</td>
+<td>Stored XSS 모드를 활성화합니다</td>
+</tr>
+<tr>
+<td><code>--sxss-url</code></td>
+<td>—</td>
+<td>—</td>
+<td>SXSS용 조회 URL</td>
+</tr>
+<tr>
+<td><code>--sxss-method</code></td>
+<td>—</td>
+<td><code>GET</code></td>
+<td>조회 메서드</td>
+</tr>
+<tr>
+<td><code>--sxss-retries</code></td>
+<td>—</td>
+<td><code>3</code></td>
+<td>저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수</td>
+</tr>
+<tr>
+<td><code>--max-payloads-per-param</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>파라미터별로 테스트하는 페이로드 수 제한 (<code>0</code> = 제한 없음)</td>
+</tr>
+<tr>
+<td><code>--skip-ast-analysis</code></td>
+<td>—</td>
+<td>false</td>
+<td>AST DOM-XSS를 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--analyze-external-js</code></td>
+<td>—</td>
+<td>false</td>
+<td>동일 출처의 <code>&lt;script src&gt;</code> 번들을 가져와 AST DOM-XSS 분석을 수행합니다 (프리플라이트, 대상별 1회; 최대 16개 파일, 각 512 KiB; <code>--include-url</code>/<code>--exclude-url</code>을 준수)</td>
+</tr>
+<tr>
+<td><code>--hpp</code></td>
+<td>—</td>
+<td>false</td>
+<td>HTTP 파라미터 오염</td>
+</tr>
+<tr>
+<td><code>--detect-outdated-libs</code></td>
+<td>—</td>
+<td>false</td>
+<td>오래되었거나 알려진 취약점이 있는 JS 라이브러리도 보고합니다 (정보성, CWE-1104; 추가 요청 0회)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="waf">WAF</h3>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--waf-bypass</code></td>
+<td><code>auto</code></td>
+<td><code>auto</code>, <code>force</code>, <code>off</code></td>
+</tr>
+<tr>
+<td><code>--skip-waf-probe</code></td>
+<td>false</td>
+<td>능동 WAF 핑거프린팅을 건너뜁니다</td>
+</tr>
+<tr>
+<td><code>--force-waf</code></td>
+<td>—</td>
+<td><code>--waf-bypass force</code>일 때 사용할 WAF 이름</td>
+</tr>
+<tr>
+<td><code>--waf-evasion</code></td>
+<td>false</td>
+<td>WAF 탐지 시 적응형 회피: 요청 간 무작위 지터 + 차단된 응답이 몰릴 때 점증하는 쿨다운 (기존의 단순한 <code>workers=1</code>/<code>delay=3000</code> 프리셋을 대체). 이 플래그가 없어도 WAF별 페이싱 힌트는 탐지 시 자동으로 적용됩니다. <code>--rate-limit</code>와 함께 쓰면 좋습니다.</td>
+</tr>
+<tr>
+<td><code>--waf-min-confidence</code></td>
+<td><code>0.3</code></td>
+<td>이 신뢰도 미만의 핑거프린트를 제거합니다 (0.0–1.0). 기본값 <code>0.3</code>은 <code>Server: Google Frontend</code>(0.15) 같은 약한 매칭을 억제합니다. 약한 신호를 유지하려면 더 낮게 설정하고, <code>1.0</code>은 완전한 신뢰도를 가진 핑거프린트만 유지합니다.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dalfox-server"><code>dalfox server</code></h2>
+<p>REST API 서버를 시작합니다.</p>
+<pre><code class="language-bash hljs">dalfox server [FLAGS]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>약칭</th>
+<th>기본값</th>
+<th>설명</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--port</code></td>
+<td><code>-p</code></td>
+<td><code>6664</code></td>
+<td>수신 포트</td>
+</tr>
+<tr>
+<td><code>--host</code></td>
+<td><code>-H</code></td>
+<td><code>127.0.0.1</code></td>
+<td>바인딩 주소</td>
+</tr>
+<tr>
+<td><code>--api-key</code></td>
+<td>—</td>
+<td>—</td>
+<td>필수 <code>X-API-KEY</code> 헤더 값 (또는 <code>DALFOX_API_KEY</code>)</td>
+</tr>
+<tr>
+<td><code>--log-file</code></td>
+<td>—</td>
+<td>—</td>
+<td>일반 텍스트 로그 파일</td>
+</tr>
+<tr>
+<td><code>--allowed-origins</code></td>
+<td>—</td>
+<td>—</td>
+<td>CORS 오리진 (쉼표로 구분, <code>*</code> 및 <code>regex:</code> 지원)</td>
+</tr>
+<tr>
+<td><code>--jsonp</code></td>
+<td>—</td>
+<td>false</td>
+<td>응답을 JSONP로 감쌉니다</td>
+</tr>
+<tr>
+<td><code>--callback-param-name</code></td>
+<td>—</td>
+<td><code>callback</code></td>
+<td>JSONP 콜백 파라미터</td>
+</tr>
+<tr>
+<td><code>--cors-allow-methods</code></td>
+<td>—</td>
+<td><code>GET,POST,OPTIONS,PUT,PATCH,DELETE</code></td>
+<td>CORS 메서드</td>
+</tr>
+<tr>
+<td><code>--cors-allow-headers</code></td>
+<td>—</td>
+<td><code>Content-Type,X-API-KEY,Authorization</code></td>
+<td>CORS 헤더</td>
+</tr>
+<tr>
+<td><code>--rate-limit</code></td>
+<td><code>-r</code>, <code>--rl</code></td>
+<td><code>0</code></td>
+<td>전역 아웃바운드 요청 속도를 제한합니다 (초당 요청 수, <code>0</code> = 무제한)</td>
+</tr>
+<tr>
+<td><code>--scan-timeout</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>스캔 단계에 대한 대상별 하드 실제 시간 상한(초)</td>
+</tr>
+<tr>
+<td><code>--max-concurrent-scans</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>동시 스캔 수 제한 (<code>0</code> = 무제한)</td>
+</tr>
+<tr>
+<td><code>--max-body-bytes</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>분석용 응답 본문 바이트 제한 (<code>0</code> = 무제한)</td>
+</tr>
+</tbody>
+</table>
+<p>엔드포인트는 <a href="../../integrations/server/">REST API Server</a>를 참조하세요.</p>
+<hr />
+<h2 id="dalfox-payload"><code>dalfox payload</code></h2>
+<p>페이로드 컬렉션을 나열하거나 가져옵니다.</p>
+<pre><code class="language-bash hljs">dalfox payload &lt;SELECTOR&gt;
+</code></pre>
+<p>선택자:</p>
+<table>
+<thead>
+<tr>
+<th>선택자</th>
+<th>출력 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>event-handlers</code></td>
+<td>DOM 이벤트 핸들러 속성 이름</td>
+</tr>
+<tr>
+<td><code>useful-tags</code></td>
+<td>유용한 HTML 태그</td>
+</tr>
+<tr>
+<td><code>uri-scheme</code></td>
+<td><code>javascript:</code>/<code>data:</code> URL 페이로드</td>
+</tr>
+<tr>
+<td><code>portswigger</code></td>
+<td>원격: PortSwigger XSS 치트시트</td>
+</tr>
+<tr>
+<td><code>payloadbox</code></td>
+<td>원격: PayloadBox XSS 목록</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dalfox-mcp"><code>dalfox mcp</code></h2>
+<p>MCP stdio 서버를 실행합니다.</p>
+<pre><code class="language-bash hljs">dalfox mcp
+</code></pre>
+<p>추가 플래그는 없습니다. 도구 정의는 <a href="../../integrations/mcp/">MCP Server</a>를 참조하세요.</p>
+<hr />
+<h2 id="함께-보기">함께 보기</h2>
+<ul>
+<li><a href="../config/">Config File reference</a></li>
+<li><a href="../environment/">Environment variables</a></li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#전역-플래그">전역 플래그</a></li><li><a href="#dalfox-scan">dalfox scan</a><ul><li><a href="#입력">입력</a></li><li><a href="#출력">출력</a></li><li><a href="#대상-형태-지정">대상 형태 지정</a></li><li><a href="#범위">범위</a></li><li><a href="#탐색">탐색</a></li><li><a href="#마이닝">마이닝</a></li><li><a href="#네트워크">네트워크</a></li><li><a href="#엔진">엔진</a></li><li><a href="#xss-스캐닝">XSS 스캐닝</a></li><li><a href="#waf">WAF</a></li></ul></li><li><a href="#dalfox-server">dalfox server</a></li><li><a href="#dalfox-payload">dalfox payload</a></li><li><a href="#dalfox-mcp">dalfox mcp</a></li><li><a href="#함께-보기">함께 보기</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/reference/cli.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

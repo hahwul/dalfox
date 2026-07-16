@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Dalfox를 Claude 및 기타 MCP 클라이언트에 스캐너 도구(tool) 모음으로 노출합니다.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>MCP 서버 · Dalfox</title>
+  <meta property="og:title" content="MCP 서버">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/integrations/mcp/">
+  <meta property="og:description" content="Dalfox를 Claude 및 기타 MCP 클라이언트에 스캐너 도구(tool) 모음으로 노출합니다.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-mcp.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="MCP 서버">
+  <meta name="twitter:description" content="Dalfox를 Claude 및 기타 MCP 클라이언트에 스캐너 도구(tool) 모음으로 노출합니다.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-mcp.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/integrations/mcp/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/integrations/mcp/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/integrations/mcp/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"MCP 서버","url":"https://dalfox.hahwul.com/ko/integrations/mcp/","description":"Dalfox를 Claude 및 기타 MCP 클라이언트에 스캐너 도구(tool) 모음으로 노출합니다.","image":"https://dalfox.hahwul.com/og-images/ko-integrations-mcp.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"연동","item":"https://dalfox.hahwul.com/ko/integrations/"},{"@type":"ListItem","position":3,"name":"MCP 서버"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="integrations">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/integrations/mcp/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>MCP 서버</h1>
+          <p><strong>Model Context Protocol</strong>(MCP)은 AI 클라이언트가 외부 도구(tool)와 통신할 수 있게 해주는 개방형 표준입니다. <code>dalfox mcp</code>는 stdio 기반 MCP 서버를 실행하여 Claude Desktop, Claude Code, Cursor를 비롯한 모든 MCP 호환 클라이언트가 Dalfox 스캔을 직접 구동할 수 있게 합니다.</p>
+<h2 id="서버-시작하기">서버 시작하기</h2>
+<pre><code class="language-bash hljs">dalfox mcp
+</code></pre>
+<p>이 서버는 <code>stdin</code>/<code>stdout</code>을 통해 MCP로 통신합니다. 클라이언트에서 실행하세요. 터미널에서 직접 실행하지 않습니다.</p>
+<h2 id="claude-desktop-설정">Claude Desktop 설정</h2>
+<p>Claude Desktop MCP 설정(<code>claude_desktop_config.json</code>)에 Dalfox를 추가합니다:</p>
+<pre><code class="language-json hljs">{
+  &quot;mcpServers&quot;: {
+    &quot;dalfox&quot;: {
+      &quot;command&quot;: &quot;dalfox&quot;,
+      &quot;args&quot;: [&quot;mcp&quot;]
+    }
+  }
+}
+</code></pre>
+<p>Claude Desktop을 재시작합니다. Dalfox가 <code>dalfox</code>라는 이름의 도구 제공자(tool-provider)로 나타납니다.</p>
+<h2 id="claude-code및-기타-cli">Claude Code(및 기타 CLI)</h2>
+<pre><code class="language-bash hljs">claude mcp add dalfox -- dalfox mcp
+</code></pre>
+<h2 id="사용-가능한-도구tool">사용 가능한 도구(tool)</h2>
+<p>여섯 개의 도구(tool)가 노출됩니다. 모두 비동기이며 논블로킹입니다. 스캔을 제출하고, 결과를 폴링한 뒤, 다음 작업으로 넘어갑니다.</p>
+<h3 id="scan-with-dalfox"><code>scan_with_dalfox</code></h3>
+<p>스캔을 제출합니다. 즉시 반환합니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;target&quot;: &quot;https://example.com/search?q=test&quot;,
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;param&quot;: [&quot;q&quot;],
+  &quot;headers&quot;: [&quot;Authorization: Bearer token&quot;],
+  &quot;encoders&quot;: [&quot;url&quot;, &quot;html&quot;],
+  &quot;timeout&quot;: 10,
+  &quot;scan_timeout&quot;: 0,
+  &quot;workers&quot;: 50,
+  &quot;rate_limit&quot;: 0,
+  &quot;insecure&quot;: true,
+  &quot;blind_callback_url&quot;: &quot;https://callback.example&quot;,
+  &quot;deep_scan&quot;: false,
+  &quot;skip_ast_analysis&quot;: false,
+  &quot;analyze_external_js&quot;: false,
+  &quot;detect_outdated_libs&quot;: false
+}
+</code></pre>
+<p><code>encoders</code>는 구현된 페이로드 인코더의 어떤 조합이든 받습니다:
+<code>url</code>, <code>html</code>, <code>htmlpad</code>, <code>2url</code>, <code>3url</code>, <code>4url</code>, <code>base64</code>, <code>unicode</code>,
+<code>zwsp</code>. 위 예시는 <code>[&quot;url&quot;, &quot;html&quot;]</code>을 보여줍니다. 변형(mutation) 커버리지를
+높이려면 더 추가하세요. 순서는 중요하지 않습니다 — 스캐너는 인코더를
+고정된 우선순위 순서(<code>url</code> → <code>html</code> → <code>htmlpad</code> → <code>2url</code> → <code>3url</code>
+→ <code>4url</code> → <code>base64</code> → <code>unicode</code> → <code>zwsp</code>)로 적용하고 출력을 중복
+제거합니다. 인코딩을 완전히 비활성화하려면 <code>[&quot;none&quot;]</code>을 사용하세요.
+<code>--encoders</code> / <code>-e</code> CLI 플래그와 대응됩니다.</p>
+<p><code>insecure</code>는 TLS 인증서 검증을 제어합니다(기본값 <code>true</code>, 스캐너 친화적).
+인증서 검증을 강제하고 자체 서명되었거나 만료된 인증서를 거부하려면 <code>false</code>로
+설정하세요. <code>--insecure</code> CLI 플래그와 대응됩니다.</p>
+<p><code>analyze_external_js</code>는 옵트인 방식입니다(기본값 <code>false</code>). 프리플라이트
+시점에 동일 출처의 <code>&lt;script src&gt;</code> 번들을 가져와 AST DOM-XSS 분석을
+실행하려면 <code>true</code>로 설정하세요. 모든 싱크(sink) 로직이 외부 번들에 있고
+페이지에 서버 측 반사가 없는 SPA에 유용합니다. 제한: 파일 16개,
+파일당 512 KiB. <code>include_url</code>/<code>exclude_url</code> 필터를 따릅니다.</p>
+<p><code>detect_outdated_libs</code>는 옵트인 방식입니다(기본값 <code>false</code>). 오래되었거나
+알려진 취약점이 있는 JS 라이브러리에 대해 정보성 <code>[I]</code> 탐지 결과도
+내보내려면 <code>true</code>로 설정하세요(CWE-1104, 추가 요청 0건). 꺼두면 스캔은 XSS만
+보고합니다.</p>
+<p><code>rate_limit</code>은 스캔의 아웃바운드 초당 요청 수를 제한합니다(<code>0</code> = 무제한,
+기본값). 이제 모든 워커 태스크에 걸쳐 적용됩니다 — 취약한 대상을 부드럽게
+다루거나 WAF 임계값 아래로 유지하는 데 사용하세요.</p>
+<p><code>scan_timeout</code>은 전체 스캔의 실제 경과 시간 예산으로 초 단위입니다(기본값 <code>0</code> =
+무제한). 요청별 <code>timeout</code>과는 구별됩니다. 시간이 초과되면 스캔이 중단되고
+부분 탐지 결과를 유지하며 <code>scan_timeout</code>을 언급하는 <code>error_message</code>와 함께
+<code>cancelled</code> 상태로 정리됩니다. 길거나 <code>deep_scan</code> 실행에 한도를 두어
+에이전트의 폴링 루프가 반드시 종료되도록 설정하세요.</p>
+<p>응답:</p>
+<pre><code class="language-json hljs">{ &quot;scan_id&quot;: &quot;9f2c…&quot;, &quot;target&quot;: &quot;https://example.com/search?q=test&quot;, &quot;status&quot;: &quot;queued&quot; }
+</code></pre>
+<h3 id="get-results-dalfox"><code>get_results_dalfox</code></h3>
+<p>스캔을 폴링합니다. 준비되면 상태, 진행률, 결과를 반환합니다.</p>
+<pre><code class="language-json hljs">{ &quot;scan_id&quot;: &quot;9f2c…&quot; }
+</code></pre>
+<p>응답(진행 중):</p>
+<pre><code class="language-json hljs">{
+  &quot;scan_id&quot;: &quot;9f2c…&quot;,
+  &quot;target&quot;: &quot;…&quot;,
+  &quot;status&quot;: &quot;running&quot;,
+  &quot;progress&quot;: {
+    &quot;params_total&quot;: 10,
+    &quot;params_tested&quot;: 4,
+    &quot;requests_sent&quot;: 215,
+    &quot;findings_so_far&quot;: 1,
+    &quot;estimated_completion_pct&quot;: 40,
+    &quot;suggested_poll_interval_ms&quot;: 3000
+  }
+}
+</code></pre>
+<p>응답(완료):</p>
+<pre><code class="language-json hljs">{
+  &quot;scan_id&quot;: &quot;9f2c…&quot;,
+  &quot;status&quot;: &quot;done&quot;,
+  &quot;results&quot;: [
+    {
+      &quot;type&quot;: &quot;V&quot;,
+      &quot;type_description&quot;: &quot;Verified&quot;,
+      &quot;inject_type&quot;: &quot;inHTML&quot;,
+      &quot;method&quot;: &quot;GET&quot;,
+      &quot;param&quot;: &quot;q&quot;,
+      &quot;payload&quot;: &quot;&lt;svg/onload=alert(1)&gt;&quot;,
+      &quot;evidence&quot;: &quot;payload reflected and DOM element verified&quot;,
+      &quot;cwe&quot;: &quot;CWE-79&quot;,
+      &quot;severity&quot;: &quot;High&quot;
+    }
+  ]
+}
+</code></pre>
+<p><code>progress.estimated_completion_pct</code>와 <code>params_tested</code>는 발견된 각 파라미터가
+완료될 때마다 실시간으로 증가합니다(더 이상 스캔이 끝날 때까지 0에 머무르지
+않습니다). 따라서 폴링 간격을 조절하는 데 사용할 수 있습니다 —
+<code>suggested_poll_interval_ms</code>를 따르세요.</p>
+<p>대상에 도달할 수 없으면(DNS 실패, 연결 거부, TLS 오류, 타임아웃) 스캔은 빈
+<code>results</code>와 함께 <code>done</code>으로 끝나는 대신 <code>CONNECTION_FAILED</code>를 포함하는
+<code>error_message</code>와 함께 <code>status: &quot;error&quot;</code>로 끝납니다 — <code>preflight_dalfox</code>가
+<code>reachable: false</code>로 보고하는 것과 동일한 구분입니다. <code>target</code>은
+<code>http://</code> 또는 <code>https://</code>로 시작해야 합니다.</p>
+<h3 id="list-scans-dalfox"><code>list_scans_dalfox</code></h3>
+<p>추적 중인 모든 스캔을 나열합니다. 선택적 필터:</p>
+<pre><code class="language-json hljs">{ &quot;status&quot;: &quot;running&quot; }
+</code></pre>
+<p><code>total</code>, <code>scans: [{scan_id, target, status, result_count}]</code>을 반환합니다.</p>
+<h3 id="cancel-scan-dalfox"><code>cancel_scan_dalfox</code></h3>
+<p>대기 중이거나 실행 중인 스캔을 중단합니다:</p>
+<pre><code class="language-json hljs">{ &quot;scan_id&quot;: &quot;9f2c…&quot; }
+</code></pre>
+<h3 id="delete-scan-dalfox"><code>delete_scan_dalfox</code></h3>
+<p>추적 중인 스캔을 메모리에서 영구적으로 제거합니다. 종료된 스캔(<code>done</code>, <code>error</code>, <code>cancelled</code>)만 삭제할 수 있습니다. 실행 중이거나 대기 중인 스캔은 먼저 취소해야 합니다. 종료된 스캔은 1시간 후 자동으로 정리되기도 합니다.</p>
+<pre><code class="language-json hljs">{ &quot;scan_id&quot;: &quot;9f2c…&quot; }
+</code></pre>
+<p><code>{scan_id, deleted: true, previous_status}</code>를 반환합니다.</p>
+<h3 id="preflight-dalfox"><code>preflight_dalfox</code></h3>
+<p>페이로드를 보내지 <strong>않고</strong> 대상을 분석합니다. 스캔을 확정하기 전에 범위를 정하는 데 유용합니다.</p>
+<pre><code class="language-json hljs">{
+  &quot;target&quot;: &quot;https://example.com&quot;,
+  &quot;method&quot;: &quot;GET&quot;,
+  &quot;skip_discovery&quot;: false,
+  &quot;skip_mining&quot;: false
+}
+</code></pre>
+<p>도달 가능 여부, 발견된 파라미터, 예상 요청 수를 반환합니다.</p>
+<h2 id="일반적인-에이전트-흐름">일반적인 에이전트 흐름</h2>
+<ol>
+<li>에이전트가 <code>preflight_dalfox</code>를 호출하여 대상을 확인하고 파라미터 수를 셉니다.</li>
+<li>에이전트가 <code>scan_with_dalfox</code>를 호출하여 <code>scan_id</code>를 받습니다.</li>
+<li>에이전트가 진행률 객체의 <code>suggested_poll_interval_ms</code>를 사용하여 <code>get_results_dalfox</code>를 폴링합니다.</li>
+<li><code>status == &quot;done&quot;</code>이 되면 에이전트가 탐지 결과를 요약하여 사용자에게 다시 보고합니다.</li>
+</ol>
+<p>모든 도구(tool)가 비동기이므로 에이전트는 응답성을 유지합니다. 오래 실행되는 도구(tool) 호출이 대화를 차단하지 않습니다.</p>
+<h2 id="권한-및-안전">권한 및 안전</h2>
+<p>MCP 서버는 CLI와 동일한 규칙을 적용합니다: <strong>테스트 권한이 있는 대상만 스캔하세요.</strong> 에이전트의 시스템 프롬프트에서 &quot;모든 스캔 전에 범위를 확인하세요&quot;와 같은 명시적 사용자 확인 단계 뒤에 Dalfox MCP 호출을 두는 것을 고려하세요.</p>
+<h2 id="문제-해결">문제 해결</h2>
+<ul>
+<li><strong>도구(tool)가 표시되지 않나요?</strong> MCP 클라이언트가 사용하는 PATH에 <code>dalfox</code> 바이너리가 있는지 확인하세요. macOS의 Claude Desktop에서는 대개 <code>/usr/local/bin</code> 또는 <code>/opt/homebrew/bin</code>입니다.</li>
+<li><strong>결과가 비어 있나요?</strong> 다시 폴링하세요. 스캔은 비동기입니다. <code>suggested_poll_interval_ms</code>를 폴링 주기로 사용하세요.</li>
+<li><strong>로그를 보고 싶나요?</strong> 설정하는 동안 <code>dalfox mcp --debug</code>를 실행하세요. 디버그 라인은 stderr로 가므로 MCP 채널을 오염시키지 않습니다.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#서버-시작하기">서버 시작하기</a></li><li><a href="#claude-desktop-설정">Claude Desktop 설정</a></li><li><a href="#claude-code및-기타-cli">Claude Code(및 기타 CLI)</a></li><li><a href="#사용-가능한-도구tool">사용 가능한 도구(tool)</a><ul><li><a href="#scan-with-dalfox">scan_with_dalfox</a></li><li><a href="#get-results-dalfox">get_results_dalfox</a></li><li><a href="#list-scans-dalfox">list_scans_dalfox</a></li><li><a href="#cancel-scan-dalfox">cancel_scan_dalfox</a></li><li><a href="#delete-scan-dalfox">delete_scan_dalfox</a></li><li><a href="#preflight-dalfox">preflight_dalfox</a></li></ul></li><li><a href="#일반적인-에이전트-흐름">일반적인 에이전트 흐름</a></li><li><a href="#권한-및-안전">권한 및 안전</a></li><li><a href="#문제-해결">문제 해결</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/integrations/mcp.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

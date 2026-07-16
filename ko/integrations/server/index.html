@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="비동기 작업 관리, CORS, JSONP, API 키 인증을 갖춘 HTTP 서비스로 Dalfox를 실행합니다.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>REST API 서버 · Dalfox</title>
+  <meta property="og:title" content="REST API 서버">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/integrations/server/">
+  <meta property="og:description" content="비동기 작업 관리, CORS, JSONP, API 키 인증을 갖춘 HTTP 서비스로 Dalfox를 실행합니다.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-server.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="REST API 서버">
+  <meta name="twitter:description" content="비동기 작업 관리, CORS, JSONP, API 키 인증을 갖춘 HTTP 서비스로 Dalfox를 실행합니다.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-server.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/integrations/server/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/integrations/server/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/integrations/server/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"REST API 서버","url":"https://dalfox.hahwul.com/ko/integrations/server/","description":"비동기 작업 관리, CORS, JSONP, API 키 인증을 갖춘 HTTP 서비스로 Dalfox를 실행합니다.","image":"https://dalfox.hahwul.com/og-images/ko-integrations-server.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"연동","item":"https://dalfox.hahwul.com/ko/integrations/"},{"@type":"ListItem","position":3,"name":"REST API 서버"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="integrations">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/integrations/server/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>REST API 서버</h1>
+          <p><code>dalfox server</code>는 스캔을 큐에 넣고 비동기로 실행하는 상시 구동 HTTP 서비스를 시작합니다. 스캔을 제출하면 <code>scan_id</code>를 돌려받으며, 원하는 대로 폴링하거나 취소할 수 있습니다.</p>
+<h2 id="서버-시작하기">서버 시작하기</h2>
+<pre><code class="language-bash hljs">dalfox server
+# listens on http://127.0.0.1:6664 by default
+</code></pre>
+<p>자주 쓰는 옵션:</p>
+<pre><code class="language-bash hljs">dalfox server \
+  --port 6664 \
+  --host 0.0.0.0 \
+  --api-key &quot;change-me&quot; \
+  --log-file /var/log/dalfox.log
+</code></pre>
+<h3 id="인증">인증</h3>
+<p><code>--api-key</code>가 설정되어 있거나 (<code>DALFOX_API_KEY</code>가 export 되어 있으면) 모든 요청은 다음을 포함해야 합니다:</p>
+<pre><code>X-API-KEY: change-me
+</code></pre>
+<p>API 키를 설정하지 않으면 서버는 인증되지 않은 요청을 수락합니다. 그런 경우에는 <code>127.0.0.1</code>에 바인딩하십시오.</p>
+<h3 id="cors">CORS</h3>
+<pre><code class="language-bash hljs">dalfox server \
+  --allowed-origins &quot;https://app.example.com,https://admin.example.com&quot; \
+  --cors-allow-methods &quot;GET,POST,OPTIONS,DELETE&quot; \
+  --cors-allow-headers &quot;Content-Type,X-API-KEY,Authorization&quot;
+</code></pre>
+<p><code>*</code>는 와일드카드로 허용됩니다. 정규식은 <code>regex:^https://.*\.example\.com$</code> 형태로 지원됩니다.</p>
+<h3 id="jsonp">JSONP</h3>
+<p>커스텀 헤더를 설정할 수 없는 브라우저 클라이언트를 위해:</p>
+<pre><code class="language-bash hljs">dalfox server --jsonp --callback-param-name callback
+# then GET /scan?target=...&amp;callback=myFunction
+</code></pre>
+<h2 id="엔드포인트">엔드포인트</h2>
+<table>
+<thead>
+<tr>
+<th>메서드</th>
+<th>경로</th>
+<th>기능</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/scan</code></td>
+<td>새 스캔 제출 (JSON 본문)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/scan?target=...</code></td>
+<td>새 스캔 제출 (쿼리 문자열)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/scan/:id</code></td>
+<td>스캔 상태 및 결과 조회</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/scan/:id</code></td>
+<td>큐에 있거나 실행 중인 스캔 취소</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/scans</code></td>
+<td>모든 스캔 목록 조회 (선택적 <code>?status=</code>)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/result/:id</code></td>
+<td><code>/scan/:id</code>의 별칭</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/preflight</code></td>
+<td>페이로드를 보내지 않고 파라미터 탐색</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/health</code></td>
+<td>서버 정보 + 기능 목록</td>
+</tr>
+</tbody>
+</table>
+<h3 id="스캔-제출">스캔 제출</h3>
+<pre><code class="language-bash hljs">curl -X POST http://127.0.0.1:6664/scan \
+  -H &quot;X-API-KEY: change-me&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{
+    &quot;target&quot;: &quot;https://target.app?q=test&quot;,
+    &quot;options&quot;: {
+      &quot;worker&quot;: 50,
+      &quot;timeout&quot;: 10,
+      &quot;encoders&quot;: [&quot;url&quot;, &quot;html&quot;],
+      &quot;blind&quot;: &quot;https://callback.interact.sh&quot;
+    }
+  }'
+</code></pre>
+<p>스캔 대상 필드는 <code>target</code>입니다 (MCP <code>scan_with_dalfox</code> 도구 및 응답 페이로드와 동일). 레거시 필드명 <code>url</code>도 여전히 별칭으로 수락되며 — JSON 본문과 <code>?target=</code> / <code>?url=</code> 쿼리 문자열 모두에서 — 기존 클라이언트가 계속 동작합니다.</p>
+<p>응답:</p>
+<pre><code class="language-json hljs">{
+  &quot;code&quot;: 200,
+  &quot;msg&quot;: &quot;queued&quot;,
+  &quot;data&quot;: {
+    &quot;scan_id&quot;: &quot;9f2c…&quot;,
+    &quot;target&quot;: &quot;https://target.app?q=test&quot;
+  }
+}
+</code></pre>
+<h3 id="상태-폴링">상태 폴링</h3>
+<pre><code class="language-bash hljs">curl -H &quot;X-API-KEY: change-me&quot; http://127.0.0.1:6664/scan/9f2c…
+</code></pre>
+<p>응답 (실행 중):</p>
+<pre><code class="language-json hljs">{
+  &quot;code&quot;: 200,
+  &quot;msg&quot;: &quot;running&quot;,
+  &quot;data&quot;: {
+    &quot;target&quot;: &quot;https://target.app?q=test&quot;,
+    &quot;status&quot;: &quot;running&quot;,
+    &quot;results&quot;: [],
+    &quot;progress&quot;: {
+      &quot;params_total&quot;: 12,
+      &quot;params_tested&quot;: 5,
+      &quot;requests_sent&quot;: 234,
+      &quot;findings_so_far&quot;: 1,
+      &quot;estimated_completion_pct&quot;: 41,
+      &quot;suggested_poll_interval_ms&quot;: 3000
+    }
+  }
+}
+</code></pre>
+<p>완료되면 <code>status</code>는 <code>done</code>이 되고 <code>results</code>가 채워집니다.</p>
+<h3 id="스캔-목록-조회">스캔 목록 조회</h3>
+<pre><code class="language-bash hljs">curl -H &quot;X-API-KEY: change-me&quot; 'http://127.0.0.1:6664/scans?status=running'
+</code></pre>
+<h3 id="스캔-취소">스캔 취소</h3>
+<pre><code class="language-bash hljs">curl -X DELETE -H &quot;X-API-KEY: change-me&quot; http://127.0.0.1:6664/scan/9f2c…
+</code></pre>
+<h3 id="프리플라이트-공격-없음">프리플라이트 (공격 없음)</h3>
+<pre><code class="language-bash hljs">curl -X POST http://127.0.0.1:6664/preflight \
+  -H &quot;X-API-KEY: change-me&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;url&quot;:&quot;https://target.app&quot;}'
+</code></pre>
+<p>응답에는 <code>params_discovered</code>, <code>estimated_total_requests</code>, 그리고 파라미터 목록이 포함되어 있어 실제 스캔에 착수하기 전에 범위를 정할 수 있습니다.</p>
+<h3 id="헬스">헬스</h3>
+<pre><code class="language-bash hljs">curl http://127.0.0.1:6664/health
+</code></pre>
+<p>버전, <code>auth_required</code>, 지원되는 엔드포인트 목록을 반환합니다. 가동 상태 확인에 유용합니다.</p>
+<h2 id="scanoptions-참조-요청-본문">ScanOptions 참조 (요청 본문)</h2>
+<pre><code class="language-jsonc hljs">{
+  &quot;url&quot;: &quot;https://target.app&quot;,
+  &quot;options&quot;: {
+    &quot;worker&quot;: 50,
+    &quot;delay&quot;: 0,
+    &quot;timeout&quot;: 10,
+    &quot;rate_limit&quot;: 0,
+    &quot;scan_timeout&quot;: 0,
+    &quot;blind&quot;: &quot;https://callback.interact.sh&quot;,
+    &quot;method&quot;: &quot;POST&quot;,
+    &quot;data&quot;: &quot;user=test&quot;,
+    &quot;header&quot;: [&quot;Authorization: Bearer token&quot;],
+    &quot;user_agent&quot;: &quot;Custom&quot;,
+    &quot;encoders&quot;: [&quot;url&quot;, &quot;html&quot;],
+    &quot;remote_payloads&quot;: [&quot;portswigger&quot;],
+    &quot;remote_wordlists&quot;: [&quot;burp&quot;],
+    &quot;include_request&quot;: false,
+    &quot;include_response&quot;: false,
+    &quot;callback_url&quot;: &quot;https://your-webhook.example/dalfox&quot;,
+    &quot;param&quot;: [&quot;q&quot;, &quot;id:query&quot;],
+    &quot;proxy&quot;: &quot;http://127.0.0.1:8080&quot;,
+    &quot;insecure&quot;: true,
+    &quot;follow_redirects&quot;: false,
+    &quot;skip_mining&quot;: false,
+    &quot;skip_discovery&quot;: false,
+    &quot;deep_scan&quot;: false,
+    &quot;skip_ast_analysis&quot;: false,
+    &quot;detect_outdated_libs&quot;: false
+  }
+}
+</code></pre>
+<p>필드는 CLI 플래그와 대응됩니다. 의미와 기본값은 <a href="../../reference/cli/">CLI 참조</a>를 확인하십시오.
+<code>detect_outdated_libs</code>는 옵트인 방식입니다 (기본값 <code>false</code>). <code>true</code>로 설정하면
+오래되었거나 알려진 취약점이 있는 JS 라이브러리도 정보성 <code>[I]</code> 탐지 결과로
+보고합니다 (CWE-1104, 추가 요청 0건). 같은 키를 <code>GET /scan</code> 쿼리 파라미터로도 사용할 수 있습니다.
+<code>insecure</code>는 기본값이 <code>true</code>입니다 (CLI 스캐너 기본값과 동일하게 TLS 인증서 검증을
+건너뜁니다). 인증서 검증을 강제하려면 <code>&quot;insecure&quot;: false</code> (또는 <code>GET /scan</code>에서
+<code>?insecure=false</code>)를 보내십시오.</p>
+<p><code>rate_limit</code>은 스캔의 초당 아웃바운드 요청 수를 제한합니다 (<code>0</code> = 무제한, 기본값).
+모든 워커 태스크에 걸쳐 적용됩니다. 서버 전역 <code>--rate-limit</code> 플래그는 상한선입니다.
+요청은 더 낮은 속도를 지정할 수는 있으나 이를 초과하거나 비활성화할 수는 없습니다.</p>
+<p><code>scan_timeout</code>은 스캔 전체의 벽시계 시간 예산(초)입니다 (기본값 <code>0</code> = 무제한).
+요청당 <code>timeout</code>과는 구별됩니다. 예산에 도달하면 스캔이 중단되고, 그때까지 수집한
+부분 탐지 결과를 유지하며, <code>scan_timeout</code>을 언급하는 <code>error_message</code>와 함께
+<code>cancelled</code> 상태로 정착합니다 (따라서 타임아웃과 클라이언트가 발행한 취소를 구별할 수
+있습니다). 서버 전역 <code>--scan-timeout</code> 플래그는 <code>--rate-limit</code>과 마찬가지로 제출된 모든
+스캔에 동일하게 상한을 적용합니다.</p>
+<h3 id="설정해-둘-만한-서버-플래그">설정해 둘 만한 서버 플래그</h3>
+<ul>
+<li><code>--rate-limit &lt;rps&gt;</code> — 모든 스캔의 아웃바운드 요청 속도를 제한합니다 (대상을 보호).</li>
+<li><code>--scan-timeout &lt;secs&gt;</code> — 스캔당 강제 벽시계 시간 예산. 길거나 <code>deep_scan</code>인
+작업을 제한하여 하나의 대상이 워커를 무한정 점유하지 못하게 합니다.</li>
+<li><code>--max-concurrent-scans &lt;n&gt;</code> — <code>n</code>개의 스캔이 큐에 있거나 실행 중이면 새 제출을
+<code>503</code>으로 거부합니다 (기본값 <code>100</code>, <code>0</code> = 무제한). 제출 폭주에 대비해 메모리와
+블로킹 풀을 제한합니다.</li>
+<li><code>--max-body-bytes &lt;n&gt;</code> — <code>POST /scan</code> 및 <code>/preflight</code>의 명시적 요청 본문 상한
+(기본값 <code>1048576</code> = 1 MiB). 크기를 초과하는 본문은 <code>413</code>을 받습니다.</li>
+</ul>
+<h2 id="작업job-수명-주기">작업(job) 수명 주기</h2>
+<pre><code>queued → running → done
+                 ↘ error
+                 ↘ cancelled
+</code></pre>
+<p>종료 상태(<code>done</code>, <code>error</code>, <code>cancelled</code>)는 고정되어 변하지 않습니다.</p>
+<p>연결할 수 없는 대상(DNS 실패, 연결 거부, TLS 오류, 타임아웃)은
+<code>target unreachable: connection failed (CONNECTION_FAILED)</code>라는 <code>error_message</code>와
+함께 <code>error</code>로 종료됩니다 — 탐지 결과가 0건인 <code>done</code>이 아니므로 &quot;스캔했으나 아무것도
+찾지 못함&quot;과 &quot;호스트에 도달하지 못함&quot;을 구별할 수 있습니다. 스캔을 실행하지 않고
+도달 가능성만 확인하려면 먼저 <code>POST /preflight</code>를 사용하십시오. <code>url</code>은 <code>http://</code> 또는
+<code>https://</code>로 시작해야 하며, 그 외 스킴은 <code>400</code>으로 거부됩니다 (<code>/preflight</code>와 동일).</p>
+<h2 id="systemd에서-실행하기">systemd에서 실행하기</h2>
+<pre><code class="language-ini hljs"># /etc/systemd/system/dalfox.service
+[Unit]
+Description=Dalfox scanner service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/dalfox server --port 6664 --host 127.0.0.1 --log-file /var/log/dalfox.log
+Environment=DALFOX_API_KEY=change-me
+Restart=on-failure
+User=dalfox
+
+[Install]
+WantedBy=multi-user.target
+</code></pre>
+<pre><code class="language-bash hljs">sudo systemctl enable --now dalfox
+</code></pre>
+<h2 id="보안-참고-사항">보안 참고 사항</h2>
+<ul>
+<li><strong>로컬호스트에 바인딩하십시오.</strong> 원격 접근이 반드시 필요한 경우가 아니라면 그렇게 하십시오.</li>
+<li><strong>원격 바인딩에는 항상 <code>--api-key</code>를 설정하십시오.</strong></li>
+<li><strong>API 키를 로그에 남기지 마십시오.</strong> Dalfox는 키를 기록하지 않지만, 리버스 프록시는 기록할 수 있습니다.</li>
+<li><strong>네트워크로 노출한다면 TLS 뒤에 두십시오</strong> (nginx, Caddy, Traefik).</li>
+<li><strong><code>callback_url</code>과 스캔 대상은 서버 측 요청입니다.</strong> Dalfox는 URL 스캐너입니다.
+제출한 대상이 무엇이든 접속하며, 완료 시 결과 JSON을 <code>callback_url</code>로 POST 합니다.
+<code>http(s)</code> 스킴만 접속하지만 <em>호스트</em>는 필터링되지 않습니다 — 루프백, 링크 로컬
+(예: <code>169.254.169.254</code>의 클라우드 메타데이터), 사설 주소가 모두 도달 가능합니다.
+인증되지 않은 바인딩에서는 스캔을 제출할 수 있는 누구에게나 이것이 서버 측 요청 위조 +
+데이터 유출 프리미티브가 되므로, 신뢰할 수 없는 호출자에게 API를 노출할 때는
+<code>--api-key</code>를 설정하고 아웃바운드 트래픽을 제한하십시오.</li>
+<li><strong><code>--jsonp</code>는 <code>GET</code> 엔드포인트를 <code>&lt;script&gt;</code>를 통해 교차 출처로 읽을 수 있게 만들며</strong>,
+이는 CORS 허용 목록의 적용을 받지 않습니다. 의도한 경우에만 활성화하고,
+<code>--api-key</code>와 함께 사용하십시오.</li>
+<li><strong><code>--scan-timeout</code>으로 스캔 실행 시간을 제한하십시오.</strong> 요청당 <code>timeout</code>은 단일 HTTP
+요청만 제한합니다. 파라미터와 페이로드가 많은 스캔(또는 <code>deep_scan</code>)은 여전히 오랫동안
+실행될 수 있습니다. <code>--scan-timeout &lt;secs&gt;</code>를 설정하여 제출된 모든 스캔에 강제 벽시계
+시간 예산을 두면, 느린 대상 하나가 워커를 무한정 묶어 둘 수 없게 됩니다.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#서버-시작하기">서버 시작하기</a><ul><li><a href="#인증">인증</a></li><li><a href="#cors">CORS</a></li><li><a href="#jsonp">JSONP</a></li></ul></li><li><a href="#엔드포인트">엔드포인트</a><ul><li><a href="#스캔-제출">스캔 제출</a></li><li><a href="#상태-폴링">상태 폴링</a></li><li><a href="#스캔-목록-조회">스캔 목록 조회</a></li><li><a href="#스캔-취소">스캔 취소</a></li><li><a href="#프리플라이트-공격-없음">프리플라이트 (공격 없음)</a></li><li><a href="#헬스">헬스</a></li></ul></li><li><a href="#scanoptions-참조-요청-본문">ScanOptions 참조 (요청 본문)</a><ul><li><a href="#설정해-둘-만한-서버-플래그">설정해 둘 만한 서버 플래그</a></li></ul></li><li><a href="#작업job-수명-주기">작업(job) 수명 주기</a></li><li><a href="#systemd에서-실행하기">systemd에서 실행하기</a></li><li><a href="#보안-참고-사항">보안 참고 사항</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/integrations/server.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

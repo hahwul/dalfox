@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Output &amp; Reports · Dalfox</title>
+  <meta property="og:title" content="Output &amp; Reports">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/guide/output/">
+  <meta property="og:description" content="Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/guide-output.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Output &amp; Reports">
+  <meta name="twitter:description" content="Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/guide-output.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/output/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/output/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/guide/output/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Output \u0026 Reports","url":"https://dalfox.hahwul.com/guide/output/","description":"Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.","image":"https://dalfox.hahwul.com/og-images/guide-output.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://dalfox.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Output \u0026 Reports"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/guide/output/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Output &amp; Reports</h1>
+          <p>Every scan produces the same internal result structure. Dalfox renders it in whichever format you pick. Machine-readable formats automatically suppress the banner so your file stays clean.</p>
+<h2 id="choosing-a-format">Choosing a format</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json -o report.json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Flag</th>
+<th>Machine-readable</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plain</code></td>
+<td><code>-f plain</code> (default)</td>
+<td>No</td>
+<td>Human terminal output</td>
+</tr>
+<tr>
+<td><code>json</code></td>
+<td><code>-f json</code></td>
+<td>Yes</td>
+<td>Single JSON doc, dashboards, <code>jq</code></td>
+</tr>
+<tr>
+<td><code>jsonl</code></td>
+<td><code>-f jsonl</code></td>
+<td>Yes</td>
+<td>Streaming, log pipelines</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td><code>-f markdown</code></td>
+<td>No</td>
+<td>Reports, pull-request comments</td>
+</tr>
+<tr>
+<td><code>sarif</code></td>
+<td><code>-f sarif</code></td>
+<td>Yes</td>
+<td>GitHub code scanning, SARIF consumers</td>
+</tr>
+<tr>
+<td><code>toml</code></td>
+<td><code>-f toml</code></td>
+<td>Yes</td>
+<td>Humans + pipelines</td>
+</tr>
+</tbody>
+</table>
+<h2 id="writing-to-a-file">Writing to a file</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f jsonl -o findings.jsonl
+</code></pre>
+<p>Without <code>-o</code>, output goes to <code>stdout</code>.</p>
+<h2 id="result-fields">Result fields</h2>
+<p>Every finding includes:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Example</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td><code>V</code>, <code>A</code>, <code>R</code>, <code>I</code></td>
+<td>Verified / AST-detected / Reflected / Informational</td>
+</tr>
+<tr>
+<td><code>type_description</code></td>
+<td><code>&quot;Verified&quot;</code></td>
+<td>Human label</td>
+</tr>
+<tr>
+<td><code>inject_type</code></td>
+<td><code>&quot;inHTML&quot;</code></td>
+<td>Context (<code>inHTML</code>, <code>inAttr</code>, <code>inJS</code>, …)</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td><code>&quot;GET&quot;</code></td>
+<td>HTTP method</td>
+</tr>
+<tr>
+<td><code>param</code></td>
+<td><code>&quot;q&quot;</code></td>
+<td>Parameter that was exploited</td>
+</tr>
+<tr>
+<td><code>payload</code></td>
+<td><code>&lt;svg/onload=alert(1)&gt;</code></td>
+<td>The exact payload</td>
+</tr>
+<tr>
+<td><code>evidence</code></td>
+<td><code>&quot;payload reflected in response&quot;</code></td>
+<td>Why Dalfox believes it</td>
+</tr>
+<tr>
+<td><code>cwe</code></td>
+<td><code>&quot;CWE-79&quot;</code></td>
+<td>Standard CWE</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>&quot;High&quot;</code></td>
+<td>High / Medium / Low / Info</td>
+</tr>
+<tr>
+<td><code>message_str</code></td>
+<td><code>&quot;XSS found&quot;</code></td>
+<td>Short message</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> / <code>A</code> / <code>R</code> are XSS findings. <code>I</code> (<strong>Informational</strong>) is a non-exploitable
+observation — currently only <strong>outdated / known-vulnerable JS libraries</strong>
+(<code>inject_type: &quot;OutdatedComponent&quot;</code>, <code>CWE-1104</code>), rendered as a compact
+<code>[INF]</code> line with no payload/parameter. It is <strong>opt-in</strong>: Dalfox focuses on
+verified XSS by default, so library reporting is off unless you pass
+<code>--detect-outdated-libs</code> (it adds <strong>0 extra requests</strong> — it inspects the
+preflight response's <code>&lt;script&gt;</code> tags). Filter it out with <code>--only-poc v,a,r</code>.</p>
+<p>Optionally include the full request/response:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json --include-all -o report.json
+# or granularly:
+dalfox ... --include-request
+dalfox ... --include-response
+</code></pre>
+<h2 id="scan-metadata-envelope">Scan metadata envelope</h2>
+<p>JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level metadata envelope (previously JSON/JSONL only; see <a href="https://github.com/hahwul/dalfox/issues/1093">#1093</a>):</p>
+<ul>
+<li><code>dalfox_version</code></li>
+<li><code>targets</code> (the input targets)</li>
+<li><code>scan_duration_ms</code></li>
+<li><code>total_requests</code></li>
+<li><code>findings_count</code></li>
+<li><code>target_summary[]</code> — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected</li>
+</ul>
+<p>In <strong>SARIF</strong> the envelope is duplicated under <code>runs[0].properties</code> and <code>runs[0].tool.driver.properties</code> so GitHub code scanning and other consumers retain context.</p>
+<p>In <strong>TOML</strong> it appears as a top-level <code>[meta]</code> table (findings under <code>[[results]]</code>).</p>
+<p>In <strong>Markdown</strong> it is rendered as human-readable tables (<code>## Scan Metadata</code> + <code>### Target Summary</code>) above the findings summary.</p>
+<p>Plain text output remains findings-focused only.</p>
+<h2 id="silence-mode">Silence mode</h2>
+<p>Emit <strong>only findings</strong> on <code>stdout</code>, no logs:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --silence
+# Pipe findings into another tool:
+cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity==&quot;High&quot;)'
+</code></pre>
+<p>Useful in shell pipelines and cron jobs.</p>
+<h2 id="streaming-findings-during-long-scans">Streaming findings during long scans</h2>
+<p>By default the plain renderer prints each finding block (POC + Issue /
+Payload / Line) <strong>after</strong> the end-of-scan <code>WRN XSS found N XSS</code> summary,
+so the log reads in natural order: start → progress → summary → details.</p>
+<p>For long scans against large targets, you can flip to mid-scan emission
+with <code>--stream-findings</code>. Each finding is printed the moment it is
+verified, above the progress bars:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --stream-findings
+</code></pre>
+<p><code>--stream-findings</code> only affects the <code>plain</code> format and is auto-disabled
+when the end-of-scan path needs to apply filters the streamer can't
+mirror cleanly (<code>--output</code>, <code>--limit</code>, <code>--only-poc</code>).</p>
+<h2 id="poc-styles">POC styles</h2>
+<p>Re-render the proof-of-concept in different client shapes:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --poc-type curl      # curl command
+dalfox https://target.app --poc-type httpie    # HTTPie
+dalfox https://target.app --poc-type http-request  # raw HTTP
+</code></pre>
+<p>Default is <code>plain</code>. Good for filing tickets.</p>
+<h2 id="filtering">Filtering</h2>
+<p>Show only certain result types:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-poc v     # only verified
+dalfox https://target.app --only-poc v,a   # verified + AST
+</code></pre>
+<p>Cap the number of results:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --limit 50
+dalfox https://target.app --limit 10 --limit-result-type v
+</code></pre>
+<h2 id="colour-tty-behaviour">Colour &amp; TTY behaviour</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app --no-color
+# or
+NO_COLOR=1 dalfox https://target.app
+</code></pre>
+<p>Dalfox also auto-disables colour when output is redirected to a file or a non-TTY.</p>
+<h2 id="toml">TOML</h2>
+<p>Same data shape as JSON (plus top-level <code>[meta]</code> envelope for parity with other formats), written as TOML. Findings render as a <code>[[results]]</code> array of tables:</p>
+<pre><code class="language-toml hljs">[meta]
+dalfox_version = &quot;3.x&quot;
+targets = [&quot;https://target.app&quot;]
+scan_duration_ms = 1234
+total_requests = 87
+findings_count = 1
+target_summary = [{ target = &quot;https://target.app&quot;, status = &quot;findings&quot;, findings_count = 1 }]
+
+[[results]]
+type = &quot;V&quot;
+type_description = &quot;Verified&quot;
+inject_type = &quot;inHTML&quot;
+method = &quot;GET&quot;
+data = &quot;https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E&quot;
+param = &quot;q&quot;
+payload = &quot;&lt;svg/onload=alert(1)&gt;&quot;
+evidence = &quot;payload reflected and DOM element verified&quot;
+location = &quot;Query&quot;
+cwe = &quot;CWE-79&quot;
+severity = &quot;High&quot;
+message_id = 606
+message_str = &quot;XSS found&quot;
+</code></pre>
+<pre><code class="language-bash hljs">dalfox https://target.app -f toml -o report.toml
+</code></pre>
+<h2 id="sarif-github-code-scanning">SARIF → GitHub code scanning</h2>
+<pre><code class="language-bash hljs">dalfox scan urls.txt -f sarif -o dalfox.sarif
+</code></pre>
+<p>Upload <code>dalfox.sarif</code> through GitHub's <code>upload-sarif</code> action, and findings appear in the repository's <strong>Security → Code scanning</strong> tab.</p>
+<h2 id="ci-example">CI example</h2>
+<pre><code class="language-yaml hljs"># .github/workflows/xss-scan.yml
+- name: Dalfox scan
+  run: dalfox scan scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: dalfox.sarif
+</code></pre>
+<h2 id="exit-codes">Exit codes</h2>
+<p>Dalfox returns:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>Completed successfully, no findings</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Completed successfully, at least one finding</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Input/config/runtime error</td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>1</code> as a CI gate only if you're comfortable failing the build on any finding. Most teams gate on <code>severity &gt;= High</code> using <code>jq</code> on JSON output.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li>Automate scans via the <a href="../../integrations/server/">REST API Server</a>.</li>
+<li>Let an AI driver handle it with the <a href="../../integrations/mcp/">MCP Server</a>.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#choosing-a-format">Choosing a format</a></li><li><a href="#writing-to-a-file">Writing to a file</a></li><li><a href="#result-fields">Result fields</a></li><li><a href="#scan-metadata-envelope">Scan metadata envelope</a></li><li><a href="#silence-mode">Silence mode</a></li><li><a href="#streaming-findings-during-long-scans">Streaming findings during long scans</a></li><li><a href="#poc-styles">POC styles</a></li><li><a href="#filtering">Filtering</a></li><li><a href="#colour-tty-behaviour">Colour &amp; TTY behaviour</a></li><li><a href="#toml">TOML</a></li><li><a href="#sarif-github-code-scanning">SARIF → GitHub code scanning</a></li><li><a href="#ci-example">CI example</a></li><li><a href="#exit-codes">Exit codes</a></li><li><a href="#next">Next</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/output.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

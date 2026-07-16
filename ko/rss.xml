@@ -1,0 +1,1726 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Dalfox (한국어)</title>
+    <link>https://dalfox.hahwul.com/ko/</link>
+    <description>Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification.</description>
+    <language>ko</language>
+    <atom:link href="https://dalfox.hahwul.com/ko/rss.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>설정</title>
+      <link>https://dalfox.hahwul.com/ko/getting-started/configuration/</link>
+      <guid>https://dalfox.hahwul.com/ko/getting-started/configuration/</guid>
+      <description>즐겨 쓰는 플래그를 Dalfox 설정 파일에 저장합니다.</description>
+      <content:encoded><![CDATA[<p>Dalfox는 시작 시 설정 파일을 읽으므로 매번 동일한 플래그를 전달할 필요가 없습니다. 설정 파일에 지정한 값은 명시적인 CLI 플래그로 덮어쓸 수 있으므로, 여기에 &quot;기본값&quot;을 두어도 안전합니다.</p>
+<h2 id="파일-위치">파일 위치</h2>
+<p>Dalfox는 다음 순서로 파일을 찾습니다.</p>
+<ol>
+<li><code>$XDG_CONFIG_HOME/dalfox/config.toml</code></li>
+<li><code>$HOME/.config/dalfox/config.toml</code></li>
+</ol>
+<p><code>--config</code>로 다른 위치를 지정할 수 있습니다.</p>
+<pre><code class="language-bash hljs">dalfox --config ./dalfox.toml scan https://target.app
+</code></pre>
+<p>파일이 없으면, Dalfox는 처음 실행할 때 기본 경로에 템플릿을 생성합니다.</p>
+<h2 id="최소-설정">최소 설정</h2>
+<pre><code class="language-toml hljs">[scan]
+format = &quot;json&quot;
+output = &quot;results.json&quot;
+timeout = 15
+workers = 100
+encoders = [&quot;url&quot;, &quot;html&quot;]
+</code></pre>
+<p>스캔을 실행하면 해당 플래그가 자동으로 적용됩니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app?q=test
+# → writes JSON results to results.json with workers=100
+</code></pre>
+<h2 id="우선순위">우선순위</h2>
+<pre><code>CLI flag  &gt;  Config file  &gt;  Built-in defaults
+</code></pre>
+<p>커맨드 라인에 지정한 것이 우선합니다. 이를 통해 설정 파일에 합리적인 기본값을 유지하면서, 스캔마다 개별적으로 덮어쓸 수 있습니다.</p>
+<pre><code class="language-bash hljs"># Config sets workers=100, but for this quick scan use 20
+dalfox --workers 20 https://target.app
+</code></pre>
+<h2 id="형식">형식</h2>
+<p>Dalfox는 TOML과 JSON을 모두 지원합니다. TOML이 기본값이며, 도구나 UI에서 파일을 생성하는 경우 JSON이 편리합니다.</p>
+<pre><code class="language-toml hljs"># ~/.config/dalfox/config.toml
+[scan]
+format = &quot;sarif&quot;
+silence = true
+</code></pre>
+<pre><code class="language-json hljs">{
+  &quot;scan&quot;: {
+    &quot;format&quot;: &quot;sarif&quot;,
+    &quot;silence&quot;: true
+  }
+}
+</code></pre>
+<h2 id="무엇을-설정할-수-있나요">무엇을 설정할 수 있나요?</h2>
+<p><code>dalfox scan</code> 아래에 CLI 플래그가 있는 모든 항목은 <code>[scan]</code> 테이블에 넣을 수 있습니다. 일반적인 예시는 다음과 같습니다.</p>
+<table>
+<thead>
+<tr>
+<th>키</th>
+<th>예시</th>
+<th>기능</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>format</code></td>
+<td><code>&quot;json&quot;</code></td>
+<td>출력 형식(<code>plain</code>, <code>json</code>, <code>jsonl</code>, <code>markdown</code>, <code>sarif</code>, <code>toml</code>)</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td><code>&quot;report.json&quot;</code></td>
+<td>기본 출력 파일</td>
+</tr>
+<tr>
+<td><code>silence</code></td>
+<td><code>true</code></td>
+<td>로그를 억제하고 탐지 결과만 출력</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td><code>15</code></td>
+<td>요청 타임아웃(초)</td>
+</tr>
+<tr>
+<td><code>delay</code></td>
+<td><code>200</code></td>
+<td>요청 간 지연(ms)</td>
+</tr>
+<tr>
+<td><code>workers</code></td>
+<td><code>100</code></td>
+<td>대상당 동시 워커 수</td>
+</tr>
+<tr>
+<td><code>encoders</code></td>
+<td><code>[&quot;url&quot;,&quot;html&quot;,&quot;base64&quot;]</code></td>
+<td>페이로드 인코더</td>
+</tr>
+<tr>
+<td><code>remote_payloads</code></td>
+<td><code>[&quot;portswigger&quot;]</code></td>
+<td>원격 페이로드 소스</td>
+</tr>
+<tr>
+<td><code>remote_wordlists</code></td>
+<td><code>[&quot;burp&quot;]</code></td>
+<td>원격 파라미터 워드리스트</td>
+</tr>
+<tr>
+<td><code>headers</code></td>
+<td><code>[&quot;Accept: text/html&quot;]</code></td>
+<td>추가 요청 헤더</td>
+</tr>
+<tr>
+<td><code>user_agent</code></td>
+<td><code>&quot;Dalfox Scanner&quot;</code></td>
+<td>기본 User-Agent</td>
+</tr>
+<tr>
+<td><code>waf_bypass</code></td>
+<td><code>&quot;auto&quot;</code></td>
+<td>WAF 우회 모드(<code>auto</code>, <code>force</code>, <code>off</code>)</td>
+</tr>
+<tr>
+<td><code>insecure</code></td>
+<td><code>true</code></td>
+<td>TLS 인증서 검증 건너뛰기(<code>false</code>로 설정 시 강제)</td>
+</tr>
+<tr>
+<td><code>follow_redirects</code></td>
+<td><code>true</code></td>
+<td>3xx 응답 따라가기</td>
+</tr>
+</tbody>
+</table>
+<p>모든 키는 <a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일 레퍼런스</a>를 참고하세요.</p>
+<h2 id="시크릿">시크릿</h2>
+<p>설정 파일을 커밋한다면, API 키, 베어러 토큰, blind-XSS 콜백 호스트명은 설정 파일에서 제외하세요. 환경 변수를 사용하는 것이 좋습니다.</p>
+<pre><code class="language-bash hljs"># .env or your shell profile
+export DALFOX_API_KEY=&quot;...&quot;
+</code></pre>
+<p>또는 커맨드 라인에서 전달하고 절대 저장하지 마세요.</p>
+<h2 id="다음-단계">다음 단계</h2>
+<ul>
+<li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">첫 스캔 실행하기</a></li>
+<li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캐닝 모드 살펴보기</a></li>
+<li><a href="https://dalfox.hahwul.com/ko/reference/cli/">전체 CLI 레퍼런스 보기</a></li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>설치</title>
+      <link>https://dalfox.hahwul.com/ko/getting-started/installation/</link>
+      <guid>https://dalfox.hahwul.com/ko/getting-started/installation/</guid>
+      <description>macOS, Linux, Windows, NixOS, Arch Linux에 Dalfox를 설치하거나 소스에서 직접 빌드합니다.</description>
+      <content:encoded><![CDATA[<p>플랫폼에 맞는 설치 방법을 고르세요. Dalfox는 별도로 관리할 런타임 없이 단일 실행 파일 하나로 배포됩니다.</p>
+<h2 id="homebrew-macos-linux">Homebrew (macOS &amp; Linux)</h2>
+<pre><code class="language-bash hljs">brew install dalfox
+</code></pre>
+<p>Homebrew formula는 최신 안정 버전을 따라갑니다. 출처: <a href="https://formulae.brew.sh/formula/dalfox">formulae.brew.sh/formula/dalfox</a>.</p>
+<h2 id="snap-ubuntu-linux">Snap (Ubuntu / Linux)</h2>
+<pre><code class="language-bash hljs">sudo snap install dalfox
+</code></pre>
+<h2 id="arch-linux-aur">Arch Linux (AUR)</h2>
+<p>AUR 헬퍼 사용(권장):</p>
+<pre><code class="language-bash hljs">yay -S dalfox
+# 또는
+paru -S dalfox
+</code></pre>
+<p><a href="https://aur.archlinux.org/packages/dalfox">AUR 패키지</a>에서 직접 빌드:</p>
+<pre><code class="language-bash hljs">git clone https://aur.archlinux.org/dalfox.git
+cd dalfox
+makepkg -si
+</code></pre>
+<h2 id="nix-nixos">Nix &amp; NixOS</h2>
+<pre><code class="language-bash hljs"># 설치 없이 한 번만 실행
+nix-shell -p dalfox
+
+# Nix flakes: GitHub에서 최신 버전 실행
+nix run github:hahwul/dalfox -- scan https://example.com
+
+# 프로필에 설치
+nix profile install github:hahwul/dalfox
+
+# Dalfox가 준비된 개발 셸로 진입
+nix develop github:hahwul/dalfox
+</code></pre>
+<p>Dalfox는 nixpkgs에 등록되어 있습니다. 최신 릴리스는 먼저 <code>unstable</code>에 올라옵니다.</p>
+<h2 id="cargo-cratesio">Cargo (crates.io)</h2>
+<pre><code class="language-bash hljs">cargo install dalfox
+</code></pre>
+<p>최신 Rust 툴체인이 필요합니다(stable이면 충분). <code>~/.cargo/bin/dalfox</code>에 빌드됩니다.</p>
+<h2 id="사전-빌드된-바이너리">사전 빌드된 바이너리</h2>
+<p><a href="https://github.com/hahwul/dalfox/releases">github.com/hahwul/dalfox/releases</a>에서 OS/아키텍처에 맞는 릴리스 아카이브를 내려받아 압축을 풀고, 바이너리를 <code>PATH</code>에 있는 경로(<code>/usr/local/bin</code>, <code>~/.local/bin</code> 등)에 두면 됩니다.</p>
+<p>릴리스마다 다음 Linux 빌드를 함께 제공합니다.</p>
+<ul>
+<li><code>linux-x86_64</code> (glibc)</li>
+<li><code>linux-x86_64-musl</code> (정적 링크, Alpine·Docker·CI에 권장)</li>
+<li><code>linux-aarch64</code> (glibc)</li>
+<li><code>linux-aarch64-musl</code> (정적 링크)</li>
+</ul>
+<h2 id="소스에서-빌드">소스에서 빌드</h2>
+<pre><code class="language-bash hljs">git clone https://github.com/hahwul/dalfox
+cd dalfox
+cargo build --release
+# 바이너리 경로: ./target/release/dalfox
+</code></pre>
+<p>Rust(2024 edition)가 필요합니다. 없다면 <a href="https://rustup.rs/">rustup</a>으로 설치하세요.</p>
+<h2 id="설치-확인">설치 확인</h2>
+<pre><code class="language-bash hljs">dalfox --version
+</code></pre>
+<p><code>dalfox 3.1.2</code> 같은 버전 정보와 함께 Dalfox 배너가 보이면 됩니다.</p>
+<h2 id="셸-자동완성-갱신-선택">셸 자동완성 갱신 (선택)</h2>
+<p>Dalfox는 <a href="https://github.com/clap-rs/clap">clap</a>을 쓰기 때문에 도움말을 언제든 볼 수 있습니다.</p>
+<pre><code class="language-bash hljs">dalfox --help
+dalfox scan --help
+</code></pre>
+<h2 id="다음-단계">다음 단계</h2>
+<p><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a>에서 첫 스캔을 실행해 보세요. 스캔 전에 기본값을 조정하고 싶다면 <a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a>으로 넘어가세요.</p>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>빠른 시작</title>
+      <link>https://dalfox.hahwul.com/ko/getting-started/quick-start/</link>
+      <guid>https://dalfox.hahwul.com/ko/getting-started/quick-start/</guid>
+      <description>5분 만에 첫 Dalfox 스캔을 실행합니다.</description>
+      <content:encoded><![CDATA[<p>이 페이지는 설치부터 검증된 탐지 결과까지 단계별로 안내합니다. 실제 출력을 확인할 수 있도록 의도적으로 취약하게 만든 데모 대상을 사용합니다.</p>
+<div class="alert alert-warning">
+  <span class="alert-icon" aria-hidden="true">
+    
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    
+  </span>
+  <div class="alert-content"><p>테스트 권한이 있는 대상만 스캔하세요. Dalfox는 실제 XSS 페이로드를 전송합니다.</p></div>
+</div>
+<h2 id="1-단일-url-스캔">1. 단일 URL 스캔</h2>
+<pre><code class="language-bash hljs">dalfox https://xss-game.appspot.com/level1/frame?query=test
+</code></pre>
+<p>첫 번째 인자가 대상입니다. Dalfox는 이것이 URL임을 자동으로 감지하여 <code>scan</code> 서브커맨드를 암묵적으로 실행합니다. 다음과 같은 내용이 표시됩니다.</p>
+<ul>
+<li>버전이 포함된 배너.</li>
+<li>Dalfox가 파라미터를 탐색하고 컨텍스트를 탐지하는 과정의 <code>INFO</code> 라인.</li>
+<li>각 탐지 결과에 대한 <code>[V]</code>(검증됨) 및 <code>[R]</code>(반사형) 라인과, 동작한 정확한 페이로드.</li>
+</ul>
+<h2 id="2-파일에서-스캔">2. 파일에서 스캔</h2>
+<p>크롤러가 수집한 URL 목록을 입력합니다.</p>
+<pre><code class="language-bash hljs"># urls.txt, one target per line
+dalfox scan urls.txt
+</code></pre>
+<p>각 URL은 동일한 파이프라인을 거칩니다. 결과는 발견되는 대로 스트리밍됩니다.</p>
+<h2 id="3-파이프라인에서-스캔">3. 파이프라인에서 스캔</h2>
+<p>파이프로 입력하면 Dalfox는 <code>stdin</code>에서 읽습니다.</p>
+<pre><code class="language-bash hljs">cat urls.txt | dalfox
+# or combined with your recon tools:
+waybackurls example.com | gf xss | dalfox
+</code></pre>
+<h2 id="4-json-출력-얻기">4. JSON 출력 얻기</h2>
+<p>Dalfox를 <code>jq</code>, 대시보드 또는 CI와 함께 사용합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/search?q=test -f json -o report.json
+</code></pre>
+<p>기계가 읽을 수 있는 형식(<code>json</code>, <code>jsonl</code>, <code>sarif</code>, <code>toml</code>)은 배너를 자동으로 억제하여 파일이 깔끔하게 유지됩니다.</p>
+<h2 id="5-인증이-필요한-스캔">5. 인증이 필요한 스캔</h2>
+<p>쿠키, 헤더 또는 커스텀 메서드를 전달합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://api.target.app/v1/users \
+  -X POST \
+  -H &quot;Authorization: Bearer eyJ...&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;name&quot;:&quot;test&quot;}' \
+  --cookies &quot;session=abc123&quot;
+</code></pre>
+<p>또는 프록시에서 캡처한 <strong>raw HTTP 요청</strong> 파일을 Dalfox에 지정할 수 있습니다.</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type raw-http request.txt
+</code></pre>
+<p>또는 전체 <strong>HAR</strong> 내보내기(브라우저 DevTools 또는 프록시에서 생성)를 재생할 수 있습니다. Dalfox는 그 안의 모든 요청을 스캔하며, 각 요청의 메서드, 헤더, 쿠키, 본문을 그대로 보존합니다.</p>
+<pre><code class="language-bash hljs">dalfox scan capture.har            # auto-detected
+dalfox scan --input-type har capture.har
+</code></pre>
+<h2 id="6-blind-xss-탐지">6. Blind XSS 탐지</h2>
+<p>아웃오브밴드 콜백(Interactsh, Burp Collaborator, XSS Hunter 등)을 사용합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app \
+  -b https://your-callback.interact.sh
+</code></pre>
+<p>Dalfox는 탐색된 모든 파라미터에 blind-XSS 페이로드를 전송합니다. 나중에 관리자 패널에서 페이로드가 실행되면, 콜백 서버가 이를 기록합니다.</p>
+<p>또는 Dalfox가 <a href="https://github.com/projectdiscovery/interactsh">interactsh</a>(OAST) 서버를 대신 관리하도록 할 수 있습니다. 세션을 등록하고, 콜백을 원본 페이로드와 연관 짓고, 자동으로 폴링합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --blind-oob                  # public interactsh mesh
+dalfox https://target.app --blind-oob=oast.fun         # pick servers
+</code></pre>
+<p>자체 호스팅 서버에는 <code>--blind-oob-secret</code>을 사용하고, 스캔 완료 후 Dalfox가 폴링을 계속하는 시간을 제어하려면 <code>--blind-oob-wait</code>을 사용합니다.</p>
+<h2 id="7-먼저-dry-run-실행">7. 먼저 Dry-run 실행</h2>
+<p><code>--dry-run</code>을 사용하여 Dalfox가 무엇을 스캔할지 미리 확인합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --dry-run
+</code></pre>
+<p>페이로드를 전혀 전송하지 않고 파라미터를 탐색하고 요청량을 추정합니다.</p>
+<h2 id="출력-읽기">출력 읽기</h2>
+<p>각 탐지 결과에는 태그가 붙습니다.</p>
+<table>
+<thead>
+<tr>
+<th>태그</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[V]</code></td>
+<td><strong>검증됨(Verified)</strong>: 페이로드가 실제 DOM 요소를 생성함(AST/CSS 셀렉터 매칭을 통해)</td>
+</tr>
+<tr>
+<td><code>[A]</code></td>
+<td><strong>AST 탐지(AST-detected)</strong>: 정적 JS 분석에서 source→sink 흐름을 발견함</td>
+</tr>
+<tr>
+<td><code>[R]</code></td>
+<td><strong>반사형(Reflected)</strong>: 페이로드가 응답에 나타났으나 DOM 증거는 없음</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> 및 <code>A</code> 탐지 결과는 실질적으로 조치가 가능합니다. <code>R</code> 탐지 결과는 살펴볼 가치가 있으나 이후 단계에서 추가로 필터링될 수 있습니다.</p>
+<h2 id="다음-단계">다음 단계</h2>
+<ul>
+<li>다양한 <a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캐닝 모드</a>를 알아보세요.</li>
+<li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터가 어떻게 탐색되는지</a> 이해하세요.</li>
+<li>까다로운 대상을 위해 <a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코더</a>를 조정하세요.</li>
+<li>즐겨 쓰는 플래그를 <a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정 파일</a>에 저장하세요.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>출력과 리포트</title>
+      <link>https://dalfox.hahwul.com/ko/guide/output/</link>
+      <guid>https://dalfox.hahwul.com/ko/guide/output/</guid>
+      <description>Plain, JSON, JSONL, Markdown, SARIF, TOML 형식과 탐지 결과를 파이프라인에 통합하는 방법을 다룹니다.</description>
+      <content:encoded><![CDATA[<p>모든 스캔은 동일한 내부 결과 구조를 생성합니다. Dalfox는 이를 여러분이 선택한 형식으로 렌더링합니다. 기계 판독 가능 형식은 배너를 자동으로 억제하므로 파일이 깔끔하게 유지됩니다.</p>
+<h2 id="형식-선택">형식 선택</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json -o report.json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>형식</th>
+<th>플래그</th>
+<th>기계 판독 가능</th>
+<th>적합한 용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plain</code></td>
+<td><code>-f plain</code> (기본값)</td>
+<td>아니오</td>
+<td>사람이 읽는 터미널 출력</td>
+</tr>
+<tr>
+<td><code>json</code></td>
+<td><code>-f json</code></td>
+<td>예</td>
+<td>단일 JSON 문서, 대시보드, <code>jq</code></td>
+</tr>
+<tr>
+<td><code>jsonl</code></td>
+<td><code>-f jsonl</code></td>
+<td>예</td>
+<td>스트리밍, 로그 파이프라인</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td><code>-f markdown</code></td>
+<td>아니오</td>
+<td>리포트, 풀 리퀘스트 코멘트</td>
+</tr>
+<tr>
+<td><code>sarif</code></td>
+<td><code>-f sarif</code></td>
+<td>예</td>
+<td>GitHub 코드 스캐닝, SARIF 소비자</td>
+</tr>
+<tr>
+<td><code>toml</code></td>
+<td><code>-f toml</code></td>
+<td>예</td>
+<td>사람 + 파이프라인</td>
+</tr>
+</tbody>
+</table>
+<h2 id="파일로-저장하기">파일로 저장하기</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f jsonl -o findings.jsonl
+</code></pre>
+<p><code>-o</code>가 없으면 출력은 <code>stdout</code>으로 전달됩니다.</p>
+<h2 id="결과-필드">결과 필드</h2>
+<p>모든 탐지 결과에는 다음이 포함됩니다.</p>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>예시</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td><code>V</code>, <code>A</code>, <code>R</code>, <code>I</code></td>
+<td>Verified / AST 탐지 / Reflected / Informational</td>
+</tr>
+<tr>
+<td><code>type_description</code></td>
+<td><code>&quot;Verified&quot;</code></td>
+<td>사람이 읽는 라벨</td>
+</tr>
+<tr>
+<td><code>inject_type</code></td>
+<td><code>&quot;inHTML&quot;</code></td>
+<td>컨텍스트 (<code>inHTML</code>, <code>inAttr</code>, <code>inJS</code>, …)</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td><code>&quot;GET&quot;</code></td>
+<td>HTTP 메서드</td>
+</tr>
+<tr>
+<td><code>param</code></td>
+<td><code>&quot;q&quot;</code></td>
+<td>공격에 사용된 파라미터</td>
+</tr>
+<tr>
+<td><code>payload</code></td>
+<td><code>&lt;svg/onload=alert(1)&gt;</code></td>
+<td>정확한 페이로드</td>
+</tr>
+<tr>
+<td><code>evidence</code></td>
+<td><code>&quot;payload reflected in response&quot;</code></td>
+<td>Dalfox가 그렇게 판단한 근거</td>
+</tr>
+<tr>
+<td><code>cwe</code></td>
+<td><code>&quot;CWE-79&quot;</code></td>
+<td>표준 CWE</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>&quot;High&quot;</code></td>
+<td>High / Medium / Low / Info</td>
+</tr>
+<tr>
+<td><code>message_str</code></td>
+<td><code>&quot;XSS found&quot;</code></td>
+<td>짧은 메시지</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> / <code>A</code> / <code>R</code>은 XSS 탐지 결과입니다. <code>I</code>(<strong>Informational</strong>)는 공격에 사용할 수 없는
+관찰 항목으로, 현재는 <strong>오래되었거나 알려진 취약점이 있는 JS 라이브러리</strong>
+(<code>inject_type: &quot;OutdatedComponent&quot;</code>, <code>CWE-1104</code>)만 해당하며, 페이로드나 파라미터가 없는 간결한
+<code>[INF]</code> 라인으로 렌더링됩니다. 이 항목은 <strong>명시적 활성화 방식</strong>입니다. Dalfox는 기본적으로
+검증된 XSS에 집중하므로, <code>--detect-outdated-libs</code>를 전달하지 않는 한 라이브러리 리포팅은 꺼져 있습니다
+(추가 요청은 <strong>0건</strong>이며, 프리플라이트 응답의 <code>&lt;script&gt;</code> 태그를 검사합니다). <code>--only-poc v,a,r</code>로 걸러낼 수 있습니다.</p>
+<p>선택적으로 전체 요청/응답을 포함할 수 있습니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json --include-all -o report.json
+# 또는 세부적으로:
+dalfox ... --include-request
+dalfox ... --include-response
+</code></pre>
+<h2 id="스캔-메타데이터-엔벨로프">스캔 메타데이터 엔벨로프</h2>
+<p>JSON, JSONL, SARIF, TOML, Markdown 출력은 이제 모두 동일한 스캔 수준 메타데이터 엔벨로프를 담습니다(이전에는 JSON/JSONL만 해당, <a href="https://github.com/hahwul/dalfox/issues/1093">#1093</a> 참조).</p>
+<ul>
+<li><code>dalfox_version</code></li>
+<li><code>targets</code> (입력 대상)</li>
+<li><code>scan_duration_ms</code></li>
+<li><code>total_requests</code></li>
+<li><code>findings_count</code></li>
+<li><code>target_summary[]</code> — 대상별 상태, 탐지 결과 수, error_code(건너뛴 경우), 그리고 탐지된 경우 WAF/우회 세부 정보</li>
+</ul>
+<p><strong>SARIF</strong>에서는 엔벨로프가 <code>runs[0].properties</code>와 <code>runs[0].tool.driver.properties</code> 아래에 중복되어 GitHub 코드 스캐닝과 기타 소비자가 컨텍스트를 유지하도록 합니다.</p>
+<p><strong>TOML</strong>에서는 최상위 <code>[meta]</code> 테이블로 나타납니다(탐지 결과는 <code>[[results]]</code> 아래).</p>
+<p><strong>Markdown</strong>에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(<code>## Scan Metadata</code> + <code>### Target Summary</code>)로 렌더링됩니다.</p>
+<p>Plain 텍스트 출력은 여전히 탐지 결과에만 집중합니다.</p>
+<h2 id="사일런스-모드">사일런스 모드</h2>
+<p>로그 없이 <code>stdout</code>에 <strong>탐지 결과만</strong> 내보냅니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --silence
+# 탐지 결과를 다른 도구로 파이프:
+cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity==&quot;High&quot;)'
+</code></pre>
+<p>셸 파이프라인과 cron 작업에 유용합니다.</p>
+<h2 id="긴-스캔-중-탐지-결과-스트리밍">긴 스캔 중 탐지 결과 스트리밍</h2>
+<p>기본적으로 plain 렌더러는 각 탐지 결과 블록(POC + Issue /
+Payload / Line)을 스캔 종료 시점의 <code>WRN XSS found N XSS</code> 요약 <strong>이후에</strong> 출력하므로,
+로그는 자연스러운 순서(시작 → 진행 → 요약 → 세부 정보)로 읽힙니다.</p>
+<p>대규모 대상에 대한 긴 스캔의 경우, <code>--stream-findings</code>로 스캔 도중 방출로 전환할 수 있습니다.
+각 탐지 결과는 검증되는 즉시 진행 표시줄 위에 출력됩니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --stream-findings
+</code></pre>
+<p><code>--stream-findings</code>는 <code>plain</code> 형식에만 영향을 미치며, 스캔 종료 경로가 스트리머로 깔끔하게
+반영할 수 없는 필터(<code>--output</code>, <code>--limit</code>, <code>--only-poc</code>)를 적용해야 할 때는
+자동으로 비활성화됩니다.</p>
+<h2 id="poc-스타일">POC 스타일</h2>
+<p>개념 증명(proof-of-concept)을 다양한 클라이언트 형태로 다시 렌더링합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --poc-type curl      # curl 명령
+dalfox https://target.app --poc-type httpie    # HTTPie
+dalfox https://target.app --poc-type http-request  # 원시 HTTP
+</code></pre>
+<p>기본값은 <code>plain</code>입니다. 티켓 등록에 적합합니다.</p>
+<h2 id="필터링">필터링</h2>
+<p>특정 결과 유형만 표시합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-poc v     # 검증된 것만
+dalfox https://target.app --only-poc v,a   # 검증 + AST
+</code></pre>
+<p>결과 수를 제한합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --limit 50
+dalfox https://target.app --limit 10 --limit-result-type v
+</code></pre>
+<h2 id="색상-및-tty-동작">색상 및 TTY 동작</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app --no-color
+# 또는
+NO_COLOR=1 dalfox https://target.app
+</code></pre>
+<p>Dalfox는 출력이 파일이나 비 TTY로 리다이렉트될 때도 색상을 자동으로 비활성화합니다.</p>
+<h2 id="toml">TOML</h2>
+<p>JSON과 동일한 데이터 형태이며(다른 형식과의 일관성을 위한 최상위 <code>[meta]</code> 엔벨로프 포함), TOML로 작성됩니다. 탐지 결과는 <code>[[results]]</code> 테이블 배열로 렌더링됩니다.</p>
+<pre><code class="language-toml hljs">[meta]
+dalfox_version = &quot;3.x&quot;
+targets = [&quot;https://target.app&quot;]
+scan_duration_ms = 1234
+total_requests = 87
+findings_count = 1
+target_summary = [{ target = &quot;https://target.app&quot;, status = &quot;findings&quot;, findings_count = 1 }]
+
+[[results]]
+type = &quot;V&quot;
+type_description = &quot;Verified&quot;
+inject_type = &quot;inHTML&quot;
+method = &quot;GET&quot;
+data = &quot;https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E&quot;
+param = &quot;q&quot;
+payload = &quot;&lt;svg/onload=alert(1)&gt;&quot;
+evidence = &quot;payload reflected and DOM element verified&quot;
+location = &quot;Query&quot;
+cwe = &quot;CWE-79&quot;
+severity = &quot;High&quot;
+message_id = 606
+message_str = &quot;XSS found&quot;
+</code></pre>
+<pre><code class="language-bash hljs">dalfox https://target.app -f toml -o report.toml
+</code></pre>
+<h2 id="sarif-github-코드-스캐닝">SARIF → GitHub 코드 스캐닝</h2>
+<pre><code class="language-bash hljs">dalfox scan urls.txt -f sarif -o dalfox.sarif
+</code></pre>
+<p>GitHub의 <code>upload-sarif</code> 액션을 통해 <code>dalfox.sarif</code>를 업로드하면, 탐지 결과가 리포지토리의 <strong>Security → Code scanning</strong> 탭에 나타납니다.</p>
+<h2 id="ci-예시">CI 예시</h2>
+<pre><code class="language-yaml hljs"># .github/workflows/xss-scan.yml
+- name: Dalfox scan
+  run: dalfox scan scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: dalfox.sarif
+</code></pre>
+<h2 id="종료-코드">종료 코드</h2>
+<p>Dalfox는 다음을 반환합니다.</p>
+<table>
+<thead>
+<tr>
+<th>코드</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>성공적으로 완료, 탐지 결과 없음</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>성공적으로 완료, 탐지 결과 하나 이상</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>입력/설정/런타임 오류</td>
+</tr>
+</tbody>
+</table>
+<p>어떤 탐지 결과라도 빌드를 실패시켜도 괜찮은 경우에만 <code>1</code>을 CI 게이트로 사용하세요. 대부분의 팀은 JSON 출력에 <code>jq</code>를 사용하여 <code>severity &gt;= High</code>를 기준으로 게이트를 겁니다.</p>
+<h2 id="다음">다음</h2>
+<ul>
+<li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a>를 통해 스캔을 자동화하세요.</li>
+<li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a>로 AI 드라이버가 처리하도록 맡기세요.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>파라미터와 탐색</title>
+      <link>https://dalfox.hahwul.com/ko/guide/parameters/</link>
+      <guid>https://dalfox.hahwul.com/ko/guide/parameters/</guid>
+      <description>Dalfox가 중요한 입력값을 찾아내는 방식과 탐색 단계를 제어하는 방법을 설명합니다.</description>
+      <content:encoded><![CDATA[<p>XSS를 찾는 일은 올바른 파라미터를 찾는 데서 시작합니다. Dalfox의 탐색 엔진은 여러 단계로 이루어진 파이프라인입니다. 전체를 이해할 필요는 거의 없지만, 각 구성 요소를 알아두면 스캔을 튜닝하고 싶을 때 도움이 됩니다.</p>
+<h2 id="파이프라인-개요">파이프라인 개요</h2>
+<ol>
+<li><strong>Discovery(탐색):</strong> URL, 본문, 헤더, 쿠키, 경로, 프래그먼트, 폼 필드에서 파라미터를 추출합니다.</li>
+<li><strong>Mining(마이닝):</strong> DOM 분석(JS에 내장된 파라미터 이름), 사전 워드리스트, 프레임워크별 패턴으로 확장합니다.</li>
+<li><strong>Active probing(능동 프로빙):</strong> 각 파라미터마다 프로브를 발사하여 어떤 특수 문자가 살아남는지 파악합니다.</li>
+<li><strong>Fast probe(빠른 프로브):</strong> 탐색된 파라미터마다 샌드위치 마커 요청을 한 번씩 보냅니다. 부분 반사도 전체 반사도 나타나지 않으면 해당 파라미터에 대한 무거운 페이로드 루프를 건너뜁니다.</li>
+<li><strong>Payload generation(페이로드 생성):</strong> 컨텍스트를 인식하는 페이로드(HTML, JS, 속성, CSS)를 생성합니다.</li>
+<li><strong>Reflection check(반사 확인):</strong> 페이로드를 보낸 뒤 그것이 돌아오는지 확인합니다.</li>
+<li><strong>DOM verification(DOM 검증):</strong> 응답을 파싱하여 페이로드가 실제 요소를 형성하는지 확인합니다. AST 기반 DOM-XSS 분석은 빠른 프로브 중에 캡처한 응답을 사용해 병렬로 실행됩니다.</li>
+</ol>
+<h2 id="특정-파라미터-지정하기">특정 파라미터 지정하기</h2>
+<p>테스트할 파라미터를 Dalfox에 정확히 지정합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api \
+  -p q \
+  -p id:query \
+  -p auth:header \
+  -p token:cookie
+</code></pre>
+<p>위치(Location): <code>query</code>, <code>body</code>, <code>json</code>, <code>multipart</code>, <code>cookie</code>, <code>header</code>. 주입 지점이 쿼리 문자열이 아닌 경우 <code>name:location</code> 형식을 사용하는 것이 좋습니다.</p>
+<p>위치 힌트가 없는 경우(<code>-p q</code> 만 지정):</p>
+<ol>
+<li>탐색/마이닝이 이미 해당 이름의 파라미터를 찾았다면, 그대로 유지합니다(필터).</li>
+<li>그렇지 않으면 Dalfox가 이를 <strong>합성(synthesize)</strong> 합니다. 위치는 요청에서 추론하며(URL 쿼리 → 본문 → 쿠키 → 헤더), 기본값은 <code>query</code> 입니다.</li>
+</ol>
+<p>즉, <code>-p q --skip-discovery --skip-mining</code> 같은 레시피도 아무것도 스캔하지 않고 조용히 지나가는 대신 여전히 <code>q</code> 를 테스트합니다.</p>
+<h2 id="워드리스트로-마이닝하기">워드리스트로 마이닝하기</h2>
+<p>URL에 파라미터가 없더라도 Dalfox는 흔히 쓰이는 이름을 시도해 볼 수 있습니다:</p>
+<pre><code class="language-bash hljs"># 로컬 워드리스트
+dalfox https://target.app -W ./params.txt
+
+# 원격 워드리스트(첫 조회 이후 캐시됨)
+dalfox https://target.app --remote-wordlists burp,assetnote
+</code></pre>
+<h3 id="자동-축소auto-collapse">자동 축소(Auto-collapse)</h3>
+<p>반사가 매우 심한 사이트(예: 모든 것을 그대로 되돌려주는 검색 페이지)는 워드리스트 마이닝을 폭발적으로 늘릴 수 있습니다. Dalfox는 두 가지 방법으로 이를 방어합니다:</p>
+<ul>
+<li><strong>Sentinel 사전 프로브(pre-probe):</strong> 워드리스트를 순회하기 전에, 실제 필드와 절대 충돌하지 않을 무작위 파라미터 이름 세 개를 테스트합니다. 세 개가 모두 반사되면 그 페이지는 거울(mirror)이므로 마이닝을 건너뛰고 단일 합성 <code>any</code> Query 파라미터로 대체합니다. 비용 상한: 워드리스트 크기와 무관하게 3개 요청. 사전 프로브가 이득이 될 만큼 워드리스트가 충분히 클 때(&gt;15개 항목)만 실행됩니다.</li>
+<li><strong>EWMA 축소:</strong> 순회하는 동안 Dalfox는 이동 반사 비율(rolling reflection ratio)을 관찰합니다. 최소 15회 시도 이후에도 그 값이 ≥85%로 유지되면 마이닝을 중단하고, 이미 수집된 Query 파라미터들을 동일한 <code>any</code> 플레이스홀더로 접어 넣습니다.</li>
+</ul>
+<p>두 경로 모두 동일한 다운스트림 상태를 만듭니다. 어느 트리거가 발동했든 5~7단계에서는 하나의 Query 주입 지점만 보게 됩니다.</p>
+<h2 id="노이즈-정리하기">노이즈 정리하기</h2>
+<p>특정 파라미터 무시:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --ignore-param csrf --ignore-param __RequestVerificationToken
+</code></pre>
+<p>URL 패턴으로 범위 지정:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt \
+  --include-url '^https://api\.target\.app/' \
+  --exclude-url '/static/|/health'
+</code></pre>
+<p>범위 밖(out-of-scope) 도메인 목록:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt --out-of-scope-file scope-block.txt
+# 또는 와일드카드를 사용해 인라인으로
+dalfox scan urls.txt --out-of-scope '*.google.com,*.cdn.cloudflare.net'
+</code></pre>
+<h2 id="탐색만-하고-공격하지-않기">탐색만 하고 공격하지 않기</h2>
+<p>Dry-run 모드는 페이로드를 보내지 않고 공격 계획을 탐색하여 출력합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --dry-run
+</code></pre>
+<p>Discovery-only 모드는 이와 비슷하지만 프로빙 단계까지 완료합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-discovery
+</code></pre>
+<p>두 모드 모두 범위 지정과 CI 사전 점검에 도움이 됩니다.</p>
+<h2 id="단계-건너뛰기">단계 건너뛰기</h2>
+<p>더 빠르게 진행하거나 취약한 대상을 우회하려면 파이프라인의 일부를 건너뛰세요:</p>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>건너뛰는 대상</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-discovery</code></td>
+<td>탐색 단계 전체</td>
+</tr>
+<tr>
+<td><code>--skip-mining</code></td>
+<td>모든 워드리스트/DOM 마이닝</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dict</code></td>
+<td>사전 마이닝만</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dom</code></td>
+<td>DOM 마이닝만</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-header</code></td>
+<td>헤더 반사 확인</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-cookie</code></td>
+<td>쿠키 반사 확인</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-path</code></td>
+<td>경로 반사 확인</td>
+</tr>
+</tbody>
+</table>
+<h2 id="주입-마커injection-markers">주입 마커(Injection markers)</h2>
+<p>일부 엔드포인트는 페이로드가 특정 위치(예: JWT 내부)에 있어야 합니다. <code>--inject-marker</code> 를 사용하세요:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api \
+  --inject-marker FUZZ \
+  -d '{&quot;filter&quot;:&quot;FUZZ&quot;}'
+</code></pre>
+<p>Dalfox는 모든 <code>FUZZ</code> 를 각 페이로드로 치환하여 요청을 보냅니다.</p>
+<h2 id="자동-사전-인코딩auto-pre-encoding">자동 사전 인코딩(Auto pre-encoding)</h2>
+<p>일부 엔드포인트는 페이로드를 원시 텍스트로 받아들이지 않습니다. 이들은 어떤 구조적 인코딩(base64, JSON, JWT 등)으로 감싸진 형태를 기대합니다. Dalfox는 탐색 중 각 파라미터의 기존 값을 검사하고, 구조를 인식하면 페이로드가 동일한 래핑을 통해 왕복(round-trip)하도록 투명한 인코딩 파이프라인을 구성합니다. 설정할 것은 없습니다. 디버그 출력에서 <code>pre_encoding</code> 또는 <code>pre_encoding_pipeline</code> 을 찾아보세요.</p>
+<p>단일 단계 인코딩은 기존 파라미터 값에서 탐지됩니다:</p>
+<table>
+<thead>
+<tr>
+<th>탐지된 형태</th>
+<th>페이로드 인코딩 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base64</code></td>
+<td><code>BASE64(payload)</code></td>
+</tr>
+<tr>
+<td><code>2base64</code></td>
+<td><code>BASE64(BASE64(payload))</code></td>
+</tr>
+<tr>
+<td><code>2url</code> / <code>3url</code></td>
+<td>2회 또는 3회 URL 인코딩</td>
+</tr>
+</tbody>
+</table>
+<p>조합 가능한 파이프라인은 값의 구조를 변환 체인으로 바꿉니다. 기존 값이 구조화된 래퍼로 디코딩되면, Dalfox는 모든 리프(leaf) 문자열 필드를 각각 별도의 가상 하위 파라미터로 열거합니다:</p>
+<table>
+<thead>
+<tr>
+<th>래퍼 형태</th>
+<th>파이프라인</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Base64로 감싼 JSON <code>?qs=eyJ…</code></td>
+<td><code>JsonField(/leaf) → Base64</code></td>
+</tr>
+<tr>
+<td>Base64URL로 감싼 JSON</td>
+<td><code>JsonField(/leaf) → Base64Url</code></td>
+</tr>
+<tr>
+<td>순수 URL 인코딩된 JSON <code>?blob=%7B…%7D</code></td>
+<td><code>JsonField(/leaf)</code></td>
+</tr>
+<tr>
+<td>JWT/JWS <code>?token=h.p.s</code></td>
+<td><code>JsonField(/leaf) → Base64Url → JwtAssemble</code></td>
+</tr>
+</tbody>
+</table>
+<p>각 리프는 대괄호 스타일의 표시 이름을 사용해 별도의 Param으로 등록됩니다. <code>qs</code> 의 <code>move_url</code> 필드에 있는 페이로드는 <code>qs[move_url]</code> 로 표시되고, 배열 요소는 <code>qs[items][0]</code> 로 나타납니다. 와이어 수준의 치환은 여전히 원래 부모 파라미터(<code>qs</code>)를 대상으로 하므로, 요청은 서버에 정상적으로 보입니다.</p>
+<p>JWT의 경우 원래 헤더와 서명 세그먼트는 그대로(verbatim) 보존됩니다. 서명은 수정된 페이로드와 일치하지 않으므로, 이는 토큰을 검증하지 않는 엔드포인트에서만 발동합니다. 올바르게 서명된 JWT는 탐지 결과를 반환하지 않습니다. 이는 놓친 것이 아니라 의도된 동작입니다.</p>
+<p>대상이 Dalfox가 자동 탐지하지 못하는 래핑을 사용한다면, <code>--inject-marker</code> 로 주입 지점을 강제로 지정할 수 있습니다(아래 참조).</p>
+<h2 id="반사-프로브-형태">반사 프로브 형태</h2>
+<p>모든 탐색 및 마이닝 프로브는 단일 토큰 대신 샌드위치 마커(<code>OPEN + INNER + CLOSE</code>)를 보냅니다. 그런 다음 응답은 네 가지 경우 중 하나로 분류됩니다:</p>
+<table>
+<thead>
+<tr>
+<th>반사</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Full</strong></td>
+<td>완전한 <code>OPEN+INNER+CLOSE</code> 가 살아남음. 표준 반사.</td>
+</tr>
+<tr>
+<td><strong>PrefixOnly</strong></td>
+<td><code>OPEN+INNER</code> 는 존재하고 <code>CLOSE</code> 가 제거됨. 접미사 제거 필터를 시사.</td>
+</tr>
+<tr>
+<td><strong>SuffixOnly</strong></td>
+<td><code>INNER+CLOSE</code> 는 존재하고 <code>OPEN</code> 이 제거됨. 접두사 제거 필터를 시사.</td>
+</tr>
+<tr>
+<td><strong>InnerOnly</strong></td>
+<td><code>INNER</code> 만 살아남음. 정규식 추출 또는 양쪽 래핑 모두 제거를 시사.</td>
+</tr>
+</tbody>
+</table>
+<p>네 가지 모두 &quot;반사됨&quot;으로 취급됩니다. 탐색은 해당 파라미터를 기록하고 스캔이 진행됩니다. 단순한 단일 토큰 확인이었다면 <em>Full</em> 을 제외한 모든 경우를 놓쳐, 접두사/접미사를 제거하는 엔드포인트를 탐지하지 못했을 것입니다. 마커 토큰은 스캔마다 고유합니다(<code>dlx</code>/<code>dlxmid</code>/<code>xld</code> 접두사에 스캔당 8자리 16진수가 붙음). 따라서 HTML에서 우연히 충돌할 가능성은 무시할 만합니다.</p>
+<h2 id="탐지-결과가-검증됨이-되는-기준">탐지 결과가 &quot;검증됨&quot;이 되는 기준</h2>
+<table>
+<thead>
+<tr>
+<th>결과</th>
+<th>확인 방식</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>V</strong> (Verified, 검증됨)</td>
+<td>Dalfox가 응답 DOM을 파싱하여 실행에 대한 직접적인 증거를 찾습니다. <code>evidence</code> 필드는 이를 입증한 경로를 태깅합니다: DOM 마커(CSS 셀렉터 적중), 실행 가능한 URL(위험한 속성 내의 <code>javascript:</code>/<code>data:</code>), HTML 구조적 증거(값이 싱크 호출인 <code>on*</code> 핸들러를 가진 주입된 요소), 또는 JS 컨텍스트 AST(파싱된 AST가 페이로드의 바이트 범위에 포함됨을 보여주는 <code>&lt;script&gt;</code> 내부의 싱크 호출).</td>
+</tr>
+<tr>
+<td><strong>A</strong> (AST-detected, AST 탐지)</td>
+<td>정적 JavaScript 분석이 사용자 제어 소스를 위험한 싱크로 추적함(예: <code>innerHTML = location.hash</code>).</td>
+</tr>
+<tr>
+<td><strong>R</strong> (Reflected, 반사됨)</td>
+<td>페이로드 텍스트가 응답 본문에 나타났지만 아직 DOM 증거는 없음. 여전히 수동으로 조사할 가치가 있음.</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> 와 <code>A</code> 는 신호입니다. <code>R</code> 은 힌트입니다.</p>
+<h2 id="안전한-컨텍스트">안전한 컨텍스트</h2>
+<p>Dalfox는 <code>&lt;textarea&gt;</code>, <code>&lt;title&gt;</code>, <code>&lt;noscript&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;xmp&gt;</code>, <code>&lt;plaintext&gt;</code> 내부의 반사를 무시합니다. 그곳의 콘텐츠는 실행되지 않으므로, 오탐(false positive)만 발생시킬 뿐입니다.</p>
+<h2 id="다음-단계">다음 단계</h2>
+<ul>
+<li>페이로드가 어떻게 구성되는지는 <a href="https://dalfox.hahwul.com/ko/guide/payloads/">Payloads &amp; Encoding</a>에서 확인하세요.</li>
+<li>WAF를 상대하고 있나요? <a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF Bypass</a>로 이동하세요.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>페이로드와 인코딩</title>
+      <link>https://dalfox.hahwul.com/ko/guide/payloads/</link>
+      <guid>https://dalfox.hahwul.com/ko/guide/payloads/</guid>
+      <description>내장 페이로드 계열, 인코더, 커스텀 페이로드, 그리고 원격 워드리스트를 다룹니다.</description>
+      <content:encoded><![CDATA[<p>Dalfox는 컨텍스트를 인식하는, 엄선된 페이로드 라이브러리를 함께 제공합니다. 대부분의 경우 이에 대해 신경 쓸 필요가 없습니다. 엔진이 각 주입 컨텍스트에 맞는 페이로드를 선택합니다. 이 페이지에서는 내장된 내용과 이를 확장하는 방법을 다룹니다.</p>
+<h2 id="페이로드-계열">페이로드 계열</h2>
+<p>Dalfox는 여러 계열로부터 페이로드를 구성합니다:</p>
+<table>
+<thead>
+<tr>
+<th>계열</th>
+<th>예시</th>
+<th>사용 시점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTML tag</strong></td>
+<td><code>&lt;svg onload=alert(1)&gt;</code></td>
+<td>HTML 컨텍스트</td>
+</tr>
+<tr>
+<td><strong>Attribute breakout</strong></td>
+<td><code>&#39;&gt;&lt;img src=x onerror=alert(1)&gt;</code></td>
+<td>속성 내부</td>
+</tr>
+<tr>
+<td><strong>JavaScript</strong></td>
+<td><code>&quot;;alert(1);//</code></td>
+<td><code>&lt;script&gt;</code> 블록 내부</td>
+</tr>
+<tr>
+<td><strong>Event handler</strong></td>
+<td><code>onmouseover=alert(1)</code></td>
+<td>기존 속성 값</td>
+</tr>
+<tr>
+<td><strong>DOM clobbering</strong></td>
+<td><code>&lt;img id=x&gt;</code></td>
+<td>레거시 DOM 조회</td>
+</tr>
+<tr>
+<td><strong>URL protocol</strong></td>
+<td><code>javascript:alert(1)</code></td>
+<td><code>href</code>/<code>src</code> 계열 속성</td>
+</tr>
+<tr>
+<td><strong>CSP bypass</strong></td>
+<td><code>strict-dynamic</code> 스크립트 가젯, nonce 재사용, 허용된 호스트의 JSONP</td>
+<td>응답이 우회 가능한 CSP를 지닐 때</td>
+</tr>
+<tr>
+<td><strong>mXSS</strong></td>
+<td><code>&lt;foreignobject&gt;</code>/DOMPurify 우회</td>
+<td>새니타이저가 변형한 DOM</td>
+</tr>
+<tr>
+<td><strong>Blind</strong></td>
+<td><code>&lt;script src=//callback/&gt;&lt;/script&gt;</code></td>
+<td><code>--blind</code> 가 설정된 경우</td>
+</tr>
+</tbody>
+</table>
+<p>각 페이로드 템플릿은 마커(<code>class={CLASS}</code> 또는 <code>id={ID}</code>)를 지니고 있어, 검증 단계에서 DOM 내에서 자신의 요소를 확실하게 식별할 수 있습니다.</p>
+<h2 id="컨텍스트-인식-선택">컨텍스트 인식 선택</h2>
+<p>탐색 중 Dalfox는 각 파라미터를 <strong>주입 컨텍스트</strong>, 즉 반사된 값이 도달하는 위치에 따라 분류합니다:</p>
+<ul>
+<li>HTML 본문 → HTML/속성 브레이크아웃 페이로드</li>
+<li>따옴표로 감싼 속성 내부 → 속성 브레이크아웃 페이로드</li>
+<li><code>&lt;script&gt;</code> 내부 → JS 브레이크아웃 페이로드</li>
+<li><code>&lt;style&gt;</code> 내부 → CSS 페이로드</li>
+<li>알 수 없음 → HTML + 속성의 폴백 조합</li>
+</ul>
+<p>이는 적중률을 극대화하면서도 요청 수를 합리적으로 유지합니다.</p>
+<h2 id="csp-인식-우회-페이로드">CSP 인식 우회 페이로드</h2>
+<p>프리플라이트(preflight) 단계가 <code>Content-Security-Policy</code>(또는 <code>…-Report-Only</code>) 헤더 — 혹은 <code>&lt;meta http-equiv&gt;</code> 등가물 — 를 발견하면, Dalfox는 이를 파싱하여 스크립트 실행 페이로드를 해당 정책의 실제 약점에 맞게 조정합니다. 페이로드는 진정으로 악용 가능한 지시어(directive)에 대해서만 생성되므로, CSP가 없는(또는 견고하게 설정된) 대상은 추가 요청을 보지 않습니다.</p>
+<table>
+<thead>
+<tr>
+<th>CSP 형태</th>
+<th>Dalfox가 방출하는 것</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>unsafe-inline</code> / <code>unsafe-eval</code></td>
+<td>직접 인라인 / <code>eval</code> 계열 페이로드</td>
+</tr>
+<tr>
+<td><code>base-uri</code> / <code>object-src</code> 누락</td>
+<td><code>&lt;base&gt;</code> 하이재킹 / <code>&lt;object&gt;</code>/<code>&lt;embed&gt;</code> 주입</td>
+</tr>
+<tr>
+<td><code>script-src</code> 내의 <code>data:</code> / <code>blob:</code></td>
+<td><code>&lt;script src=data:…&gt;</code> / <code>Blob</code> URL 로더</td>
+</tr>
+<tr>
+<td>화이트리스트에 등록된 CDN 호스트</td>
+<td>해당 호스트에 맞는 JSONP / 프레임워크 <strong>스크립트 가젯</strong></td>
+</tr>
+<tr>
+<td><code>strict-dynamic</code></td>
+<td>DOM 스크립트 가젯(RequireJS <code>data-main</code>, <code>document.write</code> 자가 전파, AngularJS 부트스트랩)과, nonce가 캡처된 경우 <strong>nonce 재사용</strong></td>
+</tr>
+</tbody>
+</table>
+<p>이전 릴리스에서는 파싱만 하고 결코 대응하지 않았던 두 가지 현대적 형태가 이제 활성화되었습니다:</p>
+<ul>
+<li><strong><code>strict-dynamic</code>.</strong> <code>strict-dynamic</code> 하에서는 브라우저가 호스트 허용 목록을 무시하므로, 평범한 <code>&lt;script src=allowed-host&gt;</code> 는 더 이상 로드되지 않습니다. Dalfox는 DOM 스크립트 가젯 — 이미 신뢰된 스크립트가 공격자 스크립트를 생성하게 만드는 페이로드 — 으로 전환하고, 정책이 nonce를 고정(pin)하면 <code>&lt;script nonce=…&gt;</code> 재사용 페이로드를 방출합니다(nonce가 정적이거나 예측 가능하거나 반사될 때 효과적).</li>
+<li><strong>Nonce / 해시 고정(pinning).</strong> <code>'nonce-…'</code> 및 <code>'sha256-…'</code> 토큰이 파싱되어 정책 분류에 사용됩니다. <code>strict-dynamic</code> 도 없고 가젯 호스트도 없는 순수 무작위 nonce/해시 정책은 <em>견고함(hardened)</em> 으로 취급됩니다. Dalfox는 그런 정책에 요청을 낭비하지 않습니다.</li>
+</ul>
+<p>가젯 세트는 하드코딩된 목록이 아니라 내장되고 확장 가능한 데이터베이스(JSONBee / H5SC / Google CSP-Evaluator 형태)에 담겨 있으므로, 분석기를 건드리지 않고도 커버리지가 늘어납니다.</p>
+<h2 id="trusted-types-인식">Trusted Types 인식</h2>
+<p><a href="https://web.dev/articles/trusted-types">Trusted Types</a>는 견고하게 설계된 앱에서 DOM-XSS를 완화하는 주된 수단입니다. Dalfox의 AST DOM-XSS 분석기는 이를 이해합니다:</p>
+<ul>
+<li><strong>엄격한(strict)</strong> 정책 콜백 — <code>createPolicy('p', {createHTML: s =&gt; DOMPurify.sanitize(s)})</code> — 은 다른 새니타이저와 마찬가지로 오염(taint)을 제거하므로, <code>p.createHTML(x)</code> 를 거쳐 전달된 값은 더 이상 보고되지 않습니다.</li>
+<li><strong>관대한(permissive)</strong> 기본 정책 — 전형적으로 우회 가능한 아무 동작도 하지 않는 <code>createPolicy('default', {createHTML: x =&gt; x})</code> — 은 보호 수단으로 <em>오인되지 않습니다</em>. 탐지 결과는 유지되고 플래그가 지정됩니다.</li>
+<li>응답 CSP가 <code>require-trusted-types-for 'script'</code> 를 강제하고 <strong>그리고</strong> 페이지가 엄격한 <code>'default'</code> 정책을 정의하면, 브라우저가 모든 TrustedHTML 싱크를 자동으로 새니타이즈합니다. 이제 Dalfox는 이렇게 오탐이 된 탐지 결과를 억제합니다.</li>
+</ul>
+<p>이 분류기는 의도적으로 보수적입니다. 안전함을 입증할 수 없는 것은 무엇이든 관대한(permissive) 상태로 남으므로, 탐지 결과가 유지됩니다. 억제는 강제(enforcement) 없이는 결코 발동하지 않으므로, 기본 정책을 정의했지만 <code>require-trusted-types-for</code> 를 빠뜨린 페이지는 여전히 보고됩니다. 즉, 미탐(false negative)이 도입되지 않습니다.</p>
+<h2 id="인코더">인코더</h2>
+<p>인코더는 <em>동일한 페이로드</em> 를 여러 형태로 변환하여, WAF와 서버 측 필터가 모두 같은 바이트를 보지 않도록 합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -e url,html,base64
+</code></pre>
+<p>사용 가능한 인코더:</p>
+<table>
+<thead>
+<tr>
+<th>인코더</th>
+<th><code>&lt;</code> 를 변환하는 형태</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>none</code></td>
+<td><code>&lt;</code> (원시)</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td><code>%3C</code></td>
+</tr>
+<tr>
+<td><code>2url</code></td>
+<td><code>%253C</code> (2중)</td>
+</tr>
+<tr>
+<td><code>3url</code></td>
+<td><code>%25253C</code> (3중)</td>
+</tr>
+<tr>
+<td><code>4url</code></td>
+<td>4중 URL</td>
+</tr>
+<tr>
+<td><code>html</code></td>
+<td><code>&amp;#x003c;</code></td>
+</tr>
+<tr>
+<td><code>htmlpad</code></td>
+<td>0으로 패딩된 HTML 엔티티</td>
+</tr>
+<tr>
+<td><code>base64</code></td>
+<td>페이로드의 base64</td>
+</tr>
+<tr>
+<td><code>unicode</code></td>
+<td>전각(fullwidth) 매핑</td>
+</tr>
+<tr>
+<td><code>zwsp</code></td>
+<td>폭 없는 공백(zero-width space) 삽입</td>
+</tr>
+</tbody>
+</table>
+<p>기본값: <code>url,html</code>. 목록에 <code>none</code> 을 추가하면, Dalfox는 원시 페이로드만 보냅니다.</p>
+<h2 id="커스텀-페이로드">커스텀 페이로드</h2>
+<p>한 줄에 하나씩, 직접 만든 목록을 제공합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --custom-payload mypayloads.txt
+</code></pre>
+<p>내장 라이브러리를 완전히 교체합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --custom-payload mypayloads.txt --only-custom-payload
+</code></pre>
+<h2 id="원격-페이로드-소스">원격 페이로드 소스</h2>
+<p>커뮤니티 워드리스트를 필요할 때 가져옵니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --remote-payloads portswigger,payloadbox
+</code></pre>
+<p>지원되는 소스: <code>portswigger</code>, <code>payloadbox</code>. 실행마다 한 번 가져오며, <code>--proxy</code> 와 <code>--timeout</code> 을 준수합니다.</p>
+<h2 id="페이로드-확인하기">페이로드 확인하기</h2>
+<p>스캔을 실행하지 않고 페이로드 계열을 출력합니다:</p>
+<pre><code class="language-bash hljs">dalfox payload event-handlers  # onerror, onmouseover, ...
+dalfox payload useful-tags     # svg, img, script, ...
+dalfox payload uri-scheme      # javascript:, data:
+dalfox payload portswigger     # 원격 목록을 가져와 출력
+</code></pre>
+<h2 id="alert-커스터마이징">&quot;alert&quot; 커스터마이징</h2>
+<p>전형적인 <code>alert(1)</code> 은 요란할 수 있습니다. 이를 교체하면 곳곳에서 대화 상자를 띄우지 않고도 영향(impact)을 입증할 수 있습니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app \
+  --custom-alert-value &quot;document.domain&quot; \
+  --custom-alert-type str
+</code></pre>
+<ul>
+<li><code>--custom-alert-value</code>: <code>alert</code>/<code>prompt</code>/<code>confirm</code> 에 전달되는 값(기본값 <code>1</code>).</li>
+<li><code>--custom-alert-type</code>: <code>none</code> 은 원래 함수를 유지하고, <code>str</code> 은 값을 따옴표로 감쌉니다.</li>
+</ul>
+<h2 id="blind-xss">Blind XSS</h2>
+<p>Blind XSS는 나중에, 여러분이 볼 수 없는 컨텍스트(관리자 패널, 지원 담당자의 대시보드)에서 발동합니다. 대역 외(out-of-band) 리스너가 필요합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -b https://your-callback.interact.sh
+</code></pre>
+<p>커스텀 blind 템플릿:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app \
+  -b https://your-callback.example \
+  --custom-blind-xss-payload blind-templates.txt
+# 각 줄에는 {} 가 포함될 수 있음(콜백 URL로 치환됨)
+</code></pre>
+<h2 id="http-파라미터-오염hpp">HTTP 파라미터 오염(HPP)</h2>
+<p>일부 필터는 파라미터의 <em>첫 번째</em> 등장만 검사합니다. Dalfox는 파라미터를 중복시켜 페이로드를 두 번째 슬롯에 밀어 넣을 수 있습니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --hpp
+</code></pre>
+<h2 id="deep-scan">Deep scan</h2>
+<p>기본적으로 Dalfox는 검증된 페이로드를 찾으면 해당 파라미터에 대한 테스트를 중단합니다. <code>--deep-scan</code> 은 계속 진행합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --deep-scan
+</code></pre>
+<p>연구에는 유용하지만, 프로덕션 파이프라인에서는 더 느립니다.</p>
+<h2 id="페이로드-단계-건너뛰기">페이로드 단계 건너뛰기</h2>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>효과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-xss-scanning</code></td>
+<td>탐색과 프로빙만 수행; 페이로드 주입 없음</td>
+</tr>
+<tr>
+<td><code>--skip-ast-analysis</code></td>
+<td>AST 기반 DOM-XSS 탐지 건너뛰기</td>
+</tr>
+</tbody>
+</table>
+<h2 id="다음-단계">다음 단계</h2>
+<ul>
+<li>이를 <a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF Bypass</a>와 결합하여 필터를 우회하도록 페이로드를 다듬으세요.</li>
+<li>탐지 결과를 내보내려면 <a href="https://dalfox.hahwul.com/ko/guide/output/">Output &amp; Reports</a>를 참조하세요.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>스캔 모드</title>
+      <link>https://dalfox.hahwul.com/ko/guide/scanning-modes/</link>
+      <guid>https://dalfox.hahwul.com/ko/guide/scanning-modes/</guid>
+      <description>단일 URL, 파일 배치, 파이프라인, 저장형 XSS, 서버, MCP까지. 워크플로에 맞는 모드를 선택하세요.</description>
+      <content:encoded><![CDATA[<p>Dalfox는 여러 형태의 대상을 받아들입니다. 모든 모드는 동일한 탐색, 페이로드, 검증 엔진을 공유하며, URL을 입력하는 방식과 결과가 어디로 가는지만 다릅니다.</p>
+<p>내부적으로는 네 개의 서브커맨드가 있습니다: <code>scan</code>(스캐너), <code>server</code>(장시간 유지되는 REST API), <code>payload</code>(페이로드 유틸리티), <code>mcp</code>(Model Context Protocol stdio 서버). 아래에서 &quot;URL / File / Pipe / Raw HTTP / HAR / SXSS&quot;로 표시된 것은 모두 <code>scan</code> 서브커맨드가 <code>--input-type</code>을 통해 처리하는 <em>입력 형태</em>이며, 독립적인 서브커맨드가 아닙니다.</p>
+<blockquote>
+<p>팬아웃 입력 형태(<code>file</code>, <code>pipe</code>, <code>raw-http</code>, <code>har</code>)는 <code>scan</code> 전용입니다. 각각 하나의 입력을 여러 대상으로 확장합니다. <code>server</code>와 <code>mcp</code> 인터페이스는 호출당 단일 대상을 다룹니다. 하나의 URL에 명시적인 메서드/헤더/쿠키/본문(HAR 항목 하나가 담는 것과 동일한 충실도)을 더해서 받으므로, 캡처한 세션을 재생하려면 요청마다 한 번씩 호출하면 됩니다.</p>
+</blockquote>
+<h2 id="auto-기본값">Auto (기본값)</h2>
+<p>Dalfox에 URL만 넘겨주세요. 나머지는 알아서 판단합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/search?q=test
+</code></pre>
+<p>내부적으로 Dalfox는 <code>--input-type auto</code>와 함께 <code>scan</code> 서브커맨드를 사용합니다. 인자가 URL인지, 파일 경로인지, <code>stdin</code>의 스트림인지 자동으로 감지합니다.</p>
+<h2 id="url-모드">URL 모드</h2>
+<p>URL 파싱을 강제합니다(거의 필요하지 않지만 스크립트에서 유용합니다):</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type url https://target.app
+</code></pre>
+<h2 id="file-모드">File 모드</h2>
+<p>URL 목록을 한 줄에 하나씩 스캔합니다:</p>
+<pre><code class="language-bash hljs"># urls.txt
+# https://target.app/search?q=1
+# https://target.app/profile?id=2
+dalfox scan urls.txt
+# or, explicit:
+dalfox scan --input-type file urls.txt
+</code></pre>
+<p>주석(<code>#</code>)과 빈 줄은 무시됩니다. 각 URL은 전체 파이프라인을 거칩니다.</p>
+<h2 id="pipe-모드">Pipe 모드</h2>
+<p><code>stdin</code>에서 읽습니다. 정찰 도구를 체이닝할 때 흔히 쓰이는 방식입니다:</p>
+<pre><code class="language-bash hljs">cat urls.txt | dalfox scan
+waybackurls example.com | gf xss | dalfox scan
+hakrawler -url https://target.app | dalfox scan
+</code></pre>
+<p>Dalfox는 입력을 버퍼링하고 중복을 제거한 뒤 모든 줄을 대상으로 스캔합니다.</p>
+<h2 id="raw-http-모드">Raw HTTP 모드</h2>
+<p>Burp, Caido, ZAP에서 캡처한 요청을 파일로 저장한 뒤 Dalfox에 넘겨줍니다:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type raw-http request.txt
+</code></pre>
+<p>이 파일은 표준 raw HTTP 요청(메서드 + 경로 + 헤더 + 빈 줄 + 본문)입니다. Dalfox는 모든 헤더, 쿠키, 본문 파라미터를 보존합니다.</p>
+<p>실시간 프록시 워크플로(특히 Caido Active Workflows)에 대해서는 전용 <a href="https://dalfox.hahwul.com/ko/guide/integrations/caido/">Caido 연동 가이드</a>를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 그리고 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.</p>
+<h2 id="har-모드">HAR 모드</h2>
+<p>전체 <a href="http://www.softwareishard.com/blog/har-12-spec/">HAR</a>(HTTP Archive) 익스포트 — 브라우저 DevTools와 가로채기 프록시(Burp, Caido, ZAP, Charles, mitmproxy)가 생성하는 JSON 캡처 — 를 Dalfox에 넘겨주면, 그 안의 모든 요청을 각각의 URL, 메서드, 헤더, 쿠키, 본문을 보존한 채로 스캔합니다:</p>
+<pre><code class="language-bash hljs"># Auto-detected from the file content:
+dalfox scan capture.har
+# or explicit:
+dalfox scan --input-type har capture.har
+# or piped from another tool:
+mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
+</code></pre>
+<p>HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 <code>log.entries[].request</code>는 하나의 대상이 되며, 요청은 URL + 메서드로 중복 제거되고 다른 모든 모드와 동일한 스코프 필터를 거칩니다. <code>http(s)</code>가 아닌 항목(<code>data:</code>, <code>blob:</code>, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.</p>
+<p>이는 Go v2.x 라인이 가졌으나 v3 재작성에서 처음에 빠졌던 기능을 복원한 것입니다. CLI 요청 플래그는 그 위에 그대로 적용됩니다. 예를 들어 <code>-H &quot;Authorization: Bearer …&quot;</code> 는 모든 항목에 추가되고, <code>--include-url</code> / <code>--out-of-scope</code> 는 대상 집합을 좁힙니다.</p>
+<h2 id="저장형-xss-모드-sxss">저장형 XSS 모드 (SXSS)</h2>
+<p>전형적인 &quot;폼 A에 주입하면 페이지 B에 페이로드가 나타난다&quot; 패턴을 테스트합니다:</p>
+<pre><code class="language-bash hljs">dalfox scan https://target.app/post-comment \
+  --sxss \
+  --sxss-url https://target.app/comments
+</code></pre>
+<p>Dalfox는 첫 번째 URL에 주입한 다음, 두 번째 URL을 가져와 페이로드가 도달했는지 확인합니다. 전체 흐름은 <a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS 가이드</a>를 참고하세요.</p>
+<h2 id="서버-모드">서버 모드</h2>
+<p>Dalfox를 장시간 유지되는 HTTP 서비스로 실행합니다. REST를 통해 스캔을 제출하고, 결과를 폴링하고, 실행 중인 작업을 취소합니다:</p>
+<pre><code class="language-bash hljs">dalfox server --port 6664 --api-key &quot;$DALFOX_API_KEY&quot;
+</code></pre>
+<p>엔드포인트와 요청 형태는 <a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API Server</a>를 참고하세요.</p>
+<h2 id="mcp-모드">MCP 모드</h2>
+<p>Dalfox를 <a href="https://modelcontextprotocol.io">Model Context Protocol</a> 서버로 노출하여 AI 에이전트와 IDE(예: Claude)가 스캔을 구동할 수 있게 합니다:</p>
+<pre><code class="language-bash hljs">dalfox mcp
+</code></pre>
+<p>도구(<code>scan_with_dalfox</code>, <code>get_results_dalfox</code>, <code>list_scans_dalfox</code>, <code>cancel_scan_dalfox</code>, <code>delete_scan_dalfox</code>, <code>preflight_dalfox</code>)는 <a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP Server</a>에 설명되어 있습니다.</p>
+<h2 id="payload-모드-유틸리티">Payload 모드 (유틸리티)</h2>
+<p>스캔 모드는 아니지만 함께 유용합니다. 스캔을 실행하지 않고 페이로드를 출력하거나 가져옵니다.</p>
+<pre><code class="language-bash hljs">dalfox payload event-handlers    # list DOM event handlers
+dalfox payload useful-tags       # list useful HTML tags
+dalfox payload portswigger       # fetch PortSwigger XSS cheatsheet
+dalfox payload payloadbox        # fetch PayloadBox XSS list
+dalfox payload uri-scheme        # print javascript:/data: payloads
+</code></pre>
+<h2 id="모드-선택하기">모드 선택하기</h2>
+<table>
+<thead>
+<tr>
+<th>원하는 작업</th>
+<th>사용할 모드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL 하나 테스트</td>
+<td>Auto / URL</td>
+</tr>
+<tr>
+<td>크롤러가 만든 목록 스캔</td>
+<td>File 또는 Pipe</td>
+</tr>
+<tr>
+<td>특정 요청 재생</td>
+<td>Raw HTTP</td>
+</tr>
+<tr>
+<td>캡처한 세션 전체 재생(프록시/DevTools 익스포트)</td>
+<td>HAR</td>
+</tr>
+<tr>
+<td>다른 페이지에 기록하는 폼 테스트</td>
+<td>SXSS</td>
+</tr>
+<tr>
+<td>대시보드나 CI에서 여러 스캔 실행</td>
+<td>Server</td>
+</tr>
+<tr>
+<td>AI 에이전트가 스캔을 구동하게 하기</td>
+<td>MCP</td>
+</tr>
+<tr>
+<td>Dalfox가 보낼 페이로드만 확인</td>
+<td>Payload 유틸리티 또는 <code>--dry-run</code></td>
+</tr>
+</tbody>
+</table>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>저장형 XSS</title>
+      <link>https://dalfox.hahwul.com/ko/guide/stored-xss/</link>
+      <guid>https://dalfox.hahwul.com/ko/guide/stored-xss/</guid>
+      <description>한 URL에서 주입하고, 다른 URL에서 페이로드가 실행되는지 검증합니다.</description>
+      <content:encoded><![CDATA[<p>저장형 XSS는 서버에 남아 있습니다. 한 번 제출하면(댓글, 프로필 필드, 채팅 메시지) 누군가 해당 페이지를 볼 때마다 실행됩니다. Dalfox에는 이 패턴을 위한 전용 모드가 있습니다.</p>
+<h2 id="기본-흐름">기본 흐름</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app/post-comment \
+  --sxss \
+  --sxss-url https://target.app/comments
+</code></pre>
+<p>Dalfox는 다음을 수행합니다.</p>
+<ol>
+<li>각 페이로드를 첫 번째 URL(<code>post-comment</code>)에 <strong>주입</strong>합니다.</li>
+<li>두 번째 URL(<code>comments</code>)을 GET으로 <strong>가져옵니다</strong>(<code>--sxss-method</code>로 구성 가능).</li>
+<li>페이로드가 가져온 응답에 반사되는지, 그리고 실제 DOM 요소를 생성했는지 <strong>검증</strong>합니다.</li>
+</ol>
+<p>두 단계를 모두 통과한 탐지 결과만 SXSS로 리포팅됩니다.</p>
+<h2 id="조회-url-선택">조회 URL 선택</h2>
+<p>저장된 값을 <strong>읽어 오는</strong> 페이지를 선택하세요. 예시:</p>
+<table>
+<thead>
+<tr>
+<th>주입 URL</th>
+<th>조회 URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /comments/new</code></td>
+<td><code>GET /post/123/comments</code></td>
+</tr>
+<tr>
+<td><code>PATCH /profile</code></td>
+<td><code>GET /u/myself</code></td>
+</tr>
+<tr>
+<td><code>POST /support/ticket</code></td>
+<td><code>GET /admin/tickets</code> (관리자 권한이 있는 경우)</td>
+</tr>
+</tbody>
+</table>
+<p><code>--sxss-url</code>을 생략하면, Dalfox는 응답 헤더(예: POST 이후의 <code>Location</code> 리다이렉트)에서 자동으로 감지하려고 시도합니다.</p>
+<h2 id="조회-메서드">조회 메서드</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app/form --sxss \
+  --sxss-url https://target.app/list \
+  --sxss-method GET
+</code></pre>
+<p><code>GET</code>이 기본값입니다. 조회 엔드포인트가 필요로 한다면 <code>POST</code>나 다른 메서드를 사용하세요.</p>
+<h2 id="인증">인증</h2>
+<p>저장형 XSS는 종종 두 개의 세션을 필요로 합니다. 하나는 쓰는 쪽(사용자), 다른 하나는 읽는 쪽(관리자)입니다. 조회 GET이 여러분이 작성한 내용을 볼 수 있을 만큼 충분한 접근 권한을 부여하는 헤더/쿠키를 사용하세요.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/profile \
+  --sxss --sxss-url https://target.app/admin/users \
+  -H &quot;Cookie: admin_session=abc; role=admin&quot;
+</code></pre>
+<h2 id="블라인드-저장형">블라인드 + 저장형</h2>
+<p>조회 페이지가 여러분이 가지지 못한 로그인 뒤에 있다면, 블라인드 XSS로 전환하세요. 페이로드는 관리자의 브라우저에서 실행되고, 여러분의 콜백 서버가 이를 기록합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/support/ticket \
+  -b https://callback.interact.sh
+</code></pre>
+<p>여전히 누군가가 페이지를 볼 때까지 기다려야 하며, 콜백이 그 시점을 알려 줍니다.</p>
+<h2 id="팁">팁</h2>
+<ul>
+<li><strong>범위를 좁게 설정하세요.</strong> <code>-p</code>를 사용해 조회 URL에서 렌더링된다고 알고 있는 필드를 지정하세요. 그러면 Dalfox가 모든 쿠키를 테스트하지 않습니다.</li>
+<li><strong>정화 후 렌더링에 주의하세요.</strong> 저장형 XSS는 쓰기 시점의 HTML 새니타이저는 통과하지만 읽기 시점의 두 번째 정화 과정에서 깨지는 경우가 많습니다. Dalfox의 mXSS 페이로드는 이에 맞춰 조정되어 있습니다.</li>
+<li><strong>속도를 늦추세요.</strong> 일부 앱은 쓰기를 디바운스하거나 배치 처리합니다. 작은 <code>--delay</code> 값은 조회가 여러분의 페이로드를 보는 데 도움이 됩니다.</li>
+</ul>
+<h2 id="다음">다음</h2>
+<ul>
+<li>주입되는 페이로드를 조정하려면 <a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a>을 참고하세요.</li>
+<li>탐지 결과를 전달하려면 <a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a>를 참고하세요.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>WAF 우회</title>
+      <link>https://dalfox.hahwul.com/ko/guide/waf-bypass/</link>
+      <guid>https://dalfox.hahwul.com/ko/guide/waf-bypass/</guid>
+      <description>WAF를 자동으로 탐지하고 WAF별 회피 전략을 적용합니다.</description>
+      <content:encoded><![CDATA[<p>대부분의 실제 대상은 WAF 뒤에 있습니다. Dalfox는 WAF를 핑거프린트한 뒤, 회피 전략을 자동으로 선택합니다. 해당 WAF의 규칙에 맞춰 조정된 추가 인코더와 페이로드 변형이 그것입니다.</p>
+<h2 id="동작-방식">동작 방식</h2>
+<ol>
+<li>Dalfox는 대상에 소수의 <strong>핑거프린트 프로브</strong>를 보냅니다.</li>
+<li>알려진 WAF 시그니처가 나타나면(<code>cf-ray</code> 같은 헤더, &quot;Attention required!&quot; 같은 본문 마커, 또는 429/403 형태), Dalfox는 해당 WAF와 그 신뢰도를 기록합니다.</li>
+<li>스캐너는 WAF의 <strong>추가 인코더</strong>를 여러분의 인코더 목록에 병합하고, WAF의 <strong>변형 목록</strong>을 페이로드 생성기에 추가합니다.</li>
+<li>페이로드 변형은 상한이 있습니다(기본 페이로드당 4개 변형). 요청량이 과도해지지 않도록 하기 위함입니다. 이 상한은 WAF가 탐지된 후에만 적용되므로, 추가 노력이 정확히 그것을 필요로 하는 스캔에만 투입됩니다.</li>
+</ol>
+<p>이 모든 것은 기본적으로 켜져 있습니다. 비활성화하거나 방향을 조정하고 싶을 때만 플래그를 건드리면 됩니다.</p>
+<h2 id="지원하는-waf">지원하는 WAF</h2>
+<ul>
+<li>Cloudflare</li>
+<li>AWS WAF</li>
+<li>Akamai</li>
+<li>Imperva / Incapsula</li>
+<li>ModSecurity</li>
+<li>OWASP CRS</li>
+<li>Sucuri</li>
+<li>F5 BIG-IP</li>
+<li>Barracuda</li>
+<li>FortiWeb</li>
+<li>Azure WAF</li>
+<li>Google Cloud Armor</li>
+<li>Fastly</li>
+<li>Wordfence</li>
+</ul>
+<p>인식되지 않는 WAF는 일반 폴백 전략을 발동시킵니다.</p>
+<h2 id="동작-조정하기">동작 조정하기</h2>
+<h3 id="auto-기본값">Auto (기본값)</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app
+# equivalent to:
+dalfox https://target.app --waf-bypass auto
+</code></pre>
+<h3 id="특정-waf-강제-지정">특정 WAF 강제 지정</h3>
+<p>핑거프린팅을 건너뛰고 선택한 WAF의 전략을 직접 적용합니다:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app \
+  --waf-bypass force \
+  --force-waf cloudflare
+</code></pre>
+<p>WAF가 자신의 헤더를 감추거나 CDN 뒤에 있을 때 유용합니다.</p>
+<h3 id="waf-로직-비활성화">WAF 로직 비활성화</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-bypass off
+</code></pre>
+<p>추가 인코더도, 변형도 없습니다. 여러분이 설정한 페이로드만 사용합니다.</p>
+<h3 id="프로브-건너뛰기">프로브 건너뛰기</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --skip-waf-probe
+</code></pre>
+<p>헤더 기반 수동 탐지는 여전히 사용하지만, 도발성 요청은 보내지 않습니다. 대상이 불안정하고 프로브에 rate limit을 소모하고 싶지 않을 때 사용하세요.</p>
+<h3 id="회피-스로틀">회피 스로틀</h3>
+<p>WAF가 탐지되면 <code>--waf-evasion</code>은 Dalfox를 무딘 감속 대신 <strong>적응형 타이밍</strong>으로 전환합니다. 요청 간 간격을 무작위화(지터)하여 그 주기를 핑거프린트할 수 없게 만들고, 차단된 응답(403/406/429/503)이 무리 지어 나타날 때마다 쿨다운 정지를 점증시킵니다. WAF별 페이싱 힌트도 탐지 시 자동으로 적용되며, 이 플래그가 없어도 마찬가지입니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-evasion
+</code></pre>
+<p>요청 속도에 대한 확고한 상한 — WAF 탐지와 무관하며 <strong>모든</strong> 워커와 대상에 걸쳐 공유되는 — 을 원한다면 <code>--rate-limit</code>(초당 요청 수)과 결합하세요. <code>--delay</code>는 단일 워커의 간격만 벌리므로, 공유 IP 뒤에서 스캔하거나 전역 임계값을 가진 엣지 WAF를 상대할 때 바로 이 손잡이가 적합합니다:</p>
+<pre><code class="language-bash hljs"># At most 15 requests/second across the whole scan, with adaptive evasion
+dalfox https://target.app --rate-limit 15 --waf-evasion
+</code></pre>
+<p>일시적 실패(5xx, 타임아웃, 연결 리셋)는 <code>--retries</code> / <code>--retry-delay</code>로 재시도할 수 있습니다. HTTP 429는 항상 재시도되며 <code>Retry-After</code>가 반영됩니다.</p>
+<h3 id="약한-핑거프린트-걸러내기">약한 핑거프린트 걸러내기</h3>
+<p>각 핑거프린트는 신뢰도 점수(0.0–1.0)를 가집니다. <code>Request blocked</code>(0.3)나 <code>Server: Google Frontend</code>(0.15) 같은 일반적인 마커는 때때로 무해한 오리진에서 오탐을 냅니다. <code>--waf-min-confidence</code>를 사용해 임계값 미만의 항목을 모두 버리세요:</p>
+<pre><code class="language-bash hljs"># Keep only confident matches (drops 0.3/0.15 noise)
+dalfox https://target.app --waf-min-confidence 0.7
+</code></pre>
+<p>기본값은 <code>0.3</code>입니다(<code>Server: Google Frontend</code> 같은 약하거나 일반적인 매치를 억제합니다). <code>--waf-min-confidence 0.0</code>을 넘기면 모든 매치를 유지하며, 잡음이 많은 수동 탐지가 Dalfox를 잘못된 회피 전략으로 몰고 간다고 의심될 때는 값을 높이세요.</p>
+<h2 id="변형-전술-내부-동작">변형 전술 (내부 동작)</h2>
+<p>WAF마다 각기 다른 수법에 무너집니다. 작은 샘플을 소개합니다:</p>
+<table>
+<thead>
+<tr>
+<th>변형</th>
+<th>예시</th>
+<th>효과적인 대상</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTML 주석 분할</strong></td>
+<td><code>&lt;scr&lt;!----&gt;ipt&gt;</code></td>
+<td>시그니처 정규식</td>
+</tr>
+<tr>
+<td><strong>JS 주석 분할</strong></td>
+<td><code>al/**/ert(1)</code></td>
+<td>키워드 필터</td>
+</tr>
+<tr>
+<td><strong>백틱 호출</strong></td>
+<td>`<code> alert</code>1<code> </code>`</td>
+<td><code>alert(</code> 정규식</td>
+</tr>
+<tr>
+<td><strong>생성자 체인</strong></td>
+<td><code>[].constructor.constructor(&#39;alert(1)&#39;)()</code></td>
+<td>강력한 키워드 차단</td>
+</tr>
+<tr>
+<td><strong>유니코드 JS 이스케이프</strong></td>
+<td><code>alert(1)</code></td>
+<td>JS 토큰 필터</td>
+</tr>
+<tr>
+<td><strong>슬래시 구분자</strong></td>
+<td><code>&lt;svg/onload=alert(1)/class=x&gt;</code></td>
+<td>CRS 941160</td>
+</tr>
+<tr>
+<td><strong>SVG animate</strong></td>
+<td><code>&lt;svg&gt;&lt;animate onbegin=alert(1) attributeName=x&gt;</code></td>
+<td>CRS 941110</td>
+</tr>
+<tr>
+<td><strong>HTML 엔티티 괄호</strong></td>
+<td><code>alert&amp;#40;1&amp;#41;</code></td>
+<td>CRS 941370</td>
+</tr>
+<tr>
+<td><strong>이색적인 공백</strong></td>
+<td>폼 피드 / 수직 탭</td>
+<td>CRS 941320</td>
+</tr>
+<tr>
+<td><strong>대소문자 교대</strong></td>
+<td><code>&lt;ScRiPt&gt;</code></td>
+<td>대소문자 구분 규칙</td>
+</tr>
+<tr>
+<td><strong>zwsp 삽입</strong></td>
+<td><code>al​ert(1)</code></td>
+<td>렉서 기반 탐지</td>
+</tr>
+<tr>
+<td><strong>키워드 엔티티 인코딩</strong></td>
+<td><code>onerror=&amp;#97;lert(1)</code></td>
+<td><code>alert</code>/핸들러 키워드 정규식(속성 디코딩됨)</td>
+</tr>
+<tr>
+<td><strong>멀티 슬래시</strong></td>
+<td><code>&lt;img/src=x/onerror=alert(1)&gt;</code></td>
+<td>이후 속성 사이의 <code>\s</code>에 고정된 정규식</td>
+</tr>
+<tr>
+<td><strong>스킴 분리</strong></td>
+<td><code>href=java&amp;#9;script:alert(1)</code></td>
+<td>리터럴 <code>javascript:</code> 스킴 정규식(URL 파서가 TAB을 제거)</td>
+</tr>
+<tr>
+<td><strong>엔티티 스킴</strong></td>
+<td><code>href=&amp;#106;avascript:alert(1)</code></td>
+<td>리터럴 <code>javascript:</code> 스킴 정규식(속성 디코딩됨)</td>
+</tr>
+</tbody>
+</table>
+<p>마지막 네 가지는 HTML 토크나이저가 URL 파서나 이벤트 핸들러 JS 컴파일러가 보기 전에 <strong>속성 값 안의</strong> 문자 참조를 디코딩한다는 점을 악용합니다. 이들은 속성 / 이벤트 핸들러 / <code>javascript:</code>-URL 컨텍스트에서만 발동하며, 엔티티 디코딩이 일어나지 않는 순수 본문 텍스트와 <code>&lt;script&gt;</code>/<code>&lt;style&gt;</code> 페이로드에서는 건너뜁니다.</p>
+<p>이들을 직접 설정하지는 않습니다. WAF별로 자동으로 선택됩니다. 무슨 일이 벌어지는지 확인하려면 <code>--debug</code>로 실행하세요.</p>
+<h2 id="검사-윈도우-오버플로">검사 윈도우 오버플로</h2>
+<p>일부 WAF(예: AWS WAF 스타일 설정)는 파라미터 값의 <strong>첫 N바이트</strong>만 검사합니다. 값의 시작 부분에 있는 벡터는 차단을 유발하지만, 동일한 벡터가 검사 윈도우를 넘어서 밀려나면 손대지 않은 채로 반사됩니다.</p>
+<p>능동 프로빙 중에 파라미터의 특수 문자 프로브가 완전히 차단된 채로 돌아오면, Dalfox는 긴 무해한 필러 접두어 뒤에 그것을 다시 시도합니다. 이제 문자가 반사되면, 값이 크기 제한된 검사 윈도우 뒤에 있다고 결론짓고 해당 파라미터의 모든 페이로드 앞에 그 필러를 자동으로 붙입니다. 그러면 실제 벡터가 항상 윈도우 너머에 도달합니다. 보고되는 PoC URL에는 필러가 포함되므로 그대로 재현됩니다. 이것은 자동이며 설정할 것이 없습니다.</p>
+<h2 id="인코더와-결합하기">인코더와 결합하기</h2>
+<p>여러분의 <code>--encoders</code> 목록과 WAF의 추가 인코더가 병합됩니다. 예를 들면:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -e url,base64
+# Cloudflare detected → extra encoders: unicode, zwsp
+# Effective: url, base64, unicode, zwsp
+</code></pre>
+<p>중복을 자동으로 제거하고 순서를 보존합니다.</p>
+<h2 id="rate-제한-백오프">Rate 제한 &amp; 백오프</h2>
+<p>Dalfox는 연속된 WAF 차단을 추적하고 영구 차단을 피하기 위해 지수적 슬립으로 자동 백오프합니다. 취약한 대상에 대해서는 <code>--delay</code>(요청당 밀리초)와 더 작은 <code>--workers</code>로 도울 수 있습니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --delay 500 --workers 10
+</code></pre>
+<h2 id="디버깅">디버깅</h2>
+<p>디버그 스트림을 켜서 핑거프린트 판단과 활성 전략을 확인하세요:</p>
+<pre><code class="language-bash hljs">dalfox --debug https://target.app 2&gt;&amp;1 | grep -i waf
+</code></pre>
+<h2 id="다음">다음</h2>
+<ul>
+<li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a>는 여기서-주입-저기서-검증 패턴을 다루며, 이는 종종 WAF와 상호작용합니다.</li>
+<li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력 &amp; 리포트</a>는 탐지 결과를 파이프라인에 통합하는 방법을 다룹니다.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>강력한 XSS 스캐너</title>
+      <link>https://dalfox.hahwul.com/ko/</link>
+      <guid>https://dalfox.hahwul.com/ko/</guid>
+      <description>오픈소스 XSS 스캐너이자 자동화 도구. 반사형, 저장형, DOM 기반 XSS를 AST 수준으로 검증합니다.</description>
+      <content:encoded><![CDATA[<section class="hero">
+  <div class="hero-illustration" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <h1 class="hero-title" id="모든-xss를-사냥하세요-당하기-전에">
+      <span class="strike">모든</span> <span class="accent">XSS</span>를 사냥하세요,<br>
+      당하기 전에.
+    </h1>
+    <p class="hero-desc">
+      반사형, 저장형, DOM 기반 취약점을 파라미터마다 AST 수준의 정밀도로 찾아내고 검증합니다.
+    </p>
+    <div class="hero-actions">
+      <a href="https://dalfox.hahwul.com/ko/getting-started/" class="btn btn-primary">
+        시작하기
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </a>
+      <a href="https://github.com/hahwul/dalfox" class="btn btn-secondary" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        GitHub에서 스타
+      </a>
+    </div>
+  </div>
+</section>
+<div class="stats-bar">
+  <div class="stats-inner">
+    <div class="stat-item">
+      <span class="stat-value">6</span>
+      <span class="stat-label">스캔 모드</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">AST</span>
+      <span class="stat-label">DOM 검증</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">MCP</span>
+      <span class="stat-label">AI 지원</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">OSS</span>
+      <span class="stat-label">MIT 라이선스</span>
+    </div>
+  </div>
+</div>
+<section class="section section--terminal">
+  <div class="section-inner">
+    <h2 class="section-title" id="명령-하나로-검증된-결과까지">명령 하나로, 검증된 결과까지</h2>
+    <p class="section-desc">Dalfox에 대상을 넘기면 파라미터를 탐색하고, 컨텍스트를 확인하고, 페이로드를 주입한 뒤, 리포트에 담기 전에 DOM 수준에서 적중을 확인합니다.</p>
+    <div class="terminal-demo">
+      <div class="hero-visual">
+        <div class="terminal">
+          <div class="terminal-bar">
+            <div class="terminal-dots">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot amber"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+            <div class="terminal-title">dalfox · scan</div>
+          </div>
+          <div class="terminal-body">
+            <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
+            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
+            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
+            <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
+            <div class="t-line"></div>
+            <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
+            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%2Fonload%3Dalert%281%29%3E</div>
+            <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
+            <div class="t-line t-dim">  ├── Payload: &lt;svg/onload=alert(1)&gt;</div>
+            <div class="t-line t-dim">  └── L13: matches for &#x3c;svg/onload=alert(1)&#x3e;</div>
+            <div class="t-line"></div>
+            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
+            <div class="t-line t-cursor"></div>
+          </div>
+        </div>
+      </div>
+      <div class="hero-install" data-install>
+        <div class="hero-install-pm">
+          <button class="hero-install-pm-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="설치 방법 선택">
+            <span class="hero-install-pm-label">brew</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <ul class="hero-install-pm-menu" role="listbox" aria-label="설치 방법">
+            <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
+            <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
+            <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
+            <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
+            <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
+          </ul>
+        </div>
+        <span class="hero-install-sep" aria-hidden="true"></span>
+        <span class="dollar">$</span>
+        <code>brew install dalfox</code>
+        <button class="hero-install-copy" type="button">복사</button>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="section">
+  <div class="section-inner">
+    <p class="section-eyebrow">// 기능</p>
+    <h2 class="section-title" id="스캐너-하나로-xss-작업-전체를">스캐너 하나로 XSS 작업 전체를</h2>
+    <p class="section-desc">URL 하나든 전체 파이프라인이든 그대로 돌립니다. CLI, 파일 배치, 파이프, 서버, MCP까지 어느 쪽이든 같은 엔진이 동작하고, 모든 결과는 파싱과 DOM 검증을 거쳐 바로 활용할 수 있는 형식으로 돌아옵니다.</p>
+    <div class="features-grid">
+      <div class="feature-cell wide">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <h3 id="깊이-있는-xss-탐색">깊이 있는 XSS 탐색</h3>
+        <p>반사형, 저장형, DOM 기반 XSS를 페이로드 최적화와 함께 찾습니다. AST 기반 DOM 검증 덕분에 단순 반사로 인한 오탐이 사라집니다.</p>
+        <div class="feature-tags">
+          <span class="feature-tag">reflected</span>
+          <span class="feature-tag">stored</span>
+          <span class="feature-tag">dom</span>
+          <span class="feature-tag">ast-verify</span>
+        </div>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        </div>
+        <h3 id="파라미터-인텔리전스">파라미터 인텔리전스</h3>
+        <p>마이닝, 정적 분석, BAV 테스트, 컨텍스트 인식 문자셋 프로빙으로 모든 파라미터에 완전한 공격 프로파일을 만듭니다.</p>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
+        </div>
+        <h3 id="waf-인식">WAF 인식</h3>
+        <p>주요 WAF를 핑거프린팅하고 인코딩, 대소문자 변형, 폴리글롯 기법으로 페이로드를 변형해 우회합니다.</p>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </div>
+        <h3 id="파이프라인을-위한-설계">파이프라인을 위한 설계</h3>
+        <p>파이프, 파일 배치, 서버 모드가 CI/CD에 들어맞습니다. 프록시, 크롤러, 정찰 스택 뒤에 Dalfox를 연결하세요.</p>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+        </div>
+        <h3 id="rest-api-mcp">REST API &amp; MCP</h3>
+        <p>Dalfox를 REST로 제어하는 상시 서버로 실행하거나, 에이전트와 IDE에 MCP 도구로 노출합니다.</p>
+      </div>
+      <div class="feature-cell full">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <h3 id="바로-제출할-수-있는-리포트">바로 제출할 수 있는 리포트</h3>
+        <p>터미널의 간결한 출력부터 GitHub 코드 스캐닝용 SARIF까지, 작업 흐름에 맞는 형식으로 내보냅니다.</p>
+        <div class="feature-tags">
+          <span class="feature-tag">JSON</span>
+          <span class="feature-tag">JSONL</span>
+          <span class="feature-tag">Markdown</span>
+          <span class="feature-tag">SARIF</span>
+          <span class="feature-tag">TOML</span>
+          <span class="feature-tag">Plain</span>
+          <span class="feature-tag">Silence</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="section section--modes">
+  <div class="modes-illustration" aria-hidden="true"></div>
+  <div class="section-inner">
+    <p class="section-eyebrow">// 모드</p>
+    <h2 class="section-title" id="dalfox를-실행하는-여섯-가지-방법">Dalfox를 실행하는 여섯 가지 방법</h2>
+    <p class="section-desc">대상에 맞는 형태를 고르세요. 모든 모드가 같은 탐색·검증 엔진을 공유합니다.</p>
+    <div class="modes" data-modes>
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-url" checked>
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-file">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-pipe">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-sxss">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-server">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-mcp">
+      <div class="mode-tabs" role="tablist" aria-label="Dalfox 실행 모드">
+        <label class="mode-tab" for="m-url"><span class="mode-tab-name">URL</span><span class="mode-tab-sub">단일 대상</span></label>
+        <label class="mode-tab" for="m-file"><span class="mode-tab-name">FILE</span><span class="mode-tab-sub">목록 일괄 처리</span></label>
+        <label class="mode-tab" for="m-pipe"><span class="mode-tab-name">PIPE</span><span class="mode-tab-sub">stdin 파이프라인</span></label>
+        <label class="mode-tab" for="m-sxss"><span class="mode-tab-name">SXSS</span><span class="mode-tab-sub">저장형 XSS</span></label>
+        <label class="mode-tab" for="m-server"><span class="mode-tab-name">SERVER</span><span class="mode-tab-sub">REST 데몬</span></label>
+        <label class="mode-tab" for="m-mcp"><span class="mode-tab-name">MCP</span><span class="mode-tab-sub">에이전트 네이티브</span></label>
+      </div>
+      <div class="mode-panels">
+        <div class="mode-panel" data-mode="url">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
+          <p>Dalfox에 URL 하나를 넘기세요. 파라미터를 마이닝하고, 각 컨텍스트를 프로빙하고, 모든 적중을 DOM 수준에서 검증합니다.</p>
+        </div>
+        <div class="mode-panel" data-mode="file">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
+          <p>파일에 담긴 대상 목록을 한 줄에 하나씩, 같은 엔진과 하나의 리포트로 훑습니다.</p>
+        </div>
+        <div class="mode-panel" data-mode="pipe">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
+          <p>stdin으로 대상을 읽어 Dalfox를 크롤러나 정찰 파이프라인에 곧장 연결합니다.</p>
+        </div>
+        <div class="mode-panel" data-mode="sxss">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss-url https://app/feed</code></div>
+          <p>한 엔드포인트에서 주입하고, 페이로드가 다른 곳에서 실행되는지 확인합니다. 저장형 XSS를 처음부터 끝까지 검증합니다.</p>
+        </div>
+        <div class="mode-panel" data-mode="server">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
+          <p>비동기 스캔 작업, 연동, 대시보드를 위한 상시 REST API로 Dalfox를 실행합니다.</p>
+        </div>
+        <div class="mode-panel" data-mode="mcp">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
+          <p>Dalfox를 MCP 도구로 노출해 에이전트와 IDE가 대신 스캔하도록 합니다.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="section">
+  <div class="section-inner">
+    <h2 class="section-title" id="설치부터-검증된-결과까지-세-단계로">설치부터 검증된 결과까지, 세 단계로</h2>
+    <p class="section-desc">Dalfox는 이미 쓰고 있는 환경에 그대로 들어갑니다. 거창한 설치 절차도, 먼저 세워야 할 오케스트레이션 계층도 없습니다.</p>
+    <div class="how-steps">
+      <div class="how-step">
+        <h3 id="설치">설치</h3>
+        <p>Homebrew, Snap, Nix, cargo, 또는 사전 빌드된 바이너리로 Dalfox를 받으세요. 명령 하나면 되고, 관리할 런타임이 없습니다.</p>
+        <code>brew install dalfox</code>
+      </div>
+      <div class="how-step">
+        <h3 id="대상-지정">대상 지정</h3>
+        <p>URL이나 파일을 주거나 크롤링 결과를 파이프로 넘기세요. Dalfox가 파라미터를 마이닝하고 컨텍스트를 프로빙하며 상황에 맞춰 조정합니다.</p>
+        <code>dalfox scan https://target.app</code>
+      </div>
+      <div class="how-step">
+        <h3 id="결과-전달">결과 전달</h3>
+        <p>SARIF, JSON, Markdown으로 내보내거나 결과를 파이프라인으로 프록시하세요. 결과는 추측이 아니라 검증을 거쳐 나옵니다.</p>
+        <code>dalfox scan urls.txt -o report.sarif</code>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="section section--community">
+  <div class="section-inner">
+    <h2 class="section-title" id="곳곳의-헌터들과-함께-오픈소스로">곳곳의 헌터들과 함께, 오픈소스로</h2>
+    <p class="section-desc">Dalfox는 직접 쓰는 사람들의 손으로 다듬어집니다. 이슈를 열고, 풀 리퀘스트를 보내고, 커뮤니티와 페이로드를 나눠 보세요. 기여 하나하나가 다음 스캔을 더 날카롭게 만듭니다.</p>
+    <div class="community-links">
+      <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">기여 가이드</a>
+      <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">열린 이슈 보기 →</a>
+    </div>
+    <p class="contributors-label">기여자 여러분 감사합니다</p>
+    <div class="contributors" role="img" aria-label="Dalfox 기여자">
+      <img src="https://dalfox.hahwul.com/images/CONTRIBUTORS.svg" alt="Dalfox 기여자" loading="lazy">
+    </div>
+  </div>
+</section>
+<section class="cta-section">
+  <div class="cta-illustration" aria-hidden="true"></div>
+  <div class="cta-inner">
+    <h2 class="cta-title" id="사냥을-시작할까요">사냥을 시작할까요?</h2>
+    <p class="cta-desc">문서를 읽고, 저장소에 스타를 남기고, 다음 정찰 루프에 Dalfox를 넣어 보세요.</p>
+    <div class="cta-buttons">
+      <a href="https://dalfox.hahwul.com/ko/getting-started/" class="btn btn-primary">시작하기</a>
+      <a href="https://dalfox.hahwul.com/ko/reference/cli/" class="btn btn-secondary">CLI 레퍼런스</a>
+    </div>
+  </div>
+</section>
+]]></content:encoded>
+    </item>
+  </channel>
+</rss>

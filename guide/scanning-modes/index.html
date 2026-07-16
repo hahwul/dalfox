@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Scanning Modes · Dalfox</title>
+  <meta property="og:title" content="Scanning Modes">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/guide/scanning-modes/">
+  <meta property="og:description" content="Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/guide-scanning-modes.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Scanning Modes">
+  <meta name="twitter:description" content="Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/guide-scanning-modes.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/scanning-modes/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/guide/scanning-modes/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Scanning Modes","url":"https://dalfox.hahwul.com/guide/scanning-modes/","description":"Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow.","image":"https://dalfox.hahwul.com/og-images/guide-scanning-modes.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://dalfox.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Scanning Modes"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/guide/scanning-modes/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Scanning Modes</h1>
+          <p>Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.</p>
+<p>Under the hood there are four subcommands: <code>scan</code> (the scanner), <code>server</code> (long-lived REST API), <code>payload</code> (payload utilities), and <code>mcp</code> (Model Context Protocol stdio server). Everything below labelled &quot;URL / File / Pipe / Raw HTTP / HAR / SXSS&quot; is a <em>shape of input</em> that the <code>scan</code> subcommand handles via <code>--input-type</code>; they are not independent subcommands.</p>
+<blockquote>
+<p>The fan-out input shapes (<code>file</code>, <code>pipe</code>, <code>raw-http</code>, <code>har</code>) are <code>scan</code>-only: each expands one input into many targets. The <code>server</code> and <code>mcp</code> interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.</p>
+</blockquote>
+<h2 id="auto-default">Auto (default)</h2>
+<p>Just give Dalfox a URL. It figures out the rest.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/search?q=test
+</code></pre>
+<p>Under the hood, Dalfox uses the <code>scan</code> subcommand with <code>--input-type auto</code>. It auto-detects whether the argument is a URL, a file path, or a stream on <code>stdin</code>.</p>
+<h2 id="url-mode">URL mode</h2>
+<p>Force URL parsing (rarely needed, useful in scripts):</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type url https://target.app
+</code></pre>
+<h2 id="file-mode">File mode</h2>
+<p>Scan a list of URLs, one per line:</p>
+<pre><code class="language-bash hljs"># urls.txt
+# https://target.app/search?q=1
+# https://target.app/profile?id=2
+dalfox scan urls.txt
+# or, explicit:
+dalfox scan --input-type file urls.txt
+</code></pre>
+<p>Comments (<code>#</code>) and blank lines are ignored. Each URL runs through the full pipeline.</p>
+<h2 id="pipe-mode">Pipe mode</h2>
+<p>Read from <code>stdin</code>, the common case when chaining recon tools:</p>
+<pre><code class="language-bash hljs">cat urls.txt | dalfox scan
+waybackurls example.com | gf xss | dalfox scan
+hakrawler -url https://target.app | dalfox scan
+</code></pre>
+<p>Dalfox buffers the input, deduplicates, and scans every line as a target.</p>
+<h2 id="raw-http-mode">Raw HTTP mode</h2>
+<p>Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalfox:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type raw-http request.txt
+</code></pre>
+<p>The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves every header, cookie, and body parameter.</p>
+<p>For live proxy workflows (especially Caido Active Workflows) see the dedicated <strong><a href="../integrations/caido/">Caido integration guide</a></strong>. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.</p>
+<h2 id="har-mode">HAR mode</h2>
+<p>Hand Dalfox a whole <a href="http://www.softwareishard.com/blog/har-12-spec/">HAR</a> (HTTP Archive) export — the JSON capture that browser DevTools and intercepting proxies (Burp, Caido, ZAP, Charles, mitmproxy) produce — and it scans every request in it, preserving each one's URL, method, headers, cookies, and body:</p>
+<pre><code class="language-bash hljs"># Auto-detected from the file content:
+dalfox scan capture.har
+# or explicit:
+dalfox scan --input-type har capture.har
+# or piped from another tool:
+mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
+</code></pre>
+<p>Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each <code>log.entries[].request</code> becomes one target; requests are deduplicated by URL + method and run through the same scope filters as every other mode. Non-<code>http(s)</code> entries (<code>data:</code>, <code>blob:</code>, WebSocket, browser-extension URLs) are skipped automatically.</p>
+<p>This restores a capability the Go v2.x line had that the v3 rewrite initially dropped. CLI request flags still apply on top — e.g. <code>-H &quot;Authorization: Bearer …&quot;</code> is appended to every entry, and <code>--include-url</code> / <code>--out-of-scope</code> narrow the set.</p>
+<h2 id="stored-xss-mode-sxss">Stored XSS mode (SXSS)</h2>
+<p>Test the classic &quot;inject on form A, payload appears on page B&quot; pattern:</p>
+<pre><code class="language-bash hljs">dalfox scan https://target.app/post-comment \
+  --sxss \
+  --sxss-url https://target.app/comments
+</code></pre>
+<p>Dalfox injects into the first URL, then fetches the second to check whether the payload landed. See the <a href="../stored-xss/">Stored XSS guide</a> for the full flow.</p>
+<h2 id="server-mode">Server mode</h2>
+<p>Run Dalfox as a long-lived HTTP service. Submit scans via REST, poll for results, cancel running jobs:</p>
+<pre><code class="language-bash hljs">dalfox server --port 6664 --api-key &quot;$DALFOX_API_KEY&quot;
+</code></pre>
+<p>See <a href="../../integrations/server/">REST API Server</a> for endpoints and request shapes.</p>
+<h2 id="mcp-mode">MCP mode</h2>
+<p>Expose Dalfox as a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server so AI agents and IDEs (like Claude) can drive scans:</p>
+<pre><code class="language-bash hljs">dalfox mcp
+</code></pre>
+<p>The tools (<code>scan_with_dalfox</code>, <code>get_results_dalfox</code>, <code>list_scans_dalfox</code>, <code>cancel_scan_dalfox</code>, <code>delete_scan_dalfox</code>, <code>preflight_dalfox</code>) are described in <a href="../../integrations/mcp/">MCP Server</a>.</p>
+<h2 id="payload-mode-utility">Payload mode (utility)</h2>
+<p>Not a scanning mode, but useful alongside: print or fetch payloads without running a scan.</p>
+<pre><code class="language-bash hljs">dalfox payload event-handlers    # list DOM event handlers
+dalfox payload useful-tags       # list useful HTML tags
+dalfox payload portswigger       # fetch PortSwigger XSS cheatsheet
+dalfox payload payloadbox        # fetch PayloadBox XSS list
+dalfox payload uri-scheme        # print javascript:/data: payloads
+</code></pre>
+<h2 id="choosing-a-mode">Choosing a mode</h2>
+<table>
+<thead>
+<tr>
+<th>You want to…</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Test one URL</td>
+<td>Auto / URL</td>
+</tr>
+<tr>
+<td>Scan a list from your crawler</td>
+<td>File or Pipe</td>
+</tr>
+<tr>
+<td>Replay a specific request</td>
+<td>Raw HTTP</td>
+</tr>
+<tr>
+<td>Replay a whole captured session (proxy/DevTools export)</td>
+<td>HAR</td>
+</tr>
+<tr>
+<td>Test a form that writes to another page</td>
+<td>SXSS</td>
+</tr>
+<tr>
+<td>Run many scans from a dashboard or CI</td>
+<td>Server</td>
+</tr>
+<tr>
+<td>Let an AI agent drive scans</td>
+<td>MCP</td>
+</tr>
+<tr>
+<td>Just see what payloads Dalfox would send</td>
+<td>Payload utility or <code>--dry-run</code></td>
+</tr>
+</tbody>
+</table>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#auto-default">Auto (default)</a></li><li><a href="#url-mode">URL mode</a></li><li><a href="#file-mode">File mode</a></li><li><a href="#pipe-mode">Pipe mode</a></li><li><a href="#raw-http-mode">Raw HTTP mode</a></li><li><a href="#har-mode">HAR mode</a></li><li><a href="#stored-xss-mode-sxss">Stored XSS mode (SXSS)</a></li><li><a href="#server-mode">Server mode</a></li><li><a href="#mcp-mode">MCP mode</a></li><li><a href="#payload-mode-utility">Payload mode (utility)</a></li><li><a href="#choosing-a-mode">Choosing a mode</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/scanning-modes.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

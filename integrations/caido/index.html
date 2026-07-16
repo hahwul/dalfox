@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Run Dalfox automatically from Caido Active Workflows and Findings to catch XSS in real time.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Caido Workflows · Dalfox</title>
+  <meta property="og:title" content="Caido Workflows">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/integrations/caido/">
+  <meta property="og:description" content="Run Dalfox automatically from Caido Active Workflows and Findings to catch XSS in real time.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/integrations-caido.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Caido Workflows">
+  <meta name="twitter:description" content="Run Dalfox automatically from Caido Active Workflows and Findings to catch XSS in real time.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/integrations-caido.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/integrations/caido/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/integrations/caido/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/integrations/caido/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Caido Workflows","url":"https://dalfox.hahwul.com/integrations/caido/","description":"Run Dalfox automatically from Caido Active Workflows and Findings to catch XSS in real time.","image":"https://dalfox.hahwul.com/og-images/integrations-caido.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Integrations","item":"https://dalfox.hahwul.com/integrations/"},{"@type":"ListItem","position":3,"name":"Caido Workflows"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="integrations">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/integrations/caido/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Caido Workflows</h1>
+          <p>Dalfox works well inside <a href="https://caido.io">Caido</a> workflows. You can feed every interesting request (or selected traffic) straight into Dalfox's engine and turn findings into Caido Findings with one click.</p>
+<p>This page covers the current recommended pattern (v3) and the common &quot;bool gotcha&quot; that trips up workflow authors.</p>
+<h2 id="the-core-pattern">The Core Pattern</h2>
+<p>Caido Workflows can execute a shell step. The step receives the current request (usually as JSON) on stdin. Extract the raw HTTP, hand it to Dalfox via <code>--input-type raw-http</code>, then decide whether to create a Finding.</p>
+<h3 id="minimal-workflow-step-bashzsh">Minimal Workflow Step (bash/zsh)</h3>
+<pre><code class="language-bash hljs">#!/bin/bash
+set -euo pipefail
+
+DALFOX=&quot;${DALFOX_PATH:-/usr/local/bin/dalfox}&quot;
+
+# Caido usually sends { &quot;request&quot;: &quot;&lt;raw HTTP&gt;&quot;, ... }
+RAW=$(cat - | jq -r '.request // .raw // .data.request // empty')
+
+if [[ -z &quot;$RAW&quot; ]]; then
+    echo &quot;No request payload&quot; &gt;&amp;2
+    exit 0
+fi
+
+# Write to temp file (robust for multiline + special chars)
+TMP=$(mktemp)
+printf '%s' &quot;$RAW&quot; &gt; &quot;$TMP&quot;
+
+# Run Dalfox (tune flags to taste)
+&quot;$DALFOX&quot; scan --input-type raw-http &quot;$TMP&quot; \
+    -S \
+    --no-color \
+    --poc-type curl \
+    --timeout 8
+
+FOUND=$?
+
+rm -f &quot;$TMP&quot;
+
+# Exit code 1 from Dalfox means &quot;findings existed&quot;
+if [[ $FOUND -eq 1 ]]; then
+    # Caido If/Else: route this to the &quot;finding&quot; branch
+    echo &quot;XSS detected&quot;
+else
+    # Clean – emit a truthy value so Caido treats it as &quot;no finding&quot;
+    echo &quot;1&quot;
+fi
+</code></pre>
+<h3 id="the-caido-boolean-gotcha-important">The Caido Boolean Gotcha (Important)</h3>
+<p>Caido's Workflow If/Else node evaluates step output using its own <a href="https://docs.caido.io/app/reference/workflow_data_types.html#bool">bool rules</a>. Many strings that look &quot;truthy&quot; to a human (or a normal shell) become <code>false</code> inside Caido.</p>
+<p><strong>The reliable community pattern</strong> (shared by <a href="https://github.com/hahwul/dalfox/discussions/992#discussion-10115370">@m4dni5 in this comment</a>):</p>
+<ul>
+<li>When you have a finding, emit the actual Dalfox output (or a non-empty marker). Caido will see it as the &quot;False&quot; branch.</li>
+<li>When clean, explicitly emit a simple truthy token such as <code>1</code> or <code>true</code>. This goes to the &quot;True&quot; branch.</li>
+</ul>
+<p>Then wire:</p>
+<ul>
+<li><code>False</code> → <strong>Create Finding</strong></li>
+<li><code>True</code> → (optional) Set Color / Tag / Continue</li>
+</ul>
+<p>This is why the examples above deliberately echo a result only on the finding path.</p>
+<h2 id="recommended-flags-for-caido">Recommended Flags for Caido</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-S</code> / <code>--silence</code></td>
+<td>Only POC / finding lines go to stdout (less noise in Caido logs)</td>
+</tr>
+<tr>
+<td><code>--no-color</code></td>
+<td>Clean text for findings, search, and exports (suggested in the community workflow example)</td>
+</tr>
+<tr>
+<td><code>--poc-type curl</code> (or <code>httpie</code>, <code>http-request</code>)</td>
+<td>Ready-to-use repro in the Caido Finding</td>
+</tr>
+<tr>
+<td><code>--timeout 6-10</code></td>
+<td>Per-request budget; keeps workflows snappy</td>
+</tr>
+<tr>
+<td><code>--waf-bypass auto</code></td>
+<td>Still worth it even inside a proxy</td>
+</tr>
+</tbody>
+</table>
+<p>You can also add <code>--report --report-format md</code> if you want the full markdown report captured in the Finding evidence.</p>
+<p><strong>Note on silence:</strong> <code>-S</code> suppresses most logs but the verified POC lines still appear when findings exist. (Community feedback in the linked discussion also requested that <code>-S</code> fully suppress POC output for even cleaner workflow results.) If you want zero output on clean runs, the pattern above (only emit on finding path) already achieves that.</p>
+<h2 id="full-example-ifelse-create-finding">Full Example: If/Else + Create Finding</h2>
+<p>Typical Caido workflow graph:</p>
+<ol>
+<li><strong>Trigger</strong> (Manual / Proxy / Intercept / Scope filter)</li>
+<li><strong>Shell / Execute</strong> step running the script above → output stored in <code>$RESULT</code></li>
+<li><strong>If/Else</strong>
+<ul>
+<li>Condition: previous step output is falsy / &quot;False&quot; path</li>
+<li><strong>False branch (finding)</strong>: Create Finding
+<ul>
+<li>Title: <code>XSS via Dalfox</code></li>
+<li>Request: original</li>
+<li>Evidence / Description: <code>$RESULT</code> (or the PoC lines)</li>
+<li>Severity: High / Medium depending on your rules</li>
+</ul>
+</li>
+<li><strong>True branch (clean)</strong>: Set Color (green) or Add Tag <code>dalfox-clean</code></li>
+</ul>
+</li>
+</ol>
+<p>You can enrich the Finding with more context from Caido (host, method, parameter names, etc.).</p>
+<h2 id="alternative-using-a-file-step-first">Alternative: Using a File Step First</h2>
+<p>Some authors prefer two steps:</p>
+<ol>
+<li>Write the raw request to a temp file (Caido has file-system nodes or you can do it in shell).</li>
+<li>Run <code>dalfox scan --input-type raw-http /path/to/req.txt ...</code></li>
+</ol>
+<p>This is slightly more visible in the workflow graph but easier to debug.</p>
+<h2 id="tips-gotchas">Tips &amp; Gotchas</h2>
+<ul>
+<li><strong>Binary location</strong>: Caido's PATH may not include brew, asdf, or linuxbrew. Use a full path or set <code>DALFOX_PATH</code> env in the workflow / Caido settings and reference <code>$DALFOX_PATH</code>.</li>
+<li><strong>Performance</strong>: On busy browsing, add a Content-Type or in-scope filter <em>before</em> the Dalfox step. Dalfox is fast but you don't need to scan every image/stylesheet.</li>
+<li><strong>Blind XSS</strong>: Add <code>--blind https://your.collaborator/</code> when you want out-of-band detection from Caido-driven traffic.</li>
+<li><strong>DOM XSS</strong>: Works out of the box (AST analysis runs on responses).</li>
+<li><strong>JSON output</strong>: For more advanced post-processing in later workflow nodes you can use <code>--format jsonl</code> and parse the stream.</li>
+</ul>
+<h2 id="updating-from-v2-guides">Updating from v2 Guides</h2>
+<p>Older Dalfox v2 documentation used <code>dalfox pipe --rawdata</code>. In v3 the equivalent is <code>dalfox scan --input-type raw-http</code> (or the hidden <code>dalfox pipe</code> compatibility command with adjusted input handling). The temp-file or process-substitution approach shown above is the most portable.</p>
+<p>See the <a href="../guide/scanning-modes/#raw-http-mode">Scanning Modes</a> page for the canonical raw-http usage.</p>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="../guide/scanning-modes/#raw-http-mode">Scanning Modes – Raw HTTP</a></li>
+<li><a href="../guide/output/">Output &amp; Reports</a></li>
+<li><a href="../guide/waf-bypass/">WAF Bypass</a></li>
+<li>GitHub Discussion <a href="https://github.com/hahwul/dalfox/discussions/992#discussion-10115370">#992 (comment)</a>: original community report with the Caido If/Else boolean workaround script and <code>--no-color</code> suggestion</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#the-core-pattern">The Core Pattern</a><ul><li><a href="#minimal-workflow-step-bashzsh">Minimal Workflow Step (bash/zsh)</a></li><li><a href="#the-caido-boolean-gotcha-important">The Caido Boolean Gotcha (Important)</a></li></ul></li><li><a href="#recommended-flags-for-caido">Recommended Flags for Caido</a></li><li><a href="#full-example-ifelse-create-finding">Full Example: If/Else + Create Finding</a></li><li><a href="#alternative-using-a-file-step-first">Alternative: Using a File Step First</a></li><li><a href="#tips-gotchas">Tips &amp; Gotchas</a></li><li><a href="#updating-from-v2-guides">Updating from v2 Guides</a></li><li><a href="#see-also">See Also</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/integrations/caido.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

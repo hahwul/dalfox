@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Caido Active Workflows와 Findings에서 Dalfox를 자동으로 실행하여 XSS를 실시간으로 잡아냅니다.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Caido 워크플로 · Dalfox</title>
+  <meta property="og:title" content="Caido 워크플로">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/integrations/caido/">
+  <meta property="og:description" content="Caido Active Workflows와 Findings에서 Dalfox를 자동으로 실행하여 XSS를 실시간으로 잡아냅니다.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-caido.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Caido 워크플로">
+  <meta name="twitter:description" content="Caido Active Workflows와 Findings에서 Dalfox를 자동으로 실행하여 XSS를 실시간으로 잡아냅니다.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-caido.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/integrations/caido/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/integrations/caido/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/integrations/caido/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Caido 워크플로","url":"https://dalfox.hahwul.com/ko/integrations/caido/","description":"Caido Active Workflows와 Findings에서 Dalfox를 자동으로 실행하여 XSS를 실시간으로 잡아냅니다.","image":"https://dalfox.hahwul.com/og-images/ko-integrations-caido.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"연동","item":"https://dalfox.hahwul.com/ko/integrations/"},{"@type":"ListItem","position":3,"name":"Caido 워크플로"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="integrations">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/integrations/caido/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Caido 워크플로</h1>
+          <p>Dalfox는 <a href="https://caido.io">Caido</a> 워크플로 안에서 잘 작동합니다. 관심 있는 모든 요청(또는 선택한 트래픽)을 Dalfox 엔진에 곧바로 넣고, 탐지 결과를 클릭 한 번으로 Caido Findings로 전환할 수 있습니다.</p>
+<p>이 페이지는 현재 권장 패턴(v3)과 워크플로 작성자를 곤란하게 만드는 흔한 &quot;bool 함정&quot;을 다룹니다.</p>
+<h2 id="핵심-패턴">핵심 패턴</h2>
+<p>Caido Workflows는 셸 단계를 실행할 수 있습니다. 이 단계는 현재 요청을(보통 JSON으로) stdin으로 받습니다. 원시 HTTP를 추출하여 <code>--input-type raw-http</code>로 Dalfox에 넘긴 다음, Finding을 생성할지 결정합니다.</p>
+<h3 id="최소-워크플로-단계-bashzsh">최소 워크플로 단계 (bash/zsh)</h3>
+<pre><code class="language-bash hljs">#!/bin/bash
+set -euo pipefail
+
+DALFOX=&quot;${DALFOX_PATH:-/usr/local/bin/dalfox}&quot;
+
+# Caido usually sends { &quot;request&quot;: &quot;&lt;raw HTTP&gt;&quot;, ... }
+RAW=$(cat - | jq -r '.request // .raw // .data.request // empty')
+
+if [[ -z &quot;$RAW&quot; ]]; then
+    echo &quot;No request payload&quot; &gt;&amp;2
+    exit 0
+fi
+
+# Write to temp file (robust for multiline + special chars)
+TMP=$(mktemp)
+printf '%s' &quot;$RAW&quot; &gt; &quot;$TMP&quot;
+
+# Run Dalfox (tune flags to taste)
+&quot;$DALFOX&quot; scan --input-type raw-http &quot;$TMP&quot; \
+    -S \
+    --no-color \
+    --poc-type curl \
+    --timeout 8
+
+FOUND=$?
+
+rm -f &quot;$TMP&quot;
+
+# Exit code 1 from Dalfox means &quot;findings existed&quot;
+if [[ $FOUND -eq 1 ]]; then
+    # Caido If/Else: route this to the &quot;finding&quot; branch
+    echo &quot;XSS detected&quot;
+else
+    # Clean – emit a truthy value so Caido treats it as &quot;no finding&quot;
+    echo &quot;1&quot;
+fi
+</code></pre>
+<h3 id="caido-불리언-함정-중요">Caido 불리언 함정 (중요)</h3>
+<p>Caido의 Workflow If/Else 노드는 자체 <a href="https://docs.caido.io/app/reference/workflow_data_types.html#bool">bool 규칙</a>을 사용하여 단계 출력을 평가합니다. 사람(또는 일반적인 셸)에게 &quot;참 같아 보이는&quot; 많은 문자열이 Caido 내부에서는 <code>false</code>가 됩니다.</p>
+<p><strong>신뢰할 수 있는 커뮤니티 패턴</strong>(<a href="https://github.com/hahwul/dalfox/discussions/992#discussion-10115370">이 댓글의 @m4dni5</a>가 공유):</p>
+<ul>
+<li>탐지 결과가 있을 때는 실제 Dalfox 출력(또는 비어 있지 않은 마커)을 내보냅니다. Caido는 이를 &quot;False&quot; 분기로 봅니다.</li>
+<li>깨끗할 때는 <code>1</code>이나 <code>true</code> 같은 단순한 참 토큰을 명시적으로 내보냅니다. 이는 &quot;True&quot; 분기로 갑니다.</li>
+</ul>
+<p>그런 다음 다음과 같이 연결합니다:</p>
+<ul>
+<li><code>False</code> → <strong>Create Finding</strong></li>
+<li><code>True</code> → (선택) Set Color / Tag / Continue</li>
+</ul>
+<p>이것이 위 예시들이 탐지 경로에서만 의도적으로 결과를 출력하는 이유입니다.</p>
+<h2 id="caido-권장-플래그">Caido 권장 플래그</h2>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>이유</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-S</code> / <code>--silence</code></td>
+<td>POC / 탐지 결과 라인만 stdout으로 나갑니다 (Caido 로그의 노이즈 감소)</td>
+</tr>
+<tr>
+<td><code>--no-color</code></td>
+<td>탐지 결과, 검색, 내보내기를 위한 깔끔한 텍스트 (커뮤니티 워크플로 예시에서 제안됨)</td>
+</tr>
+<tr>
+<td><code>--poc-type curl</code> (또는 <code>httpie</code>, <code>http-request</code>)</td>
+<td>Caido Finding에서 바로 사용할 수 있는 재현 코드</td>
+</tr>
+<tr>
+<td><code>--timeout 6-10</code></td>
+<td>요청별 예산; 워크플로를 빠릿하게 유지</td>
+</tr>
+<tr>
+<td><code>--waf-bypass auto</code></td>
+<td>프록시 내부에서도 여전히 가치 있음</td>
+</tr>
+</tbody>
+</table>
+<p>Finding 증거에 전체 마크다운 보고서를 담고 싶다면 <code>--report --report-format md</code>를 추가할 수도 있습니다.</p>
+<p><strong>silence 참고:</strong> <code>-S</code>는 대부분의 로그를 억제하지만 탐지 결과가 있을 때는 검증된 POC 라인이 여전히 나타납니다. (연결된 논의의 커뮤니티 피드백에서는 더 깔끔한 워크플로 결과를 위해 <code>-S</code>가 POC 출력도 완전히 억제하도록 요청하기도 했습니다.) 깨끗한 실행에서 출력이 전혀 없기를 원한다면, 위 패턴(탐지 경로에서만 내보내기)이 이미 그것을 달성합니다.</p>
+<h2 id="전체-예시-ifelse-create-finding">전체 예시: If/Else + Create Finding</h2>
+<p>일반적인 Caido 워크플로 그래프:</p>
+<ol>
+<li><strong>Trigger</strong> (Manual / Proxy / Intercept / Scope filter)</li>
+<li><strong>Shell / Execute</strong> 단계에서 위 스크립트를 실행 → 출력이 <code>$RESULT</code>에 저장됨</li>
+<li><strong>If/Else</strong>
+<ul>
+<li>조건: 이전 단계 출력이 거짓 / &quot;False&quot; 경로</li>
+<li><strong>False 분기 (탐지)</strong>: Create Finding
+<ul>
+<li>제목: <code>XSS via Dalfox</code></li>
+<li>요청: 원본</li>
+<li>증거 / 설명: <code>$RESULT</code> (또는 PoC 라인)</li>
+<li>심각도: 규칙에 따라 High / Medium</li>
+</ul>
+</li>
+<li><strong>True 분기 (깨끗)</strong>: Set Color (녹색) 또는 Add Tag <code>dalfox-clean</code></li>
+</ul>
+</li>
+</ol>
+<p>Caido의 추가 컨텍스트(호스트, 메서드, 파라미터 이름 등)로 Finding을 풍부하게 할 수 있습니다.</p>
+<h2 id="대안-파일-단계-먼저-사용하기">대안: 파일 단계 먼저 사용하기</h2>
+<p>일부 작성자는 두 단계를 선호합니다:</p>
+<ol>
+<li>원시 요청을 임시 파일에 씁니다 (Caido에는 파일 시스템 노드가 있거나 셸에서 할 수 있습니다).</li>
+<li><code>dalfox scan --input-type raw-http /path/to/req.txt ...</code>를 실행합니다</li>
+</ol>
+<p>이것은 워크플로 그래프에서 약간 더 잘 보이지만 디버그하기 쉽습니다.</p>
+<h2 id="팁-및-함정">팁 및 함정</h2>
+<ul>
+<li><strong>바이너리 위치</strong>: Caido의 PATH에는 brew, asdf, linuxbrew가 포함되지 않을 수 있습니다. 전체 경로를 사용하거나 워크플로 / Caido 설정에서 <code>DALFOX_PATH</code> 환경 변수를 설정하고 <code>$DALFOX_PATH</code>를 참조하세요.</li>
+<li><strong>성능</strong>: 브라우징이 바쁠 때는 Dalfox 단계 <em>앞에</em> Content-Type 또는 스코프 내 필터를 추가하세요. Dalfox는 빠르지만 모든 이미지/스타일시트를 스캔할 필요는 없습니다.</li>
+<li><strong>Blind XSS</strong>: Caido가 구동하는 트래픽에서 대역 외(out-of-band) 탐지를 원할 때 <code>--blind https://your.collaborator/</code>를 추가하세요.</li>
+<li><strong>DOM XSS</strong>: 기본 설정으로 바로 작동합니다 (AST 분석이 응답에서 실행됩니다).</li>
+<li><strong>JSON 출력</strong>: 이후 워크플로 노드에서 더 고급 후처리를 하려면 <code>--format jsonl</code>을 사용하여 스트림을 파싱할 수 있습니다.</li>
+</ul>
+<h2 id="v2-가이드에서-업데이트하기">v2 가이드에서 업데이트하기</h2>
+<p>이전 Dalfox v2 문서는 <code>dalfox pipe --rawdata</code>를 사용했습니다. v3에서 이에 해당하는 것은 <code>dalfox scan --input-type raw-http</code>(또는 입력 처리가 조정된 숨겨진 <code>dalfox pipe</code> 호환 명령)입니다. 위에 표시된 임시 파일 또는 프로세스 치환 방식이 가장 이식성이 높습니다.</p>
+<p>표준 raw-http 사용법은 <a href="../guide/scanning-modes/#raw-http-mode">스캐닝 모드</a> 페이지를 참조하세요.</p>
+<h2 id="참고">참고</h2>
+<ul>
+<li><a href="../guide/scanning-modes/#raw-http-mode">스캐닝 모드 – Raw HTTP</a></li>
+<li><a href="../guide/output/">출력 및 보고서</a></li>
+<li><a href="../guide/waf-bypass/">WAF 우회</a></li>
+<li>GitHub 논의 <a href="https://github.com/hahwul/dalfox/discussions/992#discussion-10115370">#992 (댓글)</a>: Caido If/Else 불리언 우회 스크립트와 <code>--no-color</code> 제안이 담긴 원본 커뮤니티 보고</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#핵심-패턴">핵심 패턴</a><ul><li><a href="#최소-워크플로-단계-bashzsh">최소 워크플로 단계 (bash/zsh)</a></li><li><a href="#caido-불리언-함정-중요">Caido 불리언 함정 (중요)</a></li></ul></li><li><a href="#caido-권장-플래그">Caido 권장 플래그</a></li><li><a href="#전체-예시-ifelse-create-finding">전체 예시: If/Else + Create Finding</a></li><li><a href="#대안-파일-단계-먼저-사용하기">대안: 파일 단계 먼저 사용하기</a></li><li><a href="#팁-및-함정">팁 및 함정</a></li><li><a href="#v2-가이드에서-업데이트하기">v2 가이드에서 업데이트하기</a></li><li><a href="#참고">참고</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/integrations/caido.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Agent Skill · Dalfox</title>
+  <meta property="og:title" content="Agent Skill">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/integrations/skills/">
+  <meta property="og:description" content="Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/integrations-skills.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Agent Skill">
+  <meta name="twitter:description" content="Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/integrations-skills.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/integrations/skills/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/integrations/skills/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/integrations/skills/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Agent Skill","url":"https://dalfox.hahwul.com/integrations/skills/","description":"Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents.","image":"https://dalfox.hahwul.com/og-images/integrations-skills.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Integrations","item":"https://dalfox.hahwul.com/integrations/"},{"@type":"ListItem","position":3,"name":"Agent Skill"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="integrations">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/integrations/skills/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Agent Skill</h1>
+          <p>Dalfox ships a <strong>SKILL.md</strong> that teaches any skill-aware agent how to drive Dalfox correctly: authorization gate first, MCP over CLI, preflight before heavy scans, <code>V &gt; A &gt; R</code> finding prioritization. Point your agent at it and the model stops guessing flags.</p>
+<p>The file lives at <a href="https://github.com/hahwul/dalfox/blob/main/skills/dalfox/SKILL.md"><code>skills/dalfox/SKILL.md</code></a> in the repository, so once you've cloned Dalfox you already have it locally.</p>
+<h2 id="install-with-npx-skills">Install with <code>npx skills</code></h2>
+<p>The easiest way is the <a href="https://github.com/vercel-labs/skills">open agent-skills CLI</a>:</p>
+<pre><code class="language-bash hljs"># Install to the current project (committed, shared with the team)
+npx skills add hahwul/dalfox
+
+# Or install globally (~/&lt;agent&gt;/skills/, available everywhere)
+npx skills add hahwul/dalfox -g
+</code></pre>
+<p>The CLI auto-detects which agents you use (Claude Code, Cursor, Codex, OpenCode, and <a href="https://github.com/vercel-labs/skills#available-agents">~45 others</a>) and links the skill for each. Pick a specific agent if you only want one:</p>
+<pre><code class="language-bash hljs"># Only Claude Code
+npx skills add hahwul/dalfox -a claude-code
+
+# Non-interactive (CI-friendly)
+npx skills add hahwul/dalfox -g -a claude-code -y
+</code></pre>
+<p>To update later:</p>
+<pre><code class="language-bash hljs">npx skills update dalfox
+</code></pre>
+<p>To remove:</p>
+<pre><code class="language-bash hljs">npx skills remove dalfox
+</code></pre>
+<h2 id="install-manually">Install manually</h2>
+<p>If you prefer not to run <code>npx</code>, clone the skill file into the location your agent expects. For Claude Code that's <code>~/.claude/skills/dalfox/SKILL.md</code>:</p>
+<pre><code class="language-bash hljs">mkdir -p ~/.claude/skills/dalfox
+curl -o ~/.claude/skills/dalfox/SKILL.md \
+  https://raw.githubusercontent.com/hahwul/dalfox/main/skills/dalfox/SKILL.md
+</code></pre>
+<p>Other clients read from their own skills directory; see your agent's docs for the exact path.</p>
+<h2 id="what-the-skill-covers">What the skill covers</h2>
+<ul>
+<li><strong>Trigger conditions:</strong> fires when the user asks to scan a URL for XSS, enumerate reflected parameters, or mentions &quot;dalfox&quot; explicitly. Skips non-XSS vulnerabilities.</li>
+<li><strong>Authorization gate:</strong> the skill refuses to scan until the user confirms they're authorized to send payloads to the target.</li>
+<li><strong>Mode detection:</strong> prefers MCP tools when available, falls back to the <code>dalfox</code> CLI, and tells the user how to install if neither is present.</li>
+<li><strong>MCP playbook:</strong> <code>preflight_dalfox</code> → <code>scan_with_dalfox</code> → poll <code>get_results_dalfox</code> (honoring <code>suggested_poll_interval_ms</code>) → <code>delete_scan_dalfox</code> when done. Includes the validated input bounds (timeout 1–299 s, delay 0–9999 ms) so the agent doesn't send values Dalfox will reject.</li>
+<li><strong>CLI scenarios:</strong> POST bodies, authenticated sessions, proxy-through-Burp, blind XSS with a callback URL, stored XSS, pipe input, fast smoke tests, maximum-coverage runs, and machine-readable output.</li>
+<li><strong>Result interpretation:</strong> finding type legend (<code>V</code> verified DOM execution &gt; <code>A</code> AST-detected &gt; <code>R</code> reflected-only) so the agent leads with confirmed hits.</li>
+<li><strong>Failure modes:</strong> what <code>reachable: false</code>, all-R findings, a stuck scan, or an <code>invalid_params</code> response actually mean, and how to recover.</li>
+</ul>
+<h2 id="prerequisite">Prerequisite</h2>
+<p>The skill assumes the <code>dalfox</code> binary or <a href="./mcp/">MCP server</a> is reachable from the agent's environment. Install Dalfox first (<a href="../../getting-started/installation/">installation guide</a>), then install the skill.</p>
+<h2 id="authoring-tips">Authoring tips</h2>
+<p>The skill file lives at <a href="https://github.com/hahwul/dalfox/tree/main/skills/dalfox"><code>skills/dalfox/SKILL.md</code></a> in the repository. Contributions are welcome; keep it focused on <em>how an agent should drive Dalfox</em>, not on restating CLI reference material that already lives in the <a href="../../reference/cli/">CLI reference</a>.</p>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#install-with-npx-skills">Install with npx skills</a></li><li><a href="#install-manually">Install manually</a></li><li><a href="#what-the-skill-covers">What the skill covers</a></li><li><a href="#prerequisite">Prerequisite</a></li><li><a href="#authoring-tips">Authoring tips</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/integrations/skills.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

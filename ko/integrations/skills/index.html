@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Claude Code, Cursor, OpenCode, Codex 및 기타 스킬 인식 에이전트를 위한 드롭인 `SKILL.md`.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>에이전트 스킬 · Dalfox</title>
+  <meta property="og:title" content="에이전트 스킬">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/integrations/skills/">
+  <meta property="og:description" content="Claude Code, Cursor, OpenCode, Codex 및 기타 스킬 인식 에이전트를 위한 드롭인 `SKILL.md`.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-skills.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="에이전트 스킬">
+  <meta name="twitter:description" content="Claude Code, Cursor, OpenCode, Codex 및 기타 스킬 인식 에이전트를 위한 드롭인 `SKILL.md`.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-integrations-skills.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/integrations/skills/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/integrations/skills/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/integrations/skills/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"에이전트 스킬","url":"https://dalfox.hahwul.com/ko/integrations/skills/","description":"Claude Code, Cursor, OpenCode, Codex 및 기타 스킬 인식 에이전트를 위한 드롭인 `SKILL.md`.","image":"https://dalfox.hahwul.com/og-images/ko-integrations-skills.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"연동","item":"https://dalfox.hahwul.com/ko/integrations/"},{"@type":"ListItem","position":3,"name":"에이전트 스킬"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="integrations">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/integrations/skills/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>에이전트 스킬</h1>
+          <p>Dalfox는 스킬을 인식하는 모든 에이전트에게 Dalfox를 올바르게 구동하는 법을 가르치는 <strong>SKILL.md</strong>를 함께 제공합니다: 인가 게이트 우선, CLI보다 MCP 우선, 무거운 스캔 전 프리플라이트, <code>V &gt; A &gt; R</code> 탐지 결과 우선순위. 에이전트가 이 파일을 참조하게 하면 모델이 플래그를 추측하지 않게 됩니다.</p>
+<p>이 파일은 저장소의 <a href="https://github.com/hahwul/dalfox/blob/main/skills/dalfox/SKILL.md"><code>skills/dalfox/SKILL.md</code></a>에 있으므로, Dalfox를 클론하면 이미 로컬에 확보하게 됩니다.</p>
+<h2 id="npx-skills로-설치"><code>npx skills</code>로 설치</h2>
+<p>가장 쉬운 방법은 <a href="https://github.com/vercel-labs/skills">오픈 agent-skills CLI</a>입니다:</p>
+<pre><code class="language-bash hljs"># Install to the current project (committed, shared with the team)
+npx skills add hahwul/dalfox
+
+# Or install globally (~/&lt;agent&gt;/skills/, available everywhere)
+npx skills add hahwul/dalfox -g
+</code></pre>
+<p>이 CLI는 사용 중인 에이전트(Claude Code, Cursor, Codex, OpenCode, 그리고 <a href="https://github.com/vercel-labs/skills#available-agents">약 45개의 다른 에이전트</a>)를 자동으로 감지하여 각각에 스킬을 연결합니다. 하나만 원한다면 특정 에이전트를 지정하십시오:</p>
+<pre><code class="language-bash hljs"># Only Claude Code
+npx skills add hahwul/dalfox -a claude-code
+
+# Non-interactive (CI-friendly)
+npx skills add hahwul/dalfox -g -a claude-code -y
+</code></pre>
+<p>나중에 업데이트하려면:</p>
+<pre><code class="language-bash hljs">npx skills update dalfox
+</code></pre>
+<p>제거하려면:</p>
+<pre><code class="language-bash hljs">npx skills remove dalfox
+</code></pre>
+<h2 id="수동으로-설치">수동으로 설치</h2>
+<p><code>npx</code>를 실행하고 싶지 않다면, 스킬 파일을 에이전트가 기대하는 위치에 클론하십시오. Claude Code의 경우 <code>~/.claude/skills/dalfox/SKILL.md</code>입니다:</p>
+<pre><code class="language-bash hljs">mkdir -p ~/.claude/skills/dalfox
+curl -o ~/.claude/skills/dalfox/SKILL.md \
+  https://raw.githubusercontent.com/hahwul/dalfox/main/skills/dalfox/SKILL.md
+</code></pre>
+<p>다른 클라이언트는 각자의 스킬 디렉터리에서 읽어 들입니다. 정확한 경로는 해당 에이전트의 문서를 참고하십시오.</p>
+<h2 id="스킬이-다루는-내용">스킬이 다루는 내용</h2>
+<ul>
+<li><strong>트리거 조건:</strong> 사용자가 URL의 XSS를 스캔하거나, 반사되는 파라미터를 열거하거나, &quot;dalfox&quot;를 명시적으로 언급할 때 발동됩니다. XSS가 아닌 취약점은 건너뜁니다.</li>
+<li><strong>인가 게이트:</strong> 스킬은 사용자가 대상에 페이로드를 보낼 권한이 있음을 확인하기 전까지 스캔을 거부합니다.</li>
+<li><strong>모드 감지:</strong> 사용 가능하면 MCP 도구를 우선 사용하고, 그렇지 않으면 <code>dalfox</code> CLI로 대체하며, 둘 다 없으면 설치 방법을 사용자에게 안내합니다.</li>
+<li><strong>MCP 플레이북:</strong> <code>preflight_dalfox</code> → <code>scan_with_dalfox</code> → <code>get_results_dalfox</code> 폴링(<code>suggested_poll_interval_ms</code> 준수) → 완료 시 <code>delete_scan_dalfox</code>. 검증된 입력 범위(timeout 1–299초, delay 0–9999ms)를 포함하여 에이전트가 Dalfox가 거부할 값을 보내지 않게 합니다.</li>
+<li><strong>CLI 시나리오:</strong> POST 본문, 인증된 세션, Burp 경유 프록시, 콜백 URL을 사용하는 블라인드 XSS, 스토어드 XSS, 파이프 입력, 빠른 스모크 테스트, 최대 커버리지 실행, 기계 판독 가능 출력.</li>
+<li><strong>결과 해석:</strong> 탐지 결과 유형 범례(<code>V</code> 검증된 DOM 실행 &gt; <code>A</code> AST 탐지 &gt; <code>R</code> 반사만 확인)로 에이전트가 확인된 히트를 앞세우도록 합니다.</li>
+<li><strong>실패 모드:</strong> <code>reachable: false</code>, 모든 결과가 R인 경우, 멈춘 스캔, <code>invalid_params</code> 응답이 실제로 무엇을 의미하는지, 그리고 이를 어떻게 복구하는지.</li>
+</ul>
+<h2 id="사전-요구-사항">사전 요구 사항</h2>
+<p>이 스킬은 <code>dalfox</code> 바이너리 또는 <a href="./mcp/">MCP 서버</a>가 에이전트 환경에서 도달 가능하다고 가정합니다. 먼저 Dalfox를 설치한 뒤(<a href="../../getting-started/installation/">설치 가이드</a>), 스킬을 설치하십시오.</p>
+<h2 id="작성-팁">작성 팁</h2>
+<p>스킬 파일은 저장소의 <a href="https://github.com/hahwul/dalfox/tree/main/skills/dalfox"><code>skills/dalfox/SKILL.md</code></a>에 있습니다. 기여를 환영합니다. 다만 이미 <a href="../../reference/cli/">CLI 참조</a>에 있는 CLI 참조 자료를 다시 서술하기보다는 <em>에이전트가 Dalfox를 어떻게 구동해야 하는지</em>에 초점을 맞춰 주십시오.</p>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#npx-skills로-설치">npx skills로 설치</a></li><li><a href="#수동으로-설치">수동으로 설치</a></li><li><a href="#스킬이-다루는-내용">스킬이 다루는 내용</a></li><li><a href="#사전-요구-사항">사전 요구 사항</a></li><li><a href="#작성-팁">작성 팁</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/integrations/skills.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>
