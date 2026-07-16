@@ -5,6 +5,15 @@
   var input = document.getElementById('searchInput');
   var resultsEl = document.getElementById('searchResults');
 
+  // The site ships one combined search index for all languages. Scope results
+  // to the language the reader is currently in, so a Korean page searches
+  // Korean docs and an English page searches English docs.
+  var pageIsKo = /^\/ko(\/|$)/.test(location.pathname);
+  function inCurrentLang(url) {
+    var path = (url || '').replace(/^https?:\/\/[^/]+/, '');
+    return /^\/ko(\/|$)/.test(path) === pageIsKo;
+  }
+
   function loadSearchData(cb) {
     if (searchData) return cb(searchData);
     var base = document.querySelector('link[rel="stylesheet"]').href;
@@ -77,6 +86,7 @@
     var results = [];
     for (var i = 0; i < searchData.length; i++) {
       var item = searchData[i];
+      if (!inCurrentLang(item.url)) continue;
       var titleIdx = item.title.toLowerCase().indexOf(q);
       var contentIdx = item.content.toLowerCase().indexOf(q);
       if (titleIdx !== -1 || contentIdx !== -1) {

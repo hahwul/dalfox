@@ -1,66 +1,84 @@
+{% set ko = page_language == "ko" %}
+{% set lp = "" %}{% if ko %}{% set lp = "/ko" %}{% endif %}
+{% set gs_links = [
+  {"en": "Overview", "ko": "개요", "u": "/getting-started/"},
+  {"en": "Installation", "ko": "설치", "u": "/getting-started/installation/"},
+  {"en": "Quick Start", "ko": "빠른 시작", "u": "/getting-started/quick-start/"},
+  {"en": "Configuration", "ko": "설정", "u": "/getting-started/configuration/"}
+] %}
+{% set guide_links = [
+  {"en": "Overview", "ko": "개요", "u": "/guide/"},
+  {"en": "Scanning Modes", "ko": "스캔 모드", "u": "/guide/scanning-modes/"},
+  {"en": "Parameters & Discovery", "ko": "파라미터와 탐색", "u": "/guide/parameters/"},
+  {"en": "Payloads & Encoding", "ko": "페이로드와 인코딩", "u": "/guide/payloads/"},
+  {"en": "WAF Bypass", "ko": "WAF 우회", "u": "/guide/waf-bypass/"},
+  {"en": "Stored XSS", "ko": "저장형 XSS", "u": "/guide/stored-xss/"},
+  {"en": "Output & Reports", "ko": "출력과 리포트", "u": "/guide/output/"}
+] %}
+{% set integ_links = [
+  {"en": "Overview", "ko": "개요", "u": "/integrations/"},
+  {"en": "REST API Server", "ko": "REST API 서버", "u": "/integrations/server/"},
+  {"en": "MCP Server", "ko": "MCP 서버", "u": "/integrations/mcp/"},
+  {"en": "Caido Workflows", "ko": "Caido 워크플로", "u": "/integrations/caido/"},
+  {"en": "Agent Skill", "ko": "에이전트 스킬", "u": "/integrations/skills/"}
+] %}
+{% set ref_links = [
+  {"en": "Overview", "ko": "개요", "u": "/reference/"},
+  {"en": "CLI Reference", "ko": "CLI 레퍼런스", "u": "/reference/cli/"},
+  {"en": "Config File", "ko": "설정 파일", "u": "/reference/config/"},
+  {"en": "Environment", "ko": "환경 변수", "u": "/reference/environment/"},
+  {"en": "XSSMaze Score", "ko": "XSSMaze 점수", "u": "/reference/xssmaze/"}
+] %}
 <aside class="docs-sidebar" id="docs-sidebar">
   <nav class="sidebar-nav">
     <div class="sidebar-section">
       <div class="sidebar-title">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
-        Getting Started
+        {% if ko %}시작하기{% else %}Getting Started{% endif %}
       </div>
       <ul class="sidebar-links">
-        <li><a href="{{ base_url }}/getting-started/">Overview</a></li>
-        <li><a href="{{ base_url }}/getting-started/installation/">Installation</a></li>
-        <li><a href="{{ base_url }}/getting-started/quick-start/">Quick Start</a></li>
-        <li><a href="{{ base_url }}/getting-started/configuration/">Configuration</a></li>
+        {% for l in gs_links %}<li><a href="{{ base_url }}{{ lp }}{{ l.u }}">{% if ko %}{{ l.ko }}{% else %}{{ l.en }}{% endif %}</a></li>
+        {% endfor %}
       </ul>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-title">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
-        Guide
+        {% if ko %}가이드{% else %}Guide{% endif %}
       </div>
       <ul class="sidebar-links">
-        <li><a href="{{ base_url }}/guide/">Overview</a></li>
-        <li><a href="{{ base_url }}/guide/scanning-modes/">Scanning Modes</a></li>
-        <li><a href="{{ base_url }}/guide/parameters/">Parameters &amp; Discovery</a></li>
-        <li><a href="{{ base_url }}/guide/payloads/">Payloads &amp; Encoding</a></li>
-        <li><a href="{{ base_url }}/guide/waf-bypass/">WAF Bypass</a></li>
-        <li><a href="{{ base_url }}/guide/stored-xss/">Stored XSS</a></li>
-        <li><a href="{{ base_url }}/guide/output/">Output &amp; Reports</a></li>
+        {% for l in guide_links %}<li><a href="{{ base_url }}{{ lp }}{{ l.u }}">{% if ko %}{{ l.ko }}{% else %}{{ l.en }}{% endif %}</a></li>
+        {% endfor %}
       </ul>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-title">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        Integrations
+        {% if ko %}연동{% else %}Integrations{% endif %}
       </div>
       <ul class="sidebar-links">
-        <li><a href="{{ base_url }}/integrations/">Overview</a></li>
-        <li><a href="{{ base_url }}/integrations/server/">REST API Server</a></li>
-        <li><a href="{{ base_url }}/integrations/mcp/">MCP Server</a></li>
-        <li><a href="{{ base_url }}/integrations/caido/">Caido Workflows</a></li>
-        <li><a href="{{ base_url }}/integrations/skills/">Agent Skill</a></li>
+        {% for l in integ_links %}<li><a href="{{ base_url }}{{ lp }}{{ l.u }}">{% if ko %}{{ l.ko }}{% else %}{{ l.en }}{% endif %}</a></li>
+        {% endfor %}
       </ul>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-title">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        Reference
+        {% if ko %}레퍼런스{% else %}Reference{% endif %}
       </div>
       <ul class="sidebar-links">
-        <li><a href="{{ base_url }}/reference/">Overview</a></li>
-        <li><a href="{{ base_url }}/reference/cli/">CLI Reference</a></li>
-        <li><a href="{{ base_url }}/reference/config/">Config File</a></li>
-        <li><a href="{{ base_url }}/reference/environment/">Environment</a></li>
-        <li><a href="{{ base_url }}/reference/xssmaze/">XSSMaze Score</a></li>
+        {% for l in ref_links %}<li><a href="{{ base_url }}{{ lp }}{{ l.u }}">{% if ko %}{{ l.ko }}{% else %}{{ l.en }}{% endif %}</a></li>
+        {% endfor %}
       </ul>
     </div>
   </nav>
   <div class="sidebar-footer">
     <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v{{ site.data.dalfox.version }}" target="_blank" rel="noopener" title="Dalfox v{{ site.data.dalfox.version }} release notes">v{{ site.data.dalfox.version }}</a>
-    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="{% if ko %}사이드바 접기{% else %}Collapse sidebar{% endif %}" title="{% if ko %}사이드바 접기{% else %}Collapse sidebar{% endif %}">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
     </button>
   </div>
 </aside>
-<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="{% if ko %}사이드바 펼치기{% else %}Expand sidebar{% endif %}" title="{% if ko %}사이드바 펼치기{% else %}Expand sidebar{% endif %}">
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
 </button>

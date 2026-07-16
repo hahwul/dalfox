@@ -5,10 +5,18 @@
       <article class="docs-article">
         <h1>{{ page.title | e }}</h1>
         {{ content }}
-        <h2 class="section-children-heading">In This Section</h2>
+        <h2 class="section-children-heading">{% if page_language == "ko" %}이 섹션의 문서{% else %}In This Section{% endif %}</h2>
         <ul class="section-list">
-          {{ section.list }}
+        {% for p in section.pages | sort(attribute="weight") %}
+          <li>
+            <a href="{{ base_url }}{{ p.url }}">
+              <span class="section-list-title">{{ p.title | e }}</span>
+              {% if p.description %}<span class="section-list-desc">{{ p.description | e }}</span>{% endif %}
+            </a>
+          </li>
+        {% endfor %}
         </ul>
         {{ pagination }}
       </article>
+{% set has_source = true %}
 {% include "footer.html" %}
