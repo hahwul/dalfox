@@ -361,6 +361,40 @@ impl Config {
             if let Some(v) = scan.sxss_retries {
                 args.sxss_retries = v;
             }
+            if let Some(v) = scan.skip_ast_analysis {
+                args.skip_ast_analysis = v;
+            }
+            if let Some(v) = scan.analyze_external_js {
+                args.analyze_external_js = v;
+            }
+            if let Some(v) = scan.detect_outdated_libs {
+                args.detect_outdated_libs = v;
+            }
+            // HPP
+            if let Some(v) = scan.hpp {
+                args.hpp = v;
+            }
+            // WAF
+            if let Some(v) = &scan.waf_bypass {
+                args.waf_bypass = v.clone();
+            }
+            if let Some(v) = scan.skip_waf_probe {
+                args.skip_waf_probe = v;
+            }
+            if let Some(v) = &scan.force_waf {
+                args.force_waf = Some(v.clone());
+            }
+            if let Some(v) = scan.waf_evasion {
+                args.waf_evasion = v;
+            }
+            if let Some(v) = scan.waf_min_confidence {
+                args.waf_min_confidence = v;
+            }
+            // NOTE: `debug` is intentionally not applied here. It is a process-
+            // global toggle (`crate::DEBUG`), not a `ScanArgs` field, so it is
+            // handled only in `apply_to_scan_args_if_default` (the overlay the
+            // CLI actually uses). Mirroring it here would mutate global state
+            // from a method whose contract is "write ScanArgs fields".
         }
     }
 
@@ -937,6 +971,170 @@ impl Config {
             }
         }
     }
+
+    /// Normalize and validate config values that the CLI would otherwise
+    /// normalize or reject through clap value-parsers. See
+    /// [`ScanConfig::normalize_and_validate`]; returns human-readable warnings
+    /// for the caller to surface (empty when the config is clean).
+    pub fn normalize_and_validate(&mut self) -> Vec<String> {
+        match self.scan.as_mut() {
+            Some(scan) => scan.normalize_and_validate(),
+            None => Vec::new(),
+        }
+    }
+}
+
+/// Reset `field` to `None` (falling back to the built-in default) and record a
+/// warning when its value is not one of `allowed`. Mirrors clap's
+/// `PossibleValuesParser` for the config-file path, which bypasses clap.
+fn reject_unless_allowed(
+    field: &mut Option<String>,
+    allowed: &[&str],
+    name: &str,
+    warnings: &mut Vec<String>,
+) {
+    if let Some(v) = field
+        && !allowed.contains(&v.as_str())
+    {
+        warnings.push(format!(
+            "config {name}: '{v}' is not a valid value (expected one of: {}); ignoring",
+            allowed.join(", ")
+        ));
+        *field = None;
+    }
+}
+
+/// List variant of [`reject_unless_allowed`]: if any element is invalid, drop
+/// the whole list back to `None` (a partially-applied list would be surprising)
+/// and warn, naming the offending values.
+fn reject_list_unless_allowed(
+    field: &mut Option<Vec<String>>,
+    allowed: &[&str],
+    name: &str,
+    warnings: &mut Vec<String>,
+) {
+    if let Some(list) = field {
+        let invalid: Vec<String> = list
+            .iter()
+            .filter(|v| !allowed.contains(&v.as_str()))
+            .cloned()
+            .collect();
+        if !invalid.is_empty() {
+            warnings.push(format!(
+                "config {name}: invalid value(s) [{}] (expected each of: {}); ignoring",
+                invalid.join(", "),
+                allowed.join(", ")
+            ));
+            *field = None;
+        }
+    }
+}
+
+impl ScanConfig {
+    /// Normalize and validate the free-form string / numeric fields that the
+    /// CLI would otherwise route through clap value-parsers (`--format`,
+    /// `--method`, `--limit`, …). A config file is deserialized straight into
+    /// this struct and never sees clap, so without this pass an invalid value
+    /// is copied verbatim into [`crate::cmd::scan::ScanArgs`] and silently
+    /// misbehaves — a lowercase `method = "post"` breaks the `== "POST"`
+    /// comparisons that drive discovery, `format = "xml"` falls through to a
+    /// degraded output writer, and `limit = 0` resurrects the old "show no
+    /// findings" behavior clap now rejects outright.
+    ///
+    /// Each invalid field is reset to `None` so it falls back to the built-in
+    /// default instead of corrupting the scan, and a human-readable warning is
+    /// returned for the caller to surface (empty vec == clean). `method` and
+    /// `force_waf` are additionally normalized in place (upper / lower-cased)
+    /// exactly as their CLI parsers do, so a valid-but-differently-cased value
+    /// is accepted rather than dropped.
+    pub fn normalize_and_validate(&mut self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // `method` — uppercase + validate, mirroring `--method`'s parser so a
+        // config `method = "post"` becomes "POST" instead of silently breaking
+        // the case-sensitive method comparisons downstream.
+        if let Some(m) = &self.method {
+            match crate::cmd::scan::parse_http_method_arg(m) {
+                Ok(upper) => self.method = Some(upper),
+                Err(e) => {
+                    warnings.push(format!("config scan.method: {e}; ignoring"));
+                    self.method = None;
+                }
+            }
+        }
+
+        // `force_waf` — lowercase + validate against the known WAF aliases,
+        // mirroring `--force-waf`'s parser so a typo doesn't fall into the
+        // silent `WafType::Unknown` bucket that skips targeted bypasses.
+        if let Some(w) = &self.force_waf {
+            match crate::cmd::scan::parse_force_waf_arg(w) {
+                Ok(lower) => self.force_waf = Some(lower),
+                Err(e) => {
+                    warnings.push(format!("config scan.force_waf: {e}; ignoring"));
+                    self.force_waf = None;
+                }
+            }
+        }
+
+        // Single-value enum fields validated against clap's possible values.
+        reject_unless_allowed(
+            &mut self.format,
+            crate::cmd::scan::FORMAT_VALUES,
+            "scan.format",
+            &mut warnings,
+        );
+        reject_unless_allowed(
+            &mut self.poc_type,
+            crate::cmd::scan::POC_TYPE_VALUES,
+            "scan.poc_type",
+            &mut warnings,
+        );
+        reject_unless_allowed(
+            &mut self.limit_result_type,
+            crate::cmd::scan::LIMIT_RESULT_TYPE_VALUES,
+            "scan.limit_result_type",
+            &mut warnings,
+        );
+        reject_unless_allowed(
+            &mut self.custom_alert_type,
+            crate::cmd::scan::CUSTOM_ALERT_TYPE_VALUES,
+            "scan.custom_alert_type",
+            &mut warnings,
+        );
+        reject_unless_allowed(
+            &mut self.waf_bypass,
+            crate::cmd::scan::WAF_BYPASS_VALUES,
+            "scan.waf_bypass",
+            &mut warnings,
+        );
+
+        // Comma-delimited enum list fields.
+        reject_list_unless_allowed(
+            &mut self.only_poc,
+            crate::cmd::scan::ONLY_POC_VALUES,
+            "scan.only_poc",
+            &mut warnings,
+        );
+        reject_list_unless_allowed(
+            &mut self.encoders,
+            crate::cmd::scan::ENCODER_VALUES,
+            "scan.encoders",
+            &mut warnings,
+        );
+
+        // `limit` — clap rejects `--limit 0` ("omit the flag entirely for no
+        // cap"); a config `limit = 0` used to mean "show no findings". Treat it
+        // as unset (no cap) with a warning so the meaning stays unambiguous.
+        if self.limit == Some(0) {
+            warnings.push(
+                "config scan.limit: 0 is not a valid cap (omit it for no cap); ignoring"
+                    .to_string(),
+            );
+            self.limit = None;
+        }
+
+        warnings
+    }
 }
 
 // Load configuration with the following behavior:
@@ -1113,6 +1311,19 @@ pub fn default_toml_template() -> String {
 # sxss_url = "https://target/echo"
 # sxss_method = "GET"
 # sxss_retries = 3
+# skip_ast_analysis = false
+# analyze_external_js = false
+# detect_outdated_libs = false
+
+# HPP
+# hpp = false                 # test HTTP Parameter Pollution
+
+# WAF
+# waf_bypass = "auto"         # auto, force, off
+# skip_waf_probe = false
+# force_waf = "cloudflare"    # skip detection and target a specific WAF's bypasses
+# waf_evasion = false
+# waf_min_confidence = 0.3    # 0.0..=1.0 floor for WAF fingerprint confidence
 "#;
     tpl.to_string()
 }

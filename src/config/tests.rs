@@ -329,6 +329,45 @@ fn test_apply_to_scan_args_overwrites_present_fields() {
     assert!(args.sxss);
     assert_eq!(args.sxss_url.as_deref(), Some("https://example.com/sxss"));
     assert_eq!(args.sxss_method, "POST");
+    // Fields added after this method's first draft (AST / external-JS / HPP /
+    // WAF suite) must be overwritten too — regression guard for the drift bug
+    // where new ScanConfig fields were only wired into the if_default overlay.
+    assert!(args.skip_ast_analysis);
+    assert!(args.analyze_external_js);
+    assert!(args.detect_outdated_libs);
+    assert_eq!(args.sxss_retries, 12);
+    // full_scan_config sets waf_evasion=true / waf_min_confidence=0.7, both
+    // distinct from default_scan_args (false / 0.0), so these prove overwrite.
+    assert!(args.waf_evasion);
+    assert!((args.waf_min_confidence - 0.7).abs() < f32::EPSILON);
+}
+
+#[test]
+fn test_apply_to_scan_args_unconditional_applies_waf_and_hpp_fields() {
+    // Distinct-from-default values for the fields where full_scan_config()
+    // happens to match the default (waf_bypass/skip_waf_probe/hpp/force_waf),
+    // seeded opposite in args to prove the unconditional apply overwrites them.
+    let cfg = Config {
+        scan: Some(ScanConfig {
+            waf_bypass: Some("force".to_string()),
+            skip_waf_probe: Some(true),
+            force_waf: Some("cloudflare".to_string()),
+            hpp: Some(true),
+            ..Default::default()
+        }),
+    };
+    let mut args = default_scan_args();
+    args.waf_bypass = "auto".to_string();
+    args.skip_waf_probe = false;
+    args.force_waf = None;
+    args.hpp = false;
+
+    cfg.apply_to_scan_args(&mut args);
+
+    assert_eq!(args.waf_bypass, "force");
+    assert!(args.skip_waf_probe);
+    assert_eq!(args.force_waf.as_deref(), Some("cloudflare"));
+    assert!(args.hpp);
 }
 
 #[test]
@@ -646,4 +685,200 @@ fn test_save_writes_toml_and_json_formats() {
     );
 
     let _ = std::fs::remove_dir_all(base);
+}
+
+// --- normalize_and_validate -------------------------------------------------
+
+#[test]
+fn test_normalize_and_validate_accepts_full_valid_config() {
+    // full_scan_config() uses only valid values, so validation must be a no-op
+    // (no warnings, no field cleared).
+    let mut cfg = Config {
+        scan: Some(full_scan_config()),
+    };
+    let warnings = cfg.normalize_and_validate();
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings, got: {warnings:?}"
+    );
+    let scan = cfg.scan.as_ref().unwrap();
+    assert_eq!(scan.format.as_deref(), Some("jsonl"));
+    assert_eq!(scan.method.as_deref(), Some("POST"));
+    assert_eq!(scan.limit, Some(42));
+}
+
+#[test]
+fn test_normalize_and_validate_none_scan_is_noop() {
+    let mut cfg = Config { scan: None };
+    assert!(cfg.normalize_and_validate().is_empty());
+}
+
+#[test]
+fn test_normalize_and_validate_uppercases_method() {
+    // A lowercase config method must be normalized to uppercase (mirroring the
+    // CLI's `--method` parser) instead of silently breaking `== "POST"`.
+    let mut scan = ScanConfig {
+        method: Some("post".to_string()),
+        ..Default::default()
+    };
+    let warnings = scan.normalize_and_validate();
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    assert_eq!(scan.method.as_deref(), Some("POST"));
+}
+
+#[test]
+fn test_normalize_and_validate_rejects_invalid_method() {
+    let mut scan = ScanConfig {
+        method: Some("banana".to_string()),
+        ..Default::default()
+    };
+    let warnings = scan.normalize_and_validate();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("scan.method"));
+    assert_eq!(
+        scan.method, None,
+        "invalid method must fall back to default"
+    );
+}
+
+#[test]
+fn test_normalize_and_validate_rejects_invalid_enums() {
+    let mut scan = ScanConfig {
+        format: Some("xml".to_string()),
+        poc_type: Some("nc".to_string()),
+        limit_result_type: Some("z".to_string()),
+        custom_alert_type: Some("bogus".to_string()),
+        waf_bypass: Some("always".to_string()),
+        ..Default::default()
+    };
+    let warnings = scan.normalize_and_validate();
+    assert_eq!(
+        warnings.len(),
+        5,
+        "one warning per invalid field: {warnings:?}"
+    );
+    assert_eq!(scan.format, None);
+    assert_eq!(scan.poc_type, None);
+    assert_eq!(scan.limit_result_type, None);
+    assert_eq!(scan.custom_alert_type, None);
+    assert_eq!(scan.waf_bypass, None);
+}
+
+#[test]
+fn test_normalize_and_validate_rejects_invalid_list_values() {
+    // A single bad element drops the whole list back to the default.
+    let mut scan = ScanConfig {
+        only_poc: Some(vec!["v".to_string(), "bogus".to_string()]),
+        encoders: Some(vec!["url".to_string(), "rot13".to_string()]),
+        ..Default::default()
+    };
+    let warnings = scan.normalize_and_validate();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("scan.only_poc") && w.contains("bogus"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("scan.encoders") && w.contains("rot13"))
+    );
+    assert_eq!(scan.only_poc, None);
+    assert_eq!(scan.encoders, None);
+}
+
+#[test]
+fn test_normalize_and_validate_keeps_valid_list_values() {
+    let mut scan = ScanConfig {
+        only_poc: Some(vec!["v".to_string(), "r".to_string()]),
+        encoders: Some(vec!["url".to_string(), "base64".to_string()]),
+        ..Default::default()
+    };
+    let warnings = scan.normalize_and_validate();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(scan.only_poc, Some(vec!["v".to_string(), "r".to_string()]));
+    assert_eq!(
+        scan.encoders,
+        Some(vec!["url".to_string(), "base64".to_string()])
+    );
+}
+
+#[test]
+fn test_normalize_and_validate_normalizes_force_waf() {
+    // Mixed-case alias normalizes to lowercase; a typo is rejected.
+    let mut ok = ScanConfig {
+        force_waf: Some("CloudFlare".to_string()),
+        ..Default::default()
+    };
+    assert!(ok.normalize_and_validate().is_empty());
+    assert_eq!(ok.force_waf.as_deref(), Some("cloudflare"));
+
+    let mut bad = ScanConfig {
+        force_waf: Some("cloudflair".to_string()),
+        ..Default::default()
+    };
+    let warnings = bad.normalize_and_validate();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("scan.force_waf"));
+    assert_eq!(bad.force_waf, None);
+}
+
+#[test]
+fn test_normalize_and_validate_rejects_zero_limit() {
+    // clap rejects `--limit 0`; a config `limit = 0` must be treated as "no
+    // cap" (None) with a warning rather than resurrecting "show no findings".
+    let mut scan = ScanConfig {
+        limit: Some(0),
+        ..Default::default()
+    };
+    let warnings = scan.normalize_and_validate();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("scan.limit"));
+    assert_eq!(scan.limit, None);
+
+    // A positive cap is preserved.
+    let mut ok = ScanConfig {
+        limit: Some(5),
+        ..Default::default()
+    };
+    assert!(ok.normalize_and_validate().is_empty());
+    assert_eq!(ok.limit, Some(5));
+}
+
+#[test]
+fn test_normalize_and_validate_accepts_every_allowed_enum_value() {
+    // Guard that the validator is wired to the same value sets clap enforces:
+    // every canonical value round-trips without a warning.
+    for &f in crate::cmd::scan::FORMAT_VALUES {
+        let mut scan = ScanConfig {
+            format: Some(f.to_string()),
+            ..Default::default()
+        };
+        assert!(
+            scan.normalize_and_validate().is_empty(),
+            "format {f} should be accepted"
+        );
+        assert_eq!(scan.format.as_deref(), Some(f));
+    }
+    for &p in crate::cmd::scan::POC_TYPE_VALUES {
+        let mut scan = ScanConfig {
+            poc_type: Some(p.to_string()),
+            ..Default::default()
+        };
+        assert!(
+            scan.normalize_and_validate().is_empty(),
+            "poc_type {p} should be accepted"
+        );
+    }
+    for &e in crate::cmd::scan::ENCODER_VALUES {
+        let mut scan = ScanConfig {
+            encoders: Some(vec![e.to_string()]),
+            ..Default::default()
+        };
+        assert!(
+            scan.normalize_and_validate().is_empty(),
+            "encoder {e} should be accepted"
+        );
+    }
 }
