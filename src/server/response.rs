@@ -50,10 +50,23 @@ pub(crate) fn build_response_body<T: Serialize>(
 ) -> (Option<&'static str>, String) {
     let json = serde_json::to_string(resp).expect("serializable response");
     match jsonp_cb {
-        Some(cb) => (
-            Some("application/javascript; charset=utf-8"),
-            format!("{}({});", cb, json),
-        ),
+        Some(cb) => {
+            // serde_json leaves U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH
+            // SEPARATOR) as raw bytes. They're valid inside JSON strings, but in
+            // a JSONP body served as application/javascript they are string-
+            // literal line terminators on pre-ES2019 engines — an attacker-
+            // influenced finding field (target URL, payload, evidence) carrying
+            // one would break the wrapped `callback(...)` into a syntax error or
+            // split its string literal. Escape them so the JS stays valid
+            // regardless of finding content.
+            let safe = json
+                .replace('\u{2028}', "\\u2028")
+                .replace('\u{2029}', "\\u2029");
+            (
+                Some("application/javascript; charset=utf-8"),
+                format!("{}({});", cb, safe),
+            )
+        }
         None => (None, json),
     }
 }

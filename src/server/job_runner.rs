@@ -71,6 +71,9 @@ pub(crate) fn spawn_scan_task(
                     &job_id_for_recovery,
                     &url_for_recovery,
                     msg,
+                    // Panic recovery: no scan target was built, so fall back to
+                    // the default client for the terminal webhook.
+                    None,
                 )
                 .await;
             });
@@ -119,7 +122,7 @@ fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, url: &str, msg: St
     let job_id = job_id.to_string();
     let url = url.to_string();
     rt.block_on(async move {
-        mark_job_error(&state, &job_id, &url, msg).await;
+        mark_job_error(&state, &job_id, &url, msg, None).await;
     });
 }
 
@@ -131,11 +134,20 @@ fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, url: &str, msg: St
 /// don't receive duplicate notifications.
 ///
 /// The webhook is dispatched after the jobs lock is released so a slow
-/// callback URL can't block concurrent job updates. We use the default
-/// reqwest client because the panic / parse-error paths may not have a
-/// fully-built target available; this still mirrors the contract that
-/// every terminal state fires the webhook (see commit aeb8cdb).
-pub(crate) async fn mark_job_error(state: &AppState, job_id: &str, url: &str, msg: String) {
+/// callback URL can't block concurrent job updates. `client` lets a caller
+/// that already built the scan's target hand in a proxy/TLS/redirect-aware
+/// reqwest client so the webhook honors the same network boundary as the scan
+/// (see the unreachable path in `run_scan_job`); the panic / parse-error paths
+/// have no usable target and pass `None`, falling back to a default client.
+/// Either way this mirrors the contract that every terminal state fires the
+/// webhook (see commit aeb8cdb).
+pub(crate) async fn mark_job_error(
+    state: &AppState,
+    job_id: &str,
+    url: &str,
+    msg: String,
+    client: Option<reqwest::Client>,
+) {
     let (transitioned, callback_url) = {
         let mut jobs = state.jobs.lock().await;
         if let Some(job) = jobs.get_mut(job_id)
@@ -152,7 +164,7 @@ pub(crate) async fn mark_job_error(state: &AppState, job_id: &str, url: &str, ms
         }
     };
     if transitioned {
-        send_terminal_webhook(state, callback_url, job_id, url, "error", &[], None).await;
+        send_terminal_webhook(state, callback_url, job_id, url, "error", &[], client).await;
     }
 }
 
@@ -438,7 +450,7 @@ pub(crate) async fn run_scan_job(
             // subscriber waiting indefinitely. mark_job_error now handles
             // both the status update and the webhook dispatch.
             let msg = format!("parse_target failed: {}", e);
-            mark_job_error(&state, &job_id, &url, msg).await;
+            mark_job_error(&state, &job_id, &url, msg, None).await;
             return;
         }
     };
@@ -466,7 +478,20 @@ pub(crate) async fn run_scan_job(
     // returns reachable:false; mirror that here so /scan clients can tell the
     // two apart. Any HTTP response (including 4xx/5xx) counts as reachable.
     if !send_reachability_probe(&target).await {
-        mark_job_error(&state, &job_id, &url, unreachable_error_message()).await;
+        // The target is fully hydrated here, so deliver the terminal webhook
+        // through its proxy/TLS/redirect-aware client — matching the done /
+        // cancelled paths. Without this, the unreachable/error webhook went out
+        // on a bare default client and silently failed whenever the callback
+        // host was only reachable via the scan's configured proxy.
+        let cb_client = target.build_client_or_default();
+        mark_job_error(
+            &state,
+            &job_id,
+            &url,
+            unreachable_error_message(),
+            Some(cb_client),
+        )
+        .await;
         return;
     }
 
@@ -648,13 +673,20 @@ pub(crate) async fn run_scan_job(
     drop(findings_updater);
 
     let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
+    // A worker-task panic means at least one parameter's findings are
+    // incomplete. Surface that as `error` (with the partial results still
+    // attached) so a poller can't mistake a crashed scan for a clean `done`.
+    // Cancellation takes precedence (it's already a partial-by-design state).
+    let panicked = !was_cancelled && scan_report.worker_panics > 0;
 
-    if !was_cancelled {
-        // After natural completion, every discovered parameter has been
-        // processed by `run_scanning`, so reflect that in `params_tested`.
-        // Skip this on cancellation: the scan stopped early and promoting
-        // params_tested to params_total would falsely report 100%
-        // completion to API pollers computing estimated_completion_pct.
+    if !was_cancelled && !panicked {
+        // After a clean, complete run every discovered parameter was processed
+        // by `run_scanning`, so pin `params_tested` to `params_total` (exactly
+        // 100%). Skip this on cancellation AND on a worker panic: both stop
+        // short of finishing every parameter — a panicked worker never bumps
+        // the live counter — so promoting to params_total would report
+        // estimated_completion_pct = 100 for a job whose status is
+        // cancelled/error, making a partial scan read as a clean finish.
         progress.params_tested.store(
             progress
                 .params_total
@@ -674,13 +706,8 @@ pub(crate) async fn run_scan_job(
             .collect::<Vec<_>>()
     };
 
-    // A worker-task panic means at least one parameter's findings are
-    // incomplete. Surface that as `error` (with the partial results still
-    // attached) so a poller can't mistake a crashed scan for a clean `done`.
-    // Cancellation takes precedence (it's already a partial-by-design state).
-    let panicked = !was_cancelled && scan_report.worker_panics > 0;
     let final_results_arc = Arc::new(final_results);
-    let callback_url = {
+    let (callback_url, final_status) = {
         let mut jobs = state.jobs.lock().await;
 
         if let Some(job) = jobs.get_mut(&job_id) {
@@ -714,17 +741,21 @@ pub(crate) async fn run_scan_job(
             if job.finished_at_ms.is_none() {
                 job.finished_at_ms = Some(now_ms());
             }
-            job.callback_url.clone()
+            (job.callback_url.clone(), Some(job.status.clone()))
         } else {
-            None
+            (None, None)
         }
     };
-    let status_label = if was_cancelled {
-        "cancelled"
-    } else if panicked {
-        "error"
-    } else {
-        "done"
+    // Derive the webhook/log label from the status actually stored, not from the
+    // pre-lock `was_cancelled`/`panicked` snapshot: a DELETE cancel landing in
+    // the window between those reads and this lock flips the job to `cancelled`,
+    // and the webhook payload (which subscribers branch on) and the JOB log must
+    // agree with what GET /scan/{id} now reports rather than announcing `done`
+    // for a job stored as cancelled.
+    let status_label = match final_status {
+        Some(JobStatus::Cancelled) => "cancelled",
+        Some(JobStatus::Error) => "error",
+        _ => "done",
     };
     log(
         &state,

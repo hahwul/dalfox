@@ -231,6 +231,33 @@ fn test_validate_jsonp_callback_accepts_and_rejects() {
 }
 
 #[test]
+fn test_jsonp_body_escapes_line_and_paragraph_separators() {
+    // F4: U+2028 (LINE SEPARATOR) / U+2029 (PARAGRAPH SEPARATOR) in an
+    // attacker-influenced finding field must be escaped in the JSONP body, or
+    // the wrapped `callback(...)` becomes a syntax error / split string literal
+    // on engines that treat them as string-literal line terminators.
+    let resp = ApiResponse::<serde_json::Value> {
+        code: 200,
+        msg: "ok".to_string(),
+        data: Some(serde_json::json!({ "evidence": "a\u{2028}b\u{2029}c" })),
+    };
+    let (ct, body) = build_response_body(&resp, Some("cb"));
+    assert_eq!(ct, Some("application/javascript; charset=utf-8"));
+    assert!(body.starts_with("cb(") && body.ends_with(");"));
+    assert!(
+        !body.contains('\u{2028}') && !body.contains('\u{2029}'),
+        "raw separators must not survive into the JS body: {body}"
+    );
+    assert!(body.contains("\\u2028") && body.contains("\\u2029"));
+
+    // The non-JSONP path is unchanged: plain JSON is a superset and modern
+    // parsers accept the raw separators, so they pass through untouched.
+    let (ct2, body2) = build_response_body(&resp, None);
+    assert_eq!(ct2, None);
+    assert!(body2.contains('\u{2028}') && body2.contains('\u{2029}'));
+}
+
+#[test]
 fn test_build_cors_headers_none_all_exact_regex_and_fallbacks() {
     let req_headers = HeaderMap::new();
     let state_none = make_state(None, None, false, false, "callback");
@@ -1407,6 +1434,117 @@ async fn test_run_scan_job_webhook_reports_done_status() {
 }
 
 #[tokio::test]
+async fn test_run_scan_job_unreachable_target_fires_error_webhook() {
+    // Regression for F1: an unreachable (but parseable) target must still fire a
+    // terminal webhook, and that webhook is now dispatched through the scan
+    // target's own proxy/TLS/redirect-aware client (previously a bare default
+    // client, which silently failed to deliver whenever the callback host was
+    // only reachable via the scan's configured proxy). We can't wire a proxy in
+    // a unit test, but we lock in the observable contract subscribers depend on:
+    // unreachable → a webhook with status="error", and the job settles Error.
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::oneshot;
+
+    // Webhook capture server (bound first so it can't collide with the port we
+    // free below).
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let fired = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = oneshot::channel::<()>();
+    let tx_shared = Arc::new(Mutex::new(Some(tx)));
+    let captured_clone = captured.clone();
+    let fired_clone = fired.clone();
+    let tx_clone = tx_shared.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            let fired = fired_clone.clone();
+            let tx_shared = tx_clone.clone();
+            async move {
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                *captured.lock().await = Some(parsed);
+                if !fired.swap(true, Ordering::SeqCst)
+                    && let Some(tx) = tx_shared.lock().await.take()
+                {
+                    let _ = tx.send(());
+                }
+                StatusCode::OK
+            }
+        }),
+    );
+    let webhook_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let webhook_addr = webhook_listener.local_addr().expect("webhook local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(webhook_listener, webhook_app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    // Reserve then immediately drop a port so a connection there is refused —
+    // a reliably unreachable but well-formed http target.
+    let dead_addr = {
+        let l = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind throwaway listener");
+        l.local_addr().expect("throwaway local addr")
+    };
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "unreachable-webhook-test".to_string();
+    let mut job = test_job(JobStatus::Queued, None, "");
+    job.callback_url = Some(format!("http://{}/hook", webhook_addr));
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), job);
+    }
+
+    let opts = ScanOptions {
+        // Short request timeout; connection-refused returns well within it.
+        timeout: Some(5),
+        callback_url: Some(format!("http://{}/hook", webhook_addr)),
+        ..ScanOptions::default()
+    };
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/", dead_addr),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(
+        run.is_ok(),
+        "run_scan_job should return promptly for an unreachable target"
+    );
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), rx).await;
+    let payload = captured
+        .lock()
+        .await
+        .clone()
+        .expect("unreachable scan must still fire a terminal webhook");
+    assert_eq!(
+        payload["status"], "error",
+        "unreachable target must emit status=error (got payload: {})",
+        payload
+    );
+    assert_eq!(payload["scan_id"], serde_json::Value::String(id.clone()));
+
+    let jobs = state.jobs.lock().await;
+    assert_eq!(
+        jobs.get(&id).expect("job still present").status,
+        JobStatus::Error
+    );
+}
+
+#[tokio::test]
 async fn test_get_result_handler_jsonp_done_branch() {
     let state = make_state(None, None, false, true, "cb");
     let id = "done-jsonp".to_string();
@@ -2365,7 +2503,7 @@ async fn test_mark_job_error_transitions_non_terminal() {
         jobs.insert(id.clone(), test_job(JobStatus::Running, None, "http://x"));
     }
 
-    mark_job_error(&state, &id, "http://x", "synthetic panic".to_string()).await;
+    mark_job_error(&state, &id, "http://x", "synthetic panic".to_string(), None).await;
 
     let jobs = state.jobs.lock().await;
     let job = jobs.get(&id).expect("job present");
@@ -2391,7 +2529,14 @@ async fn test_mark_job_error_does_not_clobber_terminal_state() {
             let mut jobs = state.jobs.lock().await;
             jobs.insert(id.to_string(), test_job(status.clone(), None, "http://x"));
         }
-        mark_job_error(&state, id, "http://x", "should-not-overwrite".to_string()).await;
+        mark_job_error(
+            &state,
+            id,
+            "http://x",
+            "should-not-overwrite".to_string(),
+            None,
+        )
+        .await;
         let jobs = state.jobs.lock().await;
         let job = jobs.get(id).expect("job present");
         assert_eq!(
@@ -2447,6 +2592,7 @@ async fn test_mark_job_error_fires_webhook_with_error_status() {
         &id,
         target_url,
         "parse_target failed: bad url".to_string(),
+        None,
     )
     .await;
 
@@ -2498,7 +2644,7 @@ async fn test_mark_job_error_does_not_double_fire_webhook_on_terminal_job() {
         jobs.insert(id.clone(), job);
     }
 
-    mark_job_error(&state, &id, "http://x", "late panic".to_string()).await;
+    mark_job_error(&state, &id, "http://x", "late panic".to_string(), None).await;
     // Give the webhook a beat in case it was sent anyway (it shouldn't be).
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(

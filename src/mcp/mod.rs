@@ -561,11 +561,20 @@ impl DalfoxMcp {
         // (the client would compute estimated_completion_pct = 100 even
         // though the scan stopped at, say, 10/50 params).
         let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
+        // A worker-task panic means a parameter's findings are incomplete;
+        // surface it as `error` (partial results still attached) so a poller
+        // can't mistake a crashed scan for a clean finish. Cancellation wins.
+        let panicked = !was_cancelled && scan_report.worker_panics > 0;
 
-        if !was_cancelled {
-            // After natural completion, all discovered params have been
-            // processed by `run_scanning`. No per-param counter is wired
-            // today, so the most honest post-scan value is `params_total`.
+        if !was_cancelled && !panicked {
+            // Only a clean, complete run pins `params_tested` to `params_total`
+            // (exactly 100%). Skip on cancellation AND on a worker panic: both
+            // stop short of finishing every discovered parameter — a panicked
+            // worker never bumps the live per-param counter fed to
+            // `run_scanning` at line ~540 — so promoting to params_total would
+            // make get_results_dalfox report estimated_completion_pct = 100 for
+            // a job whose status is cancelled/error, a partial scan reading as a
+            // clean finish.
             progress.params_tested.store(
                 progress
                     .params_total
@@ -585,11 +594,7 @@ impl DalfoxMcp {
                 .collect::<Vec<_>>()
         };
 
-        // A worker-task panic means a parameter's findings are incomplete;
-        // surface it as `error` (partial results still attached) so a poller
-        // can't mistake a crashed scan for a clean finish. Cancellation wins.
-        let panicked = !was_cancelled && scan_report.worker_panics > 0;
-        {
+        let final_status = {
             let mut jobs = self.lock_jobs();
             if let Some(j) = jobs.get_mut(&scan_id) {
                 // Store partial or complete results
@@ -624,15 +629,21 @@ impl DalfoxMcp {
                 if j.finished_at_ms.is_none() {
                     j.finished_at_ms = Some(now_ms());
                 }
+                Some(j.status.clone())
+            } else {
+                None
             }
-        }
+        };
 
-        let status_label = if was_cancelled {
-            "cancelled"
-        } else if panicked {
-            "error"
-        } else {
-            "finished"
+        // Derive the log label from the status actually stored, not the pre-lock
+        // was_cancelled/panicked snapshot — a cancel_scan_dalfox landing between
+        // those reads and this lock flips the job to `cancelled`, and the log
+        // line must agree with what get_results_dalfox now reports rather than
+        // announcing `finished` for a job stored as cancelled.
+        let status_label = match final_status {
+            Some(JobStatus::Cancelled) => "cancelled",
+            Some(JobStatus::Error) => "error",
+            _ => "finished",
         };
         Self::log(
             "JOB",

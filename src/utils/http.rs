@@ -10,7 +10,10 @@ Rationale:
 Notes:
 - If target.headers already contains a Cookie header (case-insensitive), we do NOT auto-attach cookies.
 - If a custom cookie header is provided to build_request_with_cookie, it takes precedence over auto-attach.
-- If both a header "User-Agent" is present and target.user_agent is Some, target.user_agent overwrites it.
+- reqwest's `RequestBuilder::header()` *appends*, so if `target.headers` already carries a
+  "User-Agent" entry AND `target.user_agent` is `Some`, the request sends BOTH (two User-Agent
+  headers). The scan/MCP/REST paths do exactly this on purpose — the header entry lets the
+  header-reflection probe exercise the UA while `target.user_agent` drives the common sweep.
 
 Usage examples:
   let rb = http::build_request(&client, &target, Method::GET, target.url.clone(), None);
@@ -77,7 +80,9 @@ pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
     headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
 }
 
-/// Apply provided headers (verbatim), then apply User-Agent if present (overrides any existing).
+/// Apply provided headers (verbatim), then append `target.user_agent` as a
+/// User-Agent header when non-empty. reqwest appends rather than overrides, so a
+/// caller that also placed a User-Agent in `target.headers` ends up sending both.
 /// If `cookie_header` is Some, attach it. Otherwise, if no Cookie header exists in headers,
 /// auto-attach from target.cookies (when non-empty).
 pub fn apply_headers_ua_cookies(
