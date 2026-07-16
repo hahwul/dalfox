@@ -15,15 +15,16 @@ base_url = "https://dalfox.hahwul.com"
 # - content/about.ko.md -> /ko/about/
 # - content/about/index.ko.md -> /ko/about/
 
-# default_language = "en"
-#
-# [languages.en]
-# language_name = "English"
-# weight = 1
-#
-# [languages.ko]
-# language_name = "한국어"
-# weight = 2
+default_language = "en"
+
+[languages.en]
+language_name = "English"
+weight = 1
+
+[languages.ko]
+language_name = "한국어"
+weight = 2
+build_search_index = true
 
 # =============================================================================
 # Plugins

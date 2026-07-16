@@ -292,6 +292,44 @@ body::before {
     color: var(--text-primary);
 }
 
+/* Language switch — EN / KO, a single ink-hairline segment. The active code
+   glows in the accent; the other is a quiet link that lights on hover. */
+.lang-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-surface);
+}
+.lang-switch-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    height: 22px;
+    padding: 0 0.4rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    text-decoration: none;
+    color: var(--text-muted);
+    transition:
+        color 0.15s,
+        background 0.15s;
+}
+a.lang-switch-item:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+.lang-switch-item.is-active {
+    color: var(--accent-hover);
+    background: var(--accent-dim);
+}
+
 .site-overlay {
     display: none;
     position: fixed;
@@ -882,19 +920,46 @@ ul.section-list li {
 }
 ul.section-list a {
     position: relative;
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
     padding: 0.85rem 1.1rem;
     background: var(--bg-surface);
     border: 1px solid var(--ink-line);
     border-radius: 7px;
     color: var(--text-primary);
     text-decoration: none;
-    font-weight: 500;
-    font-size: 0.92rem;
     transition:
         border-color 0.18s,
         background 0.18s,
         transform 0.18s;
+}
+.section-list-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--text-primary);
+}
+/* A quiet arrow that slides in on hover, echoing the header CTA. */
+.section-list-title::after {
+    content: "→";
+    color: var(--accent);
+    opacity: 0;
+    transform: translateX(-4px);
+    transition:
+        opacity 0.18s,
+        transform 0.18s;
+}
+ul.section-list a:hover .section-list-title::after {
+    opacity: 0.8;
+    transform: translateX(0);
+}
+.section-list-desc {
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text-muted);
 }
 /* Window-frame corner brackets that ink in on hover. */
 ul.section-list a::before,
@@ -2368,6 +2433,21 @@ body:has(.docs-layout) .site-footer {
     .search-trigger kbd {
         display: none;
     }
+    /* Tighten the bar so search + language switch + GitHub all fit. */
+    .header-inner {
+        padding: 0 1rem;
+    }
+    .header-right {
+        gap: 0.4rem;
+    }
+    /* Wide reference tables must scroll inside their own column, not push the
+       page wider than the viewport — otherwise the fixed header stretches with
+       the overflow and the language switch slides off the right edge. */
+    .docs-article table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+    }
 
     .hero {
         padding: 3rem 1.25rem 3rem;
@@ -2416,6 +2496,11 @@ body:has(.docs-layout) .site-footer {
         font-size: 0.72rem;
         padding: 0.85rem 0.95rem;
         min-height: auto;
+    }
+    /* On the narrowest phones, drop the GitHub icon (still linked from the
+       footer) so the language switch never gets pushed off the bar. */
+    .header-iconlink {
+        display: none;
     }
 }
 

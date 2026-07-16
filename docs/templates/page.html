@@ -9,11 +9,12 @@
         </article>
         {% if page.toc and toc %}
         <aside class="docs-toc">
-          <div class="toc-title">On this page</div>
+          <div class="toc-title">{% if page_language == "ko" %}목차{% else %}On this page{% endif %}</div>
           <div class="toc-content">
             {{ toc }}
           </div>
         </aside>
         {% endif %}
       </div>
+{% set has_source = true %}
 {% include "footer.html" %}
