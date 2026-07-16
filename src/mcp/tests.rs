@@ -859,6 +859,37 @@ async fn test_get_results_done_shows_100_pct_and_zero_poll_interval() {
 }
 
 #[tokio::test]
+async fn test_get_results_error_with_partial_params_reports_honest_pct() {
+    // Regression for L1: a scan that settled `error` (e.g. worker panics) left
+    // some parameters unfinished, so `run_job` must NOT promote params_tested to
+    // params_total. get_results_dalfox then reports the honest partial percentage
+    // instead of a misleading 100% that reads as a clean finish. This guards the
+    // reporting contract the run_job promotion-gating fix upholds.
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        let job = test_job(JobStatus::Error, Some(vec![]));
+        job.progress
+            .params_total
+            .store(10, std::sync::atomic::Ordering::Relaxed);
+        job.progress
+            .params_tested
+            .store(7, std::sync::atomic::Ordering::Relaxed);
+        jobs.insert("error-partial".to_string(), job);
+    }
+
+    let resp = mcp
+        .get_results_dalfox(Parameters(get_params("error-partial")))
+        .await
+        .expect("get_results should succeed");
+    let payload = parse_result_json(&resp);
+    assert_eq!(
+        payload["progress"]["estimated_completion_pct"], 70,
+        "an error scan with 7/10 params tested must report 70%, not 100%"
+    );
+}
+
+#[tokio::test]
 async fn test_get_results_includes_timestamps() {
     let mcp = DalfoxMcp::new();
     {
