@@ -165,7 +165,7 @@ async fn main() {
     // suppresses it the same way the `--silence` CLI flag does.
 
     // Load configuration with optional --config override
-    let config_load = if let Some(cfg_path) = &cli.config {
+    let mut config_load = if let Some(cfg_path) = &cli.config {
         let p = std::path::Path::new(cfg_path);
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -267,6 +267,22 @@ async fn main() {
     // file and a missing-or-malformed default isn't actionable.
     if let (Some(cfg_path), Err(e)) = (&cli.config, &config_load) {
         eprintln!("Warning: failed to load --config {}: {}", cfg_path, e);
+    }
+
+    // Config values are deserialized straight into `Config` and never pass
+    // through clap's value-parsers, so an invalid `format`, a lowercase
+    // `method`, or a `limit = 0` would be copied verbatim into `ScanArgs` and
+    // silently misbehave. Normalize/validate once here — before the config
+    // drives any banner/format decision or overlays onto scan args — so every
+    // downstream entry point (scan / default / url / file / pipe) sees a clean
+    // config. Invalid fields fall back to their built-in defaults and each
+    // emits an actionable stderr warning (stdout stays clean for machine
+    // formats). The default `~/.config/dalfox/config.toml` is all-commented, so
+    // this is silent unless the operator set a real value.
+    if let Ok(lr) = config_load.as_mut() {
+        for warning in lr.config.normalize_and_validate() {
+            eprintln!("Warning: {warning}");
+        }
     }
 
     // Emit the banner now that the config file (if any) has been parsed.

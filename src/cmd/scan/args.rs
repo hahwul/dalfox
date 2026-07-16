@@ -8,6 +8,21 @@ use clap::Args;
 /// Default encoders used when the user does not specify any via CLI or config.
 /// Centralizing this allows config.rs to reference the same canonical defaults.
 pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
+
+// Allowed value sets for the enum-like string flags. Kept as the single source
+// of truth so both the clap `PossibleValuesParser` below and the config-file
+// validator (`config::ScanConfig::normalize_and_validate`) agree — a config
+// file bypasses clap entirely, so without a shared list an invalid config value
+// would be copied straight into `ScanArgs` and silently misbehave.
+pub const FORMAT_VALUES: &[&str] = &["plain", "json", "jsonl", "markdown", "sarif", "toml"];
+pub const POC_TYPE_VALUES: &[&str] = &["plain", "curl", "httpie", "http-request"];
+pub const LIMIT_RESULT_TYPE_VALUES: &[&str] = &["all", "v", "r", "a", "V", "R", "A"];
+pub const ONLY_POC_VALUES: &[&str] = &["v", "r", "a", "V", "R", "A"];
+pub const ENCODER_VALUES: &[&str] = &[
+    "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
+];
+pub const CUSTOM_ALERT_TYPE_VALUES: &[&str] = &["none", "str"];
+pub const WAF_BYPASS_VALUES: &[&str] = &["auto", "force", "off"];
 // Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
@@ -138,7 +153,7 @@ fn parse_limit_arg(s: &str) -> std::result::Result<usize, String> {
 /// "GET"` — used to silently break discovery), and rejects unknown
 /// or empty methods at parse time instead of letting them surface as
 /// `[POC][V][][body]` / `[POC][V][WAT][body]` garbage later.
-fn parse_http_method_arg(s: &str) -> std::result::Result<String, String> {
+pub(crate) fn parse_http_method_arg(s: &str) -> std::result::Result<String, String> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
         return Err("HTTP method must not be empty".to_string());
@@ -163,7 +178,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// Output format: json, jsonl, plain, markdown, sarif, toml
-    #[arg(short, long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(["plain", "json", "jsonl", "markdown", "sarif", "toml"]))]
+    #[arg(short, long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(FORMAT_VALUES.iter().copied()))]
     pub format: String,
 
     #[clap(help_heading = "OUTPUT")]
@@ -214,7 +229,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// POC output type: plain, curl, httpie, http-request
-    #[arg(long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(["plain", "curl", "httpie", "http-request"]))]
+    #[arg(long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(POC_TYPE_VALUES.iter().copied()))]
     pub poc_type: String,
 
     #[clap(help_heading = "OUTPUT")]
@@ -224,12 +239,12 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// Filter which finding types count toward --limit: all (default), v (verified), r (reflected), a (AST DOM XSS). Example: --limit-result-type v
-    #[arg(long, default_value = "all", value_parser = clap::builder::PossibleValuesParser::new(["all", "v", "r", "a", "V", "R", "A"]))]
+    #[arg(long, default_value = "all", value_parser = clap::builder::PossibleValuesParser::new(LIMIT_RESULT_TYPE_VALUES.iter().copied()))]
     pub limit_result_type: String,
 
     #[clap(help_heading = "OUTPUT")]
     /// Filter output to show only specific finding types (comma-separated). Options: v (verified), r (reflected), a (AST DOM XSS). Example: --only-poc "v,r"
-    #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(["v", "r", "a", "V", "R", "A"]))]
+    #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(ONLY_POC_VALUES.iter().copied()))]
     pub only_poc: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
@@ -438,7 +453,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, htmlpad, base64, unicode, zwsp. Default: url,html
-    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"], value_parser = clap::builder::PossibleValuesParser::new(["none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp"]))]
+    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"], value_parser = clap::builder::PossibleValuesParser::new(ENCODER_VALUES.iter().copied()))]
     pub encoders: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
@@ -479,7 +494,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Custom alert function type. Options: none (keep original), str (wrap value in quotes). Default: "none"
-    #[arg(long, default_value = "none", value_parser = clap::builder::PossibleValuesParser::new(["none", "str"]))]
+    #[arg(long, default_value = "none", value_parser = clap::builder::PossibleValuesParser::new(CUSTOM_ALERT_TYPE_VALUES.iter().copied()))]
     pub custom_alert_type: String,
 
     #[clap(help_heading = "XSS SCANNING")]
@@ -558,7 +573,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "WAF")]
     /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (detect-only; no payload mutations). Default: auto
-    #[arg(long, default_value = "auto", value_parser = clap::builder::PossibleValuesParser::new(["auto", "force", "off"]))]
+    #[arg(long, default_value = "auto", value_parser = clap::builder::PossibleValuesParser::new(WAF_BYPASS_VALUES.iter().copied()))]
     pub waf_bypass: String,
 
     #[clap(help_heading = "WAF")]
