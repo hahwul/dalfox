@@ -38,7 +38,22 @@ pub(crate) async fn resolve_targets(
     // it buffers the whole stream here so the parsing phase reuses the same
     // bytes instead of reading an already-drained stdin.
     let mut buffered_stdin: Option<String> = None;
-    let stdin_is_piped = !std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let stdin_is_piped = {
+        let is_dalfox_bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .map(|name| {
+                let name_lower = name.to_lowercase();
+                name_lower == "dalfox" || name_lower == "dalfox.exe"
+            })
+            .unwrap_or(false);
+
+        if is_dalfox_bin {
+            !std::io::IsTerminal::is_terminal(&std::io::stdin())
+        } else {
+            false
+        }
+    };
 
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
