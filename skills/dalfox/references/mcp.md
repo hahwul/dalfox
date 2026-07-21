@@ -104,7 +104,7 @@ Use this before expensive scans when the user is concerned about request volume.
 
 `queued` → `running` → `done` | `error` | `cancelled`
 
-`cancel_scan_dalfox` flips an `AtomicBool`; the scan loop checks it at safe points. Partial findings are returned.
+`cancel_scan_dalfox` flips an `AtomicBool`; the scan loop checks it at safe points. Partial findings are returned. The response's `cancelled` field is `true` only when the job was `queued`/`running` at the time of the call; cancelling an already-terminal job (`done`/`error`/`cancelled`) is a no-op and returns `cancelled: false` with `previous_status` set to that terminal state.
 
 ## Error Handling in MCP
 

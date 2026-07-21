@@ -1681,6 +1681,37 @@ async fn test_cancel_scan_handler_cancels_queued_job() {
 }
 
 #[tokio::test]
+async fn test_cancel_scan_handler_on_terminal_job_is_a_noop() {
+    // Cancelling a scan that already finished must not claim `cancelled: true`
+    // — nothing was actually stopped, and the stored status must not change.
+    let state = make_state(None, None, false, false, "cb");
+    let scan_id = "done-cancel-test-id".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(scan_id.clone(), test_job(JobStatus::Done, None, ""));
+    }
+
+    let resp = cancel_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Path(scan_id.clone()),
+        Query(Map::new()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(parsed["data"]["cancelled"], false);
+    assert_eq!(parsed["data"]["previous_status"], "done");
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&scan_id).expect("job still exists");
+    assert_eq!(job.status, JobStatus::Done);
+}
+
+#[tokio::test]
 async fn test_cancel_scan_handler_returns_404_for_unknown_id() {
     let state = make_state(None, None, false, false, "cb");
     let resp = cancel_scan_handler(

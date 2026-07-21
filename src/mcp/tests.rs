@@ -55,7 +55,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
-        waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+        waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE as f64,
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
@@ -543,8 +543,14 @@ fn test_waf_and_remote_params_serde() {
     assert!(!defaults.skip_waf_probe);
     assert!(defaults.force_waf.is_none());
     assert!(!defaults.waf_evasion);
+    // Compared at f32 precision (the width `ScanArgs`/the WAF subsystem
+    // actually use) rather than a raw f64 `==`: the MCP field is f64 purely
+    // so the tool schema's default renders cleanly (see
+    // `default_waf_min_confidence`), and an f32→f64 widening comparison here
+    // would be exactly the precision trap that function's doc comment warns
+    // about.
     assert_eq!(
-        defaults.waf_min_confidence,
+        defaults.waf_min_confidence as f32,
         crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE
     );
     assert!(defaults.remote_payloads.is_empty());
@@ -570,6 +576,26 @@ fn test_waf_and_remote_params_serde() {
     assert_eq!(set.waf_min_confidence, 0.75);
     assert_eq!(set.remote_payloads, vec!["portswigger".to_string()]);
     assert_eq!(set.remote_wordlists, vec!["burp".to_string()]);
+}
+
+#[test]
+fn test_waf_min_confidence_default_renders_clean_in_json_schema() {
+    // Regression test: the tool schema's `default` for `waf_min_confidence`
+    // must render as a clean `0.3`, not the f32→f64 widening artifact
+    // `0.30000001192092896` that `DEFAULT_WAF_MIN_CONFIDENCE as f64` would
+    // produce (serde_json's `Value::Number` only has an f64 variant, so any
+    // f32 default is widened when the schema is built).
+    let value = serde_json::to_value(default_waf_min_confidence()).unwrap();
+    assert_eq!(value, serde_json::json!(0.3));
+    assert_eq!(value.to_string(), "0.3");
+
+    // The literal must still agree with the canonical CLI/ScanArgs default at
+    // the precision that actually governs scanning behavior (f32), so the two
+    // can't silently drift apart if the canonical default ever changes.
+    assert_eq!(
+        default_waf_min_confidence() as f32,
+        crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE
+    );
 }
 
 #[tokio::test]
@@ -698,6 +724,37 @@ async fn test_cancel_scan_removes_job() {
         .expect("cancelled scan should still be retrievable");
     let payload = parse_result_json(&result);
     assert_eq!(payload["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn test_cancel_scan_on_terminal_job_is_a_noop() {
+    // Cancelling a scan that already finished must not claim `cancelled: true`
+    // — nothing was actually stopped, and the status must not change.
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        jobs.insert(
+            "done-job".to_string(),
+            test_job(JobStatus::Done, Some(vec![])),
+        );
+    }
+
+    let cancel_resp = mcp
+        .cancel_scan_dalfox(Parameters(CancelScanDalfoxParams {
+            scan_id: "done-job".to_string(),
+        }))
+        .await
+        .expect("cancel should succeed (as a no-op)");
+    let cancel_payload = parse_result_json(&cancel_resp);
+    assert_eq!(cancel_payload["cancelled"], false);
+    assert_eq!(cancel_payload["previous_status"], "done");
+
+    let result = mcp
+        .get_results_dalfox(Parameters(get_params("done-job")))
+        .await
+        .expect("job should still be retrievable");
+    let payload = parse_result_json(&result);
+    assert_eq!(payload["status"], "done");
 }
 
 #[tokio::test]
