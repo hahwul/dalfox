@@ -582,9 +582,15 @@ pub(crate) async fn cancel_scan_handler(
             }
 
             let previous_status = job.status.clone();
+            // Only a queued/running job actually stops as a result of this
+            // call — cancelling an already-terminal job (done/error/cancelled)
+            // is a no-op, so `cancelled` must reflect that instead of always
+            // reporting `true`, which previously made a cancel on a finished
+            // scan look indistinguishable from a real one.
+            let was_active = matches!(previous_status, JobStatus::Queued | JobStatus::Running);
             job.cancelled
                 .store(true, std::sync::atomic::Ordering::Relaxed);
-            if matches!(job.status, JobStatus::Queued | JobStatus::Running) {
+            if was_active {
                 job.status = JobStatus::Cancelled;
                 if job.finished_at_ms.is_none() {
                     job.finished_at_ms = Some(now_ms());
@@ -603,7 +609,7 @@ pub(crate) async fn cancel_scan_handler(
                 data: Some(serde_json::json!({
                     "scan_id": id,
                     "target": target_url,
-                    "cancelled": true,
+                    "cancelled": was_active,
                     "previous_status": previous_status
                 })),
             };

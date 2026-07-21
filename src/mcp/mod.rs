@@ -810,8 +810,15 @@ pub struct ScanWithDalfoxParams {
 
     /// WAF detection confidence floor in [0.0, 1.0]; fingerprints below this are
     /// dropped. Default: 0.3
+    //
+    // f64 (not the `f32` `ScanArgs` uses internally) so the generated tool
+    // schema's `default` renders as a clean `0.3` instead of the f32→f64
+    // widening artifact `0.30000001192092896` (schemars/serde_json build the
+    // schema's default via `serde_json::Value`, which only has an f64 number
+    // variant). Narrowed back to f32 with `as f32` where this flows into
+    // `ScanArgs` below.
     #[serde(default = "default_waf_min_confidence")]
-    pub waf_min_confidence: f32,
+    pub waf_min_confidence: f64,
 
     /// Fetch remote XSS payloads from providers (e.g. "portswigger",
     /// "payloadbox"). Default: none.
@@ -862,8 +869,13 @@ fn default_method() -> String {
 fn default_waf_bypass() -> String {
     "auto".to_string()
 }
-fn default_waf_min_confidence() -> f32 {
-    crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE
+// Deliberately a literal, not `DEFAULT_WAF_MIN_CONFIDENCE as f64`: widening an
+// f32 value preserves *its* rounding error at f64 precision, so the cast
+// renders in the generated tool schema as `0.30000001192092896` instead of
+// `0.3`. A test below pins this literal to the canonical f32 constant so the
+// two can't silently drift if the default ever changes.
+fn default_waf_min_confidence() -> f64 {
+    0.3
 }
 fn default_encoders() -> Vec<String> {
     crate::cmd::scan::DEFAULT_ENCODERS
@@ -1304,7 +1316,7 @@ CWE, payload, and evidence."
             rate_limit,
             retries: 0,
             retry_delay: 1000,
-            waf_min_confidence,
+            waf_min_confidence: waf_min_confidence as f32,
             remote_payloads,
             remote_wordlists,
         });
@@ -1878,11 +1890,14 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
     /// Cancel a queued or running scan.
     #[tool(
         name = "cancel_scan_dalfox",
-        description = "Cancel a scan by scan_id. Returns {scan_id, target, cancelled: true, \
-previous_status}. For running scans, the background task stops at the next \
-cancellation checkpoint (typically within seconds). \
-The job remains in the list with status 'cancelled' so partial results can \
-still be retrieved via get_results_dalfox."
+        description = "Cancel a scan by scan_id. Returns {scan_id, target, cancelled, \
+previous_status}. `cancelled` is true only if the scan was queued or running \
+(and is now stopping); it is false if the scan had already reached a terminal \
+state (done/error/cancelled), in which case this call was a no-op — check \
+`previous_status` to see what state it was already in. For running scans, the \
+background task stops at the next cancellation checkpoint (typically within \
+seconds). The job remains in the list with status 'cancelled' so partial \
+results can still be retrieved via get_results_dalfox."
     )]
     async fn cancel_scan_dalfox(
         &self,
@@ -1898,13 +1913,18 @@ still be retrieved via get_results_dalfox."
         match jobs.get_mut(&pid) {
             Some(job) => {
                 let previous_status = job.status.clone();
+                // Only a queued/running job actually stops as a result of this
+                // call — cancelling an already-terminal job (done/error/
+                // cancelled) is a no-op, so `cancelled` must reflect that
+                // instead of always reporting `true`.
+                let was_active = matches!(previous_status, JobStatus::Queued | JobStatus::Running);
                 // Signal cancellation to the running scan
                 job.cancelled
                     .store(true, std::sync::atomic::Ordering::Relaxed);
                 // Mark as cancelled immediately for both queued and running scans.
                 // For running scans, the background task will exit at the next
                 // cancellation checkpoint and store partial results.
-                if matches!(job.status, JobStatus::Queued | JobStatus::Running) {
+                if was_active {
                     job.status = JobStatus::Cancelled;
                     if job.finished_at_ms.is_none() {
                         job.finished_at_ms = Some(now_ms());
@@ -1913,7 +1933,7 @@ still be retrieved via get_results_dalfox."
                 let out = serde_json::json!({
                     "scan_id": pid,
                     "target": job.target_url,
-                    "cancelled": true,
+                    "cancelled": was_active,
                     "previous_status": previous_status
                 });
                 Ok(CallToolResult::success(vec![ContentBlock::text(
