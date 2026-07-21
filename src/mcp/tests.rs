@@ -733,7 +733,10 @@ async fn test_cancel_scan_on_terminal_job_is_a_noop() {
     let mcp = DalfoxMcp::new();
     {
         let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
-        jobs.insert("done-job".to_string(), test_job(JobStatus::Done, Some(vec![])));
+        jobs.insert(
+            "done-job".to_string(),
+            test_job(JobStatus::Done, Some(vec![])),
+        );
     }
 
     let cancel_resp = mcp
