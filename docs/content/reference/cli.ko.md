@@ -158,7 +158,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--sxss-method` | — | `GET` | 조회 메서드 |
 | `--sxss-retries` | — | `3` | 저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수 |
 | `--max-payloads-per-param` | — | `0` | 파라미터별로 테스트하는 페이로드 수 제한 (`0`은 `--deep-scan`이 없으면 세트당 3000개의 내장 안전 상한을 적용) |
-| `--skip-ast-analysis` | — | false | AST DOM-XSS를 건너뜁니다 |
+| `--skip-ast-analysis` | — | false | AST DOM-XSS(`[A]` 결과를 만드는 source→sink 패스)를 건너뜁니다. `--skip-mining-dom`이 아니라 이 플래그입니다 |
 | `--analyze-external-js` | — | false | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석을 수행합니다 (프리플라이트, 대상별 1회; 최대 16개 파일, 각 512 KiB; `--include-url`/`--exclude-url`을 준수) |
 | `--hpp` | — | false | HTTP 파라미터 오염 |
 | `--detect-outdated-libs` | — | false | 오래되었거나 알려진 취약점이 있는 JS 라이브러리도 보고합니다 (정보성, CWE-1104; 추가 요청 0회) |

@@ -113,7 +113,7 @@ To move faster or work around a fragile target, skip parts of the pipeline:
 | `--skip-reflection-cookie` | Cookie reflection checks |
 | `--skip-reflection-path` | Path reflection checks |
 
-> `--skip-mining-dom` only stops dalfox from harvesting parameter *names* out of the response HTML. It does **not** disable DOM-XSS detection: the static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/). To filter those findings out of the output instead, use `--only-poc v,r`.
+> `--skip-mining-dom` only stops dalfox from harvesting parameter *names* out of the response HTML. It does **not** disable DOM-XSS detection: the static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/). To filter those findings out of the output instead, use `--only-poc v,r`. See [Detection Model](../detection-model/) for how the two subsystems differ and what each evidence tier proves.
 
 ## Injection markers
 

@@ -47,6 +47,9 @@ dalfox https://target.app -f jsonl -o findings.jsonl
 | `severity` | `"High"` | High / Medium / Low / Info |
 | `message_str` | `"XSS found"` | 짧은 메시지 |
 
+각 등급이 실제로 어떤 증거인지, 그리고 순수 클라이언트 사이드 DOM-XSS가 왜 `V`에
+도달하지 못하는지는 [탐지 모델](../detection-model/) 문서에서 다룹니다.
+
 `V` / `A` / `R`은 XSS 탐지 결과입니다. `I`(**Informational**)는 공격에 사용할 수 없는
 관찰 항목으로, 현재는 **오래되었거나 알려진 취약점이 있는 JS 라이브러리**
 (`inject_type: "OutdatedComponent"`, `CWE-1104`)만 해당하며, 페이로드나 파라미터가 없는 간결한

@@ -549,7 +549,9 @@ pub struct ScanArgs {
     pub sxss_retries: u32,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Skip AST-based DOM XSS detection (analyzes JavaScript in responses)
+    /// Skip AST-based DOM XSS detection — the source→sink analysis of
+    /// JavaScript in responses that emits [A] findings. This is the flag
+    /// that silences them; --skip-mining-dom does not
     #[arg(long)]
     pub skip_ast_analysis: bool,
 

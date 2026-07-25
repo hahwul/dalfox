@@ -205,7 +205,7 @@ Useful for research; slower for production pipelines.
 | `--skip-xss-scanning` | Discover and probe only; no payload injection |
 | `--skip-ast-analysis` | Skip AST-based DOM-XSS detection of inline scripts (the `[A]` findings) |
 
-`--skip-ast-analysis` is the control for the static DOM-XSS pass that reports `source → sink` flows (e.g. `location.hash` → `innerHTML`) as `[A]` (AST-detected) findings — independent of parameter mining. `--skip-mining-dom` does **not** affect it. To keep the pass running but hide those findings from the output, use `--only-poc v,r`.
+`--skip-ast-analysis` is the control for the static DOM-XSS pass that reports `source → sink` flows (e.g. `location.hash` → `innerHTML`) as `[A]` (AST-detected) findings — independent of parameter mining. `--skip-mining-dom` does **not** affect it. To keep the pass running but hide those findings from the output, use `--only-poc v,r`. What `[A]` actually proves — and why a pure client-side DOM-XSS never reaches `[V]` — is covered in [Detection Model](../detection-model/).
 
 ## Next
 

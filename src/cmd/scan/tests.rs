@@ -1,5 +1,7 @@
 use super::logging::{log_info, log_warn, start_spinner};
-use super::output::{render_dry_run, render_only_discovery, render_results};
+use super::output::{
+    plain_findings_summary, render_dry_run, render_only_discovery, render_results,
+};
 use super::poc::{build_ast_dom_message, generate_poc, render_finding_block};
 use super::postprocess::{dedupe_ast_results, extract_context};
 use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
@@ -663,6 +665,68 @@ fn test_generate_poc_path_segment_selective_encoding_for_special_chars() {
     assert!(out.contains("A%20B%23%3F%25"));
 }
 
+/// The summary counts `[V]` only, so a DOM-XSS-only scan used to print
+/// "XSS found 0 XSS" directly above three `[A]` POC blocks (issue #1238).
+/// The other tiers about to be printed are now named alongside it.
+#[test]
+fn test_plain_findings_summary_names_unverified_tiers() {
+    let mut ast = reflected_result("https://example.com", "q", "<x>");
+    ast.result_type = FindingType::AstDetected;
+    let reflected = reflected_result("https://example.com", "q", "<x>");
+    let summary = plain_findings_summary(&[ast.clone(), ast, reflected]);
+    let plain = crate::utils::term::strip_ansi(&summary);
+    assert_eq!(plain, "XSS found 0 XSS (+2 A, 1 R)", "got: {}", plain);
+}
+
+/// A verified-only run keeps the historical one-number shape that scripts
+/// grep for.
+#[test]
+fn test_plain_findings_summary_verified_only_keeps_legacy_shape() {
+    let mut verified = reflected_result("https://example.com", "q", "<x>");
+    verified.result_type = FindingType::Verified;
+    let summary = plain_findings_summary(&[verified.clone(), verified]);
+    let plain = crate::utils::term::strip_ansi(&summary);
+    assert_eq!(plain, "XSS found 2 XSS", "got: {}", plain);
+}
+
+#[test]
+fn test_plain_findings_summary_empty_is_zero() {
+    let plain = crate::utils::term::strip_ansi(&plain_findings_summary(&[]));
+    assert_eq!(plain, "XSS found 0 XSS", "got: {}", plain);
+}
+
+/// AST findings build their own POC URL (payload in the fragment / query /
+/// path per the detected source). Now that they report the real source
+/// parameter instead of the `"-"` sentinel, `poc_url_complete` is what stops
+/// the renderer from appending `?location.hash=…` on top of a `#…` POC.
+#[test]
+fn test_generate_poc_leaves_complete_ast_poc_url_untouched() {
+    let mut r = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .method("GET")
+        .data("https://example.com/#%3Cimg%20src=x%20onerror=alert(1)%3E")
+        .param("location.hash")
+        .payload("#<img src=x onerror=alert(1)>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(0)
+        .message_str("DOM-based XSS via location.hash to innerHTML")
+        .build();
+    r.poc_url_complete = true;
+    let poc = generate_poc(&r, "plain");
+    assert!(
+        poc.contains("https://example.com/#%3Cimg%20src=x%20onerror=alert(1)%3E"),
+        "POC URL must survive verbatim: {}",
+        poc
+    );
+    assert!(
+        !poc.contains('?'),
+        "must not synthesize a query on a complete POC URL: {}",
+        poc
+    );
+}
+
 #[test]
 fn test_build_ast_dom_message_keeps_url_source_wording() {
     let message = build_ast_dom_message(
@@ -671,9 +735,11 @@ fn test_build_ast_dom_message_keeps_url_source_wording() {
         "https://example.com/dom/level2/",
         "<img src=x onerror=alert(1)>",
     );
+    // URL-carried sources get no manual-setup hint — the finding's POC URL is
+    // the reproduction step, so no internal `[light check: …]` tail (#1238).
     assert_eq!(
         message,
-        "DOM-based XSS via location.hash to innerHTML (needs runtime confirmation) [light check: no parameter]"
+        "DOM-based XSS via location.hash to innerHTML (needs runtime confirmation)"
     );
 }
 
@@ -726,7 +792,7 @@ fn test_build_ast_dom_message_keeps_pathname_wording() {
     );
     assert_eq!(
         message,
-        "DOM-based XSS via location.pathname to document.write (needs runtime confirmation) [light check: no parameter]"
+        "DOM-based XSS via location.pathname to document.write (needs runtime confirmation)"
     );
 }
 
@@ -1060,6 +1126,58 @@ fn test_render_finding_block_ast_with_request() {
     assert!(
         block.contains("Host: example.com"),
         "missing request body: {}",
+        block
+    );
+}
+
+/// An AST DOM-XSS finding must render the description it actually carries —
+/// which names the source→sink flow and its confirmation status — instead of
+/// the generic "DOM object identified" label, which described a static
+/// inference as an observation (issue #1238).
+#[test]
+fn test_render_finding_block_ast_dom_shows_source_sink_and_caveat() {
+    let r = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .method("GET")
+        .data("https://example.com/?q=%3Cimg%3E")
+        .param("q")
+        .payload("q=<img src=x onerror=alert(1)>")
+        .evidence("https://example.com/:3:12 - … (Source: URLSearchParams.get(q), Sink: innerHTML)")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(0)
+        .message_str(
+            "DOM-based XSS via URLSearchParams.get(q) to innerHTML (needs runtime confirmation)",
+        )
+        .build();
+    let block = render_finding_block(&r, "plain", false, false);
+    assert!(
+        block.contains("DOM-based XSS via URLSearchParams.get(q) to innerHTML"),
+        "AST block must name the source→sink flow: {}",
+        block
+    );
+    assert!(
+        block.contains("needs runtime confirmation"),
+        "AST block must keep the confirmation caveat: {}",
+        block
+    );
+    assert!(
+        !block.contains("XSS payload DOM object identified"),
+        "AST block must not claim a DOM observation: {}",
+        block
+    );
+}
+
+/// Findings from the reflection pipeline keep their catalog wording — the
+/// message_str override above is scoped to the AST DOM-XSS producers.
+#[test]
+fn test_render_finding_block_non_ast_keeps_generic_issue_label() {
+    let mut r = reflected_result("https://example.com", "q", "<x>");
+    r.result_type = FindingType::AstDetected;
+    let block = render_finding_block(&r, "plain", false, false);
+    assert!(
+        block.contains("XSS payload DOM object identified"),
+        "non-DOM-XSS finding should keep the generic label: {}",
         block
     );
 }

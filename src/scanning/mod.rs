@@ -593,9 +593,17 @@ async fn run_ast_dom_analysis(
                 .cwe("CWE-79")
                 .severity("Medium")
                 .message_id(0)
-                .message_str(format!("{} (needs runtime confirmation)", description))
+                // The confirmation status is appended below, once the light
+                // check has run — a finding this path promotes to `V` must not
+                // also claim it "needs runtime confirmation" (#1238).
+                .message_str(description.clone())
                 .build();
             ast_result.location = format!("{:?}", param.location);
+            // A URL-surface source got its POC URL from
+            // `build_dom_xss_poc_url`, which already placed the payload in the
+            // fragment / query / path — synthesizing `?param=payload` on top
+            // of that would emit a double-injection POC.
+            ast_result.poc_url_complete = source_uses_url_surface;
             if !source_uses_url_surface {
                 ast_result.request = Some(build_request_text(target, param, &payload));
             }
@@ -609,14 +617,11 @@ async fn run_ast_dom_analysis(
             if let Some(runtime_response) = rt_resp {
                 ast_result.response = Some(runtime_response);
             }
-            if let Some(n) = note {
-                ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
-            }
             if verified {
                 ast_result.result_type = FindingType::Verified;
                 ast_result.severity = "High".to_string();
                 ast_result.message_str =
-                    format!("{} [light check: verified]", ast_result.message_str);
+                    format!("{} [light check: confirmed]", ast_result.message_str);
             } else if self_bootstrap_verified {
                 ast_result.result_type = FindingType::Verified;
                 ast_result.severity = "High".to_string();
@@ -625,8 +630,15 @@ async fn run_ast_dom_analysis(
                     ast_result.message_str
                 );
             } else {
-                ast_result.message_str =
-                    format!("{} [light check: unverified]", ast_result.message_str);
+                ast_result.message_str = format!(
+                    "{} (needs runtime confirmation) [light check: not confirmed]",
+                    ast_result.message_str
+                );
+            }
+            // Appended last so the CSP-style caveat trails the verdict instead
+            // of splitting the description from it.
+            if let Some(n) = note {
+                ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
             }
             results.push(ast_result);
         }
