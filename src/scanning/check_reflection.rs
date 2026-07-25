@@ -1632,13 +1632,66 @@ pub(crate) fn resolve_sxss_check_urls(
     urls
 }
 
+/// Text handed back by the reflection check, tagged with whether a browser
+/// would ever have rendered it as a document.
+///
+/// Nearly every reflection body is the server's real response, and consumers
+/// may freely infer execution from it. The 3xx `Location:` vector is the
+/// exception: browsers never render a redirect's body — only the `Location:`
+/// header drives navigation — so that path returns a *stand-in* string that
+/// merely contains the payload, purely so `classify_reflection` can still
+/// record the R finding.
+///
+/// The distinction is a type-level invariant rather than a convention because
+/// getting it wrong is silent and severe: a stand-in that happens to parse as
+/// HTML will match the DOM-marker selector and mint a "Verified / High"
+/// finding whose evidence no browser ever executed. Any consumer that infers
+/// execution — DOM-marker evidence, AST sink analysis, user-facing PoC
+/// evidence — must gate on [`ReflectionBody::renderable`].
+#[derive(Debug, Clone)]
+pub struct ReflectionBody {
+    /// The text to match the payload against when classifying reflection.
+    pub text: String,
+    /// Whether `text` is the response body a browser would actually parse and
+    /// render as a document. `false` for the 3xx `Location:` stand-in.
+    pub renderable: bool,
+}
+
+impl ReflectionBody {
+    /// A real response body: safe for execution-inferring consumers.
+    fn rendered(text: String) -> Self {
+        Self {
+            text,
+            renderable: true,
+        }
+    }
+
+    /// A stand-in for a 3xx `Location:` header value.
+    ///
+    /// Rendered as a plain status/header line rather than synthetic markup:
+    /// the payload still appears verbatim (so `classify_reflection` records
+    /// R), but the text is an honest description of what was observed instead
+    /// of a fabricated document that never existed on the wire.
+    fn redirect_location(status_code: u16, location: &str) -> Self {
+        Self {
+            text: format!("HTTP {} Location: {}", status_code, location),
+            renderable: false,
+        }
+    }
+
+    /// Borrow the text only when a browser would have rendered it.
+    pub fn renderable_text(&self) -> Option<&str> {
+        self.renderable.then_some(self.text.as_str())
+    }
+}
+
 async fn fetch_injection_response(
     target: &Target,
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
-) -> Option<String> {
+) -> Option<ReflectionBody> {
     if args.skip_xss_scanning {
         return None;
     }
@@ -1653,7 +1706,7 @@ async fn fetch_injection_response_with_client(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
-) -> Option<String> {
+) -> Option<ReflectionBody> {
     if args.skip_xss_scanning {
         return None;
     }
@@ -1880,7 +1933,7 @@ async fn fetch_injection_response_with_client(
                     && !text.is_empty()
                 {
                     if classify_reflection(&text, payload).is_some() {
-                        return Some(text);
+                        return Some(ReflectionBody::rendered(text));
                     }
                     if fallback_body.is_none() {
                         fallback_body = Some(text);
@@ -1895,9 +1948,9 @@ async fn fetch_injection_response_with_client(
         if let Some(body) = inject_body.as_ref()
             && classify_reflection(body, payload).is_some()
         {
-            return inject_body;
+            return inject_body.map(ReflectionBody::rendered);
         }
-        fallback_body.or(inject_body)
+        fallback_body.or(inject_body).map(ReflectionBody::rendered)
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
@@ -1990,19 +2043,22 @@ async fn fetch_injection_response_with_client(
                 && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
                 && (location.contains(&*encoded_payload) || location.contains(payload))
             {
-                // Wrap the Location value in a minimal HTML container so the
-                // downstream reflection check still finds the payload via
-                // substring match, but the JS-context AST verifier cannot
-                // parse the synthesized text as JavaScript and wrongly
-                // upgrade the finding to V. Without the wrapper, a literal
-                // `Location: javascript:alert(1)` becomes a freestanding
-                // expression statement that the oxc parser accepts, which
-                // triggered V on redirects that no browser ever follows
-                // (browsers refuse `javascript:` / `data:` schemes in 3xx
-                // `Location:` headers). The wrapper starts with `<html>`,
-                // which fails JS parsing cleanly, so reflection-finding
-                // R is preserved while the false V upgrade is blocked.
-                return Some(format!("<html><body>{}</body></html>", location));
+                // Report the Location value as a non-renderable stand-in.
+                // Browsers never render a redirect's body — only `Location:`
+                // drives navigation — so nothing here is executable, and no
+                // consumer may infer execution from it. `renderable: false`
+                // enforces that at the type level, keeping both the JS-context
+                // AST verifier and the DOM-marker classifier off this text
+                // while the substring match below still records R.
+                //
+                // Prior revisions instead returned a synthetic
+                // `<html><body>{location}</body></html>` wrapper to defeat the
+                // AST verifier. That merely swapped one false-V source for
+                // another: the wrapper parses as valid HTML, so a payload
+                // carrying a `dlx` marker matched the DOM-marker selector and
+                // minted a Verified/High finding whose "response" evidence the
+                // server never sent.
+                return Some(ReflectionBody::redirect_location(status_code, location));
             }
             match crate::utils::http::read_body(resp).await {
                 Ok(body) => {
@@ -2025,7 +2081,7 @@ async fn fetch_injection_response_with_client(
                         );
                         return None;
                     }
-                    Some(body)
+                    Some(ReflectionBody::rendered(body))
                 }
                 Err(e) => {
                     crate::dbg_log!(
@@ -2054,7 +2110,9 @@ pub async fn check_reflection_with_response(
     args: &crate::cmd::scan::ScanArgs,
 ) -> (Option<ReflectionKind>, Option<String>) {
     let streak = std::sync::atomic::AtomicU32::new(0);
-    check_reflection_with_response_tracked(client, target, param, payload, args, &streak).await
+    let (kind, body) =
+        check_reflection_with_response_tracked(client, target, param, payload, args, &streak).await;
+    (kind, body.map(|b| b.text))
 }
 
 /// Inject `payload`, then classify reflection in the response.
@@ -2075,20 +2133,20 @@ pub async fn check_reflection_with_response_tracked(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
-) -> (Option<ReflectionKind>, Option<String>) {
-    let text = match client {
+) -> (Option<ReflectionKind>, Option<ReflectionBody>) {
+    let body = match client {
         Some(client) => {
             fetch_injection_response_with_client(client, target, param, payload, args, streak).await
         }
         None => fetch_injection_response(target, param, payload, args, streak).await,
     };
-    if let Some(text) = text {
-        let kind = classify_reflection(&text, payload);
+    if let Some(body) = body {
+        let kind = classify_reflection(&body.text, payload);
         let kind = match kind {
-            Some(_) if is_in_safe_context_decoded(&text, payload) => None,
+            Some(_) if is_in_safe_context_decoded(&body.text, payload) => None,
             other => other,
         };
-        (kind, Some(text))
+        (kind, Some(body))
     } else {
         (None, None)
     }
