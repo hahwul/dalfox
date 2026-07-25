@@ -110,7 +110,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--remote-wordlists` | — | — | Remote sources: `burp`, `assetnote` |
 | `--skip-mining` | — | false | Skip all mining |
 | `--skip-mining-dict` | — | false | Skip dictionary mining |
-| `--skip-mining-dom` | — | false | Skip DOM mining |
+| `--skip-mining-dom` | — | false | Skip mining parameter names from HTML `id`/`name` attributes (not DOM-XSS detection — see `--skip-ast-analysis`) |
 
 ### Network
 

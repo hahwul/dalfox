@@ -353,7 +353,7 @@ pub struct ScanArgs {
     pub skip_mining_dict: bool,
 
     #[clap(help_heading = "PARAMETER MINING")]
-    /// Skip DOM-based mining
+    /// Skip mining parameter names from HTML input id/name attributes. Does NOT disable DOM-XSS static analysis of inline scripts (the `[A]` findings) — use --skip-ast-analysis for that.
     #[arg(long)]
     pub skip_mining_dom: bool,
 

@@ -172,7 +172,7 @@ debug = false
 | `remote_wordlists` | array | `[]` | `burp`, `assetnote` |
 | `skip_mining` | bool | `false` | Skip all mining |
 | `skip_mining_dict` | bool | `false` | Skip dictionary mining |
-| `skip_mining_dom` | bool | `false` | Skip DOM mining |
+| `skip_mining_dom` | bool | `false` | Skip mining parameter names from HTML `id`/`name` attributes (not DOM-XSS detection — see `skip_ast_analysis`) |
 
 ### Network
 
