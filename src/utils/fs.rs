@@ -149,8 +149,11 @@ pub enum StdinRead {
 /// or slowly-written list is never silently truncated.
 ///
 /// The read runs on a detached thread that outlives a timeout — a blocking
-/// `read()` on a pipe cannot be cancelled portably. That thread only ever
-/// touches stdin and its own buffer, and it is reaped at process exit.
+/// `read()` on a pipe cannot be cancelled portably. Once the caller has given
+/// up, the thread stops at its next completed read and drops what it had, so
+/// a pipe that goes quiet and later floods can't grow a buffer nobody will
+/// ever look at. Until then it is parked in `read()`, holding one chunk, and
+/// is reaped at process exit.
 pub fn read_stdin_bounded_within(
     max_bytes: u64,
     label: &str,
@@ -167,13 +170,18 @@ fn read_bounded_within<R: Read + Send + 'static>(
     label: &str,
     grace: std::time::Duration,
 ) -> std::io::Result<StdinRead> {
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
 
     let label = label.to_string();
     // `first_byte` fires as soon as the stream commits to an answer (a byte,
     // EOF, or an error); `done` carries the fully-read result afterwards.
     let (first_byte_tx, first_byte_rx) = mpsc::channel::<()>();
     let (done_tx, done_rx) = mpsc::channel::<std::io::Result<String>>();
+    // Set when the grace window expires: the caller is no longer interested,
+    // so the reader should stop rather than buffer a stream nobody will read.
+    let abandoned = Arc::new(AtomicBool::new(false));
+    let reader_abandoned = Arc::clone(&abandoned);
 
     std::thread::spawn(move || {
         // `take(max + 1)` bounds the read itself, so a stream that never ends
@@ -183,6 +191,11 @@ fn read_bounded_within<R: Read + Send + 'static>(
         let mut chunk = vec![0u8; 64 * 1024];
         let mut announced = false;
         let read_result = loop {
+            // Checked between reads (a blocking `read()` can't be woken): the
+            // caller timed out, so drop the buffer and stop draining stdin.
+            if reader_abandoned.load(Ordering::Relaxed) {
+                return;
+            }
             match reader.read(&mut chunk) {
                 Ok(0) => break Ok(()),
                 Ok(n) => {
@@ -235,8 +248,12 @@ fn read_bounded_within<R: Read + Send + 'static>(
             .map(StdinRead::Data),
         // Timeout: an open pipe with nothing in it. Disconnected: the reader
         // thread died without answering. Neither yields usable input, and
-        // neither is worth failing the run over.
-        Err(_) => Ok(StdinRead::Idle),
+        // neither is worth failing the run over — just tell the reader to
+        // stand down.
+        Err(_) => {
+            abandoned.store(true, Ordering::Relaxed);
+            Ok(StdinRead::Idle)
+        }
     }
 }
 

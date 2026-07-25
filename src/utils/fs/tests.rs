@@ -137,15 +137,16 @@ struct SlowTailReader {
     head: Vec<u8>,
     tail: Vec<u8>,
     hold: std::time::Duration,
-    sent_head: bool,
 }
 
 impl std::io::Read for SlowTailReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if !self.sent_head {
-            self.sent_head = true;
+        if !self.head.is_empty() {
+            // Drain what fits rather than dropping the remainder: a short
+            // `buf` must cost an extra read, not data.
             let n = self.head.len().min(buf.len());
             buf[..n].copy_from_slice(&self.head[..n]);
+            self.head.drain(..n);
             return Ok(n);
         }
         if !self.tail.is_empty() {
@@ -223,7 +224,6 @@ fn read_bounded_within_bounds_only_the_first_byte_not_the_whole_read() {
             head: b"http://first.example\n".to_vec(),
             tail: b"http://second.example\n".to_vec(),
             hold: std::time::Duration::from_millis(300),
-            sent_head: false,
         },
         1024,
         "stdin pipe",
@@ -237,6 +237,55 @@ fn read_bounded_within_bounds_only_the_first_byte_not_the_whole_read() {
         ),
         StdinRead::Idle => panic!("stream had data before the window expired"),
     }
+}
+
+/// Silent past the grace window, then streams without end — the pipe that goes
+/// quiet and later floods.
+struct LateFloodReader {
+    quiet: std::time::Duration,
+    reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    served_quiet: bool,
+}
+
+impl std::io::Read for LateFloodReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if !self.served_quiet {
+            self.served_quiet = true;
+            std::thread::sleep(self.quiet);
+        }
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        buf.fill(b'x');
+        Ok(buf.len())
+    }
+}
+
+#[test]
+fn read_bounded_within_stops_reading_once_the_caller_gave_up() {
+    // The reader can't be interrupted mid-`read()`, but it must not keep
+    // draining and buffering a stream the caller already walked away from —
+    // that would grow toward the cap in the background of a live scan.
+    let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let out = read_bounded_within(
+        LateFloodReader {
+            quiet: std::time::Duration::from_millis(250),
+            reads: std::sync::Arc::clone(&reads),
+            served_quiet: false,
+        },
+        64 << 20, // large cap: `take` must not be what stops the flood
+        "stdin pipe",
+        std::time::Duration::from_millis(50),
+    )
+    .unwrap();
+    assert!(matches!(out, StdinRead::Idle), "expected idle: {out:?}");
+
+    // Let the flood run: the reader should serve one read (the one already in
+    // flight when the window expired) and then stand down.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let served = reads.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        served <= 2,
+        "abandoned reader kept draining stdin: {served} reads"
+    );
 }
 
 #[test]

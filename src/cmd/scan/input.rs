@@ -756,8 +756,10 @@ const STDIN_MERGE_WAIT_MS: u64 = 500;
 
 /// Upper bound on the configured wait: one hour. Past this the knob has
 /// stopped meaning "grace window" and `-i pipe` is the honest way to say
-/// "block until stdin is done" — and a wild value (`u64::MAX`) would overflow
-/// the deadline arithmetic inside `recv_timeout` and panic.
+/// "block until stdin is done". The clamp also keeps the knob from silently
+/// re-creating #1239: a wait so large that `Instant::now() + wait` overflows
+/// (e.g. `u64::MAX`) makes `recv_timeout` fall back to an unbounded `recv()`,
+/// which is exactly the indefinite block this fix removed.
 const MAX_STDIN_MERGE_WAIT_MS: u64 = 60 * 60 * 1000;
 
 /// [`STDIN_MERGE_WAIT_MS`], overridable via `DALFOX_STDIN_WAIT_MS` for the two
