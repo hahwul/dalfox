@@ -122,5 +122,140 @@ pub fn read_stdin_bounded(max_bytes: u64, label: &str) -> std::io::Result<String
     Ok(buf)
 }
 
+/// Outcome of [`read_stdin_bounded_within`].
+#[derive(Debug)]
+pub enum StdinRead {
+    /// stdin answered within the grace window — it either delivered bytes or
+    /// hit an immediate EOF. The payload is the whole stream, read to EOF.
+    Data(String),
+    /// The grace window elapsed with stdin silent: an open pipe nobody is
+    /// writing to. Nothing was consumed that the caller could have used.
+    Idle,
+}
+
+/// [`read_stdin_bounded`] with a bound on how long we wait for the *first*
+/// byte.
+///
+/// `is_terminal()` cannot tell a pipe that is about to deliver a URL list
+/// apart from one a parent process left open and idle (CI harnesses, job
+/// runners, wrappers) — both are simply "not a TTY". Blocking on the latter
+/// hangs the whole run (#1239). Waiting a short grace window for the first
+/// byte separates them: a real producer (`cat urls.txt | dalfox …`) has bytes
+/// buffered in the pipe long before we look, while an idle pipe stays silent
+/// and the caller can carry on without it.
+///
+/// Only the first byte is time-bounded. Once the stream starts talking we are
+/// committed and read it to EOF like [`read_stdin_bounded`] would, so a large
+/// or slowly-written list is never silently truncated.
+///
+/// The read runs on a detached thread that outlives a timeout — a blocking
+/// `read()` on a pipe cannot be cancelled portably. Once the caller has given
+/// up, the thread stops at its next completed read and drops what it had, so
+/// a pipe that goes quiet and later floods can't grow a buffer nobody will
+/// ever look at. Until then it is parked in `read()`, holding one chunk, and
+/// is reaped at process exit.
+pub fn read_stdin_bounded_within(
+    max_bytes: u64,
+    label: &str,
+    grace: std::time::Duration,
+) -> std::io::Result<StdinRead> {
+    read_bounded_within(std::io::stdin(), max_bytes, label, grace)
+}
+
+/// Reader-generic core of [`read_stdin_bounded_within`], so the timing
+/// behaviour can be tested without hijacking the process's real stdin.
+fn read_bounded_within<R: Read + Send + 'static>(
+    reader: R,
+    max_bytes: u64,
+    label: &str,
+    grace: std::time::Duration,
+) -> std::io::Result<StdinRead> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
+
+    let label = label.to_string();
+    // `first_byte` fires as soon as the stream commits to an answer (a byte,
+    // EOF, or an error); `done` carries the fully-read result afterwards.
+    let (first_byte_tx, first_byte_rx) = mpsc::channel::<()>();
+    let (done_tx, done_rx) = mpsc::channel::<std::io::Result<String>>();
+    // Set when the grace window expires: the caller is no longer interested,
+    // so the reader should stop rather than buffer a stream nobody will read.
+    let abandoned = Arc::new(AtomicBool::new(false));
+    let reader_abandoned = Arc::clone(&abandoned);
+
+    std::thread::spawn(move || {
+        // `take(max + 1)` bounds the read itself, so a stream that never ends
+        // stops one byte past the cap and is rejected below.
+        let mut reader = reader.take(max_bytes + 1);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut chunk = vec![0u8; 64 * 1024];
+        let mut announced = false;
+        let read_result = loop {
+            // Checked between reads (a blocking `read()` can't be woken): the
+            // caller timed out, so drop the buffer and stop draining stdin.
+            if reader_abandoned.load(Ordering::Relaxed) {
+                return;
+            }
+            match reader.read(&mut chunk) {
+                Ok(0) => break Ok(()),
+                Ok(n) => {
+                    if !announced {
+                        announced = true;
+                        let _ = first_byte_tx.send(());
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                // A signal interrupted the read; the stream is still fine.
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    break Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("read failed (or non-UTF8): {}", e),
+                    ));
+                }
+            }
+        };
+        // Empty stream or an error on the very first read: still an answer, so
+        // release the waiter rather than letting it time out as "idle".
+        if !announced {
+            let _ = first_byte_tx.send(());
+        }
+        let result = read_result.and_then(|()| {
+            if buf.len() as u64 > max_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "{} exceeded {}-byte cap (likely a streaming source)",
+                        label, max_bytes
+                    ),
+                ));
+            }
+            String::from_utf8(buf).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("read failed (or non-UTF8): {}", e),
+                )
+            })
+        });
+        let _ = done_tx.send(result);
+    });
+
+    match first_byte_rx.recv_timeout(grace) {
+        // The stream answered — now wait for all of it.
+        Ok(()) => done_rx
+            .recv()
+            .unwrap_or_else(|_| Err(std::io::Error::other("stdin reader ended without a result")))
+            .map(StdinRead::Data),
+        // Timeout: an open pipe with nothing in it. Disconnected: the reader
+        // thread died without answering. Neither yields usable input, and
+        // neither is worth failing the run over — just tell the reader to
+        // stand down.
+        Err(_) => {
+            abandoned.store(true, Ordering::Relaxed);
+            Ok(StdinRead::Idle)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

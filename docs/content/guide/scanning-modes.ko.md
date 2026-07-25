@@ -56,6 +56,19 @@ hakrawler -url https://target.app | dalfox scan
 
 Dalfox는 입력을 버퍼링하고 중복을 제거한 뒤 모든 줄을 대상으로 스캔합니다.
 
+### 명령줄 대상과 함께 파이프하기
+
+대상을 인자로 주면서 동시에 파이프로도 넘기면 두 목록이 병합됩니다:
+
+```bash
+cat urls.txt | dalfox scan https://target.app/one
+# [info] Merged 12 target(s) from stdin and 1 target(s) from arguments
+```
+
+이 경우 명령줄 대상만으로도 이미 스캔이 가능하므로, Dalfox는 `stdin`의 첫 바이트를 약 500ms만 기다립니다. 래퍼나 CI 잡, 잡 러너가 열어둔 채 아무것도 쓰지 않는 파이프는 실행을 막지 않고 경고와 함께 건너뜁니다. 일단 스트림이 데이터를 보내기 시작하면 끝까지 읽으므로, 길거나 천천히 쓰이는 목록이 잘리는 일은 없습니다.
+
+이 동작을 조정하려면 `DALFOX_STDIN_WAIT_MS`로 대기 시간을 늘리거나 `0`으로 병합을 끌 수 있습니다([Environment](../../reference/environment/) 참고). `stdin`이 곧 입력이며 얼마가 걸리든 기다려야 한다면 `--input-type pipe`를 사용하세요.
+
 ## Raw HTTP 모드
 
 Burp, Caido, ZAP에서 캡처한 요청을 파일로 저장한 뒤 Dalfox에 넘겨줍니다:

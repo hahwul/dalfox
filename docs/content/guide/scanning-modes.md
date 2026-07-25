@@ -56,6 +56,19 @@ hakrawler -url https://target.app | dalfox scan
 
 Dalfox buffers the input, deduplicates, and scans every line as a target.
 
+### Piping alongside a command-line target
+
+Give Dalfox a target *and* pipe one, and the two lists merge:
+
+```bash
+cat urls.txt | dalfox scan https://target.app/one
+# [info] Merged 12 target(s) from stdin and 1 target(s) from arguments
+```
+
+Here the command-line target is already enough to scan, so Dalfox waits only ~500 ms for `stdin` to produce its first byte. A pipe that a wrapper, CI job, or job runner left open and idle is skipped with a warning instead of blocking the run. Once the stream does start talking, it's read to the end — a long or slowly written list is never truncated.
+
+To adjust that: `DALFOX_STDIN_WAIT_MS` raises the wait (or disables the merge with `0`) — see [Environment](../../reference/environment/) — and `--input-type pipe` says `stdin` *is* the input, so Dalfox waits for it however long it takes.
+
 ## Raw HTTP mode
 
 Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalfox:

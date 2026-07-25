@@ -145,9 +145,25 @@ pub(crate) async fn resolve_targets(
 
     if input_type == "auto" {
         // If stdin is piped under auto, read it and merge targets!
+        //
+        // Reaching here means the user already named targets on the command
+        // line (the empty case above resolved to `pipe`/`har` or errored), so
+        // stdin is a bonus source rather than the input they asked for.
+        // Reading it to EOF unconditionally hangs `dalfox scan <URL>` whenever
+        // the parent process leaves an idle pipe on stdin — `is_terminal()`
+        // can't tell that apart from a pipe about to deliver a URL list
+        // (#1239). So wait only a short grace window for stdin's first byte:
+        // a real producer has bytes buffered long before we look, an idle pipe
+        // stays silent and we scan the CLI targets instead. `-i pipe` remains
+        // the way to say "stdin *is* the input, wait for it".
         if stdin_is_piped {
-            match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe") {
-                Ok(buffer) => {
+            let wait_ms = stdin_merge_wait_ms();
+            match crate::utils::fs::read_stdin_bounded_within(
+                MAX_TARGET_LIST_BYTES,
+                "stdin pipe",
+                std::time::Duration::from_millis(wait_ms),
+            ) {
+                Ok(crate::utils::fs::StdinRead::Data(buffer)) => {
                     let mut stdin_count = 0;
                     for line in buffer.lines() {
                         let trimmed = line.trim();
@@ -160,6 +176,20 @@ pub(crate) async fn resolve_targets(
                         eprintln!(
                             "[info] Merged {} target(s) from stdin and {} target(s) from arguments",
                             stdin_count,
+                            args.targets.len()
+                        );
+                    }
+                }
+                Ok(crate::utils::fs::StdinRead::Idle) => {
+                    // Say so rather than dropping the stream silently: if the
+                    // pipe *was* meant to carry targets, its producer is just
+                    // slow and the operator needs to know they were skipped.
+                    if !args.silence {
+                        eprintln!(
+                            "[warn] stdin is an open pipe but sent no data within {}ms; \
+                             scanning the {} target(s) from arguments only. Use `-i pipe` to \
+                             wait for stdin, or set DALFOX_STDIN_WAIT_MS to adjust the wait.",
+                            wait_ms,
                             args.targets.len()
                         );
                     }
@@ -712,6 +742,37 @@ pub(crate) async fn resolve_targets(
     }
 
     Ok(parsed_targets)
+}
+
+/// Default grace window for the `auto` stdin merge, in milliseconds.
+///
+/// Only spent when stdin is a pipe *and* targets were given on the command
+/// line. A shell pipeline (`cat urls.txt | dalfox scan <URL>`) has its first
+/// bytes in the pipe buffer within microseconds — orders of magnitude under
+/// this — while an idle pipe pays the window once and then gets out of the
+/// way. Half a second is long enough to absorb a heavily loaded machine
+/// scheduling the producer late, short enough to read as instant.
+const STDIN_MERGE_WAIT_MS: u64 = 500;
+
+/// Upper bound on the configured wait: one hour. Past this the knob has
+/// stopped meaning "grace window" and `-i pipe` is the honest way to say
+/// "block until stdin is done". The clamp also keeps the knob from silently
+/// re-creating #1239: a wait so large that `Instant::now() + wait` overflows
+/// (e.g. `u64::MAX`) makes `recv_timeout` fall back to an unbounded `recv()`,
+/// which is exactly the indefinite block this fix removed.
+const MAX_STDIN_MERGE_WAIT_MS: u64 = 60 * 60 * 1000;
+
+/// [`STDIN_MERGE_WAIT_MS`], overridable via `DALFOX_STDIN_WAIT_MS` for the two
+/// tails this can't guess: a producer that takes seconds to emit its first URL
+/// (raise it), and a wrapper that always leaves an idle pipe on stdin (`0`
+/// skips the merge outright). A malformed value falls back to the default; an
+/// oversized one is clamped to [`MAX_STDIN_MERGE_WAIT_MS`].
+fn stdin_merge_wait_ms() -> u64 {
+    std::env::var("DALFOX_STDIN_WAIT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|ms| ms.min(MAX_STDIN_MERGE_WAIT_MS))
+        .unwrap_or(STDIN_MERGE_WAIT_MS)
 }
 
 /// Load the source text for a request-bearing input (`raw-http` or `har`):

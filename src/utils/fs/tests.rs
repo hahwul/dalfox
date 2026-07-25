@@ -111,6 +111,207 @@ fn read_prefix_lossy_rejects_directory() {
     assert!(err.to_string().contains("not a regular file"));
 }
 
+// ── read_bounded_within: grace window on the *first* byte ───────────
+//
+// The real stdin can't be swapped out inside a test process, so these
+// drive the reader-generic core with readers that reproduce the shapes
+// that matter: a live-but-silent pipe, a normal producer, and a producer
+// that keeps the stream open long after its first byte (#1239).
+
+/// Blocks on every read for `hold`, then reports EOF — an open pipe whose
+/// writer never sends anything.
+struct SilentReader {
+    hold: std::time::Duration,
+}
+
+impl std::io::Read for SilentReader {
+    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+        std::thread::sleep(self.hold);
+        Ok(0)
+    }
+}
+
+/// Emits `head` immediately, then holds the stream open for `hold` before
+/// delivering `tail` and EOF — a slow producer that has already started.
+struct SlowTailReader {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    hold: std::time::Duration,
+}
+
+impl std::io::Read for SlowTailReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if !self.head.is_empty() {
+            // Drain what fits rather than dropping the remainder: a short
+            // `buf` must cost an extra read, not data.
+            let n = self.head.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.head[..n]);
+            self.head.drain(..n);
+            return Ok(n);
+        }
+        if !self.tail.is_empty() {
+            std::thread::sleep(self.hold);
+            let n = self.tail.len().min(buf.len());
+            buf[..n].copy_from_slice(&self.tail[..n]);
+            self.tail.drain(..n);
+            return Ok(n);
+        }
+        Ok(0)
+    }
+}
+
+#[test]
+fn read_bounded_within_reports_idle_when_nothing_arrives() {
+    let reader = SilentReader {
+        hold: std::time::Duration::from_secs(30),
+    };
+    let started = std::time::Instant::now();
+    let out = read_bounded_within(
+        reader,
+        1024,
+        "stdin pipe",
+        std::time::Duration::from_millis(100),
+    )
+    .unwrap();
+    assert!(
+        matches!(out, StdinRead::Idle),
+        "a silent pipe must not block the caller: {out:?}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "should have returned right after the grace window"
+    );
+}
+
+#[test]
+fn read_bounded_within_returns_data_that_is_ready() {
+    let out = read_bounded_within(
+        std::io::Cursor::new(b"http://a.example\nhttp://b.example\n".to_vec()),
+        1024,
+        "stdin pipe",
+        std::time::Duration::from_secs(5),
+    )
+    .unwrap();
+    match out {
+        StdinRead::Data(s) => assert_eq!(s.lines().count(), 2),
+        StdinRead::Idle => panic!("buffered input must not be reported as idle"),
+    }
+}
+
+#[test]
+fn read_bounded_within_treats_immediate_eof_as_empty_data() {
+    // `echo -n "" | dalfox scan <URL>`: stdin answered, it just had nothing.
+    // That's not the idle case — there is no producer to wait for.
+    let out = read_bounded_within(
+        std::io::Cursor::new(Vec::new()),
+        1024,
+        "stdin pipe",
+        std::time::Duration::from_millis(100),
+    )
+    .unwrap();
+    match out {
+        StdinRead::Data(s) => assert!(s.is_empty()),
+        StdinRead::Idle => panic!("a closed empty stream is data, not idle"),
+    }
+}
+
+#[test]
+fn read_bounded_within_bounds_only_the_first_byte_not_the_whole_read() {
+    // Once the stream talks we're committed: a list still being written when
+    // the grace window expires must arrive whole, never truncated.
+    let out = read_bounded_within(
+        SlowTailReader {
+            head: b"http://first.example\n".to_vec(),
+            tail: b"http://second.example\n".to_vec(),
+            hold: std::time::Duration::from_millis(300),
+        },
+        1024,
+        "stdin pipe",
+        std::time::Duration::from_millis(50),
+    )
+    .unwrap();
+    match out {
+        StdinRead::Data(s) => assert_eq!(
+            s, "http://first.example\nhttp://second.example\n",
+            "the tail written after the grace window must still be read"
+        ),
+        StdinRead::Idle => panic!("stream had data before the window expired"),
+    }
+}
+
+/// Silent past the grace window, then streams without end — the pipe that goes
+/// quiet and later floods.
+struct LateFloodReader {
+    quiet: std::time::Duration,
+    reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    served_quiet: bool,
+}
+
+impl std::io::Read for LateFloodReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if !self.served_quiet {
+            self.served_quiet = true;
+            std::thread::sleep(self.quiet);
+        }
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        buf.fill(b'x');
+        Ok(buf.len())
+    }
+}
+
+#[test]
+fn read_bounded_within_stops_reading_once_the_caller_gave_up() {
+    // The reader can't be interrupted mid-`read()`, but it must not keep
+    // draining and buffering a stream the caller already walked away from —
+    // that would grow toward the cap in the background of a live scan.
+    let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let out = read_bounded_within(
+        LateFloodReader {
+            quiet: std::time::Duration::from_millis(250),
+            reads: std::sync::Arc::clone(&reads),
+            served_quiet: false,
+        },
+        64 << 20, // large cap: `take` must not be what stops the flood
+        "stdin pipe",
+        std::time::Duration::from_millis(50),
+    )
+    .unwrap();
+    assert!(matches!(out, StdinRead::Idle), "expected idle: {out:?}");
+
+    // Let the flood run: the reader should serve one read (the one already in
+    // flight when the window expired) and then stand down.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let served = reads.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        served <= 2,
+        "abandoned reader kept draining stdin: {served} reads"
+    );
+}
+
+#[test]
+fn read_bounded_within_enforces_the_byte_cap() {
+    let err = read_bounded_within(
+        std::io::Cursor::new(vec![b'x'; 64]),
+        16,
+        "stdin pipe",
+        std::time::Duration::from_secs(5),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("exceeded 16-byte cap"));
+}
+
+#[test]
+fn read_bounded_within_rejects_non_utf8() {
+    let err = read_bounded_within(
+        std::io::Cursor::new(vec![0x80, 0x81]),
+        1024,
+        "stdin pipe",
+        std::time::Duration::from_secs(5),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("read failed (or non-UTF8)"));
+}
+
 #[test]
 fn read_prefix_lossy_tolerates_split_multibyte_char() {
     // A 3-byte '…' (U+2026) cut after 1 byte must not error — the partial
