@@ -10,6 +10,7 @@ Dalfox respects a small set of environment variables for configuration that does
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `DALFOX_API_KEY` | `dalfox server` | Value required in the `X-API-KEY` header. Equivalent to `--api-key`. |
+| `DALFOX_STDIN_WAIT_MS` | `dalfox scan` (auto input) | Milliseconds to wait for piped `stdin` to produce its first byte when targets were *also* given on the command line. Default `500`; `0` skips the stdin merge entirely. Does not apply to `--input-type pipe`/`har`, which always wait. |
 | `NO_COLOR` | all modes | Disables ANSI colour output when set to any non-empty value. Follows the [NO_COLOR](https://no-color.org) convention. |
 | `XDG_CONFIG_HOME` | config loader | Base directory for the config file (`$XDG_CONFIG_HOME/dalfox/config.toml`). Falls back to `$HOME/.config`. |
 | `HOME` | config loader | Used when `XDG_CONFIG_HOME` is unset. |

@@ -258,6 +258,147 @@ fn test_e2e_stdin_and_positional_targets_merged() {
     );
 }
 
+/// Run `dalfox` with an idle (open but silent) pipe on stdin, holding the write
+/// end for the whole run. Returns `(exited_in_time, stdout, stderr)`.
+///
+/// stdout/stderr are drained on their own threads: the child must never stall
+/// on a full pipe buffer, or a hang here would mean "we didn't read" rather
+/// than "dalfox blocked".
+fn run_with_idle_stdin_pipe(
+    args: &[&str],
+    env: &[(&str, &str)],
+    write_after: Option<(std::time::Duration, &'static str)>,
+    limit: std::time::Duration,
+) -> (bool, String, String) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_dalfox"));
+    cmd.args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("failed to execute dalfox");
+
+    let mut stdin = child.stdin.take().expect("child stdin should be piped");
+    let mut stdout_pipe = child.stdout.take().expect("child stdout should be piped");
+    let mut stderr_pipe = child.stderr.take().expect("child stderr should be piped");
+    let out_reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = std::io::Read::read_to_string(&mut stdout_pipe, &mut s);
+        s
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = std::io::Read::read_to_string(&mut stderr_pipe, &mut s);
+        s
+    });
+    // With no payload the write end is held open and silent for the whole run
+    // (the #1239 shape); with one, it sends late and then closes so the child
+    // reaches EOF.
+    let mut held_stdin = None;
+    let writer = if let Some((delay, payload)) = write_after {
+        Some(std::thread::spawn(move || {
+            std::thread::sleep(delay);
+            let _ = stdin.write_all(payload.as_bytes());
+            drop(stdin);
+        }))
+    } else {
+        held_stdin = Some(stdin);
+        None
+    };
+
+    let deadline = std::time::Instant::now() + limit;
+    let exited = loop {
+        match child.try_wait().expect("failed polling dalfox") {
+            Some(_) => break true,
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    };
+
+    drop(held_stdin);
+    let stdout = out_reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
+    if let Some(w) = writer {
+        let _ = w.join();
+    }
+    (exited, stdout, stderr)
+}
+
+/// Regression test for #1239: an explicit target on the command line must be
+/// scanned even when a parent process leaves an open, idle pipe on stdin
+/// (`sleep 60 | dalfox scan <URL>` — the shape CI harnesses and job runners
+/// produce). Before the fix, dalfox blocked in `read()` on fd 0 forever.
+#[test]
+fn test_e2e_idle_stdin_pipe_does_not_block_explicit_target() {
+    let (exited, stdout, stderr) = run_with_idle_stdin_pipe(
+        &[
+            "scan",
+            "http://127.0.0.1:1/?q=test",
+            "--skip-xss-scanning",
+            "--skip-discovery",
+            "--skip-mining",
+            "--format",
+            "json",
+        ],
+        &[],
+        None,
+        std::time::Duration::from_secs(30),
+    );
+
+    assert!(
+        exited,
+        "dalfox blocked on an idle stdin pipe despite an explicit target (#1239)\n\
+         stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("http://127.0.0.1:1/?q=test"),
+        "the command-line target should still be scanned, got stdout:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("stdin is an open pipe but sent no data"),
+        "skipping an idle stdin should be announced, got stderr:\n{stderr}"
+    );
+}
+
+/// The grace window is an estimate, so `DALFOX_STDIN_WAIT_MS` has to be able to
+/// stretch it for a producer that takes seconds to emit its first URL.
+#[test]
+fn test_e2e_stdin_wait_env_extends_the_merge_window() {
+    let (exited, stdout, stderr) = run_with_idle_stdin_pipe(
+        &[
+            "scan",
+            "http://127.0.0.1:1/?cli=1",
+            "--skip-xss-scanning",
+            "--skip-discovery",
+            "--skip-mining",
+            "--format",
+            "json",
+        ],
+        &[("DALFOX_STDIN_WAIT_MS", "20000")],
+        Some((
+            std::time::Duration::from_millis(1500),
+            "http://127.0.0.1:1/?piped=1\n",
+        )),
+        std::time::Duration::from_secs(60),
+    );
+
+    assert!(
+        exited,
+        "dalfox should finish once the slow producer sends its target\n\
+         stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Merged 1 target(s) from stdin"),
+        "a target that arrives inside the widened window must still merge, got stderr:\n{stderr}"
+    );
+}
+
 /// Verify `--analyze-external-js` is a recognized flag (clap doesn't reject it).
 #[test]
 fn test_analyze_external_js_flag_is_recognized() {
