@@ -959,6 +959,103 @@ fn test_unresolved_explicit_param_specs_reports_path_fragment() {
     assert!(missing.iter().any(|s| s == "q"));
 }
 
+#[test]
+fn test_ensure_sxss_candidate_params_seeds_query_and_body_inputs() {
+    // Regression: under --sxss the write endpoint does not echo, so every
+    // discovery probe (which gates on immediate-response reflection) kept zero
+    // params and the scan reported clean without ever fetching --sxss-url.
+    // The request's own declared inputs must be seeded as candidates.
+    let mut target = parse_target("https://example.com/store?msg=1&other=2").unwrap();
+    target.data = Some("comment=hi&author=bob".to_string());
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.data = Some("comment=hi&author=bob".to_string());
+
+    let mut params: Vec<Param> = vec![];
+    ensure_sxss_candidate_params(&mut params, &target, &args);
+
+    for (name, loc) in [
+        ("msg", Location::Query),
+        ("other", Location::Query),
+        ("comment", Location::Body),
+        ("author", Location::Body),
+    ] {
+        assert!(
+            params.iter().any(|p| p.name == name && p.location == loc),
+            "stored-XSS candidate {name} ({loc:?}) must be seeded, got {:?}",
+            params
+                .iter()
+                .map(|p| (&p.name, &p.location))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn test_ensure_sxss_candidate_params_preserves_discovered_metadata() {
+    // A param discovery *did* find (inline-echoing stored sink) carries probed
+    // specials / injection context. Seeding must not shadow it with a bare
+    // duplicate, which would both double the scan cost and lose the metadata.
+    let target = parse_target("https://example.com/store?msg=1").unwrap();
+    let mut args = default_scan_args();
+    args.sxss = true;
+
+    let mut discovered = bare_param("msg", Location::Query);
+    discovered.valid_specials = Some(vec!['<', '>']);
+    let mut params = vec![discovered];
+    ensure_sxss_candidate_params(&mut params, &target, &args);
+
+    assert_eq!(
+        params.iter().filter(|p| p.name == "msg").count(),
+        1,
+        "discovered param must not be duplicated by seeding"
+    );
+    assert_eq!(
+        params[0].valid_specials.as_deref(),
+        Some(['<', '>'].as_slice()),
+        "probe metadata must survive seeding"
+    );
+}
+
+#[test]
+fn test_ensure_sxss_candidate_params_honours_ignore_param() {
+    let target = parse_target("https://example.com/store?msg=1&csrf=abc").unwrap();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.ignore_param = vec!["csrf".to_string()];
+
+    let mut params: Vec<Param> = vec![];
+    ensure_sxss_candidate_params(&mut params, &target, &args);
+
+    assert!(params.iter().any(|p| p.name == "msg"));
+    assert!(
+        !params.iter().any(|p| p.name == "csrf"),
+        "--ignore-param must still exclude a seeded stored-XSS candidate"
+    );
+}
+
+#[test]
+fn test_ensure_sxss_candidate_params_seeds_json_body_keys() {
+    let target = parse_target("https://example.com/api/comment").unwrap();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.data = Some(r#"{"body":"hi","author":"bob"}"#.to_string());
+
+    let mut params: Vec<Param> = vec![];
+    ensure_sxss_candidate_params(&mut params, &target, &args);
+
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "body" && p.location == Location::JsonBody)
+    );
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "author" && p.location == Location::JsonBody)
+    );
+}
+
 fn default_scan_args() -> ScanArgs {
     ScanArgs {
         insecure: Some(true),

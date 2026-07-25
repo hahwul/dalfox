@@ -1724,6 +1724,9 @@ impl ScanWorkerCtx {
                 &state.waf_streak,
             )
             .await;
+            // Only a browser-rendered body may seed AST analysis / probe
+            // classification; the 3xx `Location:` stand-in is not a document.
+            let response_text = response_text.and_then(|b| b.renderable.then_some(b.text));
             if kind.is_some() {
                 probe_reflected = true;
                 probe_response_text = response_text;
@@ -1845,12 +1848,21 @@ impl ScanWorkerCtx {
                 }
             };
             let reflected_kind = reflection_tuple.0;
-            let reflection_response_text = reflection_tuple.1;
+            let reflection_body = reflection_tuple.1;
+            // Everything downstream of here infers execution from the body
+            // (AST sinks, the static V upgrade), so it may only ever see a
+            // body a browser would actually render. The 3xx `Location:`
+            // stand-in is withheld: it contains the payload for R
+            // classification but was never a document. Borrowed rather than
+            // cloned — a response body runs up to 16 MiB and this is the
+            // per-payload hot loop.
+            let renderable_text: Option<&str> =
+                reflection_body.as_ref().and_then(|b| b.renderable_text());
 
             // AST-based DOM XSS analysis (enabled by default unless skipped)
             if !self.args.skip_ast_analysis
                 && !state.ast_analysis_done
-                && let Some(ref response_text) = reflection_response_text
+                && let Some(response_text) = renderable_text
             {
                 state.ast_analysis_done = true;
                 let ast_findings = run_ast_dom_analysis(
@@ -1928,7 +1940,7 @@ impl ScanWorkerCtx {
                     // when angles are reported "invalid" at one of the
                     // reflection sites, and the prior `has_js_context_evidence`
                     // check only covered the `<script>`-block case.
-                    let dom_evidence_kind = reflection_response_text.as_deref().and_then(|body| {
+                    let dom_evidence_kind = renderable_text.and_then(|body| {
                         crate::scanning::check_dom_verification::classify_dom_evidence(
                             &reflection_payload,
                             body,
@@ -1999,7 +2011,12 @@ impl ScanWorkerCtx {
                     result.location = format!("{:?}", param.location);
                     result.request =
                         Some(build_request_text(&self.target, param, &reflection_payload));
-                    result.response = reflection_response_text;
+                    // Report the observed text even when it isn't renderable:
+                    // the redirect stand-in is an honest `HTTP 302 Location: …`
+                    // line, which is the real evidence for that vector. Only
+                    // execution-inferring consumers above are gated on
+                    // `renderable`.
+                    result.response = reflection_body.map(|b| b.text);
 
                     self.stream_finding(&result);
                     // Defer pushing to shared results (batched)

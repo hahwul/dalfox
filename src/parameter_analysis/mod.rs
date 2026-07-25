@@ -1100,6 +1100,23 @@ pub async fn analyze_parameters(
         // `-p name:type` targets; synthesize those so a named injection point
         // is always tested regardless of `--skip-*` flags.
         ensure_explicit_params(&mut params, &args.param, target);
+    } else if args.sxss {
+        // Stored-XSS candidate seeding.
+        //
+        // Every discovery/mining probe keeps a param only when the marker
+        // comes back in the *immediate* response. For a stored sink that is
+        // precisely the wrong test: the defining property of `--sxss` is that
+        // the write endpoint does not echo — the payload surfaces later, on
+        // the retrieval URL. So the documented flow (inject at A, verify at
+        // `--sxss-url` B) discovered zero params and reported a clean scan
+        // without ever requesting B, even though the SXSS-aware reflection and
+        // DOM stages downstream do fetch B correctly.
+        //
+        // Seed the inputs the request actually carries so those stages get a
+        // chance to run. Anything discovery already found keeps its richer
+        // probe metadata; these fills are the same shape `-p name:type`
+        // synthesizes, which is the path that already worked.
+        ensure_sxss_candidate_params(&mut params, target, args);
     }
     target.reflection_params = params;
 
@@ -1263,6 +1280,55 @@ fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], targe
             let location = infer_location_for_bare_param(name, target);
             push_synthesized_param(params, name, location);
         }
+    }
+}
+
+/// Seed stored-XSS candidates from the inputs the request actually carries.
+///
+/// Only called under `--sxss` with no explicit `-p`. Discovery gates on
+/// immediate-response reflection, which a stored sink by definition fails, so
+/// without this the scan has nothing to test and silently reports clean. See
+/// the call site for the full rationale.
+///
+/// Deliberately limited to inputs already present on the wire (URL query pairs
+/// and `--data` body fields) rather than the mining wordlists: those are the
+/// operator's own declared inputs, so seeding them cannot invent traffic the
+/// user did not ask for. `--ignore-param` is still honoured.
+fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: &ScanArgs) {
+    let mut candidates: Vec<(String, Location)> = Vec::new();
+
+    for (name, _) in target.url.query_pairs() {
+        candidates.push((name.to_string(), Location::Query));
+    }
+
+    if let Some(data) = args.data.as_deref() {
+        let trimmed = data.trim_start();
+        if trimmed.starts_with('{') {
+            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed) {
+                for key in map.keys() {
+                    candidates.push((key.clone(), Location::JsonBody));
+                }
+            }
+        } else {
+            for (name, _) in url::form_urlencoded::parse(data.as_bytes()) {
+                candidates.push((name.to_string(), Location::Body));
+            }
+        }
+    }
+
+    for (name, location) in candidates {
+        if name.is_empty() || args.ignore_param.iter().any(|ignored| ignored == &name) {
+            continue;
+        }
+        // Keep whatever discovery produced for this slot — it carries probed
+        // specials / injection context that a bare synthesis does not.
+        if params
+            .iter()
+            .any(|p| p.name == name && p.location == location)
+        {
+            continue;
+        }
+        push_synthesized_param(params, &name, location);
     }
 }
 

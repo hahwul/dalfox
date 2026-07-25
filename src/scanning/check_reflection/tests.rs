@@ -998,6 +998,81 @@ async fn test_check_reflection_catches_decoded_payload_in_redirect_location() {
 }
 
 #[tokio::test]
+async fn test_redirect_location_body_is_not_renderable_and_carries_no_markup() {
+    // Regression: a marker-bearing payload echoed into a 3xx `Location:` used
+    // to come back wrapped as `<html><body>{location}</body></html>`. That
+    // stand-in parses as valid HTML, so the static V upgrade's DOM-marker
+    // selector matched it and minted a Verified/High finding whose "response"
+    // evidence the server never sent — browsers don't render redirect bodies
+    // at all. The body must now be flagged non-renderable (keeping every
+    // execution-inferring consumer off it) and must not fabricate markup.
+    let payload = "<svg/onload=alert(1) class=dalfox>";
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/redirect/decoded");
+    let param = make_param();
+    let args = default_scan_args();
+    let streak = std::sync::atomic::AtomicU32::new(0);
+
+    let (kind, body) = crate::scanning::check_reflection::check_reflection_with_response_tracked(
+        None, &target, &param, payload, &args, &streak,
+    )
+    .await;
+
+    assert!(
+        kind.is_some(),
+        "Location-header reflection must still be reported as R"
+    );
+    let body = body.expect("redirect reflection must return a body");
+    assert!(
+        !body.renderable,
+        "a 3xx Location stand-in is not a browser-rendered document"
+    );
+    assert_eq!(
+        body.renderable_text(),
+        None,
+        "execution-inferring consumers must not be handed the stand-in"
+    );
+    assert!(
+        !body.text.contains("<html>") && !body.text.contains("<body>"),
+        "stand-in must not fabricate markup that never came off the wire: {}",
+        body.text
+    );
+    assert!(
+        body.text.contains(payload),
+        "stand-in must still contain the payload so R classification works: {}",
+        body.text
+    );
+}
+
+#[tokio::test]
+async fn test_redirect_location_stand_in_yields_no_dom_marker_evidence() {
+    // The precise false-positive mechanism: `classify_dom_evidence` finds the
+    // `dalfox` marker in the old synthetic wrapper. Pin that the text now
+    // handed to that classifier (i.e. the renderable text) is absent, so no
+    // V upgrade is reachable from a redirect.
+    let payload = "<svg/onload=alert(1) class=dalfox>";
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/redirect/decoded");
+    let param = make_param();
+    let args = default_scan_args();
+    let streak = std::sync::atomic::AtomicU32::new(0);
+
+    let (_, body) = crate::scanning::check_reflection::check_reflection_with_response_tracked(
+        None, &target, &param, payload, &args, &streak,
+    )
+    .await;
+    let body = body.expect("redirect reflection must return a body");
+
+    let evidence = body.renderable_text().and_then(|text| {
+        crate::scanning::check_dom_verification::classify_dom_evidence(payload, text)
+    });
+    assert!(
+        evidence.is_none(),
+        "a redirect must never produce DOM-marker evidence (no browser renders it)"
+    );
+}
+
+#[tokio::test]
 async fn test_inert_data_gate_does_not_swallow_redirect_location_reflection() {
     // A 302 whose body is declared `application/json` still echoes the payload
     // in its `Location` header. The inert-data content-type gate must skip
