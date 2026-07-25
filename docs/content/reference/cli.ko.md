@@ -157,7 +157,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--sxss-url` | — | — | SXSS용 조회 URL |
 | `--sxss-method` | — | `GET` | 조회 메서드 |
 | `--sxss-retries` | — | `3` | 저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수 |
-| `--max-payloads-per-param` | — | `0` | 파라미터별로 테스트하는 페이로드 수 제한 (`0` = 제한 없음) |
+| `--max-payloads-per-param` | — | `0` | 파라미터별로 테스트하는 페이로드 수 제한 (`0`은 `--deep-scan`이 없으면 세트당 3000개의 내장 안전 상한을 적용) |
 | `--skip-ast-analysis` | — | false | AST DOM-XSS를 건너뜁니다 |
 | `--analyze-external-js` | — | false | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석을 수행합니다 (프리플라이트, 대상별 1회; 최대 16개 파일, 각 512 KiB; `--include-url`/`--exclude-url`을 준수) |
 | `--hpp` | — | false | HTTP 파라미터 오염 |
@@ -194,10 +194,10 @@ dalfox server [FLAGS]
 | `--callback-param-name` | — | `callback` | JSONP 콜백 파라미터 |
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS 메서드 |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS 헤더 |
-| `--rate-limit` | `-r`, `--rl` | `0` | 전역 아웃바운드 요청 속도를 제한합니다 (초당 요청 수, `0` = 무제한) |
+| `--rate-limit` | — | `0` | 전역 아웃바운드 요청 속도를 제한합니다 (초당 요청 수, `0` = 무제한) |
 | `--scan-timeout` | — | `0` | 스캔 단계에 대한 대상별 하드 실제 시간 상한(초) |
-| `--max-concurrent-scans` | — | `0` | 동시 스캔 수 제한 (`0` = 무제한) |
-| `--max-body-bytes` | — | `0` | 분석용 응답 본문 바이트 제한 (`0` = 무제한) |
+| `--max-concurrent-scans` | — | `100` | 동시 스캔 수 제한 (`0` = 무제한) |
+| `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 `413` 응답 |
 
 엔드포인트는 [REST API Server](../../integrations/server/)를 참조하세요.
 

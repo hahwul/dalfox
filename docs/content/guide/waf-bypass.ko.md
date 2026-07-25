@@ -32,6 +32,7 @@ toc = true
 - Google Cloud Armor
 - Fastly
 - Wordfence
+- Citrix NetScaler
 
 인식되지 않는 WAF는 일반 폴백 전략을 발동시킵니다.
 
@@ -139,8 +140,8 @@ WAF마다 각기 다른 수법에 무너집니다. 작은 샘플을 소개합니
 
 ```bash
 dalfox https://target.app -e url,base64
-# Cloudflare detected → extra encoders: unicode, zwsp
-# Effective: url, base64, unicode, zwsp
+# Cloudflare detected → extra encoders: unicode, 4url, zwsp
+# Effective: url, base64, unicode, 4url, zwsp
 ```
 
 중복을 자동으로 제거하고 순서를 보존합니다.

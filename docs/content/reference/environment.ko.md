@@ -14,6 +14,7 @@ Dalfox는 파일이나 명령줄에 두기 적합하지 않은 설정을 위해 
 | `NO_COLOR` | 모든 모드 | 비어 있지 않은 값으로 설정되면 ANSI 색상 출력을 비활성화. [NO_COLOR](https://no-color.org) 관례를 따름. |
 | `XDG_CONFIG_HOME` | 설정 로더 | 설정 파일의 기준 디렉터리 (`$XDG_CONFIG_HOME/dalfox/config.toml`). `$HOME/.config`로 폴백. |
 | `HOME` | 설정 로더 | `XDG_CONFIG_HOME`이 설정되지 않았을 때 사용. |
+| `USERPROFILE` | 설정 로더 | `XDG_CONFIG_HOME`과 `HOME`이 모두 없을 때 사용하는 Windows 폴백 기준 디렉터리. |
 
 ## 예시
 

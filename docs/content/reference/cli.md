@@ -157,7 +157,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--sxss-url` | — | — | Retrieval URL for SXSS |
 | `--sxss-method` | — | `GET` | Retrieval method |
 | `--sxss-retries` | — | `3` | Retries on the retrieval URL when fetching stored output |
-| `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` = no cap) |
+| `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `--deep-scan` is set) |
 | `--skip-ast-analysis` | — | false | Skip AST DOM-XSS |
 | `--analyze-external-js` | — | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`) |
 | `--hpp` | — | false | HTTP Parameter Pollution |
@@ -194,10 +194,10 @@ dalfox server [FLAGS]
 | `--callback-param-name` | — | `callback` | JSONP callback param |
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS methods |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS headers |
-| `--rate-limit` | `-r`, `--rl` | `0` | Cap the global outbound request rate (requests/sec, `0` = unlimited) |
+| `--rate-limit` | — | `0` | Cap the global outbound request rate (requests/sec, `0` = unlimited) |
 | `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage, in seconds |
-| `--max-concurrent-scans` | — | `0` | Limit on simultaneous scans (`0` = unlimited) |
-| `--max-body-bytes` | — | `0` | Limit response body bytes for analysis (`0` = unlimited) |
+| `--max-concurrent-scans` | — | `100` | Limit on simultaneous scans (`0` = unlimited) |
+| `--max-body-bytes` | — | `1048576` | Maximum accepted request body size (bytes) for `POST /scan` and `/preflight`; oversized bodies get `413` |
 
 See [REST API Server](../../integrations/server/) for endpoints.
 
