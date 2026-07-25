@@ -114,11 +114,13 @@ Each finding is tagged:
 
 | Tag | Meaning |
 |-----|---------|
-| `[V]` | **Verified**: payload produced a real DOM element (via AST/CSS-selector match) |
+| `[V]` | **Verified**: the payload came back as a real DOM element in the parsed response (CSS-selector match on Dalfox's marker) |
 | `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
 | `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
+
+`[V]` is not browser execution — Dalfox has no headless browser, so a pure client-side DOM-XSS tops out at `[A]` and needs confirming in a browser. See [Detection Model](../../guide/detection-model/) for what each subsystem actually proves.
 
 ## Next steps
 

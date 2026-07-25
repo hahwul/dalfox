@@ -92,6 +92,13 @@ pub struct Result {
     /// line with a short location hint.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub location: String,
+    /// True when `data` already holds a complete, reproducible POC URL and the
+    /// renderer must not append `?param=payload` on top of it. Set by the AST
+    /// DOM-XSS producers, which place the payload in the fragment / query /
+    /// path themselves according to the detected DOM source. Internal
+    /// rendering hint — never serialized.
+    #[serde(skip)]
+    pub poc_url_complete: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,6 +130,7 @@ impl Result {
                 message_id: 0,
                 message_str: String::new(),
                 location: String::new(),
+                poc_url_complete: false,
                 request: None,
                 response: None,
             },

@@ -158,7 +158,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--sxss-method` | — | `GET` | Retrieval method |
 | `--sxss-retries` | — | `3` | Retries on the retrieval URL when fetching stored output |
 | `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `--deep-scan` is set) |
-| `--skip-ast-analysis` | — | false | Skip AST DOM-XSS |
+| `--skip-ast-analysis` | — | false | Skip AST DOM-XSS — the source→sink pass that emits `[A]` findings (not `--skip-mining-dom`) |
 | `--analyze-external-js` | — | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`) |
 | `--hpp` | — | false | HTTP Parameter Pollution |
 | `--detect-outdated-libs` | — | false | Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests) |

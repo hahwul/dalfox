@@ -964,3 +964,77 @@ fn test_build_ast_dom_xss_result_not_verified_stays_medium_ast() {
         "unverified result must not carry verification note"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Source → reported parameter label (issue #1238)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_dom_source_param_label_reports_query_key() {
+    assert_eq!(
+        super::dom_source_param_label("URLSearchParams.get(q)"),
+        "q",
+        "query-backed sources must report the key that carries the payload"
+    );
+}
+
+#[test]
+fn test_dom_source_param_label_reports_outermost_key_for_nested_chain() {
+    // `build_dom_xss_poc_url` nests the inner key inside the outer query
+    // parameter, so the outer one is the name on the wire.
+    assert_eq!(
+        super::dom_source_param_label("URLSearchParams.get(outer).get(inner)"),
+        "outer"
+    );
+}
+
+#[test]
+fn test_dom_source_param_label_falls_back_to_browser_surface() {
+    for source in ["location.hash", "window.name", "document.referrer"] {
+        assert_eq!(
+            super::dom_source_param_label(source),
+            source,
+            "non-query sources report the surface the operator must control"
+        );
+    }
+}
+
+#[test]
+fn test_build_ast_dom_xss_result_reports_source_param_not_dash() {
+    let r = super::build_ast_dom_xss_result(
+        "https://example.com/",
+        "GET",
+        "URLSearchParams.get(name)",
+        "name=<img src=x onerror=alert(1)>".to_string(),
+        "evidence".to_string(),
+        "DOM-XSS via name".to_string(),
+        false,
+    );
+    assert_eq!(r.param, "name", "AST findings must name the affected input");
+    assert!(
+        r.poc_url_complete,
+        "AST findings build their own POC URL and must be flagged as complete"
+    );
+}
+
+#[test]
+fn test_run_initial_ast_dom_analysis_drops_internal_light_check_wording() {
+    let html = r#"<html><body><script>
+        var q = new URLSearchParams(location.search).get('q');
+        document.getElementById('out').innerHTML = q;
+    </script></body></html>"#;
+    let results = super::run_initial_ast_dom_analysis(html, "https://example.com/", "GET", false);
+    assert!(!results.is_empty(), "expected a DOM-XSS finding");
+    for r in &results {
+        assert!(
+            r.message_str.contains("(needs runtime confirmation)"),
+            "AST findings must keep the confirmation caveat: {}",
+            r.message_str
+        );
+        assert!(
+            !r.message_str.contains("light check: no parameter"),
+            "internal wording must not reach users: {}",
+            r.message_str
+        );
+    }
+}

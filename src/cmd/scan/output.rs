@@ -240,6 +240,44 @@ pub(crate) fn render_only_discovery(
     ScanOutcome::Clean
 }
 
+/// Build the `plain` summary line printed above the POC blocks.
+///
+/// The headline count stays verified-only — scripts grep `XSS found N XSS`,
+/// and `[V]` is the tier that means "dalfox saw the payload land". But a
+/// verified-only count printed directly above a list of `[A]` findings read as
+/// a contradiction: "XSS found 0 XSS" followed by three POCs (#1238). So the
+/// other tiers about to be printed are appended, and the two now agree.
+pub(super) fn plain_findings_summary(display_results: &[Result]) -> String {
+    let count_of = |tier: FindingType| {
+        display_results
+            .iter()
+            .filter(|r| r.result_type == tier)
+            .count()
+    };
+    let others: Vec<String> = [
+        (FindingType::AstDetected, "A"),
+        (FindingType::Reflected, "R"),
+        (FindingType::Informational, "I"),
+    ]
+    .into_iter()
+    .filter_map(|(tier, label)| match count_of(tier) {
+        0 => None,
+        n => Some(format!("{} {}", n, label)),
+    })
+    .collect();
+
+    let verified = count_of(FindingType::Verified);
+    if others.is_empty() {
+        format!("XSS found \x1b[33m{}\x1b[0m XSS", verified)
+    } else {
+        format!(
+            "XSS found \x1b[33m{}\x1b[0m XSS (+{})",
+            verified,
+            others.join(", ")
+        )
+    }
+}
+
 pub(crate) async fn render_results(
     args: &ScanArgs,
     state: &ScanState,
@@ -470,11 +508,7 @@ pub(crate) async fn render_results(
         let mut output = String::new();
 
         // Plain logger: XSS summary before POC lines
-        let v_count = display_results
-            .iter()
-            .filter(|r| r.result_type == FindingType::Verified)
-            .count();
-        log_warn(args, &format!("XSS found \x1b[33m{}\x1b[0m XSS", v_count));
+        log_warn(args, &plain_findings_summary(display_results));
 
         // When the streaming printer ran (`stream_findings_enabled`), every
         // finding has already been emitted mid-scan with its full block —

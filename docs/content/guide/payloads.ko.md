@@ -181,7 +181,7 @@ dalfox https://target.app --deep-scan
 | `--skip-xss-scanning` | 탐색과 프로빙만 수행; 페이로드 주입 없음 |
 | `--skip-ast-analysis` | 인라인 스크립트의 AST 기반 DOM-XSS 탐지 건너뛰기 (`[A]` 결과) |
 
-`--skip-ast-analysis`는 `source → sink` 흐름(예: `location.hash` → `innerHTML`)을 `[A]`(AST 탐지) 결과로 보고하는 정적 DOM-XSS 패스를 제어하며, 파라미터 마이닝과는 독립적입니다. `--skip-mining-dom`은 이 패스에 영향을 주지 **않습니다**. 패스는 그대로 두고 결과에서만 숨기려면 `--only-poc v,r`을 사용하세요.
+`--skip-ast-analysis`는 `source → sink` 흐름(예: `location.hash` → `innerHTML`)을 `[A]`(AST 탐지) 결과로 보고하는 정적 DOM-XSS 패스를 제어하며, 파라미터 마이닝과는 독립적입니다. `--skip-mining-dom`은 이 패스에 영향을 주지 **않습니다**. 패스는 그대로 두고 결과에서만 숨기려면 `--only-poc v,r`을 사용하세요. `[A]`가 실제로 무엇을 증명하는지, 그리고 순수 클라이언트 사이드 DOM-XSS가 왜 `[V]`에 도달하지 못하는지는 [탐지 모델](../detection-model/) 문서에서 다룹니다.
 
 ## 다음 단계
 

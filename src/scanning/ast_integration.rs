@@ -135,6 +135,26 @@ fn extract_search_param_key(source: &str) -> Option<&str> {
     extract_search_param_chain(source)?.last().copied()
 }
 
+/// Reporting label for the input that carries a DOM-XSS source.
+///
+/// AST findings used to report `param: "-"`, which threw away triage
+/// information the analyzer already had — it derives the query key to build
+/// the POC URL in the first place (issue #1238). Query-backed sources report
+/// the key that actually appears in the POC URL (`q`); every other source
+/// reports the browser surface an operator has to control to reproduce the
+/// finding (`location.hash`, `window.name`, …).
+pub(crate) fn dom_source_param_label(source: &str) -> String {
+    // `chain[0]` — not the innermost key — because `build_dom_xss_poc_url`
+    // nests a chained `URLSearchParams.get(a).get(b)` under the outermost
+    // query parameter, so that is the name on the wire.
+    if let Some(chain) = extract_search_param_chain(source)
+        && let Some(key) = chain.first()
+    {
+        return (*key).to_string();
+    }
+    source.to_string()
+}
+
 fn extract_parenthesized_suffix<'a>(source: &'a str, prefix: &str) -> Option<&'a str> {
     let rest = source.strip_prefix(prefix)?;
     rest.strip_suffix(')')
@@ -742,7 +762,7 @@ pub(crate) fn build_ast_dom_xss_result(
             .inject_type("DOM-XSS")
             .method(target_method.to_string())
             .data(poc_url)
-            .param("-")
+            .param(dom_source_param_label(source))
             .payload(payload)
             .evidence(evidence)
             .cwe("CWE-79")
@@ -750,6 +770,9 @@ pub(crate) fn build_ast_dom_xss_result(
             .message_id(0)
             .message_str(message)
             .build();
+    // `poc_url` above already carries the payload in the fragment / query /
+    // path picked for this source, so the POC renderer must leave it alone.
+    ast_result.poc_url_complete = true;
     if self_bootstrap_verified {
         ast_result.result_type = crate::scanning::result::FindingType::Verified;
         ast_result.severity = "High".to_string();
@@ -795,7 +818,11 @@ pub fn run_initial_ast_dom_analysis(
             {
                 format!("{description} (needs runtime confirmation) [manual POC: {hint}]")
             } else {
-                format!("{description} (needs runtime confirmation) [light check: no parameter]")
+                // URL-carried sources need no setup hint — the POC URL on the
+                // finding is the reproduction step. The old
+                // `[light check: no parameter]` suffix here was internal
+                // wording that read like a scan result (#1238).
+                format!("{description} (needs runtime confirmation)")
             };
             let evidence = format!(
                 "{}:{}:{} - {} (Source: {}, Sink: {})",

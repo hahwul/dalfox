@@ -113,7 +113,7 @@ dalfox https://target.app --only-discovery
 | `--skip-reflection-cookie` | 쿠키 반사 확인 |
 | `--skip-reflection-path` | 경로 반사 확인 |
 
-> `--skip-mining-dom`은 응답 HTML에서 파라미터 *이름*을 수확하는 동작만 멈춥니다. DOM-XSS 탐지 자체를 끄지는 **않습니다**: 인라인 `<script>` 블록을 정적 분석해 `location.hash` → `innerHTML` 같은 source→sink 흐름을 찾아 `[A]`(AST 탐지) 결과를 내는 패스는 [`--skip-ast-analysis`](../payloads/)가 제어하는 별개의 단계입니다. 결과에서 해당 항목만 걸러내려면 `--only-poc v,r`을 사용하세요.
+> `--skip-mining-dom`은 응답 HTML에서 파라미터 *이름*을 수확하는 동작만 멈춥니다. DOM-XSS 탐지 자체를 끄지는 **않습니다**: 인라인 `<script>` 블록을 정적 분석해 `location.hash` → `innerHTML` 같은 source→sink 흐름을 찾아 `[A]`(AST 탐지) 결과를 내는 패스는 [`--skip-ast-analysis`](../payloads/)가 제어하는 별개의 단계입니다. 결과에서 해당 항목만 걸러내려면 `--only-poc v,r`을 사용하세요. 두 서브시스템의 차이와 각 증거 등급의 의미는 [탐지 모델](../detection-model/) 문서를 참고하세요.
 
 ## 주입 마커(Injection markers)
 

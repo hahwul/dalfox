@@ -27,7 +27,7 @@ pub(crate) fn build_ast_dom_message(
     {
         format!("{description} (needs runtime confirmation) [manual POC: {hint}]")
     } else {
-        format!("{description} (needs runtime confirmation) [light check: no parameter]")
+        format!("{description} (needs runtime confirmation)")
     }
 }
 
@@ -124,15 +124,17 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
             }
         } else if url.contains('?') {
             // Query mutation already embedded
-        } else if result.param == "-" {
-            // AST DOM-XSS findings use `"-"` as a synthetic param name
-            // and have already built a complete POC URL via
-            // `ast_integration::build_dom_xss_poc_url` (which places
-            // the payload in the fragment / search / path according
-            // to the detected DOM source). Skip query synthesis here
-            // — otherwise we'd append `?-=<payload>` after a URL that
-            // already carries `#<payload>`, producing a confusing
-            // double-injection POC.
+        } else if result.poc_url_complete || result.param == "-" {
+            // AST DOM-XSS findings have already built a complete POC URL via
+            // `ast_integration::build_dom_xss_poc_url` (which places the
+            // payload in the fragment / search / path according to the
+            // detected DOM source). Skip query synthesis here — otherwise
+            // we'd append `?q=<payload>` after a URL that already carries
+            // `#<payload>`, producing a confusing double-injection POC.
+            //
+            // The `"-"` arm is the legacy sentinel those findings used to
+            // carry before they reported the real source parameter (#1238);
+            // kept so any deserialized/older result still renders correctly.
         } else if !url.contains(&result.payload) && url_can_carry_payload {
             // Synthesize `?param=payload` ONLY when the param actually
             // travels on the URL. For Header/Cookie/Body locations the
@@ -341,7 +343,17 @@ pub(crate) fn render_finding_block(
 
     let mut idx = 0usize;
 
-    let issue_text = if result.result_type == FindingType::Reflected {
+    // AST DOM-XSS findings — the `DOM-XSS` producers that carry no catalog
+    // message id — describe the source→sink flow and its confirmation status:
+    // "DOM-based XSS via URLSearchParams.get(q) to innerHTML (needs runtime
+    // confirmation)". The generic labels below threw that away and described a
+    // static inference as an observation, which is what made `[A]` results
+    // read like verified ones (#1238). JSON already carried the real text.
+    let is_ast_dom_finding =
+        result.message_id == 0 && result.inject_type == "DOM-XSS" && !result.message_str.is_empty();
+    let issue_text = if is_ast_dom_finding {
+        result.message_str.as_str()
+    } else if result.result_type == FindingType::Reflected {
         "XSS payload reflected"
     } else {
         "XSS payload DOM object identified"

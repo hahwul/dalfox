@@ -47,6 +47,9 @@ Every finding includes:
 | `severity` | `"High"` | High / Medium / Low / Info |
 | `message_str` | `"XSS found"` | Short message |
 
+What each tier is actually evidence of — and why a pure client-side DOM-XSS
+never reaches `V` — is covered in [Detection Model](../detection-model/).
+
 `V` / `A` / `R` are XSS findings. `I` (**Informational**) is a non-exploitable
 observation — currently only **outdated / known-vulnerable JS libraries**
 (`inject_type: "OutdatedComponent"`, `CWE-1104`), rendered as a compact
