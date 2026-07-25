@@ -1295,7 +1295,7 @@ pub fn default_toml_template() -> String {
 # max_targets_per_host = 100
 
 # XSS SCANNING
-# encoders = ["url", "html"]  # none, url, 2url, 3url, 4url, html, base64
+# encoders = ["url", "html"]  # none, url, 2url, 3url, 4url, html, htmlpad, base64, unicode, zwsp
 # remote_payloads = ["payloadbox", "portswigger"]
 # custom_blind_xss_payload = "blind.txt"
 # blind_callback_url = "https://your-bxss-callback.com"
@@ -1305,7 +1305,7 @@ pub fn default_toml_template() -> String {
 # custom_payload = "payloads.txt"
 # only_custom_payload = false
 # skip_xss_scanning = false
-# max_payloads_per_param = 0  # cap payloads per param (0 = unlimited)
+# max_payloads_per_param = 0  # cap payloads per param (0 = built-in safety cap of 3000 per set, unless deep_scan)
 # deep_scan = false
 # sxss = false
 # sxss_url = "https://target/echo"

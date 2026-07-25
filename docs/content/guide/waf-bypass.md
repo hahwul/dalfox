@@ -32,6 +32,7 @@ This is all on by default. You only touch flags if you want to disable or steer 
 - Google Cloud Armor
 - Fastly
 - Wordfence
+- Citrix NetScaler
 
 Unrecognised WAFs trigger a generic fallback strategy.
 
@@ -139,8 +140,8 @@ Your `--encoders` list and the WAF's extra encoders are merged. So this:
 
 ```bash
 dalfox https://target.app -e url,base64
-# Cloudflare detected → extra encoders: unicode, zwsp
-# Effective: url, base64, unicode, zwsp
+# Cloudflare detected → extra encoders: unicode, 4url, zwsp
+# Effective: url, base64, unicode, 4url, zwsp
 ```
 
 De-duplicates automatically, preserves order.
