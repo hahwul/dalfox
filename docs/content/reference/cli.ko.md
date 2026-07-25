@@ -110,7 +110,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--remote-wordlists` | — | — | 원격 소스: `burp`, `assetnote` |
 | `--skip-mining` | — | false | 모든 마이닝을 건너뜁니다 |
 | `--skip-mining-dict` | — | false | 사전 마이닝을 건너뜁니다 |
-| `--skip-mining-dom` | — | false | DOM 마이닝을 건너뜁니다 |
+| `--skip-mining-dom` | — | false | HTML `id`/`name` 속성에서 파라미터 이름 수확을 건너뜁니다 (DOM-XSS 탐지가 아님 — `--skip-ast-analysis` 참고) |
 
 ### 네트워크
 

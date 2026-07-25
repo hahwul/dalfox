@@ -172,7 +172,7 @@ debug = false
 | `remote_wordlists` | array | `[]` | `burp`, `assetnote` |
 | `skip_mining` | bool | `false` | 모든 마이닝 건너뜀 |
 | `skip_mining_dict` | bool | `false` | 사전 기반 마이닝 건너뜀 |
-| `skip_mining_dom` | bool | `false` | DOM 마이닝 건너뜀 |
+| `skip_mining_dom` | bool | `false` | HTML `id`/`name` 속성에서 파라미터 이름 수확 건너뜀 (DOM-XSS 탐지가 아님 — `skip_ast_analysis` 참고) |
 
 ### 네트워크
 

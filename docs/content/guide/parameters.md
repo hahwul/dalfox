@@ -108,10 +108,12 @@ To move faster or work around a fragile target, skip parts of the pipeline:
 | `--skip-discovery` | Entire discovery stage |
 | `--skip-mining` | All wordlist/DOM mining |
 | `--skip-mining-dict` | Dictionary mining only |
-| `--skip-mining-dom` | DOM mining only |
+| `--skip-mining-dom` | Mining parameter names from HTML `id`/`name` attributes only |
 | `--skip-reflection-header` | Header reflection checks |
 | `--skip-reflection-cookie` | Cookie reflection checks |
 | `--skip-reflection-path` | Path reflection checks |
+
+> `--skip-mining-dom` only stops dalfox from harvesting parameter *names* out of the response HTML. It does **not** disable DOM-XSS detection: the static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/). To filter those findings out of the output instead, use `--only-poc v,r`.
 
 ## Injection markers
 
