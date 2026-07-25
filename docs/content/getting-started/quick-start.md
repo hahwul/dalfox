@@ -19,7 +19,7 @@ The first argument is the target. Dalfox auto-detects that it's a URL and runs t
 
 - A banner with the version.
 - `INFO` lines as Dalfox discovers parameters and probes contexts.
-- `[V]` (verified) and `[R]` (reflected) lines for each finding, with the exact payload that worked.
+- `[V]` (vulnerable) and `[R]` (review) lines for each finding, with the exact payload that worked.
 
 ## 2. Scan from a file
 
@@ -114,13 +114,13 @@ Each finding is tagged:
 
 | Tag | Meaning |
 |-----|---------|
-| `[V]` | **Verified**: the payload came back as a real DOM element in the parsed response (CSS-selector match on Dalfox's marker) |
+| `[V]` | **Vulnerable**: the payload came back as a real DOM element in the parsed response (CSS-selector match on Dalfox's marker) |
 | `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
-| `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
+| `[R]` | **Review**: payload appeared in the response, but no DOM evidence |
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 
-`[V]` is not browser execution — Dalfox has no headless browser, so a pure client-side DOM-XSS tops out at `[A]` and needs confirming in a browser. See [Detection Model](../../guide/detection-model/) for what each subsystem actually proves.
+`[V]` is not browser execution — Dalfox has no headless browser, so a pure client-side DOM-XSS tops out at `[A]` and needs confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (whether Dalfox can claim a vulnerability) — see [Detection Model](../../guide/detection-model/).
 
 ## Next steps
 

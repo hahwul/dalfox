@@ -1,22 +1,32 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Classification of an XSS finding.
+/// How much dalfox is willing to claim about a finding.
+///
+/// This is a **confidence** axis, not a detection-method one: `V` means "we
+/// assert this is a vulnerability", `R` means "a signal we could not raise to
+/// that claim — confirm it yourself". How a finding was produced is carried
+/// separately by [`FindingMethod`], and its impact by `Result::severity`.
+///
+/// `A` predates that split and still answers the *method* question, which is
+/// why users cannot tell where it sits on this scale (issue #1238). It is
+/// scheduled to be absorbed: graded high-confidence AST findings become `V`,
+/// the rest `R`, with `method == "ast"` preserving the distinction. Until then
+/// [`Result::confidence`] reports the grade alongside the legacy tier.
 ///
 /// Internal code uses descriptive variant names; serialization produces the
 /// single-letter abbreviation for compact user-facing output and backward-
 /// compatible JSON (`"V"`, `"A"`, `"R"`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FindingType {
-    /// DOM-verified XSS — payload confirmed in parsed DOM structure.
+    /// Vulnerable — dalfox asserts the input is exploitable.
     #[serde(rename = "V")]
     Verified,
-    /// AST-detected DOM XSS — identified via static JavaScript analysis,
-    /// not yet confirmed at runtime.
+    /// AST-detected DOM XSS — identified via static JavaScript analysis.
+    /// Method label, pending migration to the confidence axis.
     #[serde(rename = "A")]
     AstDetected,
-    /// Reflected XSS — payload appears in HTTP response but DOM evidence
-    /// was not confirmed.
+    /// Requires review — a signal that did not reach a vulnerability claim.
     #[serde(rename = "R")]
     Reflected,
     /// Informational — a non-exploitable observation, e.g. an outdated or
@@ -38,11 +48,16 @@ impl FindingType {
     }
 
     /// Human-readable descriptive name for logs and verbose output.
+    ///
+    /// `Verified` / `Reflected` were renamed to `Vulnerable` / `Review`: both
+    /// old words named a *method* ("verify" is an act, "reflected" is a
+    /// mechanism), which is what made readers ask what dalfox had verified and
+    /// with what. The new words state a claim and an action instead.
     pub fn description(&self) -> &'static str {
         match self {
-            FindingType::Verified => "Verified",
+            FindingType::Verified => "Vulnerable",
             FindingType::AstDetected => "AST-Detected",
-            FindingType::Reflected => "Reflected",
+            FindingType::Reflected => "Review",
             FindingType::Informational => "Informational",
         }
     }
@@ -50,12 +65,17 @@ impl FindingType {
     /// Detailed description suitable for agents and structured output.
     pub fn long_description(&self) -> &'static str {
         match self {
-            FindingType::Verified => "Verified XSS - payload confirmed executed in parsed DOM",
+            // NOT "confirmed executed": dalfox has no browser and never
+            // observes execution. The claim it can make is that the payload
+            // reached an executable position in a response it parsed.
+            FindingType::Verified => {
+                "Vulnerable - dalfox asserts this input is exploitable; act on it"
+            }
             FindingType::AstDetected => {
-                "AST-detected DOM XSS - identified via static JavaScript analysis, needs runtime confirmation"
+                "AST-detected DOM XSS - detection method label, pending migration to the confidence axis"
             }
             FindingType::Reflected => {
-                "Reflected XSS - payload appears in HTTP response but DOM execution not confirmed"
+                "Requires review - a signal dalfox could not raise to a vulnerability claim; confirm manually"
             }
             FindingType::Informational => {
                 "Informational - outdated or known-vulnerable component, not an exploitable XSS"
@@ -67,6 +87,103 @@ impl FindingType {
 impl fmt::Display for FindingType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.short())
+    }
+}
+
+/// Which subsystem produced a finding — the "how", kept separate from the
+/// confidence axis in [`FindingType`].
+///
+/// Named `detection_method` on the wire because `Result::method` already means
+/// the HTTP method. This is the stable selector for "AST-detected findings":
+/// prefer it over `type == "A"`, which is being absorbed into the confidence
+/// axis (issue #1238).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FindingMethod {
+    /// Payload injected and its bytes located in the response.
+    #[serde(rename = "reflection")]
+    Reflection,
+    /// Payload injected and confirmed as parsed DOM structure by the dedicated
+    /// DOM-verification request.
+    #[serde(rename = "dom-verification")]
+    DomVerification,
+    /// Static source→sink analysis of the page's JavaScript. No payload sent.
+    #[serde(rename = "ast")]
+    Ast,
+    /// Out-of-band callback (blind XSS) — the only path on which dalfox
+    /// observes real execution.
+    #[serde(rename = "oob")]
+    Oob,
+    /// Known-vulnerable / outdated library detection.
+    #[serde(rename = "library")]
+    Library,
+}
+
+impl FindingMethod {
+    /// The method implied by a tier, used when a producer does not set one.
+    ///
+    /// Correct for every producer whose tier and subsystem line up. The two
+    /// that don't — the reflection phase's static `V` upgrade (`Reflection`)
+    /// and the out-of-band poller (`Oob`) — set it explicitly.
+    ///
+    /// Resolved once at `build()`, which is what keeps the legacy AST
+    /// promotions honest: they flip `result_type` to `Verified` *after* the
+    /// finding is built, so the method stays `Ast`.
+    pub fn default_for(tier: &FindingType) -> Self {
+        match tier {
+            FindingType::Verified => FindingMethod::DomVerification,
+            FindingType::AstDetected => FindingMethod::Ast,
+            FindingType::Reflected => FindingMethod::Reflection,
+            FindingType::Informational => FindingMethod::Library,
+        }
+    }
+
+    /// `serde` default for deserializing older records that predate the field.
+    fn default_serde() -> Self {
+        FindingMethod::Reflection
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FindingMethod::Reflection => "reflection",
+            FindingMethod::DomVerification => "dom-verification",
+            FindingMethod::Ast => "ast",
+            FindingMethod::Oob => "oob",
+            FindingMethod::Library => "library",
+        }
+    }
+}
+
+impl fmt::Display for FindingMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Whether dalfox can claim a finding is a vulnerability.
+///
+/// Two levels on purpose: the tier migration derives `type` from this
+/// directly (`high` → `V`, `low` → `R`), so a third level would only defer the
+/// same decision. Ambiguous cases grade `Low` — the conservative direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Confidence {
+    #[serde(rename = "high")]
+    High,
+    #[serde(rename = "low")]
+    Low,
+}
+
+impl Confidence {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Confidence::High => "high",
+            Confidence::Low => "low",
+        }
+    }
+}
+
+impl fmt::Display for Confidence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -92,6 +209,26 @@ pub struct Result {
     /// line with a short location hint.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub location: String,
+    /// Which subsystem produced this finding. Defaults from `result_type` (see
+    /// [`FindingMethod::default_for`]) and is overridden by the producers whose
+    /// tier does not imply their method — the reflection phase's static `V`
+    /// upgrade and the out-of-band poller.
+    #[serde(default = "FindingMethod::default_serde")]
+    pub detection_method: FindingMethod,
+    /// Whether dalfox can claim this finding is a vulnerability, independent of
+    /// the legacy tier in `result_type`. `None` for informational findings and
+    /// for any AST finding that was not graded (which would be a bug — the
+    /// grade is absent rather than wrong).
+    ///
+    /// During the tier migration this may disagree with `result_type`: the two
+    /// legacy AST promotions can produce `type=V, confidence=low`. That
+    /// disagreement is the preview signal, not an inconsistency to normalize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+    /// Short `;`-joined justification for `confidence`, e.g.
+    /// `"direct flow; URL-carried source; inline script permitted"`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub confidence_reason: String,
     /// True when `data` already holds a complete, reproducible POC URL and the
     /// renderer must not append `?param=payload` on top of it. Set by the AST
     /// DOM-XSS producers, which place the payload in the fragment / query /
@@ -115,9 +252,16 @@ impl Result {
     /// `clippy::too_many_arguments`. The `location` / `request` / `response`
     /// fields remain public and are set directly on the built value when a
     /// caller needs them (often conditionally).
+    ///
+    /// `detection_method` starts at [`FindingMethod::default_for`] the tier;
+    /// producers whose subsystem differs from that default override it with
+    /// [`ResultBuilder::detection_method`].
     pub fn builder(result_type: FindingType) -> ResultBuilder {
         ResultBuilder {
             inner: Result {
+                detection_method: FindingMethod::default_for(&result_type),
+                confidence: None,
+                confidence_reason: String::new(),
                 result_type,
                 inject_type: String::new(),
                 method: String::new(),
@@ -156,6 +300,20 @@ impl ResultBuilder {
     /// HTTP method used for the request that produced the finding.
     pub fn method(mut self, v: impl Into<String>) -> Self {
         self.inner.method = v.into();
+        self
+    }
+
+    /// Override the subsystem label derived from the tier — see
+    /// [`FindingMethod::default_for`].
+    pub fn detection_method(mut self, v: FindingMethod) -> Self {
+        self.inner.detection_method = v;
+        self
+    }
+
+    /// Record the confidence grade and the signals behind it.
+    pub fn confidence(mut self, grade: Confidence, reason: impl Into<String>) -> Self {
+        self.inner.confidence = Some(grade);
+        self.inner.confidence_reason = reason.into();
         self
     }
 
@@ -232,6 +390,15 @@ pub struct SanitizedResult {
     /// [`Result::location`].
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub location: String,
+    /// Producing subsystem. See [`Result::detection_method`].
+    #[serde(default = "FindingMethod::default_serde")]
+    pub detection_method: FindingMethod,
+    /// Confidence grade. See [`Result::confidence`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+    /// Signals behind `confidence`. See [`Result::confidence_reason`].
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub confidence_reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,6 +434,9 @@ impl Result {
             message_id: self.message_id,
             message_str: self.message_str.clone(),
             location: self.location.clone(),
+            detection_method: self.detection_method,
+            confidence: self.confidence,
+            confidence_reason: self.confidence_reason.clone(),
             request: if include_request {
                 self.request.clone()
             } else {
@@ -298,7 +468,8 @@ impl Result {
             "cwe": self.cwe,
             "severity": self.severity,
             "message_id": self.message_id,
-            "message_str": self.message_str
+            "message_str": self.message_str,
+            "detection_method": self.detection_method.as_str()
         });
         if !self.location.is_empty()
             && let serde_json::Value::Object(ref mut map) = obj
@@ -307,6 +478,20 @@ impl Result {
                 "location".to_string(),
                 serde_json::Value::String(self.location.clone()),
             );
+        }
+        if let Some(grade) = self.confidence
+            && let serde_json::Value::Object(ref mut map) = obj
+        {
+            map.insert(
+                "confidence".to_string(),
+                serde_json::Value::String(grade.as_str().to_string()),
+            );
+            if !self.confidence_reason.is_empty() {
+                map.insert(
+                    "confidence_reason".to_string(),
+                    serde_json::Value::String(self.confidence_reason.clone()),
+                );
+            }
         }
         if include_request
             && let Some(req) = &self.request
@@ -551,6 +736,23 @@ impl Result {
                 let _ = writeln!(out, "| **Parameter** | `{}` |", result.param);
                 let _ = writeln!(out, "| **Method** | {} |", result.method);
                 let _ = writeln!(out, "| **Injection Type** | {} |", result.inject_type);
+                let _ = writeln!(
+                    out,
+                    "| **Detected By** | {} |",
+                    result.detection_method.as_str()
+                );
+                if let Some(grade) = result.confidence {
+                    let cell = if result.confidence_reason.is_empty() {
+                        grade.as_str().to_string()
+                    } else {
+                        format!(
+                            "{} ({})",
+                            grade.as_str(),
+                            result.confidence_reason.replace('|', "\\|")
+                        )
+                    };
+                    let _ = writeln!(out, "| **Confidence** | {} |", cell);
+                }
                 let _ = writeln!(out, "| **Severity** | {} |", result.severity);
                 let _ = writeln!(out, "| **CWE** | {} |", result.cwe);
                 let _ = writeln!(out, "| **URL** | {} |", result.data);
@@ -649,7 +851,14 @@ impl Result {
                     "param": r.param,
                     "payload": r.payload,
                     "severity": r.severity,
+                    "detection_method": r.detection_method.as_str(),
                 });
+                if let Some(grade) = r.confidence {
+                    properties["confidence"] = json!(grade.as_str());
+                    if !r.confidence_reason.is_empty() {
+                        properties["confidence_reason"] = json!(r.confidence_reason);
+                    }
+                }
 
                 if include_request && let Some(req) = &r.request {
                     properties["request"] = json!(req);

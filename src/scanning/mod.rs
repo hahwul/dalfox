@@ -538,14 +538,14 @@ async fn run_ast_dom_analysis(
     let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
     let script_element_ids =
         crate::scanning::ast_integration::extract_script_element_ids(response_text);
-    let trusted_types_enforced = target.trusted_types_enforced();
+    let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
     for js_code in js_blocks {
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &js_code,
                 target.url.as_str(),
                 &script_element_ids,
-                trusted_types_enforced,
+                posture.trusted_types_enforced,
             );
         for (vuln, payload, description) in findings {
             let self_bootstrap_verified =
@@ -572,12 +572,26 @@ async fn run_ast_dom_analysis(
                 let base = crate::scanning::url_inject::effective_query_base(&target.url, param);
                 crate::scanning::url_inject::build_injected_url(&base, param, &payload)
             };
+            // Graded from the flow's own shape, so the light-check and
+            // self-bootstrap upgrades below can leave `result_type` at
+            // `Verified` while the grade stays `Low`. See
+            // `ast_integration::build_ast_dom_xss_result` for why that
+            // disagreement is intentional during the tier migration.
+            let (confidence, confidence_reason) =
+                crate::scanning::ast_integration::grade_ast_finding(
+                    &vuln.source,
+                    &vuln.sink,
+                    vuln.guarded,
+                    self_bootstrap_verified,
+                    posture,
+                );
             let mut ast_result = crate::scanning::result::Result::builder(FindingType::AstDetected)
                 .inject_type("DOM-XSS")
                 .method(crate::scanning::url_inject::effective_method(
                     &target.method,
                     param,
                 ))
+                .confidence(confidence, confidence_reason)
                 .data(result_url.clone())
                 .param(param.name.clone())
                 .payload(payload.clone())
@@ -703,7 +717,10 @@ pub(crate) async fn fetch_and_analyze_external_js(
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
 
     let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(html);
-    let trusted_types_enforced = target.trusted_types_enforced();
+    // The posture comes from the *page's* CSP, not each script's response: the
+    // policy that governs whether an injected handler runs is the document's.
+    let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
+    let trusted_types_enforced = posture.trusted_types_enforced;
     let mut results: Vec<crate::scanning::result::Result> = Vec::new();
 
     // extract_same_origin_script_srcs already deduplicates; just cap the count.
@@ -768,13 +785,16 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 url_str,
             );
             results.push(crate::scanning::ast_integration::build_ast_dom_xss_result(
-                target.url.as_str(),
-                &target.method,
-                &vuln.source,
-                payload,
-                evidence,
-                message,
-                self_bootstrap_verified,
+                crate::scanning::ast_integration::AstDomFinding {
+                    target_url: target.url.as_str(),
+                    target_method: &target.method,
+                    vuln: &vuln,
+                    payload,
+                    evidence,
+                    message,
+                    self_bootstrap_verified,
+                    posture,
+                },
             ));
         }
     }
@@ -1959,6 +1979,10 @@ impl ScanWorkerCtx {
                         )
                     });
 
+                    // Both arms come from the reflection phase, so the tier-derived
+                    // default (`dom-verification` for V) would misattribute the
+                    // upgrade — it reuses the reflection response rather than
+                    // issuing the dedicated verification request.
                     let (finding_type, severity, summary, poc_msg) =
                         if let Some(kind) = dom_evidence_kind {
                             // Mark dom_found so we skip redundant DOM verification
@@ -2001,6 +2025,17 @@ impl ScanWorkerCtx {
                     // Template-shaped payloads (`{{…}}`) further refine the
                     // label to `*-CSTI` so users can tell client-side
                     // template injection apart from generic HTML reflection.
+                    let (confidence, confidence_reason) = if dom_evidence_kind.is_some() {
+                        (
+                            crate::scanning::result::Confidence::High,
+                            "payload reached an executable position in the parsed response",
+                        )
+                    } else {
+                        (
+                            crate::scanning::result::Confidence::Low,
+                            "payload echoed in the response; no executable position confirmed",
+                        )
+                    };
                     let mut result = crate::scanning::result::Result::builder(finding_type)
                         .inject_type(inject_type_for_payload_with_sink(
                             self.args.sxss,
@@ -2011,6 +2046,8 @@ impl ScanWorkerCtx {
                             &self.target.method,
                             param,
                         ))
+                        .detection_method(crate::scanning::result::FindingMethod::Reflection)
+                        .confidence(confidence, confidence_reason)
                         .data(result_url)
                         .param(param.name.clone())
                         .payload(reflection_payload.clone())
@@ -2140,6 +2177,13 @@ impl ScanWorkerCtx {
                     // DOM-verified => Vulnerability
                     let mut result =
                         crate::scanning::result::Result::builder(FindingType::Verified)
+                            .confidence(
+                                crate::scanning::result::Confidence::High,
+                                format!(
+                                    "DOM verification confirmed an executable position ({})",
+                                    evidence_label
+                                ),
+                            )
                             .inject_type(inject_type_for_payload_with_sink(
                                 self.args.sxss,
                                 &dom_payload,
@@ -2251,6 +2295,10 @@ impl ScanWorkerCtx {
 
                         let mut result =
                             crate::scanning::result::Result::builder(FindingType::Reflected)
+                                .confidence(
+                                    crate::scanning::result::Confidence::Low,
+                                    "duplicated-parameter echo; no executable position confirmed",
+                                )
                                 .inject_type("inHTML-HPP")
                                 .method(self.target.method.clone())
                                 .data(hpp_url.clone())

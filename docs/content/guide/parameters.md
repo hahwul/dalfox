@@ -171,9 +171,9 @@ All four are treated as "reflected": discovery records the parameter and the sca
 
 | Result | How it's confirmed |
 |--------|--------------------|
-| **V** (Verified) | Dalfox parses the response DOM and finds direct evidence of execution. The `evidence` field tags the path that proved it: DOM marker (CSS selector hit), executable URL (`javascript:`/`data:` in a dangerous attribute), HTML structural (an injected element with an `on*` handler whose value is a sink call), or JS-context AST (a sink call inside `<script>` that the parsed AST shows is covered by the payload's byte range). |
+| **V** (Vulnerable) | Dalfox parses the response DOM and finds direct evidence of execution. The `evidence` field tags the path that proved it: DOM marker (CSS selector hit), executable URL (`javascript:`/`data:` in a dangerous attribute), HTML structural (an injected element with an `on*` handler whose value is a sink call), or JS-context AST (a sink call inside `<script>` that the parsed AST shows is covered by the payload's byte range). |
 | **A** (AST-detected) | Static JavaScript analysis traced a user-controlled source to a dangerous sink (e.g., `innerHTML = location.hash`). |
-| **R** (Reflected) | Payload text appeared in the response body, but no DOM evidence yet. Still worth investigating manually. |
+| **R** (Review) | Payload text appeared in the response body, but no DOM evidence yet. Still worth investigating manually. |
 
 `V` and `A` are the signals. `R` is a hint.
 

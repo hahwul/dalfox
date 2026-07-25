@@ -711,7 +711,12 @@ fn e2e_jquery_level1_constructor_finding_and_hash_poc() {
       if (target) { $(target).appendTo('#content'); }
     </script>
     </body></html>"#;
-    let results = run_initial_ast_dom_analysis(html, "http://t/jquery/level1/", "GET", false);
+    let results = run_initial_ast_dom_analysis(
+        html,
+        "http://t/jquery/level1/",
+        "GET",
+        PageSecurityPosture::default(),
+    );
     assert!(
         results.iter().any(|r| r.evidence.contains("jQuery$")),
         "jQuery $() constructor must surface a finding; got {:?}",
@@ -746,8 +751,12 @@ fn e2e_codeexec_level1_dynamic_import_finding_and_data_uri_poc() {
       }
     </script>
     </body></html>"#;
-    let results =
-        run_initial_ast_dom_analysis(html, "http://t/codeexec/level1/?query=a", "GET", false);
+    let results = run_initial_ast_dom_analysis(
+        html,
+        "http://t/codeexec/level1/?query=a",
+        "GET",
+        PageSecurityPosture::default(),
+    );
     assert!(
         results.iter().any(|r| r.evidence.contains("Sink: import")),
         "dynamic import() must surface a finding; got {:?}",
@@ -781,7 +790,12 @@ fn e2e_apidom_level1_fetch_innerhtml_finding() {
         .then(function (t) { document.getElementById('out').innerHTML = t; });
     </script>
     </body></html>"#;
-    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level1/?q=a", "GET", false);
+    let results = run_initial_ast_dom_analysis(
+        html,
+        "http://t/apidom/level1/?q=a",
+        "GET",
+        PageSecurityPosture::default(),
+    );
     assert!(
         results
             .iter()
@@ -808,7 +822,12 @@ fn e2e_apidom_level3_xhr_innerhtml_finding() {
       xhr.send();
     </script>
     </body></html>"#;
-    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level3/?q=a", "GET", false);
+    let results = run_initial_ast_dom_analysis(
+        html,
+        "http://t/apidom/level3/?q=a",
+        "GET",
+        PageSecurityPosture::default(),
+    );
     assert!(
         results.iter().any(
             |r| r.evidence.contains("Source: XMLHttpRequest.responseText")
@@ -927,15 +946,16 @@ fn test_extract_same_origin_script_srcs_relative_no_slash() {
 #[test]
 fn test_build_ast_dom_xss_result_self_bootstrap_verified_upgrades_to_high() {
     use crate::scanning::result::FindingType;
-    let r = super::build_ast_dom_xss_result(
-        "https://example.com/",
-        "GET",
-        "location.hash",
-        "#<img src=x onerror=alert(1)>".to_string(),
-        "example.com:1:1 - sink (Source: location.hash, Sink: innerHTML)".to_string(),
-        "DOM-XSS via hash".to_string(),
-        true,
-    );
+    let r = super::build_ast_dom_xss_result(super::AstDomFinding {
+        target_url: "https://example.com/",
+        target_method: "GET",
+        vuln: &test_vuln("location.hash", "innerHTML", false),
+        payload: "#<img src=x onerror=alert(1)>".to_string(),
+        evidence: "example.com:1:1 - sink (Source: location.hash, Sink: innerHTML)".to_string(),
+        message: "DOM-XSS via hash".to_string(),
+        self_bootstrap_verified: true,
+        posture: PageSecurityPosture::default(),
+    });
     assert_eq!(r.result_type, FindingType::Verified);
     assert_eq!(r.severity, "High");
     assert!(
@@ -948,15 +968,16 @@ fn test_build_ast_dom_xss_result_self_bootstrap_verified_upgrades_to_high() {
 #[test]
 fn test_build_ast_dom_xss_result_not_verified_stays_medium_ast() {
     use crate::scanning::result::FindingType;
-    let r = super::build_ast_dom_xss_result(
-        "https://example.com/",
-        "GET",
-        "location.hash",
-        "#<img src=x onerror=alert(1)>".to_string(),
-        "evidence".to_string(),
-        "DOM-XSS via hash".to_string(),
-        false,
-    );
+    let r = super::build_ast_dom_xss_result(super::AstDomFinding {
+        target_url: "https://example.com/",
+        target_method: "GET",
+        vuln: &test_vuln("location.hash", "innerHTML", false),
+        payload: "#<img src=x onerror=alert(1)>".to_string(),
+        evidence: "evidence".to_string(),
+        message: "DOM-XSS via hash".to_string(),
+        self_bootstrap_verified: false,
+        posture: PageSecurityPosture::default(),
+    });
     assert_eq!(r.result_type, FindingType::AstDetected);
     assert_eq!(r.severity, "Medium");
     assert!(
@@ -1001,15 +1022,16 @@ fn test_dom_source_param_label_falls_back_to_browser_surface() {
 
 #[test]
 fn test_build_ast_dom_xss_result_reports_source_param_not_dash() {
-    let r = super::build_ast_dom_xss_result(
-        "https://example.com/",
-        "GET",
-        "URLSearchParams.get(name)",
-        "name=<img src=x onerror=alert(1)>".to_string(),
-        "evidence".to_string(),
-        "DOM-XSS via name".to_string(),
-        false,
-    );
+    let r = super::build_ast_dom_xss_result(super::AstDomFinding {
+        target_url: "https://example.com/",
+        target_method: "GET",
+        vuln: &test_vuln("URLSearchParams.get(name)", "innerHTML", false),
+        payload: "name=<img src=x onerror=alert(1)>".to_string(),
+        evidence: "evidence".to_string(),
+        message: "DOM-XSS via name".to_string(),
+        self_bootstrap_verified: false,
+        posture: PageSecurityPosture::default(),
+    });
     assert_eq!(r.param, "name", "AST findings must name the affected input");
     assert!(
         r.poc_url_complete,
@@ -1023,7 +1045,12 @@ fn test_run_initial_ast_dom_analysis_drops_internal_light_check_wording() {
         var q = new URLSearchParams(location.search).get('q');
         document.getElementById('out').innerHTML = q;
     </script></body></html>"#;
-    let results = super::run_initial_ast_dom_analysis(html, "https://example.com/", "GET", false);
+    let results = super::run_initial_ast_dom_analysis(
+        html,
+        "https://example.com/",
+        "GET",
+        PageSecurityPosture::default(),
+    );
     assert!(!results.is_empty(), "expected a DOM-XSS finding");
     for r in &results {
         assert!(
@@ -1037,4 +1064,246 @@ fn test_run_initial_ast_dom_analysis_drops_internal_light_check_wording() {
             r.message_str
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Confidence grading (issue #1238 tier model, Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+use crate::scanning::result::Confidence;
+
+/// The baseline shape dalfox can claim: a link-deliverable source flowing into
+/// a sink the page's CSP would let execute.
+#[test]
+fn test_grade_ast_finding_url_source_grades_high() {
+    let (grade, reason) = super::grade_ast_finding(
+        "URLSearchParams.get(q)",
+        "innerHTML",
+        false,
+        false,
+        PageSecurityPosture::default(),
+    );
+    assert_eq!(grade, Confidence::High);
+    assert!(reason.contains("URL-carried source"), "got: {}", reason);
+    assert!(
+        reason.contains("inline script permitted"),
+        "got: {}",
+        reason
+    );
+}
+
+/// Sources that need a driver page are real findings, but dalfox cannot claim
+/// them from a URL alone.
+#[test]
+fn test_grade_ast_finding_setup_required_source_grades_low() {
+    for source in [
+        "window.name",
+        "document.referrer",
+        "event.data",
+        "localStorage.getItem(x)",
+    ] {
+        let (grade, reason) = super::grade_ast_finding(
+            source,
+            "innerHTML",
+            false,
+            false,
+            PageSecurityPosture::default(),
+        );
+        assert_eq!(grade, Confidence::Low, "source {} should grade low", source);
+        assert!(
+            reason.contains("attacker-controlled page"),
+            "reason must name the blocker; got: {}",
+            reason
+        );
+    }
+}
+
+/// A conditional flow is reported but must not be downgraded: the dominant
+/// shape is `if (q) { el.innerHTML = q }`, an attacker-satisfiable presence
+/// check that mitigates nothing. Grading on it made nearly every real finding
+/// `Low`.
+#[test]
+fn test_grade_ast_finding_guarded_flow_is_noted_not_downgraded() {
+    let (grade, reason) = super::grade_ast_finding(
+        "location.hash",
+        "innerHTML",
+        true,
+        false,
+        PageSecurityPosture::default(),
+    );
+    assert_eq!(grade, Confidence::High);
+    assert!(reason.contains("conditional branch"), "got: {}", reason);
+}
+
+/// An enforcing CSP without `unsafe-inline` stops the injected handler, so the
+/// flow is no longer something dalfox can assert.
+#[test]
+fn test_grade_ast_finding_csp_blocking_inline_grades_low() {
+    let posture = PageSecurityPosture {
+        trusted_types_enforced: false,
+        inline_script_allowed: false,
+    };
+    let (grade, reason) =
+        super::grade_ast_finding("location.hash", "innerHTML", false, false, posture);
+    assert_eq!(grade, Confidence::Low);
+    assert!(reason.contains("CSP"), "got: {}", reason);
+}
+
+/// …but a sink that runs script directly does not depend on inline-handler
+/// permission, so the same CSP leaves it high.
+#[test]
+fn test_grade_ast_finding_script_executing_sink_survives_inline_block() {
+    let posture = PageSecurityPosture {
+        trusted_types_enforced: false,
+        inline_script_allowed: false,
+    };
+    for sink in ["eval", "document.write", "Function"] {
+        let (grade, reason) =
+            super::grade_ast_finding("location.hash", sink, false, false, posture);
+        assert_eq!(grade, Confidence::High, "sink {} should stay high", sink);
+        assert!(
+            reason.contains("executes script directly"),
+            "got: {}",
+            reason
+        );
+    }
+}
+
+#[test]
+fn test_grade_ast_finding_trusted_types_enforced_grades_low() {
+    let posture = PageSecurityPosture {
+        trusted_types_enforced: true,
+        inline_script_allowed: true,
+    };
+    let (grade, reason) =
+        super::grade_ast_finding("location.hash", "innerHTML", false, false, posture);
+    assert_eq!(grade, Confidence::Low);
+    assert!(reason.contains("Trusted Types"), "got: {}", reason);
+}
+
+// ── PageSecurityPosture derivation ──────────────────────────────────────
+
+#[test]
+fn test_posture_no_csp_allows_inline() {
+    let p = PageSecurityPosture::from_csp(None);
+    assert!(p.inline_script_allowed);
+    assert!(!p.trusted_types_enforced);
+}
+
+#[test]
+fn test_posture_report_only_csp_enforces_nothing() {
+    // A report-only policy must not lower confidence — it emits reports and
+    // blocks nothing.
+    let mut csp = crate::payload::xss_csp_bypass::analyze_csp("script-src 'self'");
+    csp.report_only = true;
+    let p = PageSecurityPosture::from_csp(Some(&csp));
+    assert!(
+        p.inline_script_allowed,
+        "report-only CSP must be treated as permissive"
+    );
+}
+
+#[test]
+fn test_posture_enforcing_csp_without_unsafe_inline_blocks() {
+    let csp = crate::payload::xss_csp_bypass::analyze_csp("script-src 'self'");
+    let p = PageSecurityPosture::from_csp(Some(&csp));
+    assert!(!p.inline_script_allowed);
+}
+
+#[test]
+fn test_posture_unsafe_inline_is_ignored_when_nonce_pinned() {
+    // Per CSP: a nonce in `script-src` makes `'unsafe-inline'` inert, and a
+    // nonce never helps an attribute the attacker injected.
+    let csp = crate::payload::xss_csp_bypass::analyze_csp(
+        "script-src 'unsafe-inline' 'nonce-abc123' 'self'",
+    );
+    let p = PageSecurityPosture::from_csp(Some(&csp));
+    assert!(
+        !p.inline_script_allowed,
+        "nonce-pinned policy must not count as inline-permitting"
+    );
+}
+
+#[test]
+fn test_posture_plain_unsafe_inline_allows() {
+    let csp = crate::payload::xss_csp_bypass::analyze_csp("script-src 'unsafe-inline' 'self'");
+    let p = PageSecurityPosture::from_csp(Some(&csp));
+    assert!(p.inline_script_allowed);
+}
+
+/// The legacy self-bootstrap upgrade flips the tier to `V` on a static pattern
+/// match. The grade is computed independently, so the two can disagree — here a
+/// CSP that blocks the injected handler keeps the grade `Low` while the tier
+/// still reads `V`. Reporting that disagreement is the point during the
+/// migration; normalizing it would hide what dalfox can actually claim.
+#[test]
+fn test_build_ast_dom_xss_result_grade_can_disagree_with_legacy_tier() {
+    use crate::scanning::result::{FindingMethod, FindingType};
+    let r = super::build_ast_dom_xss_result(super::AstDomFinding {
+        target_url: "https://example.com/",
+        target_method: "GET",
+        vuln: &test_vuln("window.name", "innerHTML", false),
+        payload: "<img src=x onerror=alert(1)>".to_string(),
+        evidence: "evidence".to_string(),
+        message: "DOM-XSS via window.name".to_string(),
+        self_bootstrap_verified: true,
+        posture: PageSecurityPosture {
+            trusted_types_enforced: false,
+            inline_script_allowed: false,
+        },
+    });
+    assert_eq!(
+        r.result_type,
+        FindingType::Verified,
+        "legacy tier preserved"
+    );
+    assert_eq!(
+        r.confidence,
+        Some(Confidence::Low),
+        "grade must not be overwritten by the tier upgrade"
+    );
+    assert_eq!(
+        r.detection_method,
+        FindingMethod::Ast,
+        "method stays ast even though the tier reads V"
+    );
+}
+
+/// Minimal `DomXssVulnerability` for the result-building tests: only source /
+/// sink / `guarded` are read there.
+fn test_vuln(
+    source: &str,
+    sink: &str,
+    guarded: bool,
+) -> crate::scanning::ast_dom_analysis::DomXssVulnerability {
+    crate::scanning::ast_dom_analysis::DomXssVulnerability {
+        line: 1,
+        column: 1,
+        source: source.to_string(),
+        sink: sink.to_string(),
+        snippet: String::new(),
+        description: String::new(),
+        guarded,
+    }
+}
+
+/// A page that seeds a non-URL source from a query parameter is reachable by
+/// handing someone a link, so the "needs a driver page" blocker does not apply.
+/// This is the xssmaze `?seed=` shape, and the signal is the same one the legacy
+/// tier promotion uses — here it informs reachability, not the tier.
+#[test]
+fn test_grade_ast_finding_bootstrapped_source_grades_high() {
+    let (grade, reason) = super::grade_ast_finding(
+        "window.opener",
+        "innerHTML",
+        false,
+        true,
+        PageSecurityPosture::default(),
+    );
+    assert_eq!(grade, Confidence::High);
+    assert!(
+        reason.contains("seeded from a query parameter"),
+        "got: {}",
+        reason
+    );
 }

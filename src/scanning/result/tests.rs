@@ -629,7 +629,7 @@ fn test_to_json_value_respects_include_flags() {
     assert_eq!(with_all["response"], "HTTP/1.1 200 OK");
     assert_eq!(
         with_all["type_description"],
-        "Verified XSS - payload confirmed executed in parsed DOM"
+        "Vulnerable - dalfox asserts this input is exploitable; act on it"
     );
 
     let without_optional = result.to_json_value(false, false);

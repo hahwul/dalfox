@@ -1,63 +1,93 @@
 +++
 title = "Detection Model"
-description = "The three subsystems that find XSS, which flags govern each, and what V / A / R / I are actually evidence of."
+description = "The three axes of a Dalfox finding — confidence, method, impact — and what each evidence tier actually proves."
 weight = 7
 toc = true
 +++
 
-Dalfox reports findings from three independent subsystems. They print to the same terminal and look similar, but they read different inputs and reason in different ways — so a flag that silences one has no effect on the others.
+Every Dalfox finding answers three separate questions. Reading them as one scale is the single most common source of confusion about the output, so they are separate fields:
 
-This page exists because that split is not obvious from the output alone. It was written up in [issue #1238](https://github.com/hahwul/dalfox/issues/1238) by [@OSTARA711](https://github.com/OSTARA711), whose account of the confusion is the basis for the model below.
+| Axis | Field | Question |
+|------|-------|----------|
+| **Confidence** | `type` — `V` / `R` | Can Dalfox claim this is a vulnerability? |
+| **Method** | `detection_method` | How was it found? |
+| **Impact** | `severity` | How bad is it if exploited? |
 
-## The three subsystems
+`[A]` predates that split. It answers the *method* question while sitting in the `type` field, which is why nobody — including the code — could say where it belonged on the confidence scale. It is being absorbed; see [Migration](#migration) below.
 
-### 1. Parameter mining — finding names to test
+This page exists because the split was not visible from the output alone. It was worked out in [issue #1238](https://github.com/hahwul/dalfox/issues/1238) with [@OSTARA711](https://github.com/OSTARA711), whose write-up is the basis for the model here.
 
-Reads the **HTML structure** of a response and harvests candidate parameter *names* from `id` and `name` attributes on forms and inputs, plus dictionary wordlists. Its only job is to extend the list of parameters worth probing when you haven't named them yourself.
+## Confidence: what `type` means
+
+| Tag | Name | Means |
+|-----|------|-------|
+| `V` | **Vulnerable** | Dalfox asserts this input is exploitable. Act on it. |
+| `R` | **Review** | A signal Dalfox could not raise to a vulnerability claim. Confirm it yourself. |
+| `A` | AST-detected | Transitional — a method label. See [Migration](#migration). |
+| `I` | Informational | Not an XSS claim at all (e.g. a known-vulnerable JS library, CWE-1104). |
+
+Filter with `--only-poc` (e.g. `--only-poc v`, `--only-poc v,a`, `--only-poc i`).
+
+### What `V` does not mean
+
+`V` is **not** browser execution. Dalfox drives no browser and speaks no CDP; it never renders a page or watches an `alert()` fire. For the request-based methods, `V` means the payload was found in a *DOM tree parsed from a real HTTP response* — static analysis, on stronger evidence than the raw string match behind `R`.
+
+There is exactly one method where Dalfox observes real execution: **out-of-band callbacks** (blind XSS). When an injected `<script src=…>` calls home, a real browser parsed and fetched it. That is empirical, and it is the strongest evidence Dalfox produces — but it comes from someone else's browser, not one Dalfox controls.
+
+## Method: what `detection_method` means
+
+| Value | Reads | Sends a payload? |
+|-------|-------|------------------|
+| `reflection` | The response body, for the payload's bytes | Yes |
+| `dom-verification` | The response parsed as HTML, for an executable position | Yes |
+| `ast` | The JavaScript in the response, for a source→sink flow | No |
+| `oob` | An out-of-band callback from a real browser | Yes |
+| `library` | `<script>` tags, for known-vulnerable versions | No |
+
+**Use `detection_method == "ast"` — not `type == "A"` — to select AST findings.** The method field is stable; the tier is not.
+
+### `dom-verification` evidence
+
+Five ways a payload proves it reached an executable position: the Dalfox marker matched by CSS selector; an executable scheme (`javascript:`, `data:text/html`) in a dangerous attribute; an injected element carrying a sink-calling handler; a sink call inside `<script>` whose AST range covers the payload; and an inline-handler breakout where the payload terminated the surrounding JS string. The `evidence` field names which one fired.
+
+### `ast` and the DOM-XSS ceiling
+
+The AST pass parses the JavaScript in the response and traces data from a dangerous source (`location.hash`, `location.search`, `document.referrer`, `postMessage`, …) into a dangerous sink (`innerHTML`, `document.write`, `eval`, …) with no sanitizer on the path. It reads each `<script>` block once and reports every flow it finds, so it can name inputs you never passed on the command line — including a URL fragment, which is never sent to the server. `-p` does not narrow it: `-p` scopes which parameters get *requested*, and this pass sends nothing.
+
+It also explains a result that looks like a gap but isn't. For a **pure client-side DOM-XSS**, the payload is written into the page by JavaScript at runtime, so it never appears in the server's response and the response-parsing methods have nothing to find. On a static page whose only sink is `location.hash → innerHTML`, `--only-poc v` correctly returns nothing. Open the POC URL in a browser with devtools to confirm — Dalfox prints a complete POC URL on every AST finding, plus a `[manual POC: …]` setup hint for sources it cannot put in a URL (`window.name`, `document.referrer`, cookies, `postMessage`, …).
 
 | Flag | Effect |
 |------|--------|
-| `--skip-mining` | Skip all mining |
-| `--skip-mining-dict` | Dictionary wordlists only |
-| `--skip-mining-dom` | HTML `id`/`name` harvesting only |
-
-Despite the name, **`--skip-mining-dom` has nothing to do with DOM-XSS detection.** "DOM" here refers to where the *names* come from, not to the vulnerability class.
-
-### 2. AST analysis — reading the JavaScript
-
-Parses the **JavaScript source** in the response into an abstract syntax tree and traces whether data from a dangerous source (`location.hash`, `location.search`, `document.referrer`, `postMessage`, …) reaches a dangerous sink (`innerHTML`, `document.write`, `eval`, …) without sanitization. It emits `[A]` findings.
-
-This pass is **always on** and is governed by `--skip-ast-analysis`. It is not parameter-driven: it reads each `<script>` block once and reports every source→sink path it finds, which is why `[A]` findings can name inputs you never passed on the command line — including a URL fragment, which is never sent to the server at all. Restricting the scan with `-p` does not narrow it, because `-p` scopes which parameters get *requested*, and this subsystem is not making per-parameter requests.
-
-| Flag | Effect |
-|------|--------|
-| `--skip-ast-analysis` | Turn off source→sink analysis (silences `[A]`) |
+| `--skip-ast-analysis` | Turn off source→sink analysis |
 | `--analyze-external-js` | Also fetch and analyze same-origin `<script src>` bundles |
 
-### 3. Reflection and DOM verification — sending payloads
+Note that `--skip-mining-dom` does **not** affect this pass — it governs harvesting parameter *names* from HTML `id`/`name` attributes. See [Parameters & Discovery](../parameters/).
 
-The classic active pipeline: inject a payload into a parameter, send the request, and check what comes back. A payload that merely appears in the response body is `[R]`. A payload that the response parses into a **real DOM element** — matched by CSS selector against dalfox's `class=dlx…` marker — is `[V]`.
+## `confidence`: the grade behind the claim
 
-## Evidence tiers
+Every XSS finding carries a `confidence` of `high` or `low`, plus a `confidence_reason` naming the deciding signals. For request-based methods it follows the evidence directly. For AST findings it is graded from the flow's shape:
 
-| Tag | Means | Produced by |
-|-----|-------|-------------|
-| `[V]` | The payload was found as a real element in a parsed response, or an executable scheme landed in a dangerous attribute | Reflection + DOM verification |
-| `[A]` | Static analysis found an unsanitized source→sink flow in the page's JavaScript | AST analysis |
-| `[R]` | The payload came back in the response body, without DOM evidence | Reflection |
-| `[I]` | Informational, not an exploitable XSS (e.g. a known-vulnerable JS library, CWE-1104) | Library detection (`--detect-outdated-libs`) |
+`high` requires **all** of:
 
-Filter with `--only-poc` (e.g. `--only-poc v,a`).
+- **A URL-carried source** — `location.*`, `document.URL`, `URLSearchParams`. A link alone triggers it. Sources needing an attacker-controlled driver page (`window.name`, `document.referrer`, `postMessage`, storage, `history.state`) grade `low`: real, but not reachable by sending a URL.
+- **A payload the page's CSP would let execute** — either inline script is permitted, or the sink runs script directly (`eval`, `Function`, `document.write`, `<script>` text) and so does not depend on inline-handler permission. A report-only CSP enforces nothing and never lowers the grade.
+- **No Trusted Types interception** — `require-trusted-types-for 'script'` with a TrustedHTML-class sink grades `low`.
 
-### What `[V]` does not mean
+Sanitizers are not a grading signal because they are already a *filter*: the analyzer treats them as taint clearers, so a finding existing at all means no recognised sanitizer was on the path.
 
-`[V]` is **not** browser execution. Dalfox has no headless browser and no CDP client; it never renders a page or observes an `alert()` fire. `[V]` means the payload was found in a *parsed DOM tree built from a real HTTP response* — static analysis, just on stronger evidence than the raw string match behind `[R]`.
+## Migration
 
-This has a concrete consequence for **pure client-side DOM-XSS**: the payload is written into the page by JavaScript at runtime, so it never appears in the server's response, and there is nothing for DOM verification to find. On a static page whose only vulnerability is `location.hash → innerHTML`, `[A]` is the strongest tier dalfox can reach, and `--only-poc v` will correctly return nothing.
+`confidence` is reported today but does not yet drive `type`. That is the point: you can see where each finding will land before anything moves.
 
-So `[A]` is a lead to confirm, not a confirmed exploit. Open the POC URL in a browser with devtools to verify it — dalfox prints a complete POC URL on every `[A]` finding, and a `[manual POC: …]` setup hint for sources it cannot put in a URL (`window.name`, `document.referrer`, cookies, `postMessage`, …).
+1. **Now** — `type` unchanged. `detection_method` and `confidence` are new. `type == "A"` is deprecated as a selector; use `detection_method == "ast"`.
+2. **Next** — `--tier-model confidence` as an opt-in.
+3. **Then** — that becomes the default, with `--tier-model legacy` as an escape hatch. `A` retires: `high` graded AST findings become `V`, the rest `R` — which is what `R` was always for.
 
-## Reading a scan that mixes them
+`--only-poc a` keeps working throughout; it selects `detection_method == "ast"` once the tier is gone. No flag value is ever removed.
+
+During the transition `type` and `confidence` can disagree — a finding can read `type=V, confidence=low`. Two legacy code paths promote AST findings to `V` on evidence that does not support the claim; the grade reports what Dalfox can actually assert, the tier reports what it has historically emitted. The disagreement is the preview signal, not a bug.
+
+## Reading a mixed scan
 
 ```
 INF found reflected 0 params
@@ -67,9 +97,9 @@ WRN XSS found 0 XSS (+3 A)
   └── Payload: q=<img src=x onerror=alert(1) class=dlx1944740c>
 ```
 
-- `found reflected 0 params` — the **reflection** engine found no server-side reflection. Expected on a static site.
-- `XSS found 0 XSS` — the headline count is `[V]` only. `(+3 A)` names the other tiers printed below it.
-- The `[A]` blocks come from **AST analysis**, independent of both lines above.
+- `found reflected 0 params` — the **reflection** method found no server-side reflection. Expected on a static site.
+- `XSS found 0 XSS` — the headline count is `V` only. `(+3 A)` names the other tiers printed below it.
+- The `[A]` blocks come from the **ast** method, independent of both lines above.
 
 Reading only the summary lines on a DOM-XSS target would miss every finding in the report.
 
@@ -77,7 +107,8 @@ Reading only the summary lines on a DOM-XSS target would miss every finding in t
 
 | Goal | Flags |
 |------|-------|
-| Only findings dalfox confirmed itself | `--only-poc v` |
+| Only what Dalfox asserts is exploitable | `--only-poc v` |
 | Suppress static-analysis noise on a production target | `--skip-ast-analysis` |
 | Skip name harvesting, keep DOM-XSS detection | `--skip-mining-dom` |
-| Test one parameter, but still see every DOM sink | `-p q` (AST findings are not scoped by `-p`) |
+| Test one parameter, still see every DOM sink | `-p q` (AST findings are not scoped by `-p`) |
+| Triage a large AST batch | Sort on `confidence`, then read `confidence_reason` |

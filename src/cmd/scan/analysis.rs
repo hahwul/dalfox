@@ -175,6 +175,7 @@ pub(crate) async fn run_preflight_and_analysis(
                             // the AST analyzer (that would be a false negative).
                             // Bypass-payload fields stay as parsed.
                             if !hn.eq_ignore_ascii_case("content-security-policy") {
+                                csp.report_only = true;
                                 csp.require_trusted_types_for = false;
                             }
                             if crate::DEBUG.load(Ordering::Relaxed) {
@@ -551,7 +552,9 @@ pub(crate) async fn run_preflight_and_analysis(
                             &response_text,
                             target.url.as_str(),
                             &target.method,
-                            target.trusted_types_enforced(),
+                            crate::scanning::ast_integration::PageSecurityPosture::from_target(
+                                &target,
+                            ),
                         );
                     if !ast_batch.is_empty() {
                         let added = crate::scanning::count_matching_results(

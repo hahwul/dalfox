@@ -456,18 +456,20 @@ impl DalfoxMcp {
                             crate::record_outbound_request().await;
                             if let Ok(resp) = preflight.send().await {
                                 // Read CSP off the response before consuming the
-                                // body so a `require-trusted-types-for` page is
-                                // analyzed with the same Trusted Types awareness
-                                // the CLI gets from preflight.
-                                let trusted_types_enforced =
-                                    crate::scanning::csp_requires_trusted_types(resp.headers());
+                                // body so Trusted Types awareness and the
+                                // confidence grading's CSP signal match what the
+                                // CLI derives from preflight.
+                                let posture =
+                                    crate::scanning::ast_integration::PageSecurityPosture::from_headers(
+                                        resp.headers(),
+                                    );
                                 if let Ok(body) = crate::utils::http::read_body(resp).await {
                                     let ast_batch =
                                     crate::scanning::ast_integration::run_initial_ast_dom_analysis(
                                         &body,
                                         target.url.as_str(),
                                         &target.method,
-                                        trusted_types_enforced,
+                                        posture,
                                     );
                                     if !ast_batch.is_empty() {
                                         let added = crate::scanning::count_matching_results(
