@@ -241,12 +241,12 @@ pub struct ScanArgs {
     pub limit: Option<usize>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Filter which finding types count toward --limit: all (default), v (vulnerable), r (review), a (AST DOM XSS), i (informational). Example: --limit-result-type v
+    /// Filter which finding types count toward --limit: all (default), v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --limit-result-type v
     #[arg(long, default_value = "all", value_parser = clap::builder::PossibleValuesParser::new(LIMIT_RESULT_TYPE_VALUES.iter().copied()))]
     pub limit_result_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Filter output to show only specific finding types (comma-separated). Options: v (vulnerable), r (review), a (AST DOM XSS), i (informational). Example: --only-poc "v,r"
+    /// Filter output to show only specific finding types (comma-separated). Options: v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --only-poc "v,r"
     #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(ONLY_POC_VALUES.iter().copied()))]
     pub only_poc: Vec<String>,
 

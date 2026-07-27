@@ -22,7 +22,7 @@ This page exists because the split was not visible from the output alone. It was
 | Tag | Name | Means |
 |-----|------|-------|
 | `V` | **Vulnerable** | Dalfox asserts this input is exploitable. Act on it. |
-| `R` | **Review** | A signal Dalfox could not raise to a vulnerability claim. Confirm it yourself. |
+| `R` | **Reflected** | The payload came back in the response, but its position was not confirmed exploitable. A signal, not a claim — confirm it yourself. |
 | `A` | AST-detected | Transitional — a method label. See [Migration](#migration). |
 | `I` | Informational | Not an XSS claim at all (e.g. a known-vulnerable JS library, CWE-1104). |
 
@@ -81,7 +81,7 @@ Sanitizers are not a grading signal because they are already a *filter*: the ana
 
 1. **Now** — `type` unchanged. `detection_method` and `confidence` are new. `type == "A"` is deprecated as a selector; use `detection_method == "ast"`.
 2. **Next** — `--tier-model confidence` as an opt-in.
-3. **Then** — that becomes the default, with `--tier-model legacy` as an escape hatch. `A` retires: `high` graded AST findings become `V`, the rest `R` — which is what `R` was always for.
+3. **Then** — that becomes the default, with `--tier-model legacy` as an escape hatch. `A` retires: `high` graded AST findings become `V`, the rest `R` — which is what `R` was always for. `R` is renamed in that release too: it will hold more than reflections by then, so the word stops being accurate at exactly that moment.
 
 `--only-poc a` keeps working throughout; it selects `detection_method == "ast"` once the tier is gone. No flag value is ever removed.
 

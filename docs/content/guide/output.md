@@ -36,7 +36,7 @@ Every finding includes:
 
 | Field | Example | Meaning |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R`, `I` | Confidence: Vulnerable / AST-detected / Review / Informational |
+| `type` | `V`, `A`, `R`, `I` | Confidence: Vulnerable / AST-detected / Reflected / Informational |
 | `type_description` | `"Vulnerable"` | Human label |
 | `detection_method` | `"ast"` | How it was found: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | Whether Dalfox can claim a vulnerability (`high` / `low`); absent on `I` |

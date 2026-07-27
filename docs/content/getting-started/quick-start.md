@@ -19,7 +19,7 @@ The first argument is the target. Dalfox auto-detects that it's a URL and runs t
 
 - A banner with the version.
 - `INFO` lines as Dalfox discovers parameters and probes contexts.
-- `[V]` (vulnerable) and `[R]` (review) lines for each finding, with the exact payload that worked.
+- `[V]` (vulnerable) and `[R]` (reflected) lines for each finding, with the exact payload that worked.
 
 ## 2. Scan from a file
 
@@ -116,7 +116,7 @@ Each finding is tagged:
 |-----|---------|
 | `[V]` | **Vulnerable**: the payload came back as a real DOM element in the parsed response (CSS-selector match on Dalfox's marker) |
 | `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
-| `[R]` | **Review**: payload appeared in the response, but no DOM evidence |
+| `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 

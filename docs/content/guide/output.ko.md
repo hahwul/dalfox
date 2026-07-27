@@ -36,7 +36,7 @@ dalfox https://target.app -f jsonl -o findings.jsonl
 
 | 필드 | 예시 | 의미 |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R`, `I` | 신뢰도: Vulnerable / AST 탐지 / Review / Informational |
+| `type` | `V`, `A`, `R`, `I` | 신뢰도: Vulnerable / AST 탐지 / Reflected / Informational |
 | `type_description` | `"Vulnerable"` | 사람이 읽는 라벨 |
 | `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | 취약점이라고 주장할 수 있는지 (`high` / `low`). `I`에는 없음 |

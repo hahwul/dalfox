@@ -26,7 +26,8 @@ pub enum FindingType {
     /// Method label, pending migration to the confidence axis.
     #[serde(rename = "A")]
     AstDetected,
-    /// Requires review — a signal that did not reach a vulnerability claim.
+    /// Reflected — the payload came back in the response, but its position was
+    /// not confirmed exploitable. A signal, not a claim.
     #[serde(rename = "R")]
     Reflected,
     /// Informational — a non-exploitable observation, e.g. an outdated or
@@ -49,15 +50,21 @@ impl FindingType {
 
     /// Human-readable descriptive name for logs and verbose output.
     ///
-    /// `Verified` / `Reflected` were renamed to `Vulnerable` / `Review`: both
-    /// old words named a *method* ("verify" is an act, "reflected" is a
-    /// mechanism), which is what made readers ask what dalfox had verified and
-    /// with what. The new words state a claim and an action instead.
+    /// `Verified` became `Vulnerable`: "verify" names an *act*, which is what
+    /// made readers ask what dalfox had verified and with what — the answer
+    /// ("we parsed the response") was never what the word implied. The new word
+    /// states the claim instead.
+    ///
+    /// `Reflected` is deliberately left alone. It is still literally accurate:
+    /// today `R` holds exactly the findings whose payload came back in the
+    /// response. It stops being accurate only when the tier migration moves
+    /// low-confidence AST flows into `R`, so the rename belongs to that release,
+    /// not this one.
     pub fn description(&self) -> &'static str {
         match self {
             FindingType::Verified => "Vulnerable",
             FindingType::AstDetected => "AST-Detected",
-            FindingType::Reflected => "Review",
+            FindingType::Reflected => "Reflected",
             FindingType::Informational => "Informational",
         }
     }
@@ -75,7 +82,7 @@ impl FindingType {
                 "AST-detected DOM XSS - detection method label, pending migration to the confidence axis"
             }
             FindingType::Reflected => {
-                "Requires review - a signal dalfox could not raise to a vulnerability claim; confirm manually"
+                "Reflected - payload appears in the response, but its position was not confirmed exploitable; confirm manually"
             }
             FindingType::Informational => {
                 "Informational - outdated or known-vulnerable component, not an exploitable XSS"

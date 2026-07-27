@@ -68,7 +68,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | 표시되는 전체 결과 수를 제한합니다 |
 | `--limit-result-type` | — | `all` | `--limit`에 집계되는 유형: `all`, `v`, `r`, `a`, `i` |
-| `--only-poc` | — | — | 쉼표로 구분된 필터: `v`(취약), `r`(검토 필요), `a`(AST), `i`(정보성) |
+| `--only-poc` | — | — | 쉼표로 구분된 필터: `v`(취약), `r`(반사됨), `a`(AST), `i`(정보성) |
 
 ### 대상 형태 지정
 
