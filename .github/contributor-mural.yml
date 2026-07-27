@@ -1,0 +1,16 @@
+---
+# Config for crystal-actions/contributor-mural, rendered by
+# .github/workflows/ci-contributors.yml.
+style: voronoi
+output: docs/static/images/CONTRIBUTORS.svg
+
+contributors:
+  include_bots: true # matches the previous list; the excludes below do the filtering
+
+exclude:
+  - dependabot[bot]
+  - github-actions[bot]
+  - Copilot
+
+voronoi:
+  width: 900

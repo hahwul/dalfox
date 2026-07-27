@@ -14,19 +14,18 @@ on:
 permissions:
   contents: write
   pull-requests: write
+concurrency:
+  group: contributor-mural
 jobs:
   contributors:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: wow-actions/contributors-list@v1.2.1
+      - uses: crystal-actions/contributor-mural@v1.1.2
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          round: false
-          includeBots: true
-          excludeUsers: dependabot[bot],github-actions[bot],Copilot
-          svgPath: docs/static/images/CONTRIBUTORS.svg
-          noCommit: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config: .github/contributor-mural.yml
+          no_commit: "true"
       - uses: peter-evans/create-pull-request@v8.1.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
