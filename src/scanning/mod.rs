@@ -1014,6 +1014,32 @@ fn compute_waf_strategy(
     })
 }
 
+/// Find a CSP declared with `<meta http-equiv>`, returning the equivalent
+/// header name and the policy text. Pages served without a CSP header commonly
+/// carry one this way, and the CLI preflight has always honoured it — this is
+/// that logic, shared so the server / MCP surfaces cannot analyse a different
+/// policy than the CLI does for the same page.
+pub(crate) fn extract_meta_csp(html: &str) -> Option<(String, String)> {
+    let doc = scraper::Html::parse_document(html);
+    for el in doc.select(crate::scanning::selectors::meta_csp()) {
+        let http_equiv = el
+            .value()
+            .attr("http-equiv")
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let name = match http_equiv.as_str() {
+            "content-security-policy" => "Content-Security-Policy",
+            "content-security-policy-report-only" => "Content-Security-Policy-Report-Only",
+            _ => continue,
+        };
+        let content = el.value().attr("content").unwrap_or("");
+        if !content.is_empty() {
+            return Some((name.to_string(), content.to_string()));
+        }
+    }
+    None
+}
+
 /// Whether the response headers carry an **enforcing** CSP with
 /// `require-trusted-types-for 'script'`. Used by the server / MCP surfaces —
 /// which fetch the page directly rather than through the preflight stage — to

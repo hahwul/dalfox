@@ -176,8 +176,17 @@ impl PageSecurityPosture {
             trusted_types_enforced: csp.require_trusted_types_for,
             // Per CSP: a nonce or hash in `script-src` makes `'unsafe-inline'`
             // ignored, and neither helps an attribute the attacker injected —
-            // only an explicit, unpinned `'unsafe-inline'` does. A missing
-            // `script-src` leaves script execution unrestricted by this policy.
+            // only an explicit, unpinned `'unsafe-inline'` does.
+            // `missing_script_src` means neither `script-src` nor `default-src`
+            // is present, so nothing restricts script execution.
+            //
+            // Known gap: `analyze_csp` collects nonces / hashes from
+            // `script-src` only, so a policy that pins them on `default-src`
+            // with no `script-src` reads as inline-permitting here and can grade
+            // `high` when the browser would block the handler. Widening that
+            // collection would also change which bypass payloads are generated,
+            // which is a detection-behaviour change and out of scope for this
+            // phase; the error is toward over-claiming on a rare policy shape.
             inline_script_allowed: csp.missing_script_src
                 || (csp.has_unsafe_inline && !csp.is_nonce_or_hash_based()),
         }
@@ -187,17 +196,39 @@ impl PageSecurityPosture {
         Self::from_csp(target.csp_analysis.as_ref())
     }
 
-    /// Server / MCP variant: parse the enforcing header directly. The
-    /// report-only header is ignored outright, which lands on the same
-    /// permissive posture [`from_csp`] gives it.
-    ///
-    /// [`from_csp`]: PageSecurityPosture::from_csp
-    pub fn from_headers(headers: &reqwest::header::HeaderMap) -> Self {
-        headers
+    /// Server / MCP variant: the CLI gets its `CspAnalysis` from preflight, and
+    /// these surfaces fetch the page themselves — so they must apply the same
+    /// precedence preflight does, or the identical target grades differently
+    /// depending on which interface ran the scan. Enforcing header, then
+    /// report-only header, then a `<meta http-equiv>` policy.
+    pub fn from_response(headers: &reqwest::header::HeaderMap, body: &str) -> Self {
+        let header_csp = headers
             .get("content-security-policy")
             .and_then(|v| v.to_str().ok())
-            .map(|v| Self::from_csp(Some(&crate::payload::xss_csp_bypass::analyze_csp(v))))
-            .unwrap_or_default()
+            .map(|v| (false, v.to_string()))
+            .or_else(|| {
+                headers
+                    .get("content-security-policy-report-only")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| (true, v.to_string()))
+            });
+
+        let (report_only, policy) = match header_csp {
+            Some(found) => found,
+            // Only look at the document when no header carried a policy —
+            // mirroring preflight, where the meta scan is the fallback.
+            None => match crate::scanning::extract_meta_csp(body) {
+                Some((name, content)) => (
+                    !name.eq_ignore_ascii_case("content-security-policy"),
+                    content,
+                ),
+                None => return Self::default(),
+            },
+        };
+
+        let mut csp = crate::payload::xss_csp_bypass::analyze_csp(&policy);
+        csp.report_only = report_only;
+        Self::from_csp(Some(&csp))
     }
 }
 
@@ -227,6 +258,20 @@ fn sink_executes_without_inline_handler(sink: &str) -> bool {
 /// the flow is real, but it is not reachable by sending a link, so dalfox
 /// cannot claim it without that setup.
 fn source_is_url_carried(source: &str) -> bool {
+    // Parts of the URL that are fixed by the origin the victim is already on.
+    // They are taint sources in exotic setups (wildcard DNS, `document.domain`
+    // relaxation), but handing someone a link cannot change them, so they do
+    // not meet the bar for a claim. Checked first: `location.host` would
+    // otherwise match the `location` prefix below.
+    const ORIGIN_FIXED: [&str; 4] = [
+        "location.origin",
+        "location.host",
+        "location.protocol",
+        "document.domain",
+    ];
+    if ORIGIN_FIXED.iter().any(|s| source.contains(s)) {
+        return false;
+    }
     const URL_CARRIED: [&str; 6] = [
         "location",
         "document.URL",

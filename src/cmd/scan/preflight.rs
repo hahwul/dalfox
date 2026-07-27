@@ -3,9 +3,7 @@
 //! classification and the `--force-waf` parser. Split out of `scan.rs`.
 
 use super::args::ScanArgs;
-use crate::scanning::selectors;
 use reqwest::header::CONTENT_TYPE;
-use scraper::Html;
 use std::time::Duration;
 
 pub(crate) fn is_allowed_content_type(ct: &str) -> bool {
@@ -254,33 +252,12 @@ pub(crate) async fn preflight_content_type(
             tech_result =
                 crate::scanning::tech_detect::detect_technologies(&get_headers, Some(&body));
 
-            // Only parse CSP if not already found
+            // Only parse CSP if not already found. Shared with
+            // `PageSecurityPosture::from_response`, which the server / MCP
+            // surfaces use — a page that declares its policy in the document
+            // must be analysed identically on every interface.
             if csp_header.is_none() {
-                let doc = Html::parse_document(&body);
-                {
-                    let sel = selectors::meta_csp();
-                    for el in doc.select(sel) {
-                        let http_equiv = el
-                            .value()
-                            .attr("http-equiv")
-                            .unwrap_or("")
-                            .to_ascii_lowercase();
-                        if http_equiv == "content-security-policy"
-                            || http_equiv == "content-security-policy-report-only"
-                        {
-                            let content = el.value().attr("content").unwrap_or("").to_string();
-                            if !content.is_empty() {
-                                let name = if http_equiv == "content-security-policy" {
-                                    "Content-Security-Policy".to_string()
-                                } else {
-                                    "Content-Security-Policy-Report-Only".to_string()
-                                };
-                                csp_header = Some((name, content));
-                                break;
-                            }
-                        }
-                    }
-                }
+                csp_header = crate::scanning::extract_meta_csp(&body);
             }
         }
     }

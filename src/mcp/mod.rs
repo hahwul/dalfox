@@ -455,15 +455,20 @@ impl DalfoxMcp {
                             // the job's requests_sent tally.
                             crate::record_outbound_request().await;
                             if let Ok(resp) = preflight.send().await {
-                                // Read CSP off the response before consuming the
-                                // body so Trusted Types awareness and the
-                                // confidence grading's CSP signal match what the
-                                // CLI derives from preflight.
-                                let posture =
-                                    crate::scanning::ast_integration::PageSecurityPosture::from_headers(
-                                        resp.headers(),
-                                    );
+                                // Clone the headers before `read_body` consumes
+                                // the response: the posture needs both them and
+                                // the document (a page can declare its CSP with
+                                // `<meta http-equiv>`), so Trusted Types
+                                // awareness and the confidence grading's CSP
+                                // signal match what the CLI derives from
+                                // preflight.
+                                let resp_headers = resp.headers().clone();
                                 if let Ok(body) = crate::utils::http::read_body(resp).await {
+                                    let posture =
+                                    crate::scanning::ast_integration::PageSecurityPosture::from_response(
+                                        &resp_headers,
+                                        &body,
+                                    );
                                     let ast_batch =
                                     crate::scanning::ast_integration::run_initial_ast_dom_analysis(
                                         &body,

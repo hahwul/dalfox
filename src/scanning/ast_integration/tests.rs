@@ -1307,3 +1307,113 @@ fn test_grade_ast_finding_bootstrapped_source_grades_high() {
         reason
     );
 }
+
+// ── PageSecurityPosture::from_response — CLI/server parity ──────────────
+
+fn headers_with(pairs: &[(&str, &str)]) -> reqwest::header::HeaderMap {
+    let mut h = reqwest::header::HeaderMap::new();
+    for (k, v) in pairs {
+        h.insert(
+            reqwest::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+            reqwest::header::HeaderValue::from_str(v).unwrap(),
+        );
+    }
+    h
+}
+
+/// The CLI reads a `<meta http-equiv>` policy during preflight, so the server /
+/// MCP surfaces must too — otherwise the same page grades differently depending
+/// on which interface ran the scan, and Phase 2 turns that into a tier split.
+#[test]
+fn test_posture_from_response_reads_meta_csp_when_no_header() {
+    let body = r#"<html><head>
+        <meta http-equiv="Content-Security-Policy" content="script-src 'self'">
+        </head><body></body></html>"#;
+    let p = PageSecurityPosture::from_response(&headers_with(&[]), body);
+    assert!(
+        !p.inline_script_allowed,
+        "a meta-declared policy must restrict inline script"
+    );
+}
+
+#[test]
+fn test_posture_from_response_meta_report_only_enforces_nothing() {
+    let body = r#"<html><head>
+        <meta http-equiv="Content-Security-Policy-Report-Only" content="script-src 'self'">
+        </head><body></body></html>"#;
+    let p = PageSecurityPosture::from_response(&headers_with(&[]), body);
+    assert!(p.inline_script_allowed);
+}
+
+/// Header wins over the document, and the enforcing header wins over
+/// report-only — the same precedence preflight applies.
+#[test]
+fn test_posture_from_response_header_precedence() {
+    let permissive_meta =
+        r#"<meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">"#;
+    let p = PageSecurityPosture::from_response(
+        &headers_with(&[("content-security-policy", "script-src 'self'")]),
+        permissive_meta,
+    );
+    assert!(!p.inline_script_allowed, "header must win over meta");
+
+    let p = PageSecurityPosture::from_response(
+        &headers_with(&[
+            ("content-security-policy", "script-src 'self'"),
+            (
+                "content-security-policy-report-only",
+                "script-src 'unsafe-inline'",
+            ),
+        ]),
+        "",
+    );
+    assert!(
+        !p.inline_script_allowed,
+        "enforcing header must win over report-only"
+    );
+}
+
+#[test]
+fn test_posture_from_response_report_only_header_is_permissive() {
+    let p = PageSecurityPosture::from_response(
+        &headers_with(&[("content-security-policy-report-only", "script-src 'self'")]),
+        "",
+    );
+    assert!(p.inline_script_allowed);
+}
+
+#[test]
+fn test_posture_from_response_no_csp_anywhere() {
+    let p = PageSecurityPosture::from_response(&headers_with(&[]), "<html></html>");
+    assert!(p.inline_script_allowed);
+    assert!(!p.trusted_types_enforced);
+}
+
+/// `location.origin` / `location.host` / `document.domain` are taint sources,
+/// but they are fixed by the origin the victim is already on — a link cannot
+/// change them, so they must not reach a vulnerability claim on reachability
+/// grounds. They match the `location` prefix, hence the explicit carve-out.
+#[test]
+fn test_grade_ast_finding_origin_fixed_sources_grade_low() {
+    for source in [
+        "location.origin",
+        "location.host",
+        "location.hostname",
+        "location.protocol",
+        "document.domain",
+    ] {
+        let (grade, reason) = super::grade_ast_finding(
+            source,
+            "innerHTML",
+            false,
+            false,
+            PageSecurityPosture::default(),
+        );
+        assert_eq!(grade, Confidence::Low, "source {} should grade low", source);
+        assert!(
+            reason.contains("attacker-controlled page"),
+            "got: {}",
+            reason
+        );
+    }
+}

@@ -788,3 +788,47 @@ fn test_results_to_sarif_with_meta() {
     assert_eq!(driver_props["findings_count"], 1);
     assert!(driver_props.get("waf").is_none()); // waf is inside target_summary entries
 }
+
+/// Records written before the confidence/method fields existed must still
+/// deserialize — `SanitizedResult` is a public shape and consumers may have
+/// stored it. `detection_method` falls back rather than failing the parse.
+#[test]
+fn test_sanitized_result_deserializes_records_without_new_fields() {
+    let old = r#"{
+        "type": "R",
+        "type_description": "Reflected",
+        "inject_type": "inHTML",
+        "method": "GET",
+        "data": "https://example.com/?q=x",
+        "param": "q",
+        "payload": "<x>",
+        "evidence": "evidence",
+        "cwe": "CWE-79",
+        "severity": "Info",
+        "message_id": 606,
+        "message_str": "msg"
+    }"#;
+    let parsed: SanitizedResult = serde_json::from_str(old).expect("old shape must still parse");
+    assert_eq!(parsed.detection_method, FindingMethod::Reflection);
+    assert_eq!(parsed.confidence, None);
+    assert!(parsed.confidence_reason.is_empty());
+}
+
+/// The confidence fields are omitted rather than emitted as null when a finding
+/// has no grade, so `[I]` records stay clean for consumers keying on presence.
+#[test]
+fn test_informational_finding_omits_confidence_in_json() {
+    let r = Result::builder(FindingType::Informational)
+        .inject_type("OutdatedComponent")
+        .method("GET")
+        .data("https://example.com/")
+        .cwe("CWE-1104")
+        .severity("Info")
+        .message_id(1104)
+        .message_str("outdated jquery")
+        .build();
+    let v = r.to_json_value(false, false);
+    assert_eq!(v["detection_method"], "library");
+    assert!(v.get("confidence").is_none(), "got: {}", v);
+    assert!(v.get("confidence_reason").is_none(), "got: {}", v);
+}

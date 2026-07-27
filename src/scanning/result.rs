@@ -125,7 +125,7 @@ impl FindingMethod {
     /// that don't — the reflection phase's static `V` upgrade (`Reflection`)
     /// and the out-of-band poller (`Oob`) — set it explicitly.
     ///
-    /// Resolved once at `build()`, which is what keeps the legacy AST
+    /// Resolved once in [`Result::builder`], which is what keeps the legacy AST
     /// promotions honest: they flip `result_type` to `Verified` *after* the
     /// finding is built, so the method stays `Ast`.
     pub fn default_for(tier: &FindingType) -> Self {
