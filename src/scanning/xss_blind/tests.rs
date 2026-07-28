@@ -420,13 +420,34 @@ async fn test_blind_scanning_sends_requests_for_query_body_header_and_cookie() {
     blind_scanning(&target, "https://cb.example", None).await;
 
     let records = state.lock().await.clone();
-    assert_eq!(records.len(), 4);
+    // 4 params (query, body, header, cookie) × every built-in template.
+    assert_eq!(records.len(), 4 * crate::payload::XSS_BLIND_PAYLOADS.len());
     assert!(records.iter().all(|r| r.method == "POST"));
     assert!(records.iter().any(|r| {
         r.uri.contains("cb.example")
             || r.body.contains("cb.example")
             || r.headers.values().any(|v| v.contains("cb.example"))
     }));
+
+    // The innerHTML DOM-sink vector must actually reach the wire, callback
+    // filled in — an `<img onerror>` that requests the callback host. This is
+    // the shape a stored DOM-XSS needs; a `<script src>` would be inert there.
+    let all_payloads: String = records
+        .iter()
+        .map(|r| format!("{} {}", r.uri, r.body))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Normalize the space encoding (form bodies use `+`, query strings `%20`)
+    // so the assertion reads against the payload shape, not its wire encoding.
+    let normalized = urlencoding::decode(&all_payloads)
+        .map(|c| c.into_owned())
+        .unwrap_or(all_payloads)
+        .replace('+', " ");
+    assert!(
+        normalized.contains("<img src=x onerror=") && normalized.contains("cb.example"),
+        "innerHTML DOM-sink blind payload not sent with callback; got:\n{}",
+        normalized
+    );
 }
 
 // ── pure-helper unit tests ──────────────────────────────────────────
@@ -529,6 +550,19 @@ fn build_blind_templates_falls_back_to_builtin_without_path() {
     assert!(
         templates.iter().all(|t| t.contains("{}")),
         "every built-in template keeps the normalized callback marker"
+    );
+    // The whole catalog reaches the wire — not just the first entry, which was
+    // the prior behaviour that left the other shapes defined-but-unsent.
+    assert_eq!(
+        templates.len(),
+        crate::payload::XSS_BLIND_PAYLOADS.len(),
+        "default path must send every built-in blind shape"
+    );
+    assert!(
+        templates
+            .iter()
+            .any(|t| t.contains("<img") && t.contains("onerror=")),
+        "default path must include the innerHTML DOM-sink vector"
     );
 }
 
