@@ -121,9 +121,18 @@ See `references/server-and-payload.md` for endpoints, CORS/JSONP details, and wh
 See the full guide in `references/results.md`.
 
 Key points for agents:
-- Every finding has `type` (`V`/`A`/`R`) **and** `type_description`.
+- Three separate axes: `type` (`V`/`A`/`R`/`I`, the claim) + `detection_method`
+  (`reflection` / `dom-verification` / `ast` / `oob` / `library`, how it was
+  found) + `severity`. Do not read them as one scale.
+- `V` means "dalfox asserts this is exploitable" — **not** browser execution.
+  Dalfox drives no browser by design; only `detection_method: "oob"` observes a
+  real one. Never report `V` as "watched it fire".
+- Select AST findings with `detection_method == "ast"`, not `type == "A"`.
+- `confidence` (`high`/`low`) + `confidence_reason` grade the claim; sort a
+  large `A` batch on them. Machine formats only — plain output omits them.
 - `inject_type` tells you the reflection context (`inHTML`, `inJS`, `inATTR`, etc.).
-- The parameter *location* (query/body/header/...) is visible in `data` + `method`.
+- The parameter *location* (query/body/header/...) is in the `location` field,
+  and also visible in `data` + `method`.
 - `include_request` / `include_response` are opt-in only — never enable them by default.
 
 ## 5. Performance & Scope Recipes

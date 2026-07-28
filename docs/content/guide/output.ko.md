@@ -37,7 +37,7 @@ dalfox https://target.app -f jsonl -o findings.jsonl
 | 필드 | 예시 | 의미 |
 |-------|---------|---------|
 | `type` | `V`, `A`, `R`, `I` | 신뢰도: Vulnerable / AST 탐지 / Reflected / Informational |
-| `type_description` | `"Vulnerable"` | 사람이 읽는 라벨 |
+| `type_description` | `"Vulnerable - dalfox asserts this input is exploitable; act on it"` | 사람이 읽는 라벨(한 단어가 아니라 문장 전체) |
 | `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | 취약점이라고 주장할 수 있는지 (`high` / `low`). `I`에는 없음 |
 | `confidence_reason` | `"URL-carried source; inline script permitted"` | 판단 근거 신호 |
@@ -217,10 +217,10 @@ Dalfox는 다음을 반환합니다.
 | 코드 | 의미 |
 |------|---------|
 | `0` | 성공적으로 완료, 탐지 결과 없음 |
-| `1` | 성공적으로 완료, 탐지 결과 하나 이상 |
+| `1` | 성공적으로 완료, **티어와 무관하게** 탐지 결과 하나 이상 |
 | `2` | 입력/설정/런타임 오류 |
 
-어떤 탐지 결과라도 빌드를 실패시켜도 괜찮은 경우에만 `1`을 CI 게이트로 사용하세요. 대부분의 팀은 JSON 출력에 `jq`를 사용하여 `severity >= High`를 기준으로 게이트를 겁니다.
+`1`은 모든 티어를 포함합니다 — `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 코드가 정해지기 전에 필터가 적용됩니다. (JSON에 `jq`로 `severity >= High`를 거는 방식도 오늘은 같은 집합을 얻습니다. severity가 현재 티어를 따라가기 때문입니다 — [탐지 모델](../detection-model/) 참고.)
 
 ## 다음
 

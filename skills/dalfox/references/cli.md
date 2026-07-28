@@ -23,10 +23,10 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--include-request` | false | Opt-in only |
 | `--include-response` | false | Opt-in only |
 | `--include-all` | — | Sets both of the above |
-| `--stream-findings` | false | Emit each verified finding immediately |
+| `--stream-findings` | false | Emit each finding immediately (plain only; see the caveat in `results.md`) |
 | `--limit N` | unlimited | Cap displayed findings |
-| `--limit-result-type` | `all` | `all`, `v`, `r`, `a` (case-insensitive) |
-| `--only-poc "v,r"` | all types | Comma-separated filter for which types to show |
+| `--limit-result-type` | `all` | Which type counts toward `--limit`: `all`, `v`, `r`, `a`, `i` (case-insensitive). **Not an output filter** |
+| `--only-poc "v,r"` | all types | Output filter: `v`, `r`, `a`, `i`. This is the one that hides findings |
 | `-S, --silence` | false | Suppress everything except POC lines |
 | `--no-color` | (auto) | Also respects `NO_COLOR` env var |
 

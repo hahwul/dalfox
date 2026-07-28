@@ -62,7 +62,7 @@ curl -o ~/.claude/skills/dalfox/SKILL.md \
 - **모드 감지:** 사용 가능하면 MCP 도구를 우선 사용하고, 그렇지 않으면 `dalfox` CLI로 대체하며, 둘 다 없으면 설치 방법을 사용자에게 안내합니다.
 - **MCP 플레이북:** `preflight_dalfox` → `scan_with_dalfox` → `get_results_dalfox` 폴링(`suggested_poll_interval_ms` 준수) → 완료 시 `delete_scan_dalfox`. 검증된 입력 범위(timeout 1–299초, delay 0–9999ms)를 포함하여 에이전트가 Dalfox가 거부할 값을 보내지 않게 합니다.
 - **CLI 시나리오:** POST 본문, 인증된 세션, Burp 경유 프록시, 콜백 URL을 사용하는 블라인드 XSS, 스토어드 XSS, 파이프 입력, 빠른 스모크 테스트, 최대 커버리지 실행, 기계 판독 가능 출력.
-- **결과 해석:** 탐지 결과 유형 범례(`V` 검증된 DOM 실행 > `A` AST 탐지 > `R` 반사만 확인)로 에이전트가 확인된 히트를 앞세우도록 합니다.
+- **결과 해석:** 세 축 모델 — `type`(`V` 악용 가능 판단 > `A` AST 탐지 > `R` 반사만 확인 > `I` 정보성), `detection_method`, `confidence` — 로 에이전트가 가장 강한 주장부터 앞세우되 `V`를 브라우저 실행 관측으로 서술하지 않도록 합니다. [탐지 모델](../../guide/detection-model/) 참고.
 - **실패 모드:** `reachable: false`, 모든 결과가 R인 경우, 멈춘 스캔, `invalid_params` 응답이 실제로 무엇을 의미하는지, 그리고 이를 어떻게 복구하는지.
 
 ## 사전 요구 사항

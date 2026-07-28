@@ -33,7 +33,7 @@ Exit codes:
 | Code | Meaning |
 |------|---------|
 | `0` | Success, no findings |
-| `1` | Success, findings reported |
+| `1` | Success, findings reported (any tier — combine with `--only-poc v` to gate on `V` only) |
 | `2` | Input / config / runtime error |
 
 ---

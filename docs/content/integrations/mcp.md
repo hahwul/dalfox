@@ -140,12 +140,15 @@ Response (done):
   "results": [
     {
       "type": "V",
-      "type_description": "Verified",
+      "type_description": "Vulnerable - dalfox asserts this input is exploitable; act on it",
+      "detection_method": "dom-verification",
+      "confidence": "high",
+      "confidence_reason": "DOM verification confirmed an executable position (DOM marker)",
       "inject_type": "inHTML",
       "method": "GET",
       "param": "q",
       "payload": "<svg/onload=alert(1)>",
-      "evidence": "payload reflected and DOM element verified",
+      "evidence": "DOM verification successful for param q (DOM marker)",
       "cwe": "CWE-79",
       "severity": "High"
     }

@@ -1034,8 +1034,11 @@ agent smoke tests. Use max_payloads_per_param to bound request volume. \
 Scans for reflected, DOM-based, and stored XSS using parameter analysis, \
 payload mutation, and AST-based JavaScript verification. \
 Supports custom headers, cookies, POST data, and encoding strategies. \
-Findings include type (V=Verified, R=Reflected, A=AST-detected), severity, \
-CWE, payload, and evidence."
+Findings carry three separate axes: type (V=Vulnerable, R=Reflected, \
+A=AST-detected, I=Informational), detection_method (reflection / \
+dom-verification / ast / oob / library), and severity — plus CWE, payload, \
+and evidence. V asserts exploitability from a parsed response, not observed \
+browser execution; only detection_method=oob observes a real browser."
     )]
     async fn scan_with_dalfox(
         &self,
@@ -1559,8 +1562,12 @@ CWE, payload, and evidence."
 Returns {scan_id, target, status, results, pagination, progress}. \
 Status is one of: queued, running, done, error, cancelled. \
 When done, results is an array of findings. Each finding includes: type \
-(V=Verified, A=AST-detected, R=Reflected), type_description, inject_type, \
-method, param, payload, evidence, cwe, severity, and message_str. \
+(V=Vulnerable, A=AST-detected, R=Reflected, I=Informational), type_description, \
+detection_method (reflection / dom-verification / ast / oob / library), \
+confidence (high / low, absent on I) with confidence_reason, inject_type, \
+method, param, payload, evidence, cwe, severity, location, and message_str. \
+Select AST findings by detection_method == \"ast\", not type == \"A\": the \
+method field is stable, the A tier is being folded into the confidence axis. \
 Use the optional `offset` and `limit` parameters to page through large \
 result sets; pagination describes {total, offset, limit, returned, has_more}. \
 When status is 'error', includes error_message explaining the failure reason. \

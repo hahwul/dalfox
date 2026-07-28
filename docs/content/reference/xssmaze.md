@@ -203,7 +203,7 @@ _Generated 2026-06-20T12:16:01Z · image `ghcr.io/hahwul/xssmaze:main` (`ghcr.io
 - **Targets:** every endpoint returned by XSSMaze's `/map/json`, grouped by its catalog `type` (category).
 - **Per-endpoint scan:** Dalfox is pointed at the exact injection point the catalog declares (`query`, body, header, or path), with parameter mining disabled (`--skip-mining`); discovery and reflection checks stay on so header/path cases still resolve.
 - **Detected:** an endpoint counts as detected when Dalfox returns at least one finding (verified, reflected, or AST-DOM).
-- **Verified:** the subset where Dalfox confirmed execution in the parsed DOM (finding type `V`).
+- **Verified:** the subset where Dalfox found the payload in an executable position in the parsed DOM (finding type `V`). Not browser execution — see [Detection Model](../../guide/detection-model/).
 - **Rate:** `detected / endpoints`, per category and overall.
 
 Each snapshot is pinned to the Dalfox version that produced it and the exact XSSMaze image digest, both shown beneath the table. The raw data lives in [`docs/data/xssmaze-score.json`](https://github.com/hahwul/dalfox/blob/main/docs/data/xssmaze-score.json).

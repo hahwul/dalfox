@@ -13,6 +13,13 @@ Every Dalfox finding answers three separate questions. Reading them as one scale
 | **Method** | `detection_method` | How was it found? |
 | **Impact** | `severity` | How bad is it if exploited? |
 
+Two of those three vary independently today. **`severity` does not**: for XSS
+findings it is currently a restatement of the tier (`V` → `High`, `A` →
+`Medium`, `R` → `Info`), so filtering or sorting on it tells you nothing that
+`type` didn't. It carries real information only on `I`, where it comes from the
+library advisory. Treat it as a display convenience until it grades impact on
+its own.
+
 `[A]` predates that split. It answers the *method* question while sitting in the `type` field, which is why nobody — including the code — could say where it belonged on the confidence scale. It is being absorbed; see [Migration](#migration) below.
 
 This page exists because the split was not visible from the output alone. It was worked out in [issue #1238](https://github.com/hahwul/dalfox/issues/1238) with [@OSTARA711](https://github.com/OSTARA711), whose write-up is the basis for the model here.
@@ -46,6 +53,26 @@ There is exactly one method where Dalfox observes real execution: **out-of-band 
 
 **Use `detection_method == "ast"` — not `type == "A"` — to select AST findings.** The method field is stable; the tier is not.
 
+### The combinations that actually occur
+
+The tier and the method are chosen separately, so `V` does not imply
+`dom-verification`. Every finding Dalfox emits is one of these:
+
+| `type` | `detection_method` | `confidence` | `severity` | Produced by |
+|--------|--------------------|--------------|------------|-------------|
+| `V` | `dom-verification` | `high` | High | The dedicated DOM-verification request |
+| `V` | `reflection` | `high` | High | The reflection phase, when the reflection response *already* parses to an executable position |
+| `V` | `oob` | `high` | High | An out-of-band callback |
+| `V` | `ast` | `high` **or** `low` | High | The two legacy AST promotions — the disagreement [Migration](#migration) is about |
+| `A` | `ast` | `high` **or** `low` | Medium | Every other source→sink flow |
+| `R` | `reflection` | `low` | Info | A reflection with no confirmed executable position, including the `--hpp` duplicate-parameter echo (`inject_type: inHTML-HPP`) |
+| `I` | `library` | *(absent)* | Low / Medium / High | `--detect-outdated-libs` |
+
+`V` + `reflection` is the row that surprises people. `reflection` names *which
+request the evidence came from*, not how weak the evidence is: that row parsed
+the same DOM the `dom-verification` row does — it just did it on a response it
+already had, instead of spending another request.
+
 ### `dom-verification` evidence
 
 Five ways a payload proves it reached an executable position: the Dalfox marker matched by CSS selector; an executable scheme (`javascript:`, `data:text/html`) in a dangerous attribute; an injected element carrying a sink-calling handler; a sink call inside `<script>` whose AST range covers the payload; and an inline-handler breakout where the payload terminated the surrounding JS string. The `evidence` field names which one fired.
@@ -69,15 +96,25 @@ Every XSS finding carries a `confidence` of `high` or `low`, plus a `confidence_
 
 `high` requires **all** of:
 
-- **A URL-carried source** — `location.*`, `document.URL`, `URLSearchParams`. A link alone triggers it. Sources needing an attacker-controlled driver page (`window.name`, `document.referrer`, `postMessage`, storage, `history.state`) grade `low`: real, but not reachable by sending a URL.
+- **A source an attacker can reach with a link** — `location.*`, `document.URL`, `URLSearchParams` carry the payload in the URL directly. Sources that would otherwise need an attacker-controlled driver page (`window.name`, `document.referrer`, `postMessage`, storage, `history.state`) grade `low` — *unless* the page seeds that source from a query parameter itself, which a link can also drive. That case grades `high` with the reason `non-URL source seeded from a query parameter by the page`.
 - **A payload the page's CSP would let execute** — either inline script is permitted, or the sink runs script directly (`eval`, `Function`, `document.write`, `<script>` text) and so does not depend on inline-handler permission. A report-only CSP enforces nothing and never lowers the grade.
 - **No Trusted Types interception** — `require-trusted-types-for 'script'` with a TrustedHTML-class sink grades `low`.
 
 Sanitizers are not a grading signal because they are already a *filter*: the analyzer treats them as taint clearers, so a finding existing at all means no recognised sanitizer was on the path.
 
+`confidence_reason` never mixes the two directions. A `high` grade lists the supporting signals; a `low` grade lists **only** what blocked it, so the signals that did hold are not shown. One reason is informational either way: `flow sits inside a conditional branch` records that the flow is guarded, and never changes the grade on its own.
+
+### Where the grade is visible — and where it isn't
+
+`confidence` is carried by `json`, `jsonl`, `toml`, `markdown` and `sarif`. The
+default `plain` output does **not** print it, so the triage advice below assumes
+a machine-readable format. Nothing else keys off it yet either: `--only-poc`,
+`--limit-result-type`, the deduplication ranking, and the exit code all still
+read `type`. The grade is a preview of the migration, not yet a control.
+
 ## Migration
 
-`confidence` is reported today but does not yet drive `type`. That is the point: you can see where each finding will land before anything moves.
+That the grade drives nothing yet is the point: you can see where each finding will land before anything moves.
 
 1. **Now** — `type` unchanged. `detection_method` and `confidence` are new. `type == "A"` is deprecated as a selector; use `detection_method == "ast"`.
 2. **Next** — `--tier-model confidence` as an opt-in.
@@ -86,6 +123,8 @@ Sanitizers are not a grading signal because they are already a *filter*: the ana
 `--only-poc a` keeps working throughout; it selects `detection_method == "ast"` once the tier is gone. No flag value is ever removed.
 
 During the transition `type` and `confidence` can disagree — a finding can read `type=V, confidence=low`. Two legacy code paths promote AST findings to `V` on evidence that does not support the claim; the grade reports what Dalfox can actually assert, the tier reports what it has historically emitted. The disagreement is the preview signal, not a bug.
+
+When the tier does derive from the grade, everything that reads the tier follows it: the same `--only-poc v` selects a different set, the exit code flips on a different set, and deduplication ranks the survivors differently. That is the intended effect, not a side effect to work around.
 
 ## Reading a mixed scan
 
@@ -103,6 +142,44 @@ WRN XSS found 0 XSS (+3 A)
 
 Reading only the summary lines on a DOM-XSS target would miss every finding in the report.
 
+### Why the tiers don't sum to what was found
+
+Two post-processing passes run before anything is printed, so the tier counts
+are not the number of findings recorded during the scan:
+
+- **Redundant `R` collapse** — an `R` is dropped when a `V` exists for the same
+  `(param, inject_type)` on that target. Reporting both would list the same
+  input twice at two different strengths. `V` and `A` are never dropped.
+- **AST deduplication** — the same source→sink flow can be found by the
+  preflight, the probe, and the reflection loop. One survives per fingerprint:
+  the strongest by `type`, then `severity`. `confidence` does not participate,
+  so an ungraded `V` still outranks a `high` `A`.
+
+`--stream-findings` emits each finding the moment it is recorded, which is
+*before* the collapse. An `R` can therefore appear in the stream and be absent
+from the final report. When the two disagree, the final report is the answer.
+
+### Selecting tiers: `--only-poc` vs `--limit-result-type`
+
+Both take `v` / `r` / `a` / `i`, and they do different things:
+
+| Flag | Effect |
+|------|--------|
+| `--only-poc` | **Filters the output.** Findings of other tiers are discarded |
+| `--limit-result-type` | **Counts toward `--limit`.** Findings of other tiers are still reported; they just don't consume the budget |
+
+`--limit 2 --limit-result-type v` means "keep scanning until two `V` findings
+accrue, then show everything found along the way". To actually hide the rest,
+add `--only-poc v`.
+
+### Exit codes
+
+`0` means no findings, `1` means at least one finding **of any tier** — counted
+after `--only-poc` and the collapse above — and `2` is a hard error (bad input,
+every target unreachable, `--output` unwritable). A lone `R`, or a single `I`
+from `--detect-outdated-libs`, exits `1` exactly like a `V` does. For CI that
+should fail only on what Dalfox asserts is exploitable, run `--only-poc v`.
+
 ## Choosing flags by intent
 
 | Goal | Flags |
@@ -111,4 +188,5 @@ Reading only the summary lines on a DOM-XSS target would miss every finding in t
 | Suppress static-analysis noise on a production target | `--skip-ast-analysis` |
 | Skip name harvesting, keep DOM-XSS detection | `--skip-mining-dom` |
 | Test one parameter, still see every DOM sink | `-p q` (AST findings are not scoped by `-p`) |
-| Triage a large AST batch | Sort on `confidence`, then read `confidence_reason` |
+| Triage a large AST batch | `-f json`, sort on `confidence`, then read `confidence_reason` |
+| Fail CI only on asserted vulnerabilities | `--only-poc v` (otherwise any tier exits `1`) |

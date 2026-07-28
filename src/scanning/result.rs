@@ -233,7 +233,10 @@ pub struct Result {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<Confidence>,
     /// Short `;`-joined justification for `confidence`, e.g.
-    /// `"direct flow; URL-carried source; inline script permitted"`.
+    /// `"URL-carried source; inline script permitted"` for a `High` grade or
+    /// `"CSP does not permit inline script"` for a `Low` one. The two never
+    /// mix: `ast_integration::grade_ast_finding` joins the supporting reasons
+    /// when nothing blocks, and the blockers otherwise.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub confidence_reason: String,
     /// True when `data` already holds a complete, reproducible POC URL and the
