@@ -11,8 +11,17 @@ use super::selectors;
 /// JS file has no `document.createElement('script')` of its own. The
 /// caller threads the returned set into `AstDomAnalyzer::with_script_element_ids`.
 pub fn extract_script_element_ids(html: &str) -> HashSet<String> {
-    let mut ids = HashSet::new();
     let document = Html::parse_document(html);
+    script_element_ids_from_document(&document)
+}
+
+/// Collect the `id` attribute of every `<script>` element in an already-parsed
+/// document. Factored out of [`extract_script_element_ids`] so callers that
+/// also need the JS blocks can share a single `Html::parse_document` pass via
+/// [`extract_js_and_script_ids`] instead of parsing the (up to 16 MiB) body
+/// twice.
+fn script_element_ids_from_document(document: &Html) -> HashSet<String> {
+    let mut ids = HashSet::new();
     let selector = selectors::script();
     for element in document.select(selector) {
         if let Some(id) = element.value().attr("id") {
@@ -28,11 +37,31 @@ pub fn extract_script_element_ids(html: &str) -> HashSet<String> {
 /// Extract JavaScript code from HTML response
 /// Looks for <script> tags and inline event handlers
 pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
+    let document = Html::parse_document(html);
+    js_blocks_from_document(&document)
+}
+
+/// Parse `html` once and return BOTH the JS blocks (see
+/// [`extract_javascript_from_html`]) and the `<script>` element ids (see
+/// [`extract_script_element_ids`]). The AST DOM-analysis entry points need
+/// both for the same response body; calling the two extractors separately
+/// parsed the full response through html5ever twice. Sharing one parse tree
+/// yields byte-identical results at half the HTML-parse cost.
+pub fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<String>) {
+    let document = Html::parse_document(html);
+    let js_blocks = js_blocks_from_document(&document);
+    let script_ids = script_element_ids_from_document(&document);
+    (js_blocks, script_ids)
+}
+
+/// Extract JS blocks (inline `<script>` bodies, `on*` handler bodies, and
+/// `javascript:` href bodies) from an already-parsed document. Factored out of
+/// [`extract_javascript_from_html`] so [`extract_js_and_script_ids`] can reuse
+/// a single parse.
+fn js_blocks_from_document(document: &Html) -> Vec<String> {
     use std::collections::HashSet;
     let mut js_code = Vec::new();
     let mut seen = HashSet::new();
-
-    let document = Html::parse_document(html);
 
     // Extract from <script> tags
     {
@@ -1053,8 +1082,7 @@ pub fn run_initial_ast_dom_analysis(
     target_method: &str,
     posture: PageSecurityPosture,
 ) -> Vec<crate::scanning::result::Result> {
-    let js_blocks = extract_javascript_from_html(response_text);
-    let script_element_ids = extract_script_element_ids(response_text);
+    let (js_blocks, script_element_ids) = extract_js_and_script_ids(response_text);
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();
     for js_code in js_blocks {
         let findings = analyze_javascript_for_dom_xss_with_html_context(

@@ -22,6 +22,36 @@ fn test_extract_javascript_from_html() {
     assert!(js_code[1].contains("location.search"));
 }
 
+/// The single-parse `extract_js_and_script_ids` must return byte-identical
+/// results to calling the two separate extractors — that equivalence is the
+/// entire safety argument for sharing one `Html::parse_document` pass.
+#[test]
+fn test_extract_js_and_script_ids_matches_separate_extractors() {
+    let html = r#"
+<html>
+<head>
+<script id="cfg" type="application/json">{"a":1}</script>
+<script id="app">
+    var y = location.hash;
+    document.getElementById('foo').innerHTML = y;
+</script>
+</head>
+<body onload="doStuff(location.search)">
+<a href="javascript:alert(1)">x</a>
+<script>console.log('no id here');</script>
+</body>
+</html>
+"#;
+    let (js_blocks, ids) = extract_js_and_script_ids(html);
+    assert_eq!(js_blocks, extract_javascript_from_html(html));
+    assert_eq!(ids, extract_script_element_ids(html));
+    // Sanity: both signals were actually populated.
+    assert!(ids.contains("app") && ids.contains("cfg"));
+    assert!(js_blocks.iter().any(|b| b.contains("location.hash")));
+    assert!(js_blocks.iter().any(|b| b.contains("doStuff")));
+    assert!(js_blocks.iter().any(|b| b.contains("alert(1)")));
+}
+
 #[test]
 fn test_analyze_javascript_for_dom_xss() {
     let js = r#"

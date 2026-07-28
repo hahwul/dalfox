@@ -535,9 +535,8 @@ async fn run_ast_dom_analysis(
     ast_seen: &mut HashSet<String>,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
-    let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
-    let script_element_ids =
-        crate::scanning::ast_integration::extract_script_element_ids(response_text);
+    let (js_blocks, script_element_ids) =
+        crate::scanning::ast_integration::extract_js_and_script_ids(response_text);
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
     for js_code in js_blocks {
         let findings =
