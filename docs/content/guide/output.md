@@ -36,8 +36,11 @@ Every finding includes:
 
 | Field | Example | Meaning |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R`, `I` | Verified / AST-detected / Reflected / Informational |
-| `type_description` | `"Verified"` | Human label |
+| `type` | `V`, `A`, `R`, `I` | Confidence: Vulnerable / AST-detected / Reflected / Informational |
+| `type_description` | `"Vulnerable"` | Human label |
+| `detection_method` | `"ast"` | How it was found: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
+| `confidence` | `"high"` | Whether Dalfox can claim a vulnerability (`high` / `low`); absent on `I` |
+| `confidence_reason` | `"URL-carried source; inline script permitted"` | The deciding signals |
 | `inject_type` | `"inHTML"` | Context (`inHTML`, `inAttr`, `inJS`, …) |
 | `method` | `"GET"` | HTTP method |
 | `param` | `"q"` | Parameter that was exploited |
@@ -169,7 +172,9 @@ target_summary = [{ target = "https://target.app", status = "findings", findings
 
 [[results]]
 type = "V"
-type_description = "Verified"
+type_description = "Vulnerable"
+detection_method = "dom-verification"
+confidence = "high"
 inject_type = "inHTML"
 method = "GET"
 data = "https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E"

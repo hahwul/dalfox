@@ -572,19 +572,25 @@ pub(crate) async fn run_scan_job(
                         // job's requests_sent tally.
                         crate::record_outbound_request().await;
                         if let Ok(resp) = preflight.send().await {
-                            // Read CSP off the response before the body is
-                            // consumed, so a `require-trusted-types-for` page is
-                            // analyzed with the same Trusted Types awareness the
-                            // CLI gets from preflight.
-                            let trusted_types_enforced =
-                                crate::scanning::csp_requires_trusted_types(resp.headers());
+                            // Clone the headers before `read_body` consumes the
+                            // response: the posture needs both them and the
+                            // document (a page can declare its CSP with
+                            // `<meta http-equiv>`), so Trusted Types awareness
+                            // and the confidence grading's CSP signal match what
+                            // the CLI derives from preflight.
+                            let resp_headers = resp.headers().clone();
                             if let Ok(body) = crate::utils::http::read_body(resp).await {
+                                let posture =
+                                    crate::scanning::ast_integration::PageSecurityPosture::from_response(
+                                        &resp_headers,
+                                        &body,
+                                    );
                                 let ast_batch =
                                     crate::scanning::ast_integration::run_initial_ast_dom_analysis(
                                         &body,
                                         target.url.as_str(),
                                         &target.method,
-                                        trusted_types_enforced,
+                                        posture,
                                     );
                                 if !ast_batch.is_empty() {
                                     let added = crate::scanning::count_matching_results(

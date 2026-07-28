@@ -1063,6 +1063,9 @@ fn dummy_finding(id: u32) -> SanitizedResult {
         message_id: id,
         message_str: format!("finding-{}", id),
         location: String::new(),
+        detection_method: crate::scanning::result::FindingMethod::Reflection,
+        confidence: Some(crate::scanning::result::Confidence::Low),
+        confidence_reason: String::new(),
         request: None,
         response: None,
     }

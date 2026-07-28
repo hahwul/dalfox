@@ -16,8 +16,11 @@ pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
 // would be copied straight into `ScanArgs` and silently misbehave.
 pub const FORMAT_VALUES: &[&str] = &["plain", "json", "jsonl", "markdown", "sarif", "toml"];
 pub const POC_TYPE_VALUES: &[&str] = &["plain", "curl", "httpie", "http-request"];
-pub const LIMIT_RESULT_TYPE_VALUES: &[&str] = &["all", "v", "r", "a", "V", "R", "A"];
-pub const ONLY_POC_VALUES: &[&str] = &["v", "r", "a", "V", "R", "A"];
+// `i` (informational) is selectable as well as excludable: the letter is a real
+// finding type, so omitting it meant `--only-poc v,a,r` could filter it out but
+// nothing could ask for it on its own.
+pub const LIMIT_RESULT_TYPE_VALUES: &[&str] = &["all", "v", "r", "a", "i", "V", "R", "A", "I"];
+pub const ONLY_POC_VALUES: &[&str] = &["v", "r", "a", "i", "V", "R", "A", "I"];
 pub const ENCODER_VALUES: &[&str] = &[
     "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
 ];
@@ -238,12 +241,12 @@ pub struct ScanArgs {
     pub limit: Option<usize>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Filter which finding types count toward --limit: all (default), v (verified), r (reflected), a (AST DOM XSS). Example: --limit-result-type v
+    /// Filter which finding types count toward --limit: all (default), v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --limit-result-type v
     #[arg(long, default_value = "all", value_parser = clap::builder::PossibleValuesParser::new(LIMIT_RESULT_TYPE_VALUES.iter().copied()))]
     pub limit_result_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Filter output to show only specific finding types (comma-separated). Options: v (verified), r (reflected), a (AST DOM XSS). Example: --only-poc "v,r"
+    /// Filter output to show only specific finding types (comma-separated). Options: v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --only-poc "v,r"
     #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(ONLY_POC_VALUES.iter().copied()))]
     pub only_poc: Vec<String>,
 

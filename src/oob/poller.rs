@@ -249,6 +249,13 @@ fn build_finding(
     let evidence = format!("OOB {proto} callback from {remote} at {ts} (host {host})");
 
     let mut result = ScanResult::builder(FindingType::Verified)
+        // The one path where dalfox observes real execution: the payload called
+        // home. Not `dom-verification`, which the tier would otherwise imply.
+        .detection_method(crate::scanning::result::FindingMethod::Oob)
+        .confidence(
+            crate::scanning::result::Confidence::High,
+            "out-of-band callback received from the injected payload",
+        )
         .inject_type(format!("blind-oob-{loc_label}-{proto}"))
         .method(method)
         .data(data)

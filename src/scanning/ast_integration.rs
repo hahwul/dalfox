@@ -135,6 +135,226 @@ fn extract_search_param_key(source: &str) -> Option<&str> {
     extract_search_param_chain(source)?.last().copied()
 }
 
+/// Page-level security posture that bears on whether an AST-detected flow is
+/// actually exploitable with dalfox's payloads.
+///
+/// A `Copy` struct rather than loose booleans so a future signal is additive at
+/// one definition instead of at every AST entry point. Derived from the
+/// response CSP — either the already-parsed [`CspAnalysis`] the CLI stores on
+/// the target, or straight from response headers on the server / MCP paths,
+/// which do not build a `Target`.
+///
+/// [`CspAnalysis`]: crate::payload::xss_csp_bypass::CspAnalysis
+#[derive(Debug, Clone, Copy)]
+pub struct PageSecurityPosture {
+    /// `require-trusted-types-for 'script'` is enforced, so the browser routes
+    /// every DOM-XSS sink string through a Trusted Types policy.
+    pub trusted_types_enforced: bool,
+    /// An injected event-handler attribute (`<img onerror=…>`) would execute.
+    /// False under an enforcing CSP that does not permit inline script.
+    pub inline_script_allowed: bool,
+}
+
+impl Default for PageSecurityPosture {
+    /// No CSP observed: nothing restricts an injected handler.
+    fn default() -> Self {
+        Self {
+            trusted_types_enforced: false,
+            inline_script_allowed: true,
+        }
+    }
+}
+
+impl PageSecurityPosture {
+    pub fn from_csp(csp: Option<&crate::payload::xss_csp_bypass::CspAnalysis>) -> Self {
+        // A report-only policy enforces nothing, so it must not lower
+        // confidence — its directives describe intent, not a restriction.
+        let Some(csp) = csp.filter(|c| !c.report_only) else {
+            return Self::default();
+        };
+        Self {
+            trusted_types_enforced: csp.require_trusted_types_for,
+            // Per CSP: a nonce or hash in `script-src` makes `'unsafe-inline'`
+            // ignored, and neither helps an attribute the attacker injected —
+            // only an explicit, unpinned `'unsafe-inline'` does.
+            // `missing_script_src` means neither `script-src` nor `default-src`
+            // is present, so nothing restricts script execution.
+            //
+            // Known gap: `analyze_csp` collects nonces / hashes from
+            // `script-src` only, so a policy that pins them on `default-src`
+            // with no `script-src` reads as inline-permitting here and can grade
+            // `high` when the browser would block the handler. Widening that
+            // collection would also change which bypass payloads are generated,
+            // which is a detection-behaviour change and out of scope for this
+            // phase; the error is toward over-claiming on a rare policy shape.
+            inline_script_allowed: csp.missing_script_src
+                || (csp.has_unsafe_inline && !csp.is_nonce_or_hash_based()),
+        }
+    }
+
+    pub fn from_target(target: &crate::target_parser::Target) -> Self {
+        Self::from_csp(target.csp_analysis.as_ref())
+    }
+
+    /// Server / MCP variant: the CLI gets its `CspAnalysis` from preflight, and
+    /// these surfaces fetch the page themselves — so they must apply the same
+    /// precedence preflight does, or the identical target grades differently
+    /// depending on which interface ran the scan. Enforcing header, then
+    /// report-only header, then a `<meta http-equiv>` policy.
+    pub fn from_response(headers: &reqwest::header::HeaderMap, body: &str) -> Self {
+        let header_csp = headers
+            .get("content-security-policy")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| (false, v.to_string()))
+            .or_else(|| {
+                headers
+                    .get("content-security-policy-report-only")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| (true, v.to_string()))
+            });
+
+        let (report_only, policy) = match header_csp {
+            Some(found) => found,
+            // Only look at the document when no header carried a policy —
+            // mirroring preflight, where the meta scan is the fallback.
+            None => match crate::scanning::extract_meta_csp(body) {
+                Some((name, content)) => (
+                    !name.eq_ignore_ascii_case("content-security-policy"),
+                    content,
+                ),
+                None => return Self::default(),
+            },
+        };
+
+        let mut csp = crate::payload::xss_csp_bypass::analyze_csp(&policy);
+        csp.report_only = report_only;
+        Self::from_csp(Some(&csp))
+    }
+}
+
+/// Sinks that run their argument as script regardless of whether inline
+/// event-handler attributes are permitted, so a restrictive CSP does not by
+/// itself make the flow unexploitable. `unsafe-eval` gates some of these, but
+/// the payload shape does not depend on injecting a handler attribute.
+fn sink_executes_without_inline_handler(sink: &str) -> bool {
+    const SCRIPT_EXECUTING: [&str; 7] = [
+        "eval",
+        "Function",
+        "setTimeout",
+        "setInterval",
+        "document.write",
+        "document.writeln",
+        "execScript",
+    ];
+    SCRIPT_EXECUTING.iter().any(|s| sink.contains(s))
+        // `script.text` / `.textContent` / `.innerHTML` on a <script> element
+        // runs as JS once appended — the analyzer tracks these separately.
+        || (sink.contains("script") && sink.contains("text"))
+}
+
+/// True when the payload can be delivered by handing someone a URL. Sources
+/// outside this set (`window.name`, `document.referrer`, `postMessage`,
+/// storage, `history.state`) need an attacker-controlled driver page first —
+/// the flow is real, but it is not reachable by sending a link, so dalfox
+/// cannot claim it without that setup.
+fn source_is_url_carried(source: &str) -> bool {
+    // Parts of the URL that are fixed by the origin the victim is already on.
+    // They are taint sources in exotic setups (wildcard DNS, `document.domain`
+    // relaxation), but handing someone a link cannot change them, so they do
+    // not meet the bar for a claim. Checked first: `location.host` would
+    // otherwise match the `location` prefix below.
+    const ORIGIN_FIXED: [&str; 4] = [
+        "location.origin",
+        "location.host",
+        "location.protocol",
+        "document.domain",
+    ];
+    if ORIGIN_FIXED.iter().any(|s| source.contains(s)) {
+        return false;
+    }
+    const URL_CARRIED: [&str; 6] = [
+        "location",
+        "document.URL",
+        "documentURI",
+        "URLSearchParams",
+        "baseURI",
+        "URL(",
+    ];
+    URL_CARRIED.iter().any(|s| source.contains(s))
+}
+
+/// Grade an AST DOM-XSS finding on the confidence axis: can dalfox claim this
+/// is a vulnerability, or is it a signal an operator has to confirm?
+///
+/// `High` needs all of: a URL-carried source, a payload the page's CSP would
+/// let execute, and no Trusted Types interception. Anything else grades `Low` —
+/// the conservative direction, since `Low` means "look at this yourself", not
+/// "discarded".
+///
+/// Two signals are deliberately *not* criteria:
+///
+/// * **Sanitizers.** The analyzer treats them as taint clearers, so a finding
+///   existing already means no recognised sanitizer was on the path.
+/// * **`guarded`.** It comes from `branch_depth`, which cannot tell an
+///   attacker-satisfiable presence check (`if (q) { el.innerHTML = q }` — the
+///   dominant shape in real code, and no mitigation at all since the attacker
+///   supplies `q`) apart from a guard on state the attacker does not control.
+///   Grading on it made nearly every real finding `Low`, which is worse than
+///   useless: it would push the whole class to `Review` at the tier flip.
+///   Separating the two needs analysis of the condition expression, which is
+///   deferred with the handler-context work. Until then it is reported as a
+///   note and never changes the grade.
+pub(crate) fn grade_ast_finding(
+    source: &str,
+    sink: &str,
+    guarded: bool,
+    bootstrapped_from_url: bool,
+    posture: PageSecurityPosture,
+) -> (crate::scanning::result::Confidence, String) {
+    use crate::scanning::result::Confidence;
+
+    let mut blockers: Vec<&str> = Vec::new();
+    let mut reasons: Vec<&str> = Vec::new();
+
+    if source_is_url_carried(source) {
+        reasons.push("URL-carried source");
+    } else if bootstrapped_from_url {
+        // The page seeds this non-URL source from a query parameter itself, so
+        // no attacker-controlled driver page is needed after all — a link is
+        // still enough. Detected by `has_self_bootstrap_verification`, which is
+        // exactly the "bootstraps a DOM source from a predictable query param"
+        // check. Using it for reachability is sound; using it to promote the
+        // *tier* (as the legacy paths do) is what is being retired.
+        reasons.push("non-URL source seeded from a query parameter by the page");
+    } else {
+        blockers.push("source needs an attacker-controlled page to set up");
+    }
+
+    let sink_needs_inline = !sink_executes_without_inline_handler(sink);
+    if !sink_needs_inline {
+        reasons.push("sink executes script directly");
+    } else if posture.inline_script_allowed {
+        reasons.push("inline script permitted");
+    } else {
+        blockers.push("CSP does not permit inline script");
+    }
+
+    if posture.trusted_types_enforced && sink_needs_inline {
+        blockers.push("Trusted Types enforced for this sink");
+    }
+
+    // Informational only — see the `guarded` note above.
+    if guarded {
+        reasons.push("flow sits inside a conditional branch");
+    }
+
+    if blockers.is_empty() {
+        (Confidence::High, reasons.join("; "))
+    } else {
+        (Confidence::Low, blockers.join("; "))
+    }
+}
+
 /// Reporting label for the input that carries a DOM-XSS source.
 ///
 /// AST findings used to report `param: "-"`, which threw away triage
@@ -747,20 +967,52 @@ pub fn analyze_javascript_for_dom_xss_with_html_context(
 /// confirmed. Shared by the initial-HTML pass and the external-JS pass so
 /// both surfaces emit identically shaped findings. `evidence` and `message`
 /// are caller-supplied because they differ per source (inline vs external).
+///
+/// `confidence` is graded from the flow's own shape, so the self-bootstrap
+/// upgrade below can leave `result_type` at `Verified` while the grade says
+/// `Low`. That disagreement is deliberate during the tier migration: the grade
+/// reports what dalfox can actually claim, the tier reports what it has
+/// historically emitted.
+pub(crate) struct AstDomFinding<'a> {
+    pub target_url: &'a str,
+    pub target_method: &'a str,
+    /// Carries source / sink / `guarded` — the analyzer's own output, passed
+    /// whole so a new signal on it doesn't grow this call again.
+    pub vuln: &'a crate::scanning::ast_dom_analysis::DomXssVulnerability,
+    pub payload: String,
+    pub evidence: String,
+    pub message: String,
+    pub self_bootstrap_verified: bool,
+    pub posture: PageSecurityPosture,
+}
+
 pub(crate) fn build_ast_dom_xss_result(
-    target_url: &str,
-    target_method: &str,
-    source: &str,
-    payload: String,
-    evidence: String,
-    message: String,
-    self_bootstrap_verified: bool,
+    finding: AstDomFinding<'_>,
 ) -> crate::scanning::result::Result {
+    let AstDomFinding {
+        target_url,
+        target_method,
+        vuln,
+        payload,
+        evidence,
+        message,
+        self_bootstrap_verified,
+        posture,
+    } = finding;
+    let source = vuln.source.as_str();
     let poc_url = build_dom_xss_poc_url(target_url, source, &payload);
+    let (confidence, confidence_reason) = grade_ast_finding(
+        source,
+        &vuln.sink,
+        vuln.guarded,
+        self_bootstrap_verified,
+        posture,
+    );
     let mut ast_result =
         crate::scanning::result::Result::builder(crate::scanning::result::FindingType::AstDetected)
             .inject_type("DOM-XSS")
             .method(target_method.to_string())
+            .confidence(confidence, confidence_reason)
             .data(poc_url)
             .param(dom_source_param_label(source))
             .payload(payload)
@@ -799,7 +1051,7 @@ pub fn run_initial_ast_dom_analysis(
     response_text: &str,
     target_url: &str,
     target_method: &str,
-    trusted_types_enforced: bool,
+    posture: PageSecurityPosture,
 ) -> Vec<crate::scanning::result::Result> {
     let js_blocks = extract_javascript_from_html(response_text);
     let script_element_ids = extract_script_element_ids(response_text);
@@ -809,7 +1061,7 @@ pub fn run_initial_ast_dom_analysis(
             &js_code,
             target_url,
             &script_element_ids,
-            trusted_types_enforced,
+            posture.trusted_types_enforced,
         );
         for (vuln, payload, description) in findings {
             let self_bootstrap_verified = has_self_bootstrap_verification(&js_code, &vuln.source);
@@ -828,15 +1080,16 @@ pub fn run_initial_ast_dom_analysis(
                 "{}:{}:{} - {} (Source: {}, Sink: {})",
                 target_url, vuln.line, vuln.column, description, vuln.source, vuln.sink
             );
-            out.push(build_ast_dom_xss_result(
+            out.push(build_ast_dom_xss_result(AstDomFinding {
                 target_url,
                 target_method,
-                &vuln.source,
+                vuln: &vuln,
                 payload,
                 evidence,
                 message,
                 self_bootstrap_verified,
-            ));
+                posture,
+            }));
         }
     }
     out

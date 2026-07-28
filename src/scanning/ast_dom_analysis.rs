@@ -204,6 +204,10 @@ pub struct DomXssVulnerability {
     pub snippet: String,
     /// Description of the vulnerability
     pub description: String,
+    /// True when the sink was reached from inside a conditional / loop / try
+    /// body — the flow exists but is not taken unconditionally. A confidence
+    /// signal only; it never suppresses the finding.
+    pub guarded: bool,
 }
 
 /// Lightweight summary for a function declaration.
@@ -2433,6 +2437,11 @@ impl<'a> DomXssVisitor<'a> {
             sink: sink.to_string(),
             snippet,
             description: description.to_string(),
+            // Reported from inside a conditional / loop / try body, so the flow
+            // is only taken on some paths. Consumed as a confidence signal by
+            // `ast_integration::grade_ast_finding`; the analysis itself stays
+            // flow-insensitive and still reports the finding.
+            guarded: self.branch_depth > 0,
         });
     }
 

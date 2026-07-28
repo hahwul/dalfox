@@ -17,6 +17,15 @@ use crate::scanning::markers;
 /// Parsed CSP directives relevant to XSS bypass.
 #[derive(Debug, Clone, Default)]
 pub struct CspAnalysis {
+    /// True when the policy came from `Content-Security-Policy-Report-Only`,
+    /// which enforces nothing — it only emits violation reports. Set by the
+    /// caller that read the header (`analyze_csp` cannot know which header the
+    /// value came from) and defaults to `false` (enforcing).
+    ///
+    /// Every directive field below is populated verbatim regardless, so a
+    /// consumer that treats the policy as a restriction — rather than as a hint
+    /// about what the site intends — must check this first.
+    pub report_only: bool,
     pub has_unsafe_inline: bool,
     pub has_unsafe_eval: bool,
     pub has_strict_dynamic: bool,

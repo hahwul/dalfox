@@ -67,8 +67,8 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | Cap total results shown |
-| `--limit-result-type` | — | `all` | Which types count toward `--limit`: `all`, `v`, `r`, `a` |
-| `--only-poc` | — | — | Comma-separated filter: `v`, `r`, `a` |
+| `--limit-result-type` | — | `all` | Which types count toward `--limit`: `all`, `v`, `r`, `a`, `i` |
+| `--only-poc` | — | — | Comma-separated filter: `v` (vulnerable), `r` (reflected), `a` (AST), `i` (informational) |
 
 ### Target shaping
 

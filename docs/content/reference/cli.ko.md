@@ -67,8 +67,8 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--stream-findings` | — | false | 스캔 종료 요약 이후가 아니라 각 탐지 결과가 검증되는 즉시 출력합니다 (plain 형식만; `--output`, `--limit`, `--only-poc` 사용 시 자동 비활성화) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | 표시되는 전체 결과 수를 제한합니다 |
-| `--limit-result-type` | — | `all` | `--limit`에 집계되는 유형: `all`, `v`, `r`, `a` |
-| `--only-poc` | — | — | 쉼표로 구분된 필터: `v`, `r`, `a` |
+| `--limit-result-type` | — | `all` | `--limit`에 집계되는 유형: `all`, `v`, `r`, `a`, `i` |
+| `--only-poc` | — | — | 쉼표로 구분된 필터: `v`(취약), `r`(반사됨), `a`(AST), `i`(정보성) |
 
 ### 대상 형태 지정
 

@@ -36,8 +36,11 @@ dalfox https://target.app -f jsonl -o findings.jsonl
 
 | 필드 | 예시 | 의미 |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R`, `I` | Verified / AST 탐지 / Reflected / Informational |
-| `type_description` | `"Verified"` | 사람이 읽는 라벨 |
+| `type` | `V`, `A`, `R`, `I` | 신뢰도: Vulnerable / AST 탐지 / Reflected / Informational |
+| `type_description` | `"Vulnerable"` | 사람이 읽는 라벨 |
+| `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
+| `confidence` | `"high"` | 취약점이라고 주장할 수 있는지 (`high` / `low`). `I`에는 없음 |
+| `confidence_reason` | `"URL-carried source; inline script permitted"` | 판단 근거 신호 |
 | `inject_type` | `"inHTML"` | 컨텍스트 (`inHTML`, `inAttr`, `inJS`, …) |
 | `method` | `"GET"` | HTTP 메서드 |
 | `param` | `"q"` | 공격에 사용된 파라미터 |
@@ -167,7 +170,9 @@ target_summary = [{ target = "https://target.app", status = "findings", findings
 
 [[results]]
 type = "V"
-type_description = "Verified"
+type_description = "Vulnerable"
+detection_method = "dom-verification"
+confidence = "high"
 inject_type = "inHTML"
 method = "GET"
 data = "https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E"
