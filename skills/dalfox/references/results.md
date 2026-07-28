@@ -1,36 +1,87 @@
 # Results, Findings & Output Formats
 
-## Finding Types (the V / A / R model)
+## Finding Types (the V / A / R / I model)
 
-Every finding has both a single-letter `type` and a human `type_description`.
+A finding answers three separate questions in three separate fields. Reading
+them as one scale is the most common way agents misreport dalfox output.
 
-| Type | Code | Meaning | Typical Severity | When it appears |
-|------|------|---------|------------------|-----------------|
-| **Verified** | `V` | Payload executed in a real DOM context (confirmed by headless or AST+verification pipeline) | High | DOM sinks (innerHTML, document.write, etc.) that actually ran |
-| **AST-detected** | `A` | Static analysis of inline JavaScript found a dangerous sink with attacker-controlled data | High (if DOM-verified) / Medium | `inJS` reflections where the AST engine sees dangerous patterns |
-| **Reflected** | `R` | Payload appears in the HTTP response body or headers, but execution was not confirmed | Medium / Info | Pure reflection without DOM execution path, JSON APIs, etc. |
+| Axis | Field | Question |
+|------|-------|----------|
+| Confidence | `type` | Can dalfox claim this is a vulnerability? |
+| Method | `detection_method` | How was it found? |
+| Impact | `severity` | How bad is it if exploited? (today: derived from the tier) |
 
-**Agent rule**: When presenting results to the user, **lead with V, then A, then R**. Group by parameter. Always surface `type_description` alongside the letter.
+### `type` — the claim
+
+| Type | Code | Meaning | When it appears |
+|------|------|---------|-----------------|
+| **Vulnerable** | `V` | Dalfox asserts the input is exploitable — act on it | Payload reached an executable position in a parsed response, or an out-of-band callback fired |
+| **AST-detected** | `A` | Static JS analysis found a source→sink flow. A *method* label, not a confidence level | `location.hash` → `innerHTML` and friends, including sources never sent to the server |
+| **Reflected** | `R` | Payload came back in the response, but its position was not confirmed exploitable. A signal, not a claim | Reflection without a confirmed executable position — JSON APIs, escaped echoes |
+| **Informational** | `I` | Not an XSS claim at all | Known-vulnerable JS library (CWE-1104), opt-in via `--detect-outdated-libs` |
+
+**`V` is not browser execution.** Dalfox drives no browser and speaks no CDP —
+that is a deliberate v3 design decision, not a gap. For request-based methods
+`V` means the payload was found in a DOM tree *parsed from a real HTTP
+response*. The one exception is `detection_method: "oob"` (blind XSS): a real
+browser fetched the injected script, which is the strongest evidence dalfox
+produces. Never tell a user dalfox "watched an alert fire".
+
+### `detection_method` — how it was found
+
+| Value | Reads | Sends a payload? |
+|-------|-------|------------------|
+| `reflection` | The response body, for the payload's bytes | Yes |
+| `dom-verification` | The response parsed as HTML, for an executable position | Yes |
+| `ast` | The JavaScript in the response, for a source→sink flow | No |
+| `oob` | An out-of-band callback from a real browser | Yes |
+| `library` | `<script>` tags, for known-vulnerable versions | No |
+
+**Select AST findings with `detection_method == "ast"`, not `type == "A"`.**
+The method field is stable; the `A` tier is being absorbed into the confidence
+axis (issue #1238).
+
+### `confidence` — the grade behind the claim
+
+Every XSS finding carries `confidence` (`"high"` / `"low"`) plus a
+`confidence_reason` naming the deciding signals. It is absent on `I`.
+
+During the tier migration `type` and `confidence` can legitimately disagree
+(`type: "V"`, `confidence: "low"` from two legacy AST promotions). That is the
+preview signal, not a bug. `confidence` does not yet drive filtering, ordering,
+dedup, or exit codes — those still key off `type`.
+
+**Agent rule**: lead with V, then A, then R. Within a large `A` batch, sort on
+`confidence` and read `confidence_reason`. Group by parameter. Always surface
+`type_description` alongside the letter, and never upgrade `A`/`R` to
+"confirmed" language.
 
 ## Full Finding Shape (JSON / MCP / server)
 
 ```json
 {
   "type": "V",
-  "type_description": "Verified DOM-based XSS",
+  "type_description": "Vulnerable - dalfox asserts this input is exploitable; act on it",
+  "detection_method": "dom-verification",
+  "confidence": "high",
+  "confidence_reason": "DOM verification confirmed an executable position (DOM marker)",
   "inject_type": "inHTML",
   "method": "GET",
   "data": "https://target/?q=<script>alert(1)</script>",
   "param": "q",
   "payload": "<script>alert(1)</script>",
-  "evidence": "...snippet...",
+  "evidence": "DOM verification successful for param q (DOM marker)",
   "cwe": "CWE-79",
   "severity": "High",
-  "message_id": 1234,
-  "message_str": "Reflected XSS via parameter 'q' in HTML context",
-  "message": "..."
+  "message_id": 606,
+  "message_str": "Triggered XSS Payload (DOM marker): q=<script>alert(1)</script>",
+  "location": "Query"
 }
 ```
+
+`type_description` is the **long** form shown above, not the bare word. There is
+no `message` field. `confidence` / `confidence_reason` / `location` are omitted
+when unset. `request` / `response` appear only under the opt-in flags below.
 
 ### inject_type values (reflection context, not parameter location)
 
@@ -57,7 +108,9 @@ For the **parameter location** (query / body / header / cookie / path / JSON), l
 
 ## POC Output (`--poc-type`)
 
-- `plain` — the default one-line `[POC][V][param] ...` style
+- `plain` — the default one-line `[POC][V][GET][inHTML] https://…` style
+  (`[POC][type][method][location hint][inject_type] url`; the location hint
+  appears only for non-query params, e.g. `[hdr]`)
 - `curl` — ready-to-run `curl '...'` command
 - `httpie` — `http GET '...'` style
 - `http-request` — raw HTTP request text
@@ -88,7 +141,28 @@ Plain dry-run prints the same warnings under a `Warnings:` section.
 
 ## Streaming Findings
 
-`--stream-findings` emits each verified finding the moment it is confirmed instead of waiting for the final summary. Useful for very long scans where you want early signal. Off by default.
+`--stream-findings` emits each finding the moment it is recorded instead of
+waiting for the final summary. Useful for very long scans where you want early
+signal. Off by default, plain format only, and auto-disabled with `--output`,
+`--limit`, or `--only-poc`.
+
+**Caveat**: streaming happens *before* end-of-target post-processing, so an `R`
+finding can appear in the stream and then be absent from the final report — a
+`V` on the same `(param, inject_type)` collapses it (see below). Report the
+final results, not the stream, when the two disagree.
+
+## Why the counts don't add up
+
+Two post-processing passes run before output, so summed tiers are not the number
+of findings recorded during the scan:
+
+- **Redundant `R` collapse** — an `R` is dropped when a `V` exists for the same
+  `(param, inject_type)` on that target. `V` and `A` are never dropped.
+- **AST dedup** — one finding per equivalent AST fingerprint survives, the
+  strongest by `type` then `severity`. `confidence` does not participate.
+
+The plain headline `XSS found N XSS` counts `V` only; other tiers are appended
+as `(+3 A, 1 R)` so the number agrees with the POC blocks printed under it.
 
 ## Error Codes (appear in JSON `meta`, MCP, server)
 
@@ -106,8 +180,12 @@ In JSON output the per-target summary contains `error_code` when the target fail
 ## Exit Codes (CLI)
 
 - `0` — Scan finished cleanly, zero findings
-- `1` — Scan finished with one or more findings (V/A/R)
-- `2` — Hard error (bad input, config, runtime failure)
+- `1` — Scan finished with one or more findings **of any tier**, counted after
+  `--only-poc` and dedup. A lone `R`, or a single `I` from
+  `--detect-outdated-libs`, exits `1` just like a `V` does. For CI that should
+  fail only on asserted vulnerabilities, run `--only-poc v`
+- `2` — Hard error (bad input, config, runtime failure, every target
+  unreachable, or `--output` could not be written)
 
 MCP and server surface the same information via `status` and `error_code` fields instead of process exit codes.
 
@@ -116,4 +194,12 @@ MCP and server surface the same information via `status` and `error_code` fields
 1. Lead with count and highest-confidence findings.
 2. For each interesting finding: `type` + `type_description`, `param`, `inject_type`, short evidence, and a POC (ideally `--poc-type curl`).
 3. If many R-only findings on a JSON API, explain that this is expected (no HTML DOM to verify execution).
-4. Offer to re-run with `--deep-scan`, specific `--poc-type`, or WAF bypass options if the first pass was noisy or blocked.
+4. `A` findings need manual confirmation — open the POC URL in a browser with
+   devtools. A pure client-side DOM-XSS never reaches `V`: the payload is
+   written by JavaScript at runtime, so it is not in the server's response for
+   the response-parsing methods to find. `--only-poc v` returning nothing on
+   such a target is correct behavior, not a miss.
+5. Describe `V` as "dalfox asserts this is exploitable", never as "dalfox saw it
+   execute" — except for `detection_method: "oob"`, where a real browser did
+   fetch the payload.
+6. Offer to re-run with `--deep-scan`, specific `--poc-type`, or WAF bypass options if the first pass was noisy or blocked.

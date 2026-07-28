@@ -37,7 +37,7 @@ Every finding includes:
 | Field | Example | Meaning |
 |-------|---------|---------|
 | `type` | `V`, `A`, `R`, `I` | Confidence: Vulnerable / AST-detected / Reflected / Informational |
-| `type_description` | `"Vulnerable"` | Human label |
+| `type_description` | `"Vulnerable - dalfox asserts this input is exploitable; act on it"` | Human label (the full sentence, not the bare word) |
 | `detection_method` | `"ast"` | How it was found: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | Whether Dalfox can claim a vulnerability (`high` / `low`); absent on `I` |
 | `confidence_reason` | `"URL-carried source; inline script permitted"` | The deciding signals |
@@ -219,10 +219,10 @@ Dalfox returns:
 | Code | Meaning |
 |------|---------|
 | `0` | Completed successfully, no findings |
-| `1` | Completed successfully, at least one finding |
+| `1` | Completed successfully, at least one finding **of any tier** |
 | `2` | Input/config/runtime error |
 
-Use `1` as a CI gate only if you're comfortable failing the build on any finding. Most teams gate on `severity >= High` using `jq` on JSON output.
+`1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity >= High` with `jq` reaches the same set today, because severity currently tracks the tier — see [Detection Model](../detection-model/).)
 
 ## Next
 

@@ -50,17 +50,24 @@ Use `preflight_dalfox`. Look at `estimated_total_requests` and `reachable`.
 **CLI**:
 ```bash
 dalfox scan https://target/?q=test --dry-run --skip-mining
+# Prefer --format json for machine parsing; check meta.warnings if you passed -p
 ```
 
 If the number is huge or `reachable == false`, report back to the user before sending real payloads.
 
 ### B. Standard Single-Target Scan (MCP preferred)
 
-1. Preflight (see above).
+1. Preflight (see above) when the surface is unknown or large.
 2. Start the scan:
-   - MCP: `scan_with_dalfox` (store the `scan_id`).
-   - CLI: `dalfox scan https://target/?q=test -p q ...`
-3. Poll (MCP) or watch output (CLI).
+   - **MCP short smoke** (one call, no poll loop):
+     ```json
+     {"target":"https://target/?q=test","param":["q"],"skip_mining":true,"skip_discovery":true,
+      "max_payloads_per_param":20,"wait":true,"wait_timeout_sec":120}
+     ```
+   - **MCP long scan**: `scan_with_dalfox` with `wait=false` → store `scan_id` → poll `get_results_dalfox`. Prefer explicit `param` (`["q:query"]` when location is known).
+   - **CLI**: `dalfox scan https://target/?q=test -p q --skip-mining ...`  
+     Bare `-p name` is fine for query params (synthesized if discovery was skipped). Use `name:location` for body/header/cookie/json (`-p user:body`). Cap volume with `--max-payloads-per-param`.
+3. Poll only when not using `wait=true`.
 4. Present findings using the rules in `references/results.md` (lead with V, surface `type_description` and `inject_type`).
 5. Clean up: `delete_scan_dalfox` (MCP) or just let the process end (CLI). Terminal jobs auto-expire after 1 h.
 
@@ -114,16 +121,25 @@ See `references/server-and-payload.md` for endpoints, CORS/JSONP details, and wh
 See the full guide in `references/results.md`.
 
 Key points for agents:
-- Every finding has `type` (`V`/`A`/`R`) **and** `type_description`.
+- Three separate axes: `type` (`V`/`A`/`R`/`I`, the claim) + `detection_method`
+  (`reflection` / `dom-verification` / `ast` / `oob` / `library`, how it was
+  found) + `severity`. Do not read them as one scale.
+- `V` means "dalfox asserts this is exploitable" — **not** browser execution.
+  Dalfox drives no browser by design; only `detection_method: "oob"` observes a
+  real one. Never report `V` as "watched it fire".
+- Select AST findings with `detection_method == "ast"`, not `type == "A"`.
+- `confidence` (`high`/`low`) + `confidence_reason` grade the claim; sort a
+  large `A` batch on them. Machine formats only — plain output omits them.
 - `inject_type` tells you the reflection context (`inHTML`, `inJS`, `inATTR`, etc.).
-- The parameter *location* (query/body/header/...) is visible in `data` + `method`.
+- The parameter *location* (query/body/header/...) is in the `location` field,
+  and also visible in `data` + `method`.
 - `include_request` / `include_response` are opt-in only — never enable them by default.
 
 ## 5. Performance & Scope Recipes
 
 See `references/advanced.md` for the detailed recipes:
 
-- "Too many parameters / too slow" → preflight + `--skip-mining` + explicit `-p`
+- "Too many parameters / too slow" → preflight + `--skip-mining` + explicit `-p` (`name:location` when not query) + `max_payloads_per_param` / `--max-payloads-per-param`
 - "WAF present" → the matrix of `--waf-bypass`, `--force-waf`, `--waf-evasion`
 - "Need custom payloads or markers" → `--custom-payload`, `--inject-marker`, `--custom-alert-*`
 - "Captured request testing" → `-i raw-http` (single request) or `-i har` (whole proxy/DevTools export)
@@ -150,8 +166,8 @@ See `references/config.md`.
 - MCP tool schemas + gotchas (including why `cookie_from_raw` is absent) → `references/mcp.md`
 - Finding types, output formats, POC types, error codes, exit codes → `references/results.md`
 - Config precedence, paths, banner behavior → `references/config.md`
-- Server API + `dalfox payload` selectors → `references/server-and-payload.md`
-- WAF recipes, mining control, raw-http, HPP, custom payloads → `references/advanced.md`
+- Server API + `dalfox payload` selectors → `references/server-and-payload.md` (single file; not separate `server.md` / `payload.md`)
+- WAF recipes, mining control, bare vs `name:location` `-p`, raw-http, HPP, custom payloads → `references/advanced.md`
 
 ## 9. AGENTS.md Invariants (this skill must respect)
 

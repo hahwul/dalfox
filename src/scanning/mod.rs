@@ -2335,7 +2335,14 @@ impl ScanWorkerCtx {
                                     param.name, pos_label, reflection_note
                                 ))
                                 .cwe("CWE-79")
-                                .severity("Medium")
+                                // Same severity as any other `R`: the
+                                // duplicate-parameter echo proves the payload
+                                // survives HPP handling, not that it reached an
+                                // executable position. Emitting `Medium` here
+                                // while a plain reflection emits `Info` made the
+                                // severity of a tier depend on which phase found
+                                // it (#1238).
+                                .severity("Info")
                                 .message_id(606)
                                 .message_str(format!(
                                     "[R] HPP Bypass ({}): {}={} (position={})",
