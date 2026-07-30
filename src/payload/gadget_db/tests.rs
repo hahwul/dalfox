@@ -118,6 +118,24 @@ fn test_gadgets_for_host_handles_wildcard_and_schemeless() {
     assert!(gadgets_for_host("//cdn.jsdelivr.net").next().is_some());
 }
 
+/// A `*.D` wildcard allows any subdomain of `D`, so a gadget whose ONLY
+/// matching pattern is a deeper subdomain (`cdnjs.cloudflare.com`, with no bare
+/// `cloudflare.com` parent pattern) must still be found — the base collapsing
+/// to `cloudflare.com` previously missed it.
+#[test]
+fn test_gadgets_for_host_wildcard_matches_deeper_subdomain_gadget() {
+    let hits: Vec<_> = gadgets_for_host("https://*.cloudflare.com").collect();
+    assert!(
+        hits.iter().any(|g| g.template.contains("angular")),
+        "*.cloudflare.com allows cdnjs.cloudflare.com, so the AngularJS gadget must match"
+    );
+    // But a wildcard over an unrelated domain must not pull in those gadgets.
+    assert!(
+        gadgets_for_host("https://*.attacker.test").next().is_none(),
+        "a wildcard over an unrelated domain must not over-match gadget hosts"
+    );
+}
+
 #[test]
 fn test_gadgets_for_host_is_case_insensitive() {
     let hits: Vec<_> = gadgets_for_host("HTTPS://CODE.JQUERY.COM").collect();

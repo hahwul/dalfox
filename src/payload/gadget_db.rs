@@ -131,24 +131,39 @@ pub fn all() -> &'static [ScriptGadget] {
 /// whitelisted host genuinely permits loading a `<script src>` from it.
 pub fn gadgets_for_host(allowed_origin: &str) -> impl Iterator<Item = &'static ScriptGadget> {
     let lowered = allowed_origin.to_ascii_lowercase();
-    let host = extract_host(&lowered).to_string();
+    let component = host_component(&lowered);
+    // A `*.D` (or `https://*.D`) origin allows ANY subdomain of D, so a gadget
+    // whose host is a *deeper* subdomain than the wildcard base — e.g.
+    // `cdnjs.cloudflare.com` under `*.cloudflare.com`, where the gadget's only
+    // matching pattern is the full subdomain, not a bare `cloudflare.com` — is
+    // still reachable even though the base collapses to `D`. Without this the
+    // wildcard silently missed those gadgets.
+    let is_wildcard = component.starts_with("*.");
+    let host = component
+        .strip_prefix("*.")
+        .unwrap_or(component)
+        .to_string();
+    let subdomain_suffix = format!(".{host}");
     GADGETS.iter().filter(move |g| {
-        !g.host_patterns.is_empty() && g.host_patterns.iter().any(|p| host_matches(&host, p))
+        !g.host_patterns.is_empty()
+            && g.host_patterns.iter().any(|p| {
+                host_matches(&host, p)
+                    || (is_wildcard && p.contains('.') && p.ends_with(&subdomain_suffix))
+            })
     })
 }
 
-/// Extract the bare host from a CSP `script-src` source value: strips the
-/// scheme (`https://` or a leading `//`), any path/query/fragment, the port,
-/// and a leading `*.` wildcard label. Input is expected already lowercased.
-fn extract_host(origin: &str) -> &str {
+/// The host authority of a CSP `script-src` source value: strips the scheme
+/// (`https://` or a leading `//`), any path/query/fragment, and the port, but
+/// keeps a leading `*.` wildcard label. Input is expected already lowercased.
+fn host_component(origin: &str) -> &str {
     let s = origin
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(origin);
     let s = s.strip_prefix("//").unwrap_or(s);
     let s = s.split(['/', '?', '#']).next().unwrap_or(s);
-    let s = s.split(':').next().unwrap_or(s);
-    s.strip_prefix("*.").unwrap_or(s)
+    s.split(':').next().unwrap_or(s)
 }
 
 /// Match an allowlisted `host` against a gadget host pattern. A dotted pattern
