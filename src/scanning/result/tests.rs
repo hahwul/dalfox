@@ -636,7 +636,9 @@ fn test_results_to_sarif_multiple_cwes_have_consistent_rule_index() {
     let run = &json["runs"][0];
 
     // The rule table must define both CWE rules.
-    let rules = run["tool"]["driver"]["rules"].as_array().expect("rules array");
+    let rules = run["tool"]["driver"]["rules"]
+        .as_array()
+        .expect("rules array");
     let rule_ids: Vec<&str> = rules.iter().filter_map(|r| r["id"].as_str()).collect();
     assert!(rule_ids.contains(&"dalfox/cwe-79"), "rules: {rule_ids:?}");
     assert!(rule_ids.contains(&"dalfox/cwe-1104"), "rules: {rule_ids:?}");
