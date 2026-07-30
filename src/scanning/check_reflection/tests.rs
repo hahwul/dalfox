@@ -215,6 +215,12 @@ async fn redirect_json_ct_handler(
     )
 }
 
+/// Echo the raw request body back inside an HTML shell so a reflection check
+/// can see whatever multipart fields the request actually carried.
+async fn multipart_echo_handler(body: String) -> Html<String> {
+    Html(format!("<div>{}</div>", body))
+}
+
 async fn start_mock_server(stored_payload: &str) -> SocketAddr {
     let app = Router::new()
         .route("/reflect/raw", get(raw_handler))
@@ -227,6 +233,10 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         .route("/sxss/stored", get(sxss_handler))
         .route("/redirect/decoded", get(redirect_decoded_handler))
         .route("/redirect/json-ct", get(redirect_json_ct_handler))
+        .route(
+            "/reflect/multipart-echo",
+            axum::routing::post(multipart_echo_handler),
+        )
         .with_state(TestState {
             stored_payload: stored_payload.to_string(),
         });
@@ -240,6 +250,34 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
     });
     sleep(Duration::from_millis(20)).await;
     addr
+}
+
+/// The reflection-scan multipart injection must send the payload even when the
+/// scanned param is absent from the captured body, or the request carries no
+/// injection and a real reflection is missed. Exercises the `if !found`
+/// fallback in `fetch_injection_response_with_client`'s MultipartBody arm.
+#[tokio::test]
+async fn test_fetch_injection_multipart_injects_absent_param() {
+    let addr = start_mock_server("stored").await;
+    let mut target = make_target(addr, "/reflect/multipart-echo");
+    target.method = "POST".to_string();
+    // Captured body carries a different field; the scanned param `q` is absent.
+    target.data = Some("other=seed".to_string());
+    let mut param = make_param();
+    param.location = Location::MultipartBody;
+    let args = default_scan_args();
+    let streak = std::sync::atomic::AtomicU32::new(0);
+    let client = target.build_client_or_default();
+
+    let body =
+        fetch_injection_response_with_client(&client, &target, &param, "PAYMARK", &args, &streak)
+            .await
+            .expect("injection response");
+    let text = body.renderable_text().unwrap_or_default();
+    assert!(
+        text.contains("PAYMARK"),
+        "absent multipart param must still be injected, got: {text}"
+    );
 }
 
 #[tokio::test]

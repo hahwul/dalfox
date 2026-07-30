@@ -239,6 +239,12 @@ async fn sxss_html_handler(State(state): State<TestState>) -> Html<String> {
     Html(format!("<div>{}</div>", state.stored_payload))
 }
 
+/// Echo the raw request body so tests can assert what fields a multipart
+/// request actually carried.
+async fn multipart_echo_handler(body: String) -> impl IntoResponse {
+    (StatusCode::OK, body)
+}
+
 async fn sxss_json_handler(State(state): State<TestState>) -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -268,6 +274,10 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         .route("/dom/server-error", get(server_error_handler))
         .route("/sxss/html", get(sxss_html_handler))
         .route("/sxss/json", get(sxss_json_handler))
+        .route(
+            "/dom/multipart-echo",
+            axum::routing::post(multipart_echo_handler),
+        )
         .with_state(TestState {
             stored_payload: stored_payload.to_string(),
         });
@@ -307,6 +317,35 @@ async fn test_check_dom_verification_detects_html_reflection() {
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
     assert!(found, "text/html responses with payload should be detected");
     assert!(body.unwrap_or_default().contains(&payload));
+}
+
+/// `build_multipart_request` must inject the scanned param even when it is
+/// absent from the captured body — otherwise the verification request carries
+/// no payload and the finding can never be confirmed (false negative).
+#[tokio::test]
+async fn test_build_multipart_request_injects_absent_param() {
+    let addr = start_mock_server("stored").await;
+    // Captured body carries a different field; the scanned param `q` is absent.
+    let mut target = make_target(addr, "/dom/multipart-echo");
+    target.method = "POST".to_string();
+    target.data = Some("other=seed".to_string());
+    let mut param = make_param();
+    param.location = Location::MultipartBody;
+
+    let client = target.build_client_or_default();
+    let rb = build_multipart_request(&client, &target, &param, "PAYLOAD_MARKER");
+    let body = rb
+        .send()
+        .await
+        .expect("send multipart")
+        .text()
+        .await
+        .expect("read echo body");
+    assert!(
+        body.contains("PAYLOAD_MARKER"),
+        "absent multipart param must still be injected, got body: {body}"
+    );
+    assert!(body.contains("name=\"q\""), "form field q must be present");
 }
 
 // ── Issue #1156: DomVerifyOutcome threads reflected + status signals ───────
