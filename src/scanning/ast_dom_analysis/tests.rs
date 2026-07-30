@@ -3265,6 +3265,64 @@ document.addEventListener('paste', function(e) {
 }
 
 #[test]
+fn drag_drop_get_data_is_recognised_as_source() {
+    // Drop handler innerHTMLs the dragged `text/html` flavour — the classic
+    // drag-and-drop XSS. Same trust model as clipboardData.getData above.
+    let js = r#"
+z.addEventListener('drop', function (e) {
+    e.preventDefault();
+    document.getElementById('out').innerHTML = prefix + e.dataTransfer.getData('text/html');
+});
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("dataTransfer")),
+        "drop-event dataTransfer.getData → innerHTML must surface; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn drag_drop_file_metadata_is_not_a_source() {
+    // `.files` / `.types` are metadata, not attacker-supplied string content,
+    // so only the `getData(...)` read is modeled as a source.
+    let js = r#"
+z.addEventListener('drop', function (e) {
+    document.getElementById('out').innerHTML = e.dataTransfer.files.length + e.dataTransfer.types[0];
+});
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.is_empty(),
+        "dataTransfer metadata reads must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn drag_drop_get_data_into_textcontent_no_finding() {
+    // textContent is not an HTML sink, so the dragged payload is inert there.
+    let js = r#"
+z.addEventListener('drop', function (e) {
+    document.getElementById('out').textContent = e.dataTransfer.getData('text/html');
+});
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.is_empty(),
+        "dataTransfer.getData into textContent must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn native_element_append_is_not_a_sink() {
     // `Element.prototype.append(string)` inserts the string as a Text node
     // — no HTML parsing — so a tainted argument is not exploitable. The
@@ -3616,6 +3674,62 @@ xhr.onload = function () { document.write(xhr.response); };
 }
 
 #[test]
+fn file_reader_result_to_innerhtml() {
+    // "Preview the dropped file" widget: the user-supplied file bytes land in
+    // innerHTML via `reader.result`.
+    let js = r#"
+var f = e.dataTransfer.files[0];
+var r = new FileReader();
+r.onload = function () { document.getElementById('out').innerHTML = prefix + r.result; };
+r.readAsText(f);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("FileReader.result")),
+        "FileReader.result -> innerHTML must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn file_reader_status_metadata_is_not_a_source() {
+    // `readyState` / `error` are status metadata, not file content.
+    let js = r#"
+var r = new FileReader();
+r.onload = function () { document.getElementById('out').innerHTML = r.readyState + r.error; };
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.is_empty(),
+        "FileReader status metadata must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn non_file_reader_result_property_is_not_a_source() {
+    // `.result` is only a source on a real FileReader instance — an unrelated
+    // class with a `result` field must not taint.
+    let js = r#"
+var r = new ReportBuilder();
+document.getElementById('out').innerHTML = r.result;
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.is_empty(),
+        "unrelated .result read must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn fetch_text_to_safe_textcontent_no_finding() {
     // textContent is not an HTML sink, so even tainted response text is safe.
     let js = r#"
@@ -3626,6 +3740,80 @@ fetch('/data.txt').then(function (r) { return r.text(); })
     assert!(
         r.is_empty(),
         "fetch response into textContent must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn clipboard_read_text_promise_chain_to_innerhtml() {
+    // `navigator.clipboard.readText()` resolves directly to the untrusted
+    // string, so the `.then` parameter is tainted at the chain root — the
+    // async counterpart of the clipboardData.getData source.
+    let js = r#"
+document.getElementById('b').addEventListener('click', function () {
+    navigator.clipboard.readText().then(function (t) {
+        document.getElementById('out').innerHTML = prefix + t;
+    });
+});
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("clipboard.readText")),
+        "clipboard.readText().then(t => innerHTML = t) must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn clipboard_read_text_arrow_chain_to_document_write() {
+    let js = r#"
+navigator.clipboard.readText().then(t => document.write(t));
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink.contains("write")),
+        "clipboard.readText arrow chain into document.write must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn clipboard_read_text_to_safe_textcontent_no_finding() {
+    let js = r#"
+navigator.clipboard.readText().then(function (t) {
+    document.getElementById('o').textContent = t;
+});
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.is_empty(),
+        "clipboard text into textContent must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn clipboard_write_text_is_not_a_promise_source() {
+    // Only the *read* side is a source. `writeText` takes a value and resolves
+    // to undefined, so a chain rooted at it must stay untainted.
+    let js = r#"
+navigator.clipboard.writeText('x').then(function (t) {
+    document.getElementById('o').innerHTML = t;
+});
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.is_empty(),
+        "clipboard.writeText chain must NOT fire; got {:?}",
         r.iter()
             .map(|v| (v.source.clone(), v.sink.clone()))
             .collect::<Vec<_>>()
