@@ -607,6 +607,54 @@ fn test_results_to_sarif_valid_json() {
     }
 }
 
+/// SARIF requires every result's `ruleId` to resolve to a rule in
+/// `driver.rules`, and a present `ruleIndex` to point at that same rule.
+/// Findings with different CWEs (XSS = CWE-79, outdated libs = CWE-1104) must
+/// therefore each get their own rule and a correct index — not a hardcoded
+/// `ruleIndex: 0` against a single XSS rule.
+#[test]
+fn test_results_to_sarif_multiple_cwes_have_consistent_rule_index() {
+    let xss = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .data("https://example.com/?q=x")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_str("xss")
+        .build();
+    let lib = Result::builder(FindingType::Informational)
+        .inject_type("OutdatedComponent")
+        .data("https://example.com/app.js")
+        .cwe("CWE-1104")
+        .severity("Medium")
+        .message_str("outdated jquery")
+        .build();
+
+    let sarif = Result::results_to_sarif(&[xss, lib], false, false);
+    let json: serde_json::Value = serde_json::from_str(&sarif).expect("valid SARIF JSON");
+    let run = &json["runs"][0];
+
+    // The rule table must define both CWE rules.
+    let rules = run["tool"]["driver"]["rules"]
+        .as_array()
+        .expect("rules array");
+    let rule_ids: Vec<&str> = rules.iter().filter_map(|r| r["id"].as_str()).collect();
+    assert!(rule_ids.contains(&"dalfox/cwe-79"), "rules: {rule_ids:?}");
+    assert!(rule_ids.contains(&"dalfox/cwe-1104"), "rules: {rule_ids:?}");
+
+    // Every result's ruleIndex must point at the rule whose id equals its ruleId.
+    for res in run["results"].as_array().expect("results array") {
+        let rule_id = res["ruleId"].as_str().expect("ruleId");
+        let idx = res["ruleIndex"].as_u64().expect("ruleIndex") as usize;
+        assert_eq!(
+            rules[idx]["id"].as_str(),
+            Some(rule_id),
+            "ruleIndex {idx} must point at the rule whose id is {rule_id}"
+        );
+    }
+}
+
 #[test]
 fn test_to_json_value_respects_include_flags() {
     let mut result = Result::builder(FindingType::Verified)

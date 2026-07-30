@@ -836,6 +836,29 @@ impl Result {
             }
         };
 
+        // SARIF requires that a result's `ruleId` reference a rule defined in
+        // `driver.rules`, and that a present `ruleIndex` point at THAT rule.
+        // Findings carry different CWEs (XSS is CWE-79; outdated-library
+        // findings are CWE-1104), so a single hardcoded rule + `ruleIndex: 0`
+        // emitted an id with no matching rule and an inconsistent index, which
+        // GitHub code scanning rejects. Build the rule table from the distinct
+        // CWEs actually present, in first-seen order, and index each result
+        // into it.
+        let mut rule_ids: Vec<String> = Vec::new();
+        for r in results {
+            let id = sarif_rule_id(&r.cwe);
+            if !rule_ids.contains(&id) {
+                rule_ids.push(id);
+            }
+        }
+        // Never emit an empty `rules` array — keep the XSS rule as the default
+        // so an empty result set still describes the tool's primary rule.
+        if rule_ids.is_empty() {
+            rule_ids.push(sarif_rule_id("CWE-79"));
+        }
+        let rules: Vec<serde_json::Value> =
+            rule_ids.iter().map(|id| sarif_rule_for_id(id)).collect();
+
         // Convert results to SARIF result objects
         let sarif_results: Vec<serde_json::Value> = results
             .iter()
@@ -889,9 +912,11 @@ impl Result {
                     &r.inject_type,
                     &r.cwe,
                 );
+                let rule_id = sarif_rule_id(&r.cwe);
+                let rule_index = rule_ids.iter().position(|id| *id == rule_id).unwrap_or(0);
                 json!({
-                    "ruleId": format!("dalfox/{}", r.cwe.to_lowercase()),
-                    "ruleIndex": 0,
+                    "ruleId": rule_id,
+                    "ruleIndex": rule_index,
                     "level": severity_to_level(&r.severity),
                     "message": {
                         "text": full_message
@@ -929,26 +954,7 @@ impl Result {
             "name": "Dalfox",
             "informationUri": "https://github.com/hahwul/dalfox",
             "version": env!("CARGO_PKG_VERSION"),
-            "rules": [{
-                "id": "dalfox/cwe-79",
-                "name": "CrossSiteScripting",
-                "shortDescription": {
-                    "text": "Cross-site Scripting (XSS)"
-                },
-                "fullDescription": {
-                    "text": "The application reflects user input in HTML responses without proper encoding, allowing attackers to inject malicious scripts."
-                },
-                "help": {
-                    "text": "Ensure all user input is properly encoded before being rendered in HTML context. Use context-aware output encoding based on where the data is placed (HTML body, attributes, JavaScript, CSS, or URL)."
-                },
-                "defaultConfiguration": {
-                    "level": "error"
-                },
-                "properties": {
-                    "tags": ["security", "xss", "injection"],
-                    "precision": "high"
-                }
-            }]
+            "rules": rules,
         });
         if let Some(m) = meta {
             driver["properties"] = Self::make_scan_meta_value(m);
@@ -973,6 +979,70 @@ impl Result {
         });
 
         serde_json::to_string_pretty(&sarif).unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
+/// SARIF `ruleId` / `driver.rules[].id` for a finding's CWE. Empty or unknown
+/// CWEs fall back to the XSS rule so the id is always a well-formed
+/// `dalfox/cwe-<n>` rather than a bare `dalfox/`.
+fn sarif_rule_id(cwe: &str) -> String {
+    let trimmed = cwe.trim();
+    if trimmed.is_empty() {
+        return "dalfox/cwe-79".to_string();
+    }
+    format!("dalfox/{}", trimmed.to_ascii_lowercase())
+}
+
+/// Build a `driver.rules[]` entry for a `dalfox/cwe-<n>` rule id. CWE-79 (the
+/// scanner's primary finding class) keeps its rich description; other CWEs get
+/// a minimal-but-valid rule so every emitted `ruleId` resolves to a defined
+/// rule (SARIF requirement for GitHub code scanning ingestion).
+fn sarif_rule_for_id(id: &str) -> serde_json::Value {
+    use serde_json::json;
+    match id {
+        "dalfox/cwe-1104" => json!({
+            "id": id,
+            "name": "UseOfUnmaintainedThirdPartyComponents",
+            "shortDescription": {
+                "text": "Use of a component with known vulnerabilities (CWE-1104)"
+            },
+            "fullDescription": {
+                "text": "The application loads a third-party JavaScript component whose version is known to be outdated or vulnerable."
+            },
+            "help": {
+                "text": "Upgrade the flagged component to a maintained, non-vulnerable release and track dependency advisories."
+            },
+            "defaultConfiguration": { "level": "warning" },
+            "properties": { "tags": ["security", "dependencies"], "precision": "high" }
+        }),
+        "dalfox/cwe-79" => json!({
+            "id": id,
+            "name": "CrossSiteScripting",
+            "shortDescription": {
+                "text": "Cross-site Scripting (XSS)"
+            },
+            "fullDescription": {
+                "text": "The application reflects user input in HTML responses without proper encoding, allowing attackers to inject malicious scripts."
+            },
+            "help": {
+                "text": "Ensure all user input is properly encoded before being rendered in HTML context. Use context-aware output encoding based on where the data is placed (HTML body, attributes, JavaScript, CSS, or URL)."
+            },
+            "defaultConfiguration": {
+                "level": "error"
+            },
+            "properties": {
+                "tags": ["security", "xss", "injection"],
+                "precision": "high"
+            }
+        }),
+        // Any other CWE: emit a valid, generic rule so the id resolves.
+        other => json!({
+            "id": other,
+            "name": "SecurityFinding",
+            "shortDescription": { "text": format!("Security finding ({})", other) },
+            "defaultConfiguration": { "level": "warning" },
+            "properties": { "tags": ["security"] }
+        }),
     }
 }
 
