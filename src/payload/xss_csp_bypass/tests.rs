@@ -132,6 +132,31 @@ fn test_analyze_csp_default_src_unsafe_inline_and_eval() {
     assert!(!analysis.missing_script_src);
 }
 
+/// A present `script-src` fully overrides `default-src` for scripts (CSP
+/// spec), so `default-src 'unsafe-inline'` must NOT mark scripts as
+/// inline-allowed when `script-src` hardens them with a nonce — otherwise a
+/// hardened policy is misread as gadget-bypassable and inline payloads that
+/// can't execute are emitted.
+#[test]
+fn test_analyze_csp_default_src_unsafe_inline_ignored_when_script_src_present() {
+    let analysis =
+        analyze_csp("script-src 'nonce-abc123'; default-src 'unsafe-inline' 'unsafe-eval'");
+    assert!(
+        !analysis.has_unsafe_inline,
+        "default-src unsafe-inline must not apply to scripts when script-src is present"
+    );
+    assert!(
+        !analysis.has_unsafe_eval,
+        "default-src unsafe-eval must not apply to scripts when script-src is present"
+    );
+    assert!(analysis.is_nonce_or_hash_based());
+    assert!(
+        analysis.is_hardened(),
+        "nonce script-src with no real escape hatch is hardened"
+    );
+    assert!(!analysis.is_gadget_bypassable());
+}
+
 #[test]
 fn test_analyze_csp_wildcard_and_keywords_not_whitelisted() {
     let analysis = analyze_csp("script-src 'self' 'none' * data: blob:");

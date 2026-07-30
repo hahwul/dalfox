@@ -109,6 +109,14 @@ pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
     let mut has_default_src = false;
     let mut has_base_uri = false;
     let mut has_object_src = false;
+    // `default-src` governs scripts ONLY when `script-src`/`script-src-elem` is
+    // absent — CSP spec: a present `script-src` fully overrides `default-src`
+    // for script resources. Stash default-src's script-relevant flags and fold
+    // them in after the loop, so `script-src 'nonce-x'; default-src
+    // 'unsafe-inline'` is not misread as inline-allowed (which flipped a
+    // nonce-hardened policy to "gadget-bypassable").
+    let mut default_src_unsafe_inline = false;
+    let mut default_src_unsafe_eval = false;
 
     for directive in &directives {
         let parts: Vec<&str> = directive.split_whitespace().collect();
@@ -163,10 +171,10 @@ pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
                 for v in &values {
                     let lower = v.to_ascii_lowercase();
                     if lower == "'unsafe-inline'" {
-                        analysis.has_unsafe_inline = true;
+                        default_src_unsafe_inline = true;
                     }
                     if lower == "'unsafe-eval'" {
-                        analysis.has_unsafe_eval = true;
+                        default_src_unsafe_eval = true;
                     }
                 }
             }
@@ -196,6 +204,16 @@ pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
                 analysis.trusted_types = Some(collected);
             }
             _ => {}
+        }
+    }
+
+    // Fold in default-src's script flags only when no script-src overrode it.
+    if !has_script_src {
+        if default_src_unsafe_inline {
+            analysis.has_unsafe_inline = true;
+        }
+        if default_src_unsafe_eval {
+            analysis.has_unsafe_eval = true;
         }
     }
 
