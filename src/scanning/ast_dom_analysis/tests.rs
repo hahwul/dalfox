@@ -346,6 +346,128 @@ setAttribute('onclick', data);
 }
 
 #[test]
+fn set_attribute_ns_dangerous_attribute_is_a_sink() {
+    // setAttributeNS(ns, name, value): the attribute name is at index 1 and the
+    // value at index 2, one further along than setAttribute.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query');
+document.getElementById('go').setAttributeNS(null, 'onclick', q);
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "setAttributeNS:onclick"),
+        "setAttributeNS onclick must fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn set_attribute_ns_xlink_href_is_a_sink() {
+    let code = r#"
+var q = location.search;
+el.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', q);
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink.starts_with("setAttributeNS:")),
+        "setAttributeNS xlink:href must fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn set_attribute_ns_inert_attribute_no_finding() {
+    // Same dangerous-attribute filter as setAttribute: `class` cannot execute.
+    let code = r#"
+var q = location.search;
+document.getElementById('go').setAttributeNS(null, 'class', q);
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.is_empty(),
+        "setAttributeNS of an inert attribute must NOT fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn indirect_eval_comma_sequence_is_a_sink() {
+    // `(0, eval)(x)` detaches the eval reference so the code runs in global
+    // scope; the callee is a parenthesized SequenceExpression, which the plain
+    // callee-name lookup cannot resolve.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query');
+if (q) { (0, eval)(q); }
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "eval"),
+        "indirect eval must fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn indirect_call_to_non_sink_no_finding() {
+    // The sequence-unwrap must only resolve names that are already sinks — it
+    // must not turn an arbitrary comma-expression call into a finding.
+    let code = r#"
+var q = location.search;
+(0, renderPlainText)(q);
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.is_empty(),
+        "indirect call to a non-sink must NOT fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn dom_parser_parse_from_string_html_is_a_sink() {
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query');
+var parsed = new DOMParser().parseFromString(q, 'text/html');
+out.appendChild(document.adoptNode(parsed.body.firstChild));
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "parseFromString"),
+        "parseFromString with text/html must fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn dom_parser_parse_from_string_xml_no_finding() {
+    // A text/xml parse cannot produce script-bearing nodes, so it is not an
+    // XSS sink even with tainted input.
+    let code = r#"
+var q = location.search;
+var doc = new DOMParser().parseFromString(q, 'text/xml');
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.is_empty(),
+        "parseFromString with text/xml must NOT fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn dom_parser_parse_from_string_untainted_no_finding() {
+    let code = r#"
+var doc = new DOMParser().parseFromString('<p>static</p>', 'text/html');
+"#;
+    let r = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        r.is_empty(),
+        "untainted parseFromString must NOT fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_jquery_html_sink() {
     // Simplified: direct call to html() function
     let code = r#"

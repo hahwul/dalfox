@@ -524,6 +524,17 @@ const DOM_SINKS: &[&str] = &[
     "prepend",
     "after",
     "before",
+    // Namespaced sibling of `setAttribute`. Same danger, different arity:
+    // `setAttributeNS(ns, name, value)` puts the attribute name at index 1 and
+    // the value at index 2, so it gets its own arity-aware branch below.
+    "setAttributeNS",
+    // `new DOMParser().parseFromString(html, 'text/html')` parses attacker HTML
+    // into a document with no browsing context. Nothing executes *there*, but
+    // the resulting nodes are routinely moved into the live document with
+    // `adoptNode` / `importNode` / `appendChild`, at which point they do — the
+    // same "inert until inserted" shape as the `createContextualFragment` sink
+    // already modeled. Gated on an HTML-ish MIME type below.
+    "parseFromString",
     "execCommand",
     // Modern Sanitizer-API methods. `setHTML` accepts a Sanitizer config and
     // strips known XSS vectors, so on its own it is not an exploitable sink —
@@ -1680,6 +1691,30 @@ impl<'a> DomXssVisitor<'a> {
                 _ => return false,
             }
         }
+    }
+
+    /// Resolve the indirect-eval idiom `(0, eval)(code)` to its sink name.
+    ///
+    /// Wrapping a bare `eval` reference in a comma expression detaches it from
+    /// the *direct* eval reference, so the code runs in global scope instead of
+    /// the caller's. Only the last element of the sequence is the callee;
+    /// earlier operands are evaluated and discarded. `get_expr_string` sees a
+    /// parenthesized `SequenceExpression` and yields nothing, so without this
+    /// the sink lookup misses the call entirely.
+    ///
+    /// Returns a name only when it resolves to an already-known sink — this
+    /// never invents one.
+    fn indirect_call_sink_name(&self, call: &CallExpression<'a>) -> Option<String> {
+        let mut current = &call.callee;
+        loop {
+            match current {
+                Expression::ParenthesizedExpression(p) => current = &p.expression,
+                Expression::SequenceExpression(seq) => current = seq.expressions.last()?,
+                _ => break,
+            }
+        }
+        let name = self.get_expr_string(current)?;
+        self.sinks.contains(name.as_str()).then_some(name)
     }
 
     /// Recognise a call that returns a Promise resolving to attacker-controlled
@@ -4606,7 +4641,10 @@ impl<'a> DomXssVisitor<'a> {
         } else {
             None
         };
-        if let Some(func_name) = direct_sink_name.or(bound_sink_name) {
+        if let Some(func_name) = direct_sink_name
+            .or(bound_sink_name)
+            .or_else(|| self.indirect_call_sink_name(call))
+        {
             if let Some(bound_alias) = alias_owned.as_ref()
                 && self.sinks.contains(bound_alias.target.as_str())
             {
@@ -4688,6 +4726,62 @@ impl<'a> DomXssVisitor<'a> {
                             );
                             return;
                         }
+                    }
+                }
+            // `setAttributeNS(ns, name, value)` — same dangerous-attribute
+            // filter as `setAttribute`, shifted one index for the namespace.
+            } else if method_name == "setAttributeNS" && call.arguments.len() >= 3 {
+                let attr_name_lc = call
+                    .arguments
+                    .get(1)
+                    .and_then(|arg1| self.eval_static_string_arg(arg1))
+                    .map(|name| name.to_ascii_lowercase());
+                if let Some(name) = attr_name_lc {
+                    // Namespaced attribute names arrive as `xlink:href` or a
+                    // bare local name depending on the call, so match both.
+                    let local = name.rsplit(':').next().unwrap_or(&name);
+                    let dangerous = local.starts_with("on")
+                        || local == "href"
+                        || local == "srcdoc"
+                        || name == "xlink:href";
+                    if dangerous && let Some(arg2) = call.arguments.get(2) {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg2);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &format!("setAttributeNS:{}", name),
+                                "Tainted data assigned to dangerous namespaced attribute",
+                                source_hint,
+                            );
+                            return;
+                        }
+                    }
+                }
+            // `parseFromString(str, mime)` only builds a DOM that can carry
+            // script for HTML/XHTML/SVG MIME types. A `text/xml` /
+            // `application/json`-style parse cannot produce executable nodes,
+            // so restrict to the HTML-ish types; an unknown (non-literal) MIME
+            // still fires, to fail toward reporting.
+            } else if method_name == "parseFromString" {
+                let mime = call
+                    .arguments
+                    .get(1)
+                    .and_then(|arg1| self.eval_static_string_arg(arg1))
+                    .map(|m| m.trim().to_ascii_lowercase());
+                let html_ish = match mime.as_deref() {
+                    None => true,
+                    Some(m) => matches!(m, "text/html" | "application/xhtml+xml" | "image/svg+xml"),
+                };
+                if html_ish && let Some(arg0) = call.arguments.first() {
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg0);
+                    if tainted {
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            "parseFromString",
+                            "Tainted data parsed as HTML (executes once the nodes are adopted into the live document)",
+                            source_hint,
+                        );
+                        return;
                     }
                 }
             // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
