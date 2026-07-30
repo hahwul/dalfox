@@ -507,6 +507,35 @@ fn test_find_sink_call_balances_nested_parens() {
     assert_eq!(&"alert(String(1))"[open..=close], "(String(1))");
 }
 
+/// A sink keyword that is only the *tail* of a longer identifier is not a
+/// call to that sink. Matching it as a substring makes the call-rewriting
+/// mutations splice their wrapper into the middle of an unrelated identifier
+/// and emit broken JS. Reachable through user `--custom-payload` values.
+#[test]
+fn test_find_sink_call_requires_identifier_boundary() {
+    // `myeval(1)` / `retrieval(x)` / `fingerprint(x)` are NOT sink calls: the
+    // keyword is glued to a preceding identifier byte.
+    assert_eq!(find_sink_call("myeval(1)"), None);
+    assert_eq!(find_sink_call("retrieval(x)"), None);
+    assert_eq!(find_sink_call("fingerprint(x)"), None);
+    // A genuine call preceded by a non-identifier byte still resolves, even
+    // when an earlier substring hit for the same keyword was rejected.
+    let (start, ..) = find_sink_call("myeval;alert(1)").unwrap();
+    assert_eq!(&"myeval;alert(1)"[start..start + 5], "alert");
+    // A boundary later in the string is found when the first hit is a tail.
+    let (start, ..) = find_sink_call("fingerprint(a);print(1)").unwrap();
+    assert_eq!(&"fingerprint(a);print(1)"[start..start + 5], "print");
+}
+
+/// The call-rewriting mutations must leave a payload whose only sink-looking
+/// token is a substring of a larger identifier untouched, instead of
+/// corrupting it into invalid JS.
+#[test]
+fn test_call_mutations_ignore_substring_sinks() {
+    assert_eq!(backtick_parens("myeval(1)"), "myeval(1)");
+    assert_eq!(constructor_chain("retrieval(x)"), "retrieval(x)");
+}
+
 #[test]
 fn test_citrix_netscaler_strategy() {
     let strategy = get_bypass_strategy(&WafType::Citrix);

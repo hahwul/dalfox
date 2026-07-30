@@ -557,11 +557,29 @@ const CALL_SINK_NAMES: &[&str] = &["alert", "confirm", "prompt", "print", "eval"
 /// matching from the opening `(` so nested parens in the argument
 /// (`alert((1))`, `alert(String(1))`) close correctly. Returns `None`
 /// when no known sink call is present or its parens are unbalanced.
+///
+/// The sink keyword must sit at an identifier boundary: a bare
+/// `payload.find("eval(")` also matches the *tail* of a longer identifier
+/// (`retrieval(`, `myeval(`, `fingerprint(` contains `print(`), and the
+/// callers rewrite the call by slicing at `name_start`, so a substring match
+/// splices the wrapper into the middle of an unrelated identifier and emits
+/// broken JS. Reachable with user `--custom-payload` values. Every match of a
+/// keyword is scanned so a rejected substring hit does not hide a later valid
+/// call.
 fn find_sink_call(payload: &str) -> Option<(usize, usize, usize)> {
     let bytes = payload.as_bytes();
     for name in CALL_SINK_NAMES {
         let needle = format!("{}(", name);
-        if let Some(pos) = payload.find(&needle) {
+        for (pos, _) in payload.match_indices(&needle) {
+            // Reject a match whose left edge is glued to a JS
+            // identifier-continuation byte — it is the tail of a longer name,
+            // not a call to this sink.
+            if pos > 0 {
+                let prev = bytes[pos - 1];
+                if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'$' {
+                    continue;
+                }
+            }
             let open = pos + name.len(); // index of '('
             let mut depth = 0usize;
             let mut k = open;
