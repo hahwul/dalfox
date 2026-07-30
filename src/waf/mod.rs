@@ -228,13 +228,16 @@ pub fn fingerprint_from_response(
                 );
             }
         }
+    }
 
-        // Status code hints (boost confidence for known WAF block codes)
-        if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503 {
-            // Boost all existing detections slightly if we see a blocking status
-            for fp in &mut result.detected {
-                fp.confidence = (fp.confidence + 0.05).min(1.0);
-            }
+    // Status code hints (boost confidence for known WAF block codes). This is
+    // independent of the body: a HEAD preflight or a failed body read passes
+    // `body: None`, but the blocking status is still a signal, and header-based
+    // detections must still get the boost. Previously this lived inside the
+    // `if let Some(body)` block, so a `None` body silently dropped the boost.
+    if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503 {
+        for fp in &mut result.detected {
+            fp.confidence = (fp.confidence + 0.05).min(1.0);
         }
     }
 

@@ -253,6 +253,34 @@ fn test_gfe_header_is_weak_signal_filtered_by_default() {
     );
 }
 
+/// The blocking-status confidence boost must apply even when no response body
+/// was fetched (HEAD preflight, or a failed body read that yields `None`). It
+/// used to be nested inside the `if let Some(body)` block, so a `None` body
+/// silently dropped the boost for header-detected WAFs.
+#[test]
+fn test_status_code_boost_applies_without_body() {
+    let headers = make_headers(&[("server", "Google Frontend")]);
+    let confidence_at = |status: u16| {
+        fingerprint_from_response(&headers, None, status)
+            .detected
+            .iter()
+            .find(|fp| fp.waf_type == WafType::CloudArmor)
+            .expect("CloudArmor rule fires from the GFE header")
+            .confidence
+    };
+    let base = confidence_at(200);
+    let boosted = confidence_at(403);
+    assert!(
+        boosted > base,
+        "a 403 blocking status must boost confidence even with no body \
+         (base={base}, boosted={boosted})"
+    );
+    assert!(
+        (boosted - base - 0.05).abs() < 1e-6,
+        "boost should be +0.05 (base={base}, boosted={boosted})"
+    );
+}
+
 #[test]
 fn test_cloud_armor_body_marker_survives_default_floor() {
     // Real Cloud Armor block pages contain the literal string. This is a
