@@ -1760,6 +1760,43 @@ async fn test_list_scans_handler_returns_all_jobs() {
     assert_eq!(parsed["data"]["scans"].as_array().unwrap().len(), 2);
 }
 
+/// Jobs sharing a `queued_at_ms` millisecond must list in a deterministic
+/// order (scan_id ascending as the tiebreak), not the nondeterministic HashMap
+/// iteration order — otherwise offset/limit pagination over the unstable order
+/// could skip or duplicate an entry across pages.
+#[tokio::test]
+async fn test_list_scans_handler_deterministic_tiebreak_on_equal_queued_at() {
+    let state = make_state(None, None, false, false, "cb");
+    {
+        let mut jobs = state.jobs.lock().await;
+        // Insert in a deliberately non-sorted id order, all with the SAME
+        // queued_at_ms so only the tiebreak decides ordering.
+        for id in ["m", "a", "z", "c", "b"] {
+            let mut job = test_job(JobStatus::Done, None, "");
+            job.queued_at_ms = 1_700_000_000_000;
+            jobs.insert(id.to_string(), job);
+        }
+    }
+
+    let resp = list_scans_handler(State(state), HeaderMap::new(), Query(Map::new()))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let ids: Vec<&str> = parsed["data"]["scans"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["scan_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["a", "b", "c", "m", "z"],
+        "equal-timestamp jobs must be ordered by scan_id ascending"
+    );
+}
+
 #[tokio::test]
 async fn test_list_scans_handler_filters_by_status() {
     let state = make_state(None, None, false, false, "cb");
