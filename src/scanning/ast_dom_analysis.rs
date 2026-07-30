@@ -461,6 +461,15 @@ const DOM_SOURCES: &[&str] = &[
     "event.clipboardData.getData",
     "e.clipboardData.getData",
     "navigator.clipboard.readText",
+    // Drag-and-drop `drop` handlers: `dataTransfer.getData(type)` returns the
+    // dragged payload, which the attacker controls end-to-end when the drag
+    // originates from a page they control (the classic drag-and-drop XSS: a
+    // crafted `text/html` flavour dropped into a widget that innerHTMLs it).
+    // Exactly the same trust model as the sibling `clipboardData.getData`
+    // reads above. The bare `dataTransfer` object is not listed: `.types` /
+    // `.files` / `.effectAllowed` are metadata, not attacker string content.
+    "event.dataTransfer.getData",
+    "e.dataTransfer.getData",
     // Keyboard / composition events – `key` / `code` carry user input
     // verbatim and are the natural source on autocompletion-style handlers.
     "event.key",
@@ -1673,6 +1682,31 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    /// Recognise a call that returns a Promise resolving to attacker-controlled
+    /// data. Unlike `fetch(...)` — whose Promise resolves to a `Response` whose
+    /// `.text()`/`.json()` reads are the tainted part — these resolve *directly*
+    /// to the untrusted string, so the chain kind is `Tainted` at the root.
+    ///
+    /// Returns the source label to report.
+    ///
+    /// Kept as an explicit list rather than reusing the whole `DOM_SOURCES` set:
+    /// most sources are synchronous reads (`localStorage.getItem(...)` returns a
+    /// string, not a Promise), and treating those as Promise roots would attach
+    /// chain semantics to values that never have a `.then`.
+    fn async_tainted_source_call(&self, call: &CallExpression<'a>) -> Option<String> {
+        const ASYNC_TAINTED_SOURCE_CALLS: &[&str] = &[
+            // `navigator.clipboard.readText()` resolves to the clipboard text —
+            // the async counterpart of the `event.clipboardData.getData` read
+            // already modeled as a source.
+            "navigator.clipboard.readText",
+            "window.navigator.clipboard.readText",
+        ];
+        let callee = self.get_expr_string(&call.callee)?;
+        ASYNC_TAINTED_SOURCE_CALLS
+            .contains(&callee.as_str())
+            .then_some(callee)
+    }
+
     /// If `call` invokes a Promise combinator (`.then` / `.catch` / `.finally`),
     /// return the method name.
     fn promise_method_name(call: &CallExpression<'a>) -> Option<&'static str> {
@@ -1688,9 +1722,10 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     /// True when this `.then`/`.catch`/`.finally` call sits on a Promise chain
-    /// whose root is a `fetch(...)` call. Walks the receiver chain down through
-    /// nested combinators.
-    fn promise_chain_roots_at_fetch(&self, call: &CallExpression<'a>) -> bool {
+    /// whose root produces untrusted data — a `fetch(...)` call, or an async
+    /// source call such as `navigator.clipboard.readText()`. Walks the receiver
+    /// chain down through nested combinators.
+    fn promise_chain_roots_at_untrusted_source(&self, call: &CallExpression<'a>) -> bool {
         let mut current: &Expression<'a> = match &call.callee {
             Expression::StaticMemberExpression(m) => &m.object,
             _ => return false,
@@ -1699,7 +1734,8 @@ impl<'a> DomXssVisitor<'a> {
             match current {
                 Expression::ParenthesizedExpression(p) => current = &p.expression,
                 Expression::CallExpression(inner) => {
-                    if self.is_fetch_call(inner) {
+                    if self.is_fetch_call(inner) || self.async_tainted_source_call(inner).is_some()
+                    {
                         return true;
                     }
                     if Self::promise_method_name(inner).is_some()
@@ -2271,6 +2307,30 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    /// Source label when `member` reads the decoded bytes of a file the user
+    /// supplied (`reader.result`) on a variable known to hold a
+    /// `new FileReader()` instance. The file arrives by drag-and-drop or an
+    /// `<input type=file>` picker, so its contents are attacker-influenced in
+    /// exactly the same way as the `dataTransfer.getData` / `clipboardData`
+    /// reads above — the canonical shape is a "preview the dropped file"
+    /// widget that pushes `reader.result` straight into `innerHTML`.
+    ///
+    /// Only `result` is a source: `error` / `readyState` are status metadata.
+    fn file_reader_source_for_member(&self, member: &StaticMemberExpression<'a>) -> Option<String> {
+        let Expression::Identifier(id) = &member.object else {
+            return None;
+        };
+        if self
+            .instance_classes
+            .get(id.name.as_str())
+            .map(String::as_str)
+            != Some("FileReader")
+        {
+            return None;
+        }
+        (member.property.name.as_str() == "result").then(|| "FileReader.result".to_string())
+    }
+
     /// Check if expression is tainted.
     ///
     /// Hostile JavaScript can nest expressions arbitrarily deep (`a.b.c.d…`,
@@ -2296,6 +2356,9 @@ impl<'a> DomXssVisitor<'a> {
                     return true;
                 }
                 if self.xhr_response_source_for_member(member).is_some() {
+                    return true;
+                }
+                if self.file_reader_source_for_member(member).is_some() {
                     return true;
                 }
                 if let Some(full_path) = self.get_member_string(member) {
@@ -3139,6 +3202,9 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(source) = self.xhr_response_source_for_member(member) {
                     return Some(source);
                 }
+                if let Some(source) = self.file_reader_source_for_member(member) {
+                    return Some(source);
+                }
                 if let Some(full_path) = self.get_member_string(member) {
                     if matches!(
                         full_path.as_str(),
@@ -3432,6 +3498,17 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
             return PromiseValueKind::Response;
+        }
+
+        // An async source call (`navigator.clipboard.readText()`) resolves
+        // straight to the untrusted string, so the chain is tainted at its root.
+        if let Some(source) = self.async_tainted_source_call(call) {
+            for arg in &call.arguments {
+                if let Some(expr) = arg.as_expression() {
+                    self.walk_expression(expr);
+                }
+            }
+            return PromiseValueKind::Tainted(source);
         }
 
         let Some(method) = Self::promise_method_name(call) else {
@@ -4013,10 +4090,13 @@ impl<'a> DomXssVisitor<'a> {
             self.default_tt_policy = Some(info);
         }
 
-        // fetch().then(...) response-source chains (issue #1024). Drive the
-        // whole chain here so each callback body is walked with the resolved
-        // Response / tainted value bound to its parameter, then return.
-        if Self::promise_method_name(call).is_some() && self.promise_chain_roots_at_fetch(call) {
+        // fetch().then(...) response-source chains (issue #1024) and async
+        // source chains such as `navigator.clipboard.readText().then(...)`.
+        // Drive the whole chain here so each callback body is walked with the
+        // resolved Response / tainted value bound to its parameter, then return.
+        if Self::promise_method_name(call).is_some()
+            && self.promise_chain_roots_at_untrusted_source(call)
+        {
             self.promise_kind_of_call(call);
             return;
         }
