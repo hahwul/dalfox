@@ -107,6 +107,7 @@ pub async fn verify_dom_xss_light_with_client(
                 .unwrap_or_else(|| target.url.clone());
             let mut form = reqwest::multipart::Form::new();
             if let Some(ref data) = target.data {
+                let mut found = false;
                 for pair in data.split('&') {
                     if let Some((k, v)) = pair.split_once('=') {
                         let k = urlencoding::decode(k)
@@ -117,10 +118,18 @@ pub async fn verify_dom_xss_light_with_client(
                             .to_string();
                         if k == param.name {
                             form = form.text(k, payload.to_string());
+                            found = true;
                         } else {
                             form = form.text(k, v);
                         }
                     }
+                }
+                // Mirror the `Body` branch: an injected param that isn't already
+                // in the captured body must still be sent, or the payload never
+                // reaches the server and verification silently fails (e.g. an
+                // explicit `--param` not present in the imported multipart body).
+                if !found {
+                    form = form.text(param.name.clone(), payload.to_string());
                 }
             } else {
                 form = form.text(param.name.clone(), payload.to_string());

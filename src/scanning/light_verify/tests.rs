@@ -405,3 +405,24 @@ async fn test_verify_dom_xss_light_location_multipart_body() {
     assert!(verified);
     assert!(response.expect("response").contains(&payload));
 }
+
+/// A multipart param that is NOT already present in the captured body (e.g. an
+/// explicit `--param`) must still be injected and sent, otherwise the payload
+/// never reaches the server and verification falsely fails. Regression for the
+/// missing `if !found` fallback that the `Body` branch already had.
+#[tokio::test]
+async fn test_verify_dom_xss_light_multipart_body_injects_absent_param() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    // Captured body carries a different field; the scanned param `q` is absent.
+    let target = make_target(addr, "/multipart", Some("POST"), Some("other=seed"));
+    let param = make_param(Location::MultipartBody, "q");
+    let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
+    let client = test_client();
+
+    let (verified, response, _note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+
+    assert!(verified, "absent multipart param must still be injected");
+    assert!(response.expect("response").contains(&payload));
+}
