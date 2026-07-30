@@ -901,6 +901,7 @@ fn build_multipart_request(
     let parsed_url = resolve_form_action_url(param, target);
     let mut form = reqwest::multipart::Form::new();
     if let Some(ref data) = target.data {
+        let mut found = false;
         for pair in data.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
                 let k = urlencoding::decode(k)
@@ -911,10 +912,17 @@ fn build_multipart_request(
                     .to_string();
                 if k == param.name {
                     form = form.text(k, encoded_payload.to_string());
+                    found = true;
                 } else {
                     form = form.text(k, v);
                 }
             }
+        }
+        // A verified param absent from the captured body must still be injected,
+        // or the verification request carries no payload and can never confirm
+        // the finding. Mirrors the reflection/probe multipart builders.
+        if !found {
+            form = form.text(param.name.clone(), encoded_payload.to_string());
         }
     } else {
         form = form.text(param.name.clone(), encoded_payload.to_string());

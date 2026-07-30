@@ -1816,6 +1816,7 @@ async fn fetch_injection_response_with_client(
                 .unwrap_or_else(|| target.url.clone());
             let mut form = reqwest::multipart::Form::new();
             if let Some(ref data) = target.data {
+                let mut found = false;
                 for pair in data.split('&') {
                     if let Some((k, v)) = pair.split_once('=') {
                         let k = urlencoding::decode(k)
@@ -1826,10 +1827,18 @@ async fn fetch_injection_response_with_client(
                             .to_string();
                         if k == param.name {
                             form = form.text(k, encoded_payload.to_string());
+                            found = true;
                         } else {
                             form = form.text(k, v);
                         }
                     }
+                }
+                // An injected param absent from the captured body must still be
+                // sent, or the request carries no payload and a real reflection
+                // is missed entirely. Mirrors the Body branch's `if !found` push
+                // and the same guard already in parameter_analysis mining/probe.
+                if !found {
+                    form = form.text(param.name.clone(), encoded_payload.to_string());
                 }
             } else {
                 form = form.text(param.name.clone(), encoded_payload.to_string());
