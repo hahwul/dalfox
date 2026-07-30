@@ -348,6 +348,42 @@ async fn test_build_multipart_request_injects_absent_param() {
     assert!(body.contains("name=\"q\""), "form field q must be present");
 }
 
+/// `build_json_body_request` must not run `str::replace` with an empty
+/// `param.value`: an empty pattern splices the payload between every byte of the
+/// body, sending a garbled request. When the captured body isn't valid JSON and
+/// the value is empty, it must re-serialize as a clean `{name: payload}` object.
+#[tokio::test]
+async fn test_build_json_body_request_empty_value_not_garbled() {
+    let addr = start_mock_server("stored").await;
+    let mut target = make_target(addr, "/dom/multipart-echo");
+    target.method = "POST".to_string();
+    // Non-JSON captured body forces the fallback branch; empty param value would
+    // otherwise trigger `"abc".replace("", p)` == "papbpcp".
+    target.data = Some("abc".to_string());
+    let mut param = make_param();
+    param.location = Location::JsonBody;
+    param.value = String::new();
+
+    let client = target.build_client_or_default();
+    let rb = build_json_body_request(&client, &target, &param, "PAYMARK");
+    let body = rb
+        .send()
+        .await
+        .expect("send json")
+        .text()
+        .await
+        .expect("read echo body");
+    // Clean object, not the garbled empty-pattern splice ("aPAYMARKbPAYMARKc").
+    assert_eq!(
+        body, "{\"q\":\"PAYMARK\"}",
+        "empty-value JSON body must be a clean object, got: {body}"
+    );
+    assert!(
+        !body.contains("aPAYMARKb"),
+        "payload must not be spliced between body bytes, got: {body}"
+    );
+}
+
 // ── Issue #1156: DomVerifyOutcome threads reflected + status signals ───────
 
 #[tokio::test]

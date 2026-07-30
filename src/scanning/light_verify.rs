@@ -90,6 +90,12 @@ pub async fn verify_dom_xss_light_with_client(
                         );
                     }
                     Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
+                } else if param.value.is_empty() {
+                    // An empty `param.value` makes `str::replace` splice the
+                    // payload between every byte of `data`, sending a garbled
+                    // body. Re-serialize as `{name: payload}`, matching the
+                    // no-data branch and the PoC builder in `scanning::mod`.
+                    Some(serde_json::json!({ &param.name: payload }).to_string())
                 } else {
                     Some(data.replace(&param.value, payload))
                 }
