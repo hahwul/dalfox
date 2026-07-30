@@ -878,6 +878,12 @@ fn build_json_body_request(
                 );
             }
             Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
+        } else if param.value.is_empty() {
+            // An empty `param.value` would make `str::replace` splice the payload
+            // between every byte of `data` (empty-pattern match), sending a
+            // garbled body. Re-serialize as `{name: payload}`, matching the
+            // no-data branch and the PoC builder in `scanning::mod`.
+            Some(serde_json::json!({ &param.name: encoded_payload }).to_string())
         } else {
             Some(data.replace(&param.value, encoded_payload))
         }

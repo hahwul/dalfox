@@ -1796,6 +1796,13 @@ async fn fetch_injection_response_with_client(
                         );
                     }
                     Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
+                } else if param.value.is_empty() {
+                    // An empty `param.value` makes `str::replace` splice the
+                    // payload between every byte of `data` (empty-pattern match),
+                    // sending a garbled body that never carries a clean injection.
+                    // Re-serialize as `{name: payload}`, matching the no-data
+                    // branch and the PoC builder in `scanning::mod`.
+                    Some(serde_json::json!({ &param.name: &*encoded_payload }).to_string())
                 } else {
                     // Fallback: simple string replacement of the param's original value
                     Some(data.replace(&param.value, &encoded_payload))
