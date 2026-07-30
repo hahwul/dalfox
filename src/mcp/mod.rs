@@ -1639,7 +1639,16 @@ status, and result_count."
                 .iter()
                 .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
                 .collect();
-            matching.sort_by_key(|(_, job)| std::cmp::Reverse(job.queued_at_ms));
+            // Newest first, then scan_id ascending as a deterministic tiebreak
+            // (matches the REST `/scans` contract). Without the tiebreak, jobs
+            // sharing a queued_at_ms millisecond fall back to nondeterministic
+            // HashMap order, so an entry could appear on two pages or be skipped
+            // across paginated calls.
+            matching.sort_by(|a, b| {
+                b.1.queued_at_ms
+                    .cmp(&a.1.queued_at_ms)
+                    .then_with(|| a.0.cmp(b.0))
+            });
             let total = matching.len();
             let start = offset.min(total);
             let end = if limit == 0 {
