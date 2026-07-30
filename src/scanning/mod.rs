@@ -1020,23 +1020,44 @@ fn compute_waf_strategy(
 /// policy than the CLI does for the same page.
 pub(crate) fn extract_meta_csp(html: &str) -> Option<(String, String)> {
     let doc = scraper::Html::parse_document(html);
+    // Prefer an ENFORCING `Content-Security-Policy` meta over a report-only one,
+    // mirroring the header path's enforcing-over-report-only `.or_else`. A page
+    // may carry both (report-only for telemetry, enforcing for protection), and
+    // their document order is arbitrary — returning whichever appears first
+    // could hand back the report-only policy, which downstream marks
+    // `report_only = true` and zeroes `require_trusted_types_for`. That drops
+    // the real enforcing policy: a TT-hardened enforcing meta would then be
+    // ignored and its (neutralised) DOM findings surface as false positives.
+    let mut report_only: Option<(String, String)> = None;
     for el in doc.select(crate::scanning::selectors::meta_csp()) {
         let http_equiv = el
             .value()
             .attr("http-equiv")
             .unwrap_or("")
             .to_ascii_lowercase();
-        let name = match http_equiv.as_str() {
-            "content-security-policy" => "Content-Security-Policy",
-            "content-security-policy-report-only" => "Content-Security-Policy-Report-Only",
-            _ => continue,
-        };
         let content = el.value().attr("content").unwrap_or("");
-        if !content.is_empty() {
-            return Some((name.to_string(), content.to_string()));
+        if content.is_empty() {
+            continue;
+        }
+        match http_equiv.as_str() {
+            "content-security-policy" => {
+                // Enforcing policy wins outright.
+                return Some(("Content-Security-Policy".to_string(), content.to_string()));
+            }
+            "content-security-policy-report-only" => {
+                // Remember the first report-only, but keep scanning for an
+                // enforcing policy which takes precedence.
+                report_only.get_or_insert_with(|| {
+                    (
+                        "Content-Security-Policy-Report-Only".to_string(),
+                        content.to_string(),
+                    )
+                });
+            }
+            _ => continue,
         }
     }
-    None
+    report_only
 }
 
 /// Whether the response headers carry an **enforcing** CSP with

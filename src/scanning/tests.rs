@@ -2943,3 +2943,30 @@ fn generate_param_jobs_shared_payloads_appended_after_cap() {
     assert!(dom.iter().any(|p| p == "zz-angle-free-shared"));
     assert!(!dom.iter().any(|p| p == "<svg/onload=alert(1)>"));
 }
+
+/// `extract_meta_csp` must prefer an enforcing `Content-Security-Policy` meta
+/// over a report-only one even when the report-only tag appears first —
+/// otherwise downstream marks the policy report-only (zeroing Trusted Types
+/// enforcement) and the real enforcing policy is dropped.
+#[test]
+fn test_extract_meta_csp_prefers_enforcing_over_report_only() {
+    let html = r#"<html><head>
+        <meta http-equiv="Content-Security-Policy-Report-Only" content="default-src 'none'">
+        <meta http-equiv="Content-Security-Policy" content="require-trusted-types-for 'script'">
+    </head><body></body></html>"#;
+    let (name, content) = extract_meta_csp(html).expect("a meta CSP is present");
+    assert_eq!(name, "Content-Security-Policy");
+    assert!(content.contains("require-trusted-types-for"));
+}
+
+/// With only a report-only meta present, it is still returned (nothing else to
+/// fall back to).
+#[test]
+fn test_extract_meta_csp_returns_report_only_when_no_enforcing() {
+    let html = r#"<html><head>
+        <meta http-equiv="Content-Security-Policy-Report-Only" content="default-src 'self'">
+    </head><body></body></html>"#;
+    let (name, content) = extract_meta_csp(html).expect("a report-only meta is present");
+    assert_eq!(name, "Content-Security-Policy-Report-Only");
+    assert!(content.contains("default-src 'self'"));
+}
