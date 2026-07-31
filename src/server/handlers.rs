@@ -63,8 +63,10 @@ pub(crate) async fn start_scan_handler(
         return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
     }
 
-    let opts = req.options.clone().unwrap_or_default();
-    if let Err(msg) = validate_scan_options(&opts) {
+    // `&mut`: validation also normalizes (e.g. uppercases `method`), and the
+    // normalized options are what gets dispatched to the scan below.
+    let mut opts = req.options.clone().unwrap_or_default();
+    if let Err(msg) = validate_scan_options(&mut opts) {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg,
@@ -168,6 +170,11 @@ pub(crate) async fn get_result_handler(
                 } else {
                     0
                 };
+                // Monotonically decreasing with progress: back off while there
+                // is little to see, then poll faster as the scan nears the
+                // finish. The ladder used to advise 2000ms below 10% but 3000ms
+                // between 10% and 80%, i.e. a client that made progress was told
+                // to poll *less* often. Mirrored in the MCP poll payload.
                 let suggested_poll_interval_ms: u64 = if matches!(
                     j.status,
                     JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
@@ -176,9 +183,9 @@ pub(crate) async fn get_result_handler(
                 } else if estimated_completion_pct > 80 {
                     1000
                 } else if estimated_completion_pct > 10 {
-                    3000
-                } else {
                     2000
+                } else {
+                    3000
                 };
                 Some(ProgressPayload {
                     params_total,
@@ -320,18 +327,20 @@ pub(crate) async fn get_scan_handler(
     // fallback to the default (which is what `.parse().ok()` used to do).
     // Types infer from the `parse_num_query` turbofishes — worker:usize,
     // delay/timeout/scan_timeout:u64, rate_limit:u32, each wrapped in Option.
-    let (worker, delay, timeout, rate_limit, scan_timeout) = match (
+    let (worker, delay, timeout, rate_limit, scan_timeout, max_payloads_per_param) = match (
         parse_num_query::<usize>(&params, "worker"),
         parse_num_query::<u64>(&params, "delay"),
         parse_num_query::<u64>(&params, "timeout"),
         parse_num_query::<u32>(&params, "rate_limit"),
         parse_num_query::<u64>(&params, "scan_timeout"),
+        parse_num_query::<usize>(&params, "max_payloads_per_param"),
     ) {
-        (Ok(w), Ok(d), Ok(t), Ok(rl), Ok(st)) => (w, d, t, rl, st),
+        (Ok(w), Ok(d), Ok(t), Ok(rl), Ok(st), Ok(mp)) => (w, d, t, rl, st, mp),
         (Err(msg), ..)
         | (_, Err(msg), ..)
         | (_, _, Err(msg), ..)
-        | (_, _, _, Err(msg), _)
+        | (_, _, _, Err(msg), ..)
+        | (_, _, _, _, Err(msg), _)
         | (.., Err(msg)) => {
             let resp = ApiResponse::<serde_json::Value> {
                 code: 400,
@@ -384,7 +393,7 @@ pub(crate) async fn get_scan_handler(
         }
     };
 
-    let opts = ScanOptions {
+    let mut opts = ScanOptions {
         cookie,
         worker,
         delay,
@@ -429,9 +438,10 @@ pub(crate) async fn get_scan_handler(
         waf_min_confidence,
         rate_limit,
         scan_timeout,
+        max_payloads_per_param,
     };
 
-    if let Err(msg) = validate_scan_options(&opts) {
+    if let Err(msg) = validate_scan_options(&mut opts) {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg,
@@ -813,8 +823,11 @@ pub(crate) async fn preflight_handler(
         return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
     }
 
-    let opts = req.options.clone().unwrap_or_default();
-    if let Err(msg) = validate_scan_options(&opts) {
+    // `&mut`: validation normalizes too (see start_scan_handler), and the
+    // normalized `method` is what the preflight target and its request-count
+    // estimate are built from.
+    let mut opts = req.options.clone().unwrap_or_default();
+    if let Err(msg) = validate_scan_options(&mut opts) {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg,

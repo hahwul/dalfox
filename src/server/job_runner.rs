@@ -357,7 +357,7 @@ pub(crate) async fn run_scan_job(
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
-        max_payloads_per_param: 0,
+        max_payloads_per_param: opts.max_payloads_per_param.unwrap_or(0),
         deep_scan: opts.deep_scan.unwrap_or(false),
         sxss: false,
         sxss_url: None,
@@ -424,7 +424,14 @@ pub(crate) async fn run_scan_job(
                 .collect();
             t.method = args.method.clone();
             if let Some(ua) = &args.user_agent {
-                t.headers.push(("User-Agent".to_string(), ua.clone()));
+                // Skip the header push for an explicitly-empty user_agent:
+                // `apply_headers_ua_cookies` copies `t.headers` verbatim, so an
+                // empty entry put a literal `User-Agent:` on every request,
+                // while `t.user_agent` (which it *does* empty-check) sent none.
+                // MCP already filters this; align so both behave the same.
+                if !ua.is_empty() {
+                    t.headers.push(("User-Agent".to_string(), ua.clone()));
+                }
                 t.user_agent = Some(ua.clone());
             } else {
                 t.user_agent = Some("".to_string());

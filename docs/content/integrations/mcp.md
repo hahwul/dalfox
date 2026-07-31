@@ -73,7 +73,12 @@ mutation coverage. Order does not matter — the scanner applies encoders
 in a fixed priority order (`url` → `html` → `htmlpad` → `2url` → `3url`
 → `4url` → `base64` → `unicode` → `zwsp`) and de-duplicates the output.
 Use `["none"]` to disable encoding entirely. Mirrors the `--encoders` /
-`-e` CLI flag.
+`-e` CLI flag. An unknown encoder name is rejected outright — it would
+otherwise match nothing and quietly shrink the scan's payload coverage.
+
+`method` is validated against the same verb set the CLI accepts and is
+uppercased for you (`"post"` → `"POST"`). Sending an unsupported verb is an
+error rather than a scan that puts the wrong method on the wire.
 
 `insecure` controls TLS certificate validation (default `true`, scanner-friendly):
 set it `false` to enforce certificate validation and reject self-signed or

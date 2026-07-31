@@ -1517,3 +1517,198 @@ async fn test_run_scan_job_analyze_external_js_produces_external_js_findings() {
         "expected at least one finding referencing external JS; got: {results:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Method / encoder normalization at the MCP boundary.
+//
+// The MCP request bypasses clap's value parsers exactly like a config file
+// does (see `ScanConfig::normalize_and_validate`). `method` is put on the wire
+// verbatim and compared case-sensitively downstream, so an un-normalized
+// `"post"` was sent as the literal extension verb `post` — which real servers
+// answer with 405/501 — and `"GET junk"` failed `Method::from_str` and silently
+// degraded to GET. Either way the scan settled `done` with zero findings and no
+// error, indistinguishable from a genuinely clean target.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_scan_with_dalfox_sends_uppercased_method_on_the_wire() {
+    use axum::{Router, extract::Request, response::Html, routing::any};
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    let seen: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+    let seen_for_app = seen.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind method-recorder listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route(
+            "/{*rest}",
+            any(move |req: Request| {
+                let seen = seen_for_app.clone();
+                async move {
+                    seen.lock()
+                        .expect("seen mutex poisoned")
+                        .push(req.method().as_str().to_string());
+                    Html("<html><body>ok</body></html>")
+                }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        // Lowercase, as an agent may well send it.
+        method: "post".to_string(),
+        skip_mining: true,
+        skip_ast_analysis: true,
+        max_payloads_per_param: 1,
+        wait: true,
+        wait_timeout_sec: 30,
+        ..default_scan_params(&format!("http://{addr}/page?q=a"))
+    };
+    mcp.scan_with_dalfox(Parameters(params))
+        .await
+        .expect("lowercase method must be accepted and normalized, not rejected");
+
+    let methods = seen.lock().expect("seen mutex poisoned").clone();
+    assert!(
+        !methods.is_empty(),
+        "the scan must have reached the target at least once"
+    );
+    assert!(
+        !methods.iter().any(|m| m == "post"),
+        "no request may go out with the un-normalized lowercase verb; saw {methods:?}"
+    );
+    assert!(
+        methods.iter().all(|m| *m == m.to_ascii_uppercase()),
+        "every wire method must be uppercase; saw {methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_unsupported_method() {
+    let mcp = DalfoxMcp::new();
+    for bad in ["TRACE", "GET junk", "   "] {
+        let params = ScanWithDalfoxParams {
+            method: bad.to_string(),
+            ..default_scan_params("http://127.0.0.1:1/?q=a")
+        };
+        let err = mcp
+            .scan_with_dalfox(Parameters(params))
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("method {bad:?} must be rejected"));
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    }
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_unknown_encoder() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        encoders: vec!["url".to_string(), "urlencode".to_string()],
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let err = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect_err("an unknown encoder silently shrinks coverage and must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(
+        err.message.contains("unknown encoder 'urlencode'"),
+        "got: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn test_preflight_dalfox_rejects_bad_method_and_encoder() {
+    let mcp = DalfoxMcp::new();
+    fn preflight_params(target: &str) -> PreflightDalfoxParams {
+        PreflightDalfoxParams {
+            target: target.to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 1,
+            proxy: None,
+            follow_redirects: false,
+            insecure: true,
+            skip_mining: true,
+            skip_discovery: true,
+            encoders: vec!["none".to_string()],
+        }
+    }
+
+    let err = mcp
+        .preflight_dalfox(Parameters(PreflightDalfoxParams {
+            method: "TRACE".to_string(),
+            ..preflight_params("http://127.0.0.1:1/?q=a")
+        }))
+        .await
+        .expect_err("unsupported method must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+
+    let err = mcp
+        .preflight_dalfox(Parameters(PreflightDalfoxParams {
+            encoders: vec!["base-64".to_string()],
+            ..preflight_params("http://127.0.0.1:1/?q=a")
+        }))
+        .await
+        .expect_err("unknown encoder must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+}
+
+#[tokio::test]
+async fn test_preflight_dalfox_reports_the_normalized_method() {
+    use axum::{Router, response::Html, routing::any};
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    async fn ok() -> Html<&'static str> {
+        Html("<html><body>ok</body></html>")
+    }
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind preflight listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route("/{*rest}", any(ok));
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mcp = DalfoxMcp::new();
+    let res = mcp
+        .preflight_dalfox(Parameters(PreflightDalfoxParams {
+            target: format!("http://{addr}/page?q=a"),
+            param: vec![],
+            method: "post".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 5,
+            proxy: None,
+            follow_redirects: false,
+            insecure: true,
+            skip_mining: true,
+            skip_discovery: true,
+            encoders: vec!["none".to_string()],
+        }))
+        .await
+        .expect("lowercase method must be normalized, not rejected");
+
+    let parsed = parse_result_json(&res);
+    assert_eq!(parsed["reachable"], serde_json::json!(true));
+    assert_eq!(
+        parsed["method"],
+        serde_json::json!("POST"),
+        "preflight must report (and probe with) the normalized verb: {parsed}"
+    );
+}

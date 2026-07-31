@@ -31,6 +31,13 @@ pub(crate) fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> H
         return headers;
     }
 
+    // Past the wildcard branch the response depends on the request's `Origin`
+    // header, so `Vary: Origin` must be set whether or not this particular
+    // origin matched. Setting it only on a match let a shared/CDN cache store
+    // the no-ACAO response produced for a disallowed origin and replay it to an
+    // allowed one (and vice versa), breaking CORS for legitimate callers.
+    headers.insert("Vary", "Origin".parse().expect("static Vary header"));
+
     // Reflect allowed origins
     if let Some(origin_val) = req_headers.get("Origin")
         && let Ok(origin_str) = origin_val.to_str()
@@ -46,7 +53,6 @@ pub(crate) fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> H
 
         if exact_allowed || regex_allowed {
             headers.insert("Access-Control-Allow-Origin", origin_val.clone());
-            headers.insert("Vary", "Origin".parse().expect("static Vary header"));
         }
     }
 

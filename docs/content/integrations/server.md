@@ -190,7 +190,8 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "skip_discovery": false,
     "deep_scan": false,
     "skip_ast_analysis": false,
-    "detect_outdated_libs": false
+    "detect_outdated_libs": false,
+    "max_payloads_per_param": 0
   }
 }
 ```
@@ -207,6 +208,16 @@ the CLI scanner default); send `"insecure": false` (or `?insecure=false` on
 default), enforced across all worker tasks. The server-wide `--rate-limit` flag
 is an upper bound: a request may ask for a lower rate but cannot exceed or
 disable it.
+
+`max_payloads_per_param` caps how many payloads each discovered parameter is
+tested with (default `0` = no explicit cap, the built-in payload safety cap
+still applies). Use a small value (e.g. `10`–`50`) for smoke scans. Mirrors the
+MCP scan tool's field of the same name.
+
+`method` and `encoders` are validated against the same value sets the CLI
+accepts. `method` is uppercased for you (`"post"` → `"POST"`), and an
+unsupported verb or an unknown encoder name is rejected with `400` rather than
+silently producing a scan that sends the wrong verb or skips encodings.
 
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached
