@@ -190,6 +190,46 @@ async fn start_slow_reflecting_target_server() -> SocketAddr {
     addr
 }
 
+/// Reflects each query value with the XSS-significant characters stripped, and
+/// without the artificial delay of [`target_slow_reflect_handler`]. The
+/// alphanumeric probe still shows up, so the param is classified as reflective
+/// and the whole payload set gets swept — but nothing ever verifies, so the
+/// scan never short-circuits on a finding. That makes the total request count a
+/// direct read on how far the payload fan-out went.
+async fn target_inert_reflect_handler(Query(q): Query<Map<String, String>>) -> impl IntoResponse {
+    let mut body = String::from("<html><body>");
+    for (k, v) in &q {
+        let safe: String = v
+            .chars()
+            .filter(|c| !matches!(c, '<' | '>' | '"' | '\''))
+            .collect();
+        body.push_str(&format!("<div>{k}={safe}</div>"));
+    }
+    body.push_str("</body></html>");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        body,
+    )
+}
+
+async fn start_inert_reflecting_target_server() -> SocketAddr {
+    let app = Router::new()
+        .route("/", any(target_inert_reflect_handler))
+        .route("/{*rest}", any(target_inert_reflect_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind inert reflecting target listener");
+    let addr = listener
+        .local_addr()
+        .expect("inert reflecting target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
 #[test]
 fn test_check_api_key_variants() {
     let state_no_key = make_state(None, None, false, false, "callback");
@@ -1890,66 +1930,66 @@ async fn test_preflight_handler_unreachable_target() {
 
 #[test]
 fn test_validate_scan_options_accepts_defaults() {
-    assert!(validate_scan_options(&ScanOptions::default()).is_ok());
+    assert!(validate_scan_options(&mut ScanOptions::default()).is_ok());
 }
 
 #[test]
 fn test_validate_scan_options_rejects_out_of_range() {
-    let bad_timeout = ScanOptions {
+    let mut bad_timeout = ScanOptions {
         timeout: Some(0),
         ..ScanOptions::default()
     };
-    assert!(validate_scan_options(&bad_timeout).is_err());
+    assert!(validate_scan_options(&mut bad_timeout).is_err());
 
-    let bad_timeout_hi = ScanOptions {
+    let mut bad_timeout_hi = ScanOptions {
         timeout: Some(9999),
         ..ScanOptions::default()
     };
-    assert!(validate_scan_options(&bad_timeout_hi).is_err());
+    assert!(validate_scan_options(&mut bad_timeout_hi).is_err());
 
-    let bad_delay = ScanOptions {
+    let mut bad_delay = ScanOptions {
         delay: Some(999_999),
         ..ScanOptions::default()
     };
-    assert!(validate_scan_options(&bad_delay).is_err());
+    assert!(validate_scan_options(&mut bad_delay).is_err());
 
-    let bad_worker = ScanOptions {
+    let mut bad_worker = ScanOptions {
         worker: Some(0),
         ..ScanOptions::default()
     };
-    assert!(validate_scan_options(&bad_worker).is_err());
+    assert!(validate_scan_options(&mut bad_worker).is_err());
 
-    let bad_worker_hi = ScanOptions {
+    let mut bad_worker_hi = ScanOptions {
         worker: Some(999_999),
         ..ScanOptions::default()
     };
-    assert!(validate_scan_options(&bad_worker_hi).is_err());
+    assert!(validate_scan_options(&mut bad_worker_hi).is_err());
 
     // scan_timeout: 0 is allowed (disabled); anything over the ceiling is not.
-    let ok_disabled = ScanOptions {
+    let mut ok_disabled = ScanOptions {
         scan_timeout: Some(0),
         ..ScanOptions::default()
     };
-    assert!(validate_scan_options(&ok_disabled).is_ok());
-    let bad_scan_timeout = ScanOptions {
+    assert!(validate_scan_options(&mut ok_disabled).is_ok());
+    let mut bad_scan_timeout = ScanOptions {
         scan_timeout: Some(MAX_SCAN_TIMEOUT_SECS + 1),
         ..ScanOptions::default()
     };
-    assert!(validate_scan_options(&bad_scan_timeout).is_err());
+    assert!(validate_scan_options(&mut bad_scan_timeout).is_err());
 }
 
 #[test]
 fn test_validate_scan_options_waf_fields() {
     // waf_bypass must be one of the CLI's three modes.
     assert!(
-        validate_scan_options(&ScanOptions {
+        validate_scan_options(&mut ScanOptions {
             waf_bypass: Some("force".to_string()),
             ..ScanOptions::default()
         })
         .is_ok()
     );
     assert!(
-        validate_scan_options(&ScanOptions {
+        validate_scan_options(&mut ScanOptions {
             waf_bypass: Some("nonsense".to_string()),
             ..ScanOptions::default()
         })
@@ -1958,14 +1998,14 @@ fn test_validate_scan_options_waf_fields() {
 
     // force_waf is normalized/validated against the shared CLI WAF-name set.
     assert!(
-        validate_scan_options(&ScanOptions {
+        validate_scan_options(&mut ScanOptions {
             force_waf: Some("CloudFlare".to_string()),
             ..ScanOptions::default()
         })
         .is_ok()
     );
     assert!(
-        validate_scan_options(&ScanOptions {
+        validate_scan_options(&mut ScanOptions {
             force_waf: Some("notawaf".to_string()),
             ..ScanOptions::default()
         })
@@ -1974,14 +2014,14 @@ fn test_validate_scan_options_waf_fields() {
 
     // waf_min_confidence is a probability in [0.0, 1.0].
     assert!(
-        validate_scan_options(&ScanOptions {
+        validate_scan_options(&mut ScanOptions {
             waf_min_confidence: Some(0.5),
             ..ScanOptions::default()
         })
         .is_ok()
     );
     assert!(
-        validate_scan_options(&ScanOptions {
+        validate_scan_options(&mut ScanOptions {
             waf_min_confidence: Some(1.5),
             ..ScanOptions::default()
         })
@@ -3076,5 +3116,402 @@ async fn test_get_scan_handler_empty_target_falls_through_to_url_alias() {
     assert_eq!(
         parsed["data"]["target"], "http://127.0.0.1:1/?q=1",
         "empty target must fall through to the url alias"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Method / encoder normalization at the REST boundary.
+//
+// A JSON request body bypasses clap's value parsers exactly like a config file
+// does (see `ScanConfig::normalize_and_validate`). `method` is put on the wire
+// verbatim and compared case-sensitively downstream, so an un-normalized
+// `"post"` was sent as the literal extension verb `post` — which real servers
+// answer with 405/501 — and `"GET junk"` failed `Method::from_str` and silently
+// degraded to GET. Either way the job settled `done` with zero findings and no
+// error, indistinguishable from a genuinely clean target.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_scan_options_normalizes_method() {
+    let mut lower = ScanOptions {
+        method: Some("post".to_string()),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut lower).is_ok());
+    assert_eq!(lower.method.as_deref(), Some("POST"));
+
+    for bad in ["TRACE", "GET junk", "   "] {
+        let mut opts = ScanOptions {
+            method: Some(bad.to_string()),
+            ..ScanOptions::default()
+        };
+        assert!(
+            validate_scan_options(&mut opts).is_err(),
+            "method {bad:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_validate_scan_options_rejects_unknown_encoder() {
+    let mut ok = ScanOptions {
+        encoders: Some(vec!["url".to_string(), "html".to_string()]),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut ok).is_ok());
+
+    let mut bad = ScanOptions {
+        encoders: Some(vec!["url".to_string(), "urlencode".to_string()]),
+        ..ScanOptions::default()
+    };
+    let err = validate_scan_options(&mut bad).expect_err("unknown encoder must be rejected");
+    assert!(err.contains("unknown encoder 'urlencode'"), "got: {err}");
+}
+
+#[tokio::test]
+async fn test_get_scan_handler_rejects_bad_method_and_encoder() {
+    let state = make_state(None, None, false, false, "cb");
+
+    let mut q = Map::new();
+    q.insert("target".to_string(), "http://example.com/".to_string());
+    q.insert("method".to_string(), "TRACE".to_string());
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(q))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    let mut q = Map::new();
+    q.insert("target".to_string(), "http://example.com/".to_string());
+    q.insert("encoders".to_string(), "url,urlencode".to_string());
+    let resp = get_scan_handler(State(state), HeaderMap::new(), Query(q))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = response_body_string(resp).await;
+    assert!(body.contains("unknown encoder"), "got: {body}");
+}
+
+#[tokio::test]
+async fn test_run_scan_job_sends_uppercased_method_on_the_wire() {
+    // Target that records the verb of every request it receives.
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen_for_app = seen.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind method-recorder listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route(
+            "/{*rest}",
+            any(move |req: axum::extract::Request| {
+                let seen = seen_for_app.clone();
+                async move {
+                    seen.lock().await.push(req.method().as_str().to_string());
+                    target_ok_handler().await
+                }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "cb");
+    let url = format!("http://{addr}/page?q=a");
+    // Drive the public handler so the request goes through validation exactly
+    // as a real client's would.
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: url.clone(),
+            options: Some(ScanOptions {
+                method: Some("post".to_string()),
+                timeout: Some(5),
+                worker: Some(2),
+                encoders: Some(vec!["none".to_string()]),
+                skip_mining: Some(true),
+                skip_ast_analysis: Some(true),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "a lowercase method must be normalized, not rejected"
+    );
+
+    // Wait for the job to settle.
+    for _ in 0..300 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let done = {
+            let jobs = state.jobs.lock().await;
+            jobs.values().all(|j| j.is_terminal())
+        };
+        if done && !seen.lock().await.is_empty() {
+            break;
+        }
+    }
+
+    let methods = seen.lock().await.clone();
+    assert!(
+        !methods.is_empty(),
+        "the scan must have reached the target at least once"
+    );
+    assert!(
+        !methods.iter().any(|m| m == "post"),
+        "no request may go out with the un-normalized lowercase verb; saw {methods:?}"
+    );
+    assert!(
+        methods.iter().all(|m| *m == m.to_ascii_uppercase()),
+        "every wire method must be uppercase; saw {methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_preflight_handler_rejects_bad_method() {
+    let state = make_state(None, None, false, false, "cb");
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://example.com/".to_string(),
+            options: Some(ScanOptions {
+                method: Some("TRACE".to_string()),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn test_cors_sets_vary_origin_even_when_origin_is_not_allowed() {
+    // With an allow-list configured, the response depends on the request's
+    // Origin whether or not it matched. Emitting `Vary: Origin` only on a match
+    // let a shared cache store the no-ACAO response built for a disallowed
+    // origin and replay it to an allowed one.
+    let state = make_state(
+        None,
+        Some(vec!["http://localhost:3000"]),
+        false,
+        false,
+        "callback",
+    );
+
+    let mut denied = HeaderMap::new();
+    denied.insert("Origin", HeaderValue::from_static("http://evil.example"));
+    let headers = build_cors_headers(&state, &denied);
+    assert!(
+        headers.get("Access-Control-Allow-Origin").is_none(),
+        "a disallowed origin must not be reflected"
+    );
+    assert_eq!(
+        headers.get("Vary").and_then(|v| v.to_str().ok()),
+        Some("Origin"),
+        "Vary: Origin must be present on the deny path too"
+    );
+
+    // Also present when the request carries no Origin at all.
+    let headers = build_cors_headers(&state, &HeaderMap::new());
+    assert_eq!(
+        headers.get("Vary").and_then(|v| v.to_str().ok()),
+        Some("Origin")
+    );
+}
+
+#[tokio::test]
+async fn test_scan_options_max_payloads_per_param_is_honored_and_bounded() {
+    // The REST API accepted no per-parameter payload cap at all: the field was
+    // pinned to 0 in ScanArgs regardless of the request, so the MCP tool's
+    // `max_payloads_per_param` had no REST equivalent.
+    let mut ok = ScanOptions {
+        max_payloads_per_param: Some(25),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut ok).is_ok());
+
+    let mut too_big = ScanOptions {
+        max_payloads_per_param: Some(crate::job::MAX_PAYLOADS_PER_PARAM + 1),
+        ..ScanOptions::default()
+    };
+    let err = validate_scan_options(&mut too_big).expect_err("absurd cap must be rejected");
+    assert!(err.contains("max_payloads_per_param"), "got: {err}");
+
+    // GET /scan parses it off the query string like the other numeric options.
+    let state = make_state(None, None, false, false, "cb");
+    let mut q = Map::new();
+    q.insert("target".to_string(), "http://example.com/".to_string());
+    q.insert("max_payloads_per_param".to_string(), "abc".to_string());
+    let resp = get_scan_handler(State(state), HeaderMap::new(), Query(q))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = response_body_string(resp).await;
+    assert!(
+        body.contains("max_payloads_per_param must be a valid number"),
+        "got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn test_run_scan_job_omits_user_agent_header_when_explicitly_empty() {
+    // `apply_headers_ua_cookies` copies target.headers verbatim, so pushing an
+    // empty entry put a literal `User-Agent:` on every outbound request while
+    // the (empty-checked) `target.user_agent` sent none. MCP already filters
+    // this; the REST path did not.
+    let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen_for_app = seen.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind ua-recorder listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route(
+            "/{*rest}",
+            any(move |req: axum::extract::Request| {
+                let seen = seen_for_app.clone();
+                async move {
+                    seen.lock().await.push(
+                        req.headers()
+                            .get("user-agent")
+                            .and_then(|v| v.to_str().ok())
+                            .map(str::to_string),
+                    );
+                    target_ok_handler().await
+                }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "cb");
+    let job_id = "ua-empty".to_string();
+    let url = format!("http://{addr}/page?q=a");
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(job_id.clone(), test_job(JobStatus::Queued, None, &url));
+    }
+    run_scan_job(
+        state,
+        job_id,
+        url,
+        ScanOptions {
+            user_agent: Some(String::new()),
+            timeout: Some(5),
+            worker: Some(2),
+            encoders: Some(vec!["none".to_string()]),
+            skip_mining: Some(true),
+            skip_ast_analysis: Some(true),
+            max_payloads_per_param: Some(1),
+            ..ScanOptions::default()
+        },
+        false,
+        false,
+    )
+    .await;
+
+    let uas = seen.lock().await.clone();
+    assert!(!uas.is_empty(), "the scan must have reached the target");
+    assert!(
+        !uas.iter().any(|ua| ua.as_deref() == Some("")),
+        "an explicitly-empty user_agent must not put a blank User-Agent header on the wire; saw {uas:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_run_scan_job_honors_max_payloads_per_param() {
+    // Proves the option reaches ScanArgs, not just that it validates: the REST
+    // path hard-coded `max_payloads_per_param: 0`, so a request asking for a
+    // small cap fanned out exactly as far as one asking for none.
+    async fn requests_for(cap: Option<usize>, addr: SocketAddr, job_id: &str) -> u64 {
+        let state = make_state(None, None, false, false, "cb");
+        let url = format!("http://{addr}/page?q=a");
+        let progress = {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(job_id.to_string(), test_job(JobStatus::Queued, None, &url));
+            jobs.get(job_id).expect("job").progress.clone()
+        };
+        run_scan_job(
+            state,
+            job_id.to_string(),
+            url,
+            ScanOptions {
+                max_payloads_per_param: cap,
+                timeout: Some(5),
+                worker: Some(4),
+                encoders: Some(vec!["none".to_string()]),
+                skip_mining: Some(true),
+                skip_ast_analysis: Some(true),
+                ..ScanOptions::default()
+            },
+            false,
+            false,
+        )
+        .await;
+        progress
+            .requests_sent
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    let addr = start_inert_reflecting_target_server().await;
+    let capped = requests_for(Some(1), addr, "cap-1").await;
+    let uncapped = requests_for(None, addr, "cap-none").await;
+    assert!(
+        capped < uncapped,
+        "max_payloads_per_param must bound the scan's fan-out: capped={capped} uncapped={uncapped}"
+    );
+}
+
+#[tokio::test]
+async fn test_suggested_poll_interval_is_monotonic_in_progress() {
+    // Drives the real handler: the advised delay must never *grow* as a running
+    // scan progresses. It used to (2000ms below 10%, 3000ms between 10% and
+    // 80%), telling a client that had just seen progress to slow down.
+    use std::sync::atomic::Ordering::Relaxed;
+
+    let state = make_state(None, None, false, false, "cb");
+    let id = "poll-ladder".to_string();
+    let progress = {
+        let mut jobs = state.jobs.lock().await;
+        let job = test_job(JobStatus::Running, None, "http://example.com/");
+        job.progress.params_total.store(100, Relaxed);
+        let progress = job.progress.clone();
+        jobs.insert(id.clone(), job);
+        progress
+    };
+
+    let mut prev = u64::MAX;
+    for tested in 0..=100u32 {
+        progress.params_tested.store(tested, Relaxed);
+        let resp = get_result_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path(id.clone()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json body");
+        let now = parsed["data"]["progress"]["suggested_poll_interval_ms"]
+            .as_u64()
+            .expect("suggested_poll_interval_ms");
+        assert!(
+            now <= prev,
+            "poll interval must not increase with progress: {tested}/100 advises {now}ms after {prev}ms"
+        );
+        prev = now;
+    }
+    assert_eq!(
+        prev, 1000,
+        "a nearly-finished scan should be polled fastest"
     );
 }

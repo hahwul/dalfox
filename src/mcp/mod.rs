@@ -865,8 +865,9 @@ fn default_wait_timeout_sec() -> u64 {
     300
 }
 
-/// Hard upper bound for MCP `max_payloads_per_param` (protects against absurd values).
-const MAX_PAYLOADS_PER_PARAM_MCP: usize = 100_000;
+/// Hard upper bound for MCP `max_payloads_per_param` (protects against absurd
+/// values). Shared with the REST server so both front-ends bound it identically.
+const MAX_PAYLOADS_PER_PARAM_MCP: usize = crate::job::MAX_PAYLOADS_PER_PARAM;
 /// Hard upper bound for MCP wait wall-clock (matches scan_timeout ceiling).
 const MAX_WAIT_TIMEOUT_SECS: u64 = 86_400;
 
@@ -1134,15 +1135,28 @@ browser execution; only detection_method=oob observes a real browser."
                 None,
             ));
         }
-        if !matches!(waf_bypass.as_str(), "auto" | "force" | "off") {
+        if !crate::cmd::scan::WAF_BYPASS_VALUES.contains(&waf_bypass.as_str()) {
             return Err(ErrorData::invalid_params(
                 format!(
-                    "waf_bypass must be one of auto, force, off (got '{}')",
+                    "waf_bypass must be one of {} (got '{}')",
+                    crate::cmd::scan::WAF_BYPASS_VALUES.join(", "),
                     waf_bypass
                 ),
                 None,
             ));
         }
+        // Uppercase + validate against the same set `--method` accepts. The MCP
+        // request bypasses clap exactly like a config file does, and `method` is
+        // both compared case-sensitively downstream and put on the wire
+        // verbatim — so `"post"` used to be sent as the literal extension verb
+        // `post` (answered with 405/501 by real servers) and `"GET junk"`
+        // silently degraded to GET. Either way the scan finished `done` with
+        // zero findings and no error, indistinguishable from a clean target.
+        let method = crate::cmd::scan::parse_http_method_arg(&method)
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
+        // Unknown encoder names match nothing in the payload builder, so they
+        // silently shrink payload coverage rather than failing loudly.
+        crate::job::validate_encoders(&encoders).map_err(|e| ErrorData::invalid_params(e, None))?;
         // Normalize/validate force_waf against the same WAF-name set the CLI
         // accepts; the normalized (lowercased) form flows into ScanArgs.
         let force_waf = match force_waf
@@ -1530,6 +1544,11 @@ browser execution; only detection_method=oob observes a real browser."
                 0
             };
 
+            // Monotonically decreasing with progress: back off while there is
+            // little to see, then poll faster as the scan nears the finish. The
+            // ladder used to advise 2000ms below 10% but 3000ms between 10% and
+            // 80%, i.e. a client that made progress was told to poll *less*
+            // often. Mirrors the REST `/scan/{id}` progress payload.
             let suggested_poll_interval_ms: u64 = if matches!(
                 snapshot.status,
                 JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
@@ -1538,9 +1557,9 @@ browser execution; only detection_method=oob observes a real browser."
             } else if estimated_completion_pct > 80 {
                 1000
             } else if estimated_completion_pct > 10 {
-                3000
-            } else {
                 2000
+            } else {
+                3000
             };
 
             out["progress"] = serde_json::json!({
@@ -1729,9 +1748,18 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             ));
         }
 
+        // Same normalize/validate the scan tool applies (and the CLI's
+        // `--method` parser): preflight builds its reachability probe and its
+        // request-count estimate from this verb, so an un-normalized `"post"`
+        // would probe with a literal lowercase method the target rejects.
+        let method = crate::cmd::scan::parse_http_method_arg(&params.method)
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
+        crate::job::validate_encoders(&params.encoders)
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
+
         let mut target = match parse_target(&target_url) {
             Ok(mut t) => {
-                t.method = params.method.clone();
+                t.method = method.clone();
                 t.timeout = params.timeout;
                 t.proxy = params.proxy.clone();
                 t.insecure = params.insecure;
@@ -1767,7 +1795,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
         let scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
             target: target_url.clone(),
             param: vec![],
-            method: params.method.clone(),
+            method,
             data: params.data.clone(),
             headers: params.headers.clone(),
             cookies: params.cookies.clone(),

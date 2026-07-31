@@ -198,6 +198,12 @@ pub(crate) struct ScanOptions {
     /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped
     /// by the server's `--rate-limit` when set.
     pub(crate) rate_limit: Option<u32>,
+    /// Hard cap on payloads tested per parameter (0 = no explicit cap, aside
+    /// from the built-in payload safety cap). Use a small value (e.g. 10–50)
+    /// for smoke scans. Mirrors the MCP scan tool's field of the same name,
+    /// which the REST API previously had no equivalent for — the option was
+    /// pinned to 0 regardless of what a client asked for.
+    pub(crate) max_payloads_per_param: Option<usize>,
     /// Whole-scan wall-clock budget in seconds (0 = unbounded). When the server
     /// was started with `--scan-timeout`, that value caps this one — a request
     /// may ask for a shorter budget but cannot exceed or disable the cap.

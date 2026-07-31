@@ -62,6 +62,12 @@ pub const MAX_SCAN_TIMEOUT_SECS: u64 = 86_400;
 /// from one submission. Beyond this the candidate set is truncated with a log.
 pub const MAX_DISCOVERED_PARAMS: usize = 512;
 
+/// Upper bound for the per-parameter payload cap accepted via scan options.
+/// `0` means "no explicit cap" (the built-in payload safety cap still applies).
+/// Purely a typo guard — a real scan never needs six figures of payloads per
+/// parameter. Shared by the REST server and MCP so the bound is identical.
+pub const MAX_PAYLOADS_PER_PARAM: usize = 100_000;
+
 /// Default ceiling on concurrently active (queued + running) scans for the MCP
 /// runtime, which — unlike the REST server's `--max-concurrent-scans` — has no
 /// config surface. Submissions past this are rejected so an agent loop can't
@@ -90,6 +96,29 @@ pub fn effective_rate_limit(requested: Option<u32>, server_cap: Option<u32>) -> 
         (None, Some(cap)) => cap,
         (None, None) => 0,
     }
+}
+
+/// Validate a caller-supplied payload-encoder list against the canonical set
+/// the CLI's `--encoders` accepts.
+///
+/// The CLI enforces this with clap's `PossibleValuesParser` and the config-file
+/// path re-checks it in `ScanConfig::normalize_and_validate` — but the REST and
+/// MCP request bodies bypass both, so an unknown name (`"urlencode"`,
+/// `"double-url"`, a typo) used to flow straight into `ScanArgs::encoders`,
+/// where the payload builder simply matches nothing for it. The scan then ran
+/// with silently reduced payload coverage and reported "done, 0 findings",
+/// which a caller cannot tell apart from a genuinely clean target.
+pub fn validate_encoders(encoders: &[String]) -> Result<(), String> {
+    for e in encoders {
+        if !crate::cmd::scan::ENCODER_VALUES.contains(&e.as_str()) {
+            return Err(format!(
+                "unknown encoder '{}' (expected one of: {})",
+                e,
+                crate::cmd::scan::ENCODER_VALUES.join(", ")
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],

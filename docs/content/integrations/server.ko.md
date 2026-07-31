@@ -190,7 +190,8 @@ curl http://127.0.0.1:6664/health
     "skip_discovery": false,
     "deep_scan": false,
     "skip_ast_analysis": false,
-    "detect_outdated_libs": false
+    "detect_outdated_libs": false,
+    "max_payloads_per_param": 0
   }
 }
 ```
@@ -206,6 +207,16 @@ curl http://127.0.0.1:6664/health
 `rate_limit`은 스캔의 초당 아웃바운드 요청 수를 제한합니다 (`0` = 무제한, 기본값).
 모든 워커 태스크에 걸쳐 적용됩니다. 서버 전역 `--rate-limit` 플래그는 상한선입니다.
 요청은 더 낮은 속도를 지정할 수는 있으나 이를 초과하거나 비활성화할 수는 없습니다.
+
+`max_payloads_per_param`은 발견된 각 파라미터를 테스트할 페이로드 수의 상한입니다
+(기본값 `0` = 명시적 상한 없음. 내장 페이로드 안전 상한은 그대로 적용됩니다).
+스모크 스캔에는 작은 값(예: `10`~`50`)을 사용하십시오. MCP 스캔 도구의 동명 필드와
+대응됩니다.
+
+`method`와 `encoders`는 CLI가 허용하는 것과 동일한 값 집합으로 검증됩니다.
+`method`는 자동으로 대문자로 변환되며(`"post"` → `"POST"`), 지원하지 않는 메서드나
+알 수 없는 인코더 이름은 잘못된 메서드를 보내거나 인코딩을 건너뛰는 스캔을 조용히
+실행하는 대신 `400`으로 거부됩니다.
 
 `scan_timeout`은 스캔 전체의 벽시계 시간 예산(초)입니다 (기본값 `0` = 무제한).
 요청당 `timeout`과는 구별됩니다. 예산에 도달하면 스캔이 중단되고, 그때까지 수집한

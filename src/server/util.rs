@@ -3,9 +3,25 @@
 
 use super::*;
 
-/// Reject scan-option values that are outside the supported range so callers
-/// get a precise 400 instead of having the server silently substitute defaults.
-pub(crate) fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
+/// Normalize and range-check scan options so callers get a precise 400 instead
+/// of having the server silently substitute defaults — or, worse, run a scan
+/// that quietly does the wrong thing.
+///
+/// Normalization matters because the REST body bypasses clap's value parsers
+/// exactly like a config file does (see `ScanConfig::normalize_and_validate`).
+/// `method` is the important one: it is compared case-sensitively downstream
+/// and is put on the wire verbatim, so `"post"` used to be sent as the literal
+/// extension verb `post` (which real servers answer with 405/501) while
+/// `"GET junk"` failed `Method::from_str` and silently degraded to GET. Both
+/// produced a `done` scan with zero findings and no error.
+pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String> {
+    // Uppercase + validate against the same method set `--method` accepts.
+    if let Some(m) = &opts.method {
+        opts.method = Some(crate::cmd::scan::parse_http_method_arg(m)?);
+    }
+    if let Some(encs) = &opts.encoders {
+        crate::job::validate_encoders(encs)?;
+    }
     if let Some(t) = opts.timeout
         && (t == 0 || t > MAX_TIMEOUT_SECS)
     {
@@ -30,6 +46,15 @@ pub(crate) fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
             MAX_WORKERS, w
         ));
     }
+    if let Some(m) = opts.max_payloads_per_param
+        && m > crate::job::MAX_PAYLOADS_PER_PARAM
+    {
+        return Err(format!(
+            "max_payloads_per_param must be between 0 and {} (got {})",
+            crate::job::MAX_PAYLOADS_PER_PARAM,
+            m
+        ));
+    }
     if let Some(st) = opts.scan_timeout
         && st > MAX_SCAN_TIMEOUT_SECS
     {
@@ -38,11 +63,14 @@ pub(crate) fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
             MAX_SCAN_TIMEOUT_SECS, st
         ));
     }
+    // Shared value list (also backing clap's parser and the config validator)
+    // so the accepted set can't drift between the three entry points.
     if let Some(mode) = opts.waf_bypass.as_deref()
-        && !matches!(mode, "auto" | "force" | "off")
+        && !crate::cmd::scan::WAF_BYPASS_VALUES.contains(&mode)
     {
         return Err(format!(
-            "waf_bypass must be one of auto, force, off (got '{}')",
+            "waf_bypass must be one of {} (got '{}')",
+            crate::cmd::scan::WAF_BYPASS_VALUES.join(", "),
             mode
         ));
     }
@@ -113,7 +141,10 @@ where
             .trim()
             .parse::<T>()
             .map(Some)
-            .map_err(|_| format!("{} must be a non-negative integer (got '{}')", key, raw)),
+            // Type-neutral wording: this helper also parses `waf_min_confidence`
+            // as an f32, where "must be a non-negative integer" was simply wrong
+            // advice for a value like `0.5x`.
+            .map_err(|_| format!("{} must be a valid number (got '{}')", key, raw)),
         None => Ok(None),
     }
 }
