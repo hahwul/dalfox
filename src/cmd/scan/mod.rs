@@ -351,7 +351,21 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // Per-target tracking for structured output (target_summary in JSON envelope)
     // Collect all target URLs that will be scanned, then track status per target.
-    let all_target_urls: Vec<String> = parsed_targets.iter().map(|t| t.url.to_string()).collect();
+    //
+    // Distinct URLs only. Every downstream side map (`skipped_targets`,
+    // `target_meta`, finding attribution) is keyed by URL string, so a repeated
+    // URL — possible since `--dedup-urls off` — would emit one summary entry per
+    // occurrence, each reporting that URL's *full* finding count and sharing one
+    // skip/WAF record. The per-target counts would then no longer sum to
+    // `findings_count`.
+    let all_target_urls: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        parsed_targets
+            .iter()
+            .map(|t| t.url.to_string())
+            .filter(|u| seen.insert(u.clone()))
+            .collect()
+    };
     // Insecure-mode diagnostic. By default dalfox builds its HTTP client with
     // `danger_accept_invalid_certs(true)` (the `--insecure` flag, on by
     // default) so self-signed / expired / hostname-mismatch certs are silently

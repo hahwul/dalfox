@@ -591,3 +591,120 @@ async fn dedup_urls_defaults_to_exact() {
         "the default must keep the historical behavior"
     );
 }
+
+#[test]
+fn signature_mode_prefers_a_representative_with_values() {
+    // Recon dumps commonly list the stale valueless form first; that URL often
+    // 404s, and letting it stand in for the family reports everything clean.
+    let mut targets = vec![
+        target_at("https://ex.example/p?id="),
+        target_at("https://ex.example/p?id=42"),
+        target_at("https://ex.example/p?id=43"),
+    ];
+    let stats = dedup_targets(&mut targets, "signature");
+    assert_eq!(stats.collapsed, 2);
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].url.as_str(), "https://ex.example/p?id=42");
+    assert!(
+        stats
+            .sample
+            .contains(&"https://ex.example/p?id=".to_string()),
+        "the demoted placeholder is reported as dropped: {:?}",
+        stats.sample
+    );
+}
+
+#[test]
+fn signature_mode_keeps_a_valueless_representative_when_thats_all_there_is() {
+    let mut targets = vec![
+        target_at("https://ex.example/p?id="),
+        target_at("https://ex.example/p?id="),
+    ];
+    let stats = dedup_targets(&mut targets, "signature");
+    assert_eq!(stats.collapsed, 1);
+    assert_eq!(targets[0].url.as_str(), "https://ex.example/p?id=");
+}
+
+#[test]
+fn signature_mode_ignores_non_form_bodies() {
+    // Running the form parser over XML would return the whole document as one
+    // pseudo-name: no collapse, and a multi-KiB dedup key.
+    let xml = |v: &str| format!("<order><item>{v}</item></order>");
+    let ct = [("Content-Type", "application/xml")];
+    assert_eq!(
+        sig("https://ex.example/p", "POST", Some(&xml("a")), &ct),
+        sig("https://ex.example/p", "POST", Some(&xml("b")), &ct),
+        "an unparseable body contributes no names, so the endpoint decides"
+    );
+    assert!(
+        sig("https://ex.example/p", "POST", Some(&xml("a")), &ct).ends_with('|'),
+        "no body names in the key"
+    );
+}
+
+#[test]
+fn multipart_field_name_is_not_confused_by_filename() {
+    let body = |name: &str| {
+        format!(
+            "--X\r\nContent-Disposition: form-data; filename=\"report.txt\"; name=\"{name}\"\r\n\r\nx\r\n--X--\r\n"
+        )
+    };
+    let ct = [("Content-Type", "multipart/form-data; boundary=X")];
+    let key = sig("https://ex.example/p", "POST", Some(&body("upload")), &ct);
+    assert!(
+        key.ends_with("|upload"),
+        "the field name, not the filename, belongs in the key: {key}"
+    );
+    assert_ne!(
+        key,
+        sig("https://ex.example/p", "POST", Some(&body("avatar")), &ct),
+        "different field names must not collapse"
+    );
+}
+
+#[tokio::test]
+async fn scope_filters_run_before_signature_dedup() {
+    // The include filter must get to rule family members out first: otherwise
+    // the representative picked here (`q=user`) is excluded afterwards and the
+    // whole family — including the `q=admin` the operator asked for — is gone.
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--dedup-urls",
+        "signature",
+        "--include-url",
+        "q=admin",
+        "https://ex.example/p?q=user",
+        "https://ex.example/p?q=admin",
+    ]);
+    let resolved = resolve_targets(&args).await.expect("resolves");
+    assert_eq!(resolved.targets.len(), 1);
+    assert_eq!(
+        resolved.targets[0].url.as_str(),
+        "https://ex.example/p?q=admin"
+    );
+    assert_eq!(
+        resolved.dedup.collapsed, 0,
+        "only one member survived scope"
+    );
+}
+
+#[tokio::test]
+async fn explicit_dedup_urls_flag_beats_an_unset_default() {
+    // `dedup_urls` is an Option so config precedence can tell "unset" from an
+    // explicit choice; the effective mode is read through `dedup_urls_mode`.
+    let args = args_from(&["-i", "url", "-S", "https://ex.example/p?id=1"]);
+    assert_eq!(args.dedup_urls, None);
+    assert_eq!(args.dedup_urls_mode(), "exact");
+
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--dedup-urls",
+        "exact",
+        "https://ex.example/p?id=1",
+    ]);
+    assert_eq!(args.dedup_urls.as_deref(), Some("exact"));
+}

@@ -699,23 +699,31 @@ fn test_normalize_and_validate_rejects_invalid_enums() {
 }
 
 #[test]
-fn test_config_dedup_urls_applies_when_cli_left_the_default() {
+fn test_config_dedup_urls_applies_when_cli_left_it_unset() {
     let cfg = Config {
         scan: Some(ScanConfig {
             dedup_urls: Some("signature".to_string()),
             ..Default::default()
         }),
     };
-    // CLI untouched (still the `exact` default): config wins.
+    // CLI untouched (`None`): config supplies the mode.
     let mut args = default_scan_args();
     cfg.apply_to_scan_args_if_default(&mut args);
-    assert_eq!(args.dedup_urls, "signature");
+    assert_eq!(args.dedup_urls.as_deref(), Some("signature"));
+    assert_eq!(args.dedup_urls_mode(), "signature");
 
     // CLI asked for something explicitly: config must not override it.
     let mut args = default_scan_args();
-    args.dedup_urls = "off".to_string();
+    args.dedup_urls = Some("off".to_string());
     cfg.apply_to_scan_args_if_default(&mut args);
-    assert_eq!(args.dedup_urls, "off");
+    assert_eq!(args.dedup_urls_mode(), "off");
+
+    // Including an explicit `exact` — the operator opting *out* of a
+    // config-file `signature` must win, since that mode discards targets.
+    let mut args = default_scan_args();
+    args.dedup_urls = Some("exact".to_string());
+    cfg.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.dedup_urls_mode(), "exact");
 }
 
 #[test]

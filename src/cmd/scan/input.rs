@@ -603,33 +603,6 @@ pub(crate) async fn resolve_targets(
         }
     }
 
-    // Deduplicate targets per `--dedup-urls` (exact / signature / off) to avoid
-    // redundant scans (e.g. pipe input with duplicates, or a `gau`/`katana`
-    // dump of the same endpoint with thousands of harvested values).
-    let dedup = dedup_targets(&mut parsed_targets, &args.dedup_urls);
-    if dedup.collapsed > 0 {
-        let sample = dedup
-            .sample
-            .iter()
-            .map(|s| crate::utils::log::sanitize_log_message(s).into_owned())
-            .collect::<Vec<_>>()
-            .join(", ");
-        log_info(
-            args,
-            &format!(
-                "dedup ({}): {} duplicate target(s) collapsed, {} remaining{}",
-                dedup.mode,
-                dedup.collapsed,
-                parsed_targets.len(),
-                if sample.is_empty() {
-                    String::new()
-                } else {
-                    format!(" — dropped e.g. {}", sample)
-                }
-            ),
-        );
-    }
-
     // Apply URL scope filtering (--include-url / --exclude-url)
     {
         // Invalid scope patterns must always surface on stderr, even when
@@ -739,6 +712,40 @@ pub(crate) async fn resolve_targets(
         }
     }
 
+    // Deduplicate targets per `--dedup-urls` (exact / signature / off) to avoid
+    // redundant scans (e.g. pipe input with duplicates, or a `gau`/`katana`
+    // dump of the same endpoint with thousands of harvested values).
+    //
+    // Deliberately *after* the scope filters: in `signature` mode one member of
+    // a collapsed family stands in for all of them, so the filters must get to
+    // rule members out first. Filtering afterwards would let a representative
+    // that `--include-url` excludes shadow the sibling the operator asked for,
+    // and drop the whole family. For `exact` mode the order is immaterial —
+    // the members are byte-identical, so any filter treats them alike.
+    let dedup = dedup_targets(&mut parsed_targets, args.dedup_urls_mode());
+    if dedup.collapsed > 0 {
+        let sample = dedup
+            .sample
+            .iter()
+            .map(|s| crate::utils::log::sanitize_log_message(s).into_owned())
+            .collect::<Vec<_>>()
+            .join(", ");
+        log_info(
+            args,
+            &format!(
+                "dedup ({}): {} duplicate target(s) collapsed, {} remaining{}",
+                dedup.mode,
+                dedup.collapsed,
+                parsed_targets.len(),
+                if sample.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — dropped e.g. {}", sample)
+                }
+            ),
+        );
+    }
+
     if args.hpp {
         log_info(
             args,
@@ -800,9 +807,8 @@ pub(crate) async fn resolve_targets(
     })
 }
 
-/// Drop duplicate targets in place per `mode`, keeping the first occurrence of
-/// each key (so the representative that survives is the one the operator listed
-/// first).
+/// Drop duplicate targets in place per `mode`, keeping one representative per
+/// key.
 ///
 /// - `exact` — the historical key: the full URL string (query and values
 ///   included) plus the method. Only byte-identical inputs collapse.
@@ -813,6 +819,15 @@ pub(crate) async fn resolve_targets(
 ///   `action=` discriminator can select a different handler on the same path),
 ///   which is why it is opt-in and why the collapsed count is reported.
 /// - `off` — no dedup; every input line is scanned.
+///
+/// The representative is the first member listed, with one exception: under
+/// `signature`, a member whose parameters all carry a value beats an earlier
+/// one that has an empty value somewhere. Recon dumps routinely list the
+/// stale, valueless form of an endpoint first (`?id=`, `?q=`), and that URL
+/// often 404s or renders an error page where nothing reflects — letting it
+/// represent the family would report thousands of collapsed URLs clean off a
+/// dud. It is a preference, not a guarantee: no value can be probed at input
+/// time, so `signature` can still pick a member that happens to be dead.
 ///
 /// An unrecognised mode is treated as `exact`; clap and the config validator
 /// both reject other values before they reach here.
@@ -829,25 +844,70 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
             sample: Vec::new(),
         };
     }
-    let before = targets.len();
-    let mut seen = std::collections::HashSet::new();
+    // Two passes: choose one index per key, then retain those. A single
+    // `retain` can't express "a later member replaces the one already kept".
+    let mut chosen: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::with_capacity(targets.len());
+    let mut keep = vec![false; targets.len()];
     let mut sample: Vec<String> = Vec::new();
-    targets.retain(|t| {
+    let mut collapsed = 0usize;
+    let note_dropped = |sample: &mut Vec<String>, t: &Target| {
+        if sample.len() < DEDUP_SAMPLE_LIMIT {
+            sample.push(t.url.to_string());
+        }
+    };
+    for (i, t) in targets.iter().enumerate() {
         let key = if mode == "signature" {
             target_signature_key(t)
         } else {
             format!("{}|{}", t.url, t.method)
         };
-        let fresh = seen.insert(key);
-        if !fresh && sample.len() < DEDUP_SAMPLE_LIMIT {
-            sample.push(t.url.to_string());
+        match chosen.entry(key) {
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(i);
+                keep[i] = true;
+            }
+            std::collections::hash_map::Entry::Occupied(mut slot) => {
+                collapsed += 1;
+                let current = *slot.get();
+                if mode == "signature"
+                    && has_empty_param_value(&targets[current])
+                    && !has_empty_param_value(t)
+                {
+                    // Promote this member and drop the placeholder we held.
+                    keep[current] = false;
+                    keep[i] = true;
+                    slot.insert(i);
+                    note_dropped(&mut sample, &targets[current]);
+                } else {
+                    note_dropped(&mut sample, t);
+                }
+            }
         }
-        fresh
-    });
+    }
+    let mut keep_iter = keep.into_iter();
+    targets.retain(|_| keep_iter.next().unwrap_or(true));
     DedupStats {
         mode,
-        collapsed: before - targets.len(),
+        collapsed,
         sample,
+    }
+}
+
+/// Whether any query or form-body parameter of `t` is present but empty — the
+/// `?id=` / `?q=` shape a recon dump leaves behind. Used only to pick between
+/// members of a signature family; JSON and multipart bodies are not inspected
+/// (their emptiness is not a single well-defined notion, and the query string
+/// is what varies in the input lists this exists for).
+fn has_empty_param_value(t: &Target) -> bool {
+    if t.url.query_pairs().any(|(_, v)| v.is_empty()) {
+        return true;
+    }
+    match t.data.as_deref().map(str::trim) {
+        Some(data) if looks_like_form_urlencoded(data) => {
+            url::form_urlencoded::parse(data.as_bytes()).any(|(_, v)| v.is_empty())
+        }
+        _ => false,
     }
 }
 
@@ -855,6 +915,11 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
 /// endpoint and which injection points* get scanned, and nothing that decides
 /// what is sent into them. Port is normalized through the scheme default so
 /// `https://a/p` and `https://a:443/p` share a signature.
+///
+/// The fragment is excluded on purpose: it never reaches the server, and
+/// fragment-located params are not HTTP-scannable (see
+/// `param_is_http_scannable`), so two URLs differing only after `#` produce
+/// the exact same scan.
 fn target_signature_key(t: &Target) -> String {
     let url = &t.url;
     let mut names: Vec<String> = url.query_pairs().map(|(k, _)| k.into_owned()).collect();
@@ -876,9 +941,13 @@ fn target_signature_key(t: &Target) -> String {
 /// forms collapse on the same footing as query parameters. Mirrors what the
 /// mining probes treat as body parameters: form-urlencoded pairs, the
 /// *top-level* keys of a JSON object, and `multipart/form-data` field names.
-/// A body shape none of those match (raw XML, a binary blob) contributes no
-/// names — such targets then collapse by endpoint alone, which is why
-/// `signature` mode is opt-in.
+///
+/// A body matching none of those (raw XML, a protobuf blob) contributes no
+/// names, so such targets collapse by endpoint alone — one more reason
+/// `signature` is opt-in. In particular the form-urlencoded parser is only
+/// reached for bodies that actually look like pairs: run on arbitrary bytes it
+/// happily returns the whole body as one pseudo-name, which would both defeat
+/// the collapse and paste a multi-MiB body into the dedup key.
 fn body_param_names(t: &Target) -> Vec<String> {
     let Some(data) = t.data.as_deref().map(str::trim).filter(|d| !d.is_empty()) else {
         return Vec::new();
@@ -898,13 +967,31 @@ fn body_param_names(t: &Target) -> Vec<String> {
     {
         return map.keys().cloned().collect();
     }
-    url::form_urlencoded::parse(data.as_bytes())
-        .map(|(k, _)| k.into_owned())
-        .collect()
+    if looks_like_form_urlencoded(data) {
+        return url::form_urlencoded::parse(data.as_bytes())
+            .map(|(k, _)| k.into_owned())
+            .collect();
+    }
+    Vec::new()
 }
 
-/// Field names from a raw `multipart/form-data` body: the `name="…"` of each
-/// `Content-Disposition: form-data` part.
+/// Whether `data` has the shape `a=1&b=2`: every `&`-separated segment carries
+/// a non-empty name before an `=`, and there is no raw whitespace (a real
+/// urlencoded body encodes it). Deliberately strict — misjudging XML or a
+/// binary blob as a form is worse than contributing no names for an exotic
+/// body, since the fallback silently turns the entire payload into a key.
+fn looks_like_form_urlencoded(data: &str) -> bool {
+    !data.is_empty()
+        && !data.chars().any(char::is_whitespace)
+        && data
+            .split('&')
+            .all(|pair| matches!(pair.split_once('='), Some((name, _)) if !name.is_empty()))
+}
+
+/// Field names from a raw `multipart/form-data` body: the `name` attribute of
+/// each `Content-Disposition: form-data` part. Attributes are split on `;`
+/// before matching so a `filename="…"` — which contains `name="` as a
+/// substring — can't be mistaken for the field name.
 fn multipart_field_names(data: &str) -> Vec<String> {
     let mut names = Vec::new();
     for line in data.lines() {
@@ -915,10 +1002,18 @@ fn multipart_field_names(data: &str) -> Vec<String> {
         {
             continue;
         }
-        if let Some(rest) = line.split_once("name=\"").map(|(_, r)| r)
-            && let Some((name, _)) = rest.split_once('"')
-        {
+        for attr in line.split(';').skip(1) {
+            let attr = attr.trim();
+            let Some(value) = attr.strip_prefix("name=") else {
+                continue;
+            };
+            let value = value.trim();
+            let name = value
+                .strip_prefix('"')
+                .and_then(|v| v.split_once('"').map(|(n, _)| n))
+                .unwrap_or(value);
             names.push(name.to_string());
+            break; // one field name per part
         }
     }
     names

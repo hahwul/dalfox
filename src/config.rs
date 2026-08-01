@@ -154,7 +154,7 @@ impl Config {
                 args.input_type = v.clone();
             }
             if let Some(v) = &scan.dedup_urls {
-                args.dedup_urls = v.clone();
+                args.dedup_urls = Some(v.clone());
             }
             // OUTPUT
             if let Some(v) = &scan.format {
@@ -555,9 +555,9 @@ impl Config {
                 args.input_type = v.clone();
             }
             if let Some(v) = &scan.dedup_urls
-                && args.dedup_urls == crate::cmd::scan::DEFAULT_DEDUP_URLS
+                && args.dedup_urls.is_none()
             {
-                args.dedup_urls = v.clone();
+                args.dedup_urls = Some(v.clone());
             }
 
             // OUTPUT
