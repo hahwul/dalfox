@@ -172,7 +172,7 @@ pub(crate) fn parse_http_method_arg(s: &str) -> std::result::Result<String, Stri
     }
 }
 
-#[derive(Clone, Args)]
+#[derive(Clone, Debug, PartialEq, Args)]
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
     /// Input type: auto, url, file, pipe, raw-http, har
@@ -616,6 +616,106 @@ pub struct ScanArgs {
     pub targets: Vec<String>,
 }
 
+/// Every field carries exactly the value clap's `default_value` /
+/// `default_value_t` would produce for a bare `dalfox scan <TARGET>` run, so
+/// `ScanArgs { .. , ..Default::default() }` is behaviourally identical to
+/// spelling out the full struct.
+///
+/// This exists so that adding a field to `ScanArgs` touches *this* impl and
+/// nothing else. Before it, every construction site listed all ~60 fields
+/// exhaustively, which meant a one-line flag addition rippled through 30+
+/// call sites across `src/` — pure merge-conflict surface for anything
+/// developed in parallel.
+///
+/// `scanargs_default_matches_clap_defaults` in `arg_parser_tests` pins the two
+/// together: if a new field's `default_value` and its entry here disagree, that
+/// test fails rather than the divergence reaching a release.
+impl Default for ScanArgs {
+    fn default() -> Self {
+        Self {
+            input_type: "auto".to_string(),
+            format: "plain".to_string(),
+            output: None,
+            include_request: false,
+            include_response: false,
+            include_all: false,
+            no_color: false,
+            silence: false,
+            dry_run: false,
+            stream_findings: false,
+            poc_type: "plain".to_string(),
+            limit: None,
+            limit_result_type: "all".to_string(),
+            only_poc: vec![],
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: DEFAULT_METHOD.to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
+            only_discovery: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: false,
+            mining_dict_word: None,
+            remote_wordlists: vec![],
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            timeout: crate::cmd::scan::DEFAULT_TIMEOUT_SECS,
+            scan_timeout: 0,
+            delay: crate::cmd::scan::DEFAULT_DELAY_MS,
+            rate_limit: crate::cmd::scan::DEFAULT_RATE_LIMIT,
+            retries: crate::cmd::scan::DEFAULT_RETRIES,
+            retry_delay: crate::cmd::scan::DEFAULT_RETRY_DELAY_MS,
+            proxy: None,
+            // `None` (not `Some(false)`) — absence is meaningful here: it lets
+            // config supply the value, while `Some(_)` is an explicit CLI
+            // choice that always wins. See the field's doc comment.
+            insecure: None,
+            follow_redirects: false,
+            ignore_return: vec![],
+            workers: crate::cmd::scan::DEFAULT_WORKERS,
+            max_concurrent_targets: crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
+            max_targets_per_host: crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
+            encoders: DEFAULT_ENCODERS.iter().map(|s| s.to_string()).collect(),
+            remote_payloads: vec![],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            oob: BlindOobArgs::default(),
+            custom_payload: None,
+            only_custom_payload: false,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
+            inject_marker: None,
+            skip_xss_scanning: false,
+            max_payloads_per_param: 0,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            sxss_retries: 3,
+            skip_ast_analysis: false,
+            analyze_external_js: false,
+            hpp: false,
+            detect_outdated_libs: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
+            waf_evasion: false,
+            waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+            targets: vec![],
+        }
+    }
+}
+
 /// Options for constructing a preflight ScanArgs.
 pub struct PreflightOptions {
     pub target: String,
@@ -641,7 +741,7 @@ pub struct PreflightOptions {
 /// OOB/OAST (interactsh) blind-XSS flags, flattened into [`ScanArgs`]. Grouped
 /// into one sub-struct so adding OOB support touches a single `ScanArgs` field
 /// instead of three. `Default` (all-unset) means OOB is disabled.
-#[derive(Args, Clone, Debug, Default)]
+#[derive(Args, Clone, Debug, Default, PartialEq)]
 pub struct BlindOobArgs {
     #[clap(help_heading = "XSS SCANNING")]
     /// Enable OOB blind XSS via interactsh. Optional comma-separated server
@@ -740,7 +840,6 @@ impl ScanArgs {
             DEFAULT_TIMEOUT_SECS
         };
         ScanArgs {
-            detect_outdated_libs: false,
             input_type: "url".to_string(),
             format: "json".to_string(),
             targets: vec![opts.target],
@@ -750,24 +849,11 @@ impl ScanArgs {
             cookies: opts.cookies,
             method: opts.method,
             user_agent: opts.user_agent,
-            cookie_from_raw: None,
-            include_url: vec![],
-            exclude_url: vec![],
-            ignore_param: vec![],
-            out_of_scope: vec![],
-            out_of_scope_file: None,
-            mining_dict_word: None,
             skip_mining: opts.skip_mining,
             skip_mining_dict: opts.skip_mining,
             skip_mining_dom: opts.skip_mining,
-            only_discovery: false,
             skip_discovery: opts.skip_discovery,
-            skip_reflection_header: false,
-            skip_reflection_cookie: false,
-            skip_reflection_path: false,
             timeout,
-            scan_timeout: 0,
-            delay: 0,
             proxy: opts.proxy,
             // Preflight only inspects content-type/parameters; it defaults to
             // trusting self-signed / staging certs (callers pass `true`) so
@@ -776,51 +862,16 @@ impl ScanArgs {
             // has a concrete bool here, so record it as an explicit choice.
             insecure: Some(opts.insecure),
             follow_redirects: opts.follow_redirects,
-            ignore_return: vec![],
-            output: None,
-            include_request: false,
-            include_response: false,
-            include_all: false,
             silence: true,
             dry_run: true,
-            stream_findings: false,
-            poc_type: "plain".to_string(),
-            limit: None,
-            limit_result_type: "all".to_string(),
-            only_poc: vec![],
             no_color: true,
             workers: 10,
             max_concurrent_targets: 1,
             max_targets_per_host: 1,
             encoders: opts.encoders,
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            oob: BlindOobArgs::default(),
-            custom_payload: None,
-            only_custom_payload: false,
-            inject_marker: None,
-            custom_alert_value: "1".to_string(),
-            custom_alert_type: "none".to_string(),
             skip_xss_scanning: true,
-            max_payloads_per_param: 0,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            sxss_retries: 3,
             skip_ast_analysis: true,
-            analyze_external_js: false,
-            hpp: false,
-            waf_bypass: "auto".to_string(),
-            skip_waf_probe: false,
-            force_waf: None,
-            waf_evasion: false,
-            rate_limit: 0,
-            retries: 0,
-            retry_delay: 1000,
-            waf_min_confidence: DEFAULT_WAF_MIN_CONFIDENCE,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
+            ..Default::default()
         }
     }
 }
@@ -829,6 +880,35 @@ impl ScanArgs {
 mod arg_parser_tests {
     use super::*;
     use crate::cmd::scan::DEFAULT_TIMEOUT_SECS;
+
+    /// `ScanArgs::default()` must equal what clap produces for a bare run with
+    /// no flags. Construction sites use `..Default::default()` to stand in for
+    /// "whatever the CLI default is", so any drift between the two silently
+    /// changes behaviour at every one of those sites — most of which are
+    /// non-CLI entry points (preflight, REST, MCP) that never go through clap
+    /// and would not notice. Adding a field with a `default_value` but no
+    /// matching entry in the `Default` impl fails here.
+    #[test]
+    fn scanargs_default_matches_clap_defaults() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            scan: ScanArgs,
+        }
+
+        let parsed = TestCli::try_parse_from(["dalfox"])
+            .expect("no-flag parse should succeed")
+            .scan;
+
+        assert_eq!(
+            parsed,
+            ScanArgs::default(),
+            "ScanArgs::default() drifted from the clap-declared defaults; \
+             update the Default impl in args.rs to match"
+        );
+    }
 
     #[test]
     fn encoders_arg_accepts_all_implemented_encoders() {

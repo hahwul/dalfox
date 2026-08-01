@@ -274,17 +274,9 @@ pub(crate) async fn run_scan_job(
         // here doesn't express; callers replay a HAR by POSTing /scan per entry.
         input_type: "url".to_string(),
         format: "json".to_string(),
-        output: None,
         include_request,
         include_response,
-        include_all: false,
         silence: true,
-        dry_run: false,
-        stream_findings: false,
-        poc_type: "plain".to_string(),
-        limit: None,
-        limit_result_type: "all".to_string(),
-        only_poc: vec![],
 
         param: opts.param.clone().unwrap_or_default(),
         data: opts.data.clone(),
@@ -300,21 +292,8 @@ pub(crate) async fn run_scan_job(
         },
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
         user_agent: opts.user_agent.clone(),
-        cookie_from_raw: None,
         no_color: true,
-        include_url: vec![],
-        exclude_url: vec![],
-        ignore_param: vec![],
-        out_of_scope: vec![],
-        out_of_scope_file: None,
-
-        only_discovery: false,
         skip_discovery: opts.skip_discovery.unwrap_or(false),
-        skip_reflection_header: false,
-        skip_reflection_cookie: false,
-        skip_reflection_path: false,
-
-        mining_dict_word: None,
         skip_mining: opts.skip_mining.unwrap_or(false),
         skip_mining_dict: opts.skip_mining.unwrap_or(false),
         skip_mining_dom: opts.skip_mining.unwrap_or(false),
@@ -334,38 +313,18 @@ pub(crate) async fn run_scan_job(
         // client is built, matching the CLI scan path.
         insecure: opts.insecure,
         follow_redirects: opts.follow_redirects.unwrap_or(false),
-        ignore_return: vec![],
 
         workers: opts.worker.unwrap_or(50),
-        max_concurrent_targets: 50,
-        max_targets_per_host: 100,
 
         encoders: opts
             .encoders
             .clone()
             .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]),
-
-        custom_blind_xss_payload: None,
         blind_callback_url: opts.blind.clone(),
-        // OOB/OAST blind XSS is CLI-only for now; the server runs its own scan
-        // loop and would need the poller lifecycle wired separately.
-        oob: crate::cmd::scan::BlindOobArgs::default(),
-        custom_payload: None,
-        only_custom_payload: false,
-        inject_marker: None,
-        custom_alert_value: "1".to_string(),
-        custom_alert_type: "none".to_string(),
-
-        skip_xss_scanning: false,
         max_payloads_per_param: opts.max_payloads_per_param.unwrap_or(0),
         deep_scan: opts.deep_scan.unwrap_or(false),
-        sxss: false,
-        sxss_url: None,
-        sxss_method: "GET".to_string(),
-        sxss_retries: 3,
         skip_ast_analysis: opts.skip_ast_analysis.unwrap_or(false),
         analyze_external_js: opts.analyze_external_js.unwrap_or(false),
-        hpp: false,
         waf_bypass: opts
             .waf_bypass
             .clone()
@@ -383,8 +342,6 @@ pub(crate) async fn run_scan_job(
         // `--rate-limit`. Honored in `run_scanning`'s workers now that they
         // re-enter the per-job rate-limiter scope (see crate::with_job_scopes).
         rate_limit: effective_rate_limit(opts.rate_limit, state.rate_limit),
-        retries: 0,
-        retry_delay: 1000,
         waf_min_confidence: opts
             .waf_min_confidence
             .unwrap_or(crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE),
@@ -392,6 +349,10 @@ pub(crate) async fn run_scan_job(
         remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
 
         targets: vec![url.clone()],
+        // Everything else stays at its CLI default. Notably `oob`: OOB/OAST
+        // blind XSS is CLI-only for now, because the server runs its own scan
+        // loop and would need the poller lifecycle wired separately.
+        ..Default::default()
     });
 
     // Initialize remote resources if requested (honor timeout/proxy)

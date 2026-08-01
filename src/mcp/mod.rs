@@ -1266,21 +1266,10 @@ browser execution; only detection_method=oob observes a real browser."
             cookies,
             method,
             user_agent,
-            cookie_from_raw: None,
-            include_url: vec![],
-            exclude_url: vec![],
-            ignore_param: vec![],
-            out_of_scope: vec![],
-            out_of_scope_file: None,
-            mining_dict_word: None,
             skip_mining,
             skip_mining_dict: skip_mining,
             skip_mining_dom: skip_mining,
-            only_discovery: false,
             skip_discovery,
-            skip_reflection_header: false,
-            skip_reflection_cookie: false,
-            skip_reflection_path: false,
             timeout,
             // Whole-scan wall-clock budget; 0 = unbounded. Enforced in
             // `run_job` by wrapping the scan future (run_scanning doesn't honor
@@ -1292,45 +1281,19 @@ browser execution; only detection_method=oob observes a real browser."
             // it as an explicit choice so it flows through unchanged.
             insecure: Some(insecure),
             follow_redirects,
-            ignore_return: vec![],
-            output: None,
             include_request,
             include_response,
-            include_all: false,
             silence: true,
-            dry_run: false,
-            stream_findings: false,
-            poc_type: "plain".to_string(),
-            limit: None,
-            limit_result_type: "all".to_string(),
-            only_poc: vec![],
             // Match the REST server: scan output is silenced and serialized as
             // JSON, so strip ANSI from any diagnostic the pipeline emits.
             no_color: true,
             workers,
-            max_concurrent_targets: 50,
-            max_targets_per_host: 100,
             encoders,
-            custom_blind_xss_payload: None,
             blind_callback_url,
-            // OOB/OAST blind XSS is CLI-only for now; the MCP path runs its own
-            // scan loop and would need the poller lifecycle wired separately.
-            oob: crate::cmd::scan::BlindOobArgs::default(),
-            custom_payload: None,
-            only_custom_payload: false,
-            inject_marker: None,
-            custom_alert_value: "1".to_string(),
-            custom_alert_type: "none".to_string(),
-            skip_xss_scanning: false,
             max_payloads_per_param,
             deep_scan,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            sxss_retries: 3,
             skip_ast_analysis,
             analyze_external_js,
-            hpp: false,
             waf_bypass,
             skip_waf_probe,
             force_waf,
@@ -1338,11 +1301,13 @@ browser execution; only detection_method=oob observes a real browser."
             // Per-call request-rate cap, now honored across all worker tasks
             // (see crate::with_job_scopes). 0 = unlimited.
             rate_limit,
-            retries: 0,
-            retry_delay: 1000,
             waf_min_confidence: waf_min_confidence as f32,
             remote_payloads,
             remote_wordlists,
+            // Everything else stays at its CLI default. Notably `oob`: OOB/OAST
+            // blind XSS is CLI-only for now, because the MCP path runs its own
+            // scan loop and would need the poller lifecycle wired separately.
+            ..Default::default()
         });
 
         // Load any requested remote payload/wordlist providers into the global
