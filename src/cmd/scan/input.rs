@@ -12,9 +12,44 @@ use super::validation::{
 use super::{ScanOutcome, emit_error};
 use crate::target_parser::*;
 
+/// How many dropped URLs the dedup log line quotes back. Enough to recognise
+/// the collapsed family without turning one INF line into a wall of text.
+const DEDUP_SAMPLE_LIMIT: usize = 3;
+
+/// What the target-dedup pass collapsed. Surfaced both as an operator-facing
+/// log line and in the scan-meta envelope, so a mode that *discards* targets
+/// never reads as full coverage.
+#[derive(Debug, Clone)]
+pub(crate) struct DedupStats {
+    /// Effective mode: `exact`, `signature`, or `off`.
+    pub(crate) mode: &'static str,
+    /// Targets dropped as duplicates.
+    pub(crate) collapsed: usize,
+    /// Up to [`DEDUP_SAMPLE_LIMIT`] of the dropped URLs.
+    pub(crate) sample: Vec<String>,
+}
+
+/// "The default mode collapsed nothing" — the shape a run that never reached
+/// target resolution should report.
+impl Default for DedupStats {
+    fn default() -> Self {
+        Self {
+            mode: super::args::DEFAULT_DEDUP_URLS,
+            collapsed: 0,
+            sample: Vec::new(),
+        }
+    }
+}
+
+/// The targets to scan plus what dedup dropped on the way there.
+pub(crate) struct ResolvedTargets {
+    pub(crate) targets: Vec<Target>,
+    pub(crate) dedup: DedupStats,
+}
+
 pub(crate) async fn resolve_targets(
     args: &ScanArgs,
-) -> std::result::Result<Vec<Target>, ScanOutcome> {
+) -> std::result::Result<ResolvedTargets, ScanOutcome> {
     // Byte budget for any path that slurps a file or stdin into memory.
     // 256 MiB lands well above realistic URL lists (≈5 M URLs at ~50 B
     // each) while still cutting `/dev/zero`, runaway pipes, and
@@ -568,13 +603,31 @@ pub(crate) async fn resolve_targets(
         }
     }
 
-    // Deduplicate targets by URL + method to avoid redundant scans (e.g. pipe input with duplicates)
-    {
-        let mut seen = std::collections::HashSet::new();
-        parsed_targets.retain(|t| {
-            let key = format!("{}|{}", t.url, t.method);
-            seen.insert(key)
-        });
+    // Deduplicate targets per `--dedup-urls` (exact / signature / off) to avoid
+    // redundant scans (e.g. pipe input with duplicates, or a `gau`/`katana`
+    // dump of the same endpoint with thousands of harvested values).
+    let dedup = dedup_targets(&mut parsed_targets, &args.dedup_urls);
+    if dedup.collapsed > 0 {
+        let sample = dedup
+            .sample
+            .iter()
+            .map(|s| crate::utils::log::sanitize_log_message(s).into_owned())
+            .collect::<Vec<_>>()
+            .join(", ");
+        log_info(
+            args,
+            &format!(
+                "dedup ({}): {} duplicate target(s) collapsed, {} remaining{}",
+                dedup.mode,
+                dedup.collapsed,
+                parsed_targets.len(),
+                if sample.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — dropped e.g. {}", sample)
+                }
+            ),
+        );
     }
 
     // Apply URL scope filtering (--include-url / --exclude-url)
@@ -741,7 +794,134 @@ pub(crate) async fn resolve_targets(
         }
     }
 
-    Ok(parsed_targets)
+    Ok(ResolvedTargets {
+        targets: parsed_targets,
+        dedup,
+    })
+}
+
+/// Drop duplicate targets in place per `mode`, keeping the first occurrence of
+/// each key (so the representative that survives is the one the operator listed
+/// first).
+///
+/// - `exact` — the historical key: the full URL string (query and values
+///   included) plus the method. Only byte-identical inputs collapse.
+/// - `signature` — method + scheme + host + port + path + the *sorted set of
+///   parameter names* (query and body alike). Parameter values are excluded, so
+///   `?id=1`, `?id=2`, … `?id=9999` from a `gau`/`katana` dump collapse to one
+///   scan of one endpoint. This is not value-safe for every endpoint (an
+///   `action=` discriminator can select a different handler on the same path),
+///   which is why it is opt-in and why the collapsed count is reported.
+/// - `off` — no dedup; every input line is scanned.
+///
+/// An unrecognised mode is treated as `exact`; clap and the config validator
+/// both reject other values before they reach here.
+pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats {
+    let mode: &'static str = match mode {
+        "off" => "off",
+        "signature" => "signature",
+        _ => "exact",
+    };
+    if mode == "off" {
+        return DedupStats {
+            mode,
+            collapsed: 0,
+            sample: Vec::new(),
+        };
+    }
+    let before = targets.len();
+    let mut seen = std::collections::HashSet::new();
+    let mut sample: Vec<String> = Vec::new();
+    targets.retain(|t| {
+        let key = if mode == "signature" {
+            target_signature_key(t)
+        } else {
+            format!("{}|{}", t.url, t.method)
+        };
+        let fresh = seen.insert(key);
+        if !fresh && sample.len() < DEDUP_SAMPLE_LIMIT {
+            sample.push(t.url.to_string());
+        }
+        fresh
+    });
+    DedupStats {
+        mode,
+        collapsed: before - targets.len(),
+        sample,
+    }
+}
+
+/// Value-independent identity of a target: everything that decides *which
+/// endpoint and which injection points* get scanned, and nothing that decides
+/// what is sent into them. Port is normalized through the scheme default so
+/// `https://a/p` and `https://a:443/p` share a signature.
+fn target_signature_key(t: &Target) -> String {
+    let url = &t.url;
+    let mut names: Vec<String> = url.query_pairs().map(|(k, _)| k.into_owned()).collect();
+    names.extend(body_param_names(t));
+    names.sort_unstable();
+    names.dedup();
+    format!(
+        "{}|{}://{}:{}{}|{}",
+        t.method.to_ascii_uppercase(),
+        url.scheme(),
+        url.host_str().unwrap_or(""),
+        url.port_or_known_default().unwrap_or(0),
+        url.path(),
+        names.join("&")
+    )
+}
+
+/// Parameter names carried by a target's request body, so POST/JSON/multipart
+/// forms collapse on the same footing as query parameters. Mirrors what the
+/// mining probes treat as body parameters: form-urlencoded pairs, the
+/// *top-level* keys of a JSON object, and `multipart/form-data` field names.
+/// A body shape none of those match (raw XML, a binary blob) contributes no
+/// names — such targets then collapse by endpoint alone, which is why
+/// `signature` mode is opt-in.
+fn body_param_names(t: &Target) -> Vec<String> {
+    let Some(data) = t.data.as_deref().map(str::trim).filter(|d| !d.is_empty()) else {
+        return Vec::new();
+    };
+    let content_type = t
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if content_type.contains("multipart/form-data") || data.contains("Content-Disposition:") {
+        return multipart_field_names(data);
+    }
+    if data.starts_with('{')
+        && let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(data)
+    {
+        return map.keys().cloned().collect();
+    }
+    url::form_urlencoded::parse(data.as_bytes())
+        .map(|(k, _)| k.into_owned())
+        .collect()
+}
+
+/// Field names from a raw `multipart/form-data` body: the `name="…"` of each
+/// `Content-Disposition: form-data` part.
+fn multipart_field_names(data: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for line in data.lines() {
+        let line = line.trim();
+        if !line
+            .to_ascii_lowercase()
+            .starts_with("content-disposition:")
+        {
+            continue;
+        }
+        if let Some(rest) = line.split_once("name=\"").map(|(_, r)| r)
+            && let Some((name, _)) = rest.split_once('"')
+        {
+            names.push(name.to_string());
+        }
+    }
+    names
 }
 
 /// Default grace window for the `auto` stdin merge, in milliseconds.

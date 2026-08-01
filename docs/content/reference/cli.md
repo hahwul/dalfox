@@ -51,6 +51,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `--dedup-urls` | — | `exact` | Target deduplication: `exact` (drop identical URL+method), `signature` (also collapse URLs differing only in parameter *values*), `off` (scan every input line) |
 
 ### Output
 

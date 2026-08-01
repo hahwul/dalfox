@@ -69,6 +69,21 @@ cat urls.txt | dalfox scan https://target.app/one
 
 이 동작을 조정하려면 `DALFOX_STDIN_WAIT_MS`로 대기 시간을 늘리거나 `0`으로 병합을 끌 수 있습니다([Environment](../../reference/environment/) 참고). `stdin`이 곧 입력이며 얼마가 걸리든 기다려야 한다면 `--input-type pipe`를 사용하세요.
 
+### 거의 같은 URL 묶기
+
+기본값(`--dedup-urls exact`)에서 Dalfox는 완전히 같은 타깃만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드가 모두 일치해야 합니다. 그런데 `gau` / `katana` / `waybackurls` 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 `?id=1` … `?id=9999`가 인젝션 지점 하나를 9999번 풀스캔하게 됩니다.
+
+`--dedup-urls signature`는 이것을 하나로 묶습니다. 키는 메서드, 스킴, 호스트, 포트, 경로, 그리고 *정렬된 파라미터 이름 집합*입니다. 쿼리는 물론 본문(form, JSON, multipart) 파라미터도 같은 자격으로 포함됩니다. 값은 키에서 제외되므로 값만 다른 URL 무리는 목록에서 가장 먼저 나온 하나로 대표됩니다. 무엇을 버렸는지는 로그로 남고, 그 개수는 스캔 메타데이터(`dedup_mode`, `targets_deduplicated`)에도 실리므로 축소된 실행이 목록 전체를 커버한 것처럼 보이지 않습니다.
+
+```bash
+gau target.app | dalfox scan --dedup-urls signature
+# INF dedup (signature): 8214 duplicate target(s) collapsed, 37 remaining — dropped e.g. …
+```
+
+언제 안전할까요? 입력이 어디로 흘러가는지를 파라미터 *이름*이 결정하는 경우, 즉 대부분의 경우입니다. 반대로 값이 코드 경로를 고르는 경우에는 **안전하지 않습니다.** 같은 경로에서 다른 핸들러로 분기하는 `action=` / `mode=` / `template=` 같은 판별자, 라우팅 토큰, 렌더링 템플릿을 바꾸는 로케일 값이 그렇습니다. 이런 곳에서는 한 분기만 스캔하고 전체를 보고하게 되므로, `signature`는 옵트인으로 남겨 두었습니다.
+
+모든 줄을 입력 그대로 스캔해야 하는 드문 경우에는 `--dedup-urls off`로 중복 제거를 완전히 끌 수 있습니다.
+
 ## Raw HTTP 모드
 
 Burp, Caido, ZAP에서 캡처한 요청을 파일로 저장한 뒤 Dalfox에 넘겨줍니다:

@@ -93,6 +93,7 @@ fn full_scan_config() -> ScanConfig {
         waf_evasion: Some(true),
         waf_min_confidence: Some(0.7),
         debug: Some(true),
+        ..Default::default()
     }
 }
 
@@ -677,12 +678,13 @@ fn test_normalize_and_validate_rejects_invalid_enums() {
         limit_result_type: Some("z".to_string()),
         custom_alert_type: Some("bogus".to_string()),
         waf_bypass: Some("always".to_string()),
+        dedup_urls: Some("fuzzy".to_string()),
         ..Default::default()
     };
     let warnings = scan.normalize_and_validate();
     assert_eq!(
         warnings.len(),
-        5,
+        6,
         "one warning per invalid field: {warnings:?}"
     );
     assert_eq!(scan.format, None);
@@ -690,6 +692,30 @@ fn test_normalize_and_validate_rejects_invalid_enums() {
     assert_eq!(scan.limit_result_type, None);
     assert_eq!(scan.custom_alert_type, None);
     assert_eq!(scan.waf_bypass, None);
+    assert_eq!(
+        scan.dedup_urls, None,
+        "an invalid dedup mode must fall back to `exact`, not reach ScanArgs"
+    );
+}
+
+#[test]
+fn test_config_dedup_urls_applies_when_cli_left_the_default() {
+    let cfg = Config {
+        scan: Some(ScanConfig {
+            dedup_urls: Some("signature".to_string()),
+            ..Default::default()
+        }),
+    };
+    // CLI untouched (still the `exact` default): config wins.
+    let mut args = default_scan_args();
+    cfg.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.dedup_urls, "signature");
+
+    // CLI asked for something explicitly: config must not override it.
+    let mut args = default_scan_args();
+    args.dedup_urls = "off".to_string();
+    cfg.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.dedup_urls, "off");
 }
 
 #[test]

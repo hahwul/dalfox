@@ -41,12 +41,12 @@ mod validation;
 
 pub use args::{
     BlindOobArgs, CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
-    CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, CUSTOM_ALERT_TYPE_VALUES, DEFAULT_DELAY_MS,
-    DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
-    DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS,
-    DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, ENCODER_VALUES,
-    FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ONLY_POC_VALUES, POC_TYPE_VALUES, PreflightOptions,
-    ScanArgs, WAF_BYPASS_VALUES,
+    CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, CUSTOM_ALERT_TYPE_VALUES, DEDUP_URLS_VALUES,
+    DEFAULT_DEDUP_URLS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS,
+    DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD, DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT,
+    DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE,
+    DEFAULT_WORKERS, ENCODER_VALUES, FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ONLY_POC_VALUES,
+    POC_TYPE_VALUES, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES,
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::{log_info, log_warn};
@@ -86,6 +86,10 @@ pub(crate) struct ScanState {
     pub(crate) total_targets: usize,
     pub(crate) spinner_allowed: bool,
     pub(crate) no_color: bool,
+    /// What `--dedup-urls` collapsed during target resolution, reported in the
+    /// scan-meta envelope so a run that dropped targets is never mistaken for
+    /// full coverage of the input list.
+    pub(crate) dedup: input::DedupStats,
 }
 
 /// Emit a structured error to stderr when format is json/jsonl, otherwise plain eprintln.
@@ -337,8 +341,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Resolve targets: input-type detection, file/stdin/raw-HTTP parsing,
     // dedup, scope + out-of-scope filtering, and --cookie-from-raw. Emits the
     // structured error itself on failure and returns Err for us to propagate.
-    let parsed_targets = match input::resolve_targets(args).await {
-        Ok(targets) => targets,
+    let (parsed_targets, dedup) = match input::resolve_targets(args).await {
+        Ok(resolved) => (resolved.targets, resolved.dedup),
         Err(outcome) => return outcome,
     };
 
@@ -483,6 +487,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         total_targets,
         spinner_allowed,
         no_color: nc,
+        dedup,
     };
 
     // Blind XSS: the static `-b/--blind` callback and/or OOB/OAST (interactsh)

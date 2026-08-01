@@ -44,12 +44,18 @@ fn tmp_file(name: &str, contents: &str) -> std::path::PathBuf {
 
 const SAMPLE_HAR_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.har");
 
+/// [`resolve_targets`] reduced to just the target list, for the cases that
+/// don't assert on dedup statistics.
+async fn resolve(args: &ScanArgs) -> std::result::Result<Vec<Target>, ScanOutcome> {
+    resolve_targets(args).await.map(|r| r.targets)
+}
+
 // ── resolve_targets: url mode ───────────────────────────────────────
 
 #[tokio::test]
 async fn url_mode_parses_single_target() {
     let args = args_from(&["-i", "url", "-S", "https://example.com/?q=1"]);
-    let targets = resolve_targets(&args).await.expect("one URL resolves");
+    let targets = resolve(&args).await.expect("one URL resolves");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.as_str(), "https://example.com/?q=1");
 }
@@ -64,7 +70,7 @@ async fn url_mode_dedupes_identical_targets() {
         "https://example.com/?q=1",
         "https://example.com/?q=1",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     assert_eq!(targets.len(), 1, "duplicate URL must be deduped");
 }
 
@@ -82,7 +88,7 @@ async fn url_mode_applies_method_and_header_overrides() {
         "DalfoxTest/1.0",
         "https://example.com/",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     assert_eq!(targets.len(), 1);
     let t = &targets[0];
     assert_eq!(t.method, "POST");
@@ -93,7 +99,7 @@ async fn url_mode_applies_method_and_header_overrides() {
 #[tokio::test]
 async fn invalid_input_type_is_an_error() {
     let args = args_from(&["-i", "bogus", "-S", "https://example.com/"]);
-    assert!(resolve_targets(&args).await.is_err());
+    assert!(resolve(&args).await.is_err());
 }
 
 // ── resolve_targets: auto mode (no stdin data) ──────────────────────
@@ -106,7 +112,7 @@ async fn invalid_input_type_is_an_error() {
 #[tokio::test]
 async fn auto_mode_classifies_url_literal() {
     let args = args_from(&["-i", "auto", "-S", "https://auto.example/?q=1"]);
-    let targets = resolve_targets(&args).await.expect("auto URL resolves");
+    let targets = resolve(&args).await.expect("auto URL resolves");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.host_str(), Some("auto.example"));
 }
@@ -120,7 +126,7 @@ async fn auto_mode_reads_url_list_file() {
         "https://one.example/\n# comment\nhttps://two.example/\n",
     );
     let args = args_from(&["-i", "auto", "-S", p.to_str().unwrap()]);
-    let targets = resolve_targets(&args).await.expect("auto file resolves");
+    let targets = resolve(&args).await.expect("auto file resolves");
     let _ = std::fs::remove_file(&p);
     let hosts: Vec<Option<&str>> = targets.iter().map(|t| t.url.host_str()).collect();
     assert_eq!(hosts, vec![Some("one.example"), Some("two.example")]);
@@ -135,7 +141,7 @@ async fn file_mode_reads_lines_and_skips_comments_and_blanks() {
         "https://a.example/?x=1\n# a comment\n\n  https://b.example/?y=2  \n",
     );
     let args = args_from(&["-i", "file", "-S", p.to_str().unwrap()]);
-    let targets = resolve_targets(&args).await.expect("file resolves");
+    let targets = resolve(&args).await.expect("file resolves");
     let _ = std::fs::remove_file(&p);
     let urls: Vec<&str> = targets.iter().map(|t| t.url.as_str()).collect();
     assert_eq!(
@@ -147,13 +153,13 @@ async fn file_mode_reads_lines_and_skips_comments_and_blanks() {
 #[tokio::test]
 async fn file_mode_without_path_is_an_error() {
     let args = args_from(&["-i", "file", "-S"]);
-    assert!(resolve_targets(&args).await.is_err());
+    assert!(resolve(&args).await.is_err());
 }
 
 #[tokio::test]
 async fn file_mode_missing_file_is_an_error() {
     let args = args_from(&["-i", "file", "-S", "/dalfox/no/such/target/list/xyz.txt"]);
-    assert!(resolve_targets(&args).await.is_err());
+    assert!(resolve(&args).await.is_err());
 }
 
 // ── resolve_targets: scope filters ──────────────────────────────────
@@ -169,7 +175,7 @@ async fn include_url_keeps_only_matching_targets() {
         "https://example.com/api/users",
         "https://example.com/page",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     assert_eq!(targets.len(), 1);
     assert!(targets[0].url.as_str().contains("/api/"));
 }
@@ -185,7 +191,7 @@ async fn exclude_url_drops_matching_targets() {
         "https://example.com/admin/panel",
         "https://example.com/ok",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     assert_eq!(targets.len(), 1);
     assert!(targets[0].url.as_str().ends_with("/ok"));
 }
@@ -202,7 +208,7 @@ async fn invalid_scope_regex_is_skipped_not_fatal() {
         "(unbalanced",
         "https://example.com/",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     assert_eq!(targets.len(), 1);
 }
 
@@ -219,7 +225,7 @@ async fn out_of_scope_domain_is_excluded() {
         "https://evil.example/",
         "https://good.example/",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.host_str(), Some("good.example"));
 }
@@ -236,7 +242,7 @@ async fn out_of_scope_file_domains_are_excluded() {
         "https://evil.example/",
         "https://good.example/",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     let _ = std::fs::remove_file(&p);
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.host_str(), Some("good.example"));
@@ -252,7 +258,7 @@ async fn all_targets_filtered_out_is_an_error() {
         "example.com",
         "https://example.com/",
     ]);
-    assert!(resolve_targets(&args).await.is_err());
+    assert!(resolve(&args).await.is_err());
 }
 
 // ── resolve_targets: raw-http + har modes ───────────────────────────
@@ -262,7 +268,7 @@ async fn raw_http_literal_is_parsed() {
     // A raw request pasted as a positional literal (not a path on disk).
     let raw = "GET /search?q=1 HTTP/1.1\r\nHost: raw.example\r\n\r\n";
     let args = args_from(&["-i", "raw-http", "-S", raw]);
-    let targets = resolve_targets(&args).await.expect("raw http resolves");
+    let targets = resolve(&args).await.expect("raw http resolves");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.host_str(), Some("raw.example"));
     assert_eq!(targets[0].method, "GET");
@@ -275,9 +281,7 @@ async fn raw_http_from_file_is_parsed() {
         "POST /login HTTP/1.1\r\nHost: file.example\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nu=a",
     );
     let args = args_from(&["-i", "raw-http", "-S", p.to_str().unwrap()]);
-    let targets = resolve_targets(&args)
-        .await
-        .expect("raw http file resolves");
+    let targets = resolve(&args).await.expect("raw http file resolves");
     let _ = std::fs::remove_file(&p);
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].method, "POST");
@@ -287,13 +291,13 @@ async fn raw_http_from_file_is_parsed() {
 #[tokio::test]
 async fn raw_http_invalid_is_an_error() {
     let args = args_from(&["-i", "raw-http", "-S", "not a real http request"]);
-    assert!(resolve_targets(&args).await.is_err());
+    assert!(resolve(&args).await.is_err());
 }
 
 #[tokio::test]
 async fn har_fixture_expands_to_multiple_targets() {
     let args = args_from(&["-i", "har", "-S", SAMPLE_HAR_PATH]);
-    let targets = resolve_targets(&args).await.expect("HAR resolves");
+    let targets = resolve(&args).await.expect("HAR resolves");
     assert_eq!(targets.len(), 2, "fixture has a GET and a POST entry");
     assert!(targets.iter().any(|t| t.method == "GET"));
     assert!(targets.iter().any(|t| t.method == "POST"));
@@ -302,7 +306,7 @@ async fn har_fixture_expands_to_multiple_targets() {
 #[tokio::test]
 async fn har_invalid_document_is_an_error() {
     let args = args_from(&["-i", "har", "-S", "{ not valid har }"]);
-    assert!(resolve_targets(&args).await.is_err());
+    assert!(resolve(&args).await.is_err());
 }
 
 // ── resolve_targets: cookie-from-raw ────────────────────────────────
@@ -321,7 +325,7 @@ async fn cookie_from_raw_appends_cookies_to_targets() {
         p.to_str().unwrap(),
         "https://example.com/",
     ]);
-    let targets = resolve_targets(&args).await.expect("resolves");
+    let targets = resolve(&args).await.expect("resolves");
     let _ = std::fs::remove_file(&p);
     assert_eq!(targets.len(), 1);
     let cookies = &targets[0].cookies;
@@ -407,4 +411,183 @@ fn apply_request_cli_overrides_keeps_request_method_without_flag() {
     let args = args_from(&["-i", "raw-http", "-S", "keep.example"]);
     apply_request_cli_overrides(&mut target, &args);
     assert_eq!(target.method, "DELETE");
+}
+
+// ── dedup_targets: --dedup-urls exact / signature / off ─────────────
+
+/// Parse `url` into a Target the way the non-request input paths do.
+fn target_at(url: &str) -> Target {
+    crate::target_parser::parse_target_with_method(url).expect("target parses")
+}
+
+/// Signature key of a URL scanned with `method` and an optional body.
+fn sig(url: &str, method: &str, data: Option<&str>, headers: &[(&str, &str)]) -> String {
+    let mut t = target_at(url);
+    t.method = method.to_string();
+    t.data = data.map(ToString::to_string);
+    t.headers = headers
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    target_signature_key(&t)
+}
+
+#[test]
+fn exact_mode_only_collapses_identical_urls() {
+    let mut targets = vec![
+        target_at("https://ex.example/p?id=1"),
+        target_at("https://ex.example/p?id=1"),
+        target_at("https://ex.example/p?id=2"),
+    ];
+    let stats = dedup_targets(&mut targets, "exact");
+    assert_eq!(stats.mode, "exact");
+    assert_eq!(stats.collapsed, 1);
+    assert_eq!(targets.len(), 2, "differing values stay distinct targets");
+}
+
+#[test]
+fn signature_mode_collapses_value_only_variants() {
+    // The `gau`/`katana` shape: one endpoint, one parameter, many harvested
+    // values. All of them are one injection point.
+    let mut targets: Vec<Target> = (1..=50)
+        .map(|i| target_at(&format!("https://ex.example/p?id={i}")))
+        .collect();
+    let stats = dedup_targets(&mut targets, "signature");
+    assert_eq!(stats.mode, "signature");
+    assert_eq!(stats.collapsed, 49);
+    assert_eq!(targets.len(), 1);
+    assert_eq!(
+        targets[0].url.as_str(),
+        "https://ex.example/p?id=1",
+        "the first listed URL is the surviving representative"
+    );
+    assert_eq!(
+        stats.sample.len(),
+        DEDUP_SAMPLE_LIMIT,
+        "the log line quotes a bounded sample of what was dropped"
+    );
+    assert_eq!(stats.sample[0], "https://ex.example/p?id=2");
+}
+
+#[test]
+fn signature_mode_keeps_distinct_endpoints_and_param_sets() {
+    let mut targets = vec![
+        target_at("https://ex.example/p?id=1"),
+        target_at("https://ex.example/p?id=2&debug=1"), // extra param name
+        target_at("https://ex.example/other?id=1"),     // other path
+        target_at("https://other.example/p?id=1"),      // other host
+        target_at("http://ex.example/p?id=1"),          // other scheme
+    ];
+    let stats = dedup_targets(&mut targets, "signature");
+    assert_eq!(stats.collapsed, 0);
+    assert_eq!(targets.len(), 5);
+}
+
+#[test]
+fn signature_mode_ignores_param_order_and_default_port() {
+    assert_eq!(
+        sig("https://ex.example/p?a=1&b=2", "GET", None, &[]),
+        sig("https://ex.example/p?b=9&a=8", "GET", None, &[]),
+        "same name set in a different order is the same endpoint"
+    );
+    assert_eq!(
+        sig("https://ex.example/p?a=1", "GET", None, &[]),
+        sig("https://ex.example:443/p?a=1", "GET", None, &[]),
+        "the scheme's default port must not split a signature"
+    );
+    assert_ne!(
+        sig("https://ex.example/p?a=1", "GET", None, &[]),
+        sig("https://ex.example:8443/p?a=1", "GET", None, &[]),
+        "a non-default port is a different endpoint"
+    );
+    assert_ne!(
+        sig("https://ex.example/p?a=1", "GET", None, &[]),
+        sig("https://ex.example/p?a=1", "POST", None, &[]),
+        "method is part of the signature"
+    );
+}
+
+#[test]
+fn signature_mode_counts_body_param_names() {
+    // form-urlencoded: values differ, names don't.
+    assert_eq!(
+        sig("https://ex.example/p", "POST", Some("user=a&pw=1"), &[]),
+        sig("https://ex.example/p", "POST", Some("user=b&pw=2"), &[]),
+    );
+    assert_ne!(
+        sig("https://ex.example/p", "POST", Some("user=a"), &[]),
+        sig("https://ex.example/p", "POST", Some("user=a&pw=1"), &[]),
+        "an extra body param is an extra injection point"
+    );
+    // JSON: top-level keys, matching what the JSON body miner probes.
+    assert_eq!(
+        sig("https://ex.example/p", "POST", Some(r#"{"q":"a"}"#), &[]),
+        sig("https://ex.example/p", "POST", Some(r#"{"q":"zzz"}"#), &[]),
+    );
+    assert_ne!(
+        sig("https://ex.example/p", "POST", Some(r#"{"q":"a"}"#), &[]),
+        sig("https://ex.example/p", "POST", Some(r#"{"r":"a"}"#), &[]),
+    );
+    // multipart: field names off the Content-Disposition lines.
+    let multipart = |v: &str| {
+        format!("--X\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\n{v}\r\n--X--\r\n")
+    };
+    let ct = [("Content-Type", "multipart/form-data; boundary=X")];
+    assert_eq!(
+        sig("https://ex.example/p", "POST", Some(&multipart("a")), &ct),
+        sig("https://ex.example/p", "POST", Some(&multipart("b")), &ct),
+    );
+    assert!(
+        sig("https://ex.example/p", "POST", Some(&multipart("a")), &ct).ends_with("|note"),
+        "the multipart field name lands in the signature"
+    );
+}
+
+#[test]
+fn off_mode_keeps_every_input_line() {
+    let mut targets = vec![
+        target_at("https://ex.example/p?id=1"),
+        target_at("https://ex.example/p?id=1"),
+    ];
+    let stats = dedup_targets(&mut targets, "off");
+    assert_eq!(stats.mode, "off");
+    assert_eq!(stats.collapsed, 0);
+    assert_eq!(targets.len(), 2, "off must not drop even exact duplicates");
+}
+
+#[tokio::test]
+async fn dedup_urls_signature_flows_through_resolve_targets() {
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--dedup-urls",
+        "signature",
+        "https://ex.example/p?id=1",
+        "https://ex.example/p?id=2",
+        "https://ex.example/q?id=1",
+    ]);
+    let resolved = resolve_targets(&args).await.expect("resolves");
+    assert_eq!(resolved.targets.len(), 2);
+    assert_eq!(resolved.dedup.mode, "signature");
+    assert_eq!(resolved.dedup.collapsed, 1);
+}
+
+#[tokio::test]
+async fn dedup_urls_defaults_to_exact() {
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "https://ex.example/p?id=1",
+        "https://ex.example/p?id=2",
+    ]);
+    let resolved = resolve_targets(&args).await.expect("resolves");
+    assert_eq!(resolved.dedup.mode, "exact");
+    assert_eq!(resolved.dedup.collapsed, 0);
+    assert_eq!(
+        resolved.targets.len(),
+        2,
+        "the default must keep the historical behavior"
+    );
 }

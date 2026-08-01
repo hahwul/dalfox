@@ -123,6 +123,7 @@ fn base_args(url: String, out: String) -> ScanArgs {
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     }
 }
 

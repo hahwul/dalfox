@@ -47,6 +47,7 @@ pub struct Config {
 pub struct ScanConfig {
     // INPUT
     pub input_type: Option<String>,
+    pub dedup_urls: Option<String>,
     // OUTPUT
     pub format: Option<String>,
     pub output: Option<String>,
@@ -151,6 +152,9 @@ impl Config {
             // INPUT
             if let Some(v) = &scan.input_type {
                 args.input_type = v.clone();
+            }
+            if let Some(v) = &scan.dedup_urls {
+                args.dedup_urls = v.clone();
             }
             // OUTPUT
             if let Some(v) = &scan.format {
@@ -549,6 +553,11 @@ impl Config {
                 && args.input_type == "auto"
             {
                 args.input_type = v.clone();
+            }
+            if let Some(v) = &scan.dedup_urls
+                && args.dedup_urls == crate::cmd::scan::DEFAULT_DEDUP_URLS
+            {
+                args.dedup_urls = v.clone();
             }
 
             // OUTPUT
@@ -1102,6 +1111,12 @@ impl ScanConfig {
             &mut warnings,
         );
         reject_unless_allowed(
+            &mut self.dedup_urls,
+            crate::cmd::scan::DEDUP_URLS_VALUES,
+            "scan.dedup_urls",
+            &mut warnings,
+        );
+        reject_unless_allowed(
             &mut self.waf_bypass,
             crate::cmd::scan::WAF_BYPASS_VALUES,
             "scan.waf_bypass",
@@ -1243,6 +1258,7 @@ pub fn default_toml_template() -> String {
 [scan]
 # INPUT
 # input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal), har (HAR / proxy export)
+# dedup_urls = "exact"       # exact (drop identical URL+method), signature (also collapse URLs differing only in param values), off
 
 # OUTPUT
 # format = "plain"           # plain, json, jsonl, markdown, sarif, toml

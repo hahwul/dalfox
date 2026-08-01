@@ -26,6 +26,12 @@ pub const ENCODER_VALUES: &[&str] = &[
 ];
 pub const CUSTOM_ALERT_TYPE_VALUES: &[&str] = &["none", "str"];
 pub const WAF_BYPASS_VALUES: &[&str] = &["auto", "force", "off"];
+pub const DEDUP_URLS_VALUES: &[&str] = &["exact", "signature", "off"];
+/// Default for `--dedup-urls`: collapse only byte-identical `url|method`
+/// pairs, i.e. the historical behavior. `signature` additionally collapses
+/// URLs that differ solely in parameter *values*, which is not value-safe for
+/// every endpoint, so it stays opt-in.
+pub const DEFAULT_DEDUP_URLS: &str = "exact";
 // Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
@@ -178,6 +184,13 @@ pub struct ScanArgs {
     /// Input type: auto, url, file, pipe, raw-http, har
     #[arg(short = 'i', long, default_value = "auto")]
     pub input_type: String,
+
+    #[clap(help_heading = "INPUT")]
+    /// Target deduplication: exact (default, drop byte-identical URL+method),
+    /// signature (also collapse URLs that differ only in parameter values —
+    /// keys on method+host+path+parameter names), off (scan every input line).
+    #[arg(long, default_value = DEFAULT_DEDUP_URLS, value_parser = clap::builder::PossibleValuesParser::new(DEDUP_URLS_VALUES.iter().copied()))]
+    pub dedup_urls: String,
 
     #[clap(help_heading = "OUTPUT")]
     /// Output format: json, jsonl, plain, markdown, sarif, toml
@@ -634,6 +647,7 @@ impl Default for ScanArgs {
     fn default() -> Self {
         Self {
             input_type: "auto".to_string(),
+            dedup_urls: DEFAULT_DEDUP_URLS.to_string(),
             format: "plain".to_string(),
             output: None,
             include_request: false,

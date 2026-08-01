@@ -745,6 +745,7 @@ fn mk_meta() -> ScanMetadata {
                 "error_code": "CONNECTION_FAILED"
             }),
         ],
+        ..Default::default()
     }
 }
 
