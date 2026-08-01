@@ -185,6 +185,14 @@ separate baseline writer — an ordinary `-f json -o` report is the baseline.
   disables the diff rather than failing the scan. The `meta.baseline` block
   reports `"enabled": false` with a `warning` in that case — check it before
   reading "0 findings" as "nothing new".
+- Caveats: `--limit` counts findings **before** the diff, so `--limit N` with a
+  baseline can stop the scan on N already-known findings and report 0 new —
+  drop `--limit` when gating. `--stream-findings` is auto-disabled by
+  `--baseline`. Refreshing the baseline means re-running **without**
+  `--baseline`; pointing `-o` at the baseline while `--baseline` is active
+  overwrites it with new findings only (dalfox warns).
+- **CLI only.** The server and MCP surfaces do not apply `--baseline`, and a
+  shared config file's `scan.baseline` is ignored there.
 
 ## Error Codes (appear in JSON `meta`, MCP, server)
 

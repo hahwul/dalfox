@@ -140,6 +140,26 @@ pub fn finalize_scan_args(
     args
 }
 
+/// Whether findings stream out mid-scan: opt-in via `--stream-findings`, plain
+/// format only, and disabled whenever another flag applies an end-of-scan
+/// transform the streamer cannot replicate.
+///
+/// The streamer prints a finding the moment it is recorded, before any
+/// end-of-scan stage runs. So every flag that *removes or re-counts* findings
+/// afterwards has to switch it off, or the live output contradicts the summary
+/// and the exit code. `--baseline` is in that set for the same reason as
+/// `--only-poc`: the streamer has no way to know a finding is already in the
+/// baseline, so it would print every triaged finding's full POC block mid-scan
+/// while the summary reports only the new ones.
+pub(crate) fn stream_findings_enabled(args: &ScanArgs) -> bool {
+    args.format == "plain"
+        && args.stream_findings
+        && args.output.is_none()
+        && args.limit.is_none()
+        && args.only_poc.is_empty()
+        && args.baseline.is_none()
+}
+
 /// Run a scan and return the outcome: `Clean` (no findings), `Findings`, or `Error`.
 pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Compute no-color locally (safe for concurrent server-mode scans)
@@ -300,6 +320,28 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // stderr (every format; stdout stays a clean machine payload) rather than
     // through log_warn, which only speaks in `plain`.
     let baseline = args.baseline.as_ref().map(|path| {
+        // `--output` pointed at the baseline overwrites it with this run's
+        // report. Under the default `filter` mode that report holds only the
+        // NEW findings, so the recorded backlog is destroyed and the next run
+        // re-reports all of it. Refreshing a baseline means re-running WITHOUT
+        // `--baseline`; warn rather than refuse, since `annotate` mode writes a
+        // complete report and is a legitimate way to do it.
+        if args.output.as_deref() == Some(path.as_str()) {
+            eprintln!(
+                "Warning: --output and --baseline are the same path ('{}'); under --baseline-mode filter this overwrites the baseline with new findings only. Re-run without --baseline to refresh it.",
+                path
+            );
+        }
+        // `--limit` stops the scan once N findings accrue, and that count is
+        // taken before the baseline diff runs. A target whose first N findings
+        // are all already known therefore halts early and reports zero new
+        // findings without having tested the rest of its parameters.
+        if args.limit.is_some() {
+            eprintln!(
+                "Warning: --limit counts findings before the --baseline diff, so a run whose first {} findings are all in the baseline stops early and reports 0 new. Drop --limit when gating on new findings.",
+                args.limit.unwrap_or(0)
+            );
+        }
         let loaded = baseline::load(path, &args.baseline_mode);
         match &loaded.warning {
             Some(w) => eprintln!("Warning: {} — baseline diff disabled", w),
@@ -307,8 +349,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 args,
                 &format!(
                     "baseline loaded: {} known findings from {}",
-                    loaded.keys.len(),
-                    path
+                    loaded.entries, path
                 ),
             ),
         }
@@ -606,15 +647,9 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         return output::render_only_discovery(args, &host_groups);
     }
 
-    // Streaming finding output: opt-in via `--stream-findings`, plain format
-    // only, and disabled when `--output` / `--limit` / `--only-poc` apply an
-    // end-of-scan transform the streamer can't replicate. Computed here so the
-    // scan loop and the end-of-scan renderer agree on whether streaming ran.
-    let stream_findings_enabled = args.format == "plain"
-        && args.stream_findings
-        && args.output.is_none()
-        && args.limit.is_none()
-        && args.only_poc.is_empty();
+    // Computed once here so the scan loop and the end-of-scan renderer agree on
+    // whether streaming ran.
+    let stream_findings_enabled = stream_findings_enabled(args);
 
     // Spawn the OOB poller now that we know whether streaming is on. It writes
     // correlated callbacks straight into the shared results vector and runs

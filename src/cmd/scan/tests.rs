@@ -1429,6 +1429,46 @@ async fn test_render_results_toml() {
     assert!(content.contains("target_summary"));
 }
 
+#[test]
+fn test_stream_findings_disabled_by_end_of_scan_transforms() {
+    let base = || {
+        let mut a = default_scan_args();
+        a.format = "plain".to_string();
+        a.stream_findings = true;
+        a
+    };
+    assert!(super::stream_findings_enabled(&base()));
+
+    // Each of these removes or re-counts findings after the streamer already
+    // printed them, so live output would contradict the summary and exit code.
+    let mut with_output = base();
+    with_output.output = Some("out.json".to_string());
+    let mut with_limit = base();
+    with_limit.limit = Some(5);
+    let mut with_only_poc = base();
+    with_only_poc.only_poc = vec!["v".to_string()];
+    let mut with_baseline = base();
+    with_baseline.baseline = Some("baseline.json".to_string());
+
+    for (label, args) in [
+        ("--output", with_output),
+        ("--limit", with_limit),
+        ("--only-poc", with_only_poc),
+        ("--baseline", with_baseline),
+    ] {
+        assert!(
+            !super::stream_findings_enabled(&args),
+            "{} must disable --stream-findings",
+            label
+        );
+    }
+
+    // Streaming is plain-only regardless.
+    let mut json = base();
+    json.format = "json".to_string();
+    assert!(!super::stream_findings_enabled(&json));
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // output.rs — `--baseline` end-to-end through render_results (issue #1274)
 //

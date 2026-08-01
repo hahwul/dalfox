@@ -180,7 +180,13 @@ fn a_malformed_report_disables_the_diff() {
     for (name, body) in [
         ("garbage.json", "not json at all {{{"),
         ("empty-file.json", "   \n  "),
-        ("no-findings.json", "{\"meta\":{},\"targets\":[]}"),
+        ("no-findings.json", "{\"scanned\":true,\"targets\":[]}"),
+        // A --dry-run envelope carries a `meta` but describes a plan, not
+        // findings; reading it as an empty backlog would be wrong.
+        (
+            "dry-run.json",
+            "{\"dry_run\":true,\"meta\":{},\"targets\":[]}",
+        ),
         ("wrong-shape.json", "[{\"unrelated\":1},{\"also\":2}]"),
     ] {
         let path = tmp(name, body);
@@ -231,6 +237,7 @@ fn active_baseline(keys: &[&Result], mode: &str) -> Baseline {
         path: "baseline.json".to_string(),
         mode: mode.to_string(),
         keys: keys.iter().map(|r| key_for_result(r)).collect(),
+        entries: keys.len(),
         warning: None,
     }
 }
@@ -312,6 +319,7 @@ fn a_disabled_baseline_changes_nothing_but_still_reports_itself() {
         path: "gone.json".to_string(),
         mode: BASELINE_MODE_FILTER.to_string(),
         keys: Default::default(),
+        entries: 0,
         warning: Some("could not be read".to_string()),
     };
     let mut results = vec![finding(FindingType::Verified, "https://h/s?q=1", "q")];
@@ -326,4 +334,102 @@ fn a_disabled_baseline_changes_nothing_but_still_reports_itself() {
             .unwrap()
             .contains("could not be read")
     );
+}
+
+// ------------------------------------------------------- review regressions
+
+#[test]
+fn sibling_endpoints_without_a_query_stay_distinct() {
+    // The SARIF fingerprint helper drops the whole last path segment for any
+    // query-less URL, which collapses `/api/v1/users` into `/api/v1/`. Reused
+    // as a baseline identity it would suppress a genuinely new finding on a
+    // sibling endpoint — a silent false-clean, the one failure a gate must not
+    // have. Every non-query wire location is affected.
+    for location in ["Header", "Cookie", "Body", "JsonBody", "Fragment", ""] {
+        let mut a = finding(FindingType::Verified, "https://h/api/v1/users", "X-Fwd");
+        a.location = location.to_string();
+        let mut b = finding(FindingType::Verified, "https://h/api/v1/orders", "X-Fwd");
+        b.location = location.to_string();
+        assert_ne!(
+            key_for_result(&a),
+            key_for_result(&b),
+            "sibling endpoints collapsed at location={:?}",
+            location
+        );
+    }
+}
+
+#[test]
+fn path_injection_findings_still_ignore_the_injected_segment() {
+    // The flip side: a path parameter puts the payload IN the last segment, so
+    // that segment must not participate or every run reports it as new.
+    let mut a = finding(FindingType::Verified, "https://h/p/level1/%3Cimg%3E", "seg");
+    a.location = "Path".to_string();
+    let mut b = finding(FindingType::Verified, "https://h/p/level1/%3Csvg%3E", "seg");
+    b.location = "Path".to_string();
+    assert_eq!(key_for_result(&a), key_for_result(&b));
+
+    // …but a different parent path is still a different finding.
+    let mut other = finding(FindingType::Verified, "https://h/q/level1/%3Cimg%3E", "seg");
+    other.location = "Path".to_string();
+    assert_ne!(key_for_result(&a), key_for_result(&other));
+}
+
+#[test]
+fn dom_poc_url_carrying_the_payload_on_the_path_ignores_that_segment() {
+    // `build_dom_xss_poc_url` pushes the payload onto the path for a
+    // `location.pathname` source, percent-encoded and with no `location` set.
+    // Recognising it by content keeps those findings stable across runs.
+    let payload = "<img src=x onerror=alert(1) class=dlx1>";
+    let encoded = urlencoding::encode(payload).into_owned();
+    let mut a = finding(
+        FindingType::AstDetected,
+        "https://h/app/",
+        "location.pathname",
+    );
+    a.data = format!("https://h/app/{}", encoded);
+    a.payload = payload.to_string();
+
+    let mut b = a.clone();
+    let other_payload = "<svg onload=alert(1) class=dlx2>";
+    b.data = format!("https://h/app/{}", urlencoding::encode(other_payload));
+    b.payload = other_payload.to_string();
+
+    assert_eq!(key_for_result(&a), key_for_result(&b));
+}
+
+#[test]
+fn a_meta_only_jsonl_baseline_is_a_valid_empty_baseline() {
+    // A clean first `--format jsonl` run writes exactly one line — the meta
+    // envelope. Whole-file JSON parsing accepts it as an object with no
+    // `findings`, and rejecting that broke "record once, diff every run after"
+    // for any repo whose first scan is clean.
+    let body = format!(
+        "{{\"meta\":{{\"dalfox_version\":\"{}\",\"findings_count\":0}}}}\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    let path = tmp("meta-only.jsonl", &body);
+    let bl = load(path.to_str().unwrap(), BASELINE_MODE_FILTER);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(bl.is_active(), "warning: {:?}", bl.warning);
+    assert_eq!(bl.keys.len(), 0);
+    assert_eq!(bl.entries, 0);
+    assert!(bl.is_new(&finding(FindingType::Verified, "https://h/s?q=1", "q")));
+}
+
+#[test]
+fn baseline_entries_counts_report_rows_not_deduplicated_keys() {
+    // Two findings, one shared identity (an `R` that a `V` supersedes would
+    // look like this). `entries` must still say 2 so it lines up with the
+    // baseline file's own `findings_count`.
+    let a = finding(FindingType::Verified, "https://h/s?q=1", "q");
+    let b = finding(FindingType::Verified, "https://h/s?q=2", "q");
+    let path = tmp("dup-identity.json", &report(&[a.clone(), b]));
+    let bl = load(path.to_str().unwrap(), BASELINE_MODE_FILTER);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(bl.is_active(), "warning: {:?}", bl.warning);
+    assert_eq!(bl.keys.len(), 1, "both rows share one identity");
+    assert_eq!(bl.entries, 2, "but the report held two rows");
 }

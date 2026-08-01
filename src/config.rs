@@ -1305,7 +1305,7 @@ pub fn default_toml_template() -> String {
 # stream_findings = false    # emit findings mid-scan instead of after `WRN XSS found N XSS` (plain format only)
 # poc_type = "plain"         # plain, curl, httpie, http-request
 # limit = 100
-# baseline = "baseline.json"  # prior dalfox JSON/JSONL report; report only findings new since it
+# baseline = "baseline.json"  # CLI only (not applied by `dalfox server` / MCP); prior JSON/JSONL report, report only findings new since it
 # baseline_mode = "filter"    # filter (drop known findings) or annotate (keep them, mark each `new`)
 
 # TARGETS

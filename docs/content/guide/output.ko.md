@@ -196,12 +196,20 @@ dalfox scan scope.txt --baseline baseline.json      # 이후 매 실행
 
 ### 베이스라인 갱신
 
-전용 명령은 없습니다. 신규 건을 받아들이고 파일을 교체하면 됩니다.
+전용 명령은 없습니다. `--baseline` **없이** 다시 실행해(그래야 리포트에 신규 건만이 아니라 전체 집합이 담깁니다) 파일을 교체하면 됩니다.
 
 ```bash
 dalfox scan scope.txt -f json -o baseline.json
 git commit -am "chore: refresh dalfox baseline"
 ```
+
+`--baseline`을 켠 채 `-o`를 같은 파일로 지정하면 `filter` 모드에서 베이스라인이 파괴됩니다. 되쓰이는 리포트에는 신규 건만 들어 있어서 다음 실행이 백로그 전체를 다시 보고하게 됩니다. 두 경로가 같으면 Dalfox가 경고합니다.
+
+### 주의사항
+
+- **`--limit`은 diff 이전에 셉니다.** 스캔 중 중단 조건은 수집되는 모든 건을 세므로(베이스라인에 이미 있는 건 포함), `--limit 10 --baseline b.json`으로 처음 10건이 전부 기존 건인 대상을 돌리면 나머지 파라미터를 테스트하지 않은 채 조기 종료하고 "신규 0"을 보고합니다. 신규 기준으로 게이트할 때는 `--limit`을 빼세요. 둘을 함께 쓰면 Dalfox가 경고합니다.
+- **`--stream-findings`는 `--baseline`이 있으면 비활성화됩니다.** `--only-poc`과 같은 이유입니다. 스트리머는 어떤 건이 이미 베이스라인에 있는지 알 수 없어서, 요약은 신규만 보고하는데 화면에는 트리아지가 끝난 백로그 전체가 흘러가게 됩니다.
+- **CLI 전용입니다.** `dalfox server`와 MCP 서버는 `--baseline`을 적용하지 않습니다. 공유 config의 `scan.baseline`도 그쪽에서는 조용히 무시됩니다.
 
 ## 색상 및 TTY 동작
 
@@ -289,7 +297,13 @@ GitHub의 `upload-sarif` 액션을 통해 `dalfox.sarif`를 업로드하면, 탐
     path: dalfox.json
 ```
 
-트리아지 후 베이스라인을 갱신하려면 `-o .dalfox/baseline.json`으로 다시 실행하고 결과를 커밋하세요.
+트리아지 후 베이스라인을 갱신하려면 `--baseline` **없이** 실행하고 `-o`를 베이스라인 파일로 지정하세요.
+
+```bash
+dalfox scan scope.txt --only-poc v -f json -o .dalfox/baseline.json
+```
+
+위 게이트 명령을 그대로 두고 `-o .dalfox/baseline.json`만 붙이면 *신규* 건만 담긴 리포트가 파일을 덮어써서 기록해둔 백로그가 날아갑니다. `--output`과 `--baseline`이 같은 경로로 해석되면 Dalfox가 stderr에 경고합니다.
 
 ## 종료 코드
 

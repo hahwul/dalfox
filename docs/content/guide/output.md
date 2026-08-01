@@ -198,12 +198,20 @@ A baseline that is missing, malformed, or written by a different major version *
 
 ### Refreshing the baseline
 
-There is no special command. Accept the new findings and replace the file:
+There is no special command. Re-run **without** `--baseline` — so the report holds the full set, not just the new findings — and replace the file:
 
 ```bash
 dalfox scan scope.txt -f json -o baseline.json
 git commit -am "chore: refresh dalfox baseline"
 ```
+
+Running with `--baseline` and `-o` pointed at the same file destroys the baseline under `filter` mode: the report written back holds only what was new, so the next run re-reports the whole backlog. Dalfox warns when the two paths match.
+
+### Caveats
+
+- **`--limit` counts before the diff.** The scan-time stop condition counts every finding as it is collected, baseline-known ones included, so `--limit 10 --baseline b.json` against a target whose first 10 findings are all known halts early and reports 0 new without testing the rest. Drop `--limit` when gating on new findings; Dalfox warns when both are set.
+- **`--stream-findings` is disabled by `--baseline`**, for the same reason it is disabled by `--only-poc`: the streamer cannot know a finding is already in the baseline, so it would print the whole triaged backlog live while the summary reports only the new ones.
+- **CLI only.** `--baseline` is not applied by `dalfox server` or the MCP server; a shared config file's `scan.baseline` is silently ignored there.
 
 ## Colour & TTY behaviour
 
@@ -291,7 +299,13 @@ Commit `baseline.json` alongside the scope file and let the exit code fail the b
     path: dalfox.json
 ```
 
-To refresh the baseline after triage, re-run with `-o .dalfox/baseline.json` and commit the result.
+To refresh the baseline after triage, re-run **without** `--baseline` and point `-o` at it:
+
+```bash
+dalfox scan scope.txt --only-poc v -f json -o .dalfox/baseline.json
+```
+
+Re-running the gate command above with `-o .dalfox/baseline.json` would write a report containing only the *new* findings over the file and wipe the recorded backlog — Dalfox warns on stderr when `--output` and `--baseline` resolve to the same path.
 
 ## Exit codes
 

@@ -64,27 +64,19 @@ pub fn stable_finding_fingerprint(
     hex_full[..16].to_string()
 }
 
-/// Payload-invariant identity key for a finding URL, used by
-/// `stable_finding_fingerprint` (SARIF) and the `--baseline` diff. Mirrors
-/// `finding_belongs_to_target`: strip the query if present, else key by parent
-/// path. Lives next to the matching helper so the two stay in sync.
-///
-/// The point is that two runs of the same scan produce the same key even
-/// though each embeds a different payload in the URL.
-pub fn target_identity_key(url: &str) -> &str {
+/// Owned version of the identity key used by `finding_belongs_to_target`,
+/// suitable for hashing. Mirrors that helper's logic: strip query if
+/// present, else key by parent path. Lives next to the matching helper
+/// so the two stay in sync.
+fn target_identity_key_owned(url: &str) -> String {
     let no_query = url.split('?').next().unwrap_or(url);
     if url.contains('?') {
-        return no_query;
+        return no_query.to_string();
     }
     match no_query.rfind('/') {
-        Some(i) => &no_query[..=i],
-        None => no_query,
+        Some(i) => no_query[..=i].to_string(),
+        None => no_query.to_string(),
     }
-}
-
-/// Owned form of [`target_identity_key`], kept for hashing call sites.
-fn target_identity_key_owned(url: &str) -> String {
-    target_identity_key(url).to_string()
 }
 
 /// Decide whether a finding URL was produced by scanning a given target URL.

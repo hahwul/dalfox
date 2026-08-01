@@ -330,7 +330,11 @@ pub(super) fn apply_baseline(
     }
 
     block["enabled"] = serde_json::json!(true);
-    block["baseline_findings"] = serde_json::json!(baseline.keys.len());
+    // Entries read from the report, not `keys.len()` — the deduplicated key
+    // count is smaller whenever the baseline holds several findings sharing one
+    // identity, and a pipeline comparing this against the baseline file's own
+    // `findings_count` would see a mismatch it could not explain.
+    block["baseline_findings"] = serde_json::json!(baseline.entries);
     block["new"] = serde_json::json!(new_count);
     block["known"] = serde_json::json!(known_count);
     Some(block)

@@ -138,7 +138,7 @@ debug = false
 | `limit` | int | — | 결과 개수 상한 |
 | `limit_result_type` | string | `"all"` | 집계 대상 타입: `all`, `v`, `r`, `a` |
 | `only_poc` | array | `[]` | 출력 필터: `["v","a"]` |
-| `baseline` | string | — | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다 |
+| `baseline` | string | — | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다. **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
 | `baseline_mode` | string | `"filter"` | `filter`는 알려진 건을 제거, `annotate`는 유지한 채 `new` 표시 |
 | `no_color` | bool | `false` | ANSI 색상 비활성화 |
 

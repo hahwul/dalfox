@@ -35,8 +35,16 @@ pub(crate) struct Baseline {
     pub(crate) path: String,
     /// `filter` or `annotate` (already validated by clap / config).
     pub(crate) mode: String,
-    /// Identity keys of the findings recorded in the baseline report.
+    /// Identity keys of the findings recorded in the baseline report. Fewer
+    /// than [`entries`] when the report holds several findings that share one
+    /// identity (e.g. an `R` and a `V` for the same parameter and context).
+    ///
+    /// [`entries`]: Baseline::entries
     pub(crate) keys: HashSet<String>,
+    /// How many finding entries the report actually contained. Reported as
+    /// `meta.baseline.baseline_findings` so it lines up with the baseline
+    /// file's own `findings_count` instead of the smaller deduplicated total.
+    pub(crate) entries: usize,
     /// `Some` when the diff is disabled; the message is surfaced on stderr and
     /// in the structured `meta.baseline` block.
     pub(crate) warning: Option<String>,
@@ -66,8 +74,7 @@ impl Baseline {
 /// does not read as a new finding.
 ///
 /// Included:
-///   - **host + path** via [`crate::utils::target_identity_key`], the same
-///     payload-invariant key SARIF `partialFingerprints` use,
+///   - **host + path** via [`identity_path`],
 ///   - **parameter name** and its **wire location** (a `q` in the query and a
 ///     `q` in a cookie are different findings),
 ///   - **injection context** (`inject_type`) and **CWE**,
@@ -88,10 +95,11 @@ fn finding_key(
     tier: &str,
     evidence: &str,
     detection_method: &str,
+    payload: &str,
 ) -> String {
     format!(
         "v1|{}|{}|{}|{}|{}|{}|{}",
-        crate::utils::target_identity_key(data),
+        identity_path(data, location, payload),
         param,
         location,
         inject_type,
@@ -111,7 +119,58 @@ pub(crate) fn key_for_result(r: &Result) -> String {
         r.result_type.short(),
         &r.evidence,
         r.detection_method.as_str(),
+        &r.payload,
     )
+}
+
+/// The payload-invariant part of a finding URL: scheme + host + path, with the
+/// query and fragment dropped and a payload-carrying trailing path segment
+/// replaced by `*`.
+///
+/// Deliberately **not** `utils::target_identity_key` (the SARIF fingerprint
+/// helper), which drops the whole last path segment for any URL without a
+/// query. That is fine as the *containment* test it was written for, but as an
+/// *identity* key it collapses sibling endpoints: a header/cookie/body finding
+/// on `/api/v1/users` and one on `/api/v1/orders` would hash the same, and
+/// under `filter` mode the second would be suppressed as already-known — a
+/// silent false-clean, the one failure mode a gate must not have.
+///
+/// The trailing segment is only dropped when the payload actually lives there:
+///   - `location == "Path"` — path-parameter injection replaces a segment,
+///   - or the segment decodes to something containing the payload, which is how
+///     `build_dom_xss_poc_url` renders a `location.pathname` DOM finding.
+///
+/// Anything we can't prove is payload-carrying keeps its full path. That errs
+/// toward reporting a known finding as new (noise) rather than hiding a new one
+/// (a missed vulnerability), which is the right direction for a CI gate.
+fn identity_path(data: &str, location: &str, payload: &str) -> String {
+    let no_fragment = data.split('#').next().unwrap_or(data);
+    let path = no_fragment.split('?').next().unwrap_or(no_fragment);
+
+    let Some(slash) = path.rfind('/') else {
+        return path.to_string();
+    };
+    let (parent, last) = path.split_at(slash + 1);
+    if last.is_empty() {
+        return path.to_string();
+    }
+
+    if location == "Path" || segment_carries_payload(last, payload) {
+        return format!("{}*", parent);
+    }
+    path.to_string()
+}
+
+/// Whether a path segment holds the payload — directly, or percent-encoded as
+/// the `url` crate writes it when a DOM-XSS POC pushes the payload onto the path.
+fn segment_carries_payload(segment: &str, payload: &str) -> bool {
+    if payload.is_empty() {
+        return false;
+    }
+    segment.contains(payload)
+        || urlencoding::decode(segment)
+            .map(|d| d.contains(payload))
+            .unwrap_or(false)
 }
 
 /// Reduce an evidence string to the part that is stable across runs.
@@ -152,6 +211,8 @@ struct BaselineFinding {
     location: String,
     #[serde(default)]
     detection_method: String,
+    #[serde(default)]
+    payload: String,
 }
 
 /// Load `path`, returning a [`Baseline`] that is either active or carries the
@@ -161,6 +222,7 @@ pub(crate) fn load(path: &str, mode: &str) -> Baseline {
         path: path.to_string(),
         mode: mode.to_string(),
         keys: HashSet::new(),
+        entries: 0,
         warning: Some(warning),
     };
 
@@ -220,6 +282,7 @@ pub(crate) fn load(path: &str, mode: &str) -> Baseline {
             &f.tier,
             &f.evidence,
             &f.detection_method,
+            &f.payload,
         ));
     }
 
@@ -236,6 +299,7 @@ pub(crate) fn load(path: &str, mode: &str) -> Baseline {
         path: path.to_string(),
         mode: mode.to_string(),
         keys,
+        entries: total,
         warning: None,
     }
 }
@@ -261,6 +325,21 @@ fn parse_report(
         return match value {
             serde_json::Value::Object(mut map) => match map.remove("findings") {
                 Some(serde_json::Value::Array(findings)) => Ok((map.remove("meta"), findings)),
+                // A clean `--format jsonl` run writes exactly one line — the
+                // meta envelope — which whole-file JSON parsing happily accepts
+                // as an object with no `findings`. Rejecting it would break the
+                // documented "record the backlog once, diff every run after"
+                // flow for any repo whose first scan is clean: the baseline
+                // would be permanently unreadable and every later run would
+                // report its whole backlog as new.
+                //
+                // Matched on `{"meta": …}` and nothing else, so the `--dry-run`
+                // and `--only-discovery` envelopes — which also carry a `meta`
+                // but describe a plan, not findings — are still rejected rather
+                // than silently read as an empty backlog.
+                _ if map.len() == 1 && map.contains_key("meta") => {
+                    Ok((map.remove("meta"), Vec::new()))
+                }
                 _ => Err("top-level object has no `findings` array".to_string()),
             },
             serde_json::Value::Array(findings) => Ok((None, findings)),
