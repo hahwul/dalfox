@@ -1251,6 +1251,7 @@ async fn render_results_to_file(
         std::time::Duration::from_millis(7),
         42,
         false,
+        None,
     )
     .await;
     let content = std::fs::read_to_string(&path).expect("output file written");
@@ -1428,6 +1429,277 @@ async fn test_render_results_toml() {
     assert!(content.contains("target_summary"));
 }
 
+#[test]
+fn test_stream_findings_disabled_by_end_of_scan_transforms() {
+    let base = || {
+        let mut a = default_scan_args();
+        a.format = "plain".to_string();
+        a.stream_findings = true;
+        a
+    };
+    assert!(super::stream_findings_enabled(&base()));
+
+    // Each of these removes or re-counts findings after the streamer already
+    // printed them, so live output would contradict the summary and exit code.
+    let mut with_output = base();
+    with_output.output = Some("out.json".to_string());
+    let mut with_limit = base();
+    with_limit.limit = Some(5);
+    let mut with_only_poc = base();
+    with_only_poc.only_poc = vec!["v".to_string()];
+    let mut with_baseline = base();
+    with_baseline.baseline = Some("baseline.json".to_string());
+
+    for (label, args) in [
+        ("--output", with_output),
+        ("--limit", with_limit),
+        ("--only-poc", with_only_poc),
+        ("--baseline", with_baseline),
+    ] {
+        assert!(
+            !super::stream_findings_enabled(&args),
+            "{} must disable --stream-findings",
+            label
+        );
+    }
+
+    // Streaming is plain-only regardless.
+    let mut json = base();
+    json.format = "json".to_string();
+    assert!(!super::stream_findings_enabled(&json));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// output.rs — `--baseline` end-to-end through render_results (issue #1274)
+//
+// The unit-level key/mode behavior lives in `baseline/tests.rs`; these check
+// the wiring: that suppression happens before `--limit` and the per-target
+// summary, that the returned vector (which decides the exit code) shrinks,
+// and that the `meta.baseline` block survives each renderer — TOML in
+// particular, where a nested table has to be emitted after the scalars.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// A `Reflected` finding with distinct evidence, so `dedupe_ast_results`
+/// (which keys on `inject_type|method|evidence`) doesn't collapse the pair
+/// before the baseline diff ever sees it.
+fn baseline_finding(url: &str, param: &str) -> ScanResult {
+    let mut r = reflected_result(url, param, "<x>");
+    r.evidence = format!("reflected in body for {}", param);
+    r
+}
+
+/// Write a JSON baseline report for `results` and return its path.
+fn write_baseline(tag: &str, results: &[ScanResult]) -> String {
+    let path = temp_out_path(tag);
+    let findings: Vec<serde_json::Value> = results
+        .iter()
+        .map(|r| r.to_json_value(false, false))
+        .collect();
+    let body = serde_json::json!({
+        "meta": { "dalfox_version": env!("CARGO_PKG_VERSION") },
+        "findings": findings,
+    });
+    std::fs::write(&path, body.to_string()).expect("write baseline");
+    path
+}
+
+#[tokio::test]
+async fn test_render_results_baseline_filter_suppresses_known_findings() {
+    let known = baseline_finding("https://example.com/s?q=%3Cx%3E", "q");
+    let fresh = baseline_finding("https://example.com/s?q=1", "id");
+    let baseline_path = write_baseline("baseline_filter_src", std::slice::from_ref(&known));
+
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.baseline = Some(baseline_path.clone());
+    let out_path = temp_out_path("baseline_filter_out");
+    args.output = Some(out_path.clone());
+
+    let bl = crate::cmd::scan::baseline::load(&baseline_path, "filter");
+    assert!(bl.is_active(), "warning: {:?}", bl.warning);
+
+    let state = make_scan_state(vec![known, fresh]);
+    let (final_results, _) = render_results(
+        &args,
+        &state,
+        &["https://example.com/s".to_string()],
+        std::time::Duration::from_millis(7),
+        42,
+        false,
+        Some(&bl),
+    )
+    .await;
+    let content = std::fs::read_to_string(&out_path).expect("output written");
+    let _ = std::fs::remove_file(&out_path);
+    let _ = std::fs::remove_file(&baseline_path);
+
+    // The returned vector is what run_scan turns into the exit code.
+    assert_eq!(final_results.len(), 1);
+    assert_eq!(final_results[0].param, "id");
+
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(v["meta"]["findings_count"], 1);
+    assert_eq!(v["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(v["meta"]["baseline"]["enabled"], true);
+    assert_eq!(v["meta"]["baseline"]["new"], 1);
+    assert_eq!(v["meta"]["baseline"]["known"], 1);
+    // The per-target summary counts only what survived the diff.
+    assert_eq!(v["meta"]["target_summary"][0]["findings_count"], 1);
+}
+
+#[tokio::test]
+async fn test_render_results_baseline_annotate_marks_every_finding() {
+    let known = baseline_finding("https://example.com/s?q=%3Cx%3E", "q");
+    let fresh = baseline_finding("https://example.com/s?q=1", "id");
+    let baseline_path = write_baseline("baseline_annotate_src", std::slice::from_ref(&known));
+
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.baseline = Some(baseline_path.clone());
+    args.baseline_mode = "annotate".to_string();
+    let out_path = temp_out_path("baseline_annotate_out");
+    args.output = Some(out_path.clone());
+
+    let bl = crate::cmd::scan::baseline::load(&baseline_path, "annotate");
+    let state = make_scan_state(vec![known, fresh]);
+    let (final_results, _) = render_results(
+        &args,
+        &state,
+        &["https://example.com/s".to_string()],
+        std::time::Duration::from_millis(7),
+        42,
+        false,
+        Some(&bl),
+    )
+    .await;
+    let content = std::fs::read_to_string(&out_path).expect("output written");
+    let _ = std::fs::remove_file(&out_path);
+    let _ = std::fs::remove_file(&baseline_path);
+
+    assert_eq!(final_results.len(), 2, "annotate drops nothing");
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(v["meta"]["findings_count"], 2);
+    assert_eq!(v["findings"][0]["new"], false);
+    assert_eq!(v["findings"][1]["new"], true);
+    assert_eq!(v["meta"]["baseline"]["mode"], "annotate");
+}
+
+#[tokio::test]
+async fn test_render_results_baseline_meta_survives_toml_and_markdown() {
+    let known = baseline_finding("https://example.com/s?q=%3Cx%3E", "q");
+    let fresh = baseline_finding("https://example.com/s?q=1", "id");
+    let baseline_path = write_baseline("baseline_formats_src", std::slice::from_ref(&known));
+    let bl = crate::cmd::scan::baseline::load(&baseline_path, "filter");
+
+    for (format, needle) in [("toml", "[meta.baseline]"), ("markdown", "**Baseline**")] {
+        let mut args = default_scan_args();
+        args.format = format.to_string();
+        args.baseline = Some(baseline_path.clone());
+        let out_path = temp_out_path(&format!("baseline_formats_{}", format));
+        args.output = Some(out_path.clone());
+
+        let state = make_scan_state(vec![known.clone(), fresh.clone()]);
+        let _ = render_results(
+            &args,
+            &state,
+            &["https://example.com/s".to_string()],
+            std::time::Duration::from_millis(7),
+            42,
+            false,
+            Some(&bl),
+        )
+        .await;
+        let content = std::fs::read_to_string(&out_path).expect("output written");
+        let _ = std::fs::remove_file(&out_path);
+        assert!(
+            content.contains(needle),
+            "{} output missing baseline block: {}",
+            format,
+            content
+        );
+    }
+    let _ = std::fs::remove_file(&baseline_path);
+}
+
+#[tokio::test]
+async fn test_render_results_baseline_counts_match_the_only_poc_filtered_set() {
+    // `--only-poc` runs first, so `new` + `known` describe exactly the set
+    // `findings_count` describes. Reporting suppression of `R`s the operator
+    // already excluded would make the two disagree for no reason.
+    let mut known_v = baseline_finding("https://example.com/s?q=%3Cx%3E", "q");
+    known_v.result_type = FindingType::Verified;
+    let known_r = baseline_finding("https://example.com/s?q=1", "id");
+    let baseline_path = write_baseline("baseline_onlypoc_src", &[known_v.clone(), known_r.clone()]);
+
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.only_poc = vec!["v".to_string()];
+    args.baseline = Some(baseline_path.clone());
+    let out_path = temp_out_path("baseline_onlypoc_out");
+    args.output = Some(out_path.clone());
+
+    let bl = crate::cmd::scan::baseline::load(&baseline_path, "filter");
+    let state = make_scan_state(vec![known_v, known_r]);
+    let _ = render_results(
+        &args,
+        &state,
+        &["https://example.com/s".to_string()],
+        std::time::Duration::from_millis(7),
+        42,
+        false,
+        Some(&bl),
+    )
+    .await;
+    let content = std::fs::read_to_string(&out_path).expect("output written");
+    let _ = std::fs::remove_file(&out_path);
+    let _ = std::fs::remove_file(&baseline_path);
+
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    // The `R` was removed by --only-poc, so only the `V` is accounted for.
+    assert_eq!(v["meta"]["baseline"]["known"], 1);
+    assert_eq!(v["meta"]["baseline"]["new"], 0);
+    assert_eq!(v["meta"]["findings_count"], 0);
+}
+
+#[tokio::test]
+async fn test_render_results_disabled_baseline_reports_itself() {
+    // A pipeline must be able to tell "nothing new" from "the diff never ran".
+    let bl = crate::cmd::scan::baseline::load("/nonexistent/dalfox-baseline.json", "filter");
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.baseline = Some("/nonexistent/dalfox-baseline.json".to_string());
+    let out_path = temp_out_path("baseline_disabled_out");
+    args.output = Some(out_path.clone());
+
+    let state = make_scan_state(vec![reflected_result("https://example.com", "q", "<x>")]);
+    let (final_results, _) = render_results(
+        &args,
+        &state,
+        &["https://example.com".to_string()],
+        std::time::Duration::from_millis(7),
+        42,
+        false,
+        Some(&bl),
+    )
+    .await;
+    let content = std::fs::read_to_string(&out_path).expect("output written");
+    let _ = std::fs::remove_file(&out_path);
+
+    assert_eq!(
+        final_results.len(),
+        1,
+        "a broken baseline suppresses nothing"
+    );
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(v["meta"]["baseline"]["enabled"], false);
+    assert!(
+        v["meta"]["baseline"]["warning"]
+            .as_str()
+            .unwrap()
+            .contains("could not be read")
+    );
+}
+
 #[tokio::test]
 async fn test_render_results_plain_summary() {
     let mut args = default_scan_args();
@@ -1540,6 +1812,7 @@ async fn test_render_results_includes_waf_summary() {
         std::time::Duration::from_millis(1),
         3,
         false,
+        None,
     )
     .await;
     let content = std::fs::read_to_string(&path).expect("output written");
@@ -1570,6 +1843,7 @@ async fn test_render_results_stdout_path_returns_results() {
         std::time::Duration::from_millis(1),
         1,
         true, // stream_findings_enabled → skip per-finding re-render
+        None,
     )
     .await;
     assert_eq!(final_results.len(), 1);
@@ -1598,6 +1872,7 @@ async fn test_render_results_reports_output_write_failure() {
         std::time::Duration::from_millis(1),
         1,
         true,
+        None,
     )
     .await;
     assert!(

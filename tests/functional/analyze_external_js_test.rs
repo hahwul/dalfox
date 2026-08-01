@@ -187,6 +187,8 @@ fn make_scan_args(
         limit: None,
         limit_result_type: "all".to_string(),
         only_poc: vec![],
+        baseline: None,
+        baseline_mode: "filter".to_string(),
         workers: 4,
         max_concurrent_targets: 4,
         max_targets_per_host: 100,

@@ -6,6 +6,7 @@
 use super::ScanOutcome;
 use super::ScanState;
 use super::args::ScanArgs;
+use super::baseline::Baseline;
 use super::logging::log_warn;
 use super::poc::render_finding_block;
 use super::postprocess::dedupe_ast_results;
@@ -286,6 +287,59 @@ pub(super) fn plain_findings_summary(display_results: &[Result]) -> String {
     }
 }
 
+/// Apply `--baseline` to the deduped findings and return the `meta.baseline`
+/// block describing what it did.
+///
+/// Under `filter` (the default) known findings are dropped from `results`, so
+/// everything downstream — counts, `--limit`, the per-target summary, the exit
+/// code — describes only what is new. Under `annotate` nothing is dropped and
+/// each finding is tagged `new: true|false` instead.
+///
+/// A baseline that failed to load reaches here with `warning: Some(..)`: it
+/// changes nothing about the findings, but still reports itself in the envelope
+/// so a pipeline can tell "nothing new" apart from "the diff never ran".
+pub(super) fn apply_baseline(
+    results: &mut Vec<Result>,
+    baseline: Option<&Baseline>,
+) -> Option<serde_json::Value> {
+    let baseline = baseline?;
+    let mut block = serde_json::json!({
+        "path": baseline.path,
+        "mode": baseline.mode,
+    });
+
+    if !baseline.is_active() {
+        block["enabled"] = serde_json::json!(false);
+        block["warning"] = serde_json::json!(baseline.warning.as_deref().unwrap_or_default());
+        return Some(block);
+    }
+
+    // Compute membership once — `is_new` hashes the finding, and `annotate`
+    // would otherwise recompute it during the retain pass.
+    let is_new: Vec<bool> = results.iter().map(|r| baseline.is_new(r)).collect();
+    let new_count = is_new.iter().filter(|n| **n).count();
+    let known_count = is_new.len() - new_count;
+
+    if baseline.annotates() {
+        for (r, new) in results.iter_mut().zip(&is_new) {
+            r.new_since_baseline = Some(*new);
+        }
+    } else {
+        let mut keep = is_new.iter();
+        results.retain(|_| *keep.next().unwrap_or(&true));
+    }
+
+    block["enabled"] = serde_json::json!(true);
+    // Entries read from the report, not `keys.len()` — the deduplicated key
+    // count is smaller whenever the baseline holds several findings sharing one
+    // identity, and a pipeline comparing this against the baseline file's own
+    // `findings_count` would see a mismatch it could not explain.
+    block["baseline_findings"] = serde_json::json!(baseline.entries);
+    block["new"] = serde_json::json!(new_count);
+    block["known"] = serde_json::json!(known_count);
+    Some(block)
+}
+
 pub(crate) async fn render_results(
     args: &ScanArgs,
     state: &ScanState,
@@ -293,6 +347,7 @@ pub(crate) async fn render_results(
     scan_elapsed: std::time::Duration,
     total_requests: u64,
     stream_findings_enabled: bool,
+    baseline: Option<&Baseline>,
 ) -> (Vec<Result>, bool) {
     let results = state.results.clone();
     let skipped_targets = state.skipped_targets.clone();
@@ -309,6 +364,17 @@ pub(crate) async fn render_results(
             .collect();
         final_results.retain(|r| allowed.iter().any(|a| a == r.result_type.short()));
     }
+
+    // Apply the `--baseline` diff after `--only-poc` but before `--limit`.
+    //
+    // After `--only-poc`, so the reported `new` / `known` counts describe the
+    // same set as `findings_count` — running `--only-poc v --baseline` would
+    // otherwise report suppression of `R`s the operator already excluded.
+    // Before `--limit`, the per-target summary, and the returned vector, so
+    // under `filter` a known finding cannot consume a display slot, inflate a
+    // target's count, or decide the exit code: the whole point is that the run
+    // describes what is new.
+    let baseline_meta = apply_baseline(&mut final_results, baseline);
 
     // Truncate the displayed findings to `--limit`. `--limit-result-type`
     // makes the scan-time stop condition count ONLY findings of that type
@@ -433,34 +499,40 @@ pub(crate) async fn render_results(
             .iter()
             .map(|r| r.to_json_value(args.include_request, args.include_response))
             .collect();
+        let mut meta_obj = serde_json::json!({
+            "dalfox_version": env!("CARGO_PKG_VERSION"),
+            "targets": &args.targets,
+            "scan_duration_ms": scan_elapsed.as_millis() as u64,
+            "total_requests": total_requests,
+            "findings_count": display_results.len(),
+            "target_summary": target_summary,
+            "dedup_mode": state.dedup.mode,
+            "targets_deduplicated": state.dedup.collapsed,
+        });
+        if let Some(b) = &baseline_meta {
+            meta_obj["baseline"] = b.clone();
+        }
         let wrapper = serde_json::json!({
-            "meta": {
-                "dalfox_version": env!("CARGO_PKG_VERSION"),
-                "targets": &args.targets,
-                "scan_duration_ms": scan_elapsed.as_millis() as u64,
-                "total_requests": total_requests,
-                "findings_count": display_results.len(),
-                "target_summary": target_summary,
-                "dedup_mode": state.dedup.mode,
-                "targets_deduplicated": state.dedup.collapsed,
-            },
+            "meta": meta_obj,
             "findings": findings_json
         });
         serde_json::to_string_pretty(&wrapper).unwrap_or_else(|_| "{}".to_string())
     } else if args.format == "jsonl" {
         // JSONL: first line is meta, then one finding per line
-        let meta = serde_json::json!({
-            "meta": {
-                "dalfox_version": env!("CARGO_PKG_VERSION"),
-                "targets": &args.targets,
-                "scan_duration_ms": scan_elapsed.as_millis() as u64,
-                "total_requests": total_requests,
-                "findings_count": display_results.len(),
-                "target_summary": target_summary,
-                "dedup_mode": state.dedup.mode,
-                "targets_deduplicated": state.dedup.collapsed,
-            }
+        let mut meta_obj = serde_json::json!({
+            "dalfox_version": env!("CARGO_PKG_VERSION"),
+            "targets": &args.targets,
+            "scan_duration_ms": scan_elapsed.as_millis() as u64,
+            "total_requests": total_requests,
+            "findings_count": display_results.len(),
+            "target_summary": target_summary,
+            "dedup_mode": state.dedup.mode,
+            "targets_deduplicated": state.dedup.collapsed,
         });
+        if let Some(b) = &baseline_meta {
+            meta_obj["baseline"] = b.clone();
+        }
+        let meta = serde_json::json!({ "meta": meta_obj });
         let mut out = serde_json::to_string(&meta).unwrap_or_default();
         out.push('\n');
         for r in display_results {
@@ -481,6 +553,7 @@ pub(crate) async fn render_results(
             target_summary: target_summary.clone(),
             dedup_mode: state.dedup.mode.to_string(),
             targets_deduplicated: state.dedup.collapsed,
+            baseline: baseline_meta.clone(),
         };
         crate::scanning::result::Result::results_to_markdown_with_meta(
             display_results,
@@ -498,6 +571,7 @@ pub(crate) async fn render_results(
             target_summary: target_summary.clone(),
             dedup_mode: state.dedup.mode.to_string(),
             targets_deduplicated: state.dedup.collapsed,
+            baseline: baseline_meta.clone(),
         };
         crate::scanning::result::Result::results_to_sarif_with_meta(
             display_results,
@@ -515,6 +589,7 @@ pub(crate) async fn render_results(
             target_summary: target_summary.clone(),
             dedup_mode: state.dedup.mode.to_string(),
             targets_deduplicated: state.dedup.collapsed,
+            baseline: baseline_meta.clone(),
         };
         crate::scanning::result::Result::results_to_toml_with_meta(
             display_results,

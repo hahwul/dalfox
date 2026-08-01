@@ -35,6 +35,8 @@ poc_type = "plain"
 # limit = 100
 limit_result_type = "all"
 only_poc = []
+# baseline = "baseline.json"
+baseline_mode = "filter"
 no_color = false
 
 # TARGETS
@@ -136,6 +138,8 @@ debug = false
 | `limit` | int | — | Cap on result count |
 | `limit_result_type` | string | `"all"` | Which types count: `all`, `v`, `r`, `a` |
 | `only_poc` | array | `[]` | Filter output: `["v","a"]` |
+| `baseline` | string | — | Previous JSON/JSONL report to diff against; only findings new since it are reported. **CLI only** — ignored by `dalfox server` / MCP |
+| `baseline_mode` | string | `"filter"` | `filter` drops known findings, `annotate` keeps them and marks each `new` |
 | `no_color` | bool | `false` | Disable ANSI colour |
 
 ### Targets

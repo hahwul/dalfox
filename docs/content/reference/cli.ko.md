@@ -70,6 +70,10 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--limit` | — | — | 표시되는 전체 결과 수를 제한합니다 |
 | `--limit-result-type` | — | `all` | `--limit`에 집계되는 유형: `all`, `v`, `r`, `a`, `i` |
 | `--only-poc` | — | — | 쉼표로 구분된 필터: `v`(취약), `r`(반사됨), `a`(AST), `i`(정보성) |
+| `--baseline` | — | — | 이전 Dalfox JSON/JSONL 리포트와 비교해 그 이후 새로 생긴 건만 보고합니다. 평범한 `-f json -o` 리포트가 그대로 베이스라인입니다 |
+| `--baseline-mode` | — | `filter` | `filter`는 알려진 건을 제거하고(카운트와 종료 코드가 신규 기준), `annotate`는 유지한 채 각각에 `new`를 표시합니다 |
+
+지문 규칙과 CI 레시피는 [베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)을 참고하세요.
 
 ### 대상 형태 지정
 

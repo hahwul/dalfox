@@ -80,6 +80,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 이제 모두 동일한 스캔 수�
 - `findings_count`
 - `target_summary[]` — 대상별 상태, 탐지 결과 수, error_code(건너뛴 경우), 그리고 탐지된 경우 WAF/우회 세부 정보
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 타깃 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
+- `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
 
 **SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복되어 GitHub 코드 스캐닝과 기타 소비자가 컨텍스트를 유지하도록 합니다.
 
@@ -146,6 +147,70 @@ dalfox https://target.app --limit 50
 dalfox https://target.app --limit 10 --limit-result-type v
 ```
 
+## 베이스라인: 새로 생긴 것만 보고하기
+
+`--only-poc`와 `--limit`은 **형태**로 거릅니다. 이미 트리아지를 끝낸 건과 오늘 아침에 새로 나타난 건을 구분하지 못하므로, 기존 이슈가 100건인 저장소는 PR마다 똑같은 100건을 다시 보게 되고 결국 게이트는 항상 빨간불이거나 꺼두게 됩니다.
+
+`--baseline`이 이 문제를 해결합니다. 이전 리포트를 지정하면 거기에 이미 있는 건은 억제됩니다.
+
+```bash
+dalfox scan scope.txt -f json -o baseline.json      # 최초 1회, 기존 백로그 기록
+dalfox scan scope.txt --baseline baseline.json      # 이후 매 실행
+```
+
+**별도의 베이스라인 작성 명령은 없습니다** — 평범한 `-f json -o`(또는 `-f jsonl -o`) 리포트가 그대로 베이스라인입니다.
+
+### 모드
+
+| 모드 | 플래그 | 동작 |
+|------|--------|------|
+| `filter` (기본) | `--baseline-mode filter` | 이미 알려진 건을 제거합니다. 카운트, `--limit`, **종료 코드**가 모두 신규 건만 기준으로 결정됩니다 — CI 게이트용 모드입니다. |
+| `annotate` | `--baseline-mode annotate` | 모든 건을 그대로 두고 각각에 `new: true` / `new: false`를 붙입니다. 전체 집합을 보되 신규 여부를 표시하고 싶은 대시보드용입니다. |
+
+### 무엇을 "같은 건"으로 볼까
+
+지문(fingerprint)은 그 건을 드러낸 **실행**이 아니라 취약점 자체의 정체성으로 만듭니다.
+
+**포함:** 호스트 + 경로 · 파라미터 이름 · 파라미터 위치(query / header / cookie / body / path) · 인젝션 컨텍스트 · CWE · 탐지 티어 · 증거 계열(DOM 건의 `Source → Sink` 쌍).
+
+**제외:** 페이로드와 그것이 들어간 쿼리 스트링, 페이로드 순서, AST의 줄/열 번호, 타임스탬프, 요청/응답 캡처.
+
+따라서 실행마다 페이로드가 달라져도 같은 스캔은 깔끔하게 매칭되고, 번들러가 `app.js`의 줄 번호를 밀어도 이미 처리한 DOM 건이 되살아나지 않습니다. **티어**가 지문에 들어가므로, 지난주 `R`이던 건이 오늘 `V`가 되면 신규로 보고됩니다 — 이런 승격이야말로 게이트가 잡아야 할 변화입니다.
+
+### `meta.baseline` 블록
+
+모든 구조화 형식이 diff 결과를 함께 보고합니다.
+
+```json
+"baseline": {
+  "path": "baseline.json",
+  "mode": "filter",
+  "enabled": true,
+  "baseline_findings": 100,
+  "new": 2,
+  "known": 98
+}
+```
+
+베이스라인 파일이 없거나, 형식이 깨졌거나, 다른 메이저 버전이 쓴 것이면 **stderr에 경고를 내고 diff를 비활성화**할 뿐 스캔을 실패시키지는 않습니다. 파이프라인에 남은 낡은 경로 하나 때문에 멀쩡히 돌던 스캔이 아무것도 보고하지 못하는 빨간 빌드가 되어서는 안 되기 때문입니다. 이 상황은 엔벨로프에 `"enabled": false`와 `warning`으로 드러나므로, "신규 없음"과 "diff가 아예 돌지 않음"을 구분할 수 있습니다.
+
+### 베이스라인 갱신
+
+전용 명령은 없습니다. `--baseline` **없이** 다시 실행해(그래야 리포트에 신규 건만이 아니라 전체 집합이 담깁니다) 파일을 교체하면 됩니다.
+
+```bash
+dalfox scan scope.txt -f json -o baseline.json
+git commit -am "chore: refresh dalfox baseline"
+```
+
+`--baseline`을 켠 채 `-o`를 같은 파일로 지정하면 `filter` 모드에서 베이스라인이 파괴됩니다. 되쓰이는 리포트에는 신규 건만 들어 있어서 다음 실행이 백로그 전체를 다시 보고하게 됩니다. 두 경로가 같으면 Dalfox가 경고합니다.
+
+### 주의사항
+
+- **`--limit`은 diff 이전에 셉니다.** 스캔 중 중단 조건은 수집되는 모든 건을 세므로(베이스라인에 이미 있는 건 포함), `--limit 10 --baseline b.json`으로 처음 10건이 전부 기존 건인 대상을 돌리면 나머지 파라미터를 테스트하지 않은 채 조기 종료하고 "신규 0"을 보고합니다. 신규 기준으로 게이트할 때는 `--limit`을 빼세요. 둘을 함께 쓰면 Dalfox가 경고합니다.
+- **`--stream-findings`는 `--baseline`이 있으면 비활성화됩니다.** `--only-poc`과 같은 이유입니다. 스트리머는 어떤 건이 이미 베이스라인에 있는지 알 수 없어서, 요약은 신규만 보고하는데 화면에는 트리아지가 끝난 백로그 전체가 흘러가게 됩니다.
+- **CLI 전용입니다.** `dalfox server`와 MCP 서버는 `--baseline`을 적용하지 않습니다. 공유 config의 `scan.baseline`도 그쪽에서는 조용히 무시됩니다.
+
 ## 색상 및 TTY 동작
 
 ```bash
@@ -211,6 +276,35 @@ GitHub의 `upload-sarif` 액션을 통해 `dalfox.sarif`를 업로드하면, 탐
     sarif_file: dalfox.sarif
 ```
 
+### 신규 탐지 결과만으로 게이트하기
+
+`baseline.json`을 스코프 파일과 함께 커밋해 두고 종료 코드로 빌드를 실패시키세요. 베이스라인에 없는 건이 나타났을 때만 빨간불이 됩니다.
+
+```yaml
+# .github/workflows/xss-scan.yml
+- name: Dalfox scan (new findings gate)
+  run: |
+    dalfox scan scope.txt \
+      --baseline .dalfox/baseline.json \
+      --only-poc v \
+      -f json -o dalfox.json --silence
+
+- name: Upload report
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: dalfox-report
+    path: dalfox.json
+```
+
+트리아지 후 베이스라인을 갱신하려면 `--baseline` **없이** 실행하고 `-o`를 베이스라인 파일로 지정하세요.
+
+```bash
+dalfox scan scope.txt --only-poc v -f json -o .dalfox/baseline.json
+```
+
+위 게이트 명령을 그대로 두고 `-o .dalfox/baseline.json`만 붙이면 *신규* 건만 담긴 리포트가 파일을 덮어써서 기록해둔 백로그가 날아갑니다. `--output`과 `--baseline`이 같은 경로로 해석되면 Dalfox가 stderr에 경고합니다.
+
 ## 종료 코드
 
 Dalfox는 다음을 반환합니다.
@@ -222,6 +316,8 @@ Dalfox는 다음을 반환합니다.
 | `2` | 입력/설정/런타임 오류 |
 
 `1`은 모든 티어를 포함합니다 — `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 코드가 정해지기 전에 필터가 적용됩니다. (JSON에 `jq`로 `severity >= High`를 거는 방식도 오늘은 같은 집합을 얻습니다. severity가 현재 티어를 따라가기 때문입니다 — [탐지 모델](../detection-model/) 참고.)
+
+`--baseline`은 같은 종료 코드를 **신규 여부**로 좁힙니다. 기본 `filter` 모드에서는 억제된 건이 종료 코드 판정에 도달하지 않으므로, 백로그가 전부 베이스라인에 들어 있는 실행은 `0`으로 끝납니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고.
 
 ## 다음
 
