@@ -115,10 +115,13 @@ fn awesome_alert_payloads() -> &'static [&'static str] {
     ]
 }
 
-/// Print a list of owned strings one per line and log the count.
-fn print_lines(selector: &str, list: &[String]) {
-    for p in list.iter() {
-        println!("{}", p);
+/// Print a list one entry per line and log the count. Generic over the element
+/// type so every listing selector — static `&[&str]` slices and owned
+/// `Vec<String>` families alike — emits through the same path with identical
+/// formatting and log wording.
+fn print_lines<T: std::fmt::Display>(selector: &str, list: &[T]) {
+    for entry in list.iter() {
+        println!("{}", entry);
     }
     crate::dbg_log!("{}: {} items", selector, list.len());
 }
@@ -204,19 +207,17 @@ fn fetch_and_print_remote(provider: &str) -> bool {
 pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
     match args.selector.as_deref() {
         Some("event-handlers") => {
-            let list = crate::payload::xss_event::common_event_handler_names();
-            for ev in list.iter() {
-                println!("{}", ev);
-            }
-            crate::dbg_log!("event-handlers: {} items", list.len());
+            print_lines(
+                "event-handlers",
+                crate::payload::xss_event::common_event_handler_names(),
+            );
             ScanOutcome::Clean
         }
         Some("useful-tags") => {
-            let list = crate::payload::xss_html::useful_html_tag_names();
-            for t in list.iter() {
-                println!("{}", t);
-            }
-            crate::dbg_log!("useful-tags: {} items", list.len());
+            print_lines(
+                "useful-tags",
+                crate::payload::xss_html::useful_html_tag_names(),
+            );
             ScanOutcome::Clean
         }
         Some("payloadbox") => {
@@ -234,35 +235,19 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             }
         }
         Some("uri-scheme") => {
-            let list = uri_scheme_payloads();
-            for payload in list {
-                println!("{}", payload);
-            }
-            crate::dbg_log!("uri-scheme: {} payloads", list.len());
+            print_lines("uri-scheme", uri_scheme_payloads());
             ScanOutcome::Clean
         }
         Some("special-chars") => {
-            let list = special_chars_payloads();
-            for payload in list {
-                println!("{}", payload);
-            }
-            crate::dbg_log!("special-chars: {} items", list.len());
+            print_lines("special-chars", special_chars_payloads());
             ScanOutcome::Clean
         }
         Some("functions") => {
-            let list = functions_payloads();
-            for payload in list {
-                println!("{}", payload);
-            }
-            crate::dbg_log!("functions: {} items", list.len());
+            print_lines("functions", functions_payloads());
             ScanOutcome::Clean
         }
         Some("awesome-alert") => {
-            let list = awesome_alert_payloads();
-            for payload in list {
-                println!("{}", payload);
-            }
-            crate::dbg_log!("awesome-alert: {} items", list.len());
+            print_lines("awesome-alert", awesome_alert_payloads());
             ScanOutcome::Clean
         }
         Some("dom-clobbering") => {
@@ -278,13 +263,10 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
         }
         Some("blind") => {
             // XSS_BLIND_PAYLOADS carries a `{}` placeholder for the OOB callback
-            // URL; keep it verbatim so the printed skeleton shows where the URL
-            // goes (users wire it up with `-b https://your-callback`).
-            let list: Vec<String> = crate::payload::XSS_BLIND_PAYLOADS
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            print_lines("blind", &list);
+            // URL; printed verbatim (as a value, never a format string) so the
+            // skeleton shows where the URL goes — users wire it up with
+            // `-b https://your-callback`.
+            print_lines("blind", crate::payload::XSS_BLIND_PAYLOADS);
             ScanOutcome::Clean
         }
         Some(other) => {
