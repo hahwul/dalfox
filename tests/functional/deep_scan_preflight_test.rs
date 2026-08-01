@@ -89,6 +89,8 @@ fn make_args(addr: SocketAddr, deep_scan: bool, out: &std::path::Path) -> ScanAr
         limit: None,
         limit_result_type: "all".to_string(),
         only_poc: vec![],
+        baseline: None,
+        baseline_mode: "filter".to_string(),
         workers: 4,
         max_concurrent_targets: 4,
         max_targets_per_host: 100,

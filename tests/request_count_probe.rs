@@ -69,6 +69,8 @@ fn make_args() -> ScanArgs {
         limit: None,
         limit_result_type: "all".to_string(),
         only_poc: vec![],
+        baseline: None,
+        baseline_mode: "filter".to_string(),
         workers: 5,
         max_concurrent_targets: 1,
         max_targets_per_host: 100,

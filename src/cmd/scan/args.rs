@@ -21,6 +21,14 @@ pub const POC_TYPE_VALUES: &[&str] = &["plain", "curl", "httpie", "http-request"
 // nothing could ask for it on its own.
 pub const LIMIT_RESULT_TYPE_VALUES: &[&str] = &["all", "v", "r", "a", "i", "V", "R", "A", "I"];
 pub const ONLY_POC_VALUES: &[&str] = &["v", "r", "a", "i", "V", "R", "A", "I"];
+/// `--baseline-mode filter`: drop findings already in the baseline, so the
+/// counts, the exit code, and `--limit` all describe only what is new. The
+/// CI-gate default.
+pub const BASELINE_MODE_FILTER: &str = "filter";
+/// `--baseline-mode annotate`: keep every finding and tag each with
+/// `new: true|false`, for dashboards that want the whole set.
+pub const BASELINE_MODE_ANNOTATE: &str = "annotate";
+pub const BASELINE_MODE_VALUES: &[&str] = &[BASELINE_MODE_FILTER, BASELINE_MODE_ANNOTATE];
 pub const ENCODER_VALUES: &[&str] = &[
     "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
 ];
@@ -270,6 +278,16 @@ pub struct ScanArgs {
     /// Filter output to show only specific finding types (comma-separated). Options: v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --only-poc "v,r"
     #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(ONLY_POC_VALUES.iter().copied()))]
     pub only_poc: Vec<String>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Diff against a previous dalfox JSON/JSONL report and report only findings new since it. The baseline is an ordinary `--format json --output` report. Example: --baseline baseline.json
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// What --baseline does with already-known findings: filter (drop them, so the exit code gates on new findings only) or annotate (keep them and mark each `new`). Example: --baseline-mode annotate
+    #[arg(long, default_value = BASELINE_MODE_FILTER, value_parser = clap::builder::PossibleValuesParser::new(BASELINE_MODE_VALUES.iter().copied()))]
+    pub baseline_mode: String,
 
     #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
@@ -669,6 +687,8 @@ impl Default for ScanArgs {
             limit: None,
             limit_result_type: "all".to_string(),
             only_poc: vec![],
+            baseline: None,
+            baseline_mode: BASELINE_MODE_FILTER.to_string(),
             param: vec![],
             data: None,
             headers: vec![],

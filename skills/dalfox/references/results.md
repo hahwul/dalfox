@@ -164,6 +164,28 @@ of findings recorded during the scan:
 The plain headline `XSS found N XSS` counts `V` only; other tiers are appended
 as `(+3 A, 1 R)` so the number agrees with the POC blocks printed under it.
 
+## Baselines (`--baseline`)
+
+`--baseline prev.json` suppresses findings already present in a previous
+dalfox JSON/JSONL report, so a run reports only what is new. There is no
+separate baseline writer — an ordinary `-f json -o` report is the baseline.
+
+- `--baseline-mode filter` (default) drops known findings **before** `--limit`,
+  the per-target summary, and the exit code, which is what makes it usable as a
+  CI gate: a run whose whole backlog is in the baseline exits `0`.
+- `--baseline-mode annotate` keeps everything and adds `new: true`/`new: false`
+  to each finding instead.
+- Matching is by vulnerability identity — host + path, parameter name and
+  location, injection context, CWE, tier, and (for DOM findings) the
+  source→sink pair. The payload, the query string carrying it, AST line/column
+  numbers, and request/response captures are excluded, so ordinary run-to-run
+  variation does not read as new. Because the tier participates, an `R` that
+  becomes a `V` **is** reported as new.
+- A missing, malformed, or foreign-major-version baseline warns on stderr and
+  disables the diff rather than failing the scan. The `meta.baseline` block
+  reports `"enabled": false` with a `warning` in that case — check it before
+  reading "0 findings" as "nothing new".
+
 ## Error Codes (appear in JSON `meta`, MCP, server)
 
 See `cmd/mod.rs` for the canonical list. Common ones:
@@ -186,6 +208,9 @@ In JSON output the per-target summary contains `error_code` when the target fail
   fail only on asserted vulnerabilities, run `--only-poc v`
 - `2` — Hard error (bad input, config, runtime failure, every target
   unreachable, or `--output` could not be written)
+
+With `--baseline` (default `filter` mode), suppressed findings never reach the
+exit-code decision, so the code reports novelty rather than the whole backlog.
 
 MCP and server surface the same information via `status` and `error_code` fields instead of process exit codes.
 

@@ -81,6 +81,7 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level
 - `findings_count`
 - `target_summary[]` — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
+- `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
 
 In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context.
 
@@ -148,6 +149,62 @@ dalfox https://target.app --limit 50
 dalfox https://target.app --limit 10 --limit-result-type v
 ```
 
+## Baselines: reporting only what is new
+
+`--only-poc` and `--limit` filter by *shape*. They cannot tell a finding you already triaged from one that appeared this morning, so a repo with 100 known findings shows the same 100 on every pull request and the gate is either permanently red or switched off.
+
+`--baseline` fixes that. Point it at a previous report and Dalfox suppresses everything already in it:
+
+```bash
+dalfox scan scope.txt -f json -o baseline.json      # once, to record the backlog
+dalfox scan scope.txt --baseline baseline.json      # every run after
+```
+
+There is **no separate baseline writer** — an ordinary `-f json -o` (or `-f jsonl -o`) report *is* the baseline.
+
+### Modes
+
+| Mode | Flag | Behaviour |
+|------|------|-----------|
+| `filter` (default) | `--baseline-mode filter` | Drops known findings. Counts, `--limit`, and the **exit code** all describe only what is new — this is the CI-gate mode. |
+| `annotate` | `--baseline-mode annotate` | Keeps every finding and adds `new: true` / `new: false` to each, for dashboards that want the whole set with novelty marked. |
+
+### What counts as "the same finding"
+
+Findings are matched on a fingerprint built from the vulnerability's identity, not the run that surfaced it:
+
+**Included:** host + path · parameter name · parameter location (query / header / cookie / body / path) · injection context · CWE · finding tier · evidence family (the `Source → Sink` pair for DOM findings).
+
+**Excluded:** the payload and the query string it lands in, payload ordering, AST line/column numbers, timestamps, request/response captures.
+
+So re-running the same scan matches cleanly even though every run embeds a different payload, and a bundler that shifts `app.js` line numbers does not resurrect a triaged DOM finding. Because the **tier** is part of the fingerprint, a finding that was `R` last week and is `V` today is reported as new — an escalation is exactly what a gate should catch.
+
+### The `meta.baseline` block
+
+Every structured format reports what the diff did:
+
+```json
+"baseline": {
+  "path": "baseline.json",
+  "mode": "filter",
+  "enabled": true,
+  "baseline_findings": 100,
+  "new": 2,
+  "known": 98
+}
+```
+
+A baseline that is missing, malformed, or written by a different major version **warns on stderr and disables the diff** rather than failing the scan — a stale path in a pipeline should not turn a working scan into a red build with nothing reported. That case is visible in the envelope as `"enabled": false` with a `warning`, so a pipeline can tell "nothing new" apart from "the diff never ran".
+
+### Refreshing the baseline
+
+There is no special command. Accept the new findings and replace the file:
+
+```bash
+dalfox scan scope.txt -f json -o baseline.json
+git commit -am "chore: refresh dalfox baseline"
+```
+
 ## Colour & TTY behaviour
 
 ```bash
@@ -213,6 +270,29 @@ Upload `dalfox.sarif` through GitHub's `upload-sarif` action, and findings appea
     sarif_file: dalfox.sarif
 ```
 
+### Gating on new findings only
+
+Commit `baseline.json` alongside the scope file and let the exit code fail the build. The step only goes red when something appeared that is not in the baseline:
+
+```yaml
+# .github/workflows/xss-scan.yml
+- name: Dalfox scan (new findings gate)
+  run: |
+    dalfox scan scope.txt \
+      --baseline .dalfox/baseline.json \
+      --only-poc v \
+      -f json -o dalfox.json --silence
+
+- name: Upload report
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: dalfox-report
+    path: dalfox.json
+```
+
+To refresh the baseline after triage, re-run with `-o .dalfox/baseline.json` and commit the result.
+
 ## Exit codes
 
 Dalfox returns:
@@ -224,6 +304,8 @@ Dalfox returns:
 | `2` | Input/config/runtime error |
 
 `1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity >= High` with `jq` reaches the same set today, because severity currently tracks the tier — see [Detection Model](../detection-model/).)
+
+`--baseline` narrows the same code to *novelty*: under the default `filter` mode, suppressed findings never reach the exit-code decision, so a run whose entire backlog is already in the baseline exits `0`. See [Baselines](#baselines-reporting-only-what-is-new).
 
 ## Next
 

@@ -29,6 +29,8 @@ fn full_scan_config() -> ScanConfig {
         limit: Some(42),
         limit_result_type: Some("v".to_string()),
         only_poc: Some(vec!["v".to_string()]),
+        baseline: Some("baseline.json".to_string()),
+        baseline_mode: Some("annotate".to_string()),
         no_color: Some(false),
         param: Some(vec!["q".to_string(), "id:query".to_string()]),
         data: Some("name=test".to_string()),

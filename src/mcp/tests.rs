@@ -1002,6 +1002,7 @@ fn dummy_finding(id: u32) -> SanitizedResult {
         detection_method: crate::scanning::result::FindingMethod::Reflection,
         confidence: Some(crate::scanning::result::Confidence::Low),
         confidence_reason: String::new(),
+        new_since_baseline: None,
         request: None,
         response: None,
     }

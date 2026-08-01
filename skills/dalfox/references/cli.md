@@ -28,6 +28,8 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--limit N` | unlimited | Cap displayed findings |
 | `--limit-result-type` | `all` | Which type counts toward `--limit`: `all`, `v`, `r`, `a`, `i` (case-insensitive). **Not an output filter** |
 | `--only-poc "v,r"` | all types | Output filter: `v`, `r`, `a`, `i`. This is the one that hides findings |
+| `--baseline PATH` | — | Diff against a previous dalfox JSON/JSONL report; only findings new since it are reported. An ordinary `-f json -o` report is the baseline |
+| `--baseline-mode` | `filter` | `filter` drops known findings (counts + exit code describe only what is new), `annotate` keeps them and adds `new: true`/`new: false` to each |
 | `-S, --silence` | false | Suppress everything except POC lines |
 | `--no-color` | (auto) | Also respects `NO_COLOR` env var |
 

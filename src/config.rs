@@ -61,6 +61,8 @@ pub struct ScanConfig {
     pub limit: Option<usize>,
     pub limit_result_type: Option<String>,
     pub only_poc: Option<Vec<String>>,
+    pub baseline: Option<String>,
+    pub baseline_mode: Option<String>,
     pub no_color: Option<bool>,
     // TARGETS
     pub param: Option<Vec<String>>,
@@ -192,6 +194,12 @@ impl Config {
             }
             if let Some(v) = &scan.only_poc {
                 args.only_poc = v.clone();
+            }
+            if let Some(v) = &scan.baseline {
+                args.baseline = Some(v.clone());
+            }
+            if let Some(v) = &scan.baseline_mode {
+                args.baseline_mode = v.clone();
             }
             if let Some(v) = scan.no_color {
                 args.no_color = v;
@@ -427,6 +435,16 @@ impl Config {
             {
                 args.only_poc = v.clone();
             }
+            if let Some(v) = &scan.baseline
+                && args.baseline.is_none()
+            {
+                args.baseline = Some(v.clone());
+            }
+            if let Some(v) = &scan.baseline_mode
+                && args.baseline_mode == "filter"
+            {
+                args.baseline_mode = v.clone();
+            }
             // TARGETS
             if let Some(v) = &scan.data
                 && args.data.is_none()
@@ -620,6 +638,16 @@ impl Config {
                 && args.only_poc.is_empty()
             {
                 args.only_poc = v.clone();
+            }
+            if let Some(v) = &scan.baseline
+                && args.baseline.is_none()
+            {
+                args.baseline = Some(v.clone());
+            }
+            if let Some(v) = &scan.baseline_mode
+                && args.baseline_mode == "filter"
+            {
+                args.baseline_mode = v.clone();
             }
             if let Some(v) = scan.no_color
                 && !args.no_color
@@ -1105,6 +1133,12 @@ impl ScanConfig {
             &mut warnings,
         );
         reject_unless_allowed(
+            &mut self.baseline_mode,
+            crate::cmd::scan::BASELINE_MODE_VALUES,
+            "scan.baseline_mode",
+            &mut warnings,
+        );
+        reject_unless_allowed(
             &mut self.custom_alert_type,
             crate::cmd::scan::CUSTOM_ALERT_TYPE_VALUES,
             "scan.custom_alert_type",
@@ -1271,6 +1305,8 @@ pub fn default_toml_template() -> String {
 # stream_findings = false    # emit findings mid-scan instead of after `WRN XSS found N XSS` (plain format only)
 # poc_type = "plain"         # plain, curl, httpie, http-request
 # limit = 100
+# baseline = "baseline.json"  # prior dalfox JSON/JSONL report; report only findings new since it
+# baseline_mode = "filter"    # filter (drop known findings) or annotate (keep them, mark each `new`)
 
 # TARGETS
 # param = ["id", "q:query", "auth:header"]

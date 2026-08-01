@@ -30,6 +30,7 @@ use crate::target_parser::*;
 
 mod analysis;
 mod args;
+mod baseline;
 mod input;
 mod logging;
 mod output;
@@ -40,13 +41,14 @@ mod scan_loop;
 mod validation;
 
 pub use args::{
-    BlindOobArgs, CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
-    CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, CUSTOM_ALERT_TYPE_VALUES, DEDUP_URLS_VALUES,
-    DEFAULT_DEDUP_URLS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS,
-    DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD, DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT,
-    DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE,
-    DEFAULT_WORKERS, ENCODER_VALUES, FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ONLY_POC_VALUES,
-    POC_TYPE_VALUES, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES,
+    BASELINE_MODE_VALUES, BlindOobArgs, CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES,
+    CLI_MAX_RETRY_DELAY_MS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, CUSTOM_ALERT_TYPE_VALUES,
+    DEDUP_URLS_VALUES, DEFAULT_DEDUP_URLS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
+    DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
+    DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS,
+    DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, ENCODER_VALUES,
+    FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ONLY_POC_VALUES, POC_TYPE_VALUES, PreflightOptions,
+    ScanArgs, WAF_BYPASS_VALUES,
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::{log_info, log_warn};
@@ -291,6 +293,27 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             }
         }
     }
+
+    // Load `--baseline` before any request goes out. A stale or malformed
+    // baseline path is exactly the thing a pipeline gets wrong, and finding
+    // out after a 20-minute scan is too late — so the warning lands here, on
+    // stderr (every format; stdout stays a clean machine payload) rather than
+    // through log_warn, which only speaks in `plain`.
+    let baseline = args.baseline.as_ref().map(|path| {
+        let loaded = baseline::load(path, &args.baseline_mode);
+        match &loaded.warning {
+            Some(w) => eprintln!("Warning: {} — baseline diff disabled", w),
+            None => log_info(
+                args,
+                &format!(
+                    "baseline loaded: {} known findings from {}",
+                    loaded.keys.len(),
+                    path
+                ),
+            ),
+        }
+        loaded
+    });
 
     // Warn loudly about unknown remote-provider names *before* the init
     // call swallows them as silent no-ops. Previously a typo like
@@ -650,6 +673,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         scan_elapsed,
         total_requests,
         stream_findings_enabled,
+        baseline.as_ref(),
     )
     .await;
 

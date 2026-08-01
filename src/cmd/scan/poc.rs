@@ -324,6 +324,11 @@ pub(crate) fn render_finding_block(
     if context_info.is_some() {
         sections.push("Line");
     }
+    // Only populated under `--baseline-mode annotate`; without a baseline the
+    // block keeps its historical shape.
+    if result.new_since_baseline.is_some() {
+        sections.push("Baseline");
+    }
     let want_request = include_request && result.request.is_some();
     let want_response = include_response && result.response.is_some();
     if want_request {
@@ -378,6 +383,15 @@ pub(crate) fn render_finding_block(
             bullet_for(idx),
             line_num,
             context
+        ));
+        idx += 1;
+    }
+
+    if let Some(is_new) = result.new_since_baseline {
+        output.push_str(&format!(
+            "  \x1b[90m{}\x1b[0m \x1b[38;5;247mBaseline:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
+            bullet_for(idx),
+            if is_new { "new" } else { "known" }
         ));
         idx += 1;
     }

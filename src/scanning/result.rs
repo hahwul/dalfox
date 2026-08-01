@@ -239,6 +239,12 @@ pub struct Result {
     /// when nothing blocks, and the blockers otherwise.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub confidence_reason: String,
+    /// Whether this finding is absent from the `--baseline` report, serialized
+    /// as `new`. Only populated under `--baseline-mode annotate`; `None` (and
+    /// omitted from output) otherwise, including under `filter`, where every
+    /// reported finding is new by construction.
+    #[serde(rename = "new", default, skip_serializing_if = "Option::is_none")]
+    pub new_since_baseline: Option<bool>,
     /// True when `data` already holds a complete, reproducible POC URL and the
     /// renderer must not append `?param=payload` on top of it. Set by the AST
     /// DOM-XSS producers, which place the payload in the fragment / query /
@@ -284,6 +290,7 @@ impl Result {
                 message_id: 0,
                 message_str: String::new(),
                 location: String::new(),
+                new_since_baseline: None,
                 poc_url_complete: false,
                 request: None,
                 response: None,
@@ -409,6 +416,9 @@ pub struct SanitizedResult {
     /// Signals behind `confidence`. See [`Result::confidence_reason`].
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub confidence_reason: String,
+    /// New relative to `--baseline`. See [`Result::new_since_baseline`].
+    #[serde(rename = "new", default, skip_serializing_if = "Option::is_none")]
+    pub new_since_baseline: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -434,6 +444,11 @@ pub struct ScanMetadata {
     /// coverage of that list.
     #[serde(default)]
     pub targets_deduplicated: usize,
+    /// `--baseline` diff summary (path, mode, new/known counts, or the reason
+    /// the diff was disabled). `None` when `--baseline` was not used, and then
+    /// omitted from every rendered envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<serde_json::Value>,
 }
 
 impl Result {
@@ -455,6 +470,7 @@ impl Result {
             detection_method: self.detection_method,
             confidence: self.confidence,
             confidence_reason: self.confidence_reason.clone(),
+            new_since_baseline: self.new_since_baseline,
             request: if include_request {
                 self.request.clone()
             } else {
@@ -497,6 +513,11 @@ impl Result {
                 serde_json::Value::String(self.location.clone()),
             );
         }
+        if let Some(is_new) = self.new_since_baseline
+            && let serde_json::Value::Object(ref mut map) = obj
+        {
+            map.insert("new".to_string(), serde_json::Value::Bool(is_new));
+        }
         if let Some(grade) = self.confidence
             && let serde_json::Value::Object(ref mut map) = obj
         {
@@ -533,7 +554,7 @@ impl Result {
     }
 
     fn make_scan_meta_value(meta: &ScanMetadata) -> serde_json::Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "dalfox_version": &meta.dalfox_version,
             "targets": &meta.targets,
             "scan_duration_ms": meta.scan_duration_ms,
@@ -542,7 +563,13 @@ impl Result {
             "target_summary": &meta.target_summary,
             "dedup_mode": &meta.dedup_mode,
             "targets_deduplicated": meta.targets_deduplicated,
-        })
+        });
+        if let Some(baseline) = &meta.baseline
+            && let serde_json::Value::Object(ref mut map) = value
+        {
+            map.insert("baseline".to_string(), baseline.clone());
+        }
+        value
     }
 
     /// Serialize a slice of Result into JSON array string. Set pretty=true for pretty-printed JSON.
@@ -671,6 +698,20 @@ impl Result {
                     m.targets_deduplicated, m.dedup_mode
                 );
             }
+            if let Some(b) = &m.baseline {
+                let cell = if let Some(w) = b.get("warning").and_then(|v| v.as_str()) {
+                    format!("disabled — {}", w)
+                } else {
+                    format!(
+                        "{} (mode: {}, new: {}, known: {})",
+                        b.get("path").and_then(|v| v.as_str()).unwrap_or("?"),
+                        b.get("mode").and_then(|v| v.as_str()).unwrap_or("?"),
+                        b.get("new").and_then(|v| v.as_u64()).unwrap_or(0),
+                        b.get("known").and_then(|v| v.as_u64()).unwrap_or(0),
+                    )
+                };
+                let _ = writeln!(out, "| **Baseline** | {} |", cell.replace('|', "\\|"));
+            }
             out.push('\n');
 
             // Per-target summary table (includes status, findings_count, WAF when present)
@@ -782,6 +823,13 @@ impl Result {
                         )
                     };
                     let _ = writeln!(out, "| **Confidence** | {} |", cell);
+                }
+                if let Some(is_new) = result.new_since_baseline {
+                    let _ = writeln!(
+                        out,
+                        "| **New** | {} |",
+                        if is_new { "yes" } else { "no (in baseline)" }
+                    );
                 }
                 let _ = writeln!(out, "| **Severity** | {} |", result.severity);
                 let _ = writeln!(out, "| **CWE** | {} |", result.cwe);
@@ -911,6 +959,10 @@ impl Result {
                     if !r.confidence_reason.is_empty() {
                         properties["confidence_reason"] = json!(r.confidence_reason);
                     }
+                }
+
+                if let Some(is_new) = r.new_since_baseline {
+                    properties["new"] = json!(is_new);
                 }
 
                 if include_request && let Some(req) = &r.request {

@@ -70,6 +70,10 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--limit` | — | — | Cap total results shown |
 | `--limit-result-type` | — | `all` | Which types count toward `--limit`: `all`, `v`, `r`, `a`, `i` |
 | `--only-poc` | — | — | Comma-separated filter: `v` (vulnerable), `r` (reflected), `a` (AST), `i` (informational) |
+| `--baseline` | — | — | Diff against a previous Dalfox JSON/JSONL report and report only findings new since it. An ordinary `-f json -o` report is the baseline |
+| `--baseline-mode` | — | `filter` | `filter` drops known findings (counts and exit code describe only what is new), `annotate` keeps them and marks each `new` |
+
+See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for the fingerprint rules and the CI recipe.
 
 ### Target shaping
 

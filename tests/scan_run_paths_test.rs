@@ -28,6 +28,8 @@ fn base_scan_args() -> ScanArgs {
         limit: None,
         limit_result_type: "all".to_string(),
         only_poc: vec![],
+        baseline: None,
+        baseline_mode: "filter".to_string(),
         param: vec![],
         data: None,
         headers: vec![],
