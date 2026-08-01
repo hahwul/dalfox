@@ -475,7 +475,11 @@ async fn an_unfollowed_redirect_onto_the_login_page_is_still_a_logout() {
         meta["target_summary"][0]
     );
     assert_eq!(meta["incomplete"], true);
-    assert_eq!(outcome, ScanOutcome::Error, "an empty run must still exit 2");
+    assert_eq!(
+        outcome,
+        ScanOutcome::Error,
+        "an empty run must still exit 2"
+    );
 }
 
 // Regression: preflight reads the body under `Range: bytes=0-8191` while a

@@ -970,7 +970,9 @@ mod tests {
             baseline_warning(&baseline(302, "https://app.test/auth/home", false)).is_none(),
             "an authenticated app that redirects / to /auth/home is not a logged-out session"
         );
-        assert!(baseline_warning(&baseline(302, "https://app.test/sso/dashboard", false)).is_none());
+        assert!(
+            baseline_warning(&baseline(302, "https://app.test/sso/dashboard", false)).is_none()
+        );
         assert!(
             baseline_warning(&baseline(302, "https://app.test/oauth2/authorize", false)).is_none()
         );
