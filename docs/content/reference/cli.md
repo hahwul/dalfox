@@ -218,6 +218,12 @@ Selectors:
 | `event-handlers` | DOM event handler attribute names |
 | `useful-tags` | Useful HTML tags |
 | `uri-scheme` | `javascript:`/`data:` URL payloads |
+| `special-chars` | Special characters (and encoded variants) for context probing |
+| `functions` | Confirmable sinks with filter-surviving variants (`alert`, `prompt`, ...) |
+| `awesome-alert` | Polished alert PoCs for screenshots (`alert(document.domain)`, ...) |
+| `dom-clobbering` | DOM clobbering vectors |
+| `mxss` | Mutation-XSS / sanitizer-bypass payloads |
+| `blind` | Blind-XSS skeletons (`{}` = your OOB callback URL) |
 | `portswigger` | Remote: PortSwigger XSS cheatsheet |
 | `payloadbox` | Remote: PayloadBox XSS list |
 

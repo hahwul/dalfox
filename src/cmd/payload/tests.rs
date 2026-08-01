@@ -1,4 +1,7 @@
-use super::{PayloadArgs, fetch_and_print_remote, print_summary, run_payload, uri_scheme_payloads};
+use super::{
+    PayloadArgs, awesome_alert_payloads, fetch_and_print_remote, functions_payloads, print_summary,
+    run_payload, special_chars_payloads, uri_scheme_payloads,
+};
 use crate::cmd::scan::ScanOutcome;
 
 #[test]
@@ -10,8 +13,37 @@ fn test_uri_scheme_payloads_shape() {
 }
 
 #[test]
+fn test_curated_selector_lists_are_nonempty_and_clean() {
+    for list in [
+        special_chars_payloads(),
+        functions_payloads(),
+        awesome_alert_payloads(),
+    ] {
+        assert!(!list.is_empty());
+        assert!(list.iter().all(|p| !p.is_empty()));
+        // One entry per line: no embedded newlines.
+        assert!(list.iter().all(|p| !p.contains('\n')));
+    }
+    // Sanity: the confirmable-sink list surfaces the canonical alert sink and a
+    // filter-surviving variant; the PoC list renders the host.
+    assert!(functions_payloads().contains(&"alert(1)"));
+    assert!(functions_payloads().contains(&"window['alert'](1)"));
+    assert!(awesome_alert_payloads().contains(&"alert(document.domain)"));
+}
+
+#[test]
 fn test_run_payload_known_selectors_return_clean() {
-    for selector in ["event-handlers", "useful-tags", "uri-scheme"] {
+    for selector in [
+        "event-handlers",
+        "useful-tags",
+        "uri-scheme",
+        "special-chars",
+        "functions",
+        "awesome-alert",
+        "dom-clobbering",
+        "mxss",
+        "blind",
+    ] {
         let outcome = run_payload(PayloadArgs {
             selector: Some(selector.to_string()),
         });

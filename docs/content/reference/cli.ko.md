@@ -218,6 +218,12 @@ dalfox payload <SELECTOR>
 | `event-handlers` | DOM 이벤트 핸들러 속성 이름 |
 | `useful-tags` | 유용한 HTML 태그 |
 | `uri-scheme` | `javascript:`/`data:` URL 페이로드 |
+| `special-chars` | 컨텍스트 프로빙용 특수 문자(및 인코딩된 변형) |
+| `functions` | 필터를 우회하는 변형이 포함된 확인 가능한 싱크(`alert`, `prompt`, ...) |
+| `awesome-alert` | 스크린샷용으로 다듬어진 alert PoC(`alert(document.domain)`, ...) |
+| `dom-clobbering` | DOM 클로버링 벡터 |
+| `mxss` | Mutation-XSS / 새니타이저 우회 페이로드 |
+| `blind` | Blind-XSS 스켈레톤(`{}` = OOB 콜백 URL) |
 | `portswigger` | 원격: PortSwigger XSS 치트시트 |
 | `payloadbox` | 원격: PayloadBox XSS 목록 |
 

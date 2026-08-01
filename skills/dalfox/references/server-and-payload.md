@@ -57,6 +57,12 @@ Supported selectors:
 | (no arg) | Prints short help + summary of built-in JS payload count |
 | `event-handlers` | All common DOM event handler attribute names (`onclick`, `onload`, `onerror`, ...) |
 | `useful-tags` | HTML tags frequently useful for XSS (`script`, `img`, `svg`, `iframe`, `object`, ...) |
+| `special-chars` | Special characters + encoded variants for context probing / breakout (`<`, `>`, `"`, `&lt;`, `%3C`, ...) |
+| `functions` | Confirmable sinks with filter-surviving variants (`alert(1)`, `window['alert'](1)`, `setTimeout('alert(1)')`, ...) |
+| `awesome-alert` | Polished alert PoCs for clean screenshots (`alert(document.domain)`, `alert(document.cookie)`, ...) |
+| `dom-clobbering` | DOM clobbering vectors |
+| `mxss` | Mutation-XSS / sanitizer-bypass payloads |
+| `blind` | Blind-XSS skeletons (`{}` = your OOB callback URL) |
 | `payloadbox` | Fetches current remote XSS payloads from PayloadBox provider (requires network) |
 | `portswigger` | Fetches current remote XSS payloads from PortSwigger cheat sheet |
 | `uri-scheme` | Scheme-based payloads (`javascript:`, `data:text/html,...`, base64 variants, etc.) |

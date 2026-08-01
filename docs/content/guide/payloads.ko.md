@@ -123,8 +123,26 @@ dalfox https://target.app --remote-payloads portswigger,payloadbox
 dalfox payload event-handlers  # onerror, onmouseover, ...
 dalfox payload useful-tags     # svg, img, script, ...
 dalfox payload uri-scheme      # javascript:, data:
+dalfox payload special-chars   # < > " ' ` ( ) ... 및 인코딩된 변형
+dalfox payload functions       # 확인 가능한 싱크: alert(1), window['alert'](1), ...
+dalfox payload awesome-alert   # PoC alert: alert(document.domain), alert(document.cookie)
+dalfox payload dom-clobbering  # DOM 클로버링 벡터
+dalfox payload mxss            # mutation-XSS / 새니타이저 우회 페이로드
+dalfox payload blind           # blind-XSS 스켈레톤 ({} = 콜백 URL)
 dalfox payload portswigger     # 원격 목록을 가져와 출력
 ```
+
+모든 셀렉터는 한 줄에 하나씩 출력하므로 일반적인 셸 도구와 조합할 수 있습니다:
+
+```bash
+dalfox payload functions | grep -i prompt
+dalfox payload special-chars | wc -l
+```
+
+`special-chars` 그룹은 수동 반사 테스트에 유용합니다. 각 바이트를 하나씩 주입해 어떤 문자가
+그대로 반사되는지, 어떤 문자가 HTML/URL 인코딩되어 돌아오는지, 어떤 문자가 제거되는지 확인할 수
+있습니다. `functions` 와 `awesome-alert` 는 *눈으로* 실행을 확인하고 호스트/오리진을 표시하도록
+선별되어 있어, 스크린샷 한 장으로 영향을 증명할 수 있습니다.
 
 ## "alert" 커스터마이징
 
