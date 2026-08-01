@@ -82,6 +82,15 @@ gau target.app | dalfox scan --dedup-urls signature
 # INF dedup (signature): 8214 duplicate target(s) collapsed, 37 remaining — dropped e.g. …
 ```
 
+**The bigger win is coverage, not saved requests.** `--max-targets-per-host` caps a host at 100 targets by default, and a recon dump arrives sorted — so one endpoint's thousands of harvested values are contiguous and consume the entire budget before any other endpoint is reached. Measured on a 5200-URL list (5000 × `/html?q=N`, then 200 distinct `/users/N`):
+
+| Mode | What the 100-target budget was spent on |
+|------|------------------------------------------|
+| `exact` (default) | 100 variants of `/html` — the 200 `/users/N` endpoints never scanned |
+| `signature` | 1 × `/html` + 99 distinct `/users/N` |
+
+The truncation is reported either way (`TRUNCATED_PER_HOST_CAP`), but only `signature` spends the budget on *different* endpoints. Raise `--max-targets-per-host` as well if you want both.
+
 When is it safe? When the parameter *name* is what decides where input lands — the common case. It is **not** safe when a value picks the code path: an `action=` / `mode=` / `template=` discriminator that routes to a different handler on the same path, a routing token, or a locale that swaps the rendering template. There, `signature` scans one branch and reports on all of them, which is why it stays opt-in.
 
 `--dedup-urls off` disables deduplication entirely, for the rare case where every line must be scanned as given. Note that per-target reporting is keyed by URL, so repeated lines still share one `target_summary` entry.
