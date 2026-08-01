@@ -112,8 +112,12 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 ### Where to edit by feature
 
 - New scan flag:
-  - `src/cmd/scan/args.rs` (`ScanArgs`) + behavior in `src/cmd/scan/mod.rs` (`run_scan`)
-  - `src/main.rs` (default scan construction when no subcommand)
+  - `src/cmd/scan/args.rs`: add the field to `ScanArgs` **and** its default to
+    `impl Default for ScanArgs`. Construction sites use `..Default::default()`,
+    so these two edits are all the plumbing there is — do not re-add
+    exhaustive field lists at call sites. `scanargs_default_matches_clap_defaults`
+    fails if the `Default` entry disagrees with the `default_value` you declared.
+  - behavior in `src/cmd/scan/mod.rs` (`run_scan`)
   - `src/config.rs` (`ScanConfig`, template, precedence mapping)
   - If relevant: `src/cmd/server.rs` `ScanOptions`
   - If relevant: `src/mcp/mod.rs` tool args parsing

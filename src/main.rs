@@ -399,93 +399,18 @@ async fn main() {
     } else {
         // Default to scan
         let args = cmd::scan::ScanArgs {
-            detect_outdated_libs: false,
-            input_type: "auto".to_string(),
-            format: "plain".to_string(),
             targets: cli.targets,
-            param: vec![],
-            data: None,
-            headers: vec![],
-            cookies: vec![],
-            method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            include_url: vec![],
-            exclude_url: vec![],
-            ignore_param: vec![],
-            out_of_scope: vec![],
-            out_of_scope_file: None,
-            mining_dict_word: None,
-            skip_mining: false,
-            skip_mining_dict: false,
-            skip_mining_dom: false,
-            only_discovery: false,
-            skip_discovery: false,
-            skip_reflection_header: false,
-            skip_reflection_cookie: false,
-            skip_reflection_path: false,
-            timeout: cmd::scan::DEFAULT_TIMEOUT_SECS,
-            scan_timeout: 0,
-            delay: cmd::scan::DEFAULT_DELAY_MS,
-            proxy: None,
-            // Bare `dalfox <TARGET>` path takes no `--insecure` flag (only
-            // global flags are accepted here), so leave it unspecified (None);
-            // config can set it via apply_to_scan_args_if_default and the
-            // effective value defaults to insecure (true) when building targets.
-            insecure: None,
-            follow_redirects: false,
-            ignore_return: vec![],
-            output: None,
-            include_request: false,
-            include_response: false,
-            include_all: false,
             // No-subcommand path (`dalfox <TARGET>`); read the global
             // flags from `Cli` so `dalfox URL --silence` and
             // `dalfox URL --no-color` flow through to scan.
             no_color: cli.no_color,
             silence: cli.silence,
-            dry_run: false,
-            stream_findings: false,
-            poc_type: "plain".to_string(),
-            limit: None,
-            limit_result_type: "all".to_string(),
-            only_poc: vec![],
-            workers: cmd::scan::DEFAULT_WORKERS,
-            max_concurrent_targets: cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
-            max_targets_per_host: cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
-            encoders: cmd::scan::DEFAULT_ENCODERS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            oob: cmd::scan::BlindOobArgs::default(),
-            custom_payload: None,
-            only_custom_payload: false,
-            inject_marker: None,
-            custom_alert_value: "1".to_string(),
-            custom_alert_type: "none".to_string(),
-
-            skip_xss_scanning: false,
-            max_payloads_per_param: 0,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            sxss_retries: 3,
-            skip_ast_analysis: false,
-            analyze_external_js: false,
-            hpp: false,
-            waf_bypass: "auto".to_string(),
-            skip_waf_probe: false,
-            force_waf: None,
-            waf_evasion: false,
-            rate_limit: 0,
-            retries: 0,
-            retry_delay: 1000,
-            waf_min_confidence: cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
+            // Everything else is the plain CLI default. Note `insecure` stays
+            // `None`: this path accepts no `--insecure` flag, so leaving it
+            // unspecified lets config set it via apply_to_scan_args_if_default,
+            // and the effective value falls back to insecure (true) when
+            // targets are built.
+            ..Default::default()
         };
         // Same config-overlay + `--include-all` expansion as every other entry
         // point. `no_color`/`silence` were already set from `cli` above, so the

@@ -183,8 +183,9 @@ fn test_generate_dynamic_payloads_html() {
 #[test]
 fn test_get_dynamic_payloads_basic() {
     let context = InjectionContext::Html(None);
+    // Overrides base_args()'s `encoders: ["none"]` — this test asserts the
+    // url/html encoded variants are emitted.
     let args = ScanArgs {
-        detect_outdated_libs: false,
         encoders: vec!["url".to_string(), "html".to_string()],
         ..base_args()
     };
@@ -230,10 +231,7 @@ fn protocol_scheme_survives_builtin_safety_cap_in_attribute_context() {
     ] {
         let label = format!("{delim:?}");
         let context = InjectionContext::Attribute(delim);
-        let args = ScanArgs {
-            detect_outdated_libs: false,
-            ..base_args()
-        };
+        let args = base_args();
         let payloads = get_dynamic_payloads(&context, &args).unwrap();
         let pos = payloads
             .iter()
@@ -252,7 +250,6 @@ fn protocol_scheme_survives_builtin_safety_cap_in_attribute_context() {
 fn test_get_dynamic_payloads_only_custom() {
     let context = InjectionContext::Html(None);
     let args = ScanArgs {
-        detect_outdated_libs: false,
         custom_payload: Some("test_payloads.txt".to_string()),
         only_custom_payload: true,
         ..base_args()
@@ -409,88 +406,18 @@ fn test_load_custom_payloads_caches_by_path() {
 fn base_args() -> ScanArgs {
     ScanArgs {
         insecure: Some(true),
-        detect_outdated_libs: false,
-        input_type: "auto".to_string(),
         format: "json".to_string(),
-        targets: vec![],
-        param: vec![],
-        data: None,
-        headers: vec![],
-        cookies: vec![],
-        method: "GET".to_string(),
-        user_agent: None,
-        cookie_from_raw: None,
-        include_url: vec![],
-        exclude_url: vec![],
-        ignore_param: vec![],
-        out_of_scope: vec![],
-        out_of_scope_file: None,
-        mining_dict_word: None,
-        skip_mining: false,
-        skip_mining_dict: false,
-        skip_mining_dom: false,
-        only_discovery: false,
-        skip_discovery: false,
-        skip_reflection_header: false,
-        skip_reflection_cookie: false,
-        skip_reflection_path: false,
-        timeout: 10,
-        scan_timeout: 0,
-        delay: 0,
-        proxy: None,
-        follow_redirects: false,
-        ignore_return: vec![],
-        output: None,
-        include_request: false,
-        include_response: false,
-        include_all: false,
-        no_color: false,
-        silence: false,
-        dry_run: false,
-        stream_findings: false,
-        poc_type: "plain".to_string(),
-        limit: None,
-        limit_result_type: "all".to_string(),
-        only_poc: vec![],
         workers: 10,
         max_concurrent_targets: 10,
-        max_targets_per_host: 100,
         encoders: vec!["none".to_string()],
-        custom_blind_xss_payload: None,
-        blind_callback_url: None,
-        oob: Default::default(),
-        custom_payload: None,
-        only_custom_payload: false,
-        inject_marker: None,
-        custom_alert_value: "1".to_string(),
-        custom_alert_type: "none".to_string(),
-        skip_xss_scanning: false,
-        max_payloads_per_param: 0,
-        deep_scan: false,
-        sxss: false,
-        sxss_url: None,
-        sxss_method: "GET".to_string(),
-        sxss_retries: 3,
-        skip_ast_analysis: false,
-        analyze_external_js: false,
-        hpp: false,
-        waf_bypass: "auto".to_string(),
-        skip_waf_probe: false,
-        force_waf: None,
-        waf_evasion: false,
-        rate_limit: 0,
-        retries: 0,
-        retry_delay: 1000,
         waf_min_confidence: 0.0,
-        remote_payloads: vec![],
-        remote_wordlists: vec![],
+        ..Default::default()
     }
 }
 
 #[test]
 fn test_get_dynamic_payloads_custom_numeric_alert_value() {
     let args = ScanArgs {
-        detect_outdated_libs: false,
         custom_alert_value: "9999".to_string(),
         ..base_args()
     };
@@ -504,7 +431,6 @@ fn test_get_dynamic_payloads_custom_numeric_alert_value() {
 #[test]
 fn test_get_dynamic_payloads_custom_string_alert_value() {
     let args = ScanArgs {
-        detect_outdated_libs: false,
         custom_alert_type: "str".to_string(),
         custom_alert_value: "xss".to_string(),
         ..base_args()
