@@ -2190,19 +2190,55 @@ mod har_input {
           "postData":{"mimeType":"application/x-www-form-urlencoded","text":"body=hi"}}}
     ]}}"#;
 
-    fn write_temp_har(body: &str) -> std::path::PathBuf {
+    /// Per-call sequence number for [`write_temp_har`]. **Not decoration.**
+    ///
+    /// The name used to be `pid + SystemTime::now().as_nanos()`, which is not
+    /// unique: `as_nanos()` reports nanoseconds but the clock behind it is
+    /// quantised far more coarsely (1 µs on macOS — 200k back-to-back reads
+    /// yield ~8.5k distinct values, and 8 threads sampling at once produced 7).
+    /// Every test below writes *different* HAR content through this one
+    /// helper, and they run in parallel in a single process, so a collision
+    /// means one test reads another's fixture and asserts against the wrong
+    /// entry count. That is the intermittent
+    /// `explicit_har_resolves_get_and_post_targets` failure.
+    ///
+    /// A monotonic counter cannot collide, so the name no longer depends on
+    /// clock resolution.
+    static HAR_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    fn temp_har_path() -> std::path::PathBuf {
         let mut path = std::env::temp_dir();
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
         path.push(format!(
             "dalfox-har-test-{}-{}.har",
             std::process::id(),
-            nanos
+            HAR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
+        path
+    }
+
+    fn write_temp_har(body: &str) -> std::path::PathBuf {
+        let path = temp_har_path();
         std::fs::write(&path, body).expect("write temp HAR");
         path
+    }
+
+    // Guards the fix above: if the name generator ever goes back to a
+    // timestamp, this fails instead of the HAR tests flaking once a fortnight.
+    #[test]
+    fn temp_har_paths_are_unique_under_parallel_use() {
+        let handles: Vec<_> = (0..16)
+            .map(|_| std::thread::spawn(|| (0..64).map(|_| temp_har_path()).collect::<Vec<_>>()))
+            .collect();
+        let all: Vec<std::path::PathBuf> = handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("thread"))
+            .collect();
+        let unique: std::collections::HashSet<_> = all.iter().collect();
+        assert_eq!(
+            unique.len(),
+            all.len(),
+            "temp HAR paths must be unique across threads; every test writes different content to this helper"
+        );
     }
 
     #[tokio::test]
