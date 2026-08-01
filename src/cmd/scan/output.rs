@@ -639,7 +639,7 @@ pub(crate) async fn render_results(
             log_warn(
                 args,
                 &format!(
-                    "INCOMPLETE: \x1b[33m{}\x1b[0m target(s) lost their session mid-scan — those results are not a clean bill of health",
+                    "INCOMPLETE: \x1b[33m{}\x1b[0m target(s) had no usable session — those results are not a clean bill of health",
                     lost
                 ),
             );

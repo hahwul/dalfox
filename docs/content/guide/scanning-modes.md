@@ -138,9 +138,11 @@ genuinely clean target.
 Session monitoring closes that gap. During preflight Dalfox fingerprints the
 authenticated landing response (status, where the request landed after
 redirects, whether a login form was already on the page) at **no extra request
-cost** — it reuses the body preflight already fetched. It then re-probes at each
-target's dispatch boundary and once more after that target's injection stage,
-and compares.
+cost** — it reuses the body preflight already fetched. It then re-probes after
+each target's injection stage, and again at the dispatch boundary when the
+baseline is already more than 30 seconds old. (On a short or single-target run
+only the post-scan probe fires — re-probing a baseline that is seconds old
+proves nothing.)
 
 ```bash
 # Nothing to configure: credentials switch it on.
@@ -155,8 +157,11 @@ A session is reported lost when any of these fires:
 | The request now lands on a login-shaped URL | `302 → /users/sign_in` |
 | A password field appeared where the baseline had none | the app now renders the login wall inline |
 
-`403` is also what an origin or WAF returns once it decides to block a scanner;
-the warning says so rather than asserting a cause it cannot distinguish.
+`403` is also what an origin or WAF returns once it decides to block a scanner.
+When Dalfox has already fingerprinted a WAF on the target, the `403` signal is
+suppressed entirely — a block explains it better than an expired session, and
+calling it a logout would abort the host group over a WAF rule. Use
+`--session-check` if you need `403`-as-expiry on a WAF-fronted origin.
 
 ### Making it exact
 
@@ -191,13 +196,19 @@ Either way the run is honest about it:
 - the target reported as `incomplete` (or `skipped`) with `error_code: SESSION_LOST`
   and the signal that fired in `error_message`
 - `meta.incomplete: true` in the [scan metadata envelope](../output/#scan-metadata-envelope)
-- exit code `2` under `abort` — so `dalfox scan … && echo "no XSS found"` cannot
-  print that line after being logged out (`continue` leaves the exit code alone)
+- exit code `2` under `abort` when the run found nothing — so
+  `dalfox scan … && echo "no XSS found"` cannot print that line after being
+  logged out. A run that *did* find something still exits `1`; findings are
+  real regardless, and `meta.incomplete` carries the caveat. `continue` leaves
+  the exit code alone entirely.
 
-Dalfox also warns when the **preflight** response already looks unauthenticated.
-That is the worst version of the failure: with the login page as the baseline no
-later probe can ever detect a change, so stale credentials would otherwise
-produce a silent, completely clean run.
+Dalfox also flags the case where the **preflight** response already looks
+unauthenticated — or where a `--session-check` marker never matched the baseline
+at all (a typo, or a marker that lives on another page). Both are reported as
+`SESSION_LOST` rather than merely logged: from such a baseline no later probe
+can detect a *change*, so stale credentials would otherwise produce a silent,
+completely clean run. The target is still scanned; the flag and exit code are
+what make the result honest.
 
 Monitoring is off — and costs nothing — when no credentials are supplied and
 neither `--session-check` flag is set. Logging in is out of scope: this is

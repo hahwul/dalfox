@@ -37,10 +37,10 @@ pub const ON_SESSION_LOSS_VALUES: &[&str] = &["abort", "continue"];
 /// throttled: that is the one that actually catches a session dying mid-run.
 const PRE_DISPATCH_MIN_AGE_SECS: u64 = 30;
 
-/// Cap on the probe response body we read. Only the login-form heuristic looks
-/// at the body, and a login page's `<input type="password">` is never megabytes
-/// deep; the cap keeps a hostile or merely enormous response from turning a
-/// cheap liveness check into a memory event.
+/// Cap on the probe response body we read. Only the login-form heuristic and
+/// `--session-check` look at the body, and neither needs megabytes; the cap
+/// keeps a hostile or merely enormous response from turning a cheap liveness
+/// check into a memory event.
 const PROBE_BODY_CAP_BYTES: usize = 64 * 1024;
 
 /// Fingerprint of the authenticated state, captured once per target from the
@@ -58,9 +58,30 @@ pub(crate) struct SessionBaseline {
     /// one in a header/modal even when signed in, so "a password field appeared"
     /// is only a loss signal if the baseline had none.
     pub(crate) has_login_form: bool,
-    /// Coarse body-shape signal. Not a decision input (page sizes swing wildly
-    /// between renders); carried so the debug line can show the before/after.
+    /// How many bytes of the response this baseline actually saw.
+    ///
+    /// This is a **decision input**, not a diagnostic: the preflight GET asks
+    /// for `Range: bytes=0-8191` while a probe reads up to
+    /// [`PROBE_BODY_CAP_BYTES`], so against an origin that honors Range the two
+    /// bodies cover different spans of the same page. A `type="password"` at
+    /// byte 20000 would then be invisible to the baseline and visible to every
+    /// probe — a permanent false `SESSION_LOST`. [`classify`] compares the
+    /// login-form signal over this many bytes of the probe body so both sides
+    /// look at the same region.
     pub(crate) body_len: usize,
+    /// Whether `--session-check` matched the baseline. `None` when the flag
+    /// wasn't given. `Some(false)` means the marker is wrong or on a different
+    /// page — every later probe would report a loss, so this is caught up front
+    /// (see [`baseline_warning`]) instead of aborting the scan at the first
+    /// probe.
+    pub(crate) check_marker_present: Option<bool>,
+    /// Did this baseline come from an operator-supplied `--session-check-url`?
+    ///
+    /// It suppresses exactly one check: whether the *landing path* looks like a
+    /// login endpoint. For a scan target that shape is evidence — nobody asked
+    /// to scan `/login`. For a check URL it is nothing: the operator chose the
+    /// endpoint, and `/auth/session` is a perfectly ordinary name for
+    /// "am I signed in?". Status and login-form signals still apply.
     /// When this baseline was captured, for [`PRE_DISPATCH_MIN_AGE_SECS`].
     pub(crate) captured_at: Instant,
 }
@@ -124,20 +145,30 @@ pub(crate) fn pre_dispatch_probe_due(baseline: &SessionBaseline) -> bool {
     baseline.captured_at.elapsed().as_secs() >= PRE_DISPATCH_MIN_AGE_SECS
 }
 
-/// Build the baseline from the preflight GET's own status/headers/body. Called
-/// from `preflight_content_type`, which has all three in hand — capturing the
+/// Build the baseline from the preflight GET's own response. Called from
+/// `preflight_content_type`, which has all of it in hand — capturing the
 /// authenticated fingerprint therefore costs zero extra requests.
+///
+/// `final_url` must be the response's own URL (`resp.url()`), not the request
+/// URL. Under `--follow-redirects` reqwest has already walked the chain, so an
+/// app that serves `/` by redirecting an authenticated user to `/auth/home`
+/// lands somewhere the request URL never mentions. Passing the request URL here
+/// made every probe compare `/?q=1` against `/auth/home` and read the `auth`
+/// segment as a login redirect — a guaranteed false `SESSION_LOST`.
 pub(crate) fn baseline_from_preflight(
     request_url: &url::Url,
+    final_url: &url::Url,
     status: u16,
     headers: &reqwest::header::HeaderMap,
     body: &str,
+    check_re: Option<&regex::Regex>,
 ) -> SessionBaseline {
     SessionBaseline {
         status,
-        landing: resolve_landing(request_url, None, status, headers),
+        landing: resolve_landing(request_url, Some(final_url), status, headers),
         has_login_form: has_login_form(body),
         body_len: body.len(),
+        check_marker_present: check_re.map(|re| re.is_match(body)),
         captured_at: Instant::now(),
     }
 }
@@ -157,6 +188,7 @@ pub(crate) fn baseline_from_preflight(
 pub(crate) async fn baseline_from_check_url(
     target: &Target,
     check_url: &str,
+    check_re: Option<&regex::Regex>,
 ) -> Option<SessionBaseline> {
     let probe = probe_session(target, Some(check_url)).await?;
     Some(SessionBaseline {
@@ -164,18 +196,51 @@ pub(crate) async fn baseline_from_check_url(
         landing: probe.landing,
         has_login_form: has_login_form(&probe.body),
         body_len: probe.body.len(),
+        check_marker_present: check_re.map(|re| re.is_match(&probe.body)),
         captured_at: Instant::now(),
     })
 }
 
-/// Did the *baseline itself* already look unauthenticated?
+/// Is this baseline unusable as a reference for "authenticated"? Returns the
+/// operator-facing explanation, or `None` when it looks fine.
 ///
-/// If the credentials were stale before the first payload went out, no later
-/// probe can ever report a "loss" — the login page is the baseline, so every
-/// comparison matches. That is the worst version of the bug this module exists
-/// to kill, so it gets its own up-front warning instead of a silent clean run.
-pub(crate) fn baseline_looks_unauthenticated(baseline: &SessionBaseline) -> bool {
-    baseline.status == 401 || baseline.has_login_form || is_login_url(&baseline.landing)
+/// Two ways it can be unusable, and both are silent catastrophes without this
+/// check:
+///
+/// - **The credentials were already stale.** The login page becomes the
+///   baseline, so no later probe can ever detect a *change* and the run reports
+///   a clean bill of health for a target that was never tested — the worst
+///   version of the bug this module exists to kill.
+/// - **`--session-check` never matched.** A typo (`'Sign Out'` for
+///   `'Sign out'`), or a marker that lives on a different page than the scan
+///   target, makes the pattern miss on every probe. Since the pattern is
+///   authoritative, that is an unconditional `Lost` verdict — and under the
+///   default `abort` it would skip the whole host and exit 2 for no reason.
+///
+/// The caller records this as `SESSION_LOST` rather than only logging it, so
+/// the structured output and exit code agree with the warning.
+pub(crate) fn baseline_warning(baseline: &SessionBaseline) -> Option<String> {
+    if baseline.check_marker_present == Some(false) {
+        return Some(format!(
+            "--session-check pattern did not match the baseline response (HTTP {}, {} bytes from {}) — the marker is wrong, is on a different page, or the credentials are already invalid",
+            baseline.status, baseline.body_len, baseline.landing
+        ));
+    }
+    // A *redirect* onto a login URL, not merely living at one. `/auth/home` and
+    // `/sso/dashboard` are ordinary authenticated landing pages, and this
+    // verdict now costs the operator an exit code — a 200 whose path happens to
+    // contain a login-ish token is nowhere near evidence enough for that. A
+    // stale session that 302s to `/login` is caught here; one that renders the
+    // login page inline is caught by `has_login_form`.
+    let redirected_to_login =
+        (300..400).contains(&baseline.status) && is_login_url(&baseline.landing);
+    if baseline.status == 401 || baseline.has_login_form || redirected_to_login {
+        return Some(format!(
+            "preflight response already looks unauthenticated (HTTP {}, landed on {}) — no later probe can detect a change from this baseline, so check the supplied credentials",
+            baseline.status, baseline.landing
+        ));
+    }
+    None
 }
 
 /// Re-probe the session with a single plain GET carrying the same
@@ -247,10 +312,20 @@ fn resolve_landing(
 /// Everything softer — body length, title, generic content drift — is left out
 /// on purpose. `abort` is the default, so a false positive costs the operator a
 /// whole scan; the signals have to be worth that.
+///
+/// `waf_detected` suppresses the 403 branch. A bare GET returning 403 after a
+/// heavy injection run is one of the most common outcomes of scanning a
+/// WAF-fronted origin, and monitoring auto-enables for anyone passing
+/// `--cookies` — including cookies that carry no session at all (consent, A/B).
+/// Calling that "session lost" would abort the host group and flip the exit
+/// code on a target that was never logged out. When a WAF was fingerprinted we
+/// have a better explanation than a guess, so we take it; operators who need
+/// 403-as-expiry on a WAF-fronted origin have `--session-check`.
 pub(crate) fn classify(
     baseline: &SessionBaseline,
     probe: &SessionProbe,
     check_re: Option<&regex::Regex>,
+    waf_detected: bool,
 ) -> SessionState {
     if let Some(re) = check_re {
         return if re.is_match(&probe.body) {
@@ -264,19 +339,25 @@ pub(crate) fn classify(
         };
     }
 
-    if (probe.status == 401 || probe.status == 403) && probe.status != baseline.status {
-        // 403 is included because plenty of apps answer an expired session with
-        // it, but it is also what an origin/WAF returns once it decides to block
-        // the scanner — say so rather than assert a cause we can't distinguish.
-        let hint = if probe.status == 403 {
-            " (session expired, or the origin/WAF is now blocking this client)"
-        } else {
-            ""
-        };
+    let status_flipped = probe.status != baseline.status;
+    if probe.status == 401 && status_flipped {
         return SessionState::Lost(format!(
-            "HTTP {} on the unmodified target request (baseline was HTTP {}){}",
-            probe.status, baseline.status, hint
+            "HTTP 401 on the unmodified target request (baseline was HTTP {})",
+            baseline.status
         ));
+    }
+    if probe.status == 403 && status_flipped {
+        if waf_detected {
+            crate::dbg_log!(
+                "session: ignoring HTTP 403 on {} — a WAF is fingerprinted on this target, so a block is the likelier cause than an expired session",
+                probe.landing
+            );
+        } else {
+            return SessionState::Lost(format!(
+                "HTTP 403 on the unmodified target request (baseline was HTTP {}) (session expired, or the origin is now blocking this client)",
+                baseline.status
+            ));
+        }
     }
 
     if probe.landing != baseline.landing
@@ -289,16 +370,36 @@ pub(crate) fn classify(
         ));
     }
 
-    if !baseline.has_login_form && has_login_form(&probe.body) {
+    // Compared over the span the baseline actually saw, not the whole probe
+    // body: the preflight GET asks for `Range: bytes=0-8191` while a probe reads
+    // up to PROBE_BODY_CAP_BYTES, so on a Range-honoring origin a password field
+    // past byte 8192 is invisible to the baseline and visible to every probe.
+    // That asymmetry was a permanent false SESSION_LOST on any SPA shell big
+    // enough to have its login markup below the fold. Truncating errs toward a
+    // missed signal, never a fabricated one.
+    let comparable = prefix_bytes(&probe.body, baseline.body_len);
+    if !baseline.has_login_form && has_login_form(comparable) {
         return SessionState::Lost(format!(
-            "response now contains a login form (password field); baseline had none (HTTP {}, {} bytes vs {} at baseline)",
+            "response now contains a login form (password field); baseline had none (HTTP {}, compared over the first {} bytes)",
             probe.status,
-            probe.body.len(),
-            baseline.body_len
+            comparable.len()
         ));
     }
 
     SessionState::Alive
+}
+
+/// The longest prefix of `s` that is at most `n` bytes and ends on a `char`
+/// boundary. (`str::floor_char_boundary` is still unstable.)
+fn prefix_bytes(s: &str, n: usize) -> &str {
+    if s.len() <= n {
+        return s;
+    }
+    let mut end = n;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 /// Which of the two re-probe points a check is running from.
@@ -377,7 +478,9 @@ impl SessionMonitor {
         }
 
         let probe = probe_session(target, self.check_url.as_deref()).await?;
-        match classify(&baseline, &probe, self.check_re.as_ref()) {
+        // A fingerprinted WAF changes what a 403 means — see `classify`.
+        let waf_detected = target.waf_info.as_ref().is_some_and(|w| !w.is_empty());
+        match classify(&baseline, &probe, self.check_re.as_ref(), waf_detected) {
             SessionState::Alive => {
                 crate::dbg_log!("session alive ({:?}): {}", phase, key);
                 None
@@ -385,24 +488,35 @@ impl SessionMonitor {
             SessionState::Lost(reason) => {
                 self.lost.lock().await.insert(key.clone(), reason.clone());
                 if !self.silence {
-                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                    let action = if self.abort_on_loss {
-                        "aborting this target and the rest of this host (--on-session-loss abort)"
-                    } else {
-                        "continuing; results for this target are incomplete (--on-session-loss continue)"
-                    };
-                    crate::ceprintln!(
-                        "\x1b[90m{}\x1b[0m \x1b[31mSESSION LOST\x1b[0m {} — {}; {}",
-                        ts,
-                        key,
-                        crate::utils::log::sanitize_log_message(&reason),
-                        action
-                    );
+                    report_loss(&key, &reason, self.abort_on_loss);
                 }
                 Some(reason)
             }
         }
     }
+}
+
+/// The single `SESSION LOST` stderr line, shared by the mid-scan probes and the
+/// preflight baseline check so both read identically.
+///
+/// stderr, not stdout, so the warning reaches the operator without corrupting
+/// the JSON/JSONL/SARIF payload a script is parsing. Both interpolations are
+/// sanitized: `reason` embeds a `Location` header the origin controls, and the
+/// URL can come from a target list of arbitrary provenance.
+pub(crate) fn report_loss(target_url: &str, reason: &str, abort_on_loss: bool) {
+    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+    let action = if abort_on_loss {
+        "aborting this target and the rest of this host (--on-session-loss abort)"
+    } else {
+        "continuing; results for this target are incomplete (--on-session-loss continue)"
+    };
+    crate::ceprintln!(
+        "\x1b[90m{}\x1b[0m \x1b[31mSESSION LOST\x1b[0m {} — {}; {}",
+        ts,
+        crate::utils::log::sanitize_log_message(target_url),
+        crate::utils::log::sanitize_log_message(reason),
+        action
+    );
 }
 
 /// Does this URL look like a login endpoint?
@@ -464,12 +578,15 @@ fn has_login_form(body: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Baseline with a generous `body_len` so the login-form comparison isn't
+    /// truncated unless a test deliberately sets a small budget.
     fn baseline(status: u16, landing: &str, has_login_form: bool) -> SessionBaseline {
         SessionBaseline {
             status,
             landing: landing.to_string(),
             has_login_form,
-            body_len: 1024,
+            body_len: 8192,
+            check_marker_present: None,
             captured_at: Instant::now(),
         }
     }
@@ -480,6 +597,12 @@ mod tests {
             landing: landing.to_string(),
             body: body.to_string(),
         }
+    }
+
+    /// `classify` with no `--session-check` and no WAF fingerprinted — the
+    /// plain heuristic path most tests exercise.
+    fn verdict(b: &SessionBaseline, p: &SessionProbe) -> SessionState {
+        classify(b, p, None, false)
     }
 
     fn lost_reason(state: &SessionState) -> &str {
@@ -493,21 +616,35 @@ mod tests {
     fn unchanged_response_is_alive() {
         let b = baseline(200, "https://app.test/dashboard", false);
         let p = probe(200, "https://app.test/dashboard", "<h1>Dashboard</h1>");
-        assert_eq!(classify(&b, &p, None), SessionState::Alive);
+        assert_eq!(verdict(&b, &p), SessionState::Alive);
     }
 
     #[test]
     fn status_flip_to_401_is_loss() {
         let b = baseline(200, "https://app.test/dashboard", false);
         let p = probe(401, "https://app.test/dashboard", "");
-        assert!(lost_reason(&classify(&b, &p, None)).contains("HTTP 401"));
+        assert!(lost_reason(&verdict(&b, &p)).contains("HTTP 401"));
     }
 
     #[test]
-    fn status_flip_to_403_is_loss_but_names_the_waf_alternative() {
+    fn status_flip_to_403_is_loss_when_no_waf_is_in_play() {
         let b = baseline(200, "https://app.test/dashboard", false);
         let p = probe(403, "https://app.test/dashboard", "");
-        assert!(lost_reason(&classify(&b, &p, None)).contains("WAF"));
+        assert!(lost_reason(&verdict(&b, &p)).contains("HTTP 403"));
+    }
+
+    // A WAF that starts blocking after a heavy injection run answers a bare GET
+    // with 403 too. Calling that "session lost" would abort the whole host
+    // group and flip the exit code on a target nobody logged out of — so once a
+    // WAF is fingerprinted, 403 stops being a session signal.
+    #[test]
+    fn status_flip_to_403_is_not_a_loss_when_a_waf_is_fingerprinted() {
+        let b = baseline(200, "https://app.test/dashboard", false);
+        let p = probe(403, "https://app.test/dashboard", "");
+        assert_eq!(classify(&b, &p, None, true), SessionState::Alive);
+        // 401 is unambiguous and survives the WAF carve-out.
+        let p401 = probe(401, "https://app.test/dashboard", "");
+        assert!(lost_reason(&classify(&b, &p401, None, true)).contains("HTTP 401"));
     }
 
     // A target that answered 403 from the start (e.g. an endpoint the
@@ -517,14 +654,14 @@ mod tests {
     fn baseline_that_was_already_401_does_not_report_loss() {
         let b = baseline(401, "https://app.test/api", false);
         let p = probe(401, "https://app.test/api", "");
-        assert_eq!(classify(&b, &p, None), SessionState::Alive);
+        assert_eq!(verdict(&b, &p), SessionState::Alive);
     }
 
     #[test]
     fn redirect_to_login_url_is_loss() {
         let b = baseline(200, "https://app.test/dashboard", false);
         let p = probe(302, "https://app.test/login?next=/dashboard", "");
-        assert!(lost_reason(&classify(&b, &p, None)).contains("login URL"));
+        assert!(lost_reason(&verdict(&b, &p)).contains("login URL"));
     }
 
     // The whole point of token matching: `/authors/42` and `/lessons` are not
@@ -558,7 +695,7 @@ mod tests {
             "https://app.test/dashboard",
             "<form><input type=\"password\" name=\"pw\"></form>",
         );
-        assert!(lost_reason(&classify(&b, &p, None)).contains("login form"));
+        assert!(lost_reason(&verdict(&b, &p)).contains("login form"));
     }
 
     // Apps that render a sign-in modal in the header while authenticated would
@@ -571,7 +708,37 @@ mod tests {
             "https://app.test/dashboard",
             "<input type='password' id='pw'>",
         );
-        assert_eq!(classify(&b, &p, None), SessionState::Alive);
+        assert_eq!(verdict(&b, &p), SessionState::Alive);
+    }
+
+    // The preflight GET asks for `Range: bytes=0-8191`; a probe reads up to
+    // 64 KiB. On a Range-honoring origin that means a password field deep in a
+    // large SPA shell is invisible to the baseline and visible to every probe —
+    // a permanent false SESSION_LOST. The comparison is bounded by what the
+    // baseline could actually see.
+    #[test]
+    fn login_form_past_the_baseline_byte_budget_is_not_a_loss() {
+        let mut b = baseline(200, "https://app.test/dashboard", false);
+        b.body_len = 64;
+        let body = format!("{}<input type=\"password\">", "x".repeat(200));
+        let p = probe(200, "https://app.test/dashboard", &body);
+        assert_eq!(
+            verdict(&b, &p),
+            SessionState::Alive,
+            "a password field the baseline's byte budget never covered is not evidence of anything"
+        );
+        // Inside the budget it still fires.
+        b.body_len = 4096;
+        assert!(lost_reason(&verdict(&b, &p)).contains("login form"));
+    }
+
+    #[test]
+    fn prefix_bytes_never_splits_a_char() {
+        // 'é' is two bytes; asking for 2 must not slice it in half.
+        assert_eq!(prefix_bytes("aé", 2), "a");
+        assert_eq!(prefix_bytes("aé", 3), "aé");
+        assert_eq!(prefix_bytes("abc", 99), "abc");
+        assert_eq!(prefix_bytes("abc", 0), "");
     }
 
     #[test]
@@ -585,7 +752,7 @@ mod tests {
             "https://app.test/login",
             "Signed in as alice <input type=password>",
         );
-        assert_eq!(classify(&b, &p, Some(&re)), SessionState::Alive);
+        assert_eq!(classify(&b, &p, Some(&re), false), SessionState::Alive);
     }
 
     #[test]
@@ -593,7 +760,7 @@ mod tests {
         let re = regex::Regex::new("Signed in as").unwrap();
         let b = baseline(200, "https://app.test/dashboard", false);
         let p = probe(200, "https://app.test/dashboard", "<h1>Dashboard</h1>");
-        assert!(lost_reason(&classify(&b, &p, Some(&re))).contains("--session-check"));
+        assert!(lost_reason(&classify(&b, &p, Some(&re), false)).contains("--session-check"));
     }
 
     #[test]
@@ -656,26 +823,55 @@ mod tests {
 
     #[test]
     fn a_login_page_baseline_is_flagged_as_already_unauthenticated() {
-        assert!(baseline_looks_unauthenticated(&baseline(
-            302,
-            "https://app.test/login",
-            false
-        )));
-        assert!(baseline_looks_unauthenticated(&baseline(
-            401,
-            "https://app.test/dashboard",
-            false
-        )));
-        assert!(baseline_looks_unauthenticated(&baseline(
-            200,
-            "https://app.test/dashboard",
-            true
-        )));
-        assert!(!baseline_looks_unauthenticated(&baseline(
-            200,
-            "https://app.test/dashboard",
-            false
-        )));
+        for b in [
+            // Redirected to the login wall…
+            baseline(302, "https://app.test/login", false),
+            // …rejected outright…
+            baseline(401, "https://app.test/dashboard", false),
+            // …or rendering the login form inline.
+            baseline(200, "https://app.test/dashboard", true),
+        ] {
+            assert!(
+                baseline_warning(&b)
+                    .expect("unusable baseline")
+                    .contains("already looks unauthenticated")
+            );
+        }
+        assert!(baseline_warning(&baseline(200, "https://app.test/dashboard", false)).is_none());
+    }
+
+    // A 200 that merely *lives* at a login-ish path is not evidence of
+    // anything: `/auth/home` and `/sso/dashboard` are ordinary authenticated
+    // landing pages, and this verdict costs the operator exit code 2. Only an
+    // actual redirect onto a login URL counts.
+    #[test]
+    fn a_login_shaped_path_served_with_200_is_not_flagged() {
+        assert!(baseline_warning(&baseline(200, "https://app.test/auth/home", false)).is_none());
+        assert!(
+            baseline_warning(&baseline(200, "https://app.test/sso/dashboard", false)).is_none()
+        );
+        assert!(
+            baseline_warning(&baseline(302, "https://app.test/auth/home", false))
+                .expect("a redirect onto a login-shaped URL is still flagged")
+                .contains("already looks unauthenticated")
+        );
+    }
+
+    // A `--session-check` marker that isn't on the baseline page (a typo, or a
+    // marker that lives elsewhere) makes every probe report a loss. Caught here
+    // instead of aborting the host at the first probe with no explanation.
+    #[test]
+    fn a_session_check_marker_missing_from_the_baseline_is_flagged_up_front() {
+        let mut b = baseline(200, "https://app.test/dashboard", false);
+        b.check_marker_present = Some(false);
+        assert!(
+            baseline_warning(&b)
+                .expect("unusable baseline")
+                .contains("--session-check")
+        );
+
+        b.check_marker_present = Some(true);
+        assert!(baseline_warning(&b).is_none());
     }
 
     #[test]
@@ -701,10 +897,40 @@ mod tests {
     fn baseline_from_preflight_captures_the_landing_and_form_state() {
         let req = url::Url::parse("https://app.test/dashboard").unwrap();
         let headers = reqwest::header::HeaderMap::new();
-        let b = baseline_from_preflight(&req, 200, &headers, "<h1>hi</h1>");
+        let b = baseline_from_preflight(&req, &req, 200, &headers, "<h1>hi</h1>", None);
         assert_eq!(b.status, 200);
         assert_eq!(b.landing, "https://app.test/dashboard");
         assert!(!b.has_login_form);
         assert_eq!(b.body_len, 11);
+        assert_eq!(b.check_marker_present, None);
+    }
+
+    // Under `--follow-redirects` reqwest has already walked the chain, so the
+    // baseline has to record where the response actually came from. Recording
+    // the *request* URL instead meant an app that redirects an authenticated
+    // user to `/auth/home` compared `/?q=1` against `/auth/home` on every
+    // probe, read the `auth` segment as a login redirect, and aborted the scan.
+    #[test]
+    fn baseline_records_the_post_redirect_landing_url() {
+        let req = url::Url::parse("https://app.test/?q=1").unwrap();
+        let landed = url::Url::parse("https://app.test/auth/home").unwrap();
+        let headers = reqwest::header::HeaderMap::new();
+        let b = baseline_from_preflight(&req, &landed, 200, &headers, "<h1>hi</h1>", None);
+        assert_eq!(b.landing, "https://app.test/auth/home");
+
+        // …and a probe landing in the same place is therefore unremarkable.
+        let p = probe(200, "https://app.test/auth/home", "<h1>hi</h1>");
+        assert_eq!(verdict(&b, &p), SessionState::Alive);
+    }
+
+    #[test]
+    fn baseline_from_preflight_records_whether_the_check_marker_matched() {
+        let req = url::Url::parse("https://app.test/dashboard").unwrap();
+        let headers = reqwest::header::HeaderMap::new();
+        let re = regex::Regex::new("Sign out").unwrap();
+        let hit = baseline_from_preflight(&req, &req, 200, &headers, "Sign out", Some(&re));
+        assert_eq!(hit.check_marker_present, Some(true));
+        let miss = baseline_from_preflight(&req, &req, 200, &headers, "Welcome", Some(&re));
+        assert_eq!(miss.check_marker_present, Some(false));
     }
 }

@@ -98,6 +98,20 @@ pub(crate) async fn run_scan_loop(
         state.session_lost.clone(),
     )
     .await;
+    // An operator who passed `--session-check*` asked for this explicitly; if
+    // every baseline capture failed (unreachable probe URL, a target skipped
+    // before preflight finished) they get no monitoring at all. Say so rather
+    // than leaving them to believe a silent run was a monitored one.
+    if session_monitor.is_none()
+        && (args.session_check.is_some() || args.session_check_url.is_some())
+        && !args.silence
+    {
+        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+        crate::ceprintln!(
+            "\x1b[90m{}\x1b[0m \x1b[33mWARN\x1b[0m --session-check requested but no baseline could be captured for any target; session monitoring is INACTIVE for this run",
+            ts
+        );
+    }
 
     let global_semaphore = Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
     let (finding_tx, finding_printer_handle) = if stream_findings_enabled {

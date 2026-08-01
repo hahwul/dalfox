@@ -318,7 +318,7 @@ Dalfox returns:
 |------|---------|
 | `0` | Completed successfully, no findings |
 | `1` | Completed successfully, at least one finding **of any tier** |
-| `2` | Input/config/runtime error, **or** a session lost mid-scan under the default `--on-session-loss abort` |
+| `2` | Input/config/runtime error, **or** a session lost mid-scan *with no findings* under the default `--on-session-loss abort` (a run that did find something still exits `1`) |
 
 `1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity >= High` with `jq` reaches the same set today, because severity currently tracks the tier — see [Detection Model](../detection-model/).)
 

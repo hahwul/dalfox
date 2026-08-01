@@ -233,7 +233,8 @@ credentials. Under the default `--on-session-loss abort` the exit code is also
   fail only on asserted vulnerabilities, run `--only-poc v`
 - `2` — Hard error (bad input, config, runtime failure, every target
   unreachable, `--output` could not be written, or a session lost mid-scan
-  under the default `--on-session-loss abort`)
+  **with no findings** under the default `--on-session-loss abort`; a run that
+  did find something still exits `1`)
 
 With `--baseline` (default `filter` mode), suppressed findings never reach the
 exit-code decision, so the code reports novelty rather than the whole backlog.

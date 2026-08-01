@@ -10,6 +10,14 @@ pub(crate) fn is_allowed_content_type(ct: &str) -> bool {
     crate::utils::is_xss_scannable_content_type(ct)
 }
 
+/// Byte budget for the preflight body fetch, sent as `Range: bytes=0-8191`.
+///
+/// Named rather than inlined because the session baseline is derived from this
+/// same response: `session::classify` has to know how much of the page the
+/// baseline could see before it compares a probe against it (see
+/// `SessionBaseline::body_len`).
+pub(crate) const PREFLIGHT_BODY_BYTES: usize = 8192;
+
 /// Preflight result containing content-type, CSP, body, WAF, and tech detection info.
 pub(crate) struct PreflightResult {
     pub(crate) content_type: String,
@@ -36,7 +44,13 @@ pub(crate) enum PreflightOutcome {
     /// Response was received (e.g. 405 from a POST-only endpoint) but
     /// no Content-Type header — keep scanning, just without preflight
     /// metadata (CSP, WAF, tech).
-    NoContentType,
+    ///
+    /// The session baseline rides along rather than being dropped with the
+    /// rest: the target still gets scanned, so it still has a session that can
+    /// die, and with `--session-check-url` the extra baseline request has
+    /// already been spent. Discarding it silently disabled monitoring the
+    /// operator explicitly asked for.
+    NoContentType(Option<super::session::SessionBaseline>),
     /// Hard reachability failure — the `&'static str` carries the
     /// specific error_code (`DNS_RESOLUTION_FAILED`,
     /// `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, or
@@ -166,8 +180,12 @@ pub(crate) async fn preflight_content_type(
     let mut attempt = 0u32;
     let resp = loop {
         attempt += 1;
-        let request_builder =
-            crate::utils::build_preflight_request(&client, target, true, Some(8192));
+        let request_builder = crate::utils::build_preflight_request(
+            &client,
+            target,
+            true,
+            Some(PREFLIGHT_BODY_BYTES),
+        );
         crate::record_outbound_request().await;
         match request_builder.send().await {
             Ok(r) => break r,
@@ -239,11 +257,16 @@ pub(crate) async fn preflight_content_type(
     let mut response_body: Option<String> = None;
     let mut session_baseline: Option<super::session::SessionBaseline> = None;
     let monitor_session = super::session::monitoring_enabled(args, target);
-    let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
+    let get_req =
+        crate::utils::build_preflight_request(&client, target, false, Some(PREFLIGHT_BODY_BYTES));
     crate::record_outbound_request().await;
     if let Ok(get_resp) = get_req.send().await {
         let get_status = get_resp.status().as_u16();
         let get_headers = get_resp.headers().clone();
+        // Captured before `read_body` consumes the response. Under
+        // `--follow-redirects` this is where the chain actually ended, which is
+        // the only thing the session baseline can meaningfully compare against.
+        let get_final_url = get_resp.url().clone();
         if let Ok(body) = crate::utils::http::read_body(get_resp).await {
             response_body = Some(body.clone());
 
@@ -253,15 +276,26 @@ pub(crate) async fn preflight_content_type(
             // `--session-check-url`, whose baseline has to come from that same
             // endpoint (see `baseline_from_check_url`).
             if monitor_session {
+                // Already validated in `run_scan`; `ok().flatten()` here just
+                // avoids threading a Result through preflight for a case that
+                // cannot occur.
+                let check_re = super::session::compile_session_check(args).ok().flatten();
                 session_baseline = match args.session_check_url.as_deref() {
                     Some(check_url) => {
-                        super::session::baseline_from_check_url(target, check_url).await
+                        super::session::baseline_from_check_url(
+                            target,
+                            check_url,
+                            check_re.as_ref(),
+                        )
+                        .await
                     }
                     None => Some(super::session::baseline_from_preflight(
                         &target.url,
+                        &get_final_url,
                         get_status,
                         &get_headers,
                         &body,
+                        check_re.as_ref(),
                     )),
                 };
             }
@@ -324,7 +358,7 @@ pub(crate) async fn preflight_content_type(
             tech_result,
             session_baseline,
         }),
-        None => PreflightOutcome::NoContentType,
+        None => PreflightOutcome::NoContentType(session_baseline),
     }
 }
 

@@ -783,14 +783,23 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         return ScanOutcome::Error;
     }
 
-    // A dead session makes the whole report untrustworthy, so under the
-    // default `--on-session-loss abort` it must not exit 0 — `dalfox scan ... &&
+    // An empty report after a dead session must not exit 0 — `dalfox scan ... &&
     // echo "no XSS found"` is exactly the script this issue is about. Under
     // `--on-session-loss continue` the operator has said the detection may be
     // misfiring on their target and asked to keep going, so the exit code is
     // left alone; the `incomplete` meta flag and the per-target SESSION_LOST
-    // entries still record what happened.
-    if session::aborts_on_loss(args) && !state.session_lost.lock().await.is_empty() {
+    // entries still record what happened either way.
+    //
+    // Gated on there being no findings: a run that confirmed a `V` and *then*
+    // lost its session should exit 1 (vulnerabilities found), not 2 (hard
+    // error). CI that separates those two — a distinction the output guide
+    // documents — would otherwise read a successful detection as an
+    // infrastructure failure. `meta.incomplete` carries the incompleteness for
+    // both codes.
+    if final_results.is_empty()
+        && session::aborts_on_loss(args)
+        && !state.session_lost.lock().await.is_empty()
+    {
         return ScanOutcome::Error;
     }
 

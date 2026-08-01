@@ -100,7 +100,7 @@ dalfox scan [TARGETS]... [FLAGS]
 |------|---------|-------------|
 | `--session-check` | — | 인증된 응답 본문에 계속 매칭되어야 하는 정규식. 지정하면 이 값이 기준이 되며 내장 휴리스틱은 사용하지 않습니다 |
 | `--session-check-url` | — | 세션 재검증 시 스캔 대상 대신 이 URL을 조회합니다 (예: 가벼운 `/api/me` 엔드포인트) |
-| `--on-session-loss` | `abort` | `abort`는 해당 대상을 중단하고 같은 호스트의 나머지 대상도 건너뜁니다. `continue`는 스캔을 계속합니다. 어느 쪽이든 대상은 `clean`이 아니라 `incomplete` / `SESSION_LOST`로 보고됩니다 |
+| `--on-session-loss` | `abort` | `abort`는 해당 대상을 중단하고 같은 호스트의 나머지 대상도 건너뛰며, 탐지 결과가 없으면 `2`로 종료합니다. `continue`는 스캔을 계속하고 종료 코드를 바꾸지 않습니다. 어느 쪽이든 대상은 `clean`이 아니라 `incomplete` / `SESSION_LOST`로 보고됩니다 |
 
 ### 범위
 

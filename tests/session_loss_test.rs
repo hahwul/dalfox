@@ -9,9 +9,11 @@
 //! it was talking to a login page the whole time.
 
 use axum::Router;
+use axum::extract::Query;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::get;
 use dalfox::cmd::scan::{ScanArgs, ScanOutcome, run_scan};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,6 +22,7 @@ use tokio::net::TcpListener;
 
 const SIGNED_IN: &str = "<html><body><h1>Signed in as alice</h1></body></html>";
 const LOGGED_OUT: &str = "<html><body>session expired</body></html>";
+const LOGIN_MARKUP: &str = "<form><input type=\"password\" name=\"pw\"></form>";
 
 fn html_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
@@ -64,6 +67,54 @@ async fn spawn_app(healthy_hits: usize) -> (String, tokio::task::JoinHandle<()>)
         .route(
             "/auth/session",
             get(|| async { (html_headers(), SIGNED_IN) }),
+        )
+        // An authenticated landing page that lives behind a redirect onto a
+        // login-shaped path. Real apps do this (`/` -> `/auth/home`).
+        .route(
+            "/redirect-home",
+            get(|| async {
+                (
+                    StatusCode::FOUND,
+                    [("location", "/auth/home")],
+                    html_headers(),
+                    "",
+                )
+            }),
+        )
+        .route("/auth/home", get(|| async { (html_headers(), SIGNED_IN) }))
+        // A large authenticated shell whose login markup sits past the
+        // preflight Range budget (8 KiB), served by an origin that honors
+        // Range — so the baseline sees a prefix and the probe sees the lot.
+        .route(
+            "/big-shell",
+            get(|headers: HeaderMap| async move {
+                let body = format!("{}{}", "<!-- pad -->".repeat(3000), LOGIN_MARKUP);
+                match headers.get("range") {
+                    Some(_) => (
+                        StatusCode::PARTIAL_CONTENT,
+                        html_headers(),
+                        body[..8192].to_string(),
+                    ),
+                    None => (StatusCode::OK, html_headers(), body),
+                }
+            }),
+        )
+        // Credentials that were already dead before the scan began.
+        .route(
+            "/stale",
+            get(|| async { (StatusCode::UNAUTHORIZED, html_headers(), LOGGED_OUT) }),
+        )
+        // Reflects `q` straight into the document — a real finding, so the
+        // exit-code interaction with session loss can be exercised.
+        .route(
+            "/reflect",
+            get(|q: Query<HashMap<String, String>>| async move {
+                let v = q.get("q").cloned().unwrap_or_default();
+                (
+                    html_headers(),
+                    format!("<html><body><div>{}</div></body></html>", v),
+                )
+            }),
         );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -333,4 +384,152 @@ async fn a_relative_session_check_url_fails_fast() {
 
     assert_eq!(run_scan(&args).await, ScanOutcome::Error);
     assert!(!out.exists());
+}
+
+// Regression: under `--follow-redirects` the baseline must record where the
+// response actually landed, not the request URL. An app that serves its
+// authenticated home behind `302 -> /auth/home` otherwise compares `/?q=1`
+// against `/auth/home` on every probe, reads the `auth` segment as a login
+// redirect, and aborts a scan nobody was logged out of.
+#[tokio::test]
+async fn a_followed_redirect_onto_a_login_shaped_path_is_not_a_logout() {
+    let (base, server) = spawn_app(0).await;
+    let out = unique_temp_path("session-followed-redirect");
+    let mut args = lean_args(&format!("{}/redirect-home?q=1", base), &out);
+    args.follow_redirects = true;
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(
+        meta["target_summary"][0]["status"], "clean",
+        "the authenticated landing page is /auth/home; that is not a logout: {}",
+        meta["target_summary"][0]
+    );
+    assert_eq!(meta["incomplete"], false);
+    assert_eq!(outcome, ScanOutcome::Clean);
+}
+
+// Regression: preflight reads the body under `Range: bytes=0-8191` while a
+// probe reads up to 64 KiB. On a Range-honoring origin, login markup past 8 KiB
+// is invisible to the baseline and visible to every probe — a permanent false
+// SESSION_LOST on any SPA shell with its login form below the fold.
+#[tokio::test]
+async fn login_markup_past_the_preflight_range_budget_is_not_a_logout() {
+    let (base, server) = spawn_app(0).await;
+    let out = unique_temp_path("session-range-asymmetry");
+    let args = lean_args(&format!("{}/big-shell?q=1", base), &out);
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(
+        meta["target_summary"][0]["status"], "clean",
+        "the baseline never saw that region of the page, so it is not evidence: {}",
+        meta["target_summary"][0]
+    );
+    assert_eq!(outcome, ScanOutcome::Clean);
+}
+
+// Credentials that were already dead at preflight are the worst variant: the
+// login page becomes the baseline, so no later probe can ever detect a change.
+// That must still reach the envelope and the exit code, not just stderr.
+#[tokio::test]
+async fn credentials_already_stale_at_preflight_are_reported_not_just_logged() {
+    let (base, server) = spawn_app(0).await;
+    let out = unique_temp_path("session-stale-at-preflight");
+    let mut args = lean_args(&format!("{}/?q=1", base), &out);
+    args.session_check_url = Some(format!("{}/stale", base));
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    let summary = &meta["target_summary"][0];
+    assert_eq!(summary["status"], "incomplete", "{}", summary);
+    assert_eq!(summary["error_code"], "SESSION_LOST");
+    assert!(
+        summary["error_message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("already looks unauthenticated"),
+        "{}",
+        summary
+    );
+    assert_eq!(meta["incomplete"], true);
+    assert_eq!(outcome, ScanOutcome::Error);
+}
+
+// A `--session-check` marker that never matched the baseline is a typo or a
+// wrong page, not a logout — but it *would* make every probe report a loss. It
+// has to be caught at preflight and named for what it is.
+#[tokio::test]
+async fn a_session_check_marker_absent_from_the_baseline_is_named_as_such() {
+    let (base, server) = spawn_app(0).await;
+    let out = unique_temp_path("session-marker-typo");
+    let mut args = lean_args(&format!("{}/?q=1", base), &out);
+    args.session_check = Some("Signed in as nobody".to_string());
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    let summary = &meta["target_summary"][0];
+    assert_eq!(summary["status"], "incomplete");
+    assert!(
+        summary["error_message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("did not match the baseline"),
+        "the operator needs to know the marker is wrong, not that they were logged out: {}",
+        summary
+    );
+    assert_eq!(outcome, ScanOutcome::Error);
+}
+
+// Exit codes have to stay distinguishable: 1 means "vulnerabilities found",
+// 2 means "this run failed". A scan that confirmed a finding and *then* lost
+// its session found something real — reporting it as an infrastructure error
+// would make CI that separates the two treat a successful detection as a
+// broken job. `meta.incomplete` carries the incompleteness for both codes.
+#[tokio::test]
+async fn a_run_with_findings_still_exits_one_after_a_session_loss() {
+    let (base, server) = spawn_app(1).await;
+    let out = unique_temp_path("session-lost-with-findings");
+    let mut args = lean_args(&format!("{}/reflect?q=1", base), &out);
+    args.session_check_url = Some(format!("{}/expire", base));
+    // Let the injection stage actually run against the reflecting parameter.
+    args.skip_discovery = false;
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    assert!(
+        meta["findings_count"].as_u64().unwrap_or(0) > 0,
+        "the reflecting endpoint should produce at least one finding: {}",
+        meta
+    );
+    assert_eq!(meta["target_summary"][0]["status"], "incomplete");
+    assert_eq!(
+        meta["incomplete"], true,
+        "the run is still flagged as incomplete"
+    );
+    assert_eq!(
+        outcome,
+        ScanOutcome::Findings,
+        "findings outrank the session loss for the exit code"
+    );
 }

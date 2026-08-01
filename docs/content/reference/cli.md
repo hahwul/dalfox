@@ -101,7 +101,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 |------|---------|-------------|
 | `--session-check` | — | Regex that must keep matching an authenticated response body. Authoritative: when set, the built-in heuristics are not consulted |
 | `--session-check-url` | — | Probe this URL instead of the scan target when re-validating (e.g. a cheap `/api/me` endpoint) |
-| `--on-session-loss` | `abort` | `abort` stops the affected target and skips the rest of that host; `continue` keeps scanning. Either way the target is reported `incomplete` / `SESSION_LOST`, never `clean` |
+| `--on-session-loss` | `abort` | `abort` stops the affected target, skips the rest of that host, and exits `2` when the run found nothing; `continue` keeps scanning and leaves the exit code alone. Either way the target is reported `incomplete` / `SESSION_LOST`, never `clean` |
 
 ### Scope
 
