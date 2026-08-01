@@ -81,6 +81,56 @@ fn test_missing_toml_config_path_is_created() {
 }
 
 #[test]
+fn test_missing_config_path_creation_emits_notice_on_stderr() {
+    // The missing-path scaffold (asserted above) must not be silent: a typo'd
+    // `--config` path would otherwise run with built-in defaults while looking
+    // like a successful load. The creation is surfaced on stderr, and stdout
+    // stays clean so machine-format output is unaffected.
+    let dir = unique_temp_dir("cfg-create-notice");
+    let config_path = dir.join("config.toml");
+    assert!(!config_path.exists());
+
+    let output = run_payload_with_config(&config_path);
+    assert!(
+        output.status.success(),
+        "missing config path should succeed"
+    );
+    assert!(config_path.exists(), "config file should be created");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Notice:") && stderr.contains("did not exist"),
+        "creation of a missing --config path must emit a stderr notice; stderr was:\n{stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Notice:"),
+        "the creation notice must go to stderr, not stdout; stdout was:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_existing_config_path_emits_no_creation_notice() {
+    // Control: an existing, valid config file is loaded, not created, so no
+    // creation notice fires — the notice is scoped to the scaffold case only.
+    let dir = unique_temp_dir("cfg-existing-no-notice");
+    let config_path = dir.join("config.toml");
+    std::fs::write(&config_path, "[scan]\nformat = \"plain\"\n").expect("write valid toml config");
+
+    let output = run_payload_with_config(&config_path);
+    assert!(
+        output.status.success(),
+        "existing config path should succeed"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Notice:"),
+        "loading an existing config must not emit a creation notice; stderr was:\n{stderr}"
+    );
+}
+
+#[test]
 fn test_existing_valid_json_config_path_is_parsed() {
     let dir = unique_temp_dir("cfg-existing-json");
     let config_path = dir.join("config.json");

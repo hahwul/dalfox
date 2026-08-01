@@ -269,6 +269,26 @@ async fn main() {
         eprintln!("Warning: failed to load --config {}: {}", cfg_path, e);
     }
 
+    // A missing explicit `--config <path>` is scaffolded with a default template
+    // (see the create-if-missing branch above) and the scan proceeds on built-in
+    // defaults. That convenience is fine, but doing it *silently* reproduces the
+    // exact footgun the warning above guards against: a typo in the path (or a
+    // wrong directory) then runs with defaults while the operator believes their
+    // `encoders` / `method` / `format` settings applied — and writes an
+    // unsolicited file at the mistyped location. Surface it on stderr so the
+    // creation is visible; stdout stays clean for machine formats. Scoped to the
+    // explicit-`--config` path only — the implicit default-path init
+    // (`load_or_init`, `cli.config == None`) stays quiet on purpose so a
+    // first-time user isn't nagged about their bootstrapped config.
+    if let (Some(cfg_path), Ok(lr)) = (&cli.config, &config_load)
+        && lr.created
+    {
+        eprintln!(
+            "Notice: --config {} did not exist — created it with a default template and ran with built-in defaults (check the path if you meant to load an existing config)",
+            cfg_path
+        );
+    }
+
     // Config values are deserialized straight into `Config` and never pass
     // through clap's value-parsers, so an invalid `format`, a lowercase
     // `method`, or a `limit = 0` would be copied verbatim into `ScanArgs` and
