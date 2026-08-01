@@ -230,14 +230,25 @@ pub(crate) fn baseline_warning(baseline: &SessionBaseline) -> Option<String> {
             baseline.status, baseline.body_len, baseline.landing
         ));
     }
-    // A *redirect* onto a login URL, not merely living at one. `/auth/home` and
-    // `/sso/dashboard` are ordinary authenticated landing pages, and this
-    // verdict now costs the operator an exit code — a 200 whose path happens to
-    // contain a login-ish token is nowhere near evidence enough for that. A
-    // stale session that 302s to `/login` is caught here; one that renders the
-    // login page inline is caught by `has_login_form`.
+    // A *redirect* onto an unambiguous login URL, not merely living at one, and
+    // not merely one whose path contains an auth-ish word.
+    //
+    // Two narrowings, both because this verdict costs the operator an exit code
+    // and there is no second signal to corroborate it: every other rule in this
+    // module compares a probe against a baseline and fires on a *change*, which
+    // is what makes a weak token safe there. Here there is nothing to compare —
+    // the baseline IS the evidence — so the token has to carry the claim alone.
+    //
+    // 1. Redirect only. `/auth/home` served with 200 is an ordinary
+    //    authenticated landing page.
+    // 2. [`is_login_endpoint_url`], not [`is_login_url`]. An app that serves its
+    //    authenticated home by redirecting `/` to `/auth/home` — the example
+    //    this module's own docs use for "ordinary authenticated landing page" —
+    //    otherwise reported SESSION_LOST, `incomplete: true`, and exit 2 on a
+    //    session nobody had been logged out of, whenever the scan ran without
+    //    `--follow-redirects` (the default). Reproduced end-to-end.
     let redirected_to_login =
-        (300..400).contains(&baseline.status) && is_login_url(&baseline.landing);
+        (300..400).contains(&baseline.status) && is_login_endpoint_url(&baseline.landing);
     if baseline.status == 401 || baseline.has_login_form || redirected_to_login {
         return Some(format!(
             "preflight response already looks unauthenticated (HTTP {}, landed on {}) — no later probe can detect a change from this baseline, so check the supplied credentials",
@@ -245,6 +256,36 @@ pub(crate) fn baseline_warning(baseline: &SessionBaseline) -> Option<String> {
         ));
     }
     None
+}
+
+/// A baseline that *might* be a login wall, stated as a heads-up rather than a
+/// verdict. Returns the operator-facing text, or `None` when there is nothing
+/// ambiguous about it.
+///
+/// This is the half [`baseline_warning`] gave up when it narrowed to
+/// [`is_login_endpoint_url`]. A preflight that redirects to `/oauth2/authorize`
+/// or `/sso/` really can be a dead SSO session — and if it is, no later probe
+/// can detect a change, so the run would end `"clean"`. But it is just as
+/// likely an authenticated app whose home lives behind an auth-shaped redirect,
+/// and that case must not cost an exit code (see [`baseline_warning`]).
+///
+/// So it is printed and nothing else: no `SESSION_LOST` entry, no effect on
+/// `meta.incomplete` or the exit code. The operator gets the one thing dalfox
+/// genuinely knows — "your credentials may already be stale here, and I cannot
+/// tell" — and `--session-check` settles it definitively.
+pub(crate) fn baseline_advisory(baseline: &SessionBaseline) -> Option<String> {
+    if baseline_warning(baseline).is_some() {
+        return None; // Already reported, and far more definitely.
+    }
+    let ambiguous_redirect = (300..400).contains(&baseline.status)
+        && is_login_url(&baseline.landing)
+        && !is_login_endpoint_url(&baseline.landing);
+    ambiguous_redirect.then(|| {
+        format!(
+            "preflight redirects to an auth-shaped URL ({}) — normal for an app whose authenticated home lives there, but it is also what an expired SSO session looks like, and dalfox cannot tell the two apart. If the credentials are stale this run cannot detect it; pass --session-check '<marker>' to make the check exact",
+            baseline.landing
+        )
+    })
 }
 
 /// Re-probe the session with a single plain GET carrying the same
@@ -523,6 +564,19 @@ pub(crate) fn report_loss(target_url: &str, reason: &str, abort_on_loss: bool) {
     );
 }
 
+/// The advisory counterpart of [`report_loss`]: same stream and sanitizing,
+/// deliberately not the same word. `SESSION LOST` is a verdict that costs an
+/// exit code; this one is `SESSION?` — a thing to look at, not a failure.
+pub(crate) fn report_baseline_advisory(target_url: &str, note: &str) {
+    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+    crate::ceprintln!(
+        "\x1b[90m{}\x1b[0m \x1b[33mSESSION?\x1b[0m {} — {}",
+        ts,
+        crate::utils::log::sanitize_log_message(target_url),
+        crate::utils::log::sanitize_log_message(note)
+    );
+}
+
 /// Does this URL look like a login endpoint?
 ///
 /// Matched on whole path *tokens*, not substrings: a substring test for "auth"
@@ -535,6 +589,12 @@ pub(crate) fn report_loss(target_url: &str, reason: &str, abort_on_loss: bool) {
 ///
 /// Query strings are ignored — `?next=/login` appears on plenty of pages that
 /// are perfectly authenticated.
+///
+/// Used by [`classify`], where the verdict additionally requires the landing to
+/// have *changed* from the baseline's. That corroboration is what makes the
+/// weak half of the token list (`auth`, `sso`, `oauth`, …) safe here: moving
+/// from `/dashboard` to `/oauth2/authorize` mid-scan really is a logout.
+/// A rule with no such comparison must use [`is_login_endpoint_url`].
 fn is_login_url(raw: &str) -> bool {
     const LOGIN_TOKENS: &[&str] = &[
         "login",
@@ -546,6 +606,29 @@ fn is_login_url(raw: &str) -> bool {
         "authenticate",
         "authorize",
     ];
+    path_has_token(raw, LOGIN_TOKENS)
+}
+
+/// Does this URL name a login endpoint *by itself*, with no corroborating
+/// signal?
+///
+/// The strict half of [`is_login_url`]: only tokens that name the sign-in page
+/// itself. `auth`, `sso`, `oauth`, `authorize` and `authenticate` are dropped
+/// because they are every bit as common in *authenticated* areas —
+/// `/auth/home`, `/sso/dashboard`, `/authorize-payment` — and the rules that
+/// call this have no "it changed" evidence to lean on. A real logout redirect
+/// still lands on `/login`, `/signin`, `/users/sign_in`, `/auth/login` or
+/// `/sso/login`, all of which keep matching; what stops matching is the app
+/// whose authenticated home merely *lives* under an auth-shaped prefix.
+fn is_login_endpoint_url(raw: &str) -> bool {
+    const LOGIN_ENDPOINT_TOKENS: &[&str] = &["login", "signin", "logon"];
+    path_has_token(raw, LOGIN_ENDPOINT_TOKENS)
+}
+
+/// Whole-token path match shared by the two rules above. Each segment is tested
+/// twice — split on punctuation (`/oauth2/authorize`), and with punctuation
+/// squeezed out, so `sign_in` and `sign-in` collapse onto `signin`.
+fn path_has_token(raw: &str, tokens: &[&str]) -> bool {
     let path = match url::Url::parse(raw) {
         Ok(u) => u.path().to_ascii_lowercase(),
         // Not absolute (shouldn't happen — `resolve_landing` always joins
@@ -557,10 +640,10 @@ fn is_login_url(raw: &str) -> bool {
             .chars()
             .filter(char::is_ascii_alphanumeric)
             .collect();
-        LOGIN_TOKENS.contains(&squeezed.as_str())
+        tokens.contains(&squeezed.as_str())
             || segment
                 .split(|c: char| !c.is_ascii_alphanumeric())
-                .any(|tok| LOGIN_TOKENS.contains(&tok))
+                .any(|tok| tokens.contains(&tok))
     })
 }
 
@@ -678,6 +761,30 @@ mod tests {
             "https://app.test/blog/single-sign-on-explained"
         ));
         assert!(!is_login_url("https://app.test/dashboard?next=/login"));
+    }
+
+    // The strict variant keeps only the tokens that name the sign-in page
+    // itself, for the one rule that has no baseline-vs-probe change to lean on.
+    #[test]
+    fn login_endpoint_urls_exclude_the_ambiguous_auth_tokens() {
+        for named in [
+            "https://app.test/login",
+            "https://app.test/auth/login",
+            "https://app.test/users/sign-in",
+            "https://app.test/logon",
+        ] {
+            assert!(is_login_endpoint_url(named), "{named}");
+        }
+        for ambiguous in [
+            "https://app.test/auth/home",
+            "https://app.test/sso/dashboard",
+            "https://app.test/oauth2/authorize",
+            "https://app.test/authenticate-device",
+        ] {
+            assert!(!is_login_endpoint_url(ambiguous), "{ambiguous}");
+            // …all of which the wider rule still matches, by design.
+            assert!(is_login_url(ambiguous), "{ambiguous}");
+        }
     }
 
     #[test]
@@ -844,21 +951,79 @@ mod tests {
         assert!(baseline_warning(&baseline(200, "https://app.test/dashboard", false)).is_none());
     }
 
-    // A 200 that merely *lives* at a login-ish path is not evidence of
+    // A path that merely *contains* an auth-ish word is not evidence of
     // anything: `/auth/home` and `/sso/dashboard` are ordinary authenticated
-    // landing pages, and this verdict costs the operator exit code 2. Only an
-    // actual redirect onto a login URL counts.
+    // landing pages, and this verdict costs the operator exit code 2.
+    //
+    // Neither the status nor the token alone is enough — it takes both. The
+    // 302 case is a reproduced false positive: an app that serves its
+    // authenticated home by redirecting `/` to `/auth/home` (no
+    // `--follow-redirects`, the default) reported SESSION_LOST,
+    // `incomplete: true` and exit 2 with a perfectly live session.
     #[test]
-    fn a_login_shaped_path_served_with_200_is_not_flagged() {
+    fn a_login_shaped_path_is_not_flagged_without_a_login_endpoint_token() {
         assert!(baseline_warning(&baseline(200, "https://app.test/auth/home", false)).is_none());
         assert!(
             baseline_warning(&baseline(200, "https://app.test/sso/dashboard", false)).is_none()
         );
         assert!(
-            baseline_warning(&baseline(302, "https://app.test/auth/home", false))
-                .expect("a redirect onto a login-shaped URL is still flagged")
-                .contains("already looks unauthenticated")
+            baseline_warning(&baseline(302, "https://app.test/auth/home", false)).is_none(),
+            "an authenticated app that redirects / to /auth/home is not a logged-out session"
         );
+        assert!(
+            baseline_warning(&baseline(302, "https://app.test/sso/dashboard", false)).is_none()
+        );
+        assert!(
+            baseline_warning(&baseline(302, "https://app.test/oauth2/authorize", false)).is_none()
+        );
+        // …while a redirect onto the sign-in page itself still is.
+        for landing in [
+            "https://app.test/login",
+            "https://app.test/auth/login",
+            "https://app.test/sso/login",
+            "https://app.test/users/sign_in",
+        ] {
+            assert!(
+                baseline_warning(&baseline(302, landing, false))
+                    .expect("a redirect onto the login page is still flagged")
+                    .contains("already looks unauthenticated"),
+                "{landing}"
+            );
+        }
+        // The mid-scan rule keeps the wider token list: there the landing must
+        // have *changed*, which is the corroboration this rule lacks.
+        let b = baseline(200, "https://app.test/dashboard", false);
+        let p = probe(302, "https://app.test/oauth2/authorize", "");
+        assert!(lost_reason(&verdict(&b, &p)).contains("login URL"));
+    }
+
+    // What the narrowed rule gives up is not dropped, only demoted: the
+    // ambiguous redirect is still surfaced, as a heads-up with no
+    // SESSION_LOST entry, no `incomplete`, and no exit code attached.
+    #[test]
+    fn an_ambiguous_auth_redirect_is_advised_but_not_condemned() {
+        for landing in [
+            "https://app.test/auth/home",
+            "https://app.test/sso/dashboard",
+            "https://app.test/oauth2/authorize",
+        ] {
+            let b = baseline(302, landing, false);
+            assert!(baseline_warning(&b).is_none(), "{landing}");
+            assert!(
+                baseline_advisory(&b)
+                    .expect("ambiguous redirect is advised")
+                    .contains("--session-check"),
+                "{landing}"
+            );
+        }
+
+        // Nothing ambiguous about these, so no advisory noise.
+        assert!(baseline_advisory(&baseline(200, "https://app.test/auth/home", false)).is_none());
+        assert!(baseline_advisory(&baseline(200, "https://app.test/dashboard", false)).is_none());
+        assert!(baseline_advisory(&baseline(302, "https://app.test/home", false)).is_none());
+        // A baseline already condemned by `baseline_warning` is not also
+        // advised — one line per target, and the verdict is the louder one.
+        assert!(baseline_advisory(&baseline(302, "https://app.test/login", false)).is_none());
     }
 
     // A `--session-check` marker that isn't on the baseline page (a typo, or a
