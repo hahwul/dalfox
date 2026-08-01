@@ -82,6 +82,9 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level
 - `target_summary[]` — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
+- `incomplete` — `true` when at least one target was **not fully tested**; today that means its authenticated session died mid-scan (see [Session monitoring](../scanning-modes/)). Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
+
+A target whose session died is reported as `"status": "incomplete"` (or `"skipped"` if it never ran) with `"error_code": "SESSION_LOST"` and the signal that fired in `"error_message"` — never as `"clean"`.
 
 In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context.
 
@@ -315,7 +318,7 @@ Dalfox returns:
 |------|---------|
 | `0` | Completed successfully, no findings |
 | `1` | Completed successfully, at least one finding **of any tier** |
-| `2` | Input/config/runtime error |
+| `2` | Input/config/runtime error, **or** a session lost mid-scan under the default `--on-session-loss abort` |
 
 `1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity >= High` with `jq` reaches the same set today, because severity currently tracks the tier — see [Detection Model](../detection-model/).)
 

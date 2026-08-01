@@ -36,6 +36,13 @@ pub mod error_codes {
     // Scan filtering
     pub const CONTENT_TYPE_MISMATCH: &str = "CONTENT_TYPE_MISMATCH";
     pub const TRUNCATED_PER_HOST_CAP: &str = "TRUNCATED_PER_HOST_CAP";
+    /// The authenticated session died (or was already dead) while scanning
+    /// this target, so its results cannot be trusted. Carried on
+    /// `target_summary` entries with `status: "skipped"` (the target never
+    /// ran, or was cut short under `--on-session-loss abort`) or
+    /// `status: "incomplete"` (it ran, but the session was gone by the end).
+    /// The distinction that matters to a consumer: neither is `"clean"`.
+    pub const SESSION_LOST: &str = "SESSION_LOST";
 }
 
 #[cfg(test)]
@@ -60,5 +67,6 @@ mod tests {
             error_codes::TRUNCATED_PER_HOST_CAP,
             "TRUNCATED_PER_HOST_CAP"
         );
+        assert_eq!(error_codes::SESSION_LOST, "SESSION_LOST");
     }
 }

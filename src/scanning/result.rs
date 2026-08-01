@@ -449,6 +449,13 @@ pub struct ScanMetadata {
     /// omitted from every rendered envelope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<serde_json::Value>,
+    /// At least one target was not fully tested — today that means its
+    /// authenticated session died mid-scan (see `error_codes::SESSION_LOST`).
+    /// Hoisted out of `target_summary` so a consumer can answer "are these
+    /// results trustworthy?" with one field read instead of a scan over every
+    /// entry's status. `false` on a normal run.
+    #[serde(default)]
+    pub incomplete: bool,
 }
 
 impl Result {
@@ -560,6 +567,7 @@ impl Result {
             "scan_duration_ms": meta.scan_duration_ms,
             "total_requests": meta.total_requests,
             "findings_count": meta.findings_count,
+            "incomplete": meta.incomplete,
             "target_summary": &meta.target_summary,
             "dedup_mode": &meta.dedup_mode,
             "targets_deduplicated": meta.targets_deduplicated,
@@ -711,6 +719,15 @@ impl Result {
                     )
                 };
                 let _ = writeln!(out, "| **Baseline** | {} |", cell.replace('|', "\\|"));
+            }
+            // Only rendered when true — a "Complete: yes" row on every clean
+            // report is noise, but its absence must never be what signals a
+            // truncated run, so the true case is spelled out loudly.
+            if m.incomplete {
+                let _ = writeln!(
+                    out,
+                    "| **Incomplete** | ⚠️ yes — at least one target was not fully tested (see Target Summary) |"
+                );
             }
             out.push('\n');
 

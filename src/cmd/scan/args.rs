@@ -40,6 +40,9 @@ pub const DEDUP_URLS_VALUES: &[&str] = &["exact", "signature", "off"];
 /// URLs that differ solely in parameter *values*, which is not value-safe for
 /// every endpoint, so it stays opt-in.
 pub const DEFAULT_DEDUP_URLS: &str = "exact";
+// Defined in `session`, re-exported through the same door as every other
+// enum-like value set so `config.rs` has one place to look.
+pub use super::session::ON_SESSION_LOSS_VALUES;
 // Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
@@ -323,6 +326,31 @@ pub struct ScanArgs {
     /// Load cookies from a raw HTTP request file. Example: --cookie-from-raw 'request.txt'
     #[arg(long)]
     pub cookie_from_raw: Option<String>,
+
+    #[clap(help_heading = "SESSION")]
+    /// Regex that must keep matching the response body for the session to be
+    /// considered alive (e.g. --session-check 'Sign out'). Authoritative: when
+    /// set, the built-in heuristics (401/403, login redirect, appearing login
+    /// form) are not consulted. Without it, session monitoring still runs
+    /// automatically whenever credentials are supplied via --cookies,
+    /// --cookie-from-raw, or a Cookie/Authorization header.
+    #[arg(long, value_name = "REGEX")]
+    pub session_check: Option<String>,
+
+    #[clap(help_heading = "SESSION")]
+    /// Probe this URL instead of the scan target when re-validating the
+    /// session. Useful when the target itself is public but the app exposes a
+    /// cheap authenticated endpoint. Example: --session-check-url 'https://app/me'
+    #[arg(long, value_name = "URL")]
+    pub session_check_url: Option<String>,
+
+    #[clap(help_heading = "SESSION")]
+    /// What to do when the session is detected as lost: abort (default) stops
+    /// the affected target and skips the rest of that host; continue keeps
+    /// scanning. Either way the target is reported as `incomplete` /
+    /// SESSION_LOST instead of a misleading "clean".
+    #[arg(long, default_value = "abort", value_parser = clap::builder::PossibleValuesParser::new(ON_SESSION_LOSS_VALUES.iter().copied()))]
+    pub on_session_loss: String,
 
     #[clap(help_heading = "SCOPE")]
     /// Include only URLs matching these patterns (regex, can be specified multiple times)
@@ -696,6 +724,9 @@ impl Default for ScanArgs {
             method: DEFAULT_METHOD.to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            session_check: None,
+            session_check_url: None,
+            on_session_loss: "abort".to_string(),
             include_url: vec![],
             exclude_url: vec![],
             ignore_param: vec![],

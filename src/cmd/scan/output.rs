@@ -423,14 +423,22 @@ pub(crate) async fn render_results(
         let skipped = skipped_targets.lock().await;
         let meta = target_meta.lock().await;
         let stats_map = target_mutation_stats.lock().await;
+        let session_lost = state.session_lost.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
         for url in all_target_urls {
             let finding_count = display_results
                 .iter()
                 .filter(|r| crate::utils::finding_belongs_to_target(url, &r.data))
                 .count();
+            // Session loss outranks `findings` and `clean`: a target whose
+            // session died was not fully tested, and reporting it as either
+            // would recreate exactly the ambiguity issue #1273 is about.
+            // It ranks below `skipped` only because a skipped target already
+            // carries the more specific reason it never ran.
             let (status, error_code) = if let Some(code) = skipped.get(url) {
                 ("skipped", Some(*code))
+            } else if session_lost.contains_key(url) {
+                ("incomplete", Some(crate::cmd::error_codes::SESSION_LOST))
             } else if finding_count > 0 {
                 ("findings", None)
             } else {
@@ -443,6 +451,11 @@ pub(crate) async fn render_results(
             });
             if let Some(code) = error_code {
                 entry["error_code"] = serde_json::json!(code);
+            }
+            // Which signal fired, verbatim. Present for both the `incomplete`
+            // case above and a `skipped` target aborted by the scan loop.
+            if let Some(reason) = session_lost.get(url) {
+                entry["error_message"] = serde_json::json!(reason);
             }
             // Attach preflight metadata (WAF + applied bypass) when present.
             // Omitted entirely for targets where no WAF was detected, to
@@ -494,6 +507,13 @@ pub(crate) async fn render_results(
         summary
     };
 
+    // One field for "don't trust this run": true when any target's session
+    // died. Read straight off the summary we just built so the flag and the
+    // per-target statuses can't disagree.
+    let scan_incomplete = target_summary
+        .iter()
+        .any(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST);
+
     let output_content = if args.format == "json" {
         let findings_json: Vec<serde_json::Value> = display_results
             .iter()
@@ -506,6 +526,7 @@ pub(crate) async fn render_results(
             "total_requests": total_requests,
             "findings_count": display_results.len(),
             "target_summary": target_summary,
+            "incomplete": scan_incomplete,
             "dedup_mode": state.dedup.mode,
             "targets_deduplicated": state.dedup.collapsed,
         });
@@ -526,6 +547,7 @@ pub(crate) async fn render_results(
             "total_requests": total_requests,
             "findings_count": display_results.len(),
             "target_summary": target_summary,
+            "incomplete": scan_incomplete,
             "dedup_mode": state.dedup.mode,
             "targets_deduplicated": state.dedup.collapsed,
         });
@@ -554,6 +576,7 @@ pub(crate) async fn render_results(
             dedup_mode: state.dedup.mode.to_string(),
             targets_deduplicated: state.dedup.collapsed,
             baseline: baseline_meta.clone(),
+            incomplete: scan_incomplete,
         };
         crate::scanning::result::Result::results_to_markdown_with_meta(
             display_results,
@@ -572,6 +595,7 @@ pub(crate) async fn render_results(
             dedup_mode: state.dedup.mode.to_string(),
             targets_deduplicated: state.dedup.collapsed,
             baseline: baseline_meta.clone(),
+            incomplete: scan_incomplete,
         };
         crate::scanning::result::Result::results_to_sarif_with_meta(
             display_results,
@@ -590,6 +614,7 @@ pub(crate) async fn render_results(
             dedup_mode: state.dedup.mode.to_string(),
             targets_deduplicated: state.dedup.collapsed,
             baseline: baseline_meta.clone(),
+            incomplete: scan_incomplete,
         };
         crate::scanning::result::Result::results_to_toml_with_meta(
             display_results,
@@ -602,6 +627,23 @@ pub(crate) async fn render_results(
 
         // Plain logger: XSS summary before POC lines
         log_warn(args, &plain_findings_summary(display_results));
+
+        // A finding count printed after a session died is a half-truth — say
+        // so on the same screen, next to the number the operator will quote.
+        // The per-target detail already went to stderr as it happened.
+        if scan_incomplete {
+            let lost = target_summary
+                .iter()
+                .filter(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST)
+                .count();
+            log_warn(
+                args,
+                &format!(
+                    "INCOMPLETE: \x1b[33m{}\x1b[0m target(s) lost their session mid-scan — those results are not a clean bill of health",
+                    lost
+                ),
+            );
+        }
 
         // When the streaming printer ran (`stream_findings_enabled`), every
         // finding has already been emitted mid-scan with its full block —

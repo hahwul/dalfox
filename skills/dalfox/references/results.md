@@ -204,8 +204,25 @@ See `cmd/mod.rs` for the canonical list. Common ones:
 - `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`
 - `CONTENT_TYPE_MISMATCH`
 - `TRUNCATED_PER_HOST_CAP`
+- `SESSION_LOST` — the authenticated session died (or was already dead) while
+  scanning this target
 
 In JSON output the per-target summary contains `error_code` when the target failed before any payloads were sent.
+
+## Incomplete Runs (session loss)
+
+`meta.incomplete: true` means at least one target was **not fully tested**.
+Today the only cause is session loss: static credentials (`--cookies`,
+`-H 'Cookie: …'`) expired mid-scan, so later requests hit a login page. Those
+targets carry `"status": "incomplete"` (ran, session gone by the end) or
+`"status": "skipped"` (never ran, aborted with its host), plus
+`"error_code": "SESSION_LOST"` and the triggering signal in `"error_message"`.
+
+**Agent guidance: never report `findings_count: 0` as "no XSS found" when
+`meta.incomplete` is true.** The correct summary is "the scan could not
+complete — the session expired", followed by a suggestion to re-run with fresh
+credentials. Under the default `--on-session-loss abort` the exit code is also
+`2`, not `0`.
 
 ## Exit Codes (CLI)
 
@@ -215,7 +232,8 @@ In JSON output the per-target summary contains `error_code` when the target fail
   `--detect-outdated-libs`, exits `1` just like a `V` does. For CI that should
   fail only on asserted vulnerabilities, run `--only-poc v`
 - `2` — Hard error (bad input, config, runtime failure, every target
-  unreachable, or `--output` could not be written)
+  unreachable, `--output` could not be written, or a session lost mid-scan
+  under the default `--on-session-loss abort`)
 
 With `--baseline` (default `filter` mode), suppressed findings never reach the
 exit-code decision, so the code reports novelty rather than the whole backlog.

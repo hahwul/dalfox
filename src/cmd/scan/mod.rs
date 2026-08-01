@@ -6,6 +6,7 @@
 //! - [`validation`] — numeric arg checks + input-shape heuristics
 //! - [`input`] — target resolution (input-type, file/stdin/raw-HTTP, dedup, scope filters)
 //! - [`preflight`] — content-type / CSP / WAF preflight + reqwest classification
+//! - [`session`] — authenticated-state fingerprint + mid-scan session-loss detection
 //! - [`analysis`] — per-target preflight + parameter-analysis loop
 //! - [`scan_loop`] — per-host scanning loop + mid-scan finding streaming
 //! - [`output`] — dry-run / only-discovery / end-of-scan result rendering
@@ -38,6 +39,7 @@ mod poc;
 mod postprocess;
 mod preflight;
 mod scan_loop;
+mod session;
 mod validation;
 
 pub use args::{
@@ -47,8 +49,8 @@ pub use args::{
     DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
     DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS,
     DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, ENCODER_VALUES,
-    FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ONLY_POC_VALUES, POC_TYPE_VALUES, PreflightOptions,
-    ScanArgs, WAF_BYPASS_VALUES,
+    FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ON_SESSION_LOSS_VALUES, ONLY_POC_VALUES,
+    POC_TYPE_VALUES, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES,
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::{log_info, log_warn};
@@ -80,6 +82,15 @@ pub(crate) struct ScanState {
     pub(crate) target_meta: Arc<Mutex<HashMap<String, serde_json::Value>>>,
     pub(crate) target_mutation_stats:
         Arc<Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>>,
+    /// Authenticated-state fingerprint per target URL, captured during
+    /// preflight and re-probed by the scan loop. Absent for targets with no
+    /// credentials (session monitoring is off there, and costs nothing).
+    pub(crate) session_baselines: Arc<Mutex<HashMap<String, session::SessionBaseline>>>,
+    /// Targets whose session was observed to die, mapped to the human-readable
+    /// signal that fired. Drives the `incomplete` / `SESSION_LOST` status in
+    /// the meta envelope and the non-zero exit code, so "0 findings" can be
+    /// told apart from "0 findings because we were logged out".
+    pub(crate) session_lost: Arc<Mutex<HashMap<String, String>>>,
     pub(crate) multi_pb: Option<Arc<MultiProgress>>,
     pub(crate) preflight_idx: Arc<AtomicUsize>,
     pub(crate) analyze_idx: Arc<AtomicUsize>,
@@ -247,6 +258,28 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             "Hint: --limit-result-type only affects counting toward --limit; for output filtering use --only-poc {}",
             args.limit_result_type.to_uppercase()
         );
+    }
+
+    // Validate the session-check inputs up front. Both are consulted only when
+    // a probe fires — potentially an hour into the scan — so a bad regex or a
+    // malformed probe URL must fail here, not there.
+    if let Err(e) = session::compile_session_check(args) {
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::PARSE_ERROR,
+            &format!("--session-check is not a valid regex: {e}"),
+        );
+        return ScanOutcome::Error;
+    }
+    if let Some(u) = &args.session_check_url
+        && url::Url::parse(u).is_err()
+    {
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::PARSE_ERROR,
+            &format!("--session-check-url is not a valid absolute URL: {u}"),
+        );
+        return ScanOutcome::Error;
     }
 
     // Validate --custom-payload up front. Without this check, a missing or
@@ -468,6 +501,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // counters via the MutationStats methods.
     let target_mutation_stats: Arc<Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    // Session-loss detection state (issue #1273). Both maps stay empty for
+    // unauthenticated scans — `session::monitoring_enabled` gates population.
+    let session_baselines: Arc<Mutex<HashMap<String, session::SessionBaseline>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let session_lost: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
 
     // Enable the indicatif progress UI (per-target bar + per-host overall bar)
     // when running interactive plain output. Indicatif writes to stderr, so
@@ -557,6 +595,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         skipped_targets,
         target_meta,
         target_mutation_stats,
+        session_baselines,
+        session_lost,
         multi_pb,
         preflight_idx,
         analyze_idx,
@@ -740,6 +780,17 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         !skipped.is_empty() && all_target_urls.iter().all(|u| skipped.contains_key(u))
     };
     if all_unreachable {
+        return ScanOutcome::Error;
+    }
+
+    // A dead session makes the whole report untrustworthy, so under the
+    // default `--on-session-loss abort` it must not exit 0 — `dalfox scan ... &&
+    // echo "no XSS found"` is exactly the script this issue is about. Under
+    // `--on-session-loss continue` the operator has said the detection may be
+    // misfiring on their target and asked to keep going, so the exit code is
+    // left alone; the `incomplete` meta flag and the per-target SESSION_LOST
+    // entries still record what happened.
+    if session::aborts_on_loss(args) && !state.session_lost.lock().await.is_empty() {
         return ScanOutcome::Error;
     }
 

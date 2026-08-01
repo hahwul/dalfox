@@ -127,6 +127,82 @@ dalfox scan https://target.app/post-comment \
 
 Dalfox injects into the first URL, then fetches the second to check whether the payload landed. See the [Stored XSS guide](../stored-xss/) for the full flow.
 
+## Session monitoring
+
+Static credentials (`--cookies`, `-H 'Cookie: …'`, `--cookie-from-raw`) are
+attached to every request and never revisited. If that session expires an hour
+into a long scan, every request after it is answered by a login page, nothing
+reflects, and Dalfox exits `0` with an empty report — indistinguishable from a
+genuinely clean target.
+
+Session monitoring closes that gap. During preflight Dalfox fingerprints the
+authenticated landing response (status, where the request landed after
+redirects, whether a login form was already on the page) at **no extra request
+cost** — it reuses the body preflight already fetched. It then re-probes at each
+target's dispatch boundary and once more after that target's injection stage,
+and compares.
+
+```bash
+# Nothing to configure: credentials switch it on.
+dalfox scan https://app.example.com/dashboard?q=1 --cookies "sid=$SESSION"
+```
+
+A session is reported lost when any of these fires:
+
+| Signal | Example |
+|--------|---------|
+| Status moves into `401` / `403` | the app started rejecting the cookie |
+| The request now lands on a login-shaped URL | `302 → /users/sign_in` |
+| A password field appeared where the baseline had none | the app now renders the login wall inline |
+
+`403` is also what an origin or WAF returns once it decides to block a scanner;
+the warning says so rather than asserting a cause it cannot distinguish.
+
+### Making it exact
+
+The heuristics are deliberately narrow — the default is to abort, so a false
+positive costs a whole scan. When you know exactly what an authenticated
+response looks like, say so and the heuristics step aside entirely:
+
+```bash
+dalfox scan https://app.example.com/dashboard?q=1 \
+  --cookies "sid=$SESSION" \
+  --session-check 'Signed in as' \
+  --session-check-url https://app.example.com/api/me
+```
+
+`--session-check-url` is worth setting when the scan target is expensive,
+paginated, or itself public — point it at a cheap authenticated endpoint
+instead. The baseline is then taken from that endpoint too (one extra preflight
+request per target, only when you set the flag), so a login-shaped probe path
+like `/auth/session` is compared against its own authenticated response rather
+than against the target's.
+
+### What happens on loss
+
+`--on-session-loss abort` (the default) stops the affected target and skips the
+remaining targets for that host: continuing to spend the request budget against
+a login page has no upside. `--on-session-loss continue` keeps scanning, for
+targets where the heuristics misfire.
+
+Either way the run is honest about it:
+
+- a `SESSION LOST` line on **stderr**, so structured stdout stays parseable
+- the target reported as `incomplete` (or `skipped`) with `error_code: SESSION_LOST`
+  and the signal that fired in `error_message`
+- `meta.incomplete: true` in the [scan metadata envelope](../output/#scan-metadata-envelope)
+- exit code `2` under `abort` — so `dalfox scan … && echo "no XSS found"` cannot
+  print that line after being logged out (`continue` leaves the exit code alone)
+
+Dalfox also warns when the **preflight** response already looks unauthenticated.
+That is the worst version of the failure: with the login page as the baseline no
+later probe can ever detect a change, so stale credentials would otherwise
+produce a silent, completely clean run.
+
+Monitoring is off — and costs nothing — when no credentials are supplied and
+neither `--session-check` flag is set. Logging in is out of scope: this is
+detection only.
+
 ## Server mode
 
 Run Dalfox as a long-lived HTTP service. Submit scans via REST, poll for results, cancel running jobs:

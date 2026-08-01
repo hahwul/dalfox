@@ -128,6 +128,24 @@ See `references/advanced.md` for recommended WAF combinations.
 ## Other Useful / Diagnostic
 
 - `--cookie-from-raw request.txt` — lift cookies from a captured raw request file (CLI only)
+
+### Session monitoring (authenticated scans)
+
+Auto-enabled whenever credentials are present (`--cookies`, `--cookie-from-raw`,
+or a `Cookie` / `Authorization` header); off and free otherwise. Preflight
+fingerprints the authenticated response for free, then re-probes per target
+before and after its injection stage. Detects `401`/`403`, a redirect onto a
+login-shaped URL, or a password field appearing where the baseline had none.
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--session-check <REGEX>` | — | Regex that must keep matching an authenticated body. Authoritative — replaces the heuristics entirely |
+| `--session-check-url <URL>` | — | Probe a cheap authenticated endpoint (`/api/me`) instead of the scan target |
+| `--on-session-loss <abort\|continue>` | `abort` | `abort` stops the target and skips the rest of that host, and exits `2`. `continue` keeps scanning and leaves the exit code alone |
+
+On loss: `SESSION LOST` on stderr, `meta.incomplete: true`, and the target
+marked `incomplete`/`SESSION_LOST` — never `clean`. Logging in is out of scope;
+this is detection only.
 - `--dry-run` — preflight summary only (parameter discovery + request estimate; no attack payloads). JSON/JSONL include `meta.warnings` when `-p` specs could not be seeded (e.g. `path` / `fragment` only). MCP equivalent: `preflight_dalfox` (note: preflight intentionally ignores `param` filters for impact estimation)
 - `--debug` — show DBG lines
 - Global root flags: `--config`, `--debug`, `--no-color`, `--silence`

@@ -8,6 +8,7 @@ use super::ScanState;
 use super::args::ScanArgs;
 use super::logging::start_spinner;
 use super::poc::render_finding_block;
+use super::session::{ProbePhase, SessionMonitor};
 use crate::target_parser::Target;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -87,6 +88,16 @@ pub(crate) async fn run_scan_loop(
     let total_targets = state.total_targets;
     let spinner_allowed = state.spinner_allowed;
     let nc = state.no_color;
+    let skipped_targets = state.skipped_targets.clone();
+
+    // Session-loss detection (issue #1273). `None` — and therefore zero added
+    // requests — unless preflight captured at least one authenticated baseline.
+    let session_monitor = SessionMonitor::new(
+        args,
+        state.session_baselines.clone(),
+        state.session_lost.clone(),
+    )
+    .await;
 
     let global_semaphore = Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
     let (finding_tx, finding_printer_handle) = if stream_findings_enabled {
@@ -158,6 +169,14 @@ pub(crate) async fn run_scan_loop(
         let scan_idx = scan_idx.clone();
         let overall_done_clone = overall_done.clone();
         let cancel_flag_group = cancel_flag.clone();
+        let session_monitor_group = session_monitor.clone();
+        let skipped_targets_group = skipped_targets.clone();
+        // Set once any target in this host group loses its session under
+        // `--on-session-loss abort`. Scoped to the group because a host group
+        // is exactly the set of targets sharing one origin — and therefore one
+        // session; a dead session on one of them says nothing about a
+        // different host in the same run.
+        let session_lost_group = Arc::new(AtomicBool::new(false));
         let group_handle = tokio::spawn(async move {
             // Skip the (expensive) payload-counting loop entirely when no
             // overall progress bar will be drawn — generating ~10k payloads
@@ -238,6 +257,27 @@ pub(crate) async fn run_scan_loop(
                 let Ok(permit) = global_semaphore_clone.clone().acquire_owned().await else {
                     break;
                 };
+                // Session-loss bail-out at the same boundary. Once the shared
+                // session for this host is gone, every remaining target would
+                // be scanned against a login page — the exact silent
+                // false-negative run this exists to prevent. Record each one as
+                // SESSION_LOST rather than letting target_summary call them
+                // clean.
+                //
+                // Checked *after* acquiring the permit, not before: at
+                // `--max-concurrent-targets 1` the sibling that discovers the
+                // dead session is still holding the permit when this iteration
+                // begins, so a pre-acquire check would read a stale `false` and
+                // dispatch the target anyway. Targets already in flight are not
+                // recalled — their own post-scan probe covers them.
+                if session_lost_group.load(Ordering::Relaxed) {
+                    skipped_targets_group.lock().await.insert(
+                        target.url.to_string(),
+                        crate::cmd::error_codes::SESSION_LOST,
+                    );
+                    drop(permit);
+                    continue;
+                }
                 let args_clone = args_arc.clone();
                 let results_clone_inner = results_clone.clone();
                 let multi_pb_clone_inner = multi_pb_clone.clone();
@@ -247,10 +287,32 @@ pub(crate) async fn run_scan_loop(
                 let findings_count_target = findings_count_group.clone();
                 let finding_tx_target = finding_tx_group.clone();
                 let cancel_flag_inner = cancel_flag_group.clone();
+                let session_monitor_target = session_monitor_group.clone();
+                let session_lost_target = session_lost_group.clone();
+                let skipped_targets_target = skipped_targets_group.clone();
 
                 let multi_pb_active = multi_pb_clone_inner.is_some();
                 let target_handle = tokio::spawn(async move {
                     if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
+                        // Re-validate the session before spending this target's
+                        // request budget. Throttled: on a short run the preflight
+                        // baseline is seconds old and re-probing proves nothing
+                        // (see `session::pre_dispatch_probe_due`).
+                        if let Some(monitor) = &session_monitor_target
+                            && monitor
+                                .check(&target, ProbePhase::PreDispatch)
+                                .await
+                                .is_some()
+                            && monitor.abort_on_loss
+                        {
+                            session_lost_target.store(true, Ordering::Relaxed);
+                            skipped_targets_target.lock().await.insert(
+                                target.url.to_string(),
+                                crate::cmd::error_codes::SESSION_LOST,
+                            );
+                            drop(permit);
+                            return;
+                        }
                         let __scan_spinner = {
                             // When the indicatif bar is active, run_scanning renders a
                             // per-target progress bar with rate/ETA — suppress the stdout
@@ -325,6 +387,24 @@ pub(crate) async fn run_scan_loop(
                         if let Some((tx, done_rx)) = __scan_spinner {
                             let _ = tx.send(());
                             let _ = done_rx.await;
+                        }
+                        // Post-scan re-validation — the probe that actually
+                        // catches the reported failure: a session that survived
+                        // preflight and died an hour into the injection stage,
+                        // leaving every request after that answered by a login
+                        // page. Never throttled, and skipped only when the run
+                        // was cut short anyway (Ctrl-C / --scan-timeout), where
+                        // "incomplete" is already established and a login-page
+                        // probe would just be noise.
+                        if let Some(monitor) = &session_monitor_target
+                            && !timed_out
+                            && !cancel_flag_inner.load(Ordering::Relaxed)
+                            && monitor.check(&target, ProbePhase::PostScan).await.is_some()
+                            && monitor.abort_on_loss
+                        {
+                            // Nothing left to abort for *this* target, but the
+                            // rest of the host group is still ahead of us.
+                            session_lost_target.store(true, Ordering::Relaxed);
                         }
                     }
                     drop(permit);

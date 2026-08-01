@@ -81,6 +81,9 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 이제 모두 동일한 스캔 수�
 - `target_summary[]` — 대상별 상태, 탐지 결과 수, error_code(건너뛴 경우), 그리고 탐지된 경우 WAF/우회 세부 정보
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 타깃 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
+- `incomplete` — 하나 이상의 대상이 **완전히 테스트되지 않았을 때** `true`입니다. 현재는 스캔 도중 인증 세션이 끊어진 경우를 뜻합니다([세션 모니터링](../scanning-modes/) 참고). `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
+
+세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)에 `"error_code": "SESSION_LOST"`, 그리고 감지된 신호가 `"error_message"`에 담겨 보고됩니다 — 절대 `"clean"`으로 표시되지 않습니다.
 
 **SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복되어 GitHub 코드 스캐닝과 기타 소비자가 컨텍스트를 유지하도록 합니다.
 
@@ -313,7 +316,7 @@ Dalfox는 다음을 반환합니다.
 |------|---------|
 | `0` | 성공적으로 완료, 탐지 결과 없음 |
 | `1` | 성공적으로 완료, **티어와 무관하게** 탐지 결과 하나 이상 |
-| `2` | 입력/설정/런타임 오류 |
+| `2` | 입력/설정/런타임 오류, **또는** 기본값 `--on-session-loss abort`에서 스캔 도중 세션이 끊어진 경우 |
 
 `1`은 모든 티어를 포함합니다 — `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 코드가 정해지기 전에 필터가 적용됩니다. (JSON에 `jq`로 `severity >= High`를 거는 방식도 오늘은 같은 집합을 얻습니다. severity가 현재 티어를 따라가기 때문입니다 — [탐지 모델](../detection-model/) 참고.)
 

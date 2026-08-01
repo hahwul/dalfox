@@ -27,6 +27,7 @@ pub(crate) async fn run_preflight_and_analysis(
     let skipped_targets = state.skipped_targets.clone();
     let target_meta = state.target_meta.clone();
     let target_mutation_stats = state.target_mutation_stats.clone();
+    let session_baselines = state.session_baselines.clone();
     let multi_pb = state.multi_pb.clone();
     let preflight_idx = state.preflight_idx.clone();
     let analyze_idx = state.analyze_idx.clone();
@@ -83,6 +84,7 @@ pub(crate) async fn run_preflight_and_analysis(
             let skipped_targets_outer = skipped_targets.clone();
             let target_meta_outer = target_meta.clone();
             let target_mutation_stats_outer = target_mutation_stats.clone();
+            let session_baselines_outer = session_baselines.clone();
             local.run_until(async move {
                 let mut handles = vec![];
 
@@ -98,6 +100,7 @@ pub(crate) async fn run_preflight_and_analysis(
             let skipped_targets_clone = skipped_targets_outer.clone();
             let target_meta_clone = target_meta_outer.clone();
             let target_mutation_stats_clone = target_mutation_stats_outer.clone();
+            let session_baselines_clone = session_baselines_outer.clone();
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
@@ -165,6 +168,33 @@ pub(crate) async fn run_preflight_and_analysis(
 
                     if let Some(preflight) = __preflight_info {
                         preflight_response_body = preflight.response_body;
+                        // Authenticated-state fingerprint for mid-scan
+                        // session-loss detection. Present only when the target
+                        // carries credentials (or the operator asked for a
+                        // check explicitly).
+                        if let Some(baseline) = preflight.session_baseline {
+                            // Credentials that were already stale before the
+                            // first payload went out are the nastiest variant:
+                            // the login page becomes the baseline, so no later
+                            // probe can ever detect a "change" and the whole
+                            // run reports clean. Say so now.
+                            if super::session::baseline_looks_unauthenticated(&baseline)
+                                && !args_clone.silence
+                            {
+                                let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                                crate::ceprintln!(
+                                    "\x1b[90m{}\x1b[0m \x1b[33mSESSION\x1b[0m {} preflight response already looks unauthenticated (HTTP {}, landed on {}) — check the supplied credentials",
+                                    ts,
+                                    target.url,
+                                    baseline.status,
+                                    baseline.landing
+                                );
+                            }
+                            session_baselines_clone
+                                .lock()
+                                .await
+                                .insert(target.url.to_string(), baseline);
+                        }
                         if let Some((hn, hv)) = preflight.csp_header {
                             __preflight_csp_present = true;
                             // Analyze CSP and store on target for bypass payload generation

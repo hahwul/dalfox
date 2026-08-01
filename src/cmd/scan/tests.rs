@@ -843,6 +843,8 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         skipped_targets: Arc::new(Mutex::new(HashMap::new())),
         target_meta: Arc::new(Mutex::new(HashMap::new())),
         target_mutation_stats: Arc::new(Mutex::new(HashMap::new())),
+        session_baselines: Arc::new(Mutex::new(HashMap::new())),
+        session_lost: Arc::new(Mutex::new(HashMap::new())),
         multi_pb: None,
         preflight_idx: Arc::new(AtomicUsize::new(0)),
         analyze_idx: Arc::new(AtomicUsize::new(0)),

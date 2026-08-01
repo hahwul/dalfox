@@ -17,6 +17,11 @@ pub(crate) struct PreflightResult {
     pub(crate) response_body: Option<String>,
     pub(crate) waf_result: crate::waf::WafDetectionResult,
     pub(crate) tech_result: crate::scanning::tech_detect::TechDetectionResult,
+    /// Fingerprint of the authenticated landing response, for mid-scan
+    /// session-loss detection. Derived from the GET below, so it costs no
+    /// extra request; `None` when this target isn't monitored (see
+    /// [`crate::cmd::scan::session::monitoring_enabled`]).
+    pub(crate) session_baseline: Option<super::session::SessionBaseline>,
 }
 
 /// Outcome of the `preflight_content_type` probe. We split out the
@@ -232,6 +237,8 @@ pub(crate) async fn preflight_content_type(
 
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
+    let mut session_baseline: Option<super::session::SessionBaseline> = None;
+    let monitor_session = super::session::monitoring_enabled(args, target);
     let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
     crate::record_outbound_request().await;
     if let Ok(get_resp) = get_req.send().await {
@@ -239,6 +246,25 @@ pub(crate) async fn preflight_content_type(
         let get_headers = get_resp.headers().clone();
         if let Ok(body) = crate::utils::http::read_body(get_resp).await {
             response_body = Some(body.clone());
+
+            // Authenticated-state fingerprint for mid-scan session-loss
+            // detection. Reuses this response, so monitoring adds no request
+            // to the preflight budget — except with an explicit
+            // `--session-check-url`, whose baseline has to come from that same
+            // endpoint (see `baseline_from_check_url`).
+            if monitor_session {
+                session_baseline = match args.session_check_url.as_deref() {
+                    Some(check_url) => {
+                        super::session::baseline_from_check_url(target, check_url).await
+                    }
+                    None => Some(super::session::baseline_from_preflight(
+                        &target.url,
+                        get_status,
+                        &get_headers,
+                        &body,
+                    )),
+                };
+            }
 
             // WAF detection from GET response (headers + body). Same
             // reasoning as the HEAD-based pass above — fingerprinting
@@ -296,6 +322,7 @@ pub(crate) async fn preflight_content_type(
             response_body,
             waf_result,
             tech_result,
+            session_baseline,
         }),
         None => PreflightOutcome::NoContentType,
     }
