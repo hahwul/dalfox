@@ -252,7 +252,16 @@ error, timeout) ends as `error` with an `error_message` of
 `target unreachable: connection failed (CONNECTION_FAILED)` — not `done` with
 zero findings, so you can tell "scanned, nothing found" apart from "never
 reached the host." Use `POST /preflight` first if you want to check
-reachability without launching a scan. The `url` must start with `http://` or
+reachability without launching a scan.
+
+The same rule covers a **dead session**. When the scan request carries
+credentials (a `cookie`, or a `Cookie` / `Authorization` entry in `header`),
+Dalfox fingerprints the authenticated response before scanning and re-checks it
+when the scan ends. If the session expired in between — every later request
+answered by a login page, nothing reflecting — the scan ends as `error` with an
+`error_message` beginning `SESSION_LOST:` and the signal that fired, rather than
+`done` with zero findings. Partial results stay attached. Monitoring is off, and
+costs nothing, for a scan with no credentials. The `url` must start with `http://` or
 `https://`; any other scheme is rejected with `400` (same as `/preflight`).
 
 ## Running under systemd

@@ -1108,6 +1108,145 @@ async fn test_run_scan_job_populates_live_request_counter() {
     );
 }
 
+/// Reflects while "authenticated", then answers `401` to everything once
+/// `healthy_hits` requests have been served — an app whose session expires
+/// partway through a scan. The post-scan session probe is the last request the
+/// job makes, so it always lands after the flip.
+async fn start_expiring_target_server(healthy_hits: usize) -> SocketAddr {
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    let hits = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler = {
+        let hits = hits.clone();
+        move |Query(q): Query<Map<String, String>>| {
+            let hits = hits.clone();
+            async move {
+                if hits.fetch_add(1, AtomicOrdering::SeqCst) < healthy_hits {
+                    let mut body = String::from("<html><body>");
+                    for (k, v) in &q {
+                        body.push_str(&format!("<div>{k}={v}</div>"));
+                    }
+                    body.push_str("</body></html>");
+                    (
+                        StatusCode::OK,
+                        [("content-type", "text/html; charset=utf-8")],
+                        body,
+                    )
+                } else {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        [("content-type", "text/html; charset=utf-8")],
+                        "<html><body>session expired</body></html>".to_string(),
+                    )
+                }
+            }
+        }
+    };
+    let app = Router::new()
+        .route("/", any(handler.clone()))
+        .route("/{*rest}", any(handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind expiring target listener");
+    let addr = listener.local_addr().expect("expiring target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
+/// Run a scan job against `url` with `cookie` and return (status, error_message).
+async fn run_job_and_settle(
+    id: &str,
+    url: String,
+    cookie: Option<&str>,
+) -> (JobStatus, Option<String>) {
+    let state = make_state(None, None, false, false, "cb");
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.to_string(), test_job(JobStatus::Queued, None, ""));
+    }
+    let opts = ScanOptions {
+        skip_mining: Some(true),
+        worker: Some(4),
+        encoders: Some(vec!["none".to_string()]),
+        cookie: cookie.map(|c| c.to_string()),
+        ..ScanOptions::default()
+    };
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        run_scan_job(state.clone(), id.to_string(), url, opts, false, false),
+    )
+    .await;
+    assert!(run.is_ok(), "scan should finish in time");
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(id).expect("job");
+    (job.status.clone(), job.error_message.clone())
+}
+
+// Issue #1273 on the server surface. A job whose session dies mid-scan used to
+// settle `done` with zero findings — indistinguishable from a clean target, and
+// the exact silent false negative the CLI already guards against. It must now
+// settle `error` and name the signal.
+#[tokio::test]
+async fn test_run_scan_job_reports_a_session_that_died_mid_scan() {
+    // Healthy long enough to capture the baseline and start scanning, then 401
+    // for the rest — including the post-scan probe.
+    let addr = start_expiring_target_server(3).await;
+    let (status, error) = run_job_and_settle(
+        "session-lost",
+        format!("http://{}/?a=1&b=2", addr),
+        Some("sid=deadbeef"),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        JobStatus::Error,
+        "a job that lost its session must not settle as a clean done"
+    );
+    let error = error.expect("error_message must name the signal");
+    assert!(
+        error.starts_with(crate::cmd::error_codes::SESSION_LOST),
+        "error_message must be machine-matchable: {error}"
+    );
+    assert!(
+        error.contains("401"),
+        "the triggering signal is carried verbatim: {error}"
+    );
+}
+
+// The control: same credentials, a target that never expires. Monitoring must
+// not turn a healthy authenticated scan into an error.
+#[tokio::test]
+async fn test_run_scan_job_with_a_live_session_still_settles_done() {
+    let addr = start_reflecting_target_server().await;
+    let (status, error) = run_job_and_settle(
+        "session-alive",
+        format!("http://{}/?a=1", addr),
+        Some("sid=deadbeef"),
+    )
+    .await;
+    assert_eq!(status, JobStatus::Done, "error_message={error:?}");
+    assert!(error.is_none(), "{error:?}");
+}
+
+// Monitoring is opt-in-by-context: with no credentials there is no session to
+// lose, and the job must not pay for a probe or change its verdict. Guards the
+// "off, and free" promise for the overwhelmingly common unauthenticated job.
+#[tokio::test]
+async fn test_run_scan_job_without_credentials_is_untouched_by_session_monitoring() {
+    let addr = start_expiring_target_server(3).await;
+    let (status, error) =
+        run_job_and_settle("session-none", format!("http://{}/?a=1", addr), None).await;
+    assert_eq!(
+        status,
+        JobStatus::Done,
+        "an unauthenticated job has no session to lose: {error:?}"
+    );
+    assert!(error.is_none(), "{error:?}");
+}
+
 #[tokio::test]
 async fn test_run_scan_job_wires_live_params_tested_counter() {
     // End-to-end at the server layer: run_scan_job must thread the live

@@ -76,11 +76,17 @@ If the number is huge or `reachable == false`, report back to the user before se
 See the concrete flag combinations in `references/cli.md` (search for "Polite authenticated scan" and "Blind").
 
 **Authenticated scans carry a session that can die mid-run.** Dalfox monitors
-for that automatically whenever credentials are supplied (CLI only), and marks
-affected targets `incomplete` / `SESSION_LOST` with `meta.incomplete: true`
-rather than reporting them clean. Never summarize `findings_count: 0` as "no XSS
-found" without checking `meta.incomplete` first. Tighten the check with
+for that automatically whenever credentials are supplied, and marks affected
+targets `incomplete` / `SESSION_LOST` with `meta.incomplete: true` rather than
+reporting them clean. Never summarize `findings_count: 0` as "no XSS found"
+without checking `meta.incomplete` first. Tighten the check with
 `--session-check '<regex>'` / `--session-check-url`; see `references/cli.md`.
+
+The **server and MCP** surfaces monitor too, on the same trigger (a `cookie` /
+`Authorization` header on the scan request). They have no `meta` envelope, so a
+scan whose session died settles `status: "error"` with an `error_message`
+starting `SESSION_LOST:`. Same rule for you: on a scan that returns zero
+findings, check `status` before saying the target is clean.
 
 Two ways to catch blind XSS (CLI):
 - `--blind <url>` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.

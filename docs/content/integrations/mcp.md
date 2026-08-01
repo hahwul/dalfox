@@ -171,6 +171,15 @@ timeout) the scan ends as `status: "error"` with `error_message` containing
 distinction `preflight_dalfox` reports via `reachable: false`. The `target`
 must start with `http://` or `https://`.
 
+A scan whose **authenticated session dies mid-run** ends the same way. When the
+call carries credentials (`cookies`, or a `Cookie` / `Authorization` entry in
+`headers`), Dalfox fingerprints the authenticated response before scanning and
+re-checks it at the end; if the session expired in between, the scan settles
+`status: "error"` with an `error_message` beginning `SESSION_LOST:` instead of
+`done` with an empty `results`. Do not summarize such a scan as "no XSS found" —
+nothing was really tested. Monitoring costs nothing when no credentials are
+passed.
+
 ### `list_scans_dalfox`
 
 List every tracked scan. Optional filter:

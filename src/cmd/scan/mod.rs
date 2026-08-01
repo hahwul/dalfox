@@ -39,7 +39,7 @@ mod poc;
 mod postprocess;
 mod preflight;
 mod scan_loop;
-mod session;
+pub(crate) mod session;
 mod validation;
 
 pub use args::{
