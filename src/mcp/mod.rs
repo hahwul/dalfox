@@ -410,6 +410,10 @@ impl DalfoxMcp {
         // Captured from inside the scoped/async blocks below so the worker-panic
         // count survives past the scan; assigned by the run_scanning call.
         let mut scan_report = crate::scanning::ScanRunReport::default();
+        // Set from inside the scoped block below when this scan's authenticated
+        // session was gone — before it began, or by the time it ended. Carries
+        // the signal that fired, verbatim into the job's `error_message`.
+        let mut session_lost: Option<String> = None;
         let scan_fut = crate::with_job_rate_limiter(
             scan_args.rate_limit,
             crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
@@ -430,6 +434,21 @@ impl DalfoxMcp {
                             )
                             .await;
                         }
+
+                        // Session-loss detection (issue #1273), the MCP half.
+                        // An MCP scan carrying credentials has exactly the
+                        // CLI's exposure: the session dies mid-scan, every
+                        // later request is answered by a login page, nothing
+                        // reflects, and the tool reports zero findings —
+                        // indistinguishable from a clean target. Off, and free,
+                        // when no credentials were supplied.
+                        let monitor_session =
+                            crate::cmd::scan::session::monitoring_enabled(&scan_args, &target);
+                        let session_check_re =
+                            crate::cmd::scan::session::compile_session_check(&scan_args)
+                                .ok()
+                                .flatten();
+                        let mut session_baseline = None;
 
                         // Initial AST DOM-XSS pass on the GET response so MCP
                         // scans match CLI for targets where the vulnerability
@@ -463,7 +482,30 @@ impl DalfoxMcp {
                                 // signal match what the CLI derives from
                                 // preflight.
                                 let resp_headers = resp.headers().clone();
+                                // Captured before `read_body` consumes the
+                                // response: under `follow_redirects` this is
+                                // where the chain actually ended, the only
+                                // landing a baseline can compare against.
+                                let resp_status = resp.status().as_u16();
+                                let resp_final_url = resp.url().clone();
                                 if let Ok(body) = crate::utils::http::read_body(resp).await {
+                                    // Authenticated-state fingerprint from this
+                                    // same response, so monitoring costs no
+                                    // extra request. `session_check_url` is the
+                                    // exception — its baseline must come from
+                                    // that endpoint, handled below.
+                                    if monitor_session && scan_args.session_check_url.is_none() {
+                                        session_baseline = Some(
+                                            crate::cmd::scan::session::baseline_from_preflight(
+                                                &target.url,
+                                                &resp_final_url,
+                                                resp_status,
+                                                &resp_headers,
+                                                &body,
+                                                session_check_re.as_ref(),
+                                            ),
+                                        );
+                                    }
                                     let posture =
                                     crate::scanning::ast_integration::PageSecurityPosture::from_response(
                                         &resp_headers,
@@ -505,6 +547,22 @@ impl DalfoxMcp {
                         }
 
                         // Parameter discovery / mining
+                        // No response to reuse under `skip_ast_analysis`, and
+                        // `session_check_url` needs its baseline from that
+                        // endpoint anyway — pay one request, only for a scan
+                        // that actually has a session.
+                        if monitor_session && session_baseline.is_none() {
+                            session_baseline =
+                                crate::cmd::scan::session::capture_baseline(&target, &scan_args)
+                                    .await;
+                        }
+                        // Credentials already dead when the scan began: no later
+                        // probe can detect a *change* from that baseline, so it
+                        // is recorded now instead of reporting a clean run.
+                        session_lost = session_baseline
+                            .as_ref()
+                            .and_then(crate::cmd::scan::session::baseline_warning);
+
                         analyze_parameters(&mut target, scan_args.as_ref(), None).await;
 
                         // Bound the per-scan fan-out: a sprawling/hostile target
@@ -547,6 +605,23 @@ impl DalfoxMcp {
                             Some(progress.params_tested.clone()),
                         )
                         .await;
+
+                        // The probe that catches the reported failure: a
+                        // session that survived the scan's start and died
+                        // during the injection stage. Skipped when the run was
+                        // cut short anyway (cancel / scan_timeout), where a
+                        // login-page probe only adds noise to a partial result.
+                        if session_lost.is_none()
+                            && !cancel_flag.load(std::sync::atomic::Ordering::Relaxed)
+                            && let Some(baseline) = &session_baseline
+                        {
+                            session_lost = crate::cmd::scan::session::session_lost_after_scan(
+                                &target,
+                                baseline,
+                                &scan_args,
+                            )
+                            .await;
+                        }
                     })
                     .await;
             }),
@@ -572,6 +647,10 @@ impl DalfoxMcp {
         // surface it as `error` (partial results still attached) so a poller
         // can't mistake a crashed scan for a clean finish. Cancellation wins.
         let panicked = !was_cancelled && scan_report.worker_panics > 0;
+        // Same reasoning as `panicked`: the scan ran to completion but its
+        // results cannot be trusted, so it must not settle as a clean `done`.
+        // Cancellation still wins — it is partial by design and says so.
+        let lost_session = !was_cancelled && session_lost.is_some();
 
         if !was_cancelled && !panicked {
             // Only a clean, complete run pins `params_tested` to `params_total`
@@ -612,7 +691,7 @@ impl DalfoxMcp {
                 if j.status != JobStatus::Cancelled {
                     j.status = if was_cancelled {
                         JobStatus::Cancelled
-                    } else if panicked {
+                    } else if panicked || lost_session {
                         JobStatus::Error
                     } else {
                         JobStatus::Done
@@ -620,7 +699,17 @@ impl DalfoxMcp {
                 }
                 // panic and timeout are mutually exclusive (timeout trips the
                 // cancel flag → panicked is false), so record whichever applies.
-                if panicked && j.error_message.is_none() {
+                // Prefixed with the shared error code so a caller can match
+                // on it the way the CLI's `target_summary[].error_code` is
+                // matched; `Job` has no separate code field, and error_message
+                // is already how panics and timeouts identify themselves.
+                if lost_session && j.error_message.is_none() {
+                    j.error_message = Some(format!(
+                        "{}: {}",
+                        crate::cmd::error_codes::SESSION_LOST,
+                        session_lost.clone().unwrap_or_default()
+                    ));
+                } else if panicked && j.error_message.is_none() {
                     j.error_message = Some(format!(
                         "{} scan worker task(s) panicked; results are partial",
                         scan_report.worker_panics

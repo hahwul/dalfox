@@ -17,6 +17,14 @@
 //! default `--on-session-loss abort` — the remaining targets for that host are
 //! skipped rather than spent against a login page.
 //!
+//! The REST server and MCP runtime run their own scan loop, so they do not use
+//! [`SessionMonitor`] — one job is one target, asked once. They call
+//! [`session_lost_after_scan`] instead and settle the job as `error` with a
+//! `SESSION_LOST:` message, which is the same claim their surfaces can express.
+//! Everything that decides *whether* the session died ([`classify`],
+//! [`baseline_warning`], [`monitoring_enabled`]) is shared, so the three
+//! front-ends cannot drift on the actual detection rules.
+//!
 //! Non-goal: automated login. Detection only.
 
 use super::args::ScanArgs;
@@ -539,6 +547,56 @@ impl SessionMonitor {
             }
         }
     }
+}
+
+/// One-shot session verdict for the single-target async front-ends (REST
+/// server, MCP), which have no [`SessionMonitor`].
+///
+/// The CLI needs a monitor because it juggles a map of baselines, a 30s
+/// pre-dispatch throttle, and a host-group abort policy. A server job is one
+/// target with one baseline and one question, asked once when the scan ends:
+/// *was the session still alive?* Everything else — which signals count, how a
+/// WAF changes the meaning of 403, `--session-check` being authoritative —
+/// comes from the same [`classify`] the CLI uses.
+///
+/// It exists as one shared function rather than two copies precisely because
+/// these two front-ends have drifted before: the multipart and JSON body
+/// injection fixes (#1260, #1261, #1263) each had to be applied again after
+/// landing in only one of them.
+///
+/// `None` means "keep trusting this run" — still authenticated, or the probe
+/// itself failed. A network blip must never be reported as a dead session.
+pub(crate) async fn session_lost_after_scan(
+    target: &Target,
+    baseline: &SessionBaseline,
+    args: &ScanArgs,
+) -> Option<String> {
+    let probe = probe_session(target, args.session_check_url.as_deref()).await?;
+    let check_re = compile_session_check(args).ok().flatten();
+    // A fingerprinted WAF changes what a 403 means — see `classify`.
+    let waf_detected = target.waf_info.as_ref().is_some_and(|w| !w.is_empty());
+    match classify(baseline, &probe, check_re.as_ref(), waf_detected) {
+        SessionState::Alive => None,
+        SessionState::Lost(reason) => Some(reason),
+    }
+}
+
+/// Capture a baseline for a front-end that has no preflight response to reuse
+/// (`skip_ast_analysis`, or a `--session-check-url` pointing elsewhere).
+///
+/// Costs one request, and only when the job actually carries credentials — see
+/// [`monitoring_enabled`]. Returns `None` when the probe failed, which leaves
+/// monitoring off for that job rather than inventing a baseline.
+pub(crate) async fn capture_baseline(target: &Target, args: &ScanArgs) -> Option<SessionBaseline> {
+    let check_re = compile_session_check(args).ok().flatten();
+    baseline_from_check_url(
+        target,
+        args.session_check_url
+            .as_deref()
+            .unwrap_or(target.url.as_str()),
+        check_re.as_ref(),
+    )
+    .await
 }
 
 /// The single `SESSION LOST` stderr line, shared by the mid-scan probes and the

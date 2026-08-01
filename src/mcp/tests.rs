@@ -212,6 +212,161 @@ async fn test_run_job_sets_error_on_unreachable_target() {
     );
 }
 
+/// A target that reflects while "authenticated" and answers `401` to everything
+/// once `healthy_hits` requests have been served. The post-scan session probe is
+/// the last request `run_job` makes, so it always lands after the flip.
+async fn spawn_expiring_target(healthy_hits: usize) -> (String, tokio::task::JoinHandle<()>) {
+    use axum::http::StatusCode;
+    use axum::routing::any;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let handler = {
+        let hits = hits.clone();
+        move || {
+            let hits = hits.clone();
+            async move {
+                if hits.fetch_add(1, AtomicOrdering::SeqCst) < healthy_hits {
+                    (
+                        StatusCode::OK,
+                        [("content-type", "text/html; charset=utf-8")],
+                        "<html><body><div>ok</div></body></html>".to_string(),
+                    )
+                } else {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        [("content-type", "text/html; charset=utf-8")],
+                        "<html><body>session expired</body></html>".to_string(),
+                    )
+                }
+            }
+        }
+    };
+    let app = axum::Router::new()
+        .route("/", any(handler.clone()))
+        .route("/{*rest}", any(handler));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind expiring target");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    (format!("http://{}", addr), handle)
+}
+
+/// Run an MCP job to completion and return its settled (status, error_message).
+async fn run_mcp_job(scan_id: &str, args: ScanArgs) -> (JobStatus, Option<String>) {
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        jobs.insert(scan_id.to_string(), test_job(JobStatus::Queued, None));
+    }
+    mcp.run_job(scan_id.to_string(), Arc::new(args)).await;
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+    let job = jobs.get(scan_id).expect("job exists");
+    (job.status.clone(), job.error_message.clone())
+}
+
+// Issue #1273 on the MCP surface. A scan whose session dies mid-run used to
+// settle `done` with zero findings, which an agent cannot tell apart from
+// "scanned, no XSS" — the silent false negative the CLI already guards against.
+#[tokio::test]
+async fn test_run_job_reports_a_session_that_died_mid_scan() {
+    let (base, server) = spawn_expiring_target(3).await;
+    let target = format!("{}/?a=1&b=2", base);
+    let mut args = default_scan_args(&target);
+    args.timeout = 5;
+    // Credentials are what switch monitoring on, here as on the CLI.
+    args.cookies = vec!["sid=deadbeef".to_string()];
+    args.skip_mining = true;
+
+    let (status, error) = run_mcp_job("mcp-session-lost", args).await;
+    server.abort();
+
+    assert_eq!(
+        status,
+        JobStatus::Error,
+        "a scan that lost its session must not settle as a clean done"
+    );
+    let error = error.expect("error_message must name the signal");
+    assert!(
+        error.starts_with(crate::cmd::error_codes::SESSION_LOST),
+        "error_message must be machine-matchable: {error}"
+    );
+    assert!(
+        error.contains("401"),
+        "the triggering signal is carried verbatim: {error}"
+    );
+}
+
+// The other baseline path: `skip_ast_analysis` leaves no preflight response to
+// fingerprint, so the scan pays for one dedicated capture request instead.
+#[tokio::test]
+async fn test_run_job_detects_session_loss_without_the_ast_preflight() {
+    let (base, server) = spawn_expiring_target(3).await;
+    let mut args = default_scan_args(&format!("{}/?a=1", base));
+    args.timeout = 5;
+    args.cookies = vec!["sid=deadbeef".to_string()];
+    args.skip_mining = true;
+    args.skip_ast_analysis = true;
+
+    let (status, error) = run_mcp_job("mcp-session-lost-no-ast", args).await;
+    server.abort();
+
+    assert_eq!(
+        status,
+        JobStatus::Error,
+        "the dedicated-capture path must detect loss too: {error:?}"
+    );
+    assert!(
+        error
+            .as_deref()
+            .is_some_and(|m| m.starts_with(crate::cmd::error_codes::SESSION_LOST)),
+        "{error:?}"
+    );
+}
+
+// The control: same credentials against a target that never expires. Monitoring
+// must not turn a healthy authenticated scan into an error.
+#[tokio::test]
+async fn test_run_job_with_a_live_session_still_settles_done() {
+    let (base, server) = spawn_expiring_target(usize::MAX).await;
+    let target = format!("{}/?a=1", base);
+    let mut args = default_scan_args(&target);
+    args.timeout = 5;
+    args.cookies = vec!["sid=deadbeef".to_string()];
+    args.skip_mining = true;
+
+    let (status, error) = run_mcp_job("mcp-session-alive", args).await;
+    server.abort();
+
+    assert_eq!(status, JobStatus::Done, "error_message={error:?}");
+    assert!(error.is_none(), "{error:?}");
+}
+
+// Monitoring is opt-in-by-context: with no credentials there is no session to
+// lose, so an expiring target must not be reported as a session loss.
+#[tokio::test]
+async fn test_run_job_without_credentials_is_untouched_by_session_monitoring() {
+    let (base, server) = spawn_expiring_target(3).await;
+    let target = format!("{}/?a=1", base);
+    let mut args = default_scan_args(&target);
+    args.timeout = 5;
+    args.skip_mining = true;
+
+    let (status, error) = run_mcp_job("mcp-session-none", args).await;
+    server.abort();
+
+    assert_eq!(
+        status,
+        JobStatus::Done,
+        "an unauthenticated scan has no session to lose: {error:?}"
+    );
+    assert!(error.is_none(), "{error:?}");
+}
+
 #[tokio::test]
 async fn test_mark_job_error_sync_preserves_terminal_status() {
     // Regression for the run_job parse-error path. run_job flips the job to
