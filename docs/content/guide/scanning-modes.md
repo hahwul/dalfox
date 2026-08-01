@@ -69,6 +69,23 @@ Here the command-line target is already enough to scan, so Dalfox waits only ~50
 
 To adjust that: `DALFOX_STDIN_WAIT_MS` raises the wait (or disables the merge with `0`) — see [Environment](../../reference/environment/) — and `--input-type pipe` says `stdin` *is* the input, so Dalfox waits for it however long it takes.
 
+### Collapsing near-duplicate URLs
+
+By default Dalfox only drops targets that are byte-identical (`--dedup-urls exact`): the full URL, query values included, plus the method. A `gau` / `katana` / `waybackurls` dump rarely looks like that — it is usually the same handful of endpoints with thousands of harvested values, and `?id=1` … `?id=9999` are 9999 separate full scans of one injection point.
+
+`--dedup-urls signature` collapses them. The key is the method, scheme, host, port, path, and the *sorted set of parameter names* — query and body (form, JSON, multipart) alike. Values are excluded, so a value-only family becomes one target. Dalfox logs what it dropped, and the count lands in the scan metadata (`dedup_mode`, `targets_deduplicated`) so a collapsed run is never read as full coverage of the list.
+
+The surviving representative is the first member listed, except that a member whose parameters all carry a value beats an earlier one with an empty value: recon dumps often list `?id=` before `?id=42`, and a valueless URL frequently 404s, which would report the whole family clean off a dud. Scope filters (`--include-url`, `--exclude-url`, `--out-of-scope`) are applied *before* dedup, so they always get to rule members out first.
+
+```bash
+gau target.app | dalfox scan --dedup-urls signature
+# INF dedup (signature): 8214 duplicate target(s) collapsed, 37 remaining — dropped e.g. …
+```
+
+When is it safe? When the parameter *name* is what decides where input lands — the common case. It is **not** safe when a value picks the code path: an `action=` / `mode=` / `template=` discriminator that routes to a different handler on the same path, a routing token, or a locale that swaps the rendering template. There, `signature` scans one branch and reports on all of them, which is why it stays opt-in.
+
+`--dedup-urls off` disables deduplication entirely, for the rare case where every line must be scanned as given. Note that per-target reporting is keyed by URL, so repeated lines still share one `target_summary` entry.
+
 ## Raw HTTP mode
 
 Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalfox:

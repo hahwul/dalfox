@@ -80,6 +80,7 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level
 - `total_requests`
 - `findings_count`
 - `target_summary[]` — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected
+- `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
 
 In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context.
 

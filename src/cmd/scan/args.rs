@@ -26,6 +26,12 @@ pub const ENCODER_VALUES: &[&str] = &[
 ];
 pub const CUSTOM_ALERT_TYPE_VALUES: &[&str] = &["none", "str"];
 pub const WAF_BYPASS_VALUES: &[&str] = &["auto", "force", "off"];
+pub const DEDUP_URLS_VALUES: &[&str] = &["exact", "signature", "off"];
+/// Default for `--dedup-urls`: collapse only byte-identical `url|method`
+/// pairs, i.e. the historical behavior. `signature` additionally collapses
+/// URLs that differ solely in parameter *values*, which is not value-safe for
+/// every endpoint, so it stays opt-in.
+pub const DEFAULT_DEDUP_URLS: &str = "exact";
 // Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
@@ -178,6 +184,21 @@ pub struct ScanArgs {
     /// Input type: auto, url, file, pipe, raw-http, har
     #[arg(short = 'i', long, default_value = "auto")]
     pub input_type: String,
+
+    #[clap(help_heading = "INPUT")]
+    /// Target deduplication [default: exact]: exact (drop byte-identical
+    /// URL+method), signature (also collapse URLs that differ only in
+    /// parameter values — keys on method+host+path+parameter names), off (scan
+    /// every input line).
+    ///
+    /// `None` (not `Some("exact")`) — absence is meaningful: it lets a config
+    /// file supply the mode, while `Some(_)` is an explicit CLI choice that
+    /// always wins. Without that distinction `--dedup-urls exact` could not
+    /// override a config-file `signature`, i.e. the operator could not turn
+    /// off a mode that discards targets. Read it through
+    /// [`ScanArgs::dedup_urls_mode`].
+    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(DEDUP_URLS_VALUES.iter().copied()))]
+    pub dedup_urls: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
     /// Output format: json, jsonl, plain, markdown, sarif, toml
@@ -634,6 +655,7 @@ impl Default for ScanArgs {
     fn default() -> Self {
         Self {
             input_type: "auto".to_string(),
+            dedup_urls: None,
             format: "plain".to_string(),
             output: None,
             include_request: false,
@@ -772,6 +794,14 @@ pub struct BlindOobArgs {
 pub const DEFAULT_BLIND_OOB_WAIT_SECS: u64 = 30;
 
 impl ScanArgs {
+    /// Effective `--dedup-urls` mode: the operator's choice, else the built-in
+    /// [`DEFAULT_DEDUP_URLS`]. The field is an `Option` so config precedence can
+    /// tell "unset" from an explicit `exact`; every reader should go through
+    /// this instead of unwrapping the field.
+    pub fn dedup_urls_mode(&self) -> &str {
+        self.dedup_urls.as_deref().unwrap_or(DEFAULT_DEDUP_URLS)
+    }
+
     /// True when `--blind-oob` was supplied (with or without a server list).
     pub fn blind_oob_enabled(&self) -> bool {
         self.oob.blind_oob.is_some()

@@ -88,6 +88,7 @@ fn base_scan_args() -> ScanArgs {
         waf_min_confidence: 0.0,
         targets: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     }
 }
 

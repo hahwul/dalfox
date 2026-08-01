@@ -851,6 +851,7 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         total_targets: 0,
         spinner_allowed: false,
         no_color: true,
+        dedup: Default::default(),
     }
 }
 
@@ -1650,6 +1651,14 @@ async fn test_start_spinner_runs_and_stops() {
 
 use super::input::resolve_targets;
 
+/// [`resolve_targets`] reduced to just the target list, for the cases that
+/// don't assert on dedup statistics.
+async fn resolve(
+    args: &super::ScanArgs,
+) -> std::result::Result<Vec<crate::target_parser::Target>, super::ScanOutcome> {
+    resolve_targets(args).await.map(|r| r.targets)
+}
+
 /// Write `content` to a per-test temp file and return its path.
 fn write_temp_file(tag: &str, content: &str) -> String {
     let mut p = std::env::temp_dir();
@@ -1663,7 +1672,7 @@ async fn test_resolve_targets_url_basic() {
     let mut args = default_scan_args();
     args.input_type = "url".to_string();
     args.targets = vec!["https://example.com/?q=1".to_string()];
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.as_str(), "https://example.com/?q=1");
     // No --user-agent → user_agent is set to an empty string sentinel.
@@ -1680,7 +1689,7 @@ async fn test_resolve_targets_url_applies_cli_overrides() {
     args.cookies = vec!["sid=abc".to_string()];
     args.user_agent = Some("dalfox-ua".to_string());
     args.data = Some("a=b".to_string());
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     let t = &targets[0];
     assert_eq!(t.method, "POST");
@@ -1700,7 +1709,7 @@ async fn test_resolve_targets_dedupes_identical() {
         "https://example.com/".to_string(),
         "https://example.com/".to_string(),
     ];
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1, "identical url+method should dedupe");
 }
 
@@ -1713,7 +1722,7 @@ async fn test_resolve_targets_file_skips_blanks_and_comments() {
     let mut args = default_scan_args();
     args.input_type = "file".to_string();
     args.targets = vec![path];
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 2);
 }
 
@@ -1722,10 +1731,7 @@ async fn test_resolve_targets_file_without_path_errors() {
     let mut args = default_scan_args();
     args.input_type = "file".to_string();
     args.targets = vec![];
-    assert!(matches!(
-        resolve_targets(&args).await,
-        Err(ScanOutcome::Error)
-    ));
+    assert!(matches!(resolve(&args).await, Err(ScanOutcome::Error)));
 }
 
 #[tokio::test]
@@ -1733,10 +1739,7 @@ async fn test_resolve_targets_file_missing_errors() {
     let mut args = default_scan_args();
     args.input_type = "file".to_string();
     args.targets = vec!["/nonexistent/dalfox/path/xyz.txt".to_string()];
-    assert!(matches!(
-        resolve_targets(&args).await,
-        Err(ScanOutcome::Error)
-    ));
+    assert!(matches!(resolve(&args).await, Err(ScanOutcome::Error)));
 }
 
 #[tokio::test]
@@ -1744,10 +1747,7 @@ async fn test_resolve_targets_invalid_input_type_errors() {
     let mut args = default_scan_args();
     args.input_type = "bogus".to_string();
     args.targets = vec!["https://example.com/".to_string()];
-    assert!(matches!(
-        resolve_targets(&args).await,
-        Err(ScanOutcome::Error)
-    ));
+    assert!(matches!(resolve(&args).await, Err(ScanOutcome::Error)));
 }
 
 #[tokio::test]
@@ -1755,7 +1755,7 @@ async fn test_resolve_targets_raw_http_literal() {
     let mut args = default_scan_args();
     args.input_type = "raw-http".to_string();
     args.targets = vec!["GET /path?q=1 HTTP/1.1\r\nHost: example.com\r\n\r\n".to_string()];
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.host_str(), Some("example.com"));
     assert_eq!(targets[0].method, "GET");
@@ -1767,10 +1767,7 @@ async fn test_resolve_targets_raw_http_invalid_errors() {
     args.input_type = "raw-http".to_string();
     // Looks raw-ish but missing a parseable request line / host.
     args.targets = vec!["NOTAMETHOD ?? HTTP/1.1\r\n\r\n".to_string()];
-    assert!(matches!(
-        resolve_targets(&args).await,
-        Err(ScanOutcome::Error)
-    ));
+    assert!(matches!(resolve(&args).await, Err(ScanOutcome::Error)));
 }
 
 #[tokio::test]
@@ -1782,7 +1779,7 @@ async fn test_resolve_targets_include_url_filter() {
         "https://example.com/home".to_string(),
     ];
     args.include_url = vec![".*/api/.*".to_string()];
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     assert!(targets[0].url.as_str().contains("/api/"));
 }
@@ -1796,7 +1793,7 @@ async fn test_resolve_targets_exclude_url_filter() {
         "https://example.com/home".to_string(),
     ];
     args.exclude_url = vec![".*admin.*".to_string()];
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     assert!(!targets[0].url.as_str().contains("admin"));
 }
@@ -1807,10 +1804,7 @@ async fn test_resolve_targets_scope_filter_emptying_all_errors() {
     args.input_type = "url".to_string();
     args.targets = vec!["https://example.com/home".to_string()];
     args.include_url = vec!["this-matches-nothing".to_string()];
-    assert!(matches!(
-        resolve_targets(&args).await,
-        Err(ScanOutcome::Error)
-    ));
+    assert!(matches!(resolve(&args).await, Err(ScanOutcome::Error)));
 }
 
 #[tokio::test]
@@ -1822,7 +1816,7 @@ async fn test_resolve_targets_out_of_scope_domain_filter() {
         "https://evil.com/".to_string(),
     ];
     args.out_of_scope = vec!["evil.com".to_string()];
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.host_str(), Some("keep.example.com"));
 }
@@ -1837,7 +1831,7 @@ async fn test_resolve_targets_out_of_scope_file() {
         "https://evil.com/".to_string(),
     ];
     args.out_of_scope_file = Some(path);
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].url.host_str(), Some("keep.example.com"));
 }
@@ -1852,7 +1846,7 @@ async fn test_resolve_targets_cookie_from_raw_file() {
     args.input_type = "url".to_string();
     args.targets = vec!["https://example.com/".to_string()];
     args.cookie_from_raw = Some(path);
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     let cookies = &targets[0].cookies;
     assert!(cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
@@ -1872,7 +1866,7 @@ async fn test_resolve_targets_cookie_from_raw_case_insensitive() {
     args.input_type = "url".to_string();
     args.targets = vec!["https://example.com/".to_string()];
     args.cookie_from_raw = Some(path);
-    let targets = resolve_targets(&args).await.expect("resolve ok");
+    let targets = resolve(&args).await.expect("resolve ok");
     assert_eq!(targets.len(), 1);
     let cookies = &targets[0].cookies;
     assert!(cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
@@ -1885,10 +1879,7 @@ async fn test_resolve_targets_parse_error_errors() {
     args.input_type = "url".to_string();
     // A scheme that parse_target_with_method can't turn into a usable target.
     args.targets = vec!["http://".to_string()];
-    assert!(matches!(
-        resolve_targets(&args).await,
-        Err(ScanOutcome::Error)
-    ));
+    assert!(matches!(resolve(&args).await, Err(ScanOutcome::Error)));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1944,9 +1935,7 @@ mod har_input {
         args.input_type = "har".to_string();
         args.targets = vec![har.to_string_lossy().to_string()];
 
-        let targets = super::super::input::resolve_targets(&args)
-            .await
-            .expect("HAR should resolve");
+        let targets = super::resolve(&args).await.expect("HAR should resolve");
         let _ = std::fs::remove_file(&har);
 
         assert_eq!(targets.len(), 2);
@@ -1974,7 +1963,7 @@ mod har_input {
         args.input_type = "auto".to_string();
         args.targets = vec![har.to_string_lossy().to_string()];
 
-        let targets = super::super::input::resolve_targets(&args)
+        let targets = super::resolve(&args)
             .await
             .expect("auto-detected HAR should resolve");
         let _ = std::fs::remove_file(&har);
@@ -1992,9 +1981,7 @@ mod har_input {
         args.targets = vec![har.to_string_lossy().to_string()];
         args.headers = vec!["Authorization: Bearer t0ken".to_string()];
 
-        let targets = super::super::input::resolve_targets(&args)
-            .await
-            .expect("HAR should resolve");
+        let targets = super::resolve(&args).await.expect("HAR should resolve");
         let _ = std::fs::remove_file(&har);
 
         assert_eq!(targets.len(), 2);
@@ -2023,9 +2010,7 @@ mod har_input {
         args.input_type = "har".to_string();
         args.targets = vec![path.to_string_lossy().to_string()];
 
-        let targets = super::super::input::resolve_targets(&args)
-            .await
-            .expect("HAR should resolve");
+        let targets = super::resolve(&args).await.expect("HAR should resolve");
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(targets.len(), 2, "duplicate GET should be deduped");
@@ -2043,9 +2028,7 @@ mod har_input {
         args.targets = vec![path.to_string_lossy().to_string()];
         args.out_of_scope = vec!["drop.test".to_string()];
 
-        let targets = super::super::input::resolve_targets(&args)
-            .await
-            .expect("HAR should resolve");
+        let targets = super::resolve(&args).await.expect("HAR should resolve");
         let _ = std::fs::remove_file(&path);
 
         assert_eq!(targets.len(), 1);
@@ -2067,7 +2050,7 @@ mod har_input {
         args.input_type = "auto".to_string();
         args.targets = vec![path.to_string_lossy().to_string()];
 
-        let targets = super::super::input::resolve_targets(&args)
+        let targets = super::resolve(&args)
             .await
             .expect("large HAR with leading markers should auto-detect");
         let _ = std::fs::remove_file(&path);
@@ -2090,7 +2073,7 @@ mod har_input {
         args.input_type = "har".to_string(); // explicit, not auto
         args.targets = vec![path.to_string_lossy().to_string()];
 
-        let targets = super::super::input::resolve_targets(&args)
+        let targets = super::resolve(&args)
             .await
             .expect("explicit -i har should parse regardless of marker position");
         let _ = std::fs::remove_file(&path);

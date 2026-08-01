@@ -51,6 +51,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
 | `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `--dedup-urls` | — | `exact` | 타깃 중복 제거: `exact`(URL+메서드가 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
 
 ### 출력
 

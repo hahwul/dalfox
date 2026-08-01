@@ -20,6 +20,7 @@ Everything lives under the `[scan]` table and mirrors the CLI flag names (snake-
 [scan]
 # INPUT
 input_type = "auto"   # auto, url, file, pipe, raw-http, har
+dedup_urls = "exact"  # exact, signature (collapse URLs differing only in param values), off
 
 # OUTPUT
 format = "plain"

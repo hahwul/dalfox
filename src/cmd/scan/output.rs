@@ -125,6 +125,8 @@ pub(crate) async fn render_dry_run(
             "targets_skipped": skipped.len(),
             "total_params_discovered": total_params,
             "total_estimated_requests": total_estimated,
+            "dedup_mode": state.dedup.mode,
+            "targets_deduplicated": state.dedup.collapsed,
         });
         if !warnings.is_empty() {
             meta["warnings"] = serde_json::json!(warnings);
@@ -147,6 +149,12 @@ pub(crate) async fn render_dry_run(
         println!("  Targets (input):     {}", args.targets.len());
         println!("  Targets (scannable): {}", dry_run_targets.len());
         println!("  Targets (skipped):   {}", skipped.len());
+        if state.dedup.collapsed > 0 {
+            println!(
+                "  Targets (deduped):   {} ({} mode)",
+                state.dedup.collapsed, state.dedup.mode
+            );
+        }
         println!("  Params discovered:   {}", total_params);
         println!("  Estimated requests:  {}", total_estimated);
         if !warnings.is_empty() {
@@ -433,6 +441,8 @@ pub(crate) async fn render_results(
                 "total_requests": total_requests,
                 "findings_count": display_results.len(),
                 "target_summary": target_summary,
+                "dedup_mode": state.dedup.mode,
+                "targets_deduplicated": state.dedup.collapsed,
             },
             "findings": findings_json
         });
@@ -447,6 +457,8 @@ pub(crate) async fn render_results(
                 "total_requests": total_requests,
                 "findings_count": display_results.len(),
                 "target_summary": target_summary,
+                "dedup_mode": state.dedup.mode,
+                "targets_deduplicated": state.dedup.collapsed,
             }
         });
         let mut out = serde_json::to_string(&meta).unwrap_or_default();
@@ -467,6 +479,8 @@ pub(crate) async fn render_results(
             total_requests,
             findings_count: display_results.len(),
             target_summary: target_summary.clone(),
+            dedup_mode: state.dedup.mode.to_string(),
+            targets_deduplicated: state.dedup.collapsed,
         };
         crate::scanning::result::Result::results_to_markdown_with_meta(
             display_results,
@@ -482,6 +496,8 @@ pub(crate) async fn render_results(
             total_requests,
             findings_count: display_results.len(),
             target_summary: target_summary.clone(),
+            dedup_mode: state.dedup.mode.to_string(),
+            targets_deduplicated: state.dedup.collapsed,
         };
         crate::scanning::result::Result::results_to_sarif_with_meta(
             display_results,
@@ -497,6 +513,8 @@ pub(crate) async fn render_results(
             total_requests,
             findings_count: display_results.len(),
             target_summary: target_summary.clone(),
+            dedup_mode: state.dedup.mode.to_string(),
+            targets_deduplicated: state.dedup.collapsed,
         };
         crate::scanning::result::Result::results_to_toml_with_meta(
             display_results,

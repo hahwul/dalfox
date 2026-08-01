@@ -1106,6 +1106,7 @@ async fn run_scan_test(
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     };
 
     scan::run_scan(&args).await;
@@ -1233,6 +1234,7 @@ async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     };
 
     analyze_parameters(&mut target, &args, None).await;
@@ -2714,6 +2716,7 @@ async fn run_libscan(addr: SocketAddr, case_id: u32, detect_libs: bool) -> Vec<s
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     };
 
     scan::run_scan(&args).await;

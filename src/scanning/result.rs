@@ -426,6 +426,14 @@ pub struct ScanMetadata {
     pub total_requests: u64,
     pub findings_count: usize,
     pub target_summary: Vec<serde_json::Value>,
+    /// Target-dedup mode in effect (`exact`, `signature`, or `off`).
+    #[serde(default)]
+    pub dedup_mode: String,
+    /// Duplicate targets dropped by that mode before scanning. Reported so a
+    /// run that collapsed part of its input list is never read as full
+    /// coverage of that list.
+    #[serde(default)]
+    pub targets_deduplicated: usize,
 }
 
 impl Result {
@@ -532,6 +540,8 @@ impl Result {
             "total_requests": meta.total_requests,
             "findings_count": meta.findings_count,
             "target_summary": &meta.target_summary,
+            "dedup_mode": &meta.dedup_mode,
+            "targets_deduplicated": meta.targets_deduplicated,
         })
     }
 
@@ -651,6 +661,16 @@ impl Result {
             let _ = writeln!(out, "| **Scan Duration** | {} ms |", m.scan_duration_ms);
             let _ = writeln!(out, "| **Total Requests** | {} |", m.total_requests);
             let _ = writeln!(out, "| **Findings Count** | {} |", m.findings_count);
+            // Only shown when dedup actually dropped something: a collapsed
+            // input list must be visible in the report, but the common
+            // "nothing collapsed" case doesn't need a row.
+            if m.targets_deduplicated > 0 {
+                let _ = writeln!(
+                    out,
+                    "| **Targets Deduplicated** | {} ({} mode) |",
+                    m.targets_deduplicated, m.dedup_mode
+                );
+            }
             out.push('\n');
 
             // Per-target summary table (includes status, findings_count, WAF when present)

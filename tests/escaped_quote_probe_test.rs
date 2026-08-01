@@ -233,6 +233,7 @@ async fn analyze_parameters_covers_discovery_constructors_and_debug_line() {
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     };
 
     analyze_parameters(&mut target, &args, None).await;
@@ -352,6 +353,7 @@ async fn run_scan_inject_marker_covers_marker_param_constructors() {
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     };
 
     // Just exercises the marker-discovery path; no assertion on findings (scanning

@@ -101,6 +101,7 @@ fn make_args() -> ScanArgs {
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        ..Default::default()
     }
 }
 
