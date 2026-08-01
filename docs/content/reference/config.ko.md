@@ -48,6 +48,11 @@ method = "GET"
 user_agent = "Dalfox/3"
 # cookie_from_raw = "request.txt"
 
+# SESSION
+# session_check = "Sign out"
+# session_check_url = "https://app.example.com/api/me"
+on_session_loss = "abort"
+
 # SCOPE
 include_url = []
 exclude_url = []
@@ -153,6 +158,16 @@ debug = false
 | `method` | string | `"GET"` | HTTP 메서드 (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY`) |
 | `user_agent` | string | — | User-Agent 재정의 |
 | `cookie_from_raw` | string | — | 쿠키용 원본 요청 파일 |
+
+### 세션
+
+스캔 도중 세션 만료 감지 — [세션 모니터링](../../guide/scanning-modes/)을 참고하세요.
+
+| 키 | 타입 | 기본값 | 설명 |
+|-----|------|---------|-------------|
+| `session_check` | string | — | 인증된 응답 본문에 계속 매칭되어야 하는 정규식 |
+| `session_check_url` | string | — | 재검증 전용 프로브 URL |
+| `on_session_loss` | string | `"abort"` | `abort` 또는 `continue` |
 
 ### 스코프
 

@@ -87,6 +87,22 @@ See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for th
 | `--user-agent` | — | — | Custom User-Agent |
 | `--cookie-from-raw` | — | — | Load cookies from a raw HTTP request file |
 
+### Session
+
+Guards against the silent failure where an authenticated session expires
+mid-scan, every later request is answered by a login page, and the run reports
+zero findings. See [Session monitoring](../../guide/scanning-modes/).
+
+Monitoring turns itself on whenever credentials are present (`--cookies`,
+`--cookie-from-raw`, or a `Cookie` / `Authorization` header) — or when either
+`--session-check` flag is given. It is off, and free, otherwise.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--session-check` | — | Regex that must keep matching an authenticated response body. Authoritative: when set, the built-in heuristics are not consulted |
+| `--session-check-url` | — | Probe this URL instead of the scan target when re-validating (e.g. a cheap `/api/me` endpoint) |
+| `--on-session-loss` | `abort` | `abort` stops the affected target, skips the rest of that host, and exits `2` when the run found nothing; `continue` keeps scanning and leaves the exit code alone. Either way the target is reported `incomplete` / `SESSION_LOST`, never `clean` |
+
 ### Scope
 
 | Flag | Default | Description |

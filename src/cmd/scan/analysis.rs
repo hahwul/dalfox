@@ -8,11 +8,56 @@ use super::ScanState;
 use super::args::ScanArgs;
 use super::logging::start_spinner;
 use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
+use super::session::SessionBaseline;
 use crate::parameter_analysis::analyze_parameters;
 use crate::target_parser::Target;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use tokio::sync::Mutex;
 use tokio::task::LocalSet;
+
+/// File the authenticated-state baseline for `target`, and decide up front
+/// whether it is usable at all.
+///
+/// An unusable baseline — stale credentials, or a `--session-check` marker that
+/// never matched — is recorded as a real `SESSION_LOST`, not merely logged.
+/// From such a baseline no later probe can ever detect a *change*, so without
+/// this the run ends `"status": "clean"`, `"incomplete": false`, exit 0: the
+/// exact silent false negative issue #1273 is about, just moved one step
+/// earlier. Marking it here routes the case through the same reporting the
+/// mid-scan probes use, and `SessionMonitor::check` then skips probing a target
+/// already known to be lost.
+///
+/// The target is still scanned. At preflight we cannot tell "the credentials
+/// expired" from "this page legitimately renders a login form", and a login
+/// page can carry reflected XSS of its own — the exit code and `incomplete`
+/// flag are what make the run honest, not refusing to look.
+async fn record_session_baseline(
+    args: &ScanArgs,
+    target: &Target,
+    baseline: SessionBaseline,
+    session_baselines: &Arc<Mutex<HashMap<String, SessionBaseline>>>,
+    session_lost: &Arc<Mutex<HashMap<String, String>>>,
+) {
+    if let Some(reason) = super::session::baseline_warning(&baseline) {
+        if !args.silence {
+            super::session::report_loss(
+                target.url.as_str(),
+                &reason,
+                super::session::aborts_on_loss(args),
+            );
+        }
+        session_lost
+            .lock()
+            .await
+            .insert(target.url.to_string(), reason);
+    }
+    session_baselines
+        .lock()
+        .await
+        .insert(target.url.to_string(), baseline);
+}
 
 pub(crate) async fn run_preflight_and_analysis(
     args: &ScanArgs,
@@ -27,6 +72,8 @@ pub(crate) async fn run_preflight_and_analysis(
     let skipped_targets = state.skipped_targets.clone();
     let target_meta = state.target_meta.clone();
     let target_mutation_stats = state.target_mutation_stats.clone();
+    let session_baselines = state.session_baselines.clone();
+    let session_lost = state.session_lost.clone();
     let multi_pb = state.multi_pb.clone();
     let preflight_idx = state.preflight_idx.clone();
     let analyze_idx = state.analyze_idx.clone();
@@ -83,6 +130,8 @@ pub(crate) async fn run_preflight_and_analysis(
             let skipped_targets_outer = skipped_targets.clone();
             let target_meta_outer = target_meta.clone();
             let target_mutation_stats_outer = target_mutation_stats.clone();
+            let session_baselines_outer = session_baselines.clone();
+            let session_lost_outer = session_lost.clone();
             local.run_until(async move {
                 let mut handles = vec![];
 
@@ -98,6 +147,8 @@ pub(crate) async fn run_preflight_and_analysis(
             let skipped_targets_clone = skipped_targets_outer.clone();
             let target_meta_clone = target_meta_outer.clone();
             let target_mutation_stats_clone = target_mutation_stats_outer.clone();
+            let session_baselines_clone = session_baselines_outer.clone();
+            let session_lost_clone = session_lost_outer.clone();
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
@@ -158,13 +209,41 @@ pub(crate) async fn run_preflight_and_analysis(
                         // — keep scanning, just skip the preflight metadata
                         // population below. Preserves the v3.0 behavior
                         // that body-param scans of /post-only endpoints
-                        // still work.
-                        PreflightOutcome::NoContentType => None,
+                        // still work. The session baseline is the one piece
+                        // that must survive: the target still gets scanned, so
+                        // it still has a session that can die mid-run.
+                        PreflightOutcome::NoContentType(baseline) => {
+                            if let Some(baseline) = baseline {
+                                record_session_baseline(
+                                    &args_clone,
+                                    &target,
+                                    baseline,
+                                    &session_baselines_clone,
+                                    &session_lost_clone,
+                                )
+                                .await;
+                            }
+                            None
+                        }
                         PreflightOutcome::WithContentType(r) => Some(r),
                     };
 
                     if let Some(preflight) = __preflight_info {
                         preflight_response_body = preflight.response_body;
+                        // Authenticated-state fingerprint for mid-scan
+                        // session-loss detection. Present only when the target
+                        // carries credentials (or the operator asked for a
+                        // check explicitly).
+                        if let Some(baseline) = preflight.session_baseline {
+                            record_session_baseline(
+                                &args_clone,
+                                &target,
+                                baseline,
+                                &session_baselines_clone,
+                                &session_lost_clone,
+                            )
+                            .await;
+                        }
                         if let Some((hn, hv)) = preflight.csp_header {
                             __preflight_csp_present = true;
                             // Analyze CSP and store on target for bypass payload generation

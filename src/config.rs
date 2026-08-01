@@ -72,6 +72,10 @@ pub struct ScanConfig {
     pub method: Option<String>,
     pub user_agent: Option<String>,
     pub cookie_from_raw: Option<String>,
+    // SESSION
+    pub session_check: Option<String>,
+    pub session_check_url: Option<String>,
+    pub on_session_loss: Option<String>,
     // SCOPE
     pub include_url: Option<Vec<String>>,
     pub exclude_url: Option<Vec<String>>,
@@ -225,6 +229,16 @@ impl Config {
             }
             if let Some(v) = &scan.cookie_from_raw {
                 args.cookie_from_raw = Some(v.clone());
+            }
+            // SESSION
+            if let Some(v) = &scan.session_check {
+                args.session_check = Some(v.clone());
+            }
+            if let Some(v) = &scan.session_check_url {
+                args.session_check_url = Some(v.clone());
+            }
+            if let Some(v) = &scan.on_session_loss {
+                args.on_session_loss = v.clone();
             }
             // SCOPE
             if let Some(v) = &scan.include_url {
@@ -460,6 +474,22 @@ impl Config {
                 && args.cookie_from_raw.is_none()
             {
                 args.cookie_from_raw = Some(v.clone());
+            }
+            // SESSION
+            if let Some(v) = &scan.session_check
+                && args.session_check.is_none()
+            {
+                args.session_check = Some(v.clone());
+            }
+            if let Some(v) = &scan.session_check_url
+                && args.session_check_url.is_none()
+            {
+                args.session_check_url = Some(v.clone());
+            }
+            if let Some(v) = &scan.on_session_loss
+                && args.on_session_loss == "abort"
+            {
+                args.on_session_loss = v.clone();
             }
             // SCOPE
             if let Some(v) = &scan.include_url
@@ -702,6 +732,23 @@ impl Config {
                 && args.cookie_from_raw.is_none()
             {
                 args.cookie_from_raw = Some(v.clone());
+            }
+
+            // SESSION (if_default)
+            if let Some(v) = &scan.session_check
+                && args.session_check.is_none()
+            {
+                args.session_check = Some(v.clone());
+            }
+            if let Some(v) = &scan.session_check_url
+                && args.session_check_url.is_none()
+            {
+                args.session_check_url = Some(v.clone());
+            }
+            if let Some(v) = &scan.on_session_loss
+                && args.on_session_loss == "abort"
+            {
+                args.on_session_loss = v.clone();
             }
 
             // SCOPE (if_default)
@@ -1156,6 +1203,36 @@ impl ScanConfig {
             "scan.waf_bypass",
             &mut warnings,
         );
+        reject_unless_allowed(
+            &mut self.on_session_loss,
+            crate::cmd::scan::ON_SESSION_LOSS_VALUES,
+            "scan.on_session_loss",
+            &mut warnings,
+        );
+
+        // `session_check` — compiled on every probe, potentially an hour into
+        // the scan. A config file skips clap entirely, so validate the pattern
+        // here rather than letting a typo silently report every probe as a
+        // dead session (which, under the default `abort`, kills the run).
+        if let Some(p) = &self.session_check
+            && let Err(e) = regex::Regex::new(p)
+        {
+            warnings.push(format!(
+                "config scan.session_check: invalid regex ({e}); ignoring"
+            ));
+            self.session_check = None;
+        }
+
+        // `session_check_url` — must be absolute; a relative value would fail
+        // to parse at probe time and silently disable the check.
+        if let Some(u) = &self.session_check_url
+            && url::Url::parse(u).is_err()
+        {
+            warnings.push(format!(
+                "config scan.session_check_url: '{u}' is not a valid absolute URL; ignoring"
+            ));
+            self.session_check_url = None;
+        }
 
         // Comma-delimited enum list fields.
         reject_list_unless_allowed(
@@ -1316,6 +1393,11 @@ pub fn default_toml_template() -> String {
 # method = "GET"
 # user_agent = "Dalfox/3"
 # cookie_from_raw = "request.txt"
+
+# SESSION (mid-scan session-loss detection; auto-enabled when credentials are supplied)
+# session_check = "Sign out"          # regex that must keep matching an authenticated response
+# session_check_url = "https://app.example.com/api/me"
+# on_session_loss = "abort"           # abort, continue
 
 # SCOPE
 # include_url = []

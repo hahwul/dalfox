@@ -75,6 +75,13 @@ If the number is huge or `reachable == false`, report back to the user before se
 
 See the concrete flag combinations in `references/cli.md` (search for "Polite authenticated scan" and "Blind").
 
+**Authenticated scans carry a session that can die mid-run.** Dalfox monitors
+for that automatically whenever credentials are supplied (CLI only), and marks
+affected targets `incomplete` / `SESSION_LOST` with `meta.incomplete: true`
+rather than reporting them clean. Never summarize `findings_count: 0` as "no XSS
+found" without checking `meta.incomplete` first. Tighten the check with
+`--session-check '<regex>'` / `--session-check-url`; see `references/cli.md`.
+
 Two ways to catch blind XSS (CLI):
 - `--blind <url>` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.
 - `--blind-oob[=servers]` — Dalfox manages an interactsh (OAST) session for you: it registers, correlates each callback to the originating payload, and polls automatically (`--blind-oob-secret` for self-hosted, `--blind-oob-wait` to tune end-of-scan polling). CLI-only for now.

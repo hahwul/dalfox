@@ -727,6 +727,7 @@ fn mk_meta() -> ScanMetadata {
         scan_duration_ms: 1234,
         total_requests: 42,
         findings_count: 1,
+        incomplete: false,
         target_summary: vec![
             serde_json::json!({
                 "target": "https://example.com",

@@ -48,6 +48,11 @@ method = "GET"
 user_agent = "Dalfox/3"
 # cookie_from_raw = "request.txt"
 
+# SESSION
+# session_check = "Sign out"
+# session_check_url = "https://app.example.com/api/me"
+on_session_loss = "abort"
+
 # SCOPE
 include_url = []
 exclude_url = []
@@ -153,6 +158,16 @@ debug = false
 | `method` | string | `"GET"` | HTTP method (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY`) |
 | `user_agent` | string | — | User-Agent override |
 | `cookie_from_raw` | string | — | Raw-request file for cookies |
+
+### Session
+
+Mid-scan session-loss detection — see [Session monitoring](../../guide/scanning-modes/).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `session_check` | string | — | Regex that must keep matching an authenticated response body |
+| `session_check_url` | string | — | Dedicated probe URL for re-validation |
+| `on_session_loss` | string | `"abort"` | `abort` or `continue` |
 
 ### Scope
 

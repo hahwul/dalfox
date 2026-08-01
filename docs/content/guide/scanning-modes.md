@@ -127,6 +127,93 @@ dalfox scan https://target.app/post-comment \
 
 Dalfox injects into the first URL, then fetches the second to check whether the payload landed. See the [Stored XSS guide](../stored-xss/) for the full flow.
 
+## Session monitoring
+
+Static credentials (`--cookies`, `-H 'Cookie: …'`, `--cookie-from-raw`) are
+attached to every request and never revisited. If that session expires an hour
+into a long scan, every request after it is answered by a login page, nothing
+reflects, and Dalfox exits `0` with an empty report — indistinguishable from a
+genuinely clean target.
+
+Session monitoring closes that gap. During preflight Dalfox fingerprints the
+authenticated landing response (status, where the request landed after
+redirects, whether a login form was already on the page) at **no extra request
+cost** — it reuses the body preflight already fetched. It then re-probes after
+each target's injection stage, and again at the dispatch boundary when the
+baseline is already more than 30 seconds old. (On a short or single-target run
+only the post-scan probe fires — re-probing a baseline that is seconds old
+proves nothing.)
+
+```bash
+# Nothing to configure: credentials switch it on.
+dalfox scan https://app.example.com/dashboard?q=1 --cookies "sid=$SESSION"
+```
+
+A session is reported lost when any of these fires:
+
+| Signal | Example |
+|--------|---------|
+| Status moves into `401` / `403` | the app started rejecting the cookie |
+| The request now lands on a login-shaped URL | `302 → /users/sign_in` |
+| A password field appeared where the baseline had none | the app now renders the login wall inline |
+
+`403` is also what an origin or WAF returns once it decides to block a scanner.
+When Dalfox has already fingerprinted a WAF on the target, the `403` signal is
+suppressed entirely — a block explains it better than an expired session, and
+calling it a logout would abort the host group over a WAF rule. Use
+`--session-check` if you need `403`-as-expiry on a WAF-fronted origin.
+
+### Making it exact
+
+The heuristics are deliberately narrow — the default is to abort, so a false
+positive costs a whole scan. When you know exactly what an authenticated
+response looks like, say so and the heuristics step aside entirely:
+
+```bash
+dalfox scan https://app.example.com/dashboard?q=1 \
+  --cookies "sid=$SESSION" \
+  --session-check 'Signed in as' \
+  --session-check-url https://app.example.com/api/me
+```
+
+`--session-check-url` is worth setting when the scan target is expensive,
+paginated, or itself public — point it at a cheap authenticated endpoint
+instead. The baseline is then taken from that endpoint too (one extra preflight
+request per target, only when you set the flag), so a login-shaped probe path
+like `/auth/session` is compared against its own authenticated response rather
+than against the target's.
+
+### What happens on loss
+
+`--on-session-loss abort` (the default) stops the affected target and skips the
+remaining targets for that host: continuing to spend the request budget against
+a login page has no upside. `--on-session-loss continue` keeps scanning, for
+targets where the heuristics misfire.
+
+Either way the run is honest about it:
+
+- a `SESSION LOST` line on **stderr**, so structured stdout stays parseable
+- the target reported as `incomplete` (or `skipped`) with `error_code: SESSION_LOST`
+  and the signal that fired in `error_message`
+- `meta.incomplete: true` in the [scan metadata envelope](../output/#scan-metadata-envelope)
+- exit code `2` under `abort` when the run found nothing — so
+  `dalfox scan … && echo "no XSS found"` cannot print that line after being
+  logged out. A run that *did* find something still exits `1`; findings are
+  real regardless, and `meta.incomplete` carries the caveat. `continue` leaves
+  the exit code alone entirely.
+
+Dalfox also flags the case where the **preflight** response already looks
+unauthenticated — or where a `--session-check` marker never matched the baseline
+at all (a typo, or a marker that lives on another page). Both are reported as
+`SESSION_LOST` rather than merely logged: from such a baseline no later probe
+can detect a *change*, so stale credentials would otherwise produce a silent,
+completely clean run. The target is still scanned; the flag and exit code are
+what make the result honest.
+
+Monitoring is off — and costs nothing — when no credentials are supplied and
+neither `--session-check` flag is set. Logging in is out of scope: this is
+detection only.
+
 ## Server mode
 
 Run Dalfox as a long-lived HTTP service. Submit scans via REST, poll for results, cancel running jobs:

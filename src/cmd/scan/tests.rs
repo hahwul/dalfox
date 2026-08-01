@@ -742,7 +742,7 @@ async fn test_preflight_content_type_reads_http_csp_header() {
     args.skip_waf_probe = true; // avoid extra request in test
     let preflight = match preflight_content_type(&target, &args).await {
         PreflightOutcome::WithContentType(r) => r,
-        PreflightOutcome::NoContentType => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::NoContentType(_) => panic!("preflight should return a Content-Type"),
         PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
     };
     handle.abort();
@@ -764,7 +764,7 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
     args.skip_waf_probe = true;
     let preflight = match preflight_content_type(&target, &args).await {
         PreflightOutcome::WithContentType(r) => r,
-        PreflightOutcome::NoContentType => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::NoContentType(_) => panic!("preflight should return a Content-Type"),
         PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
     };
     handle.abort();
@@ -843,6 +843,8 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         skipped_targets: Arc::new(Mutex::new(HashMap::new())),
         target_meta: Arc::new(Mutex::new(HashMap::new())),
         target_mutation_stats: Arc::new(Mutex::new(HashMap::new())),
+        session_baselines: Arc::new(Mutex::new(HashMap::new())),
+        session_lost: Arc::new(Mutex::new(HashMap::new())),
         multi_pb: None,
         preflight_idx: Arc::new(AtomicUsize::new(0)),
         analyze_idx: Arc::new(AtomicUsize::new(0)),
