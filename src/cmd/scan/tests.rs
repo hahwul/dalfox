@@ -1558,7 +1558,7 @@ async fn test_render_results_baseline_annotate_marks_every_finding() {
     let mut args = default_scan_args();
     args.format = "json".to_string();
     args.baseline = Some(baseline_path.clone());
-    args.baseline_mode = "annotate".to_string();
+    args.baseline_mode_arg = Some("annotate".to_string());
     let out_path = temp_out_path("baseline_annotate_out");
     args.output = Some(out_path.clone());
 

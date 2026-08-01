@@ -42,7 +42,7 @@ pub const DEDUP_URLS_VALUES: &[&str] = &["exact", "signature", "off"];
 pub const DEFAULT_DEDUP_URLS: &str = "exact";
 // Defined in `session`, re-exported through the same door as every other
 // enum-like value set so `config.rs` has one place to look.
-pub use super::session::ON_SESSION_LOSS_VALUES;
+pub use super::session::{DEFAULT_ON_SESSION_LOSS, ON_SESSION_LOSS_VALUES};
 // Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
@@ -201,14 +201,17 @@ pub struct ScanArgs {
     /// URL+method), signature (also collapse URLs that differ only in
     /// parameter values — keys on method+host+path+parameter names), off (scan
     /// every input line).
-    ///
-    /// `None` (not `Some("exact")`) — absence is meaningful: it lets a config
-    /// file supply the mode, while `Some(_)` is an explicit CLI choice that
-    /// always wins. Without that distinction `--dedup-urls exact` could not
-    /// override a config-file `signature`, i.e. the operator could not turn
-    /// off a mode that discards targets. Read it through
-    /// [`ScanArgs::dedup_urls_mode`].
-    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(DEDUP_URLS_VALUES.iter().copied()))]
+    //
+    // Non-doc on purpose: clap renders `///` into `--help`, and the rest of
+    // this is implementation rationale, not operator guidance.
+    //
+    // `None` (not `Some("exact")`) — absence is meaningful: it lets a config
+    // file supply the mode, while `Some(_)` is an explicit CLI choice that
+    // always wins. Without that distinction `--dedup-urls exact` could not
+    // override a config-file `signature`, i.e. the operator could not turn
+    // off a mode that discards targets. Read it through
+    // `ScanArgs::dedup_urls_mode`.
+    #[arg(long, value_name = "MODE", value_parser = clap::builder::PossibleValuesParser::new(DEDUP_URLS_VALUES.iter().copied()))]
     pub dedup_urls: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
@@ -288,9 +291,15 @@ pub struct ScanArgs {
     pub baseline: Option<String>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// What --baseline does with already-known findings: filter (drop them, so the exit code gates on new findings only) or annotate (keep them and mark each `new`). Example: --baseline-mode annotate
-    #[arg(long, default_value = BASELINE_MODE_FILTER, value_parser = clap::builder::PossibleValuesParser::new(BASELINE_MODE_VALUES.iter().copied()))]
-    pub baseline_mode: String,
+    /// What --baseline does with already-known findings [default: filter]:
+    /// filter (drop them, so the exit code gates on new findings only) or
+    /// annotate (keep them and mark each `new`). Example: --baseline-mode annotate
+    //
+    // `None` (not `Some("filter")`) — absence is meaningful: it lets a config
+    // file supply the mode, while `Some(_)` is an explicit CLI choice that
+    // always wins. Read it through `ScanArgs::baseline_mode`.
+    #[arg(long = "baseline-mode", value_name = "MODE", value_parser = clap::builder::PossibleValuesParser::new(BASELINE_MODE_VALUES.iter().copied()))]
+    pub baseline_mode_arg: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
@@ -345,12 +354,18 @@ pub struct ScanArgs {
     pub session_check_url: Option<String>,
 
     #[clap(help_heading = "SESSION")]
-    /// What to do when the session is detected as lost: abort (default) stops
-    /// the affected target and skips the rest of that host; continue keeps
+    /// What to do when the session is detected as lost [default: abort]: abort
+    /// stops the affected target and skips the rest of that host; continue keeps
     /// scanning. Either way the target is reported as `incomplete` /
     /// SESSION_LOST instead of a misleading "clean".
-    #[arg(long, default_value = "abort", value_parser = clap::builder::PossibleValuesParser::new(ON_SESSION_LOSS_VALUES.iter().copied()))]
-    pub on_session_loss: String,
+    //
+    // `None` (not `Some("abort")`) — absence is meaningful: it lets a config
+    // file supply the policy, while `Some(_)` is an explicit CLI choice that
+    // always wins. Without that distinction `--on-session-loss abort` could not
+    // override a config-file `continue`, i.e. the operator could not turn the
+    // safe default back on. Read it through `ScanArgs::on_session_loss_mode`.
+    #[arg(long = "on-session-loss", value_name = "POLICY", value_parser = clap::builder::PossibleValuesParser::new(ON_SESSION_LOSS_VALUES.iter().copied()))]
+    pub on_session_loss_arg: Option<String>,
 
     #[clap(help_heading = "SCOPE")]
     /// Include only URLs matching these patterns (regex, can be specified multiple times)
@@ -716,7 +731,7 @@ impl Default for ScanArgs {
             limit_result_type: "all".to_string(),
             only_poc: vec![],
             baseline: None,
-            baseline_mode: BASELINE_MODE_FILTER.to_string(),
+            baseline_mode_arg: None,
             param: vec![],
             data: None,
             headers: vec![],
@@ -726,7 +741,7 @@ impl Default for ScanArgs {
             cookie_from_raw: None,
             session_check: None,
             session_check_url: None,
-            on_session_loss: "abort".to_string(),
+            on_session_loss_arg: None,
             include_url: vec![],
             exclude_url: vec![],
             ignore_param: vec![],
@@ -851,6 +866,26 @@ impl ScanArgs {
     /// this instead of unwrapping the field.
     pub fn dedup_urls_mode(&self) -> &str {
         self.dedup_urls.as_deref().unwrap_or(DEFAULT_DEDUP_URLS)
+    }
+
+    /// Effective `--baseline-mode`: the operator's choice, else
+    /// [`BASELINE_MODE_FILTER`]. `Option` for the same reason as
+    /// [`ScanArgs::dedup_urls_mode`] — an explicit `--baseline-mode filter` has
+    /// to beat a config-file `annotate`, which a "field equals the default"
+    /// test cannot express.
+    pub fn baseline_mode(&self) -> &str {
+        self.baseline_mode_arg
+            .as_deref()
+            .unwrap_or(BASELINE_MODE_FILTER)
+    }
+
+    /// Effective `--on-session-loss` policy: the operator's choice, else
+    /// `abort`. `Option` so an explicit `--on-session-loss abort` beats a
+    /// config-file `continue`; see [`ScanArgs::dedup_urls_mode`].
+    pub fn on_session_loss_mode(&self) -> &str {
+        self.on_session_loss_arg
+            .as_deref()
+            .unwrap_or(DEFAULT_ON_SESSION_LOSS)
     }
 
     /// True when `--blind-oob` was supplied (with or without a server list).

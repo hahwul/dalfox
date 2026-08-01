@@ -30,6 +30,10 @@ use tokio::sync::Mutex;
 /// validator: a config file bypasses clap entirely, so both must agree.
 pub const ON_SESSION_LOSS_VALUES: &[&str] = &["abort", "continue"];
 
+/// Policy when neither the CLI nor a config file says otherwise: stop spending
+/// requests on a login page.
+pub const DEFAULT_ON_SESSION_LOSS: &str = "abort";
+
 /// Minimum age a baseline must have before the *pre-dispatch* re-probe is worth
 /// spending a request on. The baseline is captured during preflight, and on a
 /// single-target run dispatch follows within milliseconds — re-probing there
@@ -75,14 +79,14 @@ pub(crate) struct SessionBaseline {
     /// (see [`baseline_warning`]) instead of aborting the scan at the first
     /// probe.
     pub(crate) check_marker_present: Option<bool>,
-    /// Did this baseline come from an operator-supplied `--session-check-url`?
-    ///
-    /// It suppresses exactly one check: whether the *landing path* looks like a
-    /// login endpoint. For a scan target that shape is evidence — nobody asked
-    /// to scan `/login`. For a check URL it is nothing: the operator chose the
-    /// endpoint, and `/auth/session` is a perfectly ordinary name for
-    /// "am I signed in?". Status and login-form signals still apply.
     /// When this baseline was captured, for [`PRE_DISPATCH_MIN_AGE_SECS`].
+    ///
+    /// (There is deliberately no "came from `--session-check-url`" flag. A
+    /// login-shaped check URL like `/auth/session` needs no special-casing:
+    /// [`classify`]'s login-URL rule already requires the *baseline* not to be
+    /// login-shaped, and [`baseline_warning`] only flags a login URL reached by
+    /// redirect. An operator-chosen 200 at `/auth/session` therefore trips
+    /// neither.)
     pub(crate) captured_at: Instant,
 }
 
@@ -136,7 +140,7 @@ pub(crate) fn compile_session_check(args: &ScanArgs) -> Result<Option<regex::Reg
 /// Should this run abort the affected target on loss (`--on-session-loss abort`,
 /// the default) rather than keep spending requests against a login page?
 pub(crate) fn aborts_on_loss(args: &ScanArgs) -> bool {
-    !args.on_session_loss.eq_ignore_ascii_case("continue")
+    !args.on_session_loss_mode().eq_ignore_ascii_case("continue")
 }
 
 /// Is the pre-dispatch re-probe worth a request yet? See
@@ -802,7 +806,7 @@ mod tests {
     fn abort_is_the_default_and_continue_opts_out() {
         assert!(aborts_on_loss(&ScanArgs::default()));
         assert!(!aborts_on_loss(&ScanArgs {
-            on_session_loss: "continue".to_string(),
+            on_session_loss_arg: Some("continue".to_string()),
             ..ScanArgs::default()
         }));
     }

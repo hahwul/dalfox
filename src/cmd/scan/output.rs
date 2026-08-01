@@ -514,47 +514,40 @@ pub(crate) async fn render_results(
         .iter()
         .any(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST);
 
+    // One envelope, built once and rendered by every format. Previously the
+    // `json` and `jsonl` arms each inlined their own copy of this object next
+    // to three `ScanMetadata` literals, so every new meta field had to be added
+    // in five places — and reached only the formats whose copy was remembered.
+    let scan_meta = crate::scanning::result::ScanMetadata {
+        dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
+        targets: args.targets.clone(),
+        scan_duration_ms: scan_elapsed.as_millis() as u64,
+        total_requests,
+        findings_count: display_results.len(),
+        // Moved, not cloned: on a mass-URL run this vector holds one JSON
+        // object per target, and nothing below needs a second copy.
+        target_summary,
+        dedup_mode: state.dedup.mode.to_string(),
+        targets_deduplicated: state.dedup.collapsed,
+        baseline: baseline_meta,
+        incomplete: scan_incomplete,
+    };
+
     let output_content = if args.format == "json" {
         let findings_json: Vec<serde_json::Value> = display_results
             .iter()
             .map(|r| r.to_json_value(args.include_request, args.include_response))
             .collect();
-        let mut meta_obj = serde_json::json!({
-            "dalfox_version": env!("CARGO_PKG_VERSION"),
-            "targets": &args.targets,
-            "scan_duration_ms": scan_elapsed.as_millis() as u64,
-            "total_requests": total_requests,
-            "findings_count": display_results.len(),
-            "target_summary": target_summary,
-            "incomplete": scan_incomplete,
-            "dedup_mode": state.dedup.mode,
-            "targets_deduplicated": state.dedup.collapsed,
-        });
-        if let Some(b) = &baseline_meta {
-            meta_obj["baseline"] = b.clone();
-        }
         let wrapper = serde_json::json!({
-            "meta": meta_obj,
+            "meta": crate::scanning::result::Result::make_scan_meta_value(&scan_meta),
             "findings": findings_json
         });
         serde_json::to_string_pretty(&wrapper).unwrap_or_else(|_| "{}".to_string())
     } else if args.format == "jsonl" {
         // JSONL: first line is meta, then one finding per line
-        let mut meta_obj = serde_json::json!({
-            "dalfox_version": env!("CARGO_PKG_VERSION"),
-            "targets": &args.targets,
-            "scan_duration_ms": scan_elapsed.as_millis() as u64,
-            "total_requests": total_requests,
-            "findings_count": display_results.len(),
-            "target_summary": target_summary,
-            "incomplete": scan_incomplete,
-            "dedup_mode": state.dedup.mode,
-            "targets_deduplicated": state.dedup.collapsed,
+        let meta = serde_json::json!({
+            "meta": crate::scanning::result::Result::make_scan_meta_value(&scan_meta),
         });
-        if let Some(b) = &baseline_meta {
-            meta_obj["baseline"] = b.clone();
-        }
-        let meta = serde_json::json!({ "meta": meta_obj });
         let mut out = serde_json::to_string(&meta).unwrap_or_default();
         out.push('\n');
         for r in display_results {
@@ -566,61 +559,25 @@ pub(crate) async fn render_results(
         }
         out
     } else if args.format == "markdown" {
-        let meta = crate::scanning::result::ScanMetadata {
-            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
-            targets: args.targets.clone(),
-            scan_duration_ms: scan_elapsed.as_millis() as u64,
-            total_requests,
-            findings_count: display_results.len(),
-            target_summary: target_summary.clone(),
-            dedup_mode: state.dedup.mode.to_string(),
-            targets_deduplicated: state.dedup.collapsed,
-            baseline: baseline_meta.clone(),
-            incomplete: scan_incomplete,
-        };
         crate::scanning::result::Result::results_to_markdown_with_meta(
             display_results,
             args.include_request,
             args.include_response,
-            Some(&meta),
+            Some(&scan_meta),
         )
     } else if args.format == "sarif" {
-        let meta = crate::scanning::result::ScanMetadata {
-            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
-            targets: args.targets.clone(),
-            scan_duration_ms: scan_elapsed.as_millis() as u64,
-            total_requests,
-            findings_count: display_results.len(),
-            target_summary: target_summary.clone(),
-            dedup_mode: state.dedup.mode.to_string(),
-            targets_deduplicated: state.dedup.collapsed,
-            baseline: baseline_meta.clone(),
-            incomplete: scan_incomplete,
-        };
         crate::scanning::result::Result::results_to_sarif_with_meta(
             display_results,
             args.include_request,
             args.include_response,
-            Some(&meta),
+            Some(&scan_meta),
         )
     } else if args.format == "toml" {
-        let meta = crate::scanning::result::ScanMetadata {
-            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
-            targets: args.targets.clone(),
-            scan_duration_ms: scan_elapsed.as_millis() as u64,
-            total_requests,
-            findings_count: display_results.len(),
-            target_summary: target_summary.clone(),
-            dedup_mode: state.dedup.mode.to_string(),
-            targets_deduplicated: state.dedup.collapsed,
-            baseline: baseline_meta.clone(),
-            incomplete: scan_incomplete,
-        };
         crate::scanning::result::Result::results_to_toml_with_meta(
             display_results,
             args.include_request,
             args.include_response,
-            Some(&meta),
+            Some(&scan_meta),
         )
     } else if args.format == "plain" {
         let mut output = String::new();
@@ -632,7 +589,8 @@ pub(crate) async fn render_results(
         // so on the same screen, next to the number the operator will quote.
         // The per-target detail already went to stderr as it happened.
         if scan_incomplete {
-            let lost = target_summary
+            let lost = scan_meta
+                .target_summary
                 .iter()
                 .filter(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST)
                 .count();

@@ -375,7 +375,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 args.limit.unwrap_or(0)
             );
         }
-        let loaded = baseline::load(path, &args.baseline_mode);
+        let loaded = baseline::load(path, args.baseline_mode());
         match &loaded.warning {
             Some(w) => eprintln!("Warning: {} — baseline diff disabled", w),
             None => log_info(
