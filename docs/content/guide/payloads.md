@@ -147,8 +147,26 @@ Print a payload family without running a scan:
 dalfox payload event-handlers  # onerror, onmouseover, ...
 dalfox payload useful-tags     # svg, img, script, ...
 dalfox payload uri-scheme      # javascript:, data:
+dalfox payload special-chars   # < > " ' ` ( ) ... and encoded variants
+dalfox payload functions       # confirmable sinks: alert(1), window['alert'](1), ...
+dalfox payload awesome-alert   # PoC alerts: alert(document.domain), alert(document.cookie)
+dalfox payload dom-clobbering  # DOM clobbering vectors
+dalfox payload mxss            # mutation-XSS / sanitizer-bypass payloads
+dalfox payload blind           # blind-XSS skeletons ({} = your callback URL)
 dalfox payload portswigger     # fetch + print remote list
 ```
+
+Every selector prints one entry per line, so it composes with the usual shell tools:
+
+```bash
+dalfox payload functions | grep -i prompt
+dalfox payload special-chars | wc -l
+```
+
+The `special-chars` group is handy for manual reflection testing — inject each byte on
+its own to see which characters survive verbatim, which come back HTML/URL-encoded, and
+which are stripped. `functions` and `awesome-alert` are curated to *visibly* fire (and to
+render the host/origin), so a single screenshot proves impact.
 
 ## Customising the "alert"
 

