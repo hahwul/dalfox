@@ -301,6 +301,33 @@ async fn test_run_job_reports_a_session_that_died_mid_scan() {
     );
 }
 
+// The other baseline path: `skip_ast_analysis` leaves no preflight response to
+// fingerprint, so the scan pays for one dedicated capture request instead.
+#[tokio::test]
+async fn test_run_job_detects_session_loss_without_the_ast_preflight() {
+    let (base, server) = spawn_expiring_target(3).await;
+    let mut args = default_scan_args(&format!("{}/?a=1", base));
+    args.timeout = 5;
+    args.cookies = vec!["sid=deadbeef".to_string()];
+    args.skip_mining = true;
+    args.skip_ast_analysis = true;
+
+    let (status, error) = run_mcp_job("mcp-session-lost-no-ast", args).await;
+    server.abort();
+
+    assert_eq!(
+        status,
+        JobStatus::Error,
+        "the dedicated-capture path must detect loss too: {error:?}"
+    );
+    assert!(
+        error
+            .as_deref()
+            .is_some_and(|m| m.starts_with(crate::cmd::error_codes::SESSION_LOST)),
+        "{error:?}"
+    );
+}
+
 // The control: same credentials against a target that never expires. Monitoring
 // must not turn a healthy authenticated scan into an error.
 #[tokio::test]

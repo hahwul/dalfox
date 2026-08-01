@@ -1216,6 +1216,58 @@ async fn test_run_scan_job_reports_a_session_that_died_mid_scan() {
     );
 }
 
+// The other baseline path. With `skip_ast_analysis` there is no preflight
+// response to derive a fingerprint from, so the job pays for one dedicated
+// capture request instead — a branch nothing else exercises, and
+// `skip_ast_analysis` is an ordinary scan option.
+#[tokio::test]
+async fn test_run_scan_job_detects_session_loss_without_the_ast_preflight() {
+    let addr = start_expiring_target_server(3).await;
+    let state = make_state(None, None, false, false, "cb");
+    let id = "session-lost-no-ast".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+    let opts = ScanOptions {
+        skip_mining: Some(true),
+        skip_ast_analysis: Some(true),
+        worker: Some(4),
+        encoders: Some(vec!["none".to_string()]),
+        cookie: Some("sid=deadbeef".to_string()),
+        ..ScanOptions::default()
+    };
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/?a=1", addr),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(run.is_ok(), "scan should finish in time");
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job");
+    assert_eq!(
+        job.status,
+        JobStatus::Error,
+        "the dedicated-capture path must detect loss too: {:?}",
+        job.error_message
+    );
+    assert!(
+        job.error_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with(crate::cmd::error_codes::SESSION_LOST)),
+        "{:?}",
+        job.error_message
+    );
+}
+
 // The control: same credentials, a target that never expires. Monitoring must
 // not turn a healthy authenticated scan into an error.
 #[tokio::test]
