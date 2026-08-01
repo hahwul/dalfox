@@ -210,6 +210,16 @@ can detect a *change*, so stale credentials would otherwise produce a silent,
 completely clean run. The target is still scanned; the flag and exit code are
 what make the result honest.
 
+"Already looks unauthenticated" means the sign-in page itself — a `401`, an
+inline password field, or a redirect onto `/login`, `/signin`, `/users/sign_in`.
+A redirect onto a merely auth-*shaped* path is not enough: plenty of apps serve
+their authenticated home from `/auth/home` or `/sso/dashboard`, and calling that
+a dead session would fail a scan whose session was fine. Dalfox prints a
+`SESSION?` advisory for that case instead — visible, but with no `SESSION_LOST`
+entry, no `meta.incomplete`, and no effect on the exit code. If your app is one
+of those and you want the check to be exact anyway, `--session-check` settles
+it.
+
 Monitoring is off — and costs nothing — when no credentials are supplied and
 neither `--session-check` flag is set. Logging in is out of scope: this is
 detection only.

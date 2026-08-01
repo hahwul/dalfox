@@ -82,6 +82,20 @@ async fn spawn_app(healthy_hits: usize) -> (String, tokio::task::JoinHandle<()>)
             }),
         )
         .route("/auth/home", get(|| async { (html_headers(), SIGNED_IN) }))
+        // The same shape, but redirecting onto the sign-in page itself — a
+        // real logged-out response, which must stay a `SESSION_LOST`.
+        .route(
+            "/redirect-login",
+            get(|| async {
+                (
+                    StatusCode::FOUND,
+                    [("location", "/login")],
+                    html_headers(),
+                    "",
+                )
+            }),
+        )
+        .route("/login", get(|| async { (html_headers(), LOGIN_MARKUP) }))
         // A large authenticated shell whose login markup sits past the
         // preflight Range budget (8 KiB), served by an origin that honors
         // Range — so the baseline sees a prefix and the probe sees the lot.
@@ -411,6 +425,57 @@ async fn a_followed_redirect_onto_a_login_shaped_path_is_not_a_logout() {
     );
     assert_eq!(meta["incomplete"], false);
     assert_eq!(outcome, ScanOutcome::Clean);
+}
+
+// Regression, and the reason `baseline_warning` uses `is_login_endpoint_url`:
+// the same app scanned WITHOUT `--follow-redirects` (the default). The baseline
+// is then the 302 itself, and its landing is resolved from the `Location`
+// header — `/auth/home`. Reading the `auth` segment as a login wall reported
+// SESSION_LOST, `incomplete: true` and exit 2 on a session that was never lost.
+#[tokio::test]
+async fn an_unfollowed_redirect_onto_an_auth_shaped_path_is_not_a_logout() {
+    let (base, server) = spawn_app(0).await;
+    let out = unique_temp_path("session-unfollowed-redirect");
+    let args = lean_args(&format!("{}/redirect-home?q=1", base), &out);
+    assert!(!args.follow_redirects, "the default, and the point");
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(
+        meta["target_summary"][0]["status"], "clean",
+        "a 302 onto /auth/home is an authenticated landing page, not a logout: {}",
+        meta["target_summary"][0]
+    );
+    assert_eq!(meta["incomplete"], false);
+    assert_eq!(outcome, ScanOutcome::Clean, "must not exit 2");
+}
+
+// The other half of the same rule: narrowing the token list must not cost the
+// detection it exists for. A 302 onto the sign-in page itself — no
+// `--follow-redirects` either — is still an unusable baseline.
+#[tokio::test]
+async fn an_unfollowed_redirect_onto_the_login_page_is_still_a_logout() {
+    let (base, server) = spawn_app(0).await;
+    let out = unique_temp_path("session-unfollowed-login-redirect");
+    let args = lean_args(&format!("{}/redirect-login?q=1", base), &out);
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(
+        meta["target_summary"][0]["error_code"], "SESSION_LOST",
+        "{}",
+        meta["target_summary"][0]
+    );
+    assert_eq!(meta["incomplete"], true);
+    assert_eq!(outcome, ScanOutcome::Error, "an empty run must still exit 2");
 }
 
 // Regression: preflight reads the body under `Range: bytes=0-8191` while a

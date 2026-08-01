@@ -52,6 +52,13 @@ async fn record_session_baseline(
             .lock()
             .await
             .insert(target.url.to_string(), reason);
+    } else if let Some(note) = super::session::baseline_advisory(&baseline)
+        && !args.silence
+    {
+        // Print-only: the baseline is ambiguous, not condemned. See
+        // `session::baseline_advisory` for why this one does not become a
+        // `SESSION_LOST` entry.
+        super::session::report_baseline_advisory(target.url.as_str(), &note);
     }
     session_baselines
         .lock()
