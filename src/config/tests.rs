@@ -731,6 +731,46 @@ fn test_config_dedup_urls_applies_when_cli_left_it_unset() {
     assert_eq!(args.dedup_urls_mode(), "exact");
 }
 
+// Same precedence rule as `--dedup-urls`, and for the same reason: these two
+// flags carry a *safe* default, so an operator re-asserting that default on the
+// command line is exactly the case that must not lose to a config file. With
+// the old "field equals the default value" test, `--on-session-loss abort`
+// against a config-file `continue` silently kept `continue` — i.e. the operator
+// could not turn the abort-on-loss guard back on, and an entirely logged-out
+// run would still exit 0.
+#[test]
+fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
+    let cfg = Config {
+        scan: Some(ScanConfig {
+            on_session_loss: Some("continue".to_string()),
+            baseline_mode: Some("annotate".to_string()),
+            ..Default::default()
+        }),
+    };
+
+    // CLI untouched (`None`): config supplies both.
+    let mut args = default_scan_args();
+    cfg.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.on_session_loss_mode(), "continue");
+    assert_eq!(args.baseline_mode(), "annotate");
+
+    // CLI explicitly re-asserts the built-in defaults: config must not win.
+    let mut args = default_scan_args();
+    args.on_session_loss_arg = Some("abort".to_string());
+    args.baseline_mode_arg = Some("filter".to_string());
+    cfg.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.on_session_loss_mode(), "abort");
+    assert_eq!(args.baseline_mode(), "filter");
+
+    // The conservative overlay follows the same rule.
+    let mut args = default_scan_args();
+    args.on_session_loss_arg = Some("abort".to_string());
+    args.baseline_mode_arg = Some("filter".to_string());
+    cfg.apply_to_scan_args_conservative(&mut args);
+    assert_eq!(args.on_session_loss_mode(), "abort");
+    assert_eq!(args.baseline_mode(), "filter");
+}
+
 #[test]
 fn test_normalize_and_validate_rejects_invalid_list_values() {
     // A single bad element drops the whole list back to the default.

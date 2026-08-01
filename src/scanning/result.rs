@@ -560,7 +560,15 @@ impl Result {
         obj
     }
 
-    fn make_scan_meta_value(meta: &ScanMetadata) -> serde_json::Value {
+    /// The scan-meta envelope as JSON, shared by every format that emits one.
+    ///
+    /// `pub(crate)` so the CLI's `json` / `jsonl` renderers go through it too.
+    /// They used to inline their own `json!` literal, which meant a new meta
+    /// field had to be added in five places (here plus two inline literals plus
+    /// the two `ScanMetadata` construction sites) and silently appeared in only
+    /// some formats when it wasn't. `incomplete` and `baseline` — both added on
+    /// the same day — each had to touch all of them.
+    pub(crate) fn make_scan_meta_value(meta: &ScanMetadata) -> serde_json::Value {
         let mut value = serde_json::json!({
             "dalfox_version": &meta.dalfox_version,
             "targets": &meta.targets,

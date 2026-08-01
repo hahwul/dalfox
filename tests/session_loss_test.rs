@@ -287,7 +287,7 @@ async fn on_session_loss_continue_reports_but_does_not_fail_the_run() {
     let out = unique_temp_path("session-continue");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
     args.session_check_url = Some(format!("{}/expire", base));
-    args.on_session_loss = "continue".to_string();
+    args.on_session_loss_arg = Some("continue".to_string());
 
     let outcome = run_scan(&args).await;
     server.abort();

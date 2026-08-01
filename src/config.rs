@@ -203,7 +203,7 @@ impl Config {
                 args.baseline = Some(v.clone());
             }
             if let Some(v) = &scan.baseline_mode {
-                args.baseline_mode = v.clone();
+                args.baseline_mode_arg = Some(v.clone());
             }
             if let Some(v) = scan.no_color {
                 args.no_color = v;
@@ -238,7 +238,7 @@ impl Config {
                 args.session_check_url = Some(v.clone());
             }
             if let Some(v) = &scan.on_session_loss {
-                args.on_session_loss = v.clone();
+                args.on_session_loss_arg = Some(v.clone());
             }
             // SCOPE
             if let Some(v) = &scan.include_url {
@@ -455,9 +455,9 @@ impl Config {
                 args.baseline = Some(v.clone());
             }
             if let Some(v) = &scan.baseline_mode
-                && args.baseline_mode == "filter"
+                && args.baseline_mode_arg.is_none()
             {
-                args.baseline_mode = v.clone();
+                args.baseline_mode_arg = Some(v.clone());
             }
             // TARGETS
             if let Some(v) = &scan.data
@@ -487,9 +487,9 @@ impl Config {
                 args.session_check_url = Some(v.clone());
             }
             if let Some(v) = &scan.on_session_loss
-                && args.on_session_loss == "abort"
+                && args.on_session_loss_arg.is_none()
             {
-                args.on_session_loss = v.clone();
+                args.on_session_loss_arg = Some(v.clone());
             }
             // SCOPE
             if let Some(v) = &scan.include_url
@@ -675,9 +675,9 @@ impl Config {
                 args.baseline = Some(v.clone());
             }
             if let Some(v) = &scan.baseline_mode
-                && args.baseline_mode == "filter"
+                && args.baseline_mode_arg.is_none()
             {
-                args.baseline_mode = v.clone();
+                args.baseline_mode_arg = Some(v.clone());
             }
             if let Some(v) = scan.no_color
                 && !args.no_color
@@ -746,9 +746,9 @@ impl Config {
                 args.session_check_url = Some(v.clone());
             }
             if let Some(v) = &scan.on_session_loss
-                && args.on_session_loss == "abort"
+                && args.on_session_loss_arg.is_none()
             {
-                args.on_session_loss = v.clone();
+                args.on_session_loss_arg = Some(v.clone());
             }
 
             // SCOPE (if_default)
