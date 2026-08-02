@@ -113,6 +113,23 @@ fn test_is_htmlish_content_type_deny_list() {
 }
 
 #[test]
+fn test_is_javascript_content_type() {
+    // Executable-JavaScript bodies: run as script, never HTML-parsed.
+    assert!(is_javascript_content_type("application/javascript"));
+    assert!(is_javascript_content_type("text/javascript; charset=utf-8"));
+    assert!(is_javascript_content_type("application/ecmascript"));
+    assert!(is_javascript_content_type("text/ecmascript"));
+    assert!(is_javascript_content_type("application/x-javascript"));
+    // Not JS: HTML, structured data, and the sniffable grey-zone types that
+    // browsers CAN render as HTML — these must stay eligible for HTML evidence.
+    assert!(!is_javascript_content_type("text/html"));
+    assert!(!is_javascript_content_type("application/json"));
+    assert!(!is_javascript_content_type("text/plain"));
+    assert!(!is_javascript_content_type("image/svg+xml"));
+    assert!(!is_javascript_content_type(""));
+}
+
+#[test]
 fn test_is_xss_scannable_content_type_allow_list() {
     assert!(is_xss_scannable_content_type("text/html"));
     assert!(is_xss_scannable_content_type("application/json"));

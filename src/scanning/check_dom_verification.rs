@@ -631,6 +631,25 @@ impl DomEvidenceKind {
             DomEvidenceKind::InlineHandlerBreakout => "inline handler JS breakout",
         }
     }
+
+    /// True when this evidence is derived from HTML-parsing the response body
+    /// (a DOM marker, a `javascript:` URL in an attribute, an injected element
+    /// carrying a sink handler, or a breakout of an existing `on*` handler).
+    ///
+    /// Such evidence only confirms exploitability when a browser actually parses
+    /// the body as markup. A response served as executable JavaScript
+    /// (`application/javascript`, JSONP) is run as script and never HTML-parsed,
+    /// so an HTML tag reflected into it is inert — only [`Self::JsContext`]
+    /// evidence (the payload runs as JavaScript) confirms XSS there.
+    pub(crate) fn requires_html_rendering(&self) -> bool {
+        match self {
+            DomEvidenceKind::Marker
+            | DomEvidenceKind::ExecutableUrl
+            | DomEvidenceKind::HtmlStructural
+            | DomEvidenceKind::InlineHandlerBreakout => true,
+            DomEvidenceKind::JsContext => false,
+        }
+    }
 }
 
 /// Returns the evidence kind that confirms the payload is exploitable, or
@@ -1055,15 +1074,31 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
         };
     }
 
+    // A response served as executable JavaScript (JSONP) is run as script and
+    // never HTML-parsed, so HTML-parse-derived evidence (a DOM marker, a
+    // `javascript:` attribute, an injected element/handler) found inside it is
+    // inert. Only JS-context evidence — the payload runs as JavaScript, the
+    // genuine JSONP-callback case — confirms XSS there. `text/plain` and empty
+    // content-types stay eligible for HTML-parse evidence (browsers sniff them).
+    let js_body_inert_to_markup = crate::utils::is_javascript_content_type(
+        headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(""),
+    );
+
     // Both HTML and non-HTML (JSONP, JSON with HTML) content types are accepted
-    // as long as there is reflection + marker/executable-URL evidence in the
-    // response. `reflected` is computed independently of `has_dom_evidence` so
-    // an inert echo (payload present, but not executable) is still reported as
-    // reflected for the DOM-phase early-exit signal.
+    // as long as there is reflection + qualifying DOM evidence in the response.
+    // `reflected` is computed independently of the evidence check so an inert
+    // echo (payload present, but not executable) is still reported as reflected
+    // for the DOM-phase early-exit signal.
     if let Ok(text) = crate::utils::http::read_body(resp).await {
         let reflected =
             crate::scanning::check_reflection::classify_reflection(&text, payload).is_some();
-        if reflected && has_dom_evidence(payload, &text) {
+        let verified = reflected
+            && classify_dom_evidence(payload, &text)
+                .is_some_and(|kind| !(js_body_inert_to_markup && kind.requires_html_rendering()));
+        if verified {
             return DomVerifyOutcome {
                 verified: true,
                 response_text: Some(text),

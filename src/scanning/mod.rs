@@ -398,6 +398,23 @@ fn get_js_breakout_payloads() -> Vec<String> {
     payloads
 }
 
+/// JSONP-callback payloads: reflected as the *callable identifier* of a
+/// `application/javascript` (JSONP) response — `callback=…` echoed into
+/// `…({"data":1})`. Each is executable JavaScript that calls a visible sink and
+/// comments-out / neutralises the trailing `({…})`, so `has_js_context_evidence`
+/// confirms a real `CallExpression` covered by the payload (the genuine JSONP
+/// XSS the `content_type_is_inert_data` carve-out keeps `application/javascript`
+/// scannable for). On an HTML body these parse-fail as whole-document
+/// JavaScript, so they add no false positives — only the DOM phase's
+/// content-type-aware JS-context check upgrades them to V.
+pub(crate) fn get_jsonp_callback_payloads() -> Vec<String> {
+    vec![
+        "alert(document.domain)//".to_string(),
+        ";alert(1)//".to_string(),
+        "-alert(1)-".to_string(),
+    ]
+}
+
 /// Round-robin interleave several payload families into one list so that any
 /// prefix samples *every* family proportionally (issue #1156). Used for the
 /// unknown-context DOM catalog so the recall-preserving DOM-phase early exit
@@ -444,6 +461,28 @@ pub(crate) fn effective_payload_cap(max_payloads: usize, deep_scan: bool) -> usi
 }
 
 pub(crate) fn get_dom_payloads(
+    param: &Param,
+    args: &ScanArgs,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut payloads = get_dom_payloads_for_context(param, args)?;
+
+    // Prepend JSONP-callback verifiers (raw, un-encoded) so a
+    // `application/javascript` endpoint that reflects the callable identifier is
+    // DOM-verified via JS-context evidence — the genuine JSONP XSS — instead of
+    // the false-positive HTML-marker echo the content-type gate now suppresses.
+    // Placed first so they land inside the DOM phase's inert-echo early-exit
+    // window; on an HTML body they parse-fail as whole-document JS and add no
+    // findings. Skipped only when the user restricts to custom payloads.
+    if !args.only_custom_payload {
+        let jsonp = get_jsonp_callback_payloads();
+        if !jsonp.is_empty() {
+            payloads.splice(0..0, jsonp);
+        }
+    }
+    Ok(payloads)
+}
+
+fn get_dom_payloads_for_context(
     param: &Param,
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
@@ -1936,6 +1975,11 @@ impl ScanWorkerCtx {
             // per-payload hot loop.
             let renderable_text: Option<&str> =
                 reflection_body.as_ref().and_then(|b| b.renderable_text());
+            // A body served as executable JavaScript (JSONP) is run as script,
+            // never HTML-parsed, so HTML-parse-derived DOM evidence found in it
+            // is inert — an `<svg onload=…>` echo is a JS syntax error, not a
+            // rendered element. Only JS-context evidence upgrades R→V there.
+            let body_is_javascript = reflection_body.as_ref().is_some_and(|b| b.js_content_type);
 
             // AST-based DOM XSS analysis (enabled by default unless skipped)
             if !self.args.skip_ast_analysis
@@ -1964,6 +2008,43 @@ impl ScanWorkerCtx {
                 opb.inc(1);
             }
             if let Some(kind) = reflected_kind {
+                // Static V upgrade: reuse the reflection response body to look
+                // for browser-executable DOM evidence (marker, executable URL in
+                // a dangerous attribute, HTML element with a sink handler,
+                // JS-context sink call). Computed *before* the reflection lock so
+                // an inert JS-body echo can be handled without emitting a bogus
+                // finding.
+                //
+                // On a body served as executable JavaScript (JSONP), drop
+                // HTML-parse-derived evidence: the browser runs the body as
+                // script and never HTML-parses it, so a `<svg onload=…>` echo is
+                // a JS syntax error, not a rendered element. Only JS-context
+                // evidence (the payload runs as JavaScript) confirms XSS there;
+                // the dedicated DOM phase supplies JSONP-callable payloads that
+                // can prove that genuine V.
+                let dom_evidence_kind = renderable_text
+                    .and_then(|body| {
+                        crate::scanning::check_dom_verification::classify_dom_evidence(
+                            &reflection_payload,
+                            body,
+                        )
+                    })
+                    .filter(|kind| !(body_is_javascript && kind.requires_html_rendering()));
+
+                // An inert HTML echo into a JS body is not a finding. Lock the
+                // param's reflection slot (so the reflection phase stops here
+                // instead of hammering an endpoint that echoes every payload)
+                // but emit nothing, and leave `found.dom` unset so the DOM phase
+                // still runs — a JSONP-callable payload there can prove V.
+                if body_is_javascript && dom_evidence_kind.is_none() {
+                    if !self.args.deep_scan {
+                        let mut found = self.found_params.write().await;
+                        found.reflection.insert(param.name.clone());
+                        state.reflection_found_locally = true;
+                    }
+                    continue;
+                }
+
                 let should_add = if self.args.deep_scan {
                     true
                 } else {
@@ -2018,12 +2099,8 @@ impl ScanWorkerCtx {
                     // when angles are reported "invalid" at one of the
                     // reflection sites, and the prior `has_js_context_evidence`
                     // check only covered the `<script>`-block case.
-                    let dom_evidence_kind = renderable_text.and_then(|body| {
-                        crate::scanning::check_dom_verification::classify_dom_evidence(
-                            &reflection_payload,
-                            body,
-                        )
-                    });
+                    // (`dom_evidence_kind` is computed above, before the lock,
+                    // so a JS-body echo can be filtered without emitting an R.)
 
                     // Both arms come from the reflection phase, so the tier-derived
                     // default (`dom-verification` for V) would misattribute the

@@ -236,6 +236,31 @@ pub fn is_htmlish_content_type(ct: &str) -> bool {
     )
 }
 
+/// True when a response Content-Type declares an executable-JavaScript body
+/// (`application/javascript`, `text/javascript`, ECMAScript aliases). A browser
+/// runs these as script — it never parses the body as an HTML document — so an
+/// HTML tag reflected into such a response is inert as markup: `<svg onload=…>`
+/// echoed into a JS body is a syntax error, not a rendered element. Only a
+/// payload that executes *as JavaScript* (e.g. a JSONP callback name) is
+/// exploitable there.
+///
+/// Deliberately excludes `text/plain` and empty/missing types, which browsers
+/// content-sniff into HTML when `X-Content-Type-Options: nosniff` is absent.
+#[inline]
+pub fn is_javascript_content_type(ct: &str) -> bool {
+    let Some(primary) = content_type_primary(ct) else {
+        return false;
+    };
+    matches!(
+        primary.as_str(),
+        "application/javascript"
+            | "text/javascript"
+            | "application/ecmascript"
+            | "text/ecmascript"
+            | "application/x-javascript"
+    )
+}
+
 /// Allow-list check for content types that are still worth scanning for XSS,
 /// even when they are not directly HTML documents.
 ///
