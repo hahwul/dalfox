@@ -14,7 +14,7 @@ use axum::Router;
 use axum::extract::Query;
 use axum::http::{HeaderMap, HeaderValue};
 use axum::routing::get;
-use dalfox::cmd::scan::{ScanArgs, run_scan};
+use dalfox::cmd::scan::{ScanArgs, ScanOutcome, run_scan};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -308,6 +308,72 @@ async fn a_dry_run_does_not_create_a_missing_state_file() {
     assert!(!state.exists(), "a preview creates nothing on disk");
 
     let _ = std::fs::remove_file(&out);
+}
+
+// An unusable `--state-file` fails the run *before* any traffic goes out.
+// Discovering after a two-hour scan that nothing was recorded is the failure
+// this feature exists to prevent, so it cannot be a warning.
+#[tokio::test]
+async fn an_unusable_state_file_path_fails_before_any_request() {
+    let (base, hits, server) = spawn_app().await;
+    // A directory can never be opened as a state file.
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("dalfox-state-dir-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    let out = unique_temp_path("resume-unusable", "json");
+    let args = lean_args(&[format!("{}/a?q=1", base)], &out, &dir);
+    let outcome = run_scan(&args).await;
+    server.abort();
+
+    assert_eq!(
+        outcome,
+        ScanOutcome::Error,
+        "an unusable state file must fail the run, not degrade it silently"
+    );
+    assert_eq!(
+        hits.load(Ordering::Relaxed),
+        0,
+        "the failure has to land before the first request, not after the scan"
+    );
+
+    let _ = std::fs::remove_dir(&dir);
+    let _ = std::fs::remove_file(&out);
+}
+
+// `--only-discovery` applies the resume filter, so its envelope has to disclose
+// the skip the same way the scan and dry-run envelopes do — otherwise a
+// consumer cannot tell a resumed partial enumeration from a complete one.
+#[tokio::test]
+async fn only_discovery_discloses_the_resume_skip() {
+    let (base, _hits, server) = spawn_app().await;
+    let state = unique_temp_path("resume-discovery", "jsonl");
+    let targets = vec![format!("{}/a?q=1", base), format!("{}/b?q=1", base)];
+
+    let out = unique_temp_path("resume-discovery-out", "json");
+    run_scan(&lean_args(&targets, &out, &state)).await;
+
+    // Second run enumerates only what is left, and says so on stdout.
+    let out2 = unique_temp_path("resume-discovery-out2", "json");
+    let mut discovery = lean_args(&targets, &out2, &state);
+    discovery.only_discovery = true;
+    discovery.skip_discovery = false;
+    discovery.output = None; // only-discovery renders to stdout
+    let outcome = run_scan(&discovery).await;
+    server.abort();
+
+    assert_eq!(outcome, ScanOutcome::Clean);
+    // The state file must be untouched by the preview: two records, no more.
+    let records = outcomes(&state);
+    assert_eq!(
+        records.len(),
+        2,
+        "an only-discovery run records nothing: {records:?}"
+    );
+
+    let _ = std::fs::remove_file(&state);
+    let _ = std::fs::remove_file(&out);
+    let _ = std::fs::remove_file(&out2);
 }
 
 // Without the flag nothing changes: no file is written, and the second run
