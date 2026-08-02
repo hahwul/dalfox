@@ -854,6 +854,8 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         spinner_allowed: false,
         no_color: true,
         dedup: Default::default(),
+        state_file: None,
+        resumed_skipped: 0,
     }
 }
 
@@ -1147,7 +1149,7 @@ fn test_render_only_discovery_plain() {
     );
     let mut args = default_scan_args();
     args.format = "plain".to_string();
-    let outcome = render_only_discovery(&args, &host_group(vec![target]));
+    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
@@ -1159,7 +1161,7 @@ fn test_render_only_discovery_json() {
     );
     let mut args = default_scan_args();
     args.format = "json".to_string();
-    let outcome = render_only_discovery(&args, &host_group(vec![target]));
+    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
@@ -1171,7 +1173,7 @@ fn test_render_only_discovery_jsonl() {
     );
     let mut args = default_scan_args();
     args.format = "jsonl".to_string();
-    let outcome = render_only_discovery(&args, &host_group(vec![target]));
+    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 

@@ -129,6 +129,14 @@ pub(crate) async fn render_dry_run(
             "dedup_mode": state.dedup.mode,
             "targets_deduplicated": state.dedup.collapsed,
         });
+        // The resume filter has already been applied to this plan, so the
+        // counts above describe what is *left* to scan, not the input list.
+        if let Some(sf) = &state.state_file {
+            meta["resumed"] = serde_json::json!({
+                "state_file": sf.path(),
+                "targets_skipped_completed": state.resumed_skipped,
+            });
+        }
         if !warnings.is_empty() {
             meta["warnings"] = serde_json::json!(warnings);
         }
@@ -154,6 +162,12 @@ pub(crate) async fn render_dry_run(
             println!(
                 "  Targets (deduped):   {} ({} mode)",
                 state.dedup.collapsed, state.dedup.mode
+            );
+        }
+        if state.resumed_skipped > 0 {
+            println!(
+                "  Targets (resumed):   {} already completed",
+                state.resumed_skipped
             );
         }
         println!("  Params discovered:   {}", total_params);
@@ -189,6 +203,7 @@ pub(crate) async fn render_dry_run(
 pub(crate) fn render_only_discovery(
     args: &ScanArgs,
     host_groups: &std::collections::HashMap<String, Vec<Target>>,
+    state: &ScanState,
 ) -> ScanOutcome {
     // Collect once so we can render both human-readable plain
     // output and the `{meta, params}` envelope shape that matches
@@ -205,14 +220,27 @@ pub(crate) fn render_only_discovery(
             }
         }
     }
+    // Same disclosure rule as the scan and dry-run envelopes: the resume
+    // filter has already removed the completed targets, so a consumer must be
+    // able to tell this partial enumeration from a complete one.
+    let resumed = state.state_file.as_ref().map(|sf| {
+        serde_json::json!({
+            "state_file": sf.path(),
+            "targets_skipped_completed": state.resumed_skipped,
+        })
+    });
     match args.format.as_str() {
         "json" => {
+            let mut meta = serde_json::json!({
+                "dalfox_version": env!("CARGO_PKG_VERSION"),
+                "mode": "only_discovery",
+                "params_discovered": entries.len(),
+            });
+            if let Some(r) = &resumed {
+                meta["resumed"] = r.clone();
+            }
             let envelope = serde_json::json!({
-                "meta": {
-                    "dalfox_version": env!("CARGO_PKG_VERSION"),
-                    "mode": "only_discovery",
-                    "params_discovered": entries.len(),
-                },
+                "meta": meta,
                 "params": entries,
             });
             println!(
@@ -223,13 +251,15 @@ pub(crate) fn render_only_discovery(
         "jsonl" => {
             // Meta line first (consistent with `-f jsonl` for scans),
             // then one param per line.
-            let meta = serde_json::json!({
-                "meta": {
-                    "dalfox_version": env!("CARGO_PKG_VERSION"),
-                    "mode": "only_discovery",
-                    "params_discovered": entries.len(),
-                }
+            let mut inner = serde_json::json!({
+                "dalfox_version": env!("CARGO_PKG_VERSION"),
+                "mode": "only_discovery",
+                "params_discovered": entries.len(),
             });
+            if let Some(r) = &resumed {
+                inner["resumed"] = r.clone();
+            }
+            let meta = serde_json::json!({ "meta": inner });
             println!("{}", serde_json::to_string(&meta).unwrap_or_default());
             for e in &entries {
                 println!("{}", serde_json::to_string(e).unwrap_or_default());
@@ -530,6 +560,12 @@ pub(crate) async fn render_results(
         dedup_mode: state.dedup.mode.to_string(),
         targets_deduplicated: state.dedup.collapsed,
         baseline: baseline_meta,
+        resumed: state.state_file.as_ref().map(|sf| {
+            serde_json::json!({
+                "state_file": sf.path(),
+                "targets_skipped_completed": state.resumed_skipped,
+            })
+        }),
         incomplete: scan_incomplete,
     };
 

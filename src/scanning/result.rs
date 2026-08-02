@@ -449,6 +449,13 @@ pub struct ScanMetadata {
     /// omitted from every rendered envelope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<serde_json::Value>,
+    /// `--state-file` resume summary (path, and how many targets this run
+    /// skipped because a previous run completed them). Present only when
+    /// `--state-file` was used. A consumer that sees `targets` describing a
+    /// 50k-URL list and a report covering 300 of them needs this field to tell
+    /// a resumed run from a scan that mostly found nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumed: Option<serde_json::Value>,
     /// At least one target was not fully tested — today that means its
     /// authenticated session died mid-scan (see `error_codes::SESSION_LOST`).
     /// Hoisted out of `target_summary` so a consumer can answer "are these
@@ -584,6 +591,11 @@ impl Result {
             && let serde_json::Value::Object(ref mut map) = value
         {
             map.insert("baseline".to_string(), baseline.clone());
+        }
+        if let Some(resumed) = &meta.resumed
+            && let serde_json::Value::Object(ref mut map) = value
+        {
+            map.insert("resumed".to_string(), resumed.clone());
         }
         value
     }
@@ -727,6 +739,26 @@ impl Result {
                     )
                 };
                 let _ = writeln!(out, "| **Baseline** | {} |", cell.replace('|', "\\|"));
+            }
+            // Same rule as the dedup row: a report covering a fraction of the
+            // input list because the rest was already done must say so.
+            if let Some(r) = &m.resumed
+                && r.get("targets_skipped_completed")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    > 0
+            {
+                let _ = writeln!(
+                    out,
+                    "| **Resumed** | {} target(s) skipped as already completed (state file: {}) |",
+                    r.get("targets_skipped_completed")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0),
+                    r.get("state_file")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                        .replace('|', "\\|")
+                );
             }
             // Only rendered when true — a "Complete: yes" row on every clean
             // report is noise, but its absence must never be what signals a

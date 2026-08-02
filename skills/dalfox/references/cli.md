@@ -8,6 +8,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 |------|---------|-------|
 | `-i, --input-type` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
 | `--dedup-urls` | `exact` | `exact` (drop identical URL+method), `signature` (also collapse URLs differing only in parameter *values* — keys on method+host+path+param names), `off` (no dedup). Use `signature` for `gau`/`katana` dumps; not value-safe when an `action=`-style value picks the handler. Collapsed count is logged and lands in `meta.dedup_mode` / `meta.targets_deduplicated`. |
+| `--state-file` | — | Resume support for mass scans: records each target's terminal state (`completed` / `cancelled` / `error`) and skips the `completed` ones on a re-run. Only `completed` is skipped — Ctrl-C, `--scan-timeout`, and preflight drops are retried. The file's header holds a hash of the scan-affecting config; a mismatch moves the file to `<path>.bak` and starts over. Skipped count lands in `meta.resumed`. CLI only. |
 | `TARGET` (positional) | — | URL, file path, raw HTTP (`-i raw-http`), or HAR file (`-i har` / auto-detected) |
 
 **`raw-http`** is powerful: you can feed a complete captured request (from Burp "Copy to file" or `curl -v` output) and dalfox will parse method, path, headers, cookies, and body.

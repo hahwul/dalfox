@@ -52,6 +52,9 @@ dalfox scan [TARGETS]... [FLAGS]
 |------|-------|---------|-------------|
 | `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
 | `--dedup-urls` | — | `exact` | Target deduplication: `exact` (drop identical URL+method), `signature` (also collapse URLs differing only in parameter *values*), `off` (scan every input line) |
+| `--state-file` | — | — | Record completed targets to a file and skip them when the scan is re-run, so an interrupted mass scan resumes instead of restarting |
+
+See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-interrupted-scan) for what is skipped and what is retried.
 
 ### Output
 
