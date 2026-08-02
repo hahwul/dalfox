@@ -95,6 +95,47 @@ gau target.app | dalfox scan --dedup-urls signature
 
 모든 줄을 입력 그대로 스캔해야 하는 드문 경우에는 `--dedup-urls off`로 중복 제거를 완전히 끌 수 있습니다. 다만 대상별 리포팅은 URL을 키로 삼으므로, 같은 URL이 여러 번 나와도 `target_summary` 항목은 하나로 합쳐집니다.
 
+## 중단된 스캔 이어하기
+
+Ctrl-C는 스캔을 깔끔하게 멈추고 그때까지 찾은 것도 정상적으로 출력합니다. 하지만 그것만으로는 부분 리포트 하나가 남을 뿐입니다. **어떤 대상까지 끝났는지가 어디에도 기록되지 않으므로**, 5만 URL 목록을 80%에서 멈췄다면 다시 돌릴 때 그 80%를 처음부터 훑습니다. 크래시, 끊어진 SSH 세션, 공용 서버의 OOM도 마찬가지입니다.
+
+`--state-file`은 옵트인입니다(지정하지 않으면 동작은 지금까지와 완전히 동일합니다). 각 대상이 종료 상태에 도달할 때마다 기록해 두고, 다음 실행에서 끝난 것들을 건너뜁니다:
+
+```bash
+dalfox scan --input-type file urls.txt --state-file scan.state
+# ^C
+# [!] Ctrl-C received — stopping in-flight tasks (press again to force exit)
+
+dalfox scan --input-type file urls.txt --state-file scan.state
+# INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan
+```
+
+**건너뛰는 것은 완료된 대상뿐입니다.** 어디까지 검사됐는지 알 수 없는 것은 전부 다시 스캔합니다:
+
+| 기록된 상태 | 언제 | 다음 실행 |
+|------------|------|----------|
+| `completed` | 세션이 살아 있는 상태로 끝까지 스캔됨 | 건너뜀 |
+| `cancelled` | Ctrl-C, `--scan-timeout` 만료, 스캔 도중 세션 끊김 | 재시도 |
+| `error` | 프리플라이트에서 제외됨 — 도달 불가, content-type 불일치, `--max-targets-per-host` 상한 | 재시도 |
+
+대상의 식별자는 URL + 메서드로, `--dedup-urls exact`가 쓰는 키와 같습니다. 그래서 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라, URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
+
+**설정이 바뀌면 처음부터 다시 시작합니다.** 파일 헤더에는 스캔에 영향을 주는 설정의 해시가 들어 있습니다. 해시가 맞지 않으면 기록된 대상들은 이번 실행과 다른 설정에서 검사된 것이므로, Dalfox는 기존 파일을 `scan.state.bak`으로 옮기고 새 파일로 시작한 뒤 전부 다시 스캔합니다:
+
+```
+Warning: scan configuration changed since 'scan.state' was written (recorded a5f8…, now 6447…) — starting fresh (previous state kept at 'scan.state.bak')
+```
+
+덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 만료된 세션 쿠키를 갈아끼우고 인증 스캔을 이어가는 경우가 바로 이 경로를 타는데, 그것 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 제자리에서 파괴하지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
+
+출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--silence`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--cookies` / `--headers` 등이 여기에 해당합니다.
+
+파일은 append-only JSONL입니다. 헤더 한 줄 뒤에 대상당 한 줄이 붙습니다. 강제 종료로 잘릴 수 있는 것은 마지막 줄 하나뿐이고, 그 줄은 읽을 때 건너뛰되 앞의 온전한 기록은 모두 그대로 유효합니다. 지난 실행과 결과가 같은 대상은 다시 기록하지 않으므로, 계속 죽어 있는 호스트 때문에 파일이 실행마다 커지지 않습니다.
+
+`--dry-run`과 `--only-discovery`는 파일을 **읽기 전용**으로 엽니다. 계획에는 이어하기가 반영되지만 공격 페이로드를 보내지도, 무엇을 완료하지도 않으므로 파일을 만들거나 덧붙이거나 옮기지 않습니다 — `--dry-run`으로 `--deep-scan` 비용을 가늠해 보다가 진행 상황을 날릴 일이 없습니다. 이 필터가 적용되는 모든 출력(스캔, dry-run, only-discovery, Markdown)에는 state 파일 경로와 건너뛴 대상 수가 담긴 `resumed` 블록이 들어갑니다. 이어서 돌린 실행의 짧은 리포트를 입력 목록 전체에 대한 커버리지로 오해할 일이 없도록 하기 위해서입니다.
+
+CLI 전용입니다. `dalfox server`와 MCP는 잡 단위로 각자의 수명 주기를 가지며, 이전 프로세스의 작업을 이어받지 않습니다.
+
 ## Raw HTTP 모드
 
 Burp, Caido, ZAP에서 캡처한 요청을 파일로 저장한 뒤 Dalfox에 넘겨줍니다:

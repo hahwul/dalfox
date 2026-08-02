@@ -89,6 +89,10 @@ pub(crate) async fn run_scan_loop(
     let spinner_allowed = state.spinner_allowed;
     let nc = state.no_color;
     let skipped_targets = state.skipped_targets.clone();
+    // `--state-file` handle (None unless resume is on). Written once per
+    // target as it reaches a terminal state, so a kill at any point leaves the
+    // completions so far on disk.
+    let state_file = state.state_file.clone();
 
     // Session-loss detection (issue #1273). `None` — and therefore zero added
     // requests — unless preflight captured at least one authenticated baseline.
@@ -185,6 +189,7 @@ pub(crate) async fn run_scan_loop(
         let cancel_flag_group = cancel_flag.clone();
         let session_monitor_group = session_monitor.clone();
         let skipped_targets_group = skipped_targets.clone();
+        let state_file_group = state_file.clone();
         // Set once any target in this host group loses its session under
         // `--on-session-loss abort`. Scoped to the group because a host group
         // is exactly the set of targets sharing one origin — and therefore one
@@ -289,6 +294,15 @@ pub(crate) async fn run_scan_loop(
                         target.url.to_string(),
                         crate::cmd::error_codes::SESSION_LOST,
                     );
+                    // `cancelled`, not `completed`: this target was never
+                    // tested, so a later run must pick it up again.
+                    if let Some(sf) = &state_file_group {
+                        sf.record(
+                            target.url.as_str(),
+                            &target.method,
+                            super::state_file::TargetOutcome::Cancelled,
+                        );
+                    }
                     drop(permit);
                     continue;
                 }
@@ -304,6 +318,7 @@ pub(crate) async fn run_scan_loop(
                 let session_monitor_target = session_monitor_group.clone();
                 let session_lost_target = session_lost_group.clone();
                 let skipped_targets_target = skipped_targets_group.clone();
+                let state_file_target = state_file_group.clone();
 
                 let multi_pb_active = multi_pb_clone_inner.is_some();
                 let target_handle = tokio::spawn(async move {
@@ -324,6 +339,13 @@ pub(crate) async fn run_scan_loop(
                                 target.url.to_string(),
                                 crate::cmd::error_codes::SESSION_LOST,
                             );
+                            if let Some(sf) = &state_file_target {
+                                sf.record(
+                                    target.url.as_str(),
+                                    &target.method,
+                                    super::state_file::TargetOutcome::Cancelled,
+                                );
+                            }
                             drop(permit);
                             return;
                         }
@@ -410,16 +432,51 @@ pub(crate) async fn run_scan_loop(
                         // was cut short anyway (Ctrl-C / --scan-timeout), where
                         // "incomplete" is already established and a login-page
                         // probe would just be noise.
+                        let mut session_died = false;
                         if let Some(monitor) = &session_monitor_target
                             && !timed_out
                             && !cancel_flag_inner.load(Ordering::Relaxed)
                             && monitor.check(&target, ProbePhase::PostScan).await.is_some()
-                            && monitor.abort_on_loss
                         {
-                            // Nothing left to abort for *this* target, but the
-                            // rest of the host group is still ahead of us.
-                            session_lost_target.store(true, Ordering::Relaxed);
+                            session_died = true;
+                            if monitor.abort_on_loss {
+                                // Nothing left to abort for *this* target, but
+                                // the rest of the host group is still ahead of
+                                // us.
+                                session_lost_target.store(true, Ordering::Relaxed);
+                            }
                         }
+
+                        // Terminal state for `--state-file`. Only a target that
+                        // ran to the end under a live session is `completed`
+                        // and therefore skippable next run; a Ctrl-C, a
+                        // `--scan-timeout` expiry, or a session that died
+                        // mid-scan all leave coverage unknown, so they are
+                        // recorded `cancelled` and retried.
+                        if let Some(sf) = &state_file_target {
+                            let outcome = if timed_out
+                                || cancel_flag_inner.load(Ordering::Relaxed)
+                                || session_died
+                            {
+                                super::state_file::TargetOutcome::Cancelled
+                            } else {
+                                super::state_file::TargetOutcome::Completed
+                            };
+                            sf.record(target.url.as_str(), &target.method, outcome);
+                        }
+                    } else if let Some(sf) = &state_file_target {
+                        // `--skip-xss-scanning`: the injection stage is off, but
+                        // preflight, discovery, and mining already ran for this
+                        // target and that is the whole run. Recording it means a
+                        // resumed discovery-only campaign makes progress instead
+                        // of redoing every target while looking resumable. Safe
+                        // because `skip_xss_scanning` is part of the config hash:
+                        // a later run that does scan does not reuse these.
+                        sf.record(
+                            target.url.as_str(),
+                            &target.method,
+                            super::state_file::TargetOutcome::Completed,
+                        );
                     }
                     drop(permit);
                 });

@@ -21,6 +21,7 @@ Dalfox는 다음 순서로 설정 파일을 찾습니다.
 # INPUT
 input_type = "auto"   # auto, url, file, pipe, raw-http, har
 dedup_urls = "exact"  # exact, signature (파라미터 값만 다른 URL 병합), off
+# state_file = "scan.state"  # 완료된 대상을 기록해 재실행 시 건너뜁니다. CLI 전용 — `dalfox server`/MCP는 무시
 
 # OUTPUT
 format = "plain"

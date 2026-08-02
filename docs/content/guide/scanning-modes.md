@@ -95,6 +95,47 @@ When is it safe? When the parameter *name* is what decides where input lands —
 
 `--dedup-urls off` disables deduplication entirely, for the rare case where every line must be scanned as given. Note that per-target reporting is keyed by URL, so repeated lines still share one `target_summary` entry.
 
+## Resuming an interrupted scan
+
+Ctrl-C stops a scan cleanly and still reports what was found, but on its own it buys you a partial report and nothing else: nothing records *which* targets finished, so re-running a 50k-URL list that stopped at 80% redoes the 80%. The same applies to a crash, a dropped SSH session, or an OOM on a shared box.
+
+`--state-file` (opt-in — without it, behavior is exactly as before) records each target as it reaches a terminal state, and skips the finished ones on the next run:
+
+```bash
+dalfox scan --input-type file urls.txt --state-file scan.state
+# ^C
+# [!] Ctrl-C received — stopping in-flight tasks (press again to force exit)
+
+dalfox scan --input-type file urls.txt --state-file scan.state
+# INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan
+```
+
+**Only completed targets are skipped.** Anything whose coverage is unknown is scanned again:
+
+| Recorded outcome | When | Next run |
+|------------------|------|----------|
+| `completed` | The target was scanned to the end with a live session | Skipped |
+| `cancelled` | Ctrl-C, `--scan-timeout` expiry, or a session that died mid-scan | Retried |
+| `error` | Dropped during preflight — unreachable, content-type mismatch, `--max-targets-per-host` cap | Retried |
+
+A target's identity is its URL plus method, the same key `--dedup-urls exact` uses. One state file can therefore back a shell loop of per-URL invocations as easily as a single `--input-type file` run.
+
+**A configuration change starts over.** The file's header carries a hash of the scan-affecting configuration; when it does not match, the recorded targets were tested under settings this run does not use. Dalfox moves the old file to `scan.state.bak`, starts a new one, and scans everything:
+
+```
+Warning: scan configuration changed since 'scan.state' was written (recorded a5f8…, now 6447…) — starting fresh (previous state kept at 'scan.state.bak')
+```
+
+The old file is set aside rather than overwritten, because it is a record of real work: resuming an authenticated campaign with a rotated `--cookies` value lands on this path, and losing 40k completions to it would be worse than the redundant scan. Nothing is ever destroyed in place — a file at that path that is *not* a Dalfox state file (a typo pointing at your target list, say) is refused outright rather than adopted.
+
+Output and pacing flags are deliberately outside that hash — `--format`, `--output`, `--silence`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--workers`, `--max-concurrent-targets`, and the target list itself. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file — including `--deep-scan`, `--encoders`, `--custom-payload`, the mining and discovery toggles, the WAF options, `--limit`, and `--cookies` / `--headers`.
+
+The file is append-only JSONL: one header line, then one line per target. A hard kill can at worst tear the final line, which is skipped on read while every complete record before it still counts. A target whose outcome is unchanged from the last run is not re-recorded, so a permanently unreachable host does not grow the file once per run.
+
+`--dry-run` and `--only-discovery` open the file **read-only**: their plan reflects the resume, but they send no attack payloads and complete nothing, so they never create it, extend it, or set it aside — pricing out `--deep-scan` with a `--dry-run` cannot cost you a campaign. Every envelope that applies the filter (scan, dry-run, only-discovery, Markdown) carries a `resumed` block with the state-file path and how many targets were skipped, so a short report from a resumed run is never mistaken for full coverage of the input list.
+
+CLI only: `dalfox server` and MCP run one scan per job with their own lifecycle, and never resume a previous process's work.
+
 ## Raw HTTP mode
 
 Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalfox:

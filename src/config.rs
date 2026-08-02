@@ -48,6 +48,10 @@ pub struct ScanConfig {
     // INPUT
     pub input_type: Option<String>,
     pub dedup_urls: Option<String>,
+    /// `--state-file`: path of the resume state file. CLI only — the server /
+    /// MCP job model has its own per-job lifecycle and never resumes a
+    /// previous process's scan.
+    pub state_file: Option<String>,
     // OUTPUT
     pub format: Option<String>,
     pub output: Option<String>,
@@ -159,6 +163,11 @@ impl Config {
                 && args.input_type == "auto"
             {
                 args.input_type = v.clone();
+            }
+            if let Some(v) = &scan.state_file
+                && args.state_file.is_none()
+            {
+                args.state_file = Some(v.clone());
             }
             if let Some(v) = &scan.dedup_urls
                 && args.dedup_urls.is_none()
@@ -928,6 +937,7 @@ pub fn default_toml_template() -> String {
 # INPUT
 # input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal), har (HAR / proxy export)
 # dedup_urls = "exact"       # exact (drop identical URL+method), signature (also collapse URLs differing only in param values), off
+# state_file = "scan.state"  # CLI only (not applied by `dalfox server` / MCP); record completed targets and skip them when the scan is re-run
 
 # OUTPUT
 # format = "plain"           # plain, json, jsonl, markdown, sarif, toml

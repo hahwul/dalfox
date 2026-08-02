@@ -285,6 +285,14 @@ pub struct ScanArgs {
     #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(ONLY_POC_VALUES.iter().copied()))]
     pub only_poc: Vec<String>,
 
+    #[clap(help_heading = "INPUT")]
+    /// Record which targets finished to PATH and skip them when the same scan
+    /// is re-run, so an interrupted mass scan resumes instead of restarting.
+    /// Only fully completed targets are skipped; ones cut short by Ctrl-C or
+    /// --scan-timeout are retried. Example: --state-file scan.state
+    #[arg(long, value_name = "PATH")]
+    pub state_file: Option<String>,
+
     #[clap(help_heading = "OUTPUT")]
     /// Diff against a previous dalfox JSON/JSONL report and report only findings new since it. The baseline is an ordinary `--format json --output` report. Example: --baseline baseline.json
     #[arg(long)]
@@ -730,6 +738,7 @@ impl Default for ScanArgs {
             limit: None,
             limit_result_type: "all".to_string(),
             only_poc: vec![],
+            state_file: None,
             baseline: None,
             baseline_mode_arg: None,
             param: vec![],

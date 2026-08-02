@@ -21,6 +21,7 @@ Everything lives under the `[scan]` table and mirrors the CLI flag names (snake-
 # INPUT
 input_type = "auto"   # auto, url, file, pipe, raw-http, har
 dedup_urls = "exact"  # exact, signature (collapse URLs differing only in param values), off
+# state_file = "scan.state"  # record completed targets and skip them on re-run. CLI only — ignored by `dalfox server` / MCP
 
 # OUTPUT
 format = "plain"

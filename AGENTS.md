@@ -121,6 +121,11 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
   - `src/config.rs` (`ScanConfig`, template, precedence mapping)
   - If relevant: `src/cmd/server.rs` `ScanOptions`
   - If relevant: `src/mcp/mod.rs` tool args parsing
+  - Note: `--state-file`'s config hash covers `ScanArgs` as a whole (a denylist
+    over its `Debug` repr, `cmd::scan::state_file::config_hash`), so any new
+    field changes the hash and resets existing state files on upgrade. That is
+    the safe direction — never add a field to the neutralized list unless it
+    genuinely cannot change what a completed target was tested with.
 
 - New payload primitive:
   - `src/payload/xss_javascript.rs` (canonical source)

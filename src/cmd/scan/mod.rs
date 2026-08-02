@@ -40,6 +40,7 @@ mod postprocess;
 mod preflight;
 mod scan_loop;
 pub(crate) mod session;
+mod state_file;
 mod validation;
 
 pub use args::{
@@ -103,6 +104,14 @@ pub(crate) struct ScanState {
     /// scan-meta envelope so a run that dropped targets is never mistaken for
     /// full coverage of the input list.
     pub(crate) dedup: input::DedupStats,
+    /// `--state-file` handle, when resume is on. Written by the scanning loop
+    /// as each target reaches a terminal state, and read at meta-envelope time
+    /// for the resume block.
+    pub(crate) state_file: Option<Arc<state_file::StateFile>>,
+    /// Targets this run skipped because a previous run recorded them
+    /// `completed`. Reported alongside the dedup counts for the same reason:
+    /// a partial re-run must never read as full coverage of the input list.
+    pub(crate) resumed_skipped: usize,
 }
 
 /// Emit a structured error to stderr when format is json/jsonl, otherwise plain eprintln.
@@ -438,10 +447,112 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Resolve targets: input-type detection, file/stdin/raw-HTTP parsing,
     // dedup, scope + out-of-scope filtering, and --cookie-from-raw. Emits the
     // structured error itself on failure and returns Err for us to propagate.
-    let (parsed_targets, dedup) = match input::resolve_targets(args).await {
+    let (mut parsed_targets, dedup) = match input::resolve_targets(args).await {
         Ok(resolved) => (resolved.targets, resolved.dedup),
         Err(outcome) => return outcome,
     };
+
+    // `--state-file`: drop targets a previous run already finished. Opened
+    // before any attack traffic goes out — a path that cannot be written is
+    // reported now rather than after a two-hour scan that recorded nothing.
+    //
+    // The preview modes open it read-only: they filter their plan through the
+    // recorded completions, but they scan nothing, so they must not create the
+    // file or set it aside on a configuration change. Pricing out a different
+    // flag set with `--dry-run` is exactly when an operator would otherwise
+    // lose a campaign's progress to a hash mismatch.
+    let preview_only = args.dry_run || args.only_discovery;
+    let state_file = match args.state_file.as_deref() {
+        Some(path) => {
+            let opened = if preview_only {
+                state_file::StateFile::open_read_only(path, args)
+            } else {
+                state_file::StateFile::open(path, args)
+            };
+            match opened {
+                Ok(sf) => Some(Arc::new(sf)),
+                Err(e) => {
+                    if !args.silence {
+                        emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &e);
+                    }
+                    return ScanOutcome::Error;
+                }
+            }
+        }
+        None => None,
+    };
+    let mut resumed_skipped = 0usize;
+    if let Some(sf) = &state_file {
+        // Both of these go to stderr for every format: a reset silently
+        // discards recorded progress, and unreadable lines are the difference
+        // between "nothing was completed" and "we cannot tell what was".
+        if let Some(reason) = &sf.reset_reason {
+            match (&sf.reset_backup, preview_only) {
+                (Some(backup), _) => eprintln!(
+                    "Warning: {} — starting fresh (previous state kept at '{}')",
+                    reason, backup
+                ),
+                // Read-only: the plan below ignores the recorded completions,
+                // but the file itself is untouched and a real scan would be
+                // the one to set it aside.
+                (None, true) => eprintln!(
+                    "Warning: {} — this preview ignores the recorded state (the file is left untouched)",
+                    reason
+                ),
+                (None, false) => eprintln!("Warning: {} — starting fresh", reason),
+            }
+        }
+        if sf.corrupt_lines > 0 {
+            eprintln!(
+                "Warning: --state-file '{}': {} unreadable line(s) skipped (expected at most one after a hard kill)",
+                sf.path(),
+                sf.corrupt_lines
+            );
+        }
+        let before = parsed_targets.len();
+        parsed_targets.retain(|t| !sf.is_completed(t.url.as_str(), &t.method));
+        resumed_skipped = before - parsed_targets.len();
+        // Report both numbers when they differ: a file holding 5000
+        // completions that matches 3 of this run's targets means the input
+        // list changed, and the operator should hear that from the scanner
+        // rather than infer it from a suspiciously short run.
+        let recorded = sf.completed_count();
+        let unmatched = if recorded > resumed_skipped {
+            format!(
+                " ({} recorded completion(s) are not in this run's input)",
+                recorded - resumed_skipped
+            )
+        } else {
+            String::new()
+        };
+        if resumed_skipped > 0 {
+            log_info(
+                args,
+                &format!(
+                    "resume: {} target(s) already completed per {}, {} left to scan{}",
+                    resumed_skipped,
+                    sf.path(),
+                    parsed_targets.len(),
+                    unmatched
+                ),
+            );
+        } else if recorded > 0 {
+            log_info(
+                args,
+                &format!(
+                    "resume: none of this run's targets match the {} completion(s) recorded in {} — scanning all of them",
+                    recorded,
+                    sf.path()
+                ),
+            );
+        }
+        // Every target already done is a legitimate, successful end state, not
+        // an empty input: the run below renders a normal (zero-finding) report
+        // and exits clean rather than tripping the NO_TARGETS error path.
+        if parsed_targets.is_empty() && resumed_skipped > 0 {
+            log_info(args, "resume: nothing left to scan");
+        }
+    }
 
     let results = Arc::new(Mutex::new(Vec::<Result>::new()));
     let findings_count = Arc::new(AtomicUsize::new(0));
@@ -606,6 +717,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         spinner_allowed,
         no_color: nc,
         dedup,
+        state_file,
+        resumed_skipped,
     };
 
     // Blind XSS: the static `-b/--blind` callback and/or OOB/OAST (interactsh)
@@ -673,9 +786,44 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         }
     }
 
+    // Targets entering preflight, so the ones it drops can be told apart from
+    // the ones that go on to be scanned. Only materialized when `--state-file`
+    // is on — on a 50k-URL list this is two strings per target.
+    let pre_preflight_keys: Vec<(String, String)> = if state.state_file.is_some() {
+        host_groups
+            .values()
+            .flatten()
+            .map(|t| (t.url.to_string(), t.method.clone()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     // Preflight + parameter analysis for every target (bounded concurrency);
     // replaces each host group with the targets that survived preflight.
     analysis::run_preflight_and_analysis(args, &mut host_groups, &state).await;
+
+    // Record the targets preflight dropped (unreachable, content-type
+    // mismatch, per-host cap) as `error`. They are retried on the next run —
+    // the point is that the state file accounts for every target it saw,
+    // rather than leaving a silent gap between the input list and the
+    // completions. Skipped in the preview modes below, which send no attack
+    // traffic and so complete nothing.
+    if let Some(sf) = &state.state_file
+        && !args.dry_run
+        && !args.only_discovery
+    {
+        let survived: std::collections::HashSet<String> = host_groups
+            .values()
+            .flatten()
+            .map(|t| state_file::target_key(t.url.as_str(), &t.method))
+            .collect();
+        for (url, method) in &pre_preflight_keys {
+            if !survived.contains(&state_file::target_key(url, method)) {
+                sf.record(url, method, state_file::TargetOutcome::Error);
+            }
+        }
+    }
 
     // --dry-run: report what would be scanned without sending attack payloads.
     if args.dry_run {
@@ -684,7 +832,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // --only-discovery: print discovered params and exit early.
     if args.only_discovery {
-        return output::render_only_discovery(args, &host_groups);
+        return output::render_only_discovery(args, &host_groups, &state);
     }
 
     // Computed once here so the scan loop and the end-of-scan renderer agree on
