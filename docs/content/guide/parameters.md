@@ -152,7 +152,7 @@ Each leaf is registered as a separate Param using bracket-style display naming. 
 
 For JWTs the original header and signature segments are preserved verbatim. The signature won't match the modified payload, so this only fires on endpoints that don't verify the token. Properly-signed JWTs return no findings. That's expected behaviour, not a miss.
 
-If your target uses a wrapping that Dalfox doesn't auto-detect, you can still force the injection point with `--inject-marker` (see below).
+If your target uses a wrapping that Dalfox doesn't auto-detect, you can still force the injection point with `--inject-marker` (see above).
 
 ## Reflection probe shape
 
@@ -171,7 +171,7 @@ All four are treated as "reflected": discovery records the parameter and the sca
 
 | Result | How it's confirmed |
 |--------|--------------------|
-| **V** (Vulnerable) | Dalfox parses the response DOM and finds direct evidence of execution. The `evidence` field tags the path that proved it: DOM marker (CSS selector hit), executable URL (`javascript:`/`data:` in a dangerous attribute), HTML structural (an injected element with an `on*` handler whose value is a sink call), or JS-context AST (a sink call inside `<script>` that the parsed AST shows is covered by the payload's byte range). |
+| **V** (Vulnerable) | Dalfox parses the response DOM and finds the payload in a position that would execute. This is a static parse of a real response, not browser execution; see [Detection Model](../detection-model/). The `evidence` field tags the path that proved it: DOM marker (CSS selector hit), executable URL (`javascript:`/`data:` in a dangerous attribute), HTML structural (an injected element with an `on*` handler whose value is a sink call), or JS-context AST (a sink call inside `<script>` that the parsed AST shows is covered by the payload's byte range). |
 | **A** (AST-detected) | Static JavaScript analysis traced a user-controlled source to a dangerous sink (e.g., `innerHTML = location.hash`). |
 | **R** (Reflected) | Payload text appeared in the response body, but no DOM evidence yet. Still worth investigating manually. |
 

@@ -5,7 +5,7 @@ weight = 1
 toc = true
 +++
 
-Dalfox는 네 개의 서브커맨드로 구성되어 있습니다. 기본값(대상만 전달했을 때)은 `scan`입니다.
+Dalfox는 네 개의 서브커맨드와 기본 제공 `help`로 구성되어 있습니다. 기본값(대상만 전달했을 때)은 `scan`입니다.
 
 ```
 dalfox [SUBCOMMAND] [TARGET] [FLAGS]
@@ -17,13 +17,13 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 | `server` | REST API 서버를 실행합니다 |
 | `payload` | 내장/원격 페이로드를 나열하거나 가져옵니다 |
 | `mcp` | Model Context Protocol stdio 서버를 실행합니다 |
-| `help` | 임의의 서브커맨드에 대한 도움말을 출력합니다 |
+| `help` | 서브커맨드별 도움말을 출력합니다 |
 
 ## 전역 플래그
 
 | 플래그 | 설명 |
 |------|-------------|
-| `--config <FILE>` | 설정 파일 경로(TOML 또는 JSON). 기본 검색 경로를 덮어씁니다. |
+| `--config <FILE>` | 설정 파일 경로(TOML이나 JSON). 기본 검색 경로를 덮어씁니다. |
 | `--debug` | 디버그 로깅을 활성화합니다. |
 | `-h`, `--help` | 도움말을 출력합니다. |
 | `-V`, `--version` | 버전을 출력합니다. |
@@ -51,7 +51,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
 | `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
-| `--dedup-urls` | — | `exact` | 타깃 중복 제거: `exact`(URL+메서드가 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
+| `--dedup-urls` | — | `exact` | 대상 중복 제거: `exact`(URL+메서드가 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
 
 ### 출력
 
@@ -130,17 +130,17 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--remote-wordlists` | — | — | 원격 소스: `burp`, `assetnote` |
 | `--skip-mining` | — | false | 모든 마이닝을 건너뜁니다 |
 | `--skip-mining-dict` | — | false | 사전 마이닝을 건너뜁니다 |
-| `--skip-mining-dom` | — | false | HTML `id`/`name` 속성에서 파라미터 이름 수확을 건너뜁니다 (DOM-XSS 탐지가 아님 — `--skip-ast-analysis` 참고) |
+| `--skip-mining-dom` | — | false | HTML `id`/`name` 속성에서 파라미터 이름 수집을 건너뜁니다 (DOM-XSS 탐지가 아님 — `--skip-ast-analysis` 참고) |
 
 ### 네트워크
 
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
 | `--timeout` | — | `10` | 요청당 타임아웃(초) (네트워크 한정; 전체 스캔 시간을 제한하지 않음) |
-| `--scan-timeout` | — | `0` | 스캔 단계(프리플라이트 이후)에 대한 대상별 하드 실제 시간 상한(초). 초과 시 해당 대상을 중단합니다. 여러 순차 단계가 부분적으로 멈춘 엔드포인트에 대해 각각 요청당 `--timeout` 비용을 치를 때 유용합니다. `0`은 비활성화합니다. |
+| `--scan-timeout` | — | `0` | 스캔 단계(프리플라이트 이후)의 대상별 실제 경과 시간 하드 상한(초). 초과 시 해당 대상을 중단합니다. 여러 순차 단계가 부분적으로 멈춘 엔드포인트에 대해 각각 요청당 `--timeout` 비용을 치를 때 유용합니다. `0`은 비활성화합니다. |
 | `--delay` | — | `0` | 요청 간 지연(ms), 워커별 |
-| `--rate-limit` | `-r`, `--rl` | `0` | 모든 워커와 대상에 걸쳐 공유되는 **전역** 아웃바운드 요청 속도를 초당 요청 수로 제한합니다 (`0` = 무제한). 하나의 워커만 간격을 두는 `--delay`와 달리, `workers × concurrent targets`에서 발생하는 총 동시 진행 버스트를 제한하여 공유 IP / 엣지 WAF 임계값에 더 친화적입니다. |
-| `--retries` | — | `0` | HTTP 5xx 및 일시적 전송 오류(타임아웃, 연결 재설정) 시 실패한 요청을 이 횟수만큼 재시도합니다 (`0` = 끔). HTTP 429는 항상 재시도됩니다. |
+| `--rate-limit` | `-r`, `--rl` | `0` | 모든 워커와 대상에 걸쳐 공유되는 **전역** 아웃바운드 요청 속도를 초당 요청 수로 제한합니다 (`0` = 무제한). 하나의 워커만 간격을 두는 `--delay`와 달리, `workers × concurrent targets`에서 한꺼번에 나가는 전체 요청량을 제한하므로 공유 IP / 엣지 WAF 임계값에 더 친화적입니다. |
+| `--retries` | — | `0` | HTTP 5xx 및 일시적 전송 오류(타임아웃, 연결 재설정) 시 실패한 요청을 이 횟수만큼 재시도합니다 (`0` = 끔). HTTP 429는 이 값과 무관하게 항상 재시도합니다. |
 | `--retry-delay` | — | `1000` | `--retries` 시도 사이의 지수 백오프 기본 지연(ms) (시도마다 두 배로 증가, 내부적으로 상한 적용). 429에서는 서버의 `Retry-After` 헤더가 우선합니다. |
 | `--proxy` | — | — | 프록시 URL (`http://`, `socks5://`) |
 | `--insecure` | — | `true` | TLS/SSL 인증서 검증을 건너뜁니다 (자체 서명, 만료, 호스트명 불일치 인증서 허용). 스캐너 사용을 위해 기본적으로 켜져 있으며, 인증서 검증을 강제하려면 `--insecure=false`를 전달합니다. |
@@ -163,7 +163,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--remote-payloads` | — | — | `portswigger`, `payloadbox` |
 | `--custom-blind-xss-payload` | — | — | 사용자 지정 블라인드 페이로드 템플릿 파일 |
 | `--blind` | `-b` | — | 블라인드 XSS 콜백 URL |
-| `--blind-oob[=servers]` | — | — | interactsh를 통한 OOB/OAST 블라인드 XSS를 활성화합니다; 선택적으로 쉼표로 구분된 서버 도메인 (기본값: 공용 메시). `=` 형식이 필요합니다: `--blind-oob=oast.fun,oast.me` |
+| `--blind-oob[=servers]` | — | — | interactsh로 OOB/OAST 블라인드 XSS를 활성화합니다; 선택적으로 쉼표로 구분된 서버 도메인 (기본값: 공용 메시). `=` 형식이 필요합니다: `--blind-oob=oast.fun,oast.me` |
 | `--blind-oob-secret` | — | — | 자체 호스팅 interactsh 서버용 인증 토큰 (register/poll/deregister 시 `Authorization`으로 전송) |
 | `--blind-oob-wait` | — | `30` | 모든 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) (`0` = 스캔 종료 후 추가 대기 없음) |
 | `--custom-payload` | — | — | 사용자 지정 페이로드 파일 |
@@ -215,7 +215,7 @@ dalfox server [FLAGS]
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS 메서드 |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS 헤더 |
 | `--rate-limit` | — | `0` | 전역 아웃바운드 요청 속도를 제한합니다 (초당 요청 수, `0` = 무제한) |
-| `--scan-timeout` | — | `0` | 스캔 단계에 대한 대상별 하드 실제 시간 상한(초) |
+| `--scan-timeout` | — | `0` | 스캔 단계의 대상별 실제 경과 시간 하드 상한(초) |
 | `--max-concurrent-scans` | — | `100` | 동시 스캔 수 제한 (`0` = 무제한) |
 | `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 `413` 응답 |
 

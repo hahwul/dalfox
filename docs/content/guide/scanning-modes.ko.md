@@ -7,7 +7,7 @@ toc = true
 
 Dalfox는 여러 형태의 대상을 받아들입니다. 모든 모드는 동일한 탐색, 페이로드, 검증 엔진을 공유하며, URL을 입력하는 방식과 결과가 어디로 가는지만 다릅니다.
 
-내부적으로는 네 개의 서브커맨드가 있습니다: `scan`(스캐너), `server`(장시간 유지되는 REST API), `payload`(페이로드 유틸리티), `mcp`(Model Context Protocol stdio 서버). 아래에서 "URL / File / Pipe / Raw HTTP / HAR / SXSS"로 표시된 것은 모두 `scan` 서브커맨드가 `--input-type`을 통해 처리하는 *입력 형태*이며, 독립적인 서브커맨드가 아닙니다.
+내부적으로는 네 개의 서브커맨드가 있습니다: `scan`(스캐너), `server`(장시간 유지되는 REST API), `payload`(페이로드 유틸리티), `mcp`(Model Context Protocol stdio 서버). 아래에서 "URL / File / Pipe / Raw HTTP / HAR / SXSS"로 표시된 것은 모두 `scan` 서브커맨드가 `--input-type`으로 처리하는 *입력 형태*이지, 독립적인 서브커맨드가 아닙니다.
 
 > 팬아웃 입력 형태(`file`, `pipe`, `raw-http`, `har`)는 `scan` 전용입니다. 각각 하나의 입력을 여러 대상으로 확장합니다. `server`와 `mcp` 인터페이스는 호출당 단일 대상을 다룹니다. 하나의 URL에 명시적인 메서드/헤더/쿠키/본문(HAR 항목 하나가 담는 것과 동일한 충실도)을 더해서 받으므로, 캡처한 세션을 재생하려면 요청마다 한 번씩 호출하면 됩니다.
 
@@ -19,7 +19,7 @@ Dalfox에 URL만 넘겨주세요. 나머지는 알아서 판단합니다.
 dalfox https://target.app/search?q=test
 ```
 
-내부적으로 Dalfox는 `--input-type auto`와 함께 `scan` 서브커맨드를 사용합니다. 인자가 URL인지, 파일 경로인지, `stdin`의 스트림인지 자동으로 감지합니다.
+내부적으로는 `scan` 서브커맨드를 `--input-type auto`로 실행합니다. 인자가 URL인지, 파일 경로인지, `stdin`으로 들어오는 스트림인지는 알아서 판별합니다.
 
 ## URL 모드
 
@@ -71,9 +71,9 @@ cat urls.txt | dalfox scan https://target.app/one
 
 ### 거의 같은 URL 묶기
 
-기본값(`--dedup-urls exact`)에서 Dalfox는 완전히 같은 타깃만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드가 모두 일치해야 합니다. 그런데 `gau` / `katana` / `waybackurls` 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 `?id=1` … `?id=9999`가 인젝션 지점 하나를 9999번 풀스캔하게 됩니다.
+기본값(`--dedup-urls exact`)에서 Dalfox는 완전히 같은 대상만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드가 모두 일치해야 합니다. 그런데 `gau` / `katana` / `waybackurls` 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 `?id=1` … `?id=9999`가 주입 지점 하나를 9999번 풀스캔하게 됩니다.
 
-`--dedup-urls signature`는 이것을 하나로 묶습니다. 키는 메서드, 스킴, 호스트, 포트, 경로, 그리고 *정렬된 파라미터 이름 집합*입니다. 쿼리는 물론 본문(form, JSON, multipart) 파라미터도 같은 자격으로 포함됩니다. 값은 키에서 제외되므로 값만 다른 URL 무리는 타깃 하나로 묶입니다. 무엇을 버렸는지는 로그로 남고, 그 개수는 스캔 메타데이터(`dedup_mode`, `targets_deduplicated`)에도 실리므로 축소된 실행이 목록 전체를 커버한 것처럼 보이지 않습니다.
+`--dedup-urls signature`는 이것을 하나로 묶습니다. 키는 메서드, 스킴, 호스트, 포트, 경로, 그리고 *정렬된 파라미터 이름 집합*입니다. 쿼리는 물론 본문(form, JSON, multipart) 파라미터도 같은 자격으로 포함됩니다. 값은 키에서 제외되므로 값만 다른 URL 무리는 대상 하나로 묶입니다. 무엇을 버렸는지는 로그로 남고, 그 개수는 스캔 메타데이터(`dedup_mode`, `targets_deduplicated`)에도 실리므로 축소된 실행이 목록 전체를 커버한 것처럼 보이지 않습니다.
 
 대표로 남는 것은 목록에서 가장 먼저 나온 URL입니다. 단, 값이 비어 있는 앞쪽 URL보다 모든 파라미터에 값이 채워진 뒤쪽 URL이 우선합니다. 정찰 결과에는 `?id=42`보다 `?id=`가 먼저 오는 경우가 많은데, 값이 빈 URL은 404가 되기 쉬워서 그것이 대표가 되면 무리 전체를 깨끗한 것으로 잘못 보고하게 되기 때문입니다. 스코프 필터(`--include-url`, `--exclude-url`, `--out-of-scope`)는 중복 제거보다 *먼저* 적용되므로, 필터가 항상 먼저 구성원을 걸러낼 기회를 갖습니다.
 
@@ -105,11 +105,11 @@ dalfox scan --input-type raw-http request.txt
 
 이 파일은 표준 raw HTTP 요청(메서드 + 경로 + 헤더 + 빈 줄 + 본문)입니다. Dalfox는 모든 헤더, 쿠키, 본문 파라미터를 보존합니다.
 
-실시간 프록시 워크플로(특히 Caido Active Workflows)에 대해서는 전용 [Caido 연동 가이드](../integrations/caido/)를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 그리고 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.
+실시간 프록시 워크플로, 그중에서도 Caido Active Workflows는 전용 [Caido 연동 가이드](../integrations/caido/)를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.
 
 ## HAR 모드
 
-전체 [HAR](http://www.softwareishard.com/blog/har-12-spec/)(HTTP Archive) 익스포트 — 브라우저 DevTools와 가로채기 프록시(Burp, Caido, ZAP, Charles, mitmproxy)가 생성하는 JSON 캡처 — 를 Dalfox에 넘겨주면, 그 안의 모든 요청을 각각의 URL, 메서드, 헤더, 쿠키, 본문을 보존한 채로 스캔합니다:
+[HAR](http://www.softwareishard.com/blog/har-12-spec/)(HTTP Archive) 익스포트는 브라우저 DevTools와 가로채기 프록시(Burp, Caido, ZAP, Charles, mitmproxy)가 만들어 내는 JSON 캡처입니다. 파일을 통째로 넘겨주면 그 안의 모든 요청을 각각의 URL, 메서드, 헤더, 쿠키, 본문을 보존한 채로 스캔합니다:
 
 ```bash
 # Auto-detected from the file content:
@@ -122,7 +122,7 @@ mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 
 HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 요청은 URL + 메서드로 중복 제거되고 다른 모든 모드와 동일한 스코프 필터를 거칩니다. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
-이는 Go v2.x 라인이 가졌으나 v3 재작성에서 처음에 빠졌던 기능을 복원한 것입니다. CLI 요청 플래그는 그 위에 그대로 적용됩니다. 예를 들어 `-H "Authorization: Bearer …"` 는 모든 항목에 추가되고, `--include-url` / `--out-of-scope` 는 대상 집합을 좁힙니다.
+이는 Go v2.x 라인이 가졌으나 v3 재작성에서 처음에 빠졌던 기능을 복원한 것입니다. CLI 요청 플래그는 그 위에 그대로 적용됩니다. 예를 들어 `-H "Authorization: Bearer …"`는 모든 항목에 추가되고, `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
 
 ## 저장형 XSS 모드 (SXSS)
 
@@ -168,7 +168,7 @@ dalfox scan https://app.example.com/dashboard?q=1 \
   --session-check-url https://app.example.com/api/me
 ```
 
-스캔 대상이 무겁거나, 페이지네이션이 있거나, 그 자체로 공개 페이지라면 `--session-check-url`로 가벼운 인증 엔드포인트를 따로 지정하는 편이 좋습니다. 이 경우 기준 지문도 해당 엔드포인트에서 잡습니다(플래그를 지정했을 때만, 대상당 프리플라이트 요청 1건 추가). 덕분에 `/auth/session`처럼 로그인 형태의 프로브 경로도 스캔 대상이 아니라 자기 자신의 인증된 응답과 비교됩니다.
+스캔 대상이 무겁거나, 페이지네이션이 있거나, 그 자체로 공개 페이지라면 `--session-check-url`로 가벼운 인증 엔드포인트를 따로 지정하세요. 이 경우 기준 지문도 해당 엔드포인트에서 잡습니다(플래그를 지정했을 때만, 대상당 프리플라이트 요청 1건 추가). 덕분에 `/auth/session`처럼 로그인 형태의 프로브 경로도 스캔 대상이 아니라 자기 자신의 인증된 응답과 비교됩니다.
 
 ### 세션이 끊어졌을 때
 
@@ -178,18 +178,18 @@ dalfox scan https://app.example.com/dashboard?q=1 \
 
 - **stderr**에 `SESSION LOST` 한 줄 — 구조화된 stdout은 그대로 파싱 가능
 - 해당 대상은 `incomplete`(또는 `skipped`) 상태에 `error_code: SESSION_LOST`, 그리고 어떤 신호가 감지됐는지 `error_message`에 기록
-- [스캔 메타데이터 봉투](../output/)의 `meta.incomplete: true`
+- [스캔 메타데이터 엔벨로프](../output/#스캔-메타데이터-엔벨로프)의 `meta.incomplete: true`
 - 탐지 결과가 없는 실행에 한해 `abort`에서 종료 코드 `2` — 따라서 로그아웃된 상태에서 `dalfox scan … && echo "no XSS found"`가 그 줄을 출력할 수 없습니다. 탐지 결과가 *있었다면* 여전히 `1`로 종료합니다. 발견된 취약점은 어쨌든 실재하고, 불완전하다는 사실은 `meta.incomplete`가 전달하기 때문입니다. `continue`는 종료 코드를 전혀 바꾸지 않습니다
 
 **프리플라이트** 응답부터 이미 미인증으로 보이거나, `--session-check` 마커가 기준 응답에 애초에 없었던 경우(오타이거나 다른 페이지에 있는 마커)도 표시합니다. 두 경우 모두 단순 로그가 아니라 `SESSION_LOST`로 보고합니다: 그런 기준에서는 이후 어떤 조회도 *변화*를 감지할 수 없으므로, 만료된 자격증명이 조용하고 완벽하게 "깨끗한" 실행을 만들어 내기 때문입니다. 대상 스캔 자체는 그대로 진행되며, 결과를 정직하게 만드는 것은 이 표시와 종료 코드입니다.
 
-"이미 미인증으로 보인다"는 것은 로그인 페이지 그 자체를 뜻합니다 — `401`, 페이지에 직접 렌더링된 비밀번호 입력란, 또는 `/login`, `/signin`, `/users/sign_in`으로의 리다이렉트입니다. 단지 인증*처럼 생긴* 경로로 리다이렉트되는 것만으로는 부족합니다. 인증된 홈을 `/auth/home`이나 `/sso/dashboard`에서 서빙하는 앱이 많고, 그걸 끊어진 세션으로 판정하면 멀쩡한 세션의 스캔을 실패시키게 됩니다. 이 경우 dalfox는 대신 `SESSION?` 참고 메시지를 출력합니다 — 눈에는 보이지만 `SESSION_LOST` 항목도, `meta.incomplete`도, 종료 코드 변화도 없습니다. 여러분의 앱이 여기 해당하는데도 검사를 정확히 하고 싶다면 `--session-check`로 확정하세요.
+"이미 미인증으로 보인다"는 것은 로그인 페이지 그 자체, 즉 `401`이나 페이지에 직접 렌더링된 비밀번호 입력란, `/login`, `/signin`, `/users/sign_in`으로의 리다이렉트를 뜻합니다. 단지 인증*처럼 생긴* 경로로 리다이렉트되는 것만으로는 부족합니다. 인증된 홈을 `/auth/home`이나 `/sso/dashboard`에서 서빙하는 앱이 많고, 그걸 끊어진 세션으로 판정하면 멀쩡한 세션의 스캔을 실패시키게 됩니다. 이 경우 Dalfox는 대신 `SESSION?` 참고 메시지를 출력합니다 — 눈에는 보이지만 `SESSION_LOST` 항목도, `meta.incomplete`도, 종료 코드 변화도 없습니다. 앱이 여기 해당하는데도 검사를 정확히 하고 싶다면 `--session-check`로 확정하세요.
 
 자격증명이 없고 `--session-check` 계열 플래그도 지정하지 않으면 모니터링은 꺼져 있으며 비용도 들지 않습니다. 자동 로그인은 범위 밖입니다. 이 기능은 감지만 담당합니다.
 
 ## 서버 모드
 
-Dalfox를 장시간 유지되는 HTTP 서비스로 실행합니다. REST를 통해 스캔을 제출하고, 결과를 폴링하고, 실행 중인 작업을 취소합니다:
+Dalfox를 장시간 유지되는 HTTP 서비스로 실행합니다. REST로 스캔을 제출하고, 결과를 폴링하고, 실행 중인 작업을 취소합니다:
 
 ```bash
 dalfox server --port 6664 --api-key "$DALFOX_API_KEY"
@@ -224,10 +224,10 @@ dalfox payload uri-scheme        # print javascript:/data: payloads
 | 원하는 작업 | 사용할 모드 |
 |--------------|-----|
 | URL 하나 테스트 | Auto / URL |
-| 크롤러가 만든 목록 스캔 | File 또는 Pipe |
+| 크롤러가 만든 목록 스캔 | File이나 Pipe |
 | 특정 요청 재생 | Raw HTTP |
 | 캡처한 세션 전체 재생(프록시/DevTools 익스포트) | HAR |
 | 다른 페이지에 기록하는 폼 테스트 | SXSS |
 | 대시보드나 CI에서 여러 스캔 실행 | Server |
 | AI 에이전트가 스캔을 구동하게 하기 | MCP |
-| Dalfox가 보낼 페이로드만 확인 | Payload 유틸리티 또는 `--dry-run` |
+| Dalfox가 보낼 페이로드만 확인 | Payload 유틸리티나 `--dry-run` |

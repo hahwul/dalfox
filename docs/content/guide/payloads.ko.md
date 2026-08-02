@@ -5,7 +5,7 @@ weight = 3
 toc = true
 +++
 
-Dalfox는 컨텍스트를 인식하는, 엄선된 페이로드 라이브러리를 함께 제공합니다. 대부분의 경우 이에 대해 신경 쓸 필요가 없습니다. 엔진이 각 주입 컨텍스트에 맞는 페이로드를 선택합니다. 이 페이지에서는 내장된 내용과 이를 확장하는 방법을 다룹니다.
+Dalfox는 컨텍스트를 인식하는 엄선된 페이로드 라이브러리를 내장하고 있습니다. 대부분은 여기에 신경 쓸 일이 없습니다. 엔진이 각 주입 컨텍스트에 맞는 페이로드를 알아서 고릅니다. 이 페이지에서는 내장된 내용과 이를 확장하는 방법을 다룹니다.
 
 ## 페이로드 계열
 
@@ -39,7 +39,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 
 ## CSP 인식 우회 페이로드
 
-프리플라이트(preflight) 단계가 `Content-Security-Policy`(또는 `…-Report-Only`) 헤더 — 혹은 `<meta http-equiv>` 등가물 — 를 발견하면, Dalfox는 이를 파싱하여 스크립트 실행 페이로드를 해당 정책의 실제 약점에 맞게 조정합니다. 페이로드는 진정으로 악용 가능한 지시어(directive)에 대해서만 생성되므로, CSP가 없는(또는 견고하게 설정된) 대상은 추가 요청을 보지 않습니다.
+프리플라이트(preflight) 단계가 `Content-Security-Policy`(또는 `…-Report-Only`) 헤더나 `<meta http-equiv>` 등가물을 발견하면, Dalfox는 이를 파싱하여 스크립트 실행 페이로드를 해당 정책의 실제 약점에 맞게 조정합니다. 페이로드는 실제로 악용 가능한 지시어(directive)에 대해서만 생성되므로, CSP가 없는(또는 견고하게 설정된) 대상은 추가 요청을 보지 않습니다.
 
 | CSP 형태 | Dalfox가 방출하는 것 |
 |-----------|-------------------|
@@ -51,7 +51,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 
 이전 릴리스에서는 파싱만 하고 결코 대응하지 않았던 두 가지 현대적 형태가 이제 활성화되었습니다:
 
-- **`strict-dynamic`.** `strict-dynamic` 하에서는 브라우저가 호스트 허용 목록을 무시하므로, 평범한 `<script src=allowed-host>` 는 더 이상 로드되지 않습니다. Dalfox는 DOM 스크립트 가젯 — 이미 신뢰된 스크립트가 공격자 스크립트를 생성하게 만드는 페이로드 — 으로 전환하고, 정책이 nonce를 고정(pin)하면 `<script nonce=…>` 재사용 페이로드를 방출합니다(nonce가 정적이거나 예측 가능하거나 반사될 때 효과적).
+- **`strict-dynamic`.** `strict-dynamic` 하에서는 브라우저가 호스트 허용 목록을 무시하므로, 평범한 `<script src=allowed-host>` 는 더 이상 로드되지 않습니다. Dalfox는 DOM 스크립트 가젯(이미 신뢰된 스크립트가 공격자 스크립트를 생성하게 만드는 페이로드)으로 전환하고, 정책이 nonce를 고정(pin)하면 `<script nonce=…>` 재사용 페이로드를 방출합니다(nonce가 정적이거나 예측 가능하거나 반사될 때 효과적).
 - **Nonce / 해시 고정(pinning).** `'nonce-…'` 및 `'sha256-…'` 토큰이 파싱되어 정책 분류에 사용됩니다. `strict-dynamic` 도 없고 가젯 호스트도 없는 순수 무작위 nonce/해시 정책은 *견고함(hardened)* 으로 취급됩니다. Dalfox는 그런 정책에 요청을 낭비하지 않습니다.
 
 가젯 세트는 하드코딩된 목록이 아니라 내장되고 확장 가능한 데이터베이스(JSONBee / H5SC / Google CSP-Evaluator 형태)에 담겨 있으므로, 분석기를 건드리지 않고도 커버리지가 늘어납니다.
@@ -60,8 +60,8 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 
 [Trusted Types](https://web.dev/articles/trusted-types)는 견고하게 설계된 앱에서 DOM-XSS를 완화하는 주된 수단입니다. Dalfox의 AST DOM-XSS 분석기는 이를 이해합니다:
 
-- **엄격한(strict)** 정책 콜백 — `createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})` — 은 다른 새니타이저와 마찬가지로 오염(taint)을 제거하므로, `p.createHTML(x)` 를 거쳐 전달된 값은 더 이상 보고되지 않습니다.
-- **관대한(permissive)** 기본 정책 — 전형적으로 우회 가능한 아무 동작도 하지 않는 `createPolicy('default', {createHTML: x => x})` — 은 보호 수단으로 *오인되지 않습니다*. 탐지 결과는 유지되고 플래그가 지정됩니다.
+- **엄격한(strict)** 정책 콜백(`createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`)은 다른 새니타이저와 마찬가지로 오염(taint)을 제거하므로, `p.createHTML(x)` 를 거쳐 전달된 값은 더 이상 보고되지 않습니다.
+- **관대한(permissive)** 기본 정책(전형적으로 우회 가능한 아무 동작도 하지 않는 `createPolicy('default', {createHTML: x => x})`)은 보호 수단으로 *오인되지 않습니다*. 탐지 결과는 유지되고 플래그가 지정됩니다.
 - 응답 CSP가 `require-trusted-types-for 'script'` 를 강제하고 **그리고** 페이지가 엄격한 `'default'` 정책을 정의하면, 브라우저가 모든 TrustedHTML 싱크를 자동으로 새니타이즈합니다. 이제 Dalfox는 이렇게 오탐이 된 탐지 결과를 억제합니다.
 
 이 분류기는 의도적으로 보수적입니다. 안전함을 입증할 수 없는 것은 무엇이든 관대한(permissive) 상태로 남으므로, 탐지 결과가 유지됩니다. 억제는 강제(enforcement) 없이는 결코 발동하지 않으므로, 기본 정책을 정의했지만 `require-trusted-types-for` 를 빠뜨린 페이지는 여전히 보고됩니다. 즉, 미탐(false negative)이 도입되지 않습니다.
@@ -159,7 +159,7 @@ dalfox https://target.app \
 
 ## Blind XSS
 
-Blind XSS는 나중에, 여러분이 볼 수 없는 컨텍스트(관리자 패널, 지원 담당자의 대시보드)에서 발동합니다. 대역 외(out-of-band) 리스너가 필요합니다:
+Blind XSS는 나중에, 직접 볼 수 없는 컨텍스트(관리자 패널, 지원 담당자의 대시보드)에서 발동합니다. 대역 외(out-of-band) 리스너가 필요합니다:
 
 ```bash
 dalfox https://target.app -b https://your-callback.interact.sh

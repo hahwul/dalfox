@@ -67,7 +67,7 @@ cat urls.txt | dalfox scan https://target.app/one
 
 Here the command-line target is already enough to scan, so Dalfox waits only ~500 ms for `stdin` to produce its first byte. A pipe that a wrapper, CI job, or job runner left open and idle is skipped with a warning instead of blocking the run. Once the stream does start talking, it's read to the end — a long or slowly written list is never truncated.
 
-To adjust that: `DALFOX_STDIN_WAIT_MS` raises the wait (or disables the merge with `0`) — see [Environment](../../reference/environment/) — and `--input-type pipe` says `stdin` *is* the input, so Dalfox waits for it however long it takes.
+Two knobs adjust that. `DALFOX_STDIN_WAIT_MS` raises the wait, or disables the merge with `0` (see [Environment](../../reference/environment/)); `--input-type pipe` says `stdin` *is* the input, so Dalfox waits for it however long it takes.
 
 ### Collapsing near-duplicate URLs
 
@@ -109,7 +109,7 @@ For live proxy workflows (especially Caido Active Workflows) see the dedicated *
 
 ## HAR mode
 
-Hand Dalfox a whole [HAR](http://www.softwareishard.com/blog/har-12-spec/) (HTTP Archive) export — the JSON capture that browser DevTools and intercepting proxies (Burp, Caido, ZAP, Charles, mitmproxy) produce — and it scans every request in it, preserving each one's URL, method, headers, cookies, and body:
+A [HAR](http://www.softwareishard.com/blog/har-12-spec/) (HTTP Archive) export is the JSON capture that browser DevTools and intercepting proxies (Burp, Caido, ZAP, Charles, mitmproxy) produce. Hand Dalfox the whole file and it scans every request in it, preserving each one's URL, method, headers, cookies, and body:
 
 ```bash
 # Auto-detected from the file content:
@@ -150,7 +150,7 @@ redirects, whether a login form was already on the page) at **no extra request
 cost** — it reuses the body preflight already fetched. It then re-probes after
 each target's injection stage, and again at the dispatch boundary when the
 baseline is already more than 30 seconds old. (On a short or single-target run
-only the post-scan probe fires — re-probing a baseline that is seconds old
+only the post-scan probe fires; re-probing a baseline that is seconds old
 proves nothing.)
 
 ```bash
@@ -219,7 +219,7 @@ can detect a *change*, so stale credentials would otherwise produce a silent,
 completely clean run. The target is still scanned; the flag and exit code are
 what make the result honest.
 
-"Already looks unauthenticated" means the sign-in page itself — a `401`, an
+"Already looks unauthenticated" means the sign-in page itself: a `401`, an
 inline password field, or a redirect onto `/login`, `/signin`, `/users/sign_in`.
 A redirect onto a merely auth-*shaped* path is not enough: plenty of apps serve
 their authenticated home from `/auth/home` or `/sso/dashboard`, and calling that
@@ -229,7 +229,7 @@ entry, no `meta.incomplete`, and no effect on the exit code. If your app is one
 of those and you want the check to be exact anyway, `--session-check` settles
 it.
 
-Monitoring is off — and costs nothing — when no credentials are supplied and
+Monitoring is off (and costs nothing) when no credentials are supplied and
 neither `--session-check` flag is set. Logging in is out of scope: this is
 detection only.
 

@@ -69,7 +69,7 @@ Submit a scan. Returns immediately.
 `encoders` accepts any combination of the implemented payload encoders:
 `url`, `html`, `htmlpad`, `2url`, `3url`, `4url`, `base64`, `unicode`,
 `zwsp`. The example above shows `["url", "html"]`; add more to increase
-mutation coverage. Order does not matter — the scanner applies encoders
+mutation coverage. Order does not matter. The scanner applies encoders
 in a fixed priority order (`url` → `html` → `htmlpad` → `2url` → `3url`
 → `4url` → `base64` → `unicode` → `zwsp`) and de-duplicates the output.
 Use `["none"]` to disable encoding entirely. Mirrors the `--encoders` /

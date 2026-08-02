@@ -5,7 +5,7 @@ weight = 2
 toc = true
 +++
 
-Dalfox looks for its config at (in order):
+Dalfox looks for its config in this order:
 
 1. `$XDG_CONFIG_HOME/dalfox/config.toml`
 2. `$HOME/.config/dalfox/config.toml`
@@ -141,7 +141,7 @@ debug = false
 | `stream_findings` | bool | `false` | Print each finding mid-scan instead of after the end-of-scan summary (plain format only) |
 | `poc_type` | string | `"plain"` | `plain`, `curl`, `httpie`, `http-request` |
 | `limit` | int | — | Cap on result count |
-| `limit_result_type` | string | `"all"` | Which types count: `all`, `v`, `r`, `a` |
+| `limit_result_type` | string | `"all"` | Which types count: `all`, `v`, `r`, `a`, `i` |
 | `only_poc` | array | `[]` | Filter output: `["v","a"]` |
 | `baseline` | string | — | Previous JSON/JSONL report to diff against; only findings new since it are reported. **CLI only** — ignored by `dalfox server` / MCP |
 | `baseline_mode` | string | `"filter"` | `filter` drops known findings, `annotate` keeps them and marks each `new` |
@@ -179,7 +179,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `out_of_scope` | array | `[]` | Wildcard domain patterns |
 | `out_of_scope_file` | string | — | File listing out-of-scope hosts |
 
-### Discovery & Mining
+### Discovery & mining
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -239,7 +239,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `sxss_url` | string | — | Retrieval URL |
 | `sxss_method` | string | `"GET"` | Retrieval method |
 | `sxss_retries` | int | `3` | Retries when fetching the retrieval URL |
-| `max_payloads_per_param` | int | `0` | Cap payloads tested per parameter (`0` = no cap) |
+| `max_payloads_per_param` | int | `0` | Cap base payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `deep_scan` is set) |
 | `skip_ast_analysis` | bool | `false` | Skip AST DOM-XSS |
 | `analyze_external_js` | bool | `false` | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `include_url`/`exclude_url`) |
 | `detect_outdated_libs` | bool | `false` | Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests) |

@@ -1,6 +1,6 @@
 +++
 title = "Detection Model"
-description = "The three axes of a Dalfox finding — confidence, method, impact — and what each evidence tier actually proves."
+description = "The three axes of a Dalfox finding (confidence, method, impact) and what each evidence tier actually proves."
 weight = 7
 toc = true
 +++
@@ -20,7 +20,7 @@ findings it is currently a restatement of the tier (`V` → `High`, `A` →
 library advisory. Treat it as a display convenience until it grades impact on
 its own.
 
-`[A]` predates that split. It answers the *method* question while sitting in the `type` field, which is why nobody — including the code — could say where it belonged on the confidence scale. It is being absorbed; see [Migration](#migration) below.
+`[A]` predates that split. It answers the *method* question while sitting in the `type` field, which is why nobody (including the code) could say where it belonged on the confidence scale. It is being absorbed; see [Migration](#migration) below.
 
 This page exists because the split was not visible from the output alone. It was worked out in [issue #1238](https://github.com/hahwul/dalfox/issues/1238) with [@OSTARA711](https://github.com/OSTARA711), whose write-up is the basis for the model here.
 
@@ -51,7 +51,7 @@ There is exactly one method where Dalfox observes real execution: **out-of-band 
 | `oob` | An out-of-band callback from a real browser | Yes |
 | `library` | `<script>` tags, for known-vulnerable versions | No |
 
-**Use `detection_method == "ast"` — not `type == "A"` — to select AST findings.** The method field is stable; the tier is not.
+**Use `detection_method == "ast"`, not `type == "A"`, to select AST findings.** The method field is stable; the tier is not.
 
 ### The combinations that actually occur
 
@@ -88,7 +88,7 @@ It also explains a result that looks like a gap but isn't. For a **pure client-s
 | `--skip-ast-analysis` | Turn off source→sink analysis |
 | `--analyze-external-js` | Also fetch and analyze same-origin `<script src>` bundles |
 
-Note that `--skip-mining-dom` does **not** affect this pass — it governs harvesting parameter *names* from HTML `id`/`name` attributes. See [Parameters & Discovery](../parameters/).
+`--skip-mining-dom` does **not** affect this pass — it governs harvesting parameter *names* from HTML `id`/`name` attributes. See [Parameters & Discovery](../parameters/).
 
 ## `confidence`: the grade behind the claim
 
@@ -96,7 +96,7 @@ Every XSS finding carries a `confidence` of `high` or `low`, plus a `confidence_
 
 `high` requires **all** of:
 
-- **A source an attacker can reach with a link** — `location.*`, `document.URL`, `URLSearchParams` carry the payload in the URL directly. Sources that would otherwise need an attacker-controlled driver page (`window.name`, `document.referrer`, `postMessage`, storage, `history.state`) grade `low` — *unless* the page seeds that source from a query parameter itself, which a link can also drive. That case grades `high` with the reason `non-URL source seeded from a query parameter by the page`.
+- **A source an attacker can reach with a link** — `location.*`, `document.URL`, `URLSearchParams` carry the payload in the URL directly. Sources that would otherwise need an attacker-controlled driver page (`window.name`, `document.referrer`, `postMessage`, storage, `history.state`) grade `low`, *unless* the page seeds that source from a query parameter itself, which a link can also drive. That case grades `high` with the reason `non-URL source seeded from a query parameter by the page`.
 - **A payload the page's CSP would let execute** — either inline script is permitted, or the sink runs script directly (`eval`, `Function`, `document.write`, `<script>` text) and so does not depend on inline-handler permission. A report-only CSP enforces nothing and never lowers the grade.
 - **No Trusted Types interception** — `require-trusted-types-for 'script'` with a TrustedHTML-class sink grades `low`.
 
@@ -118,7 +118,7 @@ That the grade drives nothing yet is the point: you can see where each finding w
 
 1. **Now** — `type` unchanged. `detection_method` and `confidence` are new. `type == "A"` is deprecated as a selector; use `detection_method == "ast"`.
 2. **Next** — `--tier-model confidence` as an opt-in.
-3. **Then** — that becomes the default, with `--tier-model legacy` as an escape hatch. `A` retires: `high` graded AST findings become `V`, the rest `R` — which is what `R` was always for. `R` is renamed in that release too: it will hold more than reflections by then, so the word stops being accurate at exactly that moment.
+3. **Then** — that becomes the default, with `--tier-model legacy` as an escape hatch. `A` retires: `high` graded AST findings become `V`, the rest `R`, which is what `R` was always for. `R` is renamed in that release too: it will hold more than reflections by then, so the word stops being accurate at exactly that moment.
 
 `--only-poc a` keeps working throughout; it selects `detection_method == "ast"` once the tier is gone. No flag value is ever removed.
 
@@ -174,11 +174,12 @@ add `--only-poc v`.
 
 ### Exit codes
 
-`0` means no findings, `1` means at least one finding **of any tier** — counted
-after `--only-poc` and the collapse above — and `2` is a hard error (bad input,
-every target unreachable, `--output` unwritable). A lone `R`, or a single `I`
-from `--detect-outdated-libs`, exits `1` exactly like a `V` does. For CI that
-should fail only on what Dalfox asserts is exploitable, run `--only-poc v`.
+`0` means no findings and `1` means at least one finding **of any tier**,
+counted after `--only-poc` and the collapse above. `2` is a hard error (bad
+input, every target unreachable, `--output` unwritable). A lone `R`, or a
+single `I` from `--detect-outdated-libs`, exits `1` exactly like a `V` does.
+For CI that should fail only on what Dalfox asserts is exploitable, run
+`--only-poc v`.
 
 ## Choosing flags by intent
 

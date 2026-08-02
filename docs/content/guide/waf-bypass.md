@@ -82,7 +82,7 @@ When a WAF is detected, `--waf-evasion` switches Dalfox to **adaptive timing** i
 dalfox https://target.app --waf-evasion
 ```
 
-For a hard ceiling on the request rate — independent of WAF detection and shared across **all** workers and targets — combine it with `--rate-limit` (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since `--delay` only spaces a single worker:
+For a hard ceiling on the request rate (independent of WAF detection and shared across **all** workers and targets), combine it with `--rate-limit` (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since `--delay` only spaces a single worker:
 
 ```bash
 # At most 15 requests/second across the whole scan, with adaptive evasion

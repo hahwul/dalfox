@@ -5,7 +5,7 @@ weight = 1
 toc = true
 +++
 
-Dalfox is organised into four subcommands. The default (when you just pass a target) is `scan`.
+Dalfox is organised into four subcommands, plus the built-in `help`. The default (when you just pass a target) is `scan`.
 
 ```
 dalfox [SUBCOMMAND] [TARGET] [FLAGS]
@@ -94,8 +94,8 @@ mid-scan, every later request is answered by a login page, and the run reports
 zero findings. See [Session monitoring](../../guide/scanning-modes/).
 
 Monitoring turns itself on whenever credentials are present (`--cookies`,
-`--cookie-from-raw`, or a `Cookie` / `Authorization` header) — or when either
-`--session-check` flag is given. It is off, and free, otherwise.
+`--cookie-from-raw`, or a `Cookie` / `Authorization` header), and whenever either
+`--session-check` flag is given. Otherwise it stays off and costs nothing.
 
 | Flag | Default | Description |
 |------|---------|-------------|

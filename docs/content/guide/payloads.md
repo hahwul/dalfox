@@ -40,7 +40,7 @@ This keeps request counts sane while maximising hit rate.
 ## CSP-aware bypass payloads
 
 When the preflight stage sees a `Content-Security-Policy` (or `…-Report-Only`)
-header — or a `<meta http-equiv>` equivalent — Dalfox parses it and tailors the
+header, or a `<meta http-equiv>` equivalent, Dalfox parses it and tailors the
 script-execution payloads to that policy's actual weaknesses. Payloads are only
 generated for the directives that are genuinely exploitable, so a target with no
 CSP (or a hardened one) sees no extra requests.
@@ -57,8 +57,8 @@ Two modern shapes that earlier releases parsed but never acted on are now live:
 
 - **`strict-dynamic`.** Under `strict-dynamic` the browser ignores the host
   allowlist, so a plain `<script src=allowed-host>` no longer loads. Dalfox
-  switches to DOM script-gadgets — payloads that get an already-trusted script
-  to create the attacker script — and, when the policy pins a nonce, emits a
+  switches to DOM script-gadgets (payloads that get an already-trusted script
+  to create the attacker script) and, when the policy pins a nonce, emits a
   `<script nonce=…>` reuse payload (effective when the nonce is static,
   predictable, or reflected).
 - **Nonce / hash pinning.** `'nonce-…'` and `'sha256-…'` tokens are parsed and
@@ -75,11 +75,11 @@ without touching the analyzer.
 [Trusted Types](https://web.dev/articles/trusted-types) is the primary DOM-XSS
 mitigation in hardened apps. Dalfox's AST DOM-XSS analyzer understands it:
 
-- A **strict** policy callback — `createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`
-  — clears taint just like any other sanitizer, so values routed through
+- A **strict** policy callback (`createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`)
+  clears taint just like any other sanitizer, so values routed through
   `p.createHTML(x)` no longer report.
-- A **permissive** default policy — the classic bypassable no-op
-  `createPolicy('default', {createHTML: x => x})` — is *not* mistaken for
+- A **permissive** default policy (the classic bypassable no-op
+  `createPolicy('default', {createHTML: x => x})`) is *not* mistaken for
   protection; the finding is kept and flagged.
 - When the response CSP enforces `require-trusted-types-for 'script'` **and** the
   page defines a strict `'default'` policy, the browser auto-sanitizes every
@@ -223,7 +223,7 @@ Useful for research; slower for production pipelines.
 | `--skip-xss-scanning` | Discover and probe only; no payload injection |
 | `--skip-ast-analysis` | Skip AST-based DOM-XSS detection of inline scripts (the `[A]` findings) |
 
-`--skip-ast-analysis` is the control for the static DOM-XSS pass that reports `source → sink` flows (e.g. `location.hash` → `innerHTML`) as `[A]` (AST-detected) findings — independent of parameter mining. `--skip-mining-dom` does **not** affect it. To keep the pass running but hide those findings from the output, use `--only-poc v,r`. What `[A]` actually proves — and why a pure client-side DOM-XSS never reaches `[V]` — is covered in [Detection Model](../detection-model/).
+`--skip-ast-analysis` is the control for the static DOM-XSS pass that reports `source → sink` flows (e.g. `location.hash` → `innerHTML`) as `[A]` (AST-detected) findings — independent of parameter mining. `--skip-mining-dom` does **not** affect it. To keep the pass running but hide those findings from the output, use `--only-poc v,r`. What `[A]` actually proves (and why a pure client-side DOM-XSS never reaches `[V]`) is covered in [Detection Model](../detection-model/).
 
 ## Next
 

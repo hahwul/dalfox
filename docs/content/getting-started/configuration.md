@@ -5,7 +5,7 @@ weight = 4
 toc = true
 +++
 
-Dalfox reads a config file on startup so you don't have to pass the same flags every time. Anything you set in the config is overridden by an explicit CLI flag, so it's safe to keep "defaults" here.
+Dalfox reads a config file on startup so you don't have to pass the same flags every time. An explicit CLI flag always overrides what the config sets, so it's safe to keep "defaults" here.
 
 ## Where the file lives
 
