@@ -893,6 +893,36 @@ fn test_has_marker_evidence_entity_encoded_sink() {
     );
 }
 
+/// The evidence kinds derived from HTML-parsing the response body require the
+/// browser to actually render it as markup; JS-context evidence does not. This
+/// mapping gates the JSONP content-type false positive — HTML-parse evidence
+/// found in a `application/javascript` body is inert (the body runs as script).
+#[test]
+fn test_dom_evidence_kind_requires_html_rendering() {
+    use super::DomEvidenceKind::*;
+    assert!(Marker.requires_html_rendering());
+    assert!(ExecutableUrl.requires_html_rendering());
+    assert!(HtmlStructural.requires_html_rendering());
+    assert!(InlineHandlerBreakout.requires_html_rendering());
+    // JS-context evidence is valid on a JS body (the payload runs as script).
+    assert!(!JsContext.requires_html_rendering());
+}
+
+/// A JSONP-callback payload reflected as the callable identifier of a JS body
+/// (`callback=…` → `…({"data":1})`) must classify as JS-context evidence — the
+/// genuine JSONP XSS — and NOT rely on an HTML marker.
+#[test]
+fn test_jsonp_callback_payload_yields_js_context_evidence() {
+    for payload in crate::scanning::get_jsonp_callback_payloads() {
+        let body = format!("{payload}({{\"data\":1}})");
+        assert_eq!(
+            classify_dom_evidence(&payload, &body),
+            Some(super::DomEvidenceKind::JsContext),
+            "JSONP payload {payload:?} should verify via JS-context AST in body {body:?}"
+        );
+    }
+}
+
 /// Issue #1118: the public entry point used by the scan worker
 /// (`classify_dom_evidence`) must return `None` for a truncated-handler
 /// reflection — no fallback evidence path (HTML-structural, JS-context, inline

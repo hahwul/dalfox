@@ -1655,6 +1655,13 @@ pub struct ReflectionBody {
     /// Whether `text` is the response body a browser would actually parse and
     /// render as a document. `false` for the 3xx `Location:` stand-in.
     pub renderable: bool,
+    /// Whether the response was served as executable JavaScript
+    /// (`application/javascript`, JSONP). Such a body runs as script and is
+    /// never HTML-parsed, so HTML-parse-derived DOM evidence (markers,
+    /// `javascript:` attributes, injected elements) found inside it is inert —
+    /// only JS-context evidence confirms XSS. R→V upgraders that reuse this body
+    /// must consult it (see the static V-upgrade in `scanning::mod`).
+    pub js_content_type: bool,
 }
 
 impl ReflectionBody {
@@ -1663,7 +1670,14 @@ impl ReflectionBody {
         Self {
             text,
             renderable: true,
+            js_content_type: false,
         }
+    }
+
+    /// Mark the body as served with an executable-JavaScript content-type.
+    fn with_js_content_type(mut self, is_js: bool) -> Self {
+        self.js_content_type = is_js;
+        self
     }
 
     /// A stand-in for a 3xx `Location:` header value.
@@ -1676,6 +1690,7 @@ impl ReflectionBody {
         Self {
             text: format!("HTTP {} Location: {}", status_code, location),
             renderable: false,
+            js_content_type: false,
         }
     }
 
@@ -1972,6 +1987,16 @@ async fn fetch_injection_response_with_client(
         if let Ok(resp) = inject_resp {
             let status_code = resp.status().as_u16();
 
+            // Capture whether the body is served as executable JavaScript before
+            // `read_body` consumes the response, so the returned `ReflectionBody`
+            // can tell R→V upgraders that HTML-parse evidence is inert here.
+            let is_js_content_type = crate::utils::is_javascript_content_type(
+                resp.headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or(""),
+            );
+
             // Adaptive WAF accounting (per-worker streak + cooldown + telemetry).
             apply_injection_waf_accounting(status_code, target, args, streak).await;
 
@@ -2097,7 +2122,7 @@ async fn fetch_injection_response_with_client(
                         );
                         return None;
                     }
-                    Some(ReflectionBody::rendered(body))
+                    Some(ReflectionBody::rendered(body).with_js_content_type(is_js_content_type))
                 }
                 Err(e) => {
                     crate::dbg_log!(

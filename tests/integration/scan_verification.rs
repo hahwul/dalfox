@@ -196,6 +196,24 @@ async fn vuln_jsonp_callback(Query(p): Query<HashMap<String, String>>) -> impl I
     )
 }
 
+/// Inert-JSONP fixture: reflects the param into a *string literal* of a
+/// `application/javascript` body, with quotes escaped, so neither an HTML tag
+/// nor a callback-name injection executes. A browser runs the body as script
+/// (never HTML-parses it), so an `<svg onload=…>` echo here is inert. dalfox
+/// must NOT report a marker-based V — regression guard for the JSONP
+/// content-type false positive.
+async fn safe_js_string_literal_appjs(
+    Query(p): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    let escaped = q.replace('\\', "\\\\").replace('"', "\\\"");
+    (
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/javascript")],
+        format!("var config = \"{escaped}\";"),
+    )
+}
+
 /// Mirrors brutelogic c1 / c5: HTML-entity-encodes `'` and `<` of the param
 /// and reflects inside a single-quoted JS string. Not exploitable: entities
 /// don't decode inside `<script>`. Used to verify R suppression.
@@ -491,6 +509,7 @@ async fn start_test_server() -> SocketAddr {
         .route("/js/raw", get(vuln_js_raw))
         .route("/js/inline-event", get(vuln_inline_event))
         .route("/safe/js-apos-encoded", get(safe_js_apos_encoded))
+        .route("/safe/js-string-appjs", get(safe_js_string_literal_appjs))
         .route("/jsonp", get(vuln_jsonp_callback))
         // Reflected: CSS
         .route("/css/style", get(vuln_css_style))
@@ -849,6 +868,45 @@ async fn test_jsonp_callback_endpoint_yields_verified() {
         &findings,
         "V",
         "JSONP callback reflection should produce V via JS-context fallback",
+    );
+    // The V must come from the JS-context AST evidence (the payload executes as
+    // JavaScript when the JSONP is loaded via <script src>), NOT from
+    // HTML-parsing the application/javascript body for a DOM marker — a browser
+    // never HTML-parses a JS response, so a marker-based V there is a false
+    // positive. Pin the mechanism so a regression can't silently reinstate it.
+    let v_evidence: Vec<&str> = findings
+        .iter()
+        .filter(|f| f["type"].as_str() == Some("V"))
+        .filter_map(|f| f["evidence"].as_str())
+        .collect();
+    assert!(
+        v_evidence.iter().any(|e| e.contains("JS-context")),
+        "JSONP V must be JS-context AST evidence, not an HTML DOM marker; got: {v_evidence:?}"
+    );
+    assert!(
+        !v_evidence.iter().any(|e| e.contains("DOM marker")),
+        "JSONP must not be verified via an HTML DOM marker on a application/javascript body; got: {v_evidence:?}"
+    );
+}
+
+/// Regression guard for the JSONP content-type false positive: an HTML-tag
+/// payload echoed into a `application/javascript` string literal is inert (the
+/// body runs as script, never HTML-parsed; the string is quote-escaped so no
+/// callback injection executes). It must not be reported as a verified (V)
+/// finding via the DOM-marker path.
+#[tokio::test]
+async fn test_appjs_string_literal_no_false_v() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/safe/js-string-appjs?q=test")];
+    let findings = run_scan_and_collect(args).await;
+    assert!(
+        !findings.iter().any(|f| f["type"].as_str() == Some("V")),
+        "inert application/javascript string-literal echo must not yield a false V, got: {:?}",
+        findings
+            .iter()
+            .map(|f| (f["type"].as_str(), f["evidence"].as_str()))
+            .collect::<Vec<_>>()
     );
 }
 
