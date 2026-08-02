@@ -69,7 +69,7 @@ claude mcp add dalfox -- dalfox mcp
 `encoders`는 구현된 페이로드 인코더의 어떤 조합이든 받습니다:
 `url`, `html`, `htmlpad`, `2url`, `3url`, `4url`, `base64`, `unicode`,
 `zwsp`. 위 예시는 `["url", "html"]`을 보여줍니다. 변형(mutation) 커버리지를
-높이려면 더 추가하세요. 순서는 중요하지 않습니다 — 스캐너는 인코더를
+높이려면 더 추가하세요. 순서는 중요하지 않습니다. 스캐너는 인코더를
 고정된 우선순위 순서(`url` → `html` → `htmlpad` → `2url` → `3url`
 → `4url` → `base64` → `unicode` → `zwsp`)로 적용하고 출력을 중복
 제거합니다. 인코딩을 완전히 비활성화하려면 `["none"]`을 사용하세요.

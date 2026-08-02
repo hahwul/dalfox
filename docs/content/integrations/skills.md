@@ -45,7 +45,7 @@ npx skills remove dalfox
 
 ## Install manually
 
-If you prefer not to run `npx`, clone the skill file into the location your agent expects. For Claude Code that's `~/.claude/skills/dalfox/SKILL.md`:
+If you prefer not to run `npx`, fetch the skill file into the location your agent expects. For Claude Code that's `~/.claude/skills/dalfox/SKILL.md`:
 
 ```bash
 mkdir -p ~/.claude/skills/dalfox
@@ -62,7 +62,7 @@ Other clients read from their own skills directory; see your agent's docs for th
 - **Mode detection:** prefers MCP tools when available, falls back to the `dalfox` CLI, and tells the user how to install if neither is present.
 - **MCP playbook:** `preflight_dalfox` → `scan_with_dalfox` → poll `get_results_dalfox` (honoring `suggested_poll_interval_ms`) → `delete_scan_dalfox` when done. Includes the validated input bounds (timeout 1–299 s, delay 0–9999 ms) so the agent doesn't send values Dalfox will reject.
 - **CLI scenarios:** POST bodies, authenticated sessions, proxy-through-Burp, blind XSS with a callback URL, stored XSS, pipe input, fast smoke tests, maximum-coverage runs, and machine-readable output.
-- **Result interpretation:** the three-axis model — `type` (`V` asserted vulnerable > `A` AST-detected > `R` reflected-only > `I` informational), `detection_method`, and `confidence` — so the agent leads with the strongest claims and doesn't describe `V` as observed browser execution. See [Detection Model](../../guide/detection-model/).
+- **Result interpretation:** the three-axis model — `type` (`V` asserted vulnerable > `A` AST-detected > `R` reflected-only > `I` informational), `detection_method`, and `confidence`. The agent leads with the strongest claims and never describes `V` as observed browser execution. See [Detection Model](../../guide/detection-model/).
 - **Failure modes:** what `reachable: false`, all-R findings, a stuck scan, or an `invalid_params` response actually mean, and how to recover.
 
 ## Prerequisite

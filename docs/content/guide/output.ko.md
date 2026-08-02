@@ -5,7 +5,7 @@ weight = 6
 toc = true
 +++
 
-모든 스캔은 동일한 내부 결과 구조를 생성합니다. Dalfox는 이를 여러분이 선택한 형식으로 렌더링합니다. 기계 판독 가능 형식은 배너를 자동으로 억제하므로 파일이 깔끔하게 유지됩니다.
+모든 스캔은 동일한 내부 결과 구조를 만듭니다. Dalfox는 이를 선택한 형식으로 렌더링합니다. 기계 판독 형식은 배너를 자동으로 빼므로 파일이 깔끔하게 유지됩니다.
 
 ## 형식 선택
 
@@ -28,7 +28,7 @@ dalfox https://target.app -f json -o report.json
 dalfox https://target.app -f jsonl -o findings.jsonl
 ```
 
-`-o`가 없으면 출력은 `stdout`으로 전달됩니다.
+`-o`가 없으면 출력은 `stdout`으로 나갑니다.
 
 ## 결과 필드
 
@@ -83,9 +83,9 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 이제 모두 동일한 스캔 수�
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
 - `incomplete` — 하나 이상의 대상이 **완전히 테스트되지 않았을 때** `true`입니다. 현재는 스캔 도중 인증 세션이 끊어진 경우를 뜻합니다([세션 모니터링](../scanning-modes/) 참고). `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
 
-세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)에 `"error_code": "SESSION_LOST"`, 그리고 감지된 신호가 `"error_message"`에 담겨 보고됩니다 — 절대 `"clean"`으로 표시되지 않습니다.
+세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)에 `"error_code": "SESSION_LOST"`, 그리고 감지된 신호가 `"error_message"`에 담겨 보고됩니다. 절대 `"clean"`으로는 표시되지 않습니다.
 
-**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복되어 GitHub 코드 스캐닝과 기타 소비자가 컨텍스트를 유지하도록 합니다.
+**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복으로 실려, GitHub 코드 스캐닝을 비롯한 소비 도구가 컨텍스트를 잃지 않습니다.
 
 **TOML**에서는 최상위 `[meta]` 테이블로 나타납니다(탐지 결과는 `[[results]]` 아래).
 
@@ -111,16 +111,16 @@ cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity=="High")'
 Payload / Line)을 스캔 종료 시점의 `WRN XSS found N XSS` 요약 **이후에** 출력하므로,
 로그는 자연스러운 순서(시작 → 진행 → 요약 → 세부 정보)로 읽힙니다.
 
-대규모 대상에 대한 긴 스캔의 경우, `--stream-findings`로 스캔 도중 방출로 전환할 수 있습니다.
+대상이 크고 스캔이 길어질 때는 `--stream-findings`로 스캔 도중 출력으로 전환할 수 있습니다.
 각 탐지 결과는 검증되는 즉시 진행 표시줄 위에 출력됩니다.
 
 ```bash
 dalfox https://target.app --stream-findings
 ```
 
-`--stream-findings`는 `plain` 형식에만 영향을 미치며, 스캔 종료 경로가 스트리머로 깔끔하게
-반영할 수 없는 필터(`--output`, `--limit`, `--only-poc`)를 적용해야 할 때는
-자동으로 비활성화됩니다.
+`--stream-findings`는 `plain` 형식에만 영향을 미칩니다. 스캔 종료 시점에 스트리머가 그대로
+반영할 수 없는 필터(`--output`, `--limit`, `--only-poc`)를 적용해야 하면 자동으로
+비활성화됩니다.
 
 ## POC 스타일
 
@@ -161,7 +161,7 @@ dalfox scan scope.txt -f json -o baseline.json      # 최초 1회, 기존 백로
 dalfox scan scope.txt --baseline baseline.json      # 이후 매 실행
 ```
 
-**별도의 베이스라인 작성 명령은 없습니다** — 평범한 `-f json -o`(또는 `-f jsonl -o`) 리포트가 그대로 베이스라인입니다.
+**별도의 베이스라인 작성 명령은 없습니다.** 평범한 `-f json -o`(또는 `-f jsonl -o`) 리포트가 그대로 베이스라인입니다.
 
 ### 모드
 
@@ -172,13 +172,13 @@ dalfox scan scope.txt --baseline baseline.json      # 이후 매 실행
 
 ### 무엇을 "같은 건"으로 볼까
 
-지문(fingerprint)은 그 건을 드러낸 **실행**이 아니라 취약점 자체의 정체성으로 만듭니다.
+지문(fingerprint)은 그 건을 드러낸 **실행**이 아니라 취약점 자체의 정체성을 기준으로 만듭니다.
 
 **포함:** 호스트 + 경로 · 파라미터 이름 · 파라미터 위치(query / header / cookie / body / path) · 인젝션 컨텍스트 · CWE · 탐지 티어 · 증거 계열(DOM 건의 `Source → Sink` 쌍).
 
 **제외:** 페이로드와 그것이 들어간 쿼리 스트링, 페이로드 순서, AST의 줄/열 번호, 타임스탬프, 요청/응답 캡처.
 
-따라서 실행마다 페이로드가 달라져도 같은 스캔은 깔끔하게 매칭되고, 번들러가 `app.js`의 줄 번호를 밀어도 이미 처리한 DOM 건이 되살아나지 않습니다. **티어**가 지문에 들어가므로, 지난주 `R`이던 건이 오늘 `V`가 되면 신규로 보고됩니다 — 이런 승격이야말로 게이트가 잡아야 할 변화입니다.
+따라서 실행마다 페이로드가 달라져도 같은 스캔은 깔끔하게 매칭되고, 번들러가 `app.js`의 줄 번호를 밀어도 이미 처리한 DOM 건이 되살아나지 않습니다. **티어**가 지문에 들어가므로, 지난주 `R`이던 건이 오늘 `V`가 되면 신규로 보고됩니다. 이런 승격이야말로 게이트가 잡아야 할 변화입니다.
 
 ### `meta.baseline` 블록
 
@@ -210,7 +210,7 @@ git commit -am "chore: refresh dalfox baseline"
 
 ### 주의사항
 
-- **`--limit`은 diff 이전에 셉니다.** 스캔 중 중단 조건은 수집되는 모든 건을 세므로(베이스라인에 이미 있는 건 포함), `--limit 10 --baseline b.json`으로 처음 10건이 전부 기존 건인 대상을 돌리면 나머지 파라미터를 테스트하지 않은 채 조기 종료하고 "신규 0"을 보고합니다. 신규 기준으로 게이트할 때는 `--limit`을 빼세요. 둘을 함께 쓰면 Dalfox가 경고합니다.
+- **`--limit`은 diff 이전에 셉니다.** 스캔 중 중단 조건은 수집되는 모든 건을 세므로(베이스라인에 이미 있는 건 포함), `--limit 10 --baseline b.json`으로 처음 10건이 전부 기존 건인 대상을 돌리면 나머지를 테스트하지 않은 채 조기 종료하고 "신규 0"을 보고합니다. 신규 기준으로 게이트할 때는 `--limit`을 빼세요. 둘을 함께 쓰면 Dalfox가 경고합니다.
 - **`--stream-findings`는 `--baseline`이 있으면 비활성화됩니다.** `--only-poc`과 같은 이유입니다. 스트리머는 어떤 건이 이미 베이스라인에 있는지 알 수 없어서, 요약은 신규만 보고하는데 화면에는 트리아지가 끝난 백로그 전체가 흘러가게 됩니다.
 - **CLI 전용입니다.** `dalfox server`와 MCP 서버는 `--baseline`을 적용하지 않습니다. 공유 config의 `scan.baseline`도 그쪽에서는 조용히 무시됩니다.
 
@@ -239,7 +239,7 @@ target_summary = [{ target = "https://target.app", status = "findings", findings
 
 [[results]]
 type = "V"
-type_description = "Vulnerable"
+type_description = "Vulnerable - dalfox asserts this input is exploitable; act on it"
 detection_method = "dom-verification"
 confidence = "high"
 inject_type = "inHTML"
@@ -265,7 +265,7 @@ dalfox https://target.app -f toml -o report.toml
 dalfox scan urls.txt -f sarif -o dalfox.sarif
 ```
 
-GitHub의 `upload-sarif` 액션을 통해 `dalfox.sarif`를 업로드하면, 탐지 결과가 리포지토리의 **Security → Code scanning** 탭에 나타납니다.
+GitHub의 `upload-sarif` 액션으로 `dalfox.sarif`를 업로드하면, 탐지 결과가 리포지토리의 **Security → Code scanning** 탭에 나타납니다.
 
 ## CI 예시
 
@@ -318,11 +318,11 @@ Dalfox는 다음을 반환합니다.
 | `1` | 성공적으로 완료, **티어와 무관하게** 탐지 결과 하나 이상 |
 | `2` | 입력/설정/런타임 오류, **또는** 기본값 `--on-session-loss abort`에서 스캔 도중 세션이 끊어졌고 *탐지 결과가 없는* 경우 (탐지 결과가 있었다면 여전히 `1`) |
 
-`1`은 모든 티어를 포함합니다 — `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 코드가 정해지기 전에 필터가 적용됩니다. (JSON에 `jq`로 `severity >= High`를 거는 방식도 오늘은 같은 집합을 얻습니다. severity가 현재 티어를 따라가기 때문입니다 — [탐지 모델](../detection-model/) 참고.)
+`1`은 모든 티어를 포함합니다. `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 코드가 정해지기 전에 필터가 적용됩니다. (JSON에 `jq`로 `severity >= High`를 거는 방식도 오늘은 같은 집합을 얻습니다. severity가 현재 티어를 따라가기 때문입니다. [탐지 모델](../detection-model/) 참고.)
 
 `--baseline`은 같은 종료 코드를 **신규 여부**로 좁힙니다. 기본 `filter` 모드에서는 억제된 건이 종료 코드 판정에 도달하지 않으므로, 백로그가 전부 베이스라인에 들어 있는 실행은 `0`으로 끝납니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고.
 
 ## 다음
 
-- [REST API 서버](../../integrations/server/)를 통해 스캔을 자동화하세요.
+- [REST API 서버](../../integrations/server/)로 스캔을 자동화하세요.
 - [MCP 서버](../../integrations/mcp/)로 AI 드라이버가 처리하도록 맡기세요.

@@ -10,11 +10,11 @@ Dalfox works well inside [Caido](https://caido.io) workflows. You can feed every
 
 This page covers the current recommended pattern (v3) and the common "bool gotcha" that trips up workflow authors.
 
-## The Core Pattern
+## The core pattern
 
 Caido Workflows can execute a shell step. The step receives the current request (usually as JSON) on stdin. Extract the raw HTTP, hand it to Dalfox via `--input-type raw-http`, then decide whether to create a Finding.
 
-### Minimal Workflow Step (bash/zsh)
+### Minimal workflow step (bash/zsh)
 
 ```bash
 #!/bin/bash
@@ -34,14 +34,15 @@ fi
 TMP=$(mktemp)
 printf '%s' "$RAW" > "$TMP"
 
-# Run Dalfox (tune flags to taste)
+# Run Dalfox (tune flags to taste).
+# Dalfox exits 1 when it has findings, so capture the status with `|| FOUND=$?`
+# instead of letting `set -e` abort the script on the case we care about.
+FOUND=0
 "$DALFOX" scan --input-type raw-http "$TMP" \
     -S \
     --no-color \
     --poc-type curl \
-    --timeout 8
-
-FOUND=$?
+    --timeout 8 || FOUND=$?
 
 rm -f "$TMP"
 
@@ -50,12 +51,12 @@ if [[ $FOUND -eq 1 ]]; then
     # Caido If/Else: route this to the "finding" branch
     echo "XSS detected"
 else
-    # Clean – emit a truthy value so Caido treats it as "no finding"
+    # Clean - emit a truthy value so Caido treats it as "no finding"
     echo "1"
 fi
 ```
 
-### The Caido Boolean Gotcha (Important)
+### The Caido boolean gotcha (important)
 
 Caido's Workflow If/Else node evaluates step output using its own [bool rules](https://docs.caido.io/app/reference/workflow_data_types.html#bool). Many strings that look "truthy" to a human (or a normal shell) become `false` inside Caido.
 
@@ -70,7 +71,7 @@ Then wire:
 
 This is why the examples above deliberately echo a result only on the finding path.
 
-## Recommended Flags for Caido
+## Recommended flags for Caido
 
 | Flag              | Why |
 |-------------------|-----|
@@ -80,11 +81,11 @@ This is why the examples above deliberately echo a result only on the finding pa
 | `--timeout 6-10`  | Per-request budget; keeps workflows snappy |
 | `--waf-bypass auto` | Still worth it even inside a proxy |
 
-You can also add `--report --report-format md` if you want the full markdown report captured in the Finding evidence.
+You can also add `-f markdown` if you want the full markdown report captured in the Finding evidence.
 
 **Note on silence:** `-S` suppresses most logs but the verified POC lines still appear when findings exist. (Community feedback in the linked discussion also requested that `-S` fully suppress POC output for even cleaner workflow results.) If you want zero output on clean runs, the pattern above (only emit on finding path) already achieves that.
 
-## Full Example: If/Else + Create Finding
+## Full example: If/Else + Create Finding
 
 Typical Caido workflow graph:
 
@@ -101,16 +102,16 @@ Typical Caido workflow graph:
 
 You can enrich the Finding with more context from Caido (host, method, parameter names, etc.).
 
-## Alternative: Using a File Step First
+## Alternative: using a file step first
 
 Some authors prefer two steps:
 
 1. Write the raw request to a temp file (Caido has file-system nodes or you can do it in shell).
 2. Run `dalfox scan --input-type raw-http /path/to/req.txt ...`
 
-This is slightly more visible in the workflow graph but easier to debug.
+This adds a step to the workflow graph but is easier to debug.
 
-## Tips & Gotchas
+## Tips & gotchas
 
 - **Binary location**: Caido's PATH may not include brew, asdf, or linuxbrew. Use a full path or set `DALFOX_PATH` env in the workflow / Caido settings and reference `$DALFOX_PATH`.
 - **Performance**: On busy browsing, add a Content-Type or in-scope filter *before* the Dalfox step. Dalfox is fast but you don't need to scan every image/stylesheet.
@@ -118,15 +119,15 @@ This is slightly more visible in the workflow graph but easier to debug.
 - **DOM XSS**: Works out of the box (AST analysis runs on responses).
 - **JSON output**: For more advanced post-processing in later workflow nodes you can use `--format jsonl` and parse the stream.
 
-## Updating from v2 Guides
+## Updating from v2 guides
 
 Older Dalfox v2 documentation used `dalfox pipe --rawdata`. In v3 the equivalent is `dalfox scan --input-type raw-http` (or the hidden `dalfox pipe` compatibility command with adjusted input handling). The temp-file or process-substitution approach shown above is the most portable.
 
 See the [Scanning Modes](../guide/scanning-modes/#raw-http-mode) page for the canonical raw-http usage.
 
-## See Also
+## See also
 
-- [Scanning Modes – Raw HTTP](../guide/scanning-modes/#raw-http-mode)
+- [Scanning Modes: Raw HTTP](../guide/scanning-modes/#raw-http-mode)
 - [Output & Reports](../guide/output/)
 - [WAF Bypass](../guide/waf-bypass/)
 - GitHub Discussion [#992 (comment)](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370): original community report with the Caido If/Else boolean workaround script and `--no-color` suggestion

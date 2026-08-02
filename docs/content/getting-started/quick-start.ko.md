@@ -15,22 +15,22 @@ toc = true
 dalfox https://xss-game.appspot.com/level1/frame?query=test
 ```
 
-첫 번째 인자가 대상입니다. Dalfox는 이것이 URL임을 자동으로 감지하여 `scan` 서브커맨드를 암묵적으로 실행합니다. 다음과 같은 내용이 표시됩니다.
+첫 번째 인자가 대상입니다. Dalfox는 이것이 URL임을 알아보고 `scan` 서브커맨드를 자동으로 붙여 실행합니다. 실행하면 이런 것들이 보입니다.
 
-- 버전이 포함된 배너.
-- Dalfox가 파라미터를 탐색하고 컨텍스트를 탐지하는 과정의 `INFO` 라인.
-- 각 탐지 결과에 대한 `[V]`(취약) 및 `[R]`(반사됨) 라인과, 동작한 정확한 페이로드.
+- 버전이 적힌 배너.
+- 파라미터를 찾고 컨텍스트를 살피는 동안 찍히는 `INFO` 라인.
+- 결과마다 붙는 `[V]`(취약), `[R]`(반사됨) 라인과 실제로 통한 페이로드.
 
 ## 2. 파일에서 스캔
 
-크롤러가 수집한 URL 목록을 입력합니다.
+크롤러가 뽑아둔 URL 목록을 그대로 넘기세요.
 
 ```bash
 # urls.txt, one target per line
 dalfox scan urls.txt
 ```
 
-각 URL은 동일한 파이프라인을 거칩니다. 결과는 발견되는 대로 스트리밍됩니다.
+URL마다 같은 파이프라인을 거칩니다. 결과는 찾는 즉시 흘러나옵니다.
 
 ## 3. 파이프라인에서 스캔
 
@@ -44,17 +44,17 @@ waybackurls example.com | gf xss | dalfox
 
 ## 4. JSON 출력 얻기
 
-Dalfox를 `jq`, 대시보드 또는 CI와 함께 사용합니다.
+`jq`나 대시보드, CI에 그대로 물려 쓰세요.
 
 ```bash
 dalfox https://target.app/search?q=test -f json -o report.json
 ```
 
-기계가 읽을 수 있는 형식(`json`, `jsonl`, `sarif`, `toml`)은 배너를 자동으로 억제하여 파일이 깔끔하게 유지됩니다.
+기계 판독 형식(`json`, `jsonl`, `sarif`, `toml`)은 배너를 자동으로 끄기 때문에 파일이 깔끔하게 남습니다.
 
 ## 5. 인증이 필요한 스캔
 
-쿠키, 헤더 또는 커스텀 메서드를 전달합니다.
+쿠키나 헤더, 커스텀 메서드를 함께 넘기면 됩니다.
 
 ```bash
 dalfox https://api.target.app/v1/users \
@@ -65,13 +65,13 @@ dalfox https://api.target.app/v1/users \
   --cookies "session=abc123"
 ```
 
-또는 프록시에서 캡처한 **raw HTTP 요청** 파일을 Dalfox에 지정할 수 있습니다.
+프록시로 잡아둔 **raw HTTP 요청** 파일을 그대로 물려도 됩니다.
 
 ```bash
 dalfox scan --input-type raw-http request.txt
 ```
 
-또는 전체 **HAR** 내보내기(브라우저 DevTools 또는 프록시에서 생성)를 재생할 수 있습니다. Dalfox는 그 안의 모든 요청을 스캔하며, 각 요청의 메서드, 헤더, 쿠키, 본문을 그대로 보존합니다.
+브라우저 DevTools나 프록시에서 뽑은 **HAR** 전체를 다시 흘려보낼 수도 있습니다. Dalfox는 그 안의 모든 요청을 스캔하며, 각 요청의 메서드, 헤더, 쿠키, 본문을 그대로 살립니다.
 
 ```bash
 dalfox scan capture.har            # auto-detected
@@ -80,33 +80,33 @@ dalfox scan --input-type har capture.har
 
 ## 6. Blind XSS 탐지
 
-아웃오브밴드 콜백(Interactsh, Burp Collaborator, XSS Hunter 등)을 사용합니다.
+대역외 콜백(Interactsh, Burp Collaborator, XSS Hunter 등)을 씁니다.
 
 ```bash
 dalfox https://target.app \
   -b https://your-callback.interact.sh
 ```
 
-Dalfox는 탐색된 모든 파라미터에 blind-XSS 페이로드를 전송합니다. 나중에 관리자 패널에서 페이로드가 실행되면, 콜백 서버가 이를 기록합니다.
+Dalfox는 찾아낸 모든 파라미터에 blind-XSS 페이로드를 심습니다. 나중에 관리자 패널에서 페이로드가 터지면 콜백 서버가 그것을 기록합니다.
 
-또는 Dalfox가 [interactsh](https://github.com/projectdiscovery/interactsh)(OAST) 서버를 대신 관리하도록 할 수 있습니다. 세션을 등록하고, 콜백을 원본 페이로드와 연관 짓고, 자동으로 폴링합니다.
+[interactsh](https://github.com/projectdiscovery/interactsh)(OAST) 서버 관리를 Dalfox에 맡길 수도 있습니다. 세션을 등록하고, 콜백을 원본 페이로드와 연결 짓고, 알아서 폴링합니다.
 
 ```bash
 dalfox https://target.app --blind-oob                  # public interactsh mesh
 dalfox https://target.app --blind-oob=oast.fun         # pick servers
 ```
 
-자체 호스팅 서버에는 `--blind-oob-secret`을 사용하고, 스캔 완료 후 Dalfox가 폴링을 계속하는 시간을 제어하려면 `--blind-oob-wait`을 사용합니다.
+자체 호스팅 서버라면 `--blind-oob-secret`을 쓰고, 스캔이 끝난 뒤 폴링을 얼마나 더 이어갈지는 `--blind-oob-wait`으로 정합니다.
 
 ## 7. 먼저 Dry-run 실행
 
-`--dry-run`을 사용하여 Dalfox가 무엇을 스캔할지 미리 확인합니다.
+`--dry-run`으로 Dalfox가 무엇을 스캔할지 미리 봅니다.
 
 ```bash
 dalfox https://target.app --dry-run
 ```
 
-페이로드를 전혀 전송하지 않고 파라미터를 탐색하고 요청량을 추정합니다.
+페이로드는 하나도 쏘지 않은 채 파라미터를 찾고 요청량만 가늠합니다.
 
 ## 출력 읽기
 
@@ -118,9 +118,9 @@ dalfox https://target.app --dry-run
 | `[A]` | **AST 탐지(AST-detected)**: 정적 JS 분석에서 source→sink 흐름을 발견함 |
 | `[R]` | **반사됨(Reflected)**: 페이로드가 응답에 나타났으나 DOM 증거는 없음 |
 
-`V` 및 `A` 탐지 결과는 실질적으로 조치가 가능합니다. `R` 탐지 결과는 살펴볼 가치가 있으나 이후 단계에서 추가로 필터링될 수 있습니다.
+`V`와 `A`는 바로 조치할 수 있는 결과입니다. `R`은 한 번 볼 만하지만 이후 단계에서 더 걸러질 수 있습니다.
 
-`[V]`는 브라우저 실행이 아닙니다. Dalfox는 설계상 브라우저를 구동하지 않습니다. 순수 클라이언트 사이드 DOM-XSS는 현재 `[A]`로 보고되며, 브라우저에서 확인해 볼 가치가 있습니다. 각 결과에는 `detection_method`(어떻게 찾았는지)와 `confidence`(취약점이라고 주장할 수 있는지)도 함께 실립니다 — [탐지 모델](../../guide/detection-model/) 문서를 참고하세요.
+`[V]`는 브라우저 실행이 아닙니다. Dalfox는 설계상 브라우저를 구동하지 않습니다. 순수 클라이언트 사이드 DOM-XSS는 지금은 `[A]`로 보고되니 브라우저에서 직접 확인해 보세요. 각 결과에는 `detection_method`(어떻게 찾았는지)와 `confidence`(취약점이라고 주장할 수 있는지)도 함께 실립니다 — [탐지 모델](../../guide/detection-model/) 문서를 참고하세요.
 
 ## 다음 단계
 

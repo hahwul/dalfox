@@ -69,12 +69,14 @@ Requires a recent Rust toolchain (stable is fine). Builds into `~/.cargo/bin/dal
 
 Grab a release archive for your OS/arch from [github.com/hahwul/dalfox/releases](https://github.com/hahwul/dalfox/releases), extract it, and drop the binary somewhere on your `PATH` (`/usr/local/bin`, `~/.local/bin`, etc.).
 
-We publish the following Linux variants per release:
+We publish the following per release:
 
-- `linux-x86_64` (glibc)
-- `linux-x86_64-musl` (statically linked, recommended for Alpine, Docker, and CI)
-- `linux-aarch64` (glibc)
-- `linux-aarch64-musl` (statically linked)
+- `macos-x86_64`, `macos-aarch64`
+- `linux-x86_64` (glibc), `linux-x86_64-musl` (statically linked, recommended for Alpine, Docker, and CI)
+- `linux-aarch64` (glibc), `linux-aarch64-musl` (statically linked)
+- `windows-x86_64`
+
+Linux also gets `.deb` and `.rpm` packages for both architectures, and every archive ships with a `.sha256` alongside a combined `checksum.txt`.
 
 ## Build from source
 
@@ -95,7 +97,7 @@ dalfox --version
 
 You should see something like `dalfox 3.1.2` along with the Dalfox banner.
 
-## Update shell completions (optional)
+## Getting help
 
 Dalfox uses [clap](https://github.com/clap-rs/clap), so help is always accessible:
 

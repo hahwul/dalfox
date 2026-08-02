@@ -120,7 +120,7 @@ Each finding is tagged:
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 
-`[V]` is not browser execution — Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as `[A]` today and is worth confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (whether Dalfox can claim a vulnerability) — see [Detection Model](../../guide/detection-model/).
+`[V]` is not browser execution. Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as `[A]` today and is worth confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (whether Dalfox can claim a vulnerability) — see [Detection Model](../../guide/detection-model/).
 
 ## Next steps
 

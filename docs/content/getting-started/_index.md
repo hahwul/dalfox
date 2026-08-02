@@ -8,7 +8,7 @@ This section takes you from zero to a verified XSS finding in about ten minutes.
 
 ## What is Dalfox?
 
-Dalfox is a powerful open-source **XSS scanner and automation utility**. Give it a URL, a file of URLs, or a piped crawl, and it will:
+Dalfox is an open-source **XSS scanner and automation utility**. Give it a URL, a file of URLs, or a piped crawl, and it will:
 
 1. **Discover parameters** across the query string, body, headers, cookies, and DOM.
 2. **Probe contexts** to learn where each parameter lands (HTML, JavaScript, attribute, CSS).

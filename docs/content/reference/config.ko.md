@@ -141,7 +141,7 @@ debug = false
 | `stream_findings` | bool | `false` | 스캔 종료 요약 이후가 아니라 스캔 도중에 각 탐지 결과를 출력 (plain 형식만) |
 | `poc_type` | string | `"plain"` | `plain`, `curl`, `httpie`, `http-request` |
 | `limit` | int | — | 결과 개수 상한 |
-| `limit_result_type` | string | `"all"` | 집계 대상 타입: `all`, `v`, `r`, `a` |
+| `limit_result_type` | string | `"all"` | 집계 대상 타입: `all`, `v`, `r`, `a`, `i` |
 | `only_poc` | array | `[]` | 출력 필터: `["v","a"]` |
 | `baseline` | string | — | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다. **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
 | `baseline_mode` | string | `"filter"` | `filter`는 알려진 건을 제거, `annotate`는 유지한 채 `new` 표시 |
@@ -192,14 +192,14 @@ debug = false
 | `remote_wordlists` | array | `[]` | `burp`, `assetnote` |
 | `skip_mining` | bool | `false` | 모든 마이닝 건너뜀 |
 | `skip_mining_dict` | bool | `false` | 사전 기반 마이닝 건너뜀 |
-| `skip_mining_dom` | bool | `false` | HTML `id`/`name` 속성에서 파라미터 이름 수확 건너뜀 (DOM-XSS 탐지가 아님 — `skip_ast_analysis` 참고) |
+| `skip_mining_dom` | bool | `false` | HTML `id`/`name` 속성에서 파라미터 이름 수집 건너뜀 (DOM-XSS 탐지가 아님 — `skip_ast_analysis` 참고) |
 
 ### 네트워크
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `timeout` | int | `10` | 요청 타임아웃 (초) |
-| `scan_timeout` | int | `0` | 스캔 단계(프리플라이트 이후)에서 대상별 실제 경과 시간 상한(초). 0이면 비활성화. |
+| `scan_timeout` | int | `0` | 스캔 단계(프리플라이트 이후)의 대상별 실제 경과 시간 하드 상한(초). 0이면 비활성화. |
 | `delay` | int | `0` | 요청 간 지연 (ms), 워커별 |
 | `rate_limit` | int | `0` | 모든 워커/대상이 공유하는 전역 요청 속도 상한 (req/sec); `0` = 무제한 |
 | `retries` | int | `0` | 5xx / 일시적 전송 오류를 이 횟수만큼 재시도 (`0` = 끔; 429는 항상 재시도) |
@@ -224,8 +224,8 @@ debug = false
 | `encoders` | array | `["url","html"]` | 적용할 인코더 |
 | `remote_payloads` | array | `[]` | 원격 페이로드 소스 |
 | `custom_blind_xss_payload` | string | — | 커스텀 블라인드 템플릿 파일 |
-| `blind_callback_url` | string | — | 아웃오브밴드 콜백 URL |
-| `blind_oob` | array | — | interactsh를 통한 OOB/OAST 블라인드 XSS 활성화 (`[]` = 공개 메시; 또는 서버 이름 지정). `--blind-oob`와 동일 |
+| `blind_callback_url` | string | — | 대역외 콜백 URL |
+| `blind_oob` | array | — | interactsh로 OOB/OAST 블라인드 XSS 활성화 (`[]` = 공개 메시; 또는 서버 이름 지정). `--blind-oob`와 동일 |
 | `blind_oob_secret` | string | — | 자체 호스팅 interactsh 서버용 인증 토큰 |
 | `blind_oob_wait` | int | `30` | 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) |
 | `custom_payload` | string | — | 커스텀 페이로드 파일 |
@@ -239,7 +239,7 @@ debug = false
 | `sxss_url` | string | — | 조회 URL |
 | `sxss_method` | string | `"GET"` | 조회 메서드 |
 | `sxss_retries` | int | `3` | 조회 URL을 가져올 때의 재시도 횟수 |
-| `max_payloads_per_param` | int | `0` | 파라미터당 테스트하는 페이로드 상한 (`0` = 무제한) |
+| `max_payloads_per_param` | int | `0` | 파라미터당 테스트하는 기본 페이로드 상한 (`0`은 `deep_scan`이 켜져 있지 않으면 세트당 3000개 안전 상한을 적용) |
 | `skip_ast_analysis` | bool | `false` | AST DOM-XSS 건너뜀 |
 | `analyze_external_js` | bool | `false` | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석 수행 (프리플라이트, 대상당 1회; 최대 16개 파일, 각 512 KiB; `include_url`/`exclude_url` 준수) |
 | `detect_outdated_libs` | bool | `false` | 오래되었거나 알려진 취약점이 있는 JS 라이브러리도 보고 (정보성, CWE-1104; 추가 요청 0회) |

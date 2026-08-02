@@ -69,12 +69,14 @@ cargo install dalfox
 
 [github.com/hahwul/dalfox/releases](https://github.com/hahwul/dalfox/releases)에서 OS/아키텍처에 맞는 릴리스 아카이브를 내려받아 압축을 풀고, 바이너리를 `PATH`에 있는 경로(`/usr/local/bin`, `~/.local/bin` 등)에 두면 됩니다.
 
-릴리스마다 다음 Linux 빌드를 함께 제공합니다.
+릴리스마다 다음 빌드가 함께 올라갑니다.
 
-- `linux-x86_64` (glibc)
-- `linux-x86_64-musl` (정적 링크, Alpine·Docker·CI에 권장)
-- `linux-aarch64` (glibc)
-- `linux-aarch64-musl` (정적 링크)
+- `macos-x86_64`, `macos-aarch64`
+- `linux-x86_64` (glibc), `linux-x86_64-musl` (정적 링크, Alpine·Docker·CI에 권장)
+- `linux-aarch64` (glibc), `linux-aarch64-musl` (정적 링크)
+- `windows-x86_64`
+
+Linux는 두 아키텍처 모두 `.deb`와 `.rpm` 패키지도 나오며, 모든 아카이브에는 `.sha256`이 붙고 `checksum.txt`도 함께 올라갑니다.
 
 ## 소스에서 빌드
 
@@ -95,7 +97,7 @@ dalfox --version
 
 `dalfox 3.1.2` 같은 버전 정보와 함께 Dalfox 배너가 보이면 됩니다.
 
-## 셸 자동완성 갱신 (선택)
+## 도움말 보기
 
 Dalfox는 [clap](https://github.com/clap-rs/clap)을 쓰기 때문에 도움말을 언제든 볼 수 있습니다.
 

@@ -50,15 +50,15 @@ Every finding includes:
 | `severity` | `"High"` | High / Medium / Low / Info |
 | `message_str` | `"XSS found"` | Short message |
 
-What each tier is actually evidence of — and why a pure client-side DOM-XSS
-never reaches `V` — is covered in [Detection Model](../detection-model/).
+What each tier is actually evidence of, and why a pure client-side DOM-XSS
+never reaches `V`, is covered in [Detection Model](../detection-model/).
 
 `V` / `A` / `R` are XSS findings. `I` (**Informational**) is a non-exploitable
 observation — currently only **outdated / known-vulnerable JS libraries**
 (`inject_type: "OutdatedComponent"`, `CWE-1104`), rendered as a compact
 `[INF]` line with no payload/parameter. It is **opt-in**: Dalfox focuses on
 verified XSS by default, so library reporting is off unless you pass
-`--detect-outdated-libs` (it adds **0 extra requests** — it inspects the
+`--detect-outdated-libs` (it adds **0 extra requests**, inspecting the
 preflight response's `<script>` tags). Filter it out with `--only-poc v,a,r`.
 
 Optionally include the full request/response:
@@ -201,7 +201,7 @@ A baseline that is missing, malformed, or written by a different major version *
 
 ### Refreshing the baseline
 
-There is no special command. Re-run **without** `--baseline` — so the report holds the full set, not just the new findings — and replace the file:
+There is no special command. Re-run **without** `--baseline` (so the report holds the full set, not just the new findings) and replace the file:
 
 ```bash
 dalfox scan scope.txt -f json -o baseline.json
@@ -241,7 +241,7 @@ target_summary = [{ target = "https://target.app", status = "findings", findings
 
 [[results]]
 type = "V"
-type_description = "Vulnerable"
+type_description = "Vulnerable - dalfox asserts this input is exploitable; act on it"
 detection_method = "dom-verification"
 confidence = "high"
 inject_type = "inHTML"
@@ -320,7 +320,7 @@ Dalfox returns:
 | `1` | Completed successfully, at least one finding **of any tier** |
 | `2` | Input/config/runtime error, **or** a session lost mid-scan *with no findings* under the default `--on-session-loss abort` (a run that did find something still exits `1`) |
 
-`1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity >= High` with `jq` reaches the same set today, because severity currently tracks the tier — see [Detection Model](../detection-model/).)
+`1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity >= High` with `jq` reaches the same set today, because severity currently tracks the tier; see [Detection Model](../detection-model/).)
 
 `--baseline` narrows the same code to *novelty*: under the default `filter` mode, suppressed findings never reach the exit-code decision, so a run whose entire backlog is already in the baseline exits `0`. See [Baselines](#baselines-reporting-only-what-is-new).
 
