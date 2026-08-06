@@ -1412,3 +1412,202 @@ fn test_effective_wire_name() {
     };
     assert_eq!(plain.effective_wire_name(), "q");
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// `send_probe_request_for_param` — request-shape coverage for the body
+// locations that only had unreachable-endpoint (failure-path) tests.
+//
+// These arms decide what actually goes on the wire for the special-character
+// probe. When the probe request carries no payload, every special classifies
+// as invalid and the param's `<`/`>` payloads get pruned — a silent false
+// negative rather than an error (see the multipart absent-param fix, #1260 /
+// #1261). Asserting the response text is not enough for that class of bug;
+// these tests assert the request the server actually received.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Echoes the raw request body back inside an HTML shell so the probe's
+/// marker/special extraction sees exactly what was sent, and records each body
+/// for direct assertions on the request shape.
+async fn start_body_echo_server(
+    seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+) -> std::net::SocketAddr {
+    use axum::{Router, extract::State, response::Html};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn echo(
+        State(seen): State<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+        body: String,
+    ) -> Html<String> {
+        seen.lock().expect("record body").push(body.clone());
+        Html(format!("<div>{}</div>", body))
+    }
+
+    let app = Router::new()
+        .route("/echo", axum::routing::post(echo))
+        .with_state(seen);
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+/// The scanned multipart param is absent from the captured body: the exact-match
+/// loop never places it, so the `!placed` fallback must append it. Without that
+/// fallback the probe carries no payload and the param's angle-bracket payloads
+/// are pruned as "invalid".
+#[tokio::test]
+async fn active_probe_multipart_appends_param_absent_from_captured_body() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let addr = start_body_echo_server(seen.clone()).await;
+    let mut target = parse_target(&format!("http://{addr}/echo")).unwrap();
+    target.method = "POST".to_string();
+    target.data = Some("other=seed".to_string());
+
+    let res = active_probe_param(
+        &target,
+        probe_param("q", Location::MultipartBody),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let bodies = seen.lock().expect("bodies").clone();
+    assert!(!bodies.is_empty(), "the probe must have reached the server");
+    let first = &bodies[0];
+    assert!(
+        first.contains("name=\"q\""),
+        "the absent param must be appended as a multipart field, got: {first}"
+    );
+    assert!(
+        first.contains("name=\"other\""),
+        "the captured field must be preserved, got: {first}"
+    );
+    let valid = res.valid_specials.clone().unwrap_or_default();
+    assert!(
+        valid.contains(&'<') && valid.contains(&'>'),
+        "the echoed payload must classify angle brackets as valid; got {valid:?}"
+    );
+}
+
+/// The scanned param *is* in the captured body: it must be replaced with the
+/// payload (the `placed` arm) while every sibling field keeps its captured
+/// value (the `else` arm).
+#[tokio::test]
+async fn active_probe_multipart_replaces_present_param_and_keeps_siblings() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let addr = start_body_echo_server(seen.clone()).await;
+    let mut target = parse_target(&format!("http://{addr}/echo")).unwrap();
+    target.method = "POST".to_string();
+    target.data = Some("q=seed&other=keepme".to_string());
+
+    let _ = active_probe_param(
+        &target,
+        probe_param("q", Location::MultipartBody),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let bodies = seen.lock().expect("bodies").clone();
+    let first = bodies.first().cloned().unwrap_or_default();
+    assert!(
+        first.contains("keepme"),
+        "sibling field values must be preserved verbatim, got: {first}"
+    );
+    assert!(
+        !first.contains("seed"),
+        "the scanned param's captured value must be replaced by the payload, got: {first}"
+    );
+    // Exactly one `q` field — the fallback must not double-append it.
+    assert_eq!(
+        first.matches("name=\"q\"").count(),
+        1,
+        "the replaced param must not also be appended, got: {first}"
+    );
+}
+
+/// A captured JSON body whose root is not an object (an array, here) must be
+/// replaced by a fresh single-key object rather than dropped — otherwise the
+/// probe body carries no payload at all.
+#[tokio::test]
+async fn active_probe_json_body_replaces_non_object_root_with_object() {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let addr = start_body_echo_server(seen.clone()).await;
+    let mut target = parse_target(&format!("http://{addr}/echo")).unwrap();
+    target.method = "POST".to_string();
+    target.data = Some("[1,2,3]".to_string());
+
+    let res = active_probe_param(
+        &target,
+        probe_param("q", Location::JsonBody),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let bodies = seen.lock().expect("bodies").clone();
+    let first = bodies.first().cloned().unwrap_or_default();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&first).expect("probe body must still be valid JSON");
+    assert!(
+        parsed.get("q").and_then(|v| v.as_str()).is_some(),
+        "the array root must be replaced by an object keyed on the param, got: {first}"
+    );
+    let valid = res.valid_specials.clone().unwrap_or_default();
+    assert!(
+        !valid.is_empty(),
+        "the payload must have been echoed back for classification"
+    );
+}
+
+/// Fragment params are DOM-side: the fragment never travels to the server, so
+/// the probe must still send a well-formed request whose path and query are
+/// untouched. A fragment builder that leaked into the query would silently
+/// change which endpoint gets probed.
+#[tokio::test]
+async fn active_probe_fragment_leaves_path_and_query_intact() {
+    use axum::{Router, extract::State, http::Uri, response::Html, routing::get};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn record(
+        State(seen): State<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+        uri: Uri,
+    ) -> Html<String> {
+        seen.lock().expect("record uri").push(uri.to_string());
+        Html("<div>ok</div>".to_string())
+    }
+
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/p", get(record))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/p?a=1")).unwrap();
+    let _ = active_probe_param(
+        &target,
+        probe_param("f", Location::Fragment),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let uris = seen.lock().expect("uris").clone();
+    assert!(!uris.is_empty(), "the fragment probe must still be sent");
+    for uri in &uris {
+        assert_eq!(
+            uri, "/p?a=1",
+            "the fragment must not leak into the request line"
+        );
+    }
+}

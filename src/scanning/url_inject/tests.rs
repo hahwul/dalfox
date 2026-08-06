@@ -123,6 +123,79 @@ fn test_path_injection_basic() {
     assert!(out.contains("/a/PAY%20LOAD/c"));
 }
 
+/// Only the space arm of the path-segment encoder was exercised. The rest of
+/// the table encodes the characters that would otherwise *truncate or reshape*
+/// the URL — `#` starts a fragment, `?` starts a query, `%` would corrupt the
+/// following bytes, and CR/LF/TAB are request-splitting material. If any arm
+/// regressed to a raw push the injected payload would silently land in a
+/// different URL component than the path segment under test.
+#[test]
+fn test_path_injection_encodes_url_structural_characters() {
+    let base = make_url("https://example.com/a/b/c");
+    let param = Param {
+        name: "path_segment_1".into(),
+        value: "b".into(),
+        location: Location::Path,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    let out = build_injected_url(&base, &param, "x#y?z%w\nq\tr\ns");
+    assert!(
+        out.contains("%23") && out.contains("%3F") && out.contains("%25"),
+        "#, ? and % must be percent-encoded, got: {out}"
+    );
+    assert!(
+        out.contains("%0A") && out.contains("%09"),
+        "LF and TAB must be percent-encoded, got: {out}"
+    );
+    // The payload must stay inside the path: no fragment, no query.
+    assert!(
+        !out.contains('#') && !out.contains('?'),
+        "structural characters leaked out of the path segment: {out}"
+    );
+    assert!(out.starts_with("https://example.com/a/"));
+    assert!(out.ends_with("/c"));
+}
+
+/// CR is on the encode table too, but a bare `\r` in a path is also something
+/// `Url::set_path` would reject or rewrite — pin that the encoder gets there
+/// first and the result stays a well-formed URL.
+#[test]
+fn test_path_injection_encodes_carriage_return() {
+    let base = make_url("https://example.com/a/b");
+    let param = Param {
+        name: "path_segment_1".into(),
+        value: "b".into(),
+        location: Location::Path,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    let out = build_injected_url(&base, &param, "a\rb");
+    assert!(
+        out.contains("%0D"),
+        "CR must be percent-encoded, got: {out}"
+    );
+    assert!(!out.contains('\r'), "raw CR must not survive: {out:?}");
+}
+
 #[test]
 fn test_path_injection_index_out_of_bounds() {
     let base = make_url("https://example.com/a");
@@ -404,6 +477,89 @@ fn test_hpp_absent_param_appended() {
     let out = build_hpp_url(&base, &param, "XSS", HppPosition::Last).unwrap();
     assert!(out.contains("other=1"));
     assert!(out.contains("q=&q=XSS"));
+}
+
+/// The append branch (param absent from the original query) has one arm per
+/// position, and only `Last` was covered. `First`/`Both` emit the *same*
+/// pair ordering as their replace-branch counterparts — a mismatch here would
+/// mean `--hpp` silently probes only one real ordering on mined/dictionary
+/// params, which are exactly the ones absent from the URL.
+#[test]
+fn test_hpp_absent_param_appended_first_position() {
+    let base = make_url("https://example.com/path?other=1");
+    let param = Param {
+        name: "q".into(),
+        value: "safe".into(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    let out = build_hpp_url(&base, &param, "XSS", HppPosition::First).unwrap();
+    assert_eq!(out, "https://example.com/path?other=1&q=XSS&q=safe");
+}
+
+#[test]
+fn test_hpp_absent_param_appended_both_position() {
+    let base = make_url("https://example.com/path?other=1");
+    let param = Param {
+        name: "q".into(),
+        value: "safe".into(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    let out = build_hpp_url(&base, &param, "XSS", HppPosition::Both).unwrap();
+    assert_eq!(out, "https://example.com/path?other=1&q=XSS&q=XSS");
+}
+
+/// Appending onto a URL with *no* existing query must not emit a leading `&`
+/// (`?&q=...`), which several servers parse as an empty first parameter and
+/// which would make the whole HPP probe malformed.
+#[test]
+fn test_hpp_absent_param_appended_on_bare_url_has_no_leading_amp() {
+    let base = make_url("https://example.com/path");
+    let param = Param {
+        name: "q".into(),
+        value: "safe".into(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    for (position, expected) in [
+        (HppPosition::Last, "https://example.com/path?q=safe&q=XSS"),
+        (HppPosition::First, "https://example.com/path?q=XSS&q=safe"),
+        (HppPosition::Both, "https://example.com/path?q=XSS&q=XSS"),
+    ] {
+        let out = build_hpp_url(&base, &param, "XSS", position).unwrap();
+        assert_eq!(out, expected, "position {:?}", position);
+    }
 }
 
 #[test]

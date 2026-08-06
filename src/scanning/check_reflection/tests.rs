@@ -2163,3 +2163,175 @@ fn test_occurrence_inside_url_attr_value_handles_query_string() {
     let pos3 = h3.find("zzmarker").unwrap();
     assert!(!occurrence_inside_url_attr_value(h3.as_bytes(), pos3));
 }
+
+// ---------------------------------------------------------------------------
+// `check_reflection_with_hpp_url` — the request path behind `--hpp`.
+//
+// This function had no test at all: every one of its branches (the
+// skip/ignore-status early returns, the redirect-Location check, the capped
+// body read, the safe-context demotion) was exercised only by a live `--hpp`
+// scan. It is also the one reflection entry point that takes a pre-built URL
+// string instead of deriving it from the target, so a malformed URL from
+// `build_hpp_url` degrades here rather than at the call site.
+// ---------------------------------------------------------------------------
+
+/// Happy path: the duplicated-parameter URL is sent verbatim and the payload
+/// echoed by the server is classified as a reflection, with the body returned
+/// as evidence.
+#[tokio::test]
+async fn test_hpp_reflection_detects_echo_and_returns_body() {
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/reflect/raw");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+    // What `build_hpp_url(.., HppPosition::Last)` produces for this target.
+    let hpp_url = format!(
+        "http://{}:{}/reflect/raw?q=seed&q=DALFOXHPP",
+        addr.ip(),
+        addr.port()
+    );
+
+    let (kind, body) =
+        check_reflection_with_hpp_url(&client, &target, &param, "DALFOXHPP", &hpp_url, &args).await;
+
+    assert!(
+        kind.is_some(),
+        "duplicated param echo must classify as a reflection"
+    );
+    assert!(
+        body.unwrap_or_default().contains("DALFOXHPP"),
+        "the response body must be returned as evidence"
+    );
+}
+
+/// `--skip-xss-scanning` must short-circuit before any request is made, or the
+/// analysis-only modes (preflight, REST/MCP preflight) would still attack.
+#[tokio::test]
+async fn test_hpp_reflection_respects_skip_xss_scanning() {
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/reflect/raw");
+    let param = make_param();
+    let mut args = default_scan_args();
+    args.skip_xss_scanning = true;
+    let client = target.build_client_or_default();
+    let hpp_url = format!(
+        "http://{}:{}/reflect/raw?q=seed&q=DALFOXHPP",
+        addr.ip(),
+        addr.port()
+    );
+
+    let (kind, body) =
+        check_reflection_with_hpp_url(&client, &target, &param, "DALFOXHPP", &hpp_url, &args).await;
+
+    assert!(kind.is_none() && body.is_none());
+}
+
+/// A status code in `--ignore-return` must suppress the finding even though the
+/// body reflects — this is how users mute WAF block pages that echo the input.
+#[tokio::test]
+async fn test_hpp_reflection_honors_ignore_return() {
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/reflect/raw");
+    let param = make_param();
+    let mut args = default_scan_args();
+    args.ignore_return = vec![200];
+    let client = target.build_client_or_default();
+    let hpp_url = format!(
+        "http://{}:{}/reflect/raw?q=seed&q=DALFOXHPP",
+        addr.ip(),
+        addr.port()
+    );
+
+    let (kind, body) =
+        check_reflection_with_hpp_url(&client, &target, &param, "DALFOXHPP", &hpp_url, &args).await;
+
+    assert!(
+        kind.is_none() && body.is_none(),
+        "an ignored status must not produce a finding or leak the body"
+    );
+}
+
+/// A redirect whose `Location` carries the payload is a reflection too: the
+/// body is empty, so only the header check can catch it.
+#[tokio::test]
+async fn test_hpp_reflection_detects_payload_in_redirect_location() {
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/redirect/decoded");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+    let hpp_url = format!(
+        "http://{}:{}/redirect/decoded?q=seed&q=DALFOXHPP",
+        addr.ip(),
+        addr.port()
+    );
+
+    let (kind, evidence) =
+        check_reflection_with_hpp_url(&client, &target, &param, "DALFOXHPP", &hpp_url, &args).await;
+
+    assert!(
+        kind.is_some(),
+        "payload echoed into Location must be detected"
+    );
+    let evidence = evidence.unwrap_or_default();
+    assert!(
+        evidence.starts_with("/final?next=") && evidence.contains("DALFOXHPP"),
+        "the Location header must be returned as the evidence, got: {evidence}"
+    );
+}
+
+/// No echo -> no finding, but the body still comes back so callers can log it.
+#[tokio::test]
+async fn test_hpp_reflection_reports_no_kind_when_not_reflected() {
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/reflect/none");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+    let hpp_url = format!(
+        "http://{}:{}/reflect/none?q=seed&q=DALFOXHPP",
+        addr.ip(),
+        addr.port()
+    );
+
+    let (kind, body) =
+        check_reflection_with_hpp_url(&client, &target, &param, "DALFOXHPP", &hpp_url, &args).await;
+
+    assert!(kind.is_none());
+    assert!(body.unwrap_or_default().contains("not reflected"));
+}
+
+/// The HPP URL arrives as an already-serialized string. If it fails to parse,
+/// the scan must fall back to the target URL rather than panic or skip the
+/// param silently — `build_hpp_url` writes raw payload bytes into the query, so
+/// an unparseable result is reachable, not theoretical.
+#[tokio::test]
+async fn test_hpp_reflection_falls_back_to_target_url_when_hpp_url_is_unparseable() {
+    let addr = start_mock_server("stored").await;
+    // Target URL already carries `?q=seed`, so the fallback request reflects
+    // "seed" and not the payload.
+    let target = make_target(addr, "/reflect/raw");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let (kind, body) = check_reflection_with_hpp_url(
+        &client,
+        &target,
+        &param,
+        "DALFOXHPP",
+        ":::not a url:::",
+        &args,
+    )
+    .await;
+
+    assert!(
+        kind.is_none(),
+        "the fallback request carries no payload, so nothing must be reported"
+    );
+    assert!(
+        body.unwrap_or_default().contains("seed"),
+        "the fallback must have hit the target URL"
+    );
+}
