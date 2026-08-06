@@ -46,33 +46,11 @@ pub async fn verify_dom_xss_light_with_client(
                 .as_ref()
                 .and_then(|u| url::Url::parse(u).ok())
                 .unwrap_or_else(|| target.url.clone());
-            let body = if let Some(ref data) = target.data {
-                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-                let mut found = false;
-                for pair in &mut pairs {
-                    if pair.0 == param.name {
-                        pair.1 = payload.to_string();
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    pairs.push((param.name.clone(), payload.to_string()));
-                }
-                Some(
-                    url::form_urlencoded::Serializer::new(String::new())
-                        .extend_pairs(&pairs)
-                        .finish(),
-                )
-            } else {
-                Some(format!(
-                    "{}={}",
-                    urlencoding::encode(&param.name),
-                    urlencoding::encode(payload)
-                ))
-            };
+            let body = Some(crate::scanning::url_inject::urlencoded_body(
+                target.data.as_deref(),
+                &param.name,
+                payload,
+            ));
             crate::utils::build_request(client, target, body_method, parsed_url, body)
         }
         Location::JsonBody => {
@@ -81,27 +59,12 @@ pub async fn verify_dom_xss_light_with_client(
                 .as_ref()
                 .and_then(|u| url::Url::parse(u).ok())
                 .unwrap_or_else(|| target.url.clone());
-            let body = if let Some(ref data) = target.data {
-                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(obj) = json_val.as_object_mut() {
-                        obj.insert(
-                            param.name.clone(),
-                            serde_json::Value::String(payload.to_string()),
-                        );
-                    }
-                    Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
-                } else if param.value.is_empty() {
-                    // An empty `param.value` makes `str::replace` splice the
-                    // payload between every byte of `data`, sending a garbled
-                    // body. Re-serialize as `{name: payload}`, matching the
-                    // no-data branch and the PoC builder in `scanning::mod`.
-                    Some(serde_json::json!({ &param.name: payload }).to_string())
-                } else {
-                    Some(data.replace(&param.value, payload))
-                }
-            } else {
-                Some(serde_json::json!({ &param.name: payload }).to_string())
-            };
+            let body = Some(crate::scanning::url_inject::json_body(
+                target.data.as_deref(),
+                &param.name,
+                &param.value,
+                payload,
+            ));
             let rb = crate::utils::build_request(client, target, body_method, parsed_url, body);
             rb.header("Content-Type", "application/json")
         }
@@ -111,35 +74,11 @@ pub async fn verify_dom_xss_light_with_client(
                 .as_ref()
                 .and_then(|u| url::Url::parse(u).ok())
                 .unwrap_or_else(|| target.url.clone());
-            let mut form = reqwest::multipart::Form::new();
-            if let Some(ref data) = target.data {
-                let mut found = false;
-                for pair in data.split('&') {
-                    if let Some((k, v)) = pair.split_once('=') {
-                        let k = urlencoding::decode(k)
-                            .unwrap_or(std::borrow::Cow::Borrowed(k))
-                            .to_string();
-                        let v = urlencoding::decode(v)
-                            .unwrap_or(std::borrow::Cow::Borrowed(v))
-                            .to_string();
-                        if k == param.name {
-                            form = form.text(k, payload.to_string());
-                            found = true;
-                        } else {
-                            form = form.text(k, v);
-                        }
-                    }
-                }
-                // Mirror the `Body` branch: an injected param that isn't already
-                // in the captured body must still be sent, or the payload never
-                // reaches the server and verification silently fails (e.g. an
-                // explicit `--param` not present in the imported multipart body).
-                if !found {
-                    form = form.text(param.name.clone(), payload.to_string());
-                }
-            } else {
-                form = form.text(param.name.clone(), payload.to_string());
-            }
+            let form = crate::scanning::url_inject::multipart_form(
+                target.data.as_deref(),
+                &param.name,
+                payload,
+            );
             crate::utils::build_request(client, target, body_method, parsed_url, None)
                 .multipart(form)
         }

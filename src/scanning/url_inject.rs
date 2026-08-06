@@ -505,5 +505,109 @@ pub fn build_hpp_urls(
         .collect()
 }
 
+/// Build an `application/x-www-form-urlencoded` body that carries `value` for
+/// `name`, replacing the existing value when the param is already present and
+/// appending it otherwise.
+///
+/// This is the single source of truth for form-body injection. It was
+/// previously copy-pasted (byte-identical) across the reflection check, light
+/// verify, DOM verify, and PoC builders; keeping one implementation prevents
+/// the drift those parallel copies were prone to.
+pub fn urlencoded_body(data: Option<&str>, name: &str, value: &str) -> String {
+    match data {
+        Some(data) => {
+            let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            let mut found = false;
+            for pair in &mut pairs {
+                if pair.0 == name {
+                    pair.1 = value.to_string();
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                pairs.push((name.to_string(), value.to_string()));
+            }
+            url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&pairs)
+                .finish()
+        }
+        None => format!(
+            "{}={}",
+            urlencoding::encode(name),
+            urlencoding::encode(value)
+        ),
+    }
+}
+
+/// Build a JSON body that carries `value` for `name`.
+///
+/// - Valid JSON object body → insert/overwrite the `name` key.
+/// - Non-JSON body with an empty `param_value` → re-serialize as `{name: value}`
+///   (an empty `str::replace` pattern would splice the payload between every
+///   byte of the body).
+/// - Non-JSON body with a non-empty `param_value` → textual replace of the
+///   original value, preserving the surrounding (non-JSON) structure.
+/// - No captured body → `{name: value}`.
+///
+/// Single source of truth for the reflection / light-verify / DOM-verify / PoC
+/// JSON builders, which were byte-identical copies.
+pub fn json_body(data: Option<&str>, name: &str, param_value: &str, value: &str) -> String {
+    match data {
+        Some(data) => {
+            if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(obj) = json_val.as_object_mut() {
+                    obj.insert(
+                        name.to_string(),
+                        serde_json::Value::String(value.to_string()),
+                    );
+                }
+                serde_json::to_string(&json_val).unwrap_or_else(|_| data.to_string())
+            } else if param_value.is_empty() {
+                serde_json::json!({ name: value }).to_string()
+            } else {
+                data.replace(param_value, value)
+            }
+        }
+        None => serde_json::json!({ name: value }).to_string(),
+    }
+}
+
+/// Build a `multipart/form-data` form that carries `value` for `name`,
+/// replacing the matching field from the captured `data` and appending it when
+/// absent so an explicit `--param` not present in an imported body still ships
+/// its payload.
+///
+/// Single source of truth for the reflection / light-verify / DOM-verify /
+/// probe multipart builders.
+pub fn multipart_form(data: Option<&str>, name: &str, value: &str) -> reqwest::multipart::Form {
+    let mut form = reqwest::multipart::Form::new();
+    let mut found = false;
+    if let Some(data) = data {
+        for pair in data.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                let k = urlencoding::decode(k)
+                    .unwrap_or(Cow::Borrowed(k))
+                    .to_string();
+                let v = urlencoding::decode(v)
+                    .unwrap_or(Cow::Borrowed(v))
+                    .to_string();
+                if k == name {
+                    form = form.text(k, value.to_string());
+                    found = true;
+                } else {
+                    form = form.text(k, v);
+                }
+            }
+        }
+    }
+    if !found {
+        form = form.text(name.to_string(), value.to_string());
+    }
+    form
+}
+
 #[cfg(test)]
 mod tests;

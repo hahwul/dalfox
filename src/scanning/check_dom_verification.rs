@@ -843,33 +843,11 @@ fn build_body_request(
     encoded_payload: &str,
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
-    let body = if let Some(ref data) = target.data {
-        let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        let mut found = false;
-        for pair in &mut pairs {
-            if pair.0 == param.name {
-                pair.1 = encoded_payload.to_string();
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            pairs.push((param.name.clone(), encoded_payload.to_string()));
-        }
-        Some(
-            url::form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&pairs)
-                .finish(),
-        )
-    } else {
-        Some(format!(
-            "{}={}",
-            urlencoding::encode(&param.name),
-            urlencoding::encode(encoded_payload)
-        ))
-    };
+    let body = Some(crate::scanning::url_inject::urlencoded_body(
+        target.data.as_deref(),
+        &param.name,
+        encoded_payload,
+    ));
     let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
     let base = crate::utils::build_request(client, target, method, parsed_url, body);
     crate::utils::apply_header_overrides(
@@ -888,27 +866,12 @@ fn build_json_body_request(
     encoded_payload: &str,
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
-    let body = if let Some(ref data) = target.data {
-        if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
-            if let Some(obj) = json_val.as_object_mut() {
-                obj.insert(
-                    param.name.clone(),
-                    serde_json::Value::String(encoded_payload.to_string()),
-                );
-            }
-            Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
-        } else if param.value.is_empty() {
-            // An empty `param.value` would make `str::replace` splice the payload
-            // between every byte of `data` (empty-pattern match), sending a
-            // garbled body. Re-serialize as `{name: payload}`, matching the
-            // no-data branch and the PoC builder in `scanning::mod`.
-            Some(serde_json::json!({ &param.name: encoded_payload }).to_string())
-        } else {
-            Some(data.replace(&param.value, encoded_payload))
-        }
-    } else {
-        Some(serde_json::json!({ &param.name: encoded_payload }).to_string())
-    };
+    let body = Some(crate::scanning::url_inject::json_body(
+        target.data.as_deref(),
+        &param.name,
+        &param.value,
+        encoded_payload,
+    ));
     let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
     let base = crate::utils::build_request(client, target, method, parsed_url, body);
     crate::utils::apply_header_overrides(
@@ -924,34 +887,11 @@ fn build_multipart_request(
     encoded_payload: &str,
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
-    let mut form = reqwest::multipart::Form::new();
-    if let Some(ref data) = target.data {
-        let mut found = false;
-        for pair in data.split('&') {
-            if let Some((k, v)) = pair.split_once('=') {
-                let k = urlencoding::decode(k)
-                    .unwrap_or(std::borrow::Cow::Borrowed(k))
-                    .to_string();
-                let v = urlencoding::decode(v)
-                    .unwrap_or(std::borrow::Cow::Borrowed(v))
-                    .to_string();
-                if k == param.name {
-                    form = form.text(k, encoded_payload.to_string());
-                    found = true;
-                } else {
-                    form = form.text(k, v);
-                }
-            }
-        }
-        // A verified param absent from the captured body must still be injected,
-        // or the verification request carries no payload and can never confirm
-        // the finding. Mirrors the reflection/probe multipart builders.
-        if !found {
-            form = form.text(param.name.clone(), encoded_payload.to_string());
-        }
-    } else {
-        form = form.text(param.name.clone(), encoded_payload.to_string());
-    }
+    let form = crate::scanning::url_inject::multipart_form(
+        target.data.as_deref(),
+        &param.name,
+        encoded_payload,
+    );
     let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
     crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
 }
