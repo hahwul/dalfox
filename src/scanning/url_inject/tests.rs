@@ -855,3 +855,64 @@ fn effective_query_base_falls_back_when_action_unparseable() {
         target.as_str()
     );
 }
+
+// --- Shared body-injection helpers -----------------------------------------
+// These consolidate logic that was previously copy-pasted across the
+// reflection / light-verify / DOM-verify / PoC / probe builders. Cover the
+// replace-vs-append and no-data branches so the single source of truth stays
+// honest.
+
+#[test]
+fn urlencoded_body_replaces_existing_value() {
+    let out = urlencoded_body(Some("a=1&b=2"), "a", "PAY");
+    assert_eq!(out, "a=PAY&b=2");
+}
+
+#[test]
+fn urlencoded_body_appends_when_absent() {
+    let out = urlencoded_body(Some("a=1"), "b", "PAY");
+    assert_eq!(out, "a=1&b=PAY");
+}
+
+#[test]
+fn urlencoded_body_no_data_encodes_pair() {
+    let out = urlencoded_body(None, "q", "a b&c");
+    assert_eq!(out, "q=a%20b%26c");
+}
+
+#[test]
+fn urlencoded_body_only_replaces_exact_name_not_substring() {
+    // `id` must not rewrite `userid`.
+    let out = urlencoded_body(Some("userid=9&id=1"), "id", "PAY");
+    assert_eq!(out, "userid=9&id=PAY");
+}
+
+#[test]
+fn json_body_inserts_into_object() {
+    let out = json_body(Some(r#"{"a":"1"}"#), "b", "", "PAY");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["a"], "1");
+    assert_eq!(v["b"], "PAY");
+}
+
+#[test]
+fn json_body_empty_param_value_reserializes_not_splices() {
+    // A non-JSON body with an empty param value must NOT go through
+    // `str::replace("")`, which would splice the payload between every byte.
+    let out = json_body(Some("not json"), "q", "", "PAY");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["q"], "PAY");
+}
+
+#[test]
+fn json_body_non_empty_param_value_textual_replace() {
+    let out = json_body(Some("prefix ORIG suffix"), "q", "ORIG", "PAY");
+    assert_eq!(out, "prefix PAY suffix");
+}
+
+#[test]
+fn json_body_no_data_builds_object() {
+    let out = json_body(None, "q", "", "PAY");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["q"], "PAY");
+}

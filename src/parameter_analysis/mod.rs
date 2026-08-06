@@ -306,27 +306,8 @@ async fn send_probe_request_for_param(
             request_builder = client.request(req_method, url);
         }
         Location::Body => {
-            let body_string;
-            if let Some(d) = &data {
-                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(d.as_bytes())
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-                let mut found = false;
-                for (k, v) in &mut pairs {
-                    if *k == param_name {
-                        *v = payload.to_string();
-                        found = true;
-                    }
-                }
-                if !found {
-                    pairs.push((param_name.clone(), payload.to_string()));
-                }
-                body_string = url::form_urlencoded::Serializer::new(String::new())
-                    .extend_pairs(pairs)
-                    .finish();
-            } else {
-                body_string = format!("{}={}", param_name, payload);
-            }
+            let body_string =
+                crate::scanning::url_inject::urlencoded_body(data.as_deref(), &param_name, payload);
             request_builder = client
                 .request(req_method, action_resolved_url.clone())
                 .header("Content-Type", "application/x-www-form-urlencoded")
@@ -421,34 +402,8 @@ async fn send_probe_request_for_param(
                 .body(body_string);
         }
         Location::MultipartBody => {
-            let mut form = reqwest::multipart::Form::new();
-            let mut placed = false;
-            if let Some(d) = &data {
-                for pair in d.split('&') {
-                    if let Some((k, v)) = pair.split_once('=') {
-                        let k = urlencoding::decode(k)
-                            .unwrap_or(std::borrow::Cow::Borrowed(k))
-                            .to_string();
-                        let v = urlencoding::decode(v)
-                            .unwrap_or(std::borrow::Cow::Borrowed(v))
-                            .to_string();
-                        if k == param_name {
-                            form = form.text(k, payload.to_string());
-                            placed = true;
-                        } else {
-                            form = form.text(k, v);
-                        }
-                    }
-                }
-            }
-            // Append the param as a new field only when the exact-match loop
-            // didn't already inject it. The old `!data.contains(name)` substring
-            // guard skipped this whenever `name` was a substring of another key
-            // or value, sending the probe with no payload (so all specials
-            // classified invalid and the param's <,> payloads were pruned).
-            if !placed {
-                form = form.text(param_name.clone(), payload.to_string());
-            }
+            let form =
+                crate::scanning::url_inject::multipart_form(data.as_deref(), &param_name, payload);
             request_builder = client
                 .request(req_method, action_resolved_url.clone())
                 .multipart(form);

@@ -911,56 +911,20 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     // target has no original `data`, so the displayed PoC isn't an empty POST.
     let (body, content_type): (Option<String>, Option<&'static str>) = match param.location {
         Location::Body => {
-            let body = if let Some(data) = &target.data {
-                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-                let mut found = false;
-                for pair in &mut pairs {
-                    if pair.0 == param.name {
-                        pair.1 = payload.to_string();
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    pairs.push((param.name.clone(), payload.to_string()));
-                }
-                url::form_urlencoded::Serializer::new(String::new())
-                    .extend_pairs(&pairs)
-                    .finish()
-            } else {
-                format!(
-                    "{}={}",
-                    urlencoding::encode(&param.name),
-                    urlencoding::encode(payload)
-                )
-            };
+            let body = crate::scanning::url_inject::urlencoded_body(
+                target.data.as_deref(),
+                &param.name,
+                payload,
+            );
             (Some(body), Some("application/x-www-form-urlencoded"))
         }
         Location::JsonBody => {
-            let body = if let Some(data) = &target.data {
-                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(obj) = json_val.as_object_mut() {
-                        obj.insert(
-                            param.name.clone(),
-                            serde_json::Value::String(payload.to_string()),
-                        );
-                    }
-                    serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone())
-                } else if param.value.is_empty() {
-                    // An empty `param.value` would make `str::replace` splice the
-                    // payload between every byte of `data` (empty-pattern match),
-                    // producing a garbled PoC. Re-serialize as `{name: payload}`
-                    // instead — identical to the no-data branch below and to what
-                    // `inject_payload` actually sends for invalid-JSON bodies.
-                    serde_json::json!({ &param.name: payload }).to_string()
-                } else {
-                    data.replace(&param.value, payload)
-                }
-            } else {
-                serde_json::json!({ &param.name: payload }).to_string()
-            };
+            let body = crate::scanning::url_inject::json_body(
+                target.data.as_deref(),
+                &param.name,
+                &param.value,
+                payload,
+            );
             (Some(body), Some("application/json"))
         }
         Location::MultipartBody => (target.data.clone(), Some("multipart/form-data")),
