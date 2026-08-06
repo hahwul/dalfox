@@ -1127,3 +1127,117 @@ fn test_has_knockout_html_clause_boundary_cases() {
     assert!(!has_knockout_html_clause("text: foo"));
     assert!(!has_knockout_html_clause(""));
 }
+
+/// A page with exactly 15 distinct field names that echoes *every* query
+/// parameter. 15 is deliberate: the sentinel pre-probe only runs above
+/// `SENTINEL_PROBE_COUNT * 5`, so this shape slips past it and forces the
+/// adaptive EWMA collapse instead — the branch that was never exercised.
+async fn reflect_everything_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    let echoed: String = params.values().cloned().collect::<Vec<_>>().join(" ");
+    let mut form = String::from("<form>");
+    for i in 0..15 {
+        form.push_str(&format!("<input id=\"f{i}\" name=\"f{i}\" value=\"seed\">"));
+    }
+    form.push_str("</form>");
+    Html(format!("{form}<div>{echoed}</div>"))
+}
+
+async fn start_reflect_everything_server() -> SocketAddr {
+    let app = Router::new().route("/echo-all", get(reflect_everything_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+/// DOM mining against a reflect-everything page must collapse to the single
+/// synthetic `any` param instead of reporting one finding per field. This is an
+/// anti-amplification guard: without it the scan fans every payload out across
+/// every echoed name, which is where request counts explode on self-reflecting
+/// endpoints. The collapse block had no coverage at all.
+#[tokio::test]
+async fn test_probe_response_id_params_collapses_reflect_everything_page_to_any() {
+    let addr = start_reflect_everything_server().await;
+    let target = parse_target(&format!("http://{}:{}/echo-all", addr.ip(), addr.port()))
+        .expect("parse target");
+    let args = default_scan_args();
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+
+    probe_response_id_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    let query_params: Vec<_> = params
+        .iter()
+        .filter(|p| p.location == Location::Query)
+        .collect();
+    assert_eq!(
+        query_params.len(),
+        1,
+        "a reflect-everything page must collapse to exactly one Query param, got: {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        query_params[0].name, "any",
+        "the collapsed param must be the synthetic `any`"
+    );
+    assert!(
+        query_params[0].injection_context.is_some(),
+        "the collapsed param must keep an injection context so payload selection still works"
+    );
+}
+
+/// The collapse rewrites the Query slice in place, so params discovered through
+/// other channels (a mined Body param, here) must survive it. Dropping them
+/// would silently un-scan every non-query surface on any self-reflecting page.
+#[tokio::test]
+async fn test_dom_mining_collapse_preserves_non_query_params() {
+    let addr = start_reflect_everything_server().await;
+    let target = parse_target(&format!("http://{}:{}/echo-all", addr.ip(), addr.port()))
+        .expect("parse target");
+    let args = default_scan_args();
+    let reflection_params = Arc::new(Mutex::new(vec![Param {
+        name: "body_field".to_string(),
+        value: "v".to_string(),
+        location: Location::Body,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    }]));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+
+    probe_response_id_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "body_field" && p.location == Location::Body),
+        "the pre-existing Body param must survive the Query collapse, got: {:?}",
+        params
+            .iter()
+            .map(|p| (&p.name, &p.location))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        params
+            .iter()
+            .filter(|p| p.location == Location::Query)
+            .count(),
+        1,
+        "still exactly one collapsed Query param"
+    );
+}

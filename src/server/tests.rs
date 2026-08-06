@@ -3706,3 +3706,118 @@ async fn test_suggested_poll_interval_is_monotonic_in_progress() {
         "a nearly-finished scan should be polled fastest"
     );
 }
+
+// ---- /preflight success path ----
+//
+// Only the rejection paths (bad URL, bad method, missing auth, unreachable
+// target) were covered. Everything after the reachability probe — building the
+// preflight ScanArgs, running discovery, and turning the discovered params into
+// the estimate the REST contract publishes — had no test, so the shape of a
+// successful response and the arithmetic behind `estimated_total_requests`
+// could drift silently.
+
+/// A reachable, reflecting target must come back `reachable: true` with one
+/// entry per discovered param and a total that is exactly the sum of the
+/// per-param estimates. Clients budget scan time off these numbers.
+#[tokio::test]
+async fn test_preflight_handler_success_reports_params_and_consistent_estimate() {
+    let addr = start_reflecting_target_server().await;
+    let state = make_state(None, None, false, false, "cb");
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1"),
+            options: Some(ScanOptions {
+                timeout: Some(5),
+                skip_mining: Some(true),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&response_body_string(resp).await).expect("json");
+    let data = &parsed["data"];
+    assert_eq!(data["reachable"], true);
+    assert_eq!(data["method"], "GET");
+
+    let params = data["params"].as_array().expect("params array");
+    assert_eq!(
+        data["params_discovered"].as_u64().expect("count") as usize,
+        params.len(),
+        "params_discovered must match the params array length"
+    );
+    assert!(
+        !params.is_empty(),
+        "a reflecting target must yield at least one discovered param, got {data}"
+    );
+    for p in params {
+        assert!(p["name"].is_string(), "each param must carry a name: {p}");
+        assert!(
+            p["location"].is_string(),
+            "each param must carry a location: {p}"
+        );
+    }
+
+    let summed: u64 = params
+        .iter()
+        .map(|p| p["estimated_requests"].as_u64().unwrap_or(0))
+        .sum();
+    assert_eq!(
+        data["estimated_total_requests"].as_u64().expect("total"),
+        summed,
+        "the total must be the sum of the per-param estimates"
+    );
+    assert!(summed > 0, "a scannable param must bill a nonzero estimate");
+}
+
+/// `encoders: ["none"]` collapses the encoder fan-out factor to 1, so the
+/// estimate must come out strictly lower than the multi-encoder default. This
+/// is the one knob in the request that changes the arithmetic rather than the
+/// param set, and it is what callers reach for to preview a cheap scan.
+#[tokio::test]
+async fn test_preflight_handler_encoder_none_lowers_the_estimate() {
+    let addr = start_reflecting_target_server().await;
+
+    async fn estimate_for(addr: SocketAddr, encoders: Option<Vec<String>>) -> u64 {
+        let state = make_state(None, None, false, false, "cb");
+        let resp = preflight_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Ok(Json(ScanRequest {
+                target: format!("http://{addr}/?q=1"),
+                options: Some(ScanOptions {
+                    timeout: Some(5),
+                    skip_mining: Some(true),
+                    encoders,
+                    ..ScanOptions::default()
+                }),
+            })),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&response_body_string(resp).await).expect("json");
+        parsed["data"]["estimated_total_requests"]
+            .as_u64()
+            .expect("total")
+    }
+
+    let default_estimate = estimate_for(addr, None).await;
+    let none_estimate = estimate_for(addr, Some(vec!["none".to_string()])).await;
+    assert!(
+        default_estimate > 0 && none_estimate > 0,
+        "both runs must discover the reflecting param (default={default_estimate}, none={none_estimate})"
+    );
+    assert!(
+        none_estimate < default_estimate,
+        "`encoders: [none]` must shrink the estimate; got none={none_estimate} default={default_estimate}"
+    );
+}

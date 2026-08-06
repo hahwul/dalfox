@@ -2530,3 +2530,196 @@ fn test_extract_meta_csp_returns_report_only_when_no_enforcing() {
     assert_eq!(name, "Content-Security-Policy-Report-Only");
     assert!(content.contains("default-src 'self'"));
 }
+
+/// End-to-end coverage for the `--hpp` phase, which had none: `run_hpp_phase`
+/// and the `check_reflection_with_hpp_url` it drives were both fully untested,
+/// so an `inHTML-HPP` finding was never produced by any test.
+///
+/// The mock target models the shape HPP exists to defeat: the sanitizer runs on
+/// the *first* occurrence of `q`, while the reflection uses the *last* one. A
+/// single-parameter request (what the reflection phase sends) is therefore
+/// always sanitized and finds nothing — only the duplicated-parameter URL gets
+/// the payload through. That makes the assertion specific to the HPP phase
+/// rather than something the reflection phase could have produced.
+#[tokio::test]
+async fn test_run_scanning_hpp_phase_reports_duplicated_param_bypass() {
+    use axum::{Router, extract::RawQuery, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    async fn hpp_handler(RawQuery(raw): RawQuery) -> Html<String> {
+        let raw = raw.unwrap_or_default();
+        let values: Vec<String> = raw
+            .split('&')
+            .filter_map(|pair| pair.strip_prefix("q="))
+            .map(|v| urlencoding::decode(v).unwrap_or_default().into_owned())
+            .collect();
+        if values.is_empty() {
+            return Html("<div>no q</div>".to_string());
+        }
+        // Sanitizer inspects the first occurrence...
+        let first = &values[0];
+        if first.contains('<') || first.contains('>') {
+            return Html("<div>blocked</div>".to_string());
+        }
+        // ...but the page renders the last one, raw.
+        Html(format!("<div>{}</div>", values[values.len() - 1]))
+    }
+
+    let app = Router::new().route("/", get(hpp_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?q=safe", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.push(Param {
+        name: "q".to_string(),
+        value: "safe".to_string(),
+        location: Location::Query,
+        injection_context: Some(InjectionContext::Html(None)),
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    });
+
+    let mut args = integration_scan_args(false);
+    args.hpp = true;
+    let args = Arc::new(args);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        results.clone(),
+        None,
+        None,
+        Arc::new(AtomicUsize::new(0)),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let guard = results.lock().await;
+    let hpp: Vec<_> = guard
+        .iter()
+        .filter(|r| r.inject_type == "inHTML-HPP")
+        .collect();
+    assert!(
+        !hpp.is_empty(),
+        "the first-occurrence-sanitized / last-occurrence-rendered shape must \
+         yield an inHTML-HPP finding; got: {:?}",
+        guard
+            .iter()
+            .map(|r| (&r.result_type, r.inject_type.as_str()))
+            .collect::<Vec<_>>()
+    );
+    let finding = hpp[0];
+    // Pin the reporting contract for the HPP finding: these fields are what
+    // distinguishes it from a plain reflection in JSON/SARIF output.
+    assert_eq!(finding.param, "q");
+    assert_eq!(finding.message_id, 606);
+    assert_eq!(finding.severity, "Info");
+    assert_eq!(finding.location, "Query");
+    assert!(
+        finding.data.contains("q=") && finding.data.matches("q=").count() >= 2,
+        "the reported URL must be the duplicated-parameter one, got: {}",
+        finding.data
+    );
+    assert!(
+        finding.evidence.contains("HPP bypass") && finding.evidence.contains("position="),
+        "evidence must name the HPP position, got: {}",
+        finding.evidence
+    );
+    // Only one HPP finding per param — the phase breaks out after the first hit.
+    assert_eq!(
+        hpp.len(),
+        1,
+        "run_hpp_phase must report at most one finding per param"
+    );
+}
+
+/// The HPP phase is opt-in. Without `--hpp` the same target must produce no
+/// HPP finding, so the flag gate in `run_hpp_phase` (and the payload-cloning
+/// gate in `scan_param` that mirrors it) stays honest.
+#[tokio::test]
+async fn test_run_scanning_without_hpp_flag_reports_no_hpp_finding() {
+    use axum::{Router, extract::RawQuery, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    async fn echo_last_q(RawQuery(raw): RawQuery) -> Html<String> {
+        let raw = raw.unwrap_or_default();
+        let last = raw
+            .split('&')
+            .filter_map(|pair| pair.strip_prefix("q="))
+            .next_back()
+            .unwrap_or("");
+        Html(format!(
+            "<div>{}</div>",
+            urlencoding::decode(last).unwrap_or_default()
+        ))
+    }
+
+    let app = Router::new().route("/", get(echo_last_q));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?q=safe", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.push(Param {
+        name: "q".to_string(),
+        value: "safe".to_string(),
+        location: Location::Query,
+        injection_context: Some(InjectionContext::Html(None)),
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    });
+
+    let args = Arc::new(integration_scan_args(false));
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        results.clone(),
+        None,
+        None,
+        Arc::new(AtomicUsize::new(0)),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let guard = results.lock().await;
+    assert!(
+        guard.iter().all(|r| r.inject_type != "inHTML-HPP"),
+        "HPP findings must require --hpp"
+    );
+}
