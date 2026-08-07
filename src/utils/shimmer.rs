@@ -248,6 +248,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn smoothstep_clamps_and_hits_key_points() {
+        assert_eq!(smoothstep(0.0), 0.0);
+        assert_eq!(smoothstep(0.5), 0.5);
+        assert_eq!(smoothstep(1.0), 1.0);
+        assert_eq!(smoothstep(-1.0), 0.0);
+        assert_eq!(smoothstep(2.0), 1.0);
+    }
+
+    #[test]
+    fn smoothstep_is_monotonic() {
+        let mut previous = smoothstep(0.0);
+        for step in 1..=10 {
+            let current = smoothstep(step as f64 / 10.0);
+            assert!(current >= previous);
+            previous = current;
+        }
+    }
+
+    #[test]
     fn gray_code_spans_the_ramp() {
         assert_eq!(gray_code(0.0), GRAY_MIN);
         assert_eq!(gray_code(1.0), GRAY_MAX);
