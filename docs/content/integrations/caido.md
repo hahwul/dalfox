@@ -123,11 +123,11 @@ This adds a step to the workflow graph but is easier to debug.
 
 Older Dalfox v2 documentation used `dalfox pipe --rawdata`. In v3 the equivalent is `dalfox scan --input-type raw-http` (or the hidden `dalfox pipe` compatibility command with adjusted input handling). The temp-file or process-substitution approach shown above is the most portable.
 
-See the [Scanning Modes](../guide/scanning-modes/#raw-http-mode) page for the canonical raw-http usage.
+See the [Scanning Modes](../../guide/scanning-modes/#raw-http-mode) page for the canonical raw-http usage.
 
 ## See also
 
-- [Scanning Modes: Raw HTTP](../guide/scanning-modes/#raw-http-mode)
-- [Output & Reports](../guide/output/)
-- [WAF Bypass](../guide/waf-bypass/)
+- [Scanning Modes: Raw HTTP](../../guide/scanning-modes/#raw-http-mode)
+- [Output & Reports](../../guide/output/)
+- [WAF Bypass](../../guide/waf-bypass/)
 - GitHub Discussion [#992 (comment)](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370): original community report with the Caido If/Else boolean workaround script and `--no-color` suggestion

@@ -106,6 +106,88 @@ claude mcp add dalfox -- dalfox mcp
 `cancelled` 상태로 정리됩니다. 길거나 `deep_scan` 실행에 한도를 두어
 에이전트의 폴링 루프가 반드시 종료되도록 설정하세요.
 
+위 블록은 발췌입니다. 이 도구가 받는 모든 필드와 각각의 기본값은 다음과
+같습니다. 필수 필드는 `target` 하나뿐입니다.
+
+```json
+{
+  "target": "https://example.com/search?q=test",
+  "param": [],
+  "method": "GET",
+  "data": null,
+  "headers": [],
+  "cookies": [],
+  "user_agent": null,
+  "encoders": ["url", "html"],
+  "timeout": 10,
+  "scan_timeout": 0,
+  "delay": 0,
+  "follow_redirects": false,
+  "insecure": true,
+  "proxy": null,
+  "include_request": false,
+  "include_response": false,
+  "skip_mining": false,
+  "skip_discovery": false,
+  "deep_scan": false,
+  "skip_ast_analysis": false,
+  "analyze_external_js": false,
+  "detect_outdated_libs": false,
+  "blind_callback_url": null,
+  "workers": 50,
+  "rate_limit": 0,
+  "waf_bypass": "auto",
+  "skip_waf_probe": false,
+  "force_waf": null,
+  "waf_evasion": false,
+  "waf_min_confidence": 0.3,
+  "remote_payloads": [],
+  "remote_wordlists": [],
+  "max_payloads_per_param": 0,
+  "wait": false,
+  "wait_timeout_sec": 300
+}
+```
+
+`data`는 `POST`/`PUT`의 요청 본문으로, form-urlencoded
+(`"user=admin&pass=test"`) 또는 JSON 문자열을 받습니다. `cookies`는
+`"name=value"` 형태의 항목을, `headers`는 `"Name: Value"` 형태의 전체 줄을
+받으며, `user_agent`는 `User-Agent` 헤더를 덮어씁니다.
+
+`delay`는(기본값 `0`, 범위 `0`~`9999`) 요청 사이에 그만큼의 밀리초를 대기하고,
+`follow_redirects`는(기본값 `false`) 스캐너가 `3xx` 응답을 따라가게 하며,
+`proxy`는 모든 요청을 HTTP 또는 SOCKS 프록시(`"http://127.0.0.1:8080"`)로
+보냅니다.
+
+`include_request`와 `include_response`는(둘 다 기본값 `false`) 원본 HTTP 요청
+텍스트와 원본 응답 본문을 각 탐지 결과에 첨부해 포렌식 분석에 쓰이도록 합니다.
+응답이 클 수 있으므로 증거가 필요할 때만 켜세요.
+
+WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_bypass`는 처리
+모드를 고릅니다: `"auto"`(탐지 후 우회, 기본값), `"force"`(`force_waf`를 사용),
+`"off"`(탐지만). `skip_waf_probe`는(기본값 `false`) WAF 핑거프린팅 프로브를 아예
+건너뜁니다. `force_waf`는 WAF를 탐지하는 대신 특정 프로필(예: `"cloudflare"`,
+`"akamai"`, `"modsec"`)을 고정합니다. `waf_evasion`은(기본값 `false`) 적응형
+우회를 켭니다. `waf_min_confidence`는 `[0.0, 1.0]` 범위의 탐지 신뢰도
+하한이며(기본값 `0.3`), 이보다 낮은 핑거프린트는 버려집니다. `waf_bypass`나
+`force_waf`에 알 수 없는 값을 주거나 `waf_min_confidence`가 범위를 벗어나면
+`invalid_params`로 거부됩니다.
+
+`remote_payloads`와 `remote_wordlists`는(둘 다 기본값 `[]`) 스캔을 시작하기 전에
+원격 제공자로부터 추가 XSS 페이로드(`"portswigger"`, `"payloadbox"`)와 파라미터
+워드리스트(`"burp"`, `"assetnote"`)를 가져옵니다.
+
+`max_payloads_per_param`은 각 파라미터를 테스트할 페이로드 수의 상한입니다(기본값
+`0` = 내장 안전 상한을 제외하면 무제한). 에이전트의 스모크 스캔에는 `10`~`50`
+같은 작은 값을 쓰세요.
+
+`wait`는(기본값 `false`) 이 호출을 블로킹 방식으로 바꿉니다. 즉시
+`{scan_id, status: "queued"}`를 반환하는 대신 스캔이 `done` / `error` /
+`cancelled`에 도달할 때까지 블로킹한 뒤 `get_results_dalfox`와 동일한 형태를
+반환합니다. `wait_timeout_sec`는(기본값 `300`, 범위 `1`~`86400`) 그 대기의 실제
+경과 시간 예산이며 `wait`가 `false`이면 무시됩니다. 시간이 초과되면 작업은 계속
+실행되고 응답에 `wait_timed_out: true`가 담깁니다.
+
 응답:
 
 ```json

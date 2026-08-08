@@ -1,0 +1,18 @@
+<!-- replay-fixture
+name: jsonp_callback
+content-type: application/javascript; charset=utf-8
+escape: json
+query: callback=render
+header: X-Content-Type-Options: nosniff
+why: A JSONP endpoint, the classic shape that produces HTML-marker "verified"
+  claims on a body a browser never HTML-parses. Both attacker-reachable inputs
+  are constrained. (1) The callback name is validated against
+  ^[A-Za-z_$][A-Za-z0-9_$]{0,63}$ and replaced with "render" when it does not
+  match, so it can only ever be a bare JavaScript identifier -- no parenthesis,
+  no angle bracket, no statement. (2) The data value is JSON-escaped with < > &
+  emitted as \u00xx, so it cannot terminate the string literal nor introduce
+  markup. Served as application/javascript with nosniff: when this response is
+  loaded as a script it executes exactly one call to a validated identifier,
+  and when it is navigated to it is not HTML.
+-->
+{callback}({"query": "{input}", "results": [], "total": 0});

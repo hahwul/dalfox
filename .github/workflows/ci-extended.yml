@@ -3,10 +3,10 @@ name: Extended CI
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", .github/workflows/ci-extended.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
   pull_request:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", .github/workflows/ci-extended.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
   schedule:
     # Weekly: exercise the slower, normally-#[ignore]d functional suite so it
     # can't silently rot between releases.
@@ -55,3 +55,50 @@ jobs:
             --skip realworld \
             --skip category_baselines \
             --skip test_query_reflection_v2
+  harness-gates:
+    name: Crystal harnesses (gates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: crystal-lang/install-crystal@v1
+      - run: cargo build --release
+      # All green, so all blocking. `effectiveness` fails when recall drops or
+      # the FP count rises against docs/data/effectiveness.json; `perf-budget`
+      # fails when a scenario's request volume or wall-clock exceeds
+      # docs/data/perf-budget.json by more than its tolerance, or when findings
+      # drop (a cost win that costs detection is not a win); `hostile-scan`
+      # fails on a crash, a hang, or peak RSS over 1 GB.
+      - name: Effectiveness (precision / recall gate)
+        run: crystal run scripts/effectiveness_snapshot.cr
+      - name: Perf budget (request-volume gate)
+        run: crystal run scripts/perf_budget.cr
+      - name: Surface parity (CLI / config / REST / MCP / skills / docs)
+        run: crystal run scripts/surface_parity.cr
+      - name: Output conformance (formats + stdout purity)
+        run: crystal run scripts/output_conformance.cr
+      - name: Docs lint (EN/KO pairing, links, CSP, markers)
+        run: crystal run scripts/docs_lint.cr
+      - name: Replay corpus (benign pages must yield no findings)
+        run: crystal run scripts/replay_corpus.cr
+      - name: Hostile responses (crash / hang / memory)
+        run: crystal run scripts/hostile_scan.cr
+  harness-smoke:
+    name: Crystal harnesses (server + MCP)
+    runs-on: ubuntu-latest
+    # Not blocking for ONE remaining defect: rmcp rejects arguments that fail
+    # schema deserialization with a *successful* result carrying
+    # `isError: true`, while dalfox's own validation of the same class of
+    # mistake returns a JSON-RPC `invalid_params` error. A client that only
+    # inspects `error` reads the first form as a started scan. Fixing it means
+    # taking the tool arguments as raw JSON and hand-rolling deserialization,
+    # so it is tracked rather than rushed. Drop continue-on-error once the two
+    # channels agree.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: crystal-lang/install-crystal@v1
+      - run: cargo build --release
+      - name: Server + MCP smoke
+        continue-on-error: true
+        run: crystal run scripts/server_mcp_smoke.cr

@@ -3821,3 +3821,73 @@ async fn test_preflight_handler_encoder_none_lowers_the_estimate() {
         "`encoders: [none]` must shrink the estimate; got none={none_estimate} default={default_estimate}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// ScanOptions deserialization: unknown fields are refused, MCP spellings map.
+//
+// Before `deny_unknown_fields`, serde dropped anything it did not recognise,
+// so a misspelled or MCP-spelled option was accepted with 200 and silently
+// discarded — including `cookies` / `headers` / `blind_callback_url`, which
+// meant a scan ran unauthenticated and reported a clean result.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_scan_options_rejects_unknown_field() {
+    let err = serde_json::from_str::<ScanOptions>(r#"{"totally_bogus": 123}"#)
+        .expect_err("an unknown option must not deserialize");
+    // The message names the offending key, which is what makes the 400 useful.
+    assert!(
+        err.to_string().contains("totally_bogus"),
+        "error should name the unknown field, got: {err}"
+    );
+}
+
+#[test]
+fn test_scan_options_accepts_mcp_spellings() {
+    // The four options MCP spells differently. Each must land on the REST
+    // field rather than being dropped.
+    let opts: ScanOptions = serde_json::from_str(
+        r#"{
+            "cookies": ["sess=abc", "lang=ko"],
+            "headers": ["X-A: 1"],
+            "workers": 7,
+            "blind_callback_url": "https://oob.example/cb"
+        }"#,
+    )
+    .expect("MCP spellings must deserialize");
+
+    // A cookie list collapses to the single header value the scanner takes.
+    assert_eq!(opts.cookie.as_deref(), Some("sess=abc; lang=ko"));
+    assert_eq!(opts.header.as_deref(), Some(&["X-A: 1".to_string()][..]));
+    assert_eq!(opts.worker, Some(7));
+    assert_eq!(opts.blind.as_deref(), Some("https://oob.example/cb"));
+}
+
+#[test]
+fn test_scan_options_keeps_rest_spellings() {
+    let opts: ScanOptions = serde_json::from_str(
+        r#"{
+            "cookie": "sess=abc",
+            "header": ["X-A: 1"],
+            "worker": 7,
+            "blind": "https://oob.example/cb"
+        }"#,
+    )
+    .expect("the original REST spellings must keep working");
+
+    assert_eq!(opts.cookie.as_deref(), Some("sess=abc"));
+    assert_eq!(opts.worker, Some(7));
+    assert_eq!(opts.blind.as_deref(), Some("https://oob.example/cb"));
+}
+
+#[test]
+fn test_scan_options_cookie_list_drops_empty_entries() {
+    // `["a=b", ""]` must not produce a trailing `; ` in the header value.
+    let opts: ScanOptions =
+        serde_json::from_str(r#"{"cookies": ["a=b", "", "  ", "c=d"]}"#).unwrap();
+    assert_eq!(opts.cookie.as_deref(), Some("a=b; c=d"));
+
+    // An all-empty list is the same as not sending one at all.
+    let opts: ScanOptions = serde_json::from_str(r#"{"cookies": ["", " "]}"#).unwrap();
+    assert_eq!(opts.cookie, None);
+}

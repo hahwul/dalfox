@@ -144,13 +144,65 @@ pub(crate) struct ScanRequest {
     pub(crate) options: Option<ScanOptions>,
 }
 
+/// Per-scan options accepted by `POST /scan`.
+///
+/// `deny_unknown_fields` is load-bearing, not tidiness. Without it serde
+/// silently dropped anything it did not recognise, so a misspelled option was
+/// accepted with `200 OK` and discarded — and because four options are spelled
+/// differently on the MCP surface, an agent that reused its MCP argument dict
+/// on REST got a scan with **no cookies, no headers and no blind callback**,
+/// reported as a clean result. Silently ignoring an option a caller asked for
+/// is worse than refusing the request, so unknown keys now `400`.
+///
+/// The four MCP spellings are accepted as aliases rather than rejected: they
+/// are the same options under a different name, and mapping them is strictly
+/// better than 400-ing a caller who is asking for something real. The `#[serde(alias)]`
+/// approach mirrors `ScanRequest`'s `url` → `target` compat alias.
+/// Accept either a `Cookie` header string (the REST spelling) or a list of
+/// cookies (the MCP spelling), normalising the list to the single header value
+/// the scanner takes. Only reachable through `ScanOptions::cookie`.
+fn string_or_seq_cookie<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrSeq {
+        String(String),
+        Seq(Vec<String>),
+    }
+
+    Ok(match Option::<StringOrSeq>::deserialize(deserializer)? {
+        None => None,
+        Some(StringOrSeq::String(s)) => Some(s),
+        // Drop empties so `["a=b", ""]` cannot produce a trailing `; `.
+        Some(StringOrSeq::Seq(v)) => {
+            let joined = v
+                .iter()
+                .map(|c| c.trim())
+                .filter(|c| !c.is_empty())
+                .collect::<Vec<_>>()
+                .join("; ");
+            (!joined.is_empty()).then_some(joined)
+        }
+    })
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ScanOptions {
+    /// MCP spells this `cookies` and takes a list, while REST has always taken
+    /// one `Cookie` header string; both shapes are accepted and a list is
+    /// joined with `; ` into the single header value this field expects.
+    #[serde(alias = "cookies", default, deserialize_with = "string_or_seq_cookie")]
     pub(crate) cookie: Option<String>,
+    #[serde(alias = "workers")]
     pub(crate) worker: Option<usize>,
     pub(crate) delay: Option<u64>,
     pub(crate) timeout: Option<u64>,
+    #[serde(alias = "blind_callback_url")]
     pub(crate) blind: Option<String>,
+    #[serde(alias = "headers")]
     pub(crate) header: Option<Vec<String>>,
     pub(crate) method: Option<String>,
     pub(crate) data: Option<String>,

@@ -1698,3 +1698,75 @@ async fn active_probe_fragment_leaves_path_and_query_intact() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Cookie params must not be probed with a character that ends the cookie.
+// ---------------------------------------------------------------------------
+
+fn probe_test_target(cookies: &[(&str, &str)]) -> Target {
+    let mut target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    target.cookies = cookies
+        .iter()
+        .map(|(n, v)| (n.to_string(), v.to_string()))
+        .collect();
+    target
+}
+
+fn probe_test_param(location: Location, name: &str) -> Param {
+    Param {
+        name: name.into(),
+        value: "".into(),
+        location,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    }
+}
+
+#[test]
+fn test_probe_chars_drop_semicolon_for_cookie_params_only() {
+    let target = probe_test_target(&[("session", "abc")]);
+
+    // A `;` in the batched probe terminates the cookie value at the server, so
+    // the probe's CLOSE marker never comes back, the reflected segment cannot
+    // be extracted, and the parameter is classified as "nothing survives" —
+    // muting the payload generators for every cookie parameter.
+    let cookie_chars = probe_chars_for(&target, &probe_test_param(Location::Header, "session"));
+    assert!(
+        !cookie_chars.contains(&';'),
+        "the cookie probe must not contain the cookie delimiter"
+    );
+    // Everything else is still probed.
+    for c in SPECIAL_PROBE_CHARS.iter().filter(|c| **c != ';') {
+        assert!(cookie_chars.contains(c), "{c} should still be probed");
+    }
+
+    // Plain headers and query params keep the full set — `;` is meaningful
+    // there and its absence would be a real filtering signal.
+    for param in [
+        probe_test_param(Location::Header, "X-Forwarded-For"),
+        probe_test_param(Location::Query, "session"),
+    ] {
+        assert_eq!(probe_chars_for(&target, &param), SPECIAL_PROBE_CHARS.to_vec());
+    }
+}
+
+#[test]
+fn test_transport_invalid_chars_marks_semicolon_for_cookies() {
+    let target = probe_test_target(&[("session", "abc")]);
+    assert_eq!(
+        transport_invalid_chars(&target, &probe_test_param(Location::Header, "session")),
+        vec![';']
+    );
+    assert!(
+        transport_invalid_chars(&target, &probe_test_param(Location::Query, "session")).is_empty()
+    );
+}

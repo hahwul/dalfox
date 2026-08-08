@@ -1,0 +1,14 @@
+<!-- replay-fixture
+name: json_api
+content-type: application/json; charset=utf-8
+escape: json
+header: X-Content-Type-Options: nosniff
+why: A JSON API that echoes the query back in its response. Two independent
+  reasons this is inert. (1) The value is JSON-escaped with < > & also emitted
+  as \u00xx, so the document can never contain a raw angle bracket or an
+  unterminated string. (2) The response is served as application/json with
+  nosniff, so no browser will ever HTML-parse the body -- a marker found in
+  this response is text inside a data document, not a node in a DOM. This is
+  the "reflection inside an inert content type" false-positive class.
+-->
+{"query": "{input}", "results": [], "total": 0, "took_ms": 3}

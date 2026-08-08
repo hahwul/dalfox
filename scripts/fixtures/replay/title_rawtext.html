@@ -1,0 +1,22 @@
+<!-- replay-fixture
+name: title_rawtext
+content-type: text/html; charset=utf-8
+escape: html
+why: <title> is the other RCDATA element -- same rules as <textarea>, and the
+  same argument. The escaped < means the literal </title> can never appear, so
+  the element cannot be closed early and the payload cannot leak into <head>
+  as markup. Character references decode into the document title string, which
+  is displayed as text by the browser chrome and never parsed as HTML. The same
+  value is echoed once more into body text, escaped, for completeness.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Results for {input} - Example</title>
+</head>
+<body>
+  <h1>Results for {input}</h1>
+  <p>0 documents.</p>
+</body>
+</html>

@@ -1736,19 +1736,16 @@ async fn fetch_injection_response_with_client(
     let default_method = target.parse_method();
     let inject_request = match param.location {
         Location::Header => {
-            // Header injection: use original URL, inject payload as the header value
-            let parsed_url = target.url.clone();
-            let rb = crate::utils::build_request(
+            // Header injection. Shared with the DOM-verification and
+            // light-verify paths because a cookie param must go into the
+            // `Cookie` header, not a header named after the cookie — see
+            // `build_header_request`.
+            crate::scanning::url_inject::build_header_request(
                 client,
                 target,
+                param,
+                &encoded_payload,
                 default_method,
-                parsed_url,
-                target.data.clone(),
-            );
-            // Override/add the header with the encoded payload value
-            crate::utils::apply_header_overrides(
-                rb,
-                &[(param.name.clone(), encoded_payload.to_string())],
             )
         }
         Location::Body => {
@@ -1949,9 +1946,11 @@ async fn fetch_injection_response_with_client(
             // This removes the false positives where a query/body param is
             // echoed into a JSON API response (e.g. `{"q":"<svg onload=…>"}`).
             // Path has its own stricter markup-only gate just below; JSONP
-            // (`application/javascript`) and sniffable `text/plain` are
-            // intentionally NOT treated as inert here (see
-            // `content_type_is_inert_data`), preserving those detections.
+            // (`application/javascript`) is intentionally NOT treated as inert
+            // here (see `content_type_is_inert_data`), preserving those
+            // detections. `text/plain` is inert only when the response also
+            // sends `X-Content-Type-Options: nosniff` — without it a browser
+            // sniffs the body as HTML, with it the body can never be markup.
             //
             // Skip redirects: a 3xx carries the reflection in its `Location`
             // header, and the body content-type describes the (usually empty)
@@ -1964,11 +1963,13 @@ async fn fetch_injection_response_with_client(
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
-                if crate::utils::content_type_is_inert_data(ct) {
+                let nosniff = crate::utils::headers_declare_nosniff(resp.headers());
+                if crate::utils::content_type_is_inert_data_with_nosniff(ct, nosniff) {
                     crate::dbg_log!(
-                        "suppressing reflection on inert-data content-type (param={}, content-type={})",
+                        "suppressing reflection on inert-data content-type (param={}, content-type={}, nosniff={})",
                         param.name,
-                        ct
+                        ct,
+                        nosniff
                     );
                     return None;
                 }

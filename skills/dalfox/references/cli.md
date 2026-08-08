@@ -42,6 +42,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 |------|---------|
 | `-X, --method` | HTTP method override: `GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` (RFC 10008; body-capable, safe/idempotent). Body params preserve the target method (e.g. `-X QUERY -d '…'`) |
 | `-d, --data` | Request body (form or JSON) |
+| `--user-agent` | Set a custom `User-Agent` header (e.g. `--user-agent 'Mozilla/5.0'`); unset uses the built-in default |
 | `-p, --param` | Restrict to specific params. Prefer `name:location` (`query`, `body`, `json`, `multipart`, `header`, `cookie`). Bare `-p name` still works: if discovery did not seed it, dalfox synthesizes it (infers location from the request, defaults to `query`) so `--skip-discovery -p q` is not a silent no-op |
 | `--include-url` | Regex whitelist (multiple) |
 | `--exclude-url` | Regex blacklist (multiple) |
@@ -55,6 +56,9 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 |------|--------|
 | `--only-discovery` | Stop after parameter discovery (no XSS payloads) |
 | `--skip-discovery` | Turn off HTML form / link / JS discovery completely |
+| `--skip-reflection-header` | Skip the blanket sweep of common request headers. Headers named explicitly with `-p name:header` are still probed |
+| `--skip-reflection-cookie` | Skip the blanket sweep over supplied cookies. Cookies named explicitly with `-p name:cookie` are still probed |
+| `--skip-reflection-path` | Skip path-segment reflection checks |
 | `--skip-mining` | Skip DOM mining + dictionary mining (biggest single win for speed) |
 | `--skip-mining-dom` | Skip only DOM-based mining |
 | `--skip-mining-dict` | Skip only wordlist/dictionary mining |

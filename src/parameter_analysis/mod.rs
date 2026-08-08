@@ -703,6 +703,43 @@ async fn window_overflow_probe(
 /// dense special-char payload, while individual chars would pass), the
 /// function falls back to the legacy per-char loop so payload generators
 /// still see an accurate valid/invalid split.
+/// The special characters worth probing for `param`.
+///
+/// A cookie value is delimited by `;`, so a `;` inside the batched probe is not
+/// "filtered by the application" — it *ends the cookie*. The server then sees a
+/// truncated value, the probe's CLOSE marker never comes back,
+/// `extract_reflected_segment` finds nothing, and the whole parameter is
+/// classified as "no special character survives". That muted the payload
+/// generators for **every cookie parameter against every real server**, leaving
+/// cookies to fall back to a generic catalog that omits the context-appropriate
+/// breakout (measured: 21 targeted requests on a query param vs 4355 generic
+/// ones, missing the winning payload, on the identical sink reached via a
+/// cookie).
+///
+/// `;` is therefore dropped from the probe and recorded as invalid up front,
+/// which is also simply true: no payload can carry a raw `;` through a cookie.
+fn probe_chars_for(target: &Target, param: &Param) -> Vec<char> {
+    if crate::scanning::url_inject::param_is_cookie(target, param) {
+        SPECIAL_PROBE_CHARS
+            .iter()
+            .copied()
+            .filter(|c| *c != ';')
+            .collect()
+    } else {
+        SPECIAL_PROBE_CHARS.to_vec()
+    }
+}
+
+/// Characters that cannot survive `param`'s transport regardless of what the
+/// application does, so they are known-invalid without spending a probe.
+fn transport_invalid_chars(target: &Target, param: &Param) -> Vec<char> {
+    if crate::scanning::url_inject::param_is_cookie(target, param) {
+        vec![';']
+    } else {
+        Vec::new()
+    }
+}
+
 pub async fn active_probe_param(
     target: &Target,
     mut param: Param,
@@ -715,7 +752,8 @@ pub async fn active_probe_param(
     // `classify_special_chars`-style per-char checks then split it into
     // valid/invalid. One request replaces SPECIAL_PROBE_CHARS.len()
     // requests.
-    let batched_chars: String = SPECIAL_PROBE_CHARS.iter().collect();
+    let probe_chars = probe_chars_for(target, &param);
+    let batched_chars: String = probe_chars.iter().collect();
     let batched_probe = format!(
         "{}{}{}",
         crate::scanning::markers::open_marker(),
@@ -739,7 +777,7 @@ pub async fn active_probe_param(
         .and_then(extract_reflected_segment)
     {
         Some(segment) => {
-            for &c in SPECIAL_PROBE_CHARS {
+            for &c in &probe_chars {
                 if char_reflected_in_segment(segment, c) {
                     valid.push(c);
                 } else {
@@ -811,7 +849,7 @@ pub async fn active_probe_param(
                 }
                 // Genuine filtering / partial strip — keep the legacy
                 // "all invalid" classification.
-                None => invalid.extend_from_slice(SPECIAL_PROBE_CHARS),
+                None => invalid.extend_from_slice(&probe_chars),
             }
         }
     }
@@ -822,7 +860,7 @@ pub async fn active_probe_param(
         let mut handles = Vec::new();
         let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
         let invalid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
-        for &c in SPECIAL_PROBE_CHARS {
+        for &c in &probe_chars {
             let sem = semaphore.clone();
             let client_clone = client.clone();
             let target_clone = target.clone();
@@ -861,6 +899,14 @@ pub async fn active_probe_param(
     }
 
     let iv = invalid.clone();
+    // Fold in the characters the transport itself forbids, so payload
+    // generation avoids them rather than learning it the hard way.
+    for c in transport_invalid_chars(target, &param) {
+        if !invalid.contains(&c) {
+            invalid.push(c);
+        }
+        valid.retain(|v| *v != c);
+    }
     param.valid_specials = Some(valid.clone());
     param.invalid_specials = Some(invalid);
 

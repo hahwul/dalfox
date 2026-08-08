@@ -67,7 +67,7 @@ curl -o ~/.claude/skills/dalfox/SKILL.md \
 
 ## 사전 요구 사항
 
-이 스킬은 `dalfox` 바이너리나 [MCP 서버](./mcp/)가 에이전트 환경에서 도달 가능하다고 가정합니다. Dalfox를 먼저 설치한 뒤([설치 가이드](../../getting-started/installation/)) 스킬을 설치하세요.
+이 스킬은 `dalfox` 바이너리나 [MCP 서버](../mcp/)가 에이전트 환경에서 도달 가능하다고 가정합니다. Dalfox를 먼저 설치한 뒤([설치 가이드](../../getting-started/installation/)) 스킬을 설치하세요.
 
 ## 작성 팁
 

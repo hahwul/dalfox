@@ -3,6 +3,7 @@ title = "Caido 워크플로"
 description = "Caido Active Workflows와 Findings에서 Dalfox를 자동으로 실행하여 XSS를 실시간으로 잡아냅니다."
 weight = 4
 toc = true
+aliases = ["/ko/page/running/caido/"]
 +++
 
 Dalfox는 [Caido](https://caido.io) 워크플로 안에서 잘 작동합니다. 관심 있는 모든 요청(이나 선택한 트래픽)을 Dalfox 엔진에 곧바로 넣고, 탐지 결과를 클릭 한 번으로 Caido Findings로 전환할 수 있습니다.
@@ -122,11 +123,11 @@ Caido의 추가 컨텍스트(호스트, 메서드, 파라미터 이름 등)로 F
 
 이전 Dalfox v2 문서는 `dalfox pipe --rawdata`를 사용했습니다. v3에서 이에 해당하는 것은 `dalfox scan --input-type raw-http`(또는 입력 처리가 조정된 숨겨진 `dalfox pipe` 호환 명령)입니다. 위에 보인 임시 파일이나 프로세스 치환 방식이 가장 이식성이 높습니다.
 
-표준 raw-http 사용법은 [스캐닝 모드](../guide/scanning-modes/#raw-http-mode) 페이지를 참조하세요.
+표준 raw-http 사용법은 [스캐닝 모드](../../guide/scanning-modes/#raw-http-모드) 페이지를 참조하세요.
 
 ## 참고
 
-- [스캐닝 모드: Raw HTTP](../guide/scanning-modes/#raw-http-mode)
-- [출력 및 보고서](../guide/output/)
-- [WAF 우회](../guide/waf-bypass/)
+- [스캐닝 모드: Raw HTTP](../../guide/scanning-modes/#raw-http-모드)
+- [출력 및 보고서](../../guide/output/)
+- [WAF 우회](../../guide/waf-bypass/)
 - GitHub 논의 [#992 (댓글)](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370): Caido If/Else 불리언 우회 스크립트와 `--no-color` 제안이 담긴 원본 커뮤니티 보고

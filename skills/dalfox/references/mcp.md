@@ -46,6 +46,13 @@ Terminal jobs auto-purge after 1 hour.
   "detect_outdated_libs": false,                   // also emit [I] findings for known-vulnerable JS libs (CWE-1104, 0 extra reqs)
   "blind_callback_url": "https://xyz.interact.sh", // OOB `--blind-oob` lifecycle is CLI-only; MCP uses this callback URL
   "workers": 50,                                   // 1-500 (hard validated)
+  "waf_bypass": "auto",                            // "auto" (detect then bypass), "force" (use force_waf), "off" (detect only)
+  "skip_waf_probe": false,                         // skip the active WAF fingerprinting probe entirely
+  "force_waf": "cloudflare",                       // pin a WAF profile instead of detecting one; omit to auto-detect
+  "waf_evasion": false,                            // adaptive evasion: request jitter + cooldown on clusters of blocks
+  "waf_min_confidence": 0.3,                       // 0.0–1.0 floor; weaker fingerprints are discarded
+  "remote_payloads": ["portswigger"],              // fetch remote XSS payload sets ("portswigger", "payloadbox")
+  "remote_wordlists": ["burp"],                    // fetch remote param wordlists ("burp", "assetnote")
   "max_payloads_per_param": 0,                     // 0 = unlimited (built-in safety cap still applies); use 10–50 for agent smoke
   "wait": false,                                   // true = block until terminal (or wait_timeout_sec) and return get_results shape
   "wait_timeout_sec": 300                          // 1–86400; only used when wait=true (default 300)
@@ -58,6 +65,9 @@ Terminal jobs auto-purge after 1 hour.
 - `workers` ∈ [1, 500]
 - `max_payloads_per_param` ∈ [0, 100000]
 - `wait_timeout_sec` ∈ [1, 86400] when `wait=true`
+- `waf_bypass` ∈ {`auto`, `force`, `off`}
+- `waf_min_confidence` ∈ [0.0, 1.0]
+- `force_waf` must name a known WAF profile (same set the CLI `--force-waf` accepts)
 
 **Encoder normalization**: If `"none"` is present anywhere, the list becomes `["none"]` only.
 

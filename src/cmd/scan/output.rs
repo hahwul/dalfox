@@ -681,7 +681,18 @@ pub(crate) async fn render_results(
                 output_path
             );
         }
-        match std::fs::write(output_path, &output_content) {
+        // Always strip ANSI before writing to a file. `output_content` carries
+        // baked-in escapes from the plain builder (see `render_finding_block`),
+        // and the stdout branch below launders them through `cprintln!` — but
+        // this branch used to write the buffer raw, so `-f plain -o report.txt`
+        // produced a file starting `\e[31m[POC][V]...` even under `--no-color`
+        // and `NO_COLOR=1`, because the escapes never pass the global colour
+        // gate at all. A file is never a terminal, so there is no colour mode
+        // in which escapes belong here; strip unconditionally rather than
+        // mirroring the gate. Non-plain formats never contain escapes, so this
+        // is a no-op for them.
+        let file_content = crate::utils::term::strip_ansi(&output_content);
+        match std::fs::write(output_path, &file_content) {
             Ok(_) => {
                 if !args.silence {
                     println!("Results written to {}", output_path);

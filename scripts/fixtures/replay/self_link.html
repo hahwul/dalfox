@@ -1,0 +1,28 @@
+<!-- replay-fixture
+name: self_link
+content-type: text/html; charset=utf-8
+escape: html
+why: The permalink / canonical-URL echo that produced the javascript:-scheme
+  false positive. The href is rebuilt server-side from a hard-coded absolute
+  path -- it always begins with the literal "/page/self_link?q=" -- so the
+  attacker controls only the query string and can never reach the scheme
+  position of the URL. On top of that the echoed part is percent-encoded with
+  {input:url}, which leaves only [A-Za-z0-9-._~%], so it can neither close the
+  double-quoted attribute nor introduce a colon, a slash or an angle bracket.
+  A "javascript:" typed into q is transmitted as javascript%3A and stays a
+  relative path.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Permalink</title>
+  <link rel="canonical" href="/page/self_link?q={input:url}">
+</head>
+<body>
+  <h1>Permalink</h1>
+  <p>Showing results for <em>{input}</em>.</p>
+  <p><a href="/page/self_link?q={input:url}">Permalink to this search</a></p>
+  <p><a href="/page/self_link?q={input:url}&amp;page=2">Next page</a></p>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!-- replay-fixture
+name: data_attribute
+content-type: text/html; charset=utf-8
+escape: html
+why: The query lands in a data-* attribute (double-quoted, HTML-escaped) and is
+  then read back by inline script through element.dataset. The read side is the
+  interesting half: the value is written with textContent, which creates a text
+  node and never parses markup, so even if the attribute round-trip decoded the
+  entities back into < and " the DOM could not gain an element. Both halves --
+  the escaped write and the non-markup sink -- are individually sufficient.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dashboard</title>
+</head>
+<body>
+  <h1>Dashboard</h1>
+  <div id="panel" data-query="{input}" data-count="0"></div>
+  <script>
+    var panel = document.getElementById('panel');
+    panel.textContent = 'You searched for: ' + panel.dataset.query;
+  </script>
+</body>
+</html>

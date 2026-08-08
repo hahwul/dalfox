@@ -22,7 +22,19 @@ reqwest = { version = "0.13", default-features = false, features = [
 # `rustls-no-provider` feature leaves the crypto provider unset, so we install
 # ring's as the process default (see `dalfox::ensure_crypto_provider`).
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-scraper = "0.27"
+# `default-features = false` drops scraper's `errors` and `main` features.
+#
+# `errors` makes every `Html` retain a `Vec<Cow<str>>` holding ONE heap-allocated
+# message per tokenizer parse error, for the lifetime of the document. That vec is
+# proportional to the number of MALFORMED characters, not to body size, so a
+# response body of `<` or NUL bytes yields one allocation per byte: a 16 MiB body
+# (our `read_body_capped` ceiling) produced ~16.7M allocations and ~1-2 GB of RSS
+# from a 521 KB gzipped response. The byte cap bounds what we read; this bounds
+# what parsing that many bytes can cost. Nothing in dalfox ever reads
+# `Html::errors` — we only ever walk the tree — so dropping it is free.
+#
+# `main` only exists to build scraper's own CLI binary (it pulls `getopts`).
+scraper = { version = "0.27", default-features = false }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

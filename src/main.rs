@@ -135,8 +135,9 @@ async fn main() {
     let cli = Cli::parse();
     // Set global debug toggle for downstream modules
     DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
-    // Skip banner for MCP subcommand (stdout is JSON-RPC) and for
-    // machine-readable output formats (json, jsonl, sarif, toml) to keep stdout parseable.
+    // Skip banner for MCP subcommand (stdout is JSON-RPC) and for every
+    // document format (see `format_is_machine` — everything but `plain`) to
+    // keep stdout parseable.
     let is_mcp = matches!(cli.command, Some(Commands::Mcp));
     // Suppress banner when `payload <selector>` is invoked: the selector path
     // emits one-line-per-item output that users routinely pipe into grep/jq.
@@ -155,10 +156,9 @@ async fn main() {
             .windows(2)
             .find(|w| w[0] == "--format" || w[0] == "-f")
             .map(|w| w[1].as_str());
-        matches!(
-            scan_format.or(raw_format),
-            Some("json" | "jsonl" | "sarif" | "toml")
-        )
+        scan_format
+            .or(raw_format)
+            .is_some_and(dalfox::cmd::scan::format_is_machine)
     };
     // Banner emission is deferred until after the config file has been
     // loaded (further down) so a `silence = true` in the config file
@@ -327,7 +327,7 @@ async fn main() {
         .unwrap_or(false);
     // A machine-readable `format` set *only* in the config file (not on the CLI)
     // must also suppress the banner — otherwise the ASCII banner is prepended to
-    // the JSON/JSONL/SARIF/TOML document on stdout and breaks any pipeline that
+    // the machine-format document on stdout and breaks any pipeline that
     // configures the format via file rather than `--format`. `is_machine_format`
     // above only sees CLI args, so fold the config value in the same way
     // `config_silence` folds the config `silence`.
@@ -336,7 +336,7 @@ async fn main() {
         .ok()
         .and_then(|r| r.config.scan.as_ref())
         .and_then(|s| s.format.as_deref())
-        .map(|f| matches!(f, "json" | "jsonl" | "sarif" | "toml"))
+        .map(dalfox::cmd::scan::format_is_machine)
         .unwrap_or(false);
     let effective_silence = cli.silence || scan_silence || config_silence;
     if !is_mcp

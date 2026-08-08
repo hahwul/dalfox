@@ -104,6 +104,88 @@ stops, keeps any partial findings, and settles as `cancelled` with an
 `error_message` mentioning `scan_timeout`. Set it to bound long or `deep_scan`
 runs so an agent's poll loop is guaranteed to terminate.
 
+The block above is an excerpt. Every field the tool accepts, with its default —
+`target` is the only required one:
+
+```json
+{
+  "target": "https://example.com/search?q=test",
+  "param": [],
+  "method": "GET",
+  "data": null,
+  "headers": [],
+  "cookies": [],
+  "user_agent": null,
+  "encoders": ["url", "html"],
+  "timeout": 10,
+  "scan_timeout": 0,
+  "delay": 0,
+  "follow_redirects": false,
+  "insecure": true,
+  "proxy": null,
+  "include_request": false,
+  "include_response": false,
+  "skip_mining": false,
+  "skip_discovery": false,
+  "deep_scan": false,
+  "skip_ast_analysis": false,
+  "analyze_external_js": false,
+  "detect_outdated_libs": false,
+  "blind_callback_url": null,
+  "workers": 50,
+  "rate_limit": 0,
+  "waf_bypass": "auto",
+  "skip_waf_probe": false,
+  "force_waf": null,
+  "waf_evasion": false,
+  "waf_min_confidence": 0.3,
+  "remote_payloads": [],
+  "remote_wordlists": [],
+  "max_payloads_per_param": 0,
+  "wait": false,
+  "wait_timeout_sec": 300
+}
+```
+
+`data` is the request body for `POST`/`PUT`, either form-urlencoded
+(`"user=admin&pass=test"`) or a JSON string. `cookies` takes `"name=value"`
+entries, `headers` takes full `"Name: Value"` lines, and `user_agent` overrides
+the `User-Agent` header.
+
+`delay` (default `0`, range `0`–`9999`) waits that many milliseconds between
+requests, `follow_redirects` (default `false`) makes the scanner follow `3xx`
+responses, and `proxy` routes every request through an HTTP or SOCKS proxy
+(`"http://127.0.0.1:8080"`).
+
+`include_request` and `include_response` (both default `false`) attach the raw
+HTTP request text and the raw response body to each finding for forensic
+analysis. Opt in only when you need the evidence — responses can be large.
+
+The five WAF fields mirror the CLI's WAF flags. `waf_bypass` picks the handling
+mode: `"auto"` (detect then bypass, the default), `"force"` (use `force_waf`),
+or `"off"` (detect only). `skip_waf_probe` (default `false`) skips the WAF
+fingerprinting probe entirely. `force_waf` pins a specific WAF profile (e.g.
+`"cloudflare"`, `"akamai"`, `"modsec"`) instead of detecting one. `waf_evasion`
+(default `false`) turns on adaptive evasion. `waf_min_confidence` is the
+detection confidence floor in `[0.0, 1.0]` (default `0.3`); fingerprints below
+it are dropped. Unknown values for `waf_bypass` or `force_waf`, and a
+`waf_min_confidence` outside the range, are rejected as `invalid_params`.
+
+`remote_payloads` and `remote_wordlists` (both default `[]`) fetch extra XSS
+payloads (`"portswigger"`, `"payloadbox"`) and parameter wordlists (`"burp"`,
+`"assetnote"`) from remote providers before the scan starts.
+
+`max_payloads_per_param` caps how many payloads each parameter is tested with
+(default `0` = unlimited aside from the built-in safety cap). Use a small value
+such as `10`–`50` for agent smoke scans.
+
+`wait` (default `false`) turns the call into a blocking one: instead of
+returning `{scan_id, status: "queued"}` right away, it blocks until the scan is
+`done` / `error` / `cancelled` and returns the same shape as
+`get_results_dalfox`. `wait_timeout_sec` (default `300`, range `1`–`86400`) is
+the wall-clock budget for that wait and is ignored when `wait` is `false`; on
+timeout the job keeps running and the response carries `wait_timed_out: true`.
+
 Response:
 
 ```json

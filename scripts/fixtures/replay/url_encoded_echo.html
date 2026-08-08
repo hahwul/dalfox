@@ -1,0 +1,27 @@
+<!-- replay-fixture
+name: url_encoded_echo
+content-type: text/html; charset=utf-8
+escape: url
+why: A "canonical query string" widget that re-emits the input percent-encoded
+  rather than HTML-escaped. Percent-encoding to the RFC 3986 unreserved set
+  leaves only [A-Za-z0-9-._~] plus % and hex digits, which is a strict subset
+  of what HTML escaping would allow: no angle bracket, no quote, no ampersand,
+  no space, no colon and no slash can survive. It is therefore safe in element
+  content and inside a double-quoted attribute alike, and the browser does not
+  percent-decode either position, so the value stays as the literal %3C text.
+  The human-readable copy on the page uses {input:html} to show the same value
+  HTML-escaped instead.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Canonical URL</title>
+</head>
+<body>
+  <h1>Canonical URL</h1>
+  <p>You searched for <em>{input:html}</em>.</p>
+  <p>Canonical query string: <code>q={input}</code></p>
+  <p><a href="/page/url_encoded_echo?q={input}">Reload canonical URL</a></p>
+</body>
+</html>

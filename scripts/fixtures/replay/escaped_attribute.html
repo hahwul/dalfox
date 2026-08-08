@@ -1,0 +1,28 @@
+<!-- replay-fixture
+name: escaped_attribute
+content-type: text/html; charset=utf-8
+escape: html
+why: The query is echoed into three double-quoted attribute values. Both quote
+  characters are escaped (" as &quot;, ' as &#39;) so the value can never
+  terminate the attribute it lives in, and < is escaped so it cannot start a
+  tag even if a browser were to recover from a malformed attribute. Every
+  attribute here is explicitly double-quoted -- an unquoted attribute would be
+  breakable with a bare space, which is exactly why this fixture never uses
+  one. None of the attributes is an event handler or a URL-bearing attribute,
+  so a decoded entity stays inert data.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Filter</title>
+</head>
+<body>
+  <h1>Filter</h1>
+  <form action="/page/escaped_attribute" method="get">
+    <input type="text" name="q" value="{input}" placeholder="term">
+    <button type="submit">Apply</button>
+  </form>
+  <img src="/static/empty.png" alt="Chart for {input}" title="Chart for {input}" width="1" height="1">
+</body>
+</html>

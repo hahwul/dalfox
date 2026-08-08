@@ -190,7 +190,13 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "skip_discovery": false,
     "deep_scan": false,
     "skip_ast_analysis": false,
+    "analyze_external_js": false,
     "detect_outdated_libs": false,
+    "waf_bypass": "auto",
+    "skip_waf_probe": false,
+    "force_waf": "cloudflare",
+    "waf_evasion": false,
+    "waf_min_confidence": 0.3,
     "max_payloads_per_param": 0
   }
 }
@@ -204,6 +210,11 @@ outdated / known-vulnerable JS libraries as informational `[I]` findings
 the CLI scanner default); send `"insecure": false` (or `?insecure=false` on
 `GET /scan`) to enforce certificate validation.
 
+`analyze_external_js` is opt-in (default `false`): set it `true` to fetch
+same-origin `<script src>` bundles at preflight time and AST-analyze them for
+DOM XSS. Useful for SPAs whose sink logic lives entirely in external bundles.
+Off by default because it costs extra requests.
+
 `rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
 default), enforced across all worker tasks. The server-wide `--rate-limit` flag
 is an upper bound: a request may ask for a lower rate but cannot exceed or
@@ -213,6 +224,15 @@ disable it.
 tested with (default `0` = no explicit cap, the built-in payload safety cap
 still applies). Use a small value (e.g. `10`–`50`) for smoke scans. Mirrors the
 MCP scan tool's field of the same name.
+
+The five WAF fields mirror the CLI's WAF flags and are all optional — omit them
+and the scanner defaults apply. `waf_bypass` selects the handling mode:
+`"auto"` (detect then bypass, the default), `"force"` (use `force_waf`), or
+`"off"` (detect only). `skip_waf_probe` (default `false`) skips the WAF
+fingerprinting probe entirely. `force_waf` pins a specific WAF profile (e.g.
+`"cloudflare"`) instead of detecting one. `waf_evasion` (default `false`)
+enables adaptive evasion. `waf_min_confidence` is the detection confidence floor
+in `[0.0, 1.0]` (default `0.3`); fingerprints below it are discarded.
 
 `method` and `encoders` are validated against the same value sets the CLI
 accepts. `method` is uppercased for you (`"post"` → `"POST"`), and an

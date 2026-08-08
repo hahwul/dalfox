@@ -1,0 +1,25 @@
+<!-- replay-fixture
+name: redirect_relative
+content-type: text/html; charset=utf-8
+status: 302
+header: Location: /page/escaped_body_text?q={input:url}
+why: A 302 that carries the query across to the canonical search page. The
+  Location value is built from a hard-coded relative path, so it always starts
+  with "/page/" -- the scheme and authority positions are unreachable, which
+  rules out both javascript: and an off-site //evil.example redirect. The
+  echoed tail is percent-encoded, so it contains no CR, LF, quote or angle
+  bracket and cannot split the response or add a second header. The tiny HTML
+  body browsers show when they do not follow the redirect escapes the value the
+  ordinary way.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Moved</title>
+</head>
+<body>
+  <p>Your search for <strong>{input}</strong> moved.</p>
+  <p><a href="/page/escaped_body_text?q={input:url}">Continue</a></p>
+</body>
+</html>

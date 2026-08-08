@@ -345,6 +345,42 @@ pub fn content_type_is_inert_data(ct: &str) -> bool {
     false
 }
 
+/// Same as [`content_type_is_inert_data`], plus the types that are only
+/// sniffable — and therefore only exploitable — when the server has *not* sent
+/// `X-Content-Type-Options: nosniff`.
+///
+/// The plain-content-type version cannot make this call: its exclusion of
+/// `text/plain` is justified by "browsers content-sniff it as HTML when nosniff
+/// is absent", but it only receives the content-type string and so can never
+/// observe that nosniff is present. That gap reported a `[V]` for a
+/// `text/plain; charset=utf-8` + `nosniff` response echoing a payload — a
+/// document no browser will ever HTML-parse.
+///
+/// Only `text/plain` is added. An absent or empty content-type is deliberately
+/// still treated as live: `nosniff` constrains MIME *checking* for scripts and
+/// styles, and a navigation to a typeless response is still sniffed, so the
+/// same reasoning does not carry over.
+pub fn content_type_is_inert_data_with_nosniff(ct: &str, nosniff: bool) -> bool {
+    if content_type_is_inert_data(ct) {
+        return true;
+    }
+    if !nosniff {
+        return false;
+    }
+    matches!(content_type_primary(ct).as_deref(), Some("text/plain"))
+}
+
+/// True when the response carries `X-Content-Type-Options: nosniff`.
+///
+/// The header is a single token by spec; compared case-insensitively because
+/// the value is not case-sensitive in practice and servers do send `NoSniff`.
+pub fn headers_declare_nosniff(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get("x-content-type-options")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("nosniff"))
+}
+
 /// Build a preflight request for content-type detection.
 /// - If `prefer_head` is true, uses HEAD; otherwise GET.
 /// - When using GET and `range_bytes` is Some(n), adds `Range: bytes=0-(n-1)`

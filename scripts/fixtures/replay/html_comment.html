@@ -1,0 +1,23 @@
+<!-- replay-fixture
+name: html_comment
+content-type: text/html; charset=utf-8
+escape: html
+why: A debugging breadcrumb left inside an HTML comment. Escaping makes > into
+  &gt;, so neither "-->" nor the legacy "--!>" comment terminator can be
+  produced, and the echoed value can never escape the comment into markup.
+  Character references are not decoded inside comments either, so the entity
+  stays literal text in a node the renderer never displays. The escaped <
+  additionally means no tag could start even if a parser recovered oddly.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Docs</title>
+</head>
+<body>
+  <!-- last query: {input} -->
+  <h1>Documentation</h1>
+  <p>Nothing matched. The query was recorded in a page comment for support.</p>
+</body>
+</html>
