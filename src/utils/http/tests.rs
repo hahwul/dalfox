@@ -464,6 +464,26 @@ fn parse_retry_after_accepts_seconds_and_http_date() {
     assert_eq!(with("not-a-date"), None);
 }
 
+#[test]
+fn parse_http_date_retry_ms_handles_future_past_and_invalid_dates() {
+    let future = parse_http_date_retry_ms("Wed, 21 Oct 2099 07:28:00 GMT")
+        .expect("future HTTP-date must parse");
+    assert!(future > 0, "future date should yield a positive wait");
+    assert_eq!(
+        parse_http_date_retry_ms("Wed, 21 Oct 1999 07:28:00 GMT"),
+        Some(0)
+    );
+    assert_eq!(parse_http_date_retry_ms("not a date"), None);
+}
+
+#[test]
+fn parse_http_date_retry_ms_ignores_weekday() {
+    // 21 October 2099 is a Wednesday, but a weekday typo must not discard the
+    // server's otherwise valid retry hint.
+    assert!(parse_http_date_retry_ms("Mon, 21 Oct 2099 07:28:00 GMT").is_some_and(|ms| ms > 0));
+    assert!(parse_http_date_retry_ms("21 Oct 2099 07:28:00 GMT").is_some_and(|ms| ms > 0));
+}
+
 /// Spawn a one-shot localhost server that replies with `body` and return its
 /// URL. Used to exercise the real `reqwest::Response::chunk()` read path.
 async fn serve_once(body: Vec<u8>) -> String {
