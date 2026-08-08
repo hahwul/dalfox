@@ -880,6 +880,46 @@ fn test_dedupe_keeps_canonical_metadata_over_duplicate() {
     assert_eq!(merged.form_origin_url.as_deref(), Some("https://base/form"));
 }
 
+#[test]
+fn test_merge_char_sets_treats_none_as_unconstrained() {
+    assert_eq!(merge_char_sets(None, Some(vec!['a'])), Some(vec!['a']));
+    assert_eq!(merge_char_sets(Some(vec!['a']), None), Some(vec!['a']));
+    assert_eq!(merge_char_sets(None, None), None);
+    assert_eq!(merge_char_sets(Some(vec![]), None), Some(vec![]));
+}
+
+#[test]
+fn test_merge_char_sets_unions_preserving_first_occurrence_order() {
+    // Discovery inputs are internally unique; deduplication is needed across probes.
+    assert_eq!(
+        merge_char_sets(Some(vec!['>', '<']), Some(vec!['<', '/'])),
+        Some(vec!['>', '<', '/'])
+    );
+}
+
+#[test]
+fn test_intersect_char_sets_treats_none_as_unconstrained() {
+    assert_eq!(intersect_char_sets(None, Some(vec!['a'])), Some(vec!['a']));
+    assert_eq!(intersect_char_sets(Some(vec!['a']), None), Some(vec!['a']));
+    assert_eq!(intersect_char_sets(None, None), None);
+}
+
+#[test]
+fn test_intersect_char_sets_keeps_only_shared_chars() {
+    assert_eq!(
+        intersect_char_sets(Some(vec!['a', 'b']), Some(vec!['b', 'c'])),
+        Some(vec!['b'])
+    );
+    assert_eq!(
+        intersect_char_sets(Some(vec!['a']), Some(vec!['b'])),
+        Some(vec![])
+    );
+    assert_eq!(
+        intersect_char_sets(Some(vec![]), Some(vec!['a'])),
+        Some(vec![])
+    );
+}
+
 // Exercises the pure `-p name:<type>` spec parser directly. In production it is
 // only reached from async, network-bound discovery/mining call sites (issue
 // #1202), so its four match-arm behaviors are asserted here in isolation.
