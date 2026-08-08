@@ -39,6 +39,24 @@ fn test_host_patterns_are_lowercase() {
 }
 
 #[test]
+fn test_host_component_extracts_host() {
+    let cases = [
+        (
+            "https://ajax.googleapis.com/ajax/libs/jquery.js",
+            "ajax.googleapis.com",
+        ),
+        ("http://localhost:8080/x", "localhost"),
+        ("//cdn.example.com/lib.js", "cdn.example.com"),
+        ("example.com", "example.com"),
+        ("https://a.com/p?x=1#frag", "a.com"),
+    ];
+
+    for (origin, expected) in cases {
+        assert_eq!(host_component(origin), expected, "origin: {origin}");
+    }
+}
+
+#[test]
 fn test_gadgets_for_host_matches_cdnjs() {
     let hits: Vec<_> = gadgets_for_host("https://cdnjs.cloudflare.com").collect();
     assert!(hits.iter().any(|g| g.template.contains("angular")));
