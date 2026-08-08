@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="The three axes of a Dalfox finding (confidence, method, impact) and what each evidence tier actually proves.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Detection Model · Dalfox</title>
+  <meta property="og:title" content="Detection Model">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/guide/detection-model/">
+  <meta property="og:description" content="The three axes of a Dalfox finding (confidence, method, impact) and what each evidence tier actually proves.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/guide-detection-model.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Detection Model">
+  <meta name="twitter:description" content="The three axes of a Dalfox finding (confidence, method, impact) and what each evidence tier actually proves.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/guide-detection-model.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/detection-model/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/detection-model/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/guide/detection-model/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Detection Model","url":"https://dalfox.hahwul.com/guide/detection-model/","description":"The three axes of a Dalfox finding (confidence, method, impact) and what each evidence tier actually proves.","image":"https://dalfox.hahwul.com/og-images/guide-detection-model.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://dalfox.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Detection Model"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/guide/detection-model/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.2.0" target="_blank" rel="noopener" title="Dalfox v3.2.0 release notes">v3.2.0</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Detection Model</h1>
+          <p>Every Dalfox finding answers three separate questions. Reading them as one scale is the single most common source of confusion about the output, so they are separate fields:</p>
+<table>
+<thead>
+<tr>
+<th>Axis</th>
+<th>Field</th>
+<th>Question</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Confidence</strong></td>
+<td><code>type</code> — <code>V</code> / <code>R</code></td>
+<td>Can Dalfox claim this is a vulnerability?</td>
+</tr>
+<tr>
+<td><strong>Method</strong></td>
+<td><code>detection_method</code></td>
+<td>How was it found?</td>
+</tr>
+<tr>
+<td><strong>Impact</strong></td>
+<td><code>severity</code></td>
+<td>How bad is it if exploited?</td>
+</tr>
+</tbody>
+</table>
+<p>Two of those three vary independently today. <strong><code>severity</code> does not</strong>: for XSS
+findings it is currently a restatement of the tier (<code>V</code> → <code>High</code>, <code>A</code> →
+<code>Medium</code>, <code>R</code> → <code>Info</code>), so filtering or sorting on it tells you nothing that
+<code>type</code> didn't. It carries real information only on <code>I</code>, where it comes from the
+library advisory. Treat it as a display convenience until it grades impact on
+its own.</p>
+<p><code>[A]</code> predates that split. It answers the <em>method</em> question while sitting in the <code>type</code> field, which is why nobody (including the code) could say where it belonged on the confidence scale. It is being absorbed; see <a href="#migration">Migration</a> below.</p>
+<p>This page exists because the split was not visible from the output alone. It was worked out in <a href="https://github.com/hahwul/dalfox/issues/1238">issue #1238</a> with <a href="https://github.com/OSTARA711">@OSTARA711</a>, whose write-up is the basis for the model here.</p>
+<h2 id="confidence-what-type-means">Confidence: what <code>type</code> means</h2>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Name</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V</code></td>
+<td><strong>Vulnerable</strong></td>
+<td>Dalfox asserts this input is exploitable. Act on it.</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td><strong>Reflected</strong></td>
+<td>The payload came back in the response, but its position was not confirmed exploitable. A signal, not a claim — confirm it yourself.</td>
+</tr>
+<tr>
+<td><code>A</code></td>
+<td>AST-detected</td>
+<td>Transitional — a method label. See <a href="#migration">Migration</a>.</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td>Informational</td>
+<td>Not an XSS claim at all (e.g. a known-vulnerable JS library, CWE-1104).</td>
+</tr>
+</tbody>
+</table>
+<p>Filter with <code>--only-poc</code> (e.g. <code>--only-poc v</code>, <code>--only-poc v,a</code>, <code>--only-poc i</code>).</p>
+<h3 id="what-v-does-not-mean">What <code>V</code> does not mean</h3>
+<p><code>V</code> is <strong>not</strong> browser execution. Dalfox drives no browser and speaks no CDP; it never renders a page or watches an <code>alert()</code> fire. For the request-based methods, <code>V</code> means the payload was found in a <em>DOM tree parsed from a real HTTP response</em> — static analysis, on stronger evidence than the raw string match behind <code>R</code>.</p>
+<p>There is exactly one method where Dalfox observes real execution: <strong>out-of-band callbacks</strong> (blind XSS). When an injected <code>&lt;script src=…&gt;</code> calls home, a real browser parsed and fetched it. That is empirical, and it is the strongest evidence Dalfox produces — but it comes from someone else's browser, not one Dalfox controls.</p>
+<h2 id="method-what-detection-method-means">Method: what <code>detection_method</code> means</h2>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Reads</th>
+<th>Sends a payload?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reflection</code></td>
+<td>The response body, for the payload&#39;s bytes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>dom-verification</code></td>
+<td>The response parsed as HTML, for an executable position</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>ast</code></td>
+<td>The JavaScript in the response, for a source→sink flow</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>oob</code></td>
+<td>An out-of-band callback from a real browser</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>library</code></td>
+<td><code>&lt;script&gt;</code> tags, for known-vulnerable versions</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Use <code>detection_method == &quot;ast&quot;</code>, not <code>type == &quot;A&quot;</code>, to select AST findings.</strong> The method field is stable; the tier is not.</p>
+<h3 id="the-combinations-that-actually-occur">The combinations that actually occur</h3>
+<p>The tier and the method are chosen separately, so <code>V</code> does not imply
+<code>dom-verification</code>. Every finding Dalfox emits is one of these:</p>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th><code>detection_method</code></th>
+<th><code>confidence</code></th>
+<th><code>severity</code></th>
+<th>Produced by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V</code></td>
+<td><code>dom-verification</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>The dedicated DOM-verification request</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>reflection</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>The reflection phase, when the reflection response <em>already</em> parses to an executable position</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>oob</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>An out-of-band callback</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>ast</code></td>
+<td><code>high</code> <strong>or</strong> <code>low</code></td>
+<td>High</td>
+<td>The two legacy AST promotions — the disagreement <a href="#migration">Migration</a> is about</td>
+</tr>
+<tr>
+<td><code>A</code></td>
+<td><code>ast</code></td>
+<td><code>high</code> <strong>or</strong> <code>low</code></td>
+<td>Medium</td>
+<td>Every other source→sink flow</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td><code>reflection</code></td>
+<td><code>low</code></td>
+<td>Info</td>
+<td>A reflection with no confirmed executable position, including the <code>--hpp</code> duplicate-parameter echo (<code>inject_type: inHTML-HPP</code>)</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td><code>library</code></td>
+<td><em>(absent)</em></td>
+<td>Low / Medium / High</td>
+<td><code>--detect-outdated-libs</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> + <code>reflection</code> is the row that surprises people. <code>reflection</code> names <em>which
+request the evidence came from</em>, not how weak the evidence is: that row parsed
+the same DOM the <code>dom-verification</code> row does — it just did it on a response it
+already had, instead of spending another request.</p>
+<h3 id="dom-verification-evidence"><code>dom-verification</code> evidence</h3>
+<p>Five ways a payload proves it reached an executable position: the Dalfox marker matched by CSS selector; an executable scheme (<code>javascript:</code>, <code>data:text/html</code>) in a dangerous attribute; an injected element carrying a sink-calling handler; a sink call inside <code>&lt;script&gt;</code> whose AST range covers the payload; and an inline-handler breakout where the payload terminated the surrounding JS string. The <code>evidence</code> field names which one fired.</p>
+<h3 id="ast-and-the-dom-xss-ceiling"><code>ast</code> and the DOM-XSS ceiling</h3>
+<p>The AST pass parses the JavaScript in the response and traces data from a dangerous source (<code>location.hash</code>, <code>location.search</code>, <code>document.referrer</code>, <code>postMessage</code>, …) into a dangerous sink (<code>innerHTML</code>, <code>document.write</code>, <code>eval</code>, …) with no sanitizer on the path. It reads each <code>&lt;script&gt;</code> block once and reports every flow it finds, so it can name inputs you never passed on the command line — including a URL fragment, which is never sent to the server. <code>-p</code> does not narrow it: <code>-p</code> scopes which parameters get <em>requested</em>, and this pass sends nothing.</p>
+<p>It also explains a result that looks like a gap but isn't. For a <strong>pure client-side DOM-XSS</strong>, the payload is written into the page by JavaScript at runtime, so it never appears in the server's response and the response-parsing methods have nothing to find. On a static page whose only sink is <code>location.hash → innerHTML</code>, <code>--only-poc v</code> correctly returns nothing. Open the POC URL in a browser with devtools to confirm — Dalfox prints a complete POC URL on every AST finding, plus a <code>[manual POC: …]</code> setup hint for sources it cannot put in a URL (<code>window.name</code>, <code>document.referrer</code>, cookies, <code>postMessage</code>, …).</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-ast-analysis</code></td>
+<td>Turn off source→sink analysis</td>
+</tr>
+<tr>
+<td><code>--analyze-external-js</code></td>
+<td>Also fetch and analyze same-origin <code>&lt;script src&gt;</code> bundles</td>
+</tr>
+</tbody>
+</table>
+<p><code>--skip-mining-dom</code> does <strong>not</strong> affect this pass — it governs harvesting parameter <em>names</em> from HTML <code>id</code>/<code>name</code> attributes. See <a href="../parameters/">Parameters &amp; Discovery</a>.</p>
+<h2 id="confidence-the-grade-behind-the-claim"><code>confidence</code>: the grade behind the claim</h2>
+<p>Every XSS finding carries a <code>confidence</code> of <code>high</code> or <code>low</code>, plus a <code>confidence_reason</code> naming the deciding signals. For request-based methods it follows the evidence directly. For AST findings it is graded from the flow's shape:</p>
+<p><code>high</code> requires <strong>all</strong> of:</p>
+<ul>
+<li><strong>A source an attacker can reach with a link</strong> — <code>location.*</code>, <code>document.URL</code>, <code>URLSearchParams</code> carry the payload in the URL directly. Sources that would otherwise need an attacker-controlled driver page (<code>window.name</code>, <code>document.referrer</code>, <code>postMessage</code>, storage, <code>history.state</code>) grade <code>low</code>, <em>unless</em> the page seeds that source from a query parameter itself, which a link can also drive. That case grades <code>high</code> with the reason <code>non-URL source seeded from a query parameter by the page</code>.</li>
+<li><strong>A payload the page's CSP would let execute</strong> — either inline script is permitted, or the sink runs script directly (<code>eval</code>, <code>Function</code>, <code>document.write</code>, <code>&lt;script&gt;</code> text) and so does not depend on inline-handler permission. A report-only CSP enforces nothing and never lowers the grade.</li>
+<li><strong>No Trusted Types interception</strong> — <code>require-trusted-types-for 'script'</code> with a TrustedHTML-class sink grades <code>low</code>.</li>
+</ul>
+<p>Sanitizers are not a grading signal because they are already a <em>filter</em>: the analyzer treats them as taint clearers, so a finding existing at all means no recognised sanitizer was on the path.</p>
+<p><code>confidence_reason</code> never mixes the two directions. A <code>high</code> grade lists the supporting signals; a <code>low</code> grade lists <strong>only</strong> what blocked it, so the signals that did hold are not shown. One reason is informational either way: <code>flow sits inside a conditional branch</code> records that the flow is guarded, and never changes the grade on its own.</p>
+<h3 id="where-the-grade-is-visible-and-where-it-isnt">Where the grade is visible — and where it isn't</h3>
+<p><code>confidence</code> is carried by <code>json</code>, <code>jsonl</code>, <code>toml</code>, <code>markdown</code> and <code>sarif</code>. The
+default <code>plain</code> output does <strong>not</strong> print it, so the triage advice below assumes
+a machine-readable format. Nothing else keys off it yet either: <code>--only-poc</code>,
+<code>--limit-result-type</code>, the deduplication ranking, and the exit code all still
+read <code>type</code>. The grade is a preview of the migration, not yet a control.</p>
+<h2 id="migration">Migration</h2>
+<p>That the grade drives nothing yet is the point: you can see where each finding will land before anything moves.</p>
+<ol>
+<li><strong>Now</strong> — <code>type</code> unchanged. <code>detection_method</code> and <code>confidence</code> are new. <code>type == &quot;A&quot;</code> is deprecated as a selector; use <code>detection_method == &quot;ast&quot;</code>.</li>
+<li><strong>Next</strong> — <code>--tier-model confidence</code> as an opt-in.</li>
+<li><strong>Then</strong> — that becomes the default, with <code>--tier-model legacy</code> as an escape hatch. <code>A</code> retires: <code>high</code> graded AST findings become <code>V</code>, the rest <code>R</code>, which is what <code>R</code> was always for. <code>R</code> is renamed in that release too: it will hold more than reflections by then, so the word stops being accurate at exactly that moment.</li>
+</ol>
+<p><code>--only-poc a</code> keeps working throughout; it selects <code>detection_method == &quot;ast&quot;</code> once the tier is gone. No flag value is ever removed.</p>
+<p>During the transition <code>type</code> and <code>confidence</code> can disagree — a finding can read <code>type=V, confidence=low</code>. Two legacy code paths promote AST findings to <code>V</code> on evidence that does not support the claim; the grade reports what Dalfox can actually assert, the tier reports what it has historically emitted. The disagreement is the preview signal, not a bug.</p>
+<p>When the tier does derive from the grade, everything that reads the tier follows it: the same <code>--only-poc v</code> selects a different set, the exit code flips on a different set, and deduplication ranks the survivors differently. That is the intended effect, not a side effect to work around.</p>
+<h2 id="reading-a-mixed-scan">Reading a mixed scan</h2>
+<pre><code>INF found reflected 0 params
+WRN XSS found 0 XSS (+3 A)
+[POC][A][GET][DOM-XSS] https://target.app/?q=%3Cimg+src%3Dx+onerror%3D…
+  ├── Issue: DOM-based XSS via URLSearchParams.get(q) to innerHTML (needs runtime confirmation)
+  └── Payload: q=&lt;img src=x onerror=alert(1) class=dlx1944740c&gt;
+</code></pre>
+<ul>
+<li><code>found reflected 0 params</code> — the <strong>reflection</strong> method found no server-side reflection. Expected on a static site.</li>
+<li><code>XSS found 0 XSS</code> — the headline count is <code>V</code> only. <code>(+3 A)</code> names the other tiers printed below it.</li>
+<li>The <code>[A]</code> blocks come from the <strong>ast</strong> method, independent of both lines above.</li>
+</ul>
+<p>Reading only the summary lines on a DOM-XSS target would miss every finding in the report.</p>
+<h3 id="why-the-tiers-dont-sum-to-what-was-found">Why the tiers don't sum to what was found</h3>
+<p>Two post-processing passes run before anything is printed, so the tier counts
+are not the number of findings recorded during the scan:</p>
+<ul>
+<li><strong>Redundant <code>R</code> collapse</strong> — an <code>R</code> is dropped when a <code>V</code> exists for the same
+<code>(param, inject_type)</code> on that target. Reporting both would list the same
+input twice at two different strengths. <code>V</code> and <code>A</code> are never dropped.</li>
+<li><strong>AST deduplication</strong> — the same source→sink flow can be found by the
+preflight, the probe, and the reflection loop. One survives per fingerprint:
+the strongest by <code>type</code>, then <code>severity</code>. <code>confidence</code> does not participate,
+so an ungraded <code>V</code> still outranks a <code>high</code> <code>A</code>.</li>
+</ul>
+<p><code>--stream-findings</code> emits each finding the moment it is recorded, which is
+<em>before</em> the collapse. An <code>R</code> can therefore appear in the stream and be absent
+from the final report. When the two disagree, the final report is the answer.</p>
+<h3 id="selecting-tiers-only-poc-vs-limit-result-type">Selecting tiers: <code>--only-poc</code> vs <code>--limit-result-type</code></h3>
+<p>Both take <code>v</code> / <code>r</code> / <code>a</code> / <code>i</code>, and they do different things:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--only-poc</code></td>
+<td><strong>Filters the output.</strong> Findings of other tiers are discarded</td>
+</tr>
+<tr>
+<td><code>--limit-result-type</code></td>
+<td><strong>Counts toward <code>--limit</code>.</strong> Findings of other tiers are still reported; they just don&#39;t consume the budget</td>
+</tr>
+</tbody>
+</table>
+<p><code>--limit 2 --limit-result-type v</code> means &quot;keep scanning until two <code>V</code> findings
+accrue, then show everything found along the way&quot;. To actually hide the rest,
+add <code>--only-poc v</code>.</p>
+<h3 id="exit-codes">Exit codes</h3>
+<p><code>0</code> means no findings and <code>1</code> means at least one finding <strong>of any tier</strong>,
+counted after <code>--only-poc</code> and the collapse above. <code>2</code> is a hard error (bad
+input, every target unreachable, <code>--output</code> unwritable). A lone <code>R</code>, or a
+single <code>I</code> from <code>--detect-outdated-libs</code>, exits <code>1</code> exactly like a <code>V</code> does.
+For CI that should fail only on what Dalfox asserts is exploitable, run
+<code>--only-poc v</code>.</p>
+<h2 id="choosing-flags-by-intent">Choosing flags by intent</h2>
+<table>
+<thead>
+<tr>
+<th>Goal</th>
+<th>Flags</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Only what Dalfox asserts is exploitable</td>
+<td><code>--only-poc v</code></td>
+</tr>
+<tr>
+<td>Suppress static-analysis noise on a production target</td>
+<td><code>--skip-ast-analysis</code></td>
+</tr>
+<tr>
+<td>Skip name harvesting, keep DOM-XSS detection</td>
+<td><code>--skip-mining-dom</code></td>
+</tr>
+<tr>
+<td>Test one parameter, still see every DOM sink</td>
+<td><code>-p q</code> (AST findings are not scoped by <code>-p</code>)</td>
+</tr>
+<tr>
+<td>Triage a large AST batch</td>
+<td><code>-f json</code>, sort on <code>confidence</code>, then read <code>confidence_reason</code></td>
+</tr>
+<tr>
+<td>Fail CI only on asserted vulnerabilities</td>
+<td><code>--only-poc v</code> (otherwise any tier exits <code>1</code>)</td>
+</tr>
+</tbody>
+</table>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#confidence-what-type-means">Confidence: what type means</a><ul><li><a href="#what-v-does-not-mean">What V does not mean</a></li></ul></li><li><a href="#method-what-detection-method-means">Method: what detection_method means</a><ul><li><a href="#the-combinations-that-actually-occur">The combinations that actually occur</a></li><li><a href="#dom-verification-evidence">dom-verification evidence</a></li><li><a href="#ast-and-the-dom-xss-ceiling">ast and the DOM-XSS ceiling</a></li></ul></li><li><a href="#confidence-the-grade-behind-the-claim">confidence: the grade behind the claim</a><ul><li><a href="#where-the-grade-is-visible-and-where-it-isnt">Where the grade is visible — and where it isn't</a></li></ul></li><li><a href="#migration">Migration</a></li><li><a href="#reading-a-mixed-scan">Reading a mixed scan</a><ul><li><a href="#why-the-tiers-dont-sum-to-what-was-found">Why the tiers don't sum to what was found</a></li><li><a href="#selecting-tiers-only-poc-vs-limit-result-type">Selecting tiers: --only-poc vs --limit-result-type</a></li><li><a href="#exit-codes">Exit codes</a></li></ul></li><li><a href="#choosing-flags-by-intent">Choosing flags by intent</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/detection-model.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

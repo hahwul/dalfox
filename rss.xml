@@ -1,0 +1,2114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Dalfox</title>
+    <link>https://dalfox.hahwul.com/</link>
+    <description>Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification.</description>
+    <atom:link href="https://dalfox.hahwul.com/rss.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Configuration</title>
+      <link>https://dalfox.hahwul.com/getting-started/configuration/</link>
+      <guid>https://dalfox.hahwul.com/getting-started/configuration/</guid>
+      <description>Save your favorite flags in a Dalfox config file.</description>
+      <content:encoded><![CDATA[<p>Dalfox reads a config file on startup so you don't have to pass the same flags every time. An explicit CLI flag always overrides what the config sets, so it's safe to keep &quot;defaults&quot; here.</p>
+<h2 id="where-the-file-lives">Where the file lives</h2>
+<p>Dalfox looks in this order:</p>
+<ol>
+<li><code>$XDG_CONFIG_HOME/dalfox/config.toml</code></li>
+<li><code>$HOME/.config/dalfox/config.toml</code></li>
+</ol>
+<p>You can point anywhere else with <code>--config</code>:</p>
+<pre><code class="language-bash hljs">dalfox --config ./dalfox.toml scan https://target.app
+</code></pre>
+<p>If no file exists, Dalfox creates a template at the default path the first time you run it.</p>
+<h2 id="a-minimal-config">A minimal config</h2>
+<pre><code class="language-toml hljs"><span class="hljs-punctuation">[</span>scan<span class="hljs-punctuation">]</span>
+format <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;json&quot;</span>
+output <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;results.json&quot;</span>
+timeout <span class="hljs-punctuation">=</span> <span class="hljs-number">15</span>
+workers <span class="hljs-punctuation">=</span> <span class="hljs-number">100</span>
+encoders <span class="hljs-punctuation">=</span> <span class="hljs-punctuation">[</span><span class="hljs-string">&quot;url&quot;</span><span class="hljs-punctuation">,</span> <span class="hljs-string">&quot;html&quot;</span><span class="hljs-punctuation">]</span>
+</code></pre>
+<p>Run a scan and those flags apply automatically:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app?q<span class="hljs-operator">=</span><span class="hljs-built_in">test</span>
+<span class="hljs-comment"># → writes JSON results to results.json with workers=100</span>
+</code></pre>
+<h2 id="precedence">Precedence</h2>
+<pre><code>CLI flag  &gt;  Config file  &gt;  Built-in defaults
+</code></pre>
+<p>Anything on the command line wins. This lets you keep sensible defaults in the config, then override per-scan:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># Config sets workers=100, but for this quick scan use 20</span>
+dalfox --workers <span class="hljs-number">20</span> https://target.app
+</code></pre>
+<h2 id="formats">Formats</h2>
+<p>Dalfox supports both TOML and JSON. TOML is the default; JSON is handy if you generate the file from a tool or UI.</p>
+<pre><code class="language-toml hljs"><span class="hljs-comment"># ~/.config/dalfox/config.toml</span>
+<span class="hljs-punctuation">[</span>scan<span class="hljs-punctuation">]</span>
+format <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;sarif&quot;</span>
+silence <span class="hljs-punctuation">=</span> <span class="hljs-literal">true</span>
+</code></pre>
+<pre><code class="language-json hljs"><span class="hljs-punctuation">{</span>
+  <span class="hljs-name">&quot;scan&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">{</span>
+    <span class="hljs-name">&quot;format&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;sarif&quot;</span><span class="hljs-punctuation">,</span>
+    <span class="hljs-name">&quot;silence&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">true</span>
+  <span class="hljs-punctuation">}</span>
+<span class="hljs-punctuation">}</span>
+</code></pre>
+<h2 id="what-can-i-configure">What can I configure?</h2>
+<p>Anything that has a CLI flag under <code>dalfox scan</code> can live in the <code>[scan]</code> table. Common examples:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Example</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>format</code></td>
+<td><code>&quot;json&quot;</code></td>
+<td>Output format (<code>plain</code>, <code>json</code>, <code>jsonl</code>, <code>markdown</code>, <code>sarif</code>, <code>toml</code>)</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td><code>&quot;report.json&quot;</code></td>
+<td>Default output file</td>
+</tr>
+<tr>
+<td><code>silence</code></td>
+<td><code>true</code></td>
+<td>Suppress logs, emit only findings</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td><code>15</code></td>
+<td>Request timeout in seconds</td>
+</tr>
+<tr>
+<td><code>delay</code></td>
+<td><code>200</code></td>
+<td>Delay between requests in ms</td>
+</tr>
+<tr>
+<td><code>workers</code></td>
+<td><code>100</code></td>
+<td>Concurrent workers per target</td>
+</tr>
+<tr>
+<td><code>encoders</code></td>
+<td><code>[&quot;url&quot;,&quot;html&quot;,&quot;base64&quot;]</code></td>
+<td>Payload encoders</td>
+</tr>
+<tr>
+<td><code>remote_payloads</code></td>
+<td><code>[&quot;portswigger&quot;]</code></td>
+<td>Remote payload sources</td>
+</tr>
+<tr>
+<td><code>remote_wordlists</code></td>
+<td><code>[&quot;burp&quot;]</code></td>
+<td>Remote parameter wordlists</td>
+</tr>
+<tr>
+<td><code>headers</code></td>
+<td><code>[&quot;Accept: text/html&quot;]</code></td>
+<td>Extra request headers</td>
+</tr>
+<tr>
+<td><code>user_agent</code></td>
+<td><code>&quot;Dalfox Scanner&quot;</code></td>
+<td>Default User-Agent</td>
+</tr>
+<tr>
+<td><code>waf_bypass</code></td>
+<td><code>&quot;auto&quot;</code></td>
+<td>WAF bypass mode (<code>auto</code>, <code>force</code>, <code>off</code>)</td>
+</tr>
+<tr>
+<td><code>insecure</code></td>
+<td><code>true</code></td>
+<td>Skip TLS certificate verification (<code>false</code> to enforce)</td>
+</tr>
+<tr>
+<td><code>follow_redirects</code></td>
+<td><code>true</code></td>
+<td>Follow 3xx responses</td>
+</tr>
+</tbody>
+</table>
+<p>See the <a href="https://dalfox.hahwul.com/reference/config/">Config File reference</a> for every key.</p>
+<h2 id="secrets">Secrets</h2>
+<p>Keep API keys, bearer tokens, and blind-XSS callback hostnames out of the config file if you commit it. Prefer environment variables:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># .env or your shell profile</span>
+<span class="hljs-built_in">export</span> <span class="hljs-variable">DALFOX_API_KEY</span><span class="hljs-operator">=</span><span class="hljs-string">&quot;...&quot;</span>
+</code></pre>
+<p>Or pass them at the command line and never persist them.</p>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Run your first scan</a></li>
+<li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Explore scanning modes</a></li>
+<li><a href="https://dalfox.hahwul.com/reference/cli/">See the full CLI reference</a></li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Installation</title>
+      <link>https://dalfox.hahwul.com/getting-started/installation/</link>
+      <guid>https://dalfox.hahwul.com/getting-started/installation/</guid>
+      <description>Install Dalfox on macOS, Linux, Windows, NixOS, Arch Linux, or build from source.</description>
+      <content:encoded><![CDATA[<p>Pick the installer that fits your platform. Dalfox ships as a single self-contained binary, with no runtime to manage.</p>
+<h2 id="homebrew-macos-linux">Homebrew (macOS &amp; Linux)</h2>
+<pre><code class="language-bash hljs">brew install dalfox
+</code></pre>
+<p>The Homebrew formula tracks the latest stable release. Source: <a href="https://formulae.brew.sh/formula/dalfox">formulae.brew.sh/formula/dalfox</a>.</p>
+<h2 id="snap-ubuntu-linux">Snap (Ubuntu / Linux)</h2>
+<pre><code class="language-bash hljs">sudo snap install dalfox
+</code></pre>
+<h2 id="arch-linux-aur">Arch Linux (AUR)</h2>
+<p>Using an AUR helper (recommended):</p>
+<pre><code class="language-bash hljs">yay -S dalfox
+<span class="hljs-comment"># or</span>
+paru -S dalfox
+</code></pre>
+<p>Manual build from the <a href="https://aur.archlinux.org/packages/dalfox">AUR package</a>:</p>
+<pre><code class="language-bash hljs">git clone https://aur.archlinux.org/dalfox.git
+<span class="hljs-built_in">cd</span> dalfox
+makepkg -si
+</code></pre>
+<h2 id="nix-nixos">Nix &amp; NixOS</h2>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># Run once without installing</span>
+nix-shell -p dalfox
+
+<span class="hljs-comment"># Nix flakes: run the latest from GitHub</span>
+nix run github:hahwul/dalfox -- scan https://example.com
+
+<span class="hljs-comment"># Install into your profile</span>
+nix profile install github:hahwul/dalfox
+
+<span class="hljs-comment"># Drop into a dev shell with Dalfox available</span>
+nix develop github:hahwul/dalfox
+</code></pre>
+<p>Dalfox lives in nixpkgs. The newest releases land in <code>unstable</code> first.</p>
+<h2 id="cargo-from-cratesio">Cargo (from crates.io)</h2>
+<pre><code class="language-bash hljs">cargo install dalfox
+</code></pre>
+<p>Requires a recent Rust toolchain (stable is fine). Builds into <code>~/.cargo/bin/dalfox</code>.</p>
+<h2 id="prebuilt-binaries">Prebuilt binaries</h2>
+<p>Grab a release archive for your OS/arch from <a href="https://github.com/hahwul/dalfox/releases">github.com/hahwul/dalfox/releases</a>, extract it, and drop the binary somewhere on your <code>PATH</code> (<code>/usr/local/bin</code>, <code>~/.local/bin</code>, etc.).</p>
+<p>We publish the following per release:</p>
+<ul>
+<li><code>macos-x86_64</code>, <code>macos-aarch64</code></li>
+<li><code>linux-x86_64</code> (glibc), <code>linux-x86_64-musl</code> (statically linked, recommended for Alpine, Docker, and CI)</li>
+<li><code>linux-aarch64</code> (glibc), <code>linux-aarch64-musl</code> (statically linked)</li>
+<li><code>windows-x86_64</code></li>
+</ul>
+<p>Linux also gets <code>.deb</code> and <code>.rpm</code> packages for both architectures, and every archive ships with a <code>.sha256</code> alongside a combined <code>checksum.txt</code>.</p>
+<h2 id="build-from-source">Build from source</h2>
+<pre><code class="language-bash hljs">git clone https://github.com/hahwul/dalfox
+<span class="hljs-built_in">cd</span> dalfox
+cargo build --release
+<span class="hljs-comment"># Binary at ./target/release/dalfox</span>
+</code></pre>
+<p>You'll need Rust (2024 edition). Install with <a href="https://rustup.rs/">rustup</a> if you don't have it.</p>
+<h2 id="verify">Verify</h2>
+<pre><code class="language-bash hljs">dalfox --version
+</code></pre>
+<p>You should see something like <code>dalfox 3.2.0</code> along with the Dalfox banner.</p>
+<h2 id="getting-help">Getting help</h2>
+<p>Dalfox uses <a href="https://github.com/clap-rs/clap">clap</a>, so help is always accessible:</p>
+<pre><code class="language-bash hljs">dalfox --help
+dalfox scan --help
+</code></pre>
+<h2 id="next-steps">Next steps</h2>
+<p>Run your first scan in the <a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a>. If you want to tune defaults before scanning, jump to <a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a>.</p>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Quick Start</title>
+      <link>https://dalfox.hahwul.com/getting-started/quick-start/</link>
+      <guid>https://dalfox.hahwul.com/getting-started/quick-start/</guid>
+      <description>Your first Dalfox scan in five minutes.</description>
+      <content:encoded><![CDATA[<p>This page walks you from install to a verified finding. We'll use an intentionally vulnerable demo target so you can see real output.</p>
+<div class="alert alert-warning">
+  <span class="alert-icon" aria-hidden="true">
+    
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    
+  </span>
+  <div class="alert-content"><p>Only scan targets you're authorized to test. Dalfox fires real XSS payloads.</p></div>
+</div>
+<h2 id="1-scan-a-single-url">1. Scan a single URL</h2>
+<pre><code class="language-bash hljs">dalfox https://xss-game.appspot.com/level1/frame?query<span class="hljs-operator">=</span><span class="hljs-built_in">test</span>
+</code></pre>
+<p>The first argument is the target. Dalfox auto-detects that it's a URL and runs the <code>scan</code> subcommand implicitly. You'll see:</p>
+<ul>
+<li>A banner with the version.</li>
+<li><code>INFO</code> lines as Dalfox discovers parameters and probes contexts.</li>
+<li><code>[V]</code> (vulnerable) and <code>[R]</code> (reflected) lines for each finding, with the exact payload that worked.</li>
+</ul>
+<h2 id="2-scan-from-a-file">2. Scan from a file</h2>
+<p>Feed a list of URLs from your crawler:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># urls.txt, one target per line</span>
+dalfox scan urls.txt
+</code></pre>
+<p>Each URL runs through the same pipeline. Results stream as they're found.</p>
+<h2 id="3-scan-from-a-pipeline">3. Scan from a pipeline</h2>
+<p>Dalfox reads from <code>stdin</code> when you pipe:</p>
+<pre><code class="language-bash hljs">cat urls.txt <span class="hljs-punctuation">|</span> dalfox
+<span class="hljs-comment"># or combined with your recon tools:</span>
+waybackurls example.com <span class="hljs-punctuation">|</span> gf xss <span class="hljs-punctuation">|</span> dalfox
+</code></pre>
+<h2 id="4-get-json-output">4. Get JSON output</h2>
+<p>Pair Dalfox with <code>jq</code>, a dashboard, or CI:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/search?q<span class="hljs-operator">=</span><span class="hljs-built_in">test</span> -f json -o report.json
+</code></pre>
+<p>Machine-readable formats (<code>json</code>, <code>jsonl</code>, <code>sarif</code>, <code>toml</code>) auto-suppress the banner so the file stays clean.</p>
+<h2 id="5-authenticated-scans">5. Authenticated scans</h2>
+<p>Pass cookies, headers, or a custom method:</p>
+<pre><code class="language-bash hljs">dalfox https://api.target.app/v1/users <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -X POST <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -H <span class="hljs-string">&quot;Authorization: Bearer eyJ...&quot;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -H <span class="hljs-string">&quot;Content-Type: application/json&quot;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -d <span class="hljs-string">&#39;{&quot;name&quot;:&quot;test&quot;}&#39;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --cookies <span class="hljs-string">&quot;session=abc123&quot;</span>
+</code></pre>
+<p>Or point Dalfox at a <strong>raw HTTP request</strong> file you captured from your proxy:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type raw-http request.txt
+</code></pre>
+<p>Or replay an entire <strong>HAR</strong> export (from browser DevTools or a proxy) — Dalfox scans every request in it, preserving each one's method, headers, cookies, and body:</p>
+<pre><code class="language-bash hljs">dalfox scan capture.har            <span class="hljs-comment"># auto-detected</span>
+dalfox scan --input-type har capture.har
+</code></pre>
+<h2 id="6-catch-blind-xss">6. Catch Blind XSS</h2>
+<p>Use an out-of-band callback (Interactsh, Burp Collaborator, XSS Hunter, etc.):</p>
+<pre><code class="language-bash hljs">dalfox https://target.app <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -b https://your-callback.interact.sh
+</code></pre>
+<p>Dalfox sends blind-XSS payloads across every discovered parameter; if the payload fires later in an admin panel, your callback server records it.</p>
+<p>Or let Dalfox manage an <a href="https://github.com/projectdiscovery/interactsh">interactsh</a> (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --blind-oob                  <span class="hljs-comment"># public interactsh mesh</span>
+dalfox https://target.app --blind-oob<span class="hljs-operator">=</span>oast.fun         <span class="hljs-comment"># pick servers</span>
+</code></pre>
+<p>Use <code>--blind-oob-secret</code> for a self-hosted server and <code>--blind-oob-wait</code> to control how long Dalfox keeps polling after the scan finishes.</p>
+<h2 id="7-dry-run-first">7. Dry-run first</h2>
+<p>Use <code>--dry-run</code> to preview what Dalfox would scan:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --dry-run
+</code></pre>
+<p>It discovers parameters and estimates request volume without firing any payloads.</p>
+<h2 id="reading-the-output">Reading the output</h2>
+<p>Each finding is tagged:</p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[V]</code></td>
+<td><strong>Vulnerable</strong>: the payload came back as a real DOM element in the parsed response (CSS-selector match on Dalfox&#39;s marker)</td>
+</tr>
+<tr>
+<td><code>[A]</code></td>
+<td><strong>AST-detected</strong>: static JS analysis found a source→sink flow</td>
+</tr>
+<tr>
+<td><code>[R]</code></td>
+<td><strong>Reflected</strong>: payload appeared in the response, but no DOM evidence</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> and <code>A</code> findings are actionable. <code>R</code> findings are worth a look but may be filtered further downstream.</p>
+<p><code>[V]</code> is not browser execution. Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as <code>[A]</code> today and is worth confirming in a browser. Each finding also carries <code>detection_method</code> (how it was found) and <code>confidence</code> (whether Dalfox can claim a vulnerability) — see <a href="https://dalfox.hahwul.com/guide/detection-model/">Detection Model</a>.</p>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li>Learn the different <a href="https://dalfox.hahwul.com/guide/scanning-modes/">scanning modes</a>.</li>
+<li>Understand how <a href="https://dalfox.hahwul.com/guide/parameters/">parameters are discovered</a>.</li>
+<li>Tune <a href="https://dalfox.hahwul.com/guide/payloads/">payloads and encoders</a> for harder targets.</li>
+<li>Save your favorite flags in a <a href="https://dalfox.hahwul.com/getting-started/configuration/">config file</a>.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Detection Model</title>
+      <link>https://dalfox.hahwul.com/guide/detection-model/</link>
+      <guid>https://dalfox.hahwul.com/guide/detection-model/</guid>
+      <description>The three axes of a Dalfox finding (confidence, method, impact) and what each evidence tier actually proves.</description>
+      <content:encoded><![CDATA[<p>Every Dalfox finding answers three separate questions. Reading them as one scale is the single most common source of confusion about the output, so they are separate fields:</p>
+<table>
+<thead>
+<tr>
+<th>Axis</th>
+<th>Field</th>
+<th>Question</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Confidence</strong></td>
+<td><code>type</code> — <code>V</code> / <code>R</code></td>
+<td>Can Dalfox claim this is a vulnerability?</td>
+</tr>
+<tr>
+<td><strong>Method</strong></td>
+<td><code>detection_method</code></td>
+<td>How was it found?</td>
+</tr>
+<tr>
+<td><strong>Impact</strong></td>
+<td><code>severity</code></td>
+<td>How bad is it if exploited?</td>
+</tr>
+</tbody>
+</table>
+<p>Two of those three vary independently today. <strong><code>severity</code> does not</strong>: for XSS
+findings it is currently a restatement of the tier (<code>V</code> → <code>High</code>, <code>A</code> →
+<code>Medium</code>, <code>R</code> → <code>Info</code>), so filtering or sorting on it tells you nothing that
+<code>type</code> didn't. It carries real information only on <code>I</code>, where it comes from the
+library advisory. Treat it as a display convenience until it grades impact on
+its own.</p>
+<p><code>[A]</code> predates that split. It answers the <em>method</em> question while sitting in the <code>type</code> field, which is why nobody (including the code) could say where it belonged on the confidence scale. It is being absorbed; see <a href="#migration">Migration</a> below.</p>
+<p>This page exists because the split was not visible from the output alone. It was worked out in <a href="https://github.com/hahwul/dalfox/issues/1238">issue #1238</a> with <a href="https://github.com/OSTARA711">@OSTARA711</a>, whose write-up is the basis for the model here.</p>
+<h2 id="confidence-what-type-means">Confidence: what <code>type</code> means</h2>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Name</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V</code></td>
+<td><strong>Vulnerable</strong></td>
+<td>Dalfox asserts this input is exploitable. Act on it.</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td><strong>Reflected</strong></td>
+<td>The payload came back in the response, but its position was not confirmed exploitable. A signal, not a claim — confirm it yourself.</td>
+</tr>
+<tr>
+<td><code>A</code></td>
+<td>AST-detected</td>
+<td>Transitional — a method label. See <a href="#migration">Migration</a>.</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td>Informational</td>
+<td>Not an XSS claim at all (e.g. a known-vulnerable JS library, CWE-1104).</td>
+</tr>
+</tbody>
+</table>
+<p>Filter with <code>--only-poc</code> (e.g. <code>--only-poc v</code>, <code>--only-poc v,a</code>, <code>--only-poc i</code>).</p>
+<h3 id="what-v-does-not-mean">What <code>V</code> does not mean</h3>
+<p><code>V</code> is <strong>not</strong> browser execution. Dalfox drives no browser and speaks no CDP; it never renders a page or watches an <code>alert()</code> fire. For the request-based methods, <code>V</code> means the payload was found in a <em>DOM tree parsed from a real HTTP response</em> — static analysis, on stronger evidence than the raw string match behind <code>R</code>.</p>
+<p>There is exactly one method where Dalfox observes real execution: <strong>out-of-band callbacks</strong> (blind XSS). When an injected <code>&lt;script src=…&gt;</code> calls home, a real browser parsed and fetched it. That is empirical, and it is the strongest evidence Dalfox produces — but it comes from someone else's browser, not one Dalfox controls.</p>
+<h2 id="method-what-detection-method-means">Method: what <code>detection_method</code> means</h2>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Reads</th>
+<th>Sends a payload?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reflection</code></td>
+<td>The response body, for the payload&#39;s bytes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>dom-verification</code></td>
+<td>The response parsed as HTML, for an executable position</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>ast</code></td>
+<td>The JavaScript in the response, for a source→sink flow</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>oob</code></td>
+<td>An out-of-band callback from a real browser</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>library</code></td>
+<td><code>&lt;script&gt;</code> tags, for known-vulnerable versions</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Use <code>detection_method == &quot;ast&quot;</code>, not <code>type == &quot;A&quot;</code>, to select AST findings.</strong> The method field is stable; the tier is not.</p>
+<h3 id="the-combinations-that-actually-occur">The combinations that actually occur</h3>
+<p>The tier and the method are chosen separately, so <code>V</code> does not imply
+<code>dom-verification</code>. Every finding Dalfox emits is one of these:</p>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th><code>detection_method</code></th>
+<th><code>confidence</code></th>
+<th><code>severity</code></th>
+<th>Produced by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V</code></td>
+<td><code>dom-verification</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>The dedicated DOM-verification request</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>reflection</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>The reflection phase, when the reflection response <em>already</em> parses to an executable position</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>oob</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>An out-of-band callback</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>ast</code></td>
+<td><code>high</code> <strong>or</strong> <code>low</code></td>
+<td>High</td>
+<td>The two legacy AST promotions — the disagreement <a href="#migration">Migration</a> is about</td>
+</tr>
+<tr>
+<td><code>A</code></td>
+<td><code>ast</code></td>
+<td><code>high</code> <strong>or</strong> <code>low</code></td>
+<td>Medium</td>
+<td>Every other source→sink flow</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td><code>reflection</code></td>
+<td><code>low</code></td>
+<td>Info</td>
+<td>A reflection with no confirmed executable position, including the <code>--hpp</code> duplicate-parameter echo (<code>inject_type: inHTML-HPP</code>)</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td><code>library</code></td>
+<td><em>(absent)</em></td>
+<td>Low / Medium / High</td>
+<td><code>--detect-outdated-libs</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> + <code>reflection</code> is the row that surprises people. <code>reflection</code> names <em>which
+request the evidence came from</em>, not how weak the evidence is: that row parsed
+the same DOM the <code>dom-verification</code> row does — it just did it on a response it
+already had, instead of spending another request.</p>
+<h3 id="dom-verification-evidence"><code>dom-verification</code> evidence</h3>
+<p>Five ways a payload proves it reached an executable position: the Dalfox marker matched by CSS selector; an executable scheme (<code>javascript:</code>, <code>data:text/html</code>) in a dangerous attribute; an injected element carrying a sink-calling handler; a sink call inside <code>&lt;script&gt;</code> whose AST range covers the payload; and an inline-handler breakout where the payload terminated the surrounding JS string. The <code>evidence</code> field names which one fired.</p>
+<h3 id="ast-and-the-dom-xss-ceiling"><code>ast</code> and the DOM-XSS ceiling</h3>
+<p>The AST pass parses the JavaScript in the response and traces data from a dangerous source (<code>location.hash</code>, <code>location.search</code>, <code>document.referrer</code>, <code>postMessage</code>, …) into a dangerous sink (<code>innerHTML</code>, <code>document.write</code>, <code>eval</code>, …) with no sanitizer on the path. It reads each <code>&lt;script&gt;</code> block once and reports every flow it finds, so it can name inputs you never passed on the command line — including a URL fragment, which is never sent to the server. <code>-p</code> does not narrow it: <code>-p</code> scopes which parameters get <em>requested</em>, and this pass sends nothing.</p>
+<p>It also explains a result that looks like a gap but isn't. For a <strong>pure client-side DOM-XSS</strong>, the payload is written into the page by JavaScript at runtime, so it never appears in the server's response and the response-parsing methods have nothing to find. On a static page whose only sink is <code>location.hash → innerHTML</code>, <code>--only-poc v</code> correctly returns nothing. Open the POC URL in a browser with devtools to confirm — Dalfox prints a complete POC URL on every AST finding, plus a <code>[manual POC: …]</code> setup hint for sources it cannot put in a URL (<code>window.name</code>, <code>document.referrer</code>, cookies, <code>postMessage</code>, …).</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-ast-analysis</code></td>
+<td>Turn off source→sink analysis</td>
+</tr>
+<tr>
+<td><code>--analyze-external-js</code></td>
+<td>Also fetch and analyze same-origin <code>&lt;script src&gt;</code> bundles</td>
+</tr>
+</tbody>
+</table>
+<p><code>--skip-mining-dom</code> does <strong>not</strong> affect this pass — it governs harvesting parameter <em>names</em> from HTML <code>id</code>/<code>name</code> attributes. See <a href="https://dalfox.hahwul.com/guide/parameters/">Parameters &amp; Discovery</a>.</p>
+<h2 id="confidence-the-grade-behind-the-claim"><code>confidence</code>: the grade behind the claim</h2>
+<p>Every XSS finding carries a <code>confidence</code> of <code>high</code> or <code>low</code>, plus a <code>confidence_reason</code> naming the deciding signals. For request-based methods it follows the evidence directly. For AST findings it is graded from the flow's shape:</p>
+<p><code>high</code> requires <strong>all</strong> of:</p>
+<ul>
+<li><strong>A source an attacker can reach with a link</strong> — <code>location.*</code>, <code>document.URL</code>, <code>URLSearchParams</code> carry the payload in the URL directly. Sources that would otherwise need an attacker-controlled driver page (<code>window.name</code>, <code>document.referrer</code>, <code>postMessage</code>, storage, <code>history.state</code>) grade <code>low</code>, <em>unless</em> the page seeds that source from a query parameter itself, which a link can also drive. That case grades <code>high</code> with the reason <code>non-URL source seeded from a query parameter by the page</code>.</li>
+<li><strong>A payload the page's CSP would let execute</strong> — either inline script is permitted, or the sink runs script directly (<code>eval</code>, <code>Function</code>, <code>document.write</code>, <code>&lt;script&gt;</code> text) and so does not depend on inline-handler permission. A report-only CSP enforces nothing and never lowers the grade.</li>
+<li><strong>No Trusted Types interception</strong> — <code>require-trusted-types-for 'script'</code> with a TrustedHTML-class sink grades <code>low</code>.</li>
+</ul>
+<p>Sanitizers are not a grading signal because they are already a <em>filter</em>: the analyzer treats them as taint clearers, so a finding existing at all means no recognised sanitizer was on the path.</p>
+<p><code>confidence_reason</code> never mixes the two directions. A <code>high</code> grade lists the supporting signals; a <code>low</code> grade lists <strong>only</strong> what blocked it, so the signals that did hold are not shown. One reason is informational either way: <code>flow sits inside a conditional branch</code> records that the flow is guarded, and never changes the grade on its own.</p>
+<h3 id="where-the-grade-is-visible-and-where-it-isnt">Where the grade is visible — and where it isn't</h3>
+<p><code>confidence</code> is carried by <code>json</code>, <code>jsonl</code>, <code>toml</code>, <code>markdown</code> and <code>sarif</code>. The
+default <code>plain</code> output does <strong>not</strong> print it, so the triage advice below assumes
+a machine-readable format. Nothing else keys off it yet either: <code>--only-poc</code>,
+<code>--limit-result-type</code>, the deduplication ranking, and the exit code all still
+read <code>type</code>. The grade is a preview of the migration, not yet a control.</p>
+<h2 id="migration">Migration</h2>
+<p>That the grade drives nothing yet is the point: you can see where each finding will land before anything moves.</p>
+<ol>
+<li><strong>Now</strong> — <code>type</code> unchanged. <code>detection_method</code> and <code>confidence</code> are new. <code>type == &quot;A&quot;</code> is deprecated as a selector; use <code>detection_method == &quot;ast&quot;</code>.</li>
+<li><strong>Next</strong> — <code>--tier-model confidence</code> as an opt-in.</li>
+<li><strong>Then</strong> — that becomes the default, with <code>--tier-model legacy</code> as an escape hatch. <code>A</code> retires: <code>high</code> graded AST findings become <code>V</code>, the rest <code>R</code>, which is what <code>R</code> was always for. <code>R</code> is renamed in that release too: it will hold more than reflections by then, so the word stops being accurate at exactly that moment.</li>
+</ol>
+<p><code>--only-poc a</code> keeps working throughout; it selects <code>detection_method == &quot;ast&quot;</code> once the tier is gone. No flag value is ever removed.</p>
+<p>During the transition <code>type</code> and <code>confidence</code> can disagree — a finding can read <code>type=V, confidence=low</code>. Two legacy code paths promote AST findings to <code>V</code> on evidence that does not support the claim; the grade reports what Dalfox can actually assert, the tier reports what it has historically emitted. The disagreement is the preview signal, not a bug.</p>
+<p>When the tier does derive from the grade, everything that reads the tier follows it: the same <code>--only-poc v</code> selects a different set, the exit code flips on a different set, and deduplication ranks the survivors differently. That is the intended effect, not a side effect to work around.</p>
+<h2 id="reading-a-mixed-scan">Reading a mixed scan</h2>
+<pre><code>INF found reflected 0 params
+WRN XSS found 0 XSS (+3 A)
+[POC][A][GET][DOM-XSS] https://target.app/?q=%3Cimg+src%3Dx+onerror%3D…
+  ├── Issue: DOM-based XSS via URLSearchParams.get(q) to innerHTML (needs runtime confirmation)
+  └── Payload: q=&lt;img src=x onerror=alert(1) class=dlx1944740c&gt;
+</code></pre>
+<ul>
+<li><code>found reflected 0 params</code> — the <strong>reflection</strong> method found no server-side reflection. Expected on a static site.</li>
+<li><code>XSS found 0 XSS</code> — the headline count is <code>V</code> only. <code>(+3 A)</code> names the other tiers printed below it.</li>
+<li>The <code>[A]</code> blocks come from the <strong>ast</strong> method, independent of both lines above.</li>
+</ul>
+<p>Reading only the summary lines on a DOM-XSS target would miss every finding in the report.</p>
+<h3 id="why-the-tiers-dont-sum-to-what-was-found">Why the tiers don't sum to what was found</h3>
+<p>Two post-processing passes run before anything is printed, so the tier counts
+are not the number of findings recorded during the scan:</p>
+<ul>
+<li><strong>Redundant <code>R</code> collapse</strong> — an <code>R</code> is dropped when a <code>V</code> exists for the same
+<code>(param, inject_type)</code> on that target. Reporting both would list the same
+input twice at two different strengths. <code>V</code> and <code>A</code> are never dropped.</li>
+<li><strong>AST deduplication</strong> — the same source→sink flow can be found by the
+preflight, the probe, and the reflection loop. One survives per fingerprint:
+the strongest by <code>type</code>, then <code>severity</code>. <code>confidence</code> does not participate,
+so an ungraded <code>V</code> still outranks a <code>high</code> <code>A</code>.</li>
+</ul>
+<p><code>--stream-findings</code> emits each finding the moment it is recorded, which is
+<em>before</em> the collapse. An <code>R</code> can therefore appear in the stream and be absent
+from the final report. When the two disagree, the final report is the answer.</p>
+<h3 id="selecting-tiers-only-poc-vs-limit-result-type">Selecting tiers: <code>--only-poc</code> vs <code>--limit-result-type</code></h3>
+<p>Both take <code>v</code> / <code>r</code> / <code>a</code> / <code>i</code>, and they do different things:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--only-poc</code></td>
+<td><strong>Filters the output.</strong> Findings of other tiers are discarded</td>
+</tr>
+<tr>
+<td><code>--limit-result-type</code></td>
+<td><strong>Counts toward <code>--limit</code>.</strong> Findings of other tiers are still reported; they just don&#39;t consume the budget</td>
+</tr>
+</tbody>
+</table>
+<p><code>--limit 2 --limit-result-type v</code> means &quot;keep scanning until two <code>V</code> findings
+accrue, then show everything found along the way&quot;. To actually hide the rest,
+add <code>--only-poc v</code>.</p>
+<h3 id="exit-codes">Exit codes</h3>
+<p><code>0</code> means no findings and <code>1</code> means at least one finding <strong>of any tier</strong>,
+counted after <code>--only-poc</code> and the collapse above. <code>2</code> is a hard error (bad
+input, every target unreachable, <code>--output</code> unwritable). A lone <code>R</code>, or a
+single <code>I</code> from <code>--detect-outdated-libs</code>, exits <code>1</code> exactly like a <code>V</code> does.
+For CI that should fail only on what Dalfox asserts is exploitable, run
+<code>--only-poc v</code>.</p>
+<h2 id="choosing-flags-by-intent">Choosing flags by intent</h2>
+<table>
+<thead>
+<tr>
+<th>Goal</th>
+<th>Flags</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Only what Dalfox asserts is exploitable</td>
+<td><code>--only-poc v</code></td>
+</tr>
+<tr>
+<td>Suppress static-analysis noise on a production target</td>
+<td><code>--skip-ast-analysis</code></td>
+</tr>
+<tr>
+<td>Skip name harvesting, keep DOM-XSS detection</td>
+<td><code>--skip-mining-dom</code></td>
+</tr>
+<tr>
+<td>Test one parameter, still see every DOM sink</td>
+<td><code>-p q</code> (AST findings are not scoped by <code>-p</code>)</td>
+</tr>
+<tr>
+<td>Triage a large AST batch</td>
+<td><code>-f json</code>, sort on <code>confidence</code>, then read <code>confidence_reason</code></td>
+</tr>
+<tr>
+<td>Fail CI only on asserted vulnerabilities</td>
+<td><code>--only-poc v</code> (otherwise any tier exits <code>1</code>)</td>
+</tr>
+</tbody>
+</table>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Output &amp; Reports</title>
+      <link>https://dalfox.hahwul.com/guide/output/</link>
+      <guid>https://dalfox.hahwul.com/guide/output/</guid>
+      <description>Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.</description>
+      <content:encoded><![CDATA[<p>Every scan produces the same internal result structure. Dalfox renders it in whichever format you pick. Machine-readable formats automatically suppress the banner so your file stays clean.</p>
+<h2 id="choosing-a-format">Choosing a format</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json -o report.json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Flag</th>
+<th>Machine-readable</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plain</code></td>
+<td><code>-f plain</code> (default)</td>
+<td>No</td>
+<td>Human terminal output</td>
+</tr>
+<tr>
+<td><code>json</code></td>
+<td><code>-f json</code></td>
+<td>Yes</td>
+<td>Single JSON doc, dashboards, <code>jq</code></td>
+</tr>
+<tr>
+<td><code>jsonl</code></td>
+<td><code>-f jsonl</code></td>
+<td>Yes</td>
+<td>Streaming, log pipelines</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td><code>-f markdown</code></td>
+<td>No</td>
+<td>Reports, pull-request comments</td>
+</tr>
+<tr>
+<td><code>sarif</code></td>
+<td><code>-f sarif</code></td>
+<td>Yes</td>
+<td>GitHub code scanning, SARIF consumers</td>
+</tr>
+<tr>
+<td><code>toml</code></td>
+<td><code>-f toml</code></td>
+<td>Yes</td>
+<td>Humans + pipelines</td>
+</tr>
+</tbody>
+</table>
+<h2 id="writing-to-a-file">Writing to a file</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f jsonl -o findings.jsonl
+</code></pre>
+<p>Without <code>-o</code>, output goes to <code>stdout</code>.</p>
+<h2 id="result-fields">Result fields</h2>
+<p>Every finding includes:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Example</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td><code>V</code>, <code>A</code>, <code>R</code>, <code>I</code></td>
+<td>Confidence: Vulnerable / AST-detected / Reflected / Informational</td>
+</tr>
+<tr>
+<td><code>type_description</code></td>
+<td><code>&quot;Vulnerable - dalfox asserts this input is exploitable; act on it&quot;</code></td>
+<td>Human label (the full sentence, not the bare word)</td>
+</tr>
+<tr>
+<td><code>detection_method</code></td>
+<td><code>&quot;ast&quot;</code></td>
+<td>How it was found: <code>reflection</code>, <code>dom-verification</code>, <code>ast</code>, <code>oob</code>, <code>library</code></td>
+</tr>
+<tr>
+<td><code>confidence</code></td>
+<td><code>&quot;high&quot;</code></td>
+<td>Whether Dalfox can claim a vulnerability (<code>high</code> / <code>low</code>); absent on <code>I</code></td>
+</tr>
+<tr>
+<td><code>confidence_reason</code></td>
+<td><code>&quot;URL-carried source; inline script permitted&quot;</code></td>
+<td>The deciding signals</td>
+</tr>
+<tr>
+<td><code>inject_type</code></td>
+<td><code>&quot;inHTML&quot;</code></td>
+<td>Context (<code>inHTML</code>, <code>inAttr</code>, <code>inJS</code>, …)</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td><code>&quot;GET&quot;</code></td>
+<td>HTTP method</td>
+</tr>
+<tr>
+<td><code>param</code></td>
+<td><code>&quot;q&quot;</code></td>
+<td>Parameter that was exploited</td>
+</tr>
+<tr>
+<td><code>payload</code></td>
+<td><code>&lt;svg/onload=alert(1)&gt;</code></td>
+<td>The exact payload</td>
+</tr>
+<tr>
+<td><code>evidence</code></td>
+<td><code>&quot;payload reflected in response&quot;</code></td>
+<td>Why Dalfox believes it</td>
+</tr>
+<tr>
+<td><code>cwe</code></td>
+<td><code>&quot;CWE-79&quot;</code></td>
+<td>Standard CWE</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>&quot;High&quot;</code></td>
+<td>High / Medium / Low / Info</td>
+</tr>
+<tr>
+<td><code>message_str</code></td>
+<td><code>&quot;XSS found&quot;</code></td>
+<td>Short message</td>
+</tr>
+</tbody>
+</table>
+<p>What each tier is actually evidence of, and why a pure client-side DOM-XSS
+never reaches <code>V</code>, is covered in <a href="https://dalfox.hahwul.com/guide/detection-model/">Detection Model</a>.</p>
+<p><code>V</code> / <code>A</code> / <code>R</code> are XSS findings. <code>I</code> (<strong>Informational</strong>) is a non-exploitable
+observation — currently only <strong>outdated / known-vulnerable JS libraries</strong>
+(<code>inject_type: &quot;OutdatedComponent&quot;</code>, <code>CWE-1104</code>), rendered as a compact
+<code>[INF]</code> line with no payload/parameter. It is <strong>opt-in</strong>: Dalfox focuses on
+verified XSS by default, so library reporting is off unless you pass
+<code>--detect-outdated-libs</code> (it adds <strong>0 extra requests</strong>, inspecting the
+preflight response's <code>&lt;script&gt;</code> tags). Filter it out with <code>--only-poc v,a,r</code>.</p>
+<p>Optionally include the full request/response:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json --include-all -o report.json
+<span class="hljs-comment"># or granularly:</span>
+dalfox ... --include-request
+dalfox ... --include-response
+</code></pre>
+<h2 id="scan-metadata-envelope">Scan metadata envelope</h2>
+<p>JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level metadata envelope (previously JSON/JSONL only; see <a href="https://github.com/hahwul/dalfox/issues/1093">#1093</a>):</p>
+<ul>
+<li><code>dalfox_version</code></li>
+<li><code>targets</code> (the input targets)</li>
+<li><code>scan_duration_ms</code></li>
+<li><code>total_requests</code></li>
+<li><code>findings_count</code></li>
+<li><code>target_summary[]</code> — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected</li>
+<li><code>dedup_mode</code> / <code>targets_deduplicated</code> — the <a href="https://dalfox.hahwul.com/guide/scanning-modes/"><code>--dedup-urls</code></a> mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)</li>
+<li><code>baseline</code> — only when <code>--baseline</code> was used; see <a href="#baselines-reporting-only-what-is-new">Baselines</a></li>
+<li><code>incomplete</code> — <code>true</code> when at least one target was <strong>not fully tested</strong>; today that means its authenticated session died mid-scan (see <a href="https://dalfox.hahwul.com/guide/scanning-modes/">Session monitoring</a>). Read this one field instead of scanning every <code>target_summary</code> entry: <code>&quot;findings_count&quot;: 0</code> plus <code>&quot;incomplete&quot;: true</code> is <em>not</em> a clean bill of health</li>
+</ul>
+<p>A target whose session died is reported as <code>&quot;status&quot;: &quot;incomplete&quot;</code> (or <code>&quot;skipped&quot;</code> if it never ran) with <code>&quot;error_code&quot;: &quot;SESSION_LOST&quot;</code> and the signal that fired in <code>&quot;error_message&quot;</code> — never as <code>&quot;clean&quot;</code>.</p>
+<p>In <strong>SARIF</strong> the envelope is duplicated under <code>runs[0].properties</code> and <code>runs[0].tool.driver.properties</code> so GitHub code scanning and other consumers retain context.</p>
+<p>In <strong>TOML</strong> it appears as a top-level <code>[meta]</code> table (findings under <code>[[results]]</code>).</p>
+<p>In <strong>Markdown</strong> it is rendered as human-readable tables (<code>## Scan Metadata</code> + <code>### Target Summary</code>) above the findings summary.</p>
+<p>Plain text output remains findings-focused only.</p>
+<h2 id="silence-mode">Silence mode</h2>
+<p>Emit <strong>only findings</strong> on <code>stdout</code>, no logs:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --silence
+<span class="hljs-comment"># Pipe findings into another tool:</span>
+cat urls.txt <span class="hljs-punctuation">|</span> dalfox --silence -f jsonl <span class="hljs-punctuation">|</span> jq <span class="hljs-string">&#39;select(.severity==&quot;High&quot;)&#39;</span>
+</code></pre>
+<p>Useful in shell pipelines and cron jobs.</p>
+<h2 id="streaming-findings-during-long-scans">Streaming findings during long scans</h2>
+<p>By default the plain renderer prints each finding block (POC + Issue /
+Payload / Line) <strong>after</strong> the end-of-scan <code>WRN XSS found N XSS</code> summary,
+so the log reads in natural order: start → progress → summary → details.</p>
+<p>For long scans against large targets, you can flip to mid-scan emission
+with <code>--stream-findings</code>. Each finding is printed the moment it is
+verified, above the progress bars:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --stream-findings
+</code></pre>
+<p><code>--stream-findings</code> only affects the <code>plain</code> format and is auto-disabled
+when the end-of-scan path needs to apply filters the streamer can't
+mirror cleanly (<code>--output</code>, <code>--limit</code>, <code>--only-poc</code>).</p>
+<h2 id="poc-styles">POC styles</h2>
+<p>Re-render the proof-of-concept in different client shapes:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --poc-type curl      <span class="hljs-comment"># curl command</span>
+dalfox https://target.app --poc-type httpie    <span class="hljs-comment"># HTTPie</span>
+dalfox https://target.app --poc-type http-request  <span class="hljs-comment"># raw HTTP</span>
+</code></pre>
+<p>Default is <code>plain</code>. Good for filing tickets.</p>
+<h2 id="filtering">Filtering</h2>
+<p>Show only certain result types:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-poc v     <span class="hljs-comment"># only verified</span>
+dalfox https://target.app --only-poc v,a   <span class="hljs-comment"># verified + AST</span>
+</code></pre>
+<p>Cap the number of results:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --limit <span class="hljs-number">50</span>
+dalfox https://target.app --limit <span class="hljs-number">10</span> --limit-result-type v
+</code></pre>
+<h2 id="baselines-reporting-only-what-is-new">Baselines: reporting only what is new</h2>
+<p><code>--only-poc</code> and <code>--limit</code> filter by <em>shape</em>. They cannot tell a finding you already triaged from one that appeared this morning, so a repo with 100 known findings shows the same 100 on every pull request and the gate is either permanently red or switched off.</p>
+<p><code>--baseline</code> fixes that. Point it at a previous report and Dalfox suppresses everything already in it:</p>
+<pre><code class="language-bash hljs">dalfox scan scope.txt -f json -o baseline.json      <span class="hljs-comment"># once, to record the backlog</span>
+dalfox scan scope.txt --baseline baseline.json      <span class="hljs-comment"># every run after</span>
+</code></pre>
+<p>There is <strong>no separate baseline writer</strong> — an ordinary <code>-f json -o</code> (or <code>-f jsonl -o</code>) report <em>is</em> the baseline.</p>
+<h3 id="modes">Modes</h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Flag</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>filter</code> (default)</td>
+<td><code>--baseline-mode filter</code></td>
+<td>Drops known findings. Counts, <code>--limit</code>, and the <strong>exit code</strong> all describe only what is new — this is the CI-gate mode.</td>
+</tr>
+<tr>
+<td><code>annotate</code></td>
+<td><code>--baseline-mode annotate</code></td>
+<td>Keeps every finding and adds <code>new: true</code> / <code>new: false</code> to each, for dashboards that want the whole set with novelty marked.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-counts-as-the-same-finding">What counts as &quot;the same finding&quot;</h3>
+<p>Findings are matched on a fingerprint built from the vulnerability's identity, not the run that surfaced it:</p>
+<p><strong>Included:</strong> host + path · parameter name · parameter location (query / header / cookie / body / path) · injection context · CWE · finding tier · evidence family (the <code>Source → Sink</code> pair for DOM findings).</p>
+<p><strong>Excluded:</strong> the payload and the query string it lands in, payload ordering, AST line/column numbers, timestamps, request/response captures.</p>
+<p>So re-running the same scan matches cleanly even though every run embeds a different payload, and a bundler that shifts <code>app.js</code> line numbers does not resurrect a triaged DOM finding. Because the <strong>tier</strong> is part of the fingerprint, a finding that was <code>R</code> last week and is <code>V</code> today is reported as new — an escalation is exactly what a gate should catch.</p>
+<h3 id="the-metabaseline-block">The <code>meta.baseline</code> block</h3>
+<p>Every structured format reports what the diff did:</p>
+<pre><code class="language-json hljs"><span class="hljs-string">&quot;baseline&quot;</span>: <span class="hljs-punctuation">{</span>
+  <span class="hljs-name">&quot;path&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;baseline.json&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;mode&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;filter&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;enabled&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">true</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;baseline_findings&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">100</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;new&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">2</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;known&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">98</span>
+<span class="hljs-punctuation">}</span>
+</code></pre>
+<p>A baseline that is missing, malformed, or written by a different major version <strong>warns on stderr and disables the diff</strong> rather than failing the scan — a stale path in a pipeline should not turn a working scan into a red build with nothing reported. That case is visible in the envelope as <code>&quot;enabled&quot;: false</code> with a <code>warning</code>, so a pipeline can tell &quot;nothing new&quot; apart from &quot;the diff never ran&quot;.</p>
+<h3 id="refreshing-the-baseline">Refreshing the baseline</h3>
+<p>There is no special command. Re-run <strong>without</strong> <code>--baseline</code> (so the report holds the full set, not just the new findings) and replace the file:</p>
+<pre><code class="language-bash hljs">dalfox scan scope.txt -f json -o baseline.json
+git commit -am <span class="hljs-string">&quot;chore: refresh dalfox baseline&quot;</span>
+</code></pre>
+<p>Running with <code>--baseline</code> and <code>-o</code> pointed at the same file destroys the baseline under <code>filter</code> mode: the report written back holds only what was new, so the next run re-reports the whole backlog. Dalfox warns when the two paths match.</p>
+<h3 id="caveats">Caveats</h3>
+<ul>
+<li><strong><code>--limit</code> counts before the diff.</strong> The scan-time stop condition counts every finding as it is collected, baseline-known ones included, so <code>--limit 10 --baseline b.json</code> against a target whose first 10 findings are all known halts early and reports 0 new without testing the rest. Drop <code>--limit</code> when gating on new findings; Dalfox warns when both are set.</li>
+<li><strong><code>--stream-findings</code> is disabled by <code>--baseline</code></strong>, for the same reason it is disabled by <code>--only-poc</code>: the streamer cannot know a finding is already in the baseline, so it would print the whole triaged backlog live while the summary reports only the new ones.</li>
+<li><strong>CLI only.</strong> <code>--baseline</code> is not applied by <code>dalfox server</code> or the MCP server; a shared config file's <code>scan.baseline</code> is silently ignored there.</li>
+</ul>
+<h2 id="colour-tty-behaviour">Colour &amp; TTY behaviour</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app --no-color
+<span class="hljs-comment"># or</span>
+<span class="hljs-variable">NO_COLOR</span><span class="hljs-operator">=</span><span class="hljs-number">1</span> dalfox https://target.app
+</code></pre>
+<p>Dalfox also auto-disables colour when output is redirected to a file or a non-TTY.</p>
+<h2 id="toml">TOML</h2>
+<p>Same data shape as JSON (plus top-level <code>[meta]</code> envelope for parity with other formats), written as TOML. Findings render as a <code>[[results]]</code> array of tables:</p>
+<pre><code class="language-toml hljs"><span class="hljs-punctuation">[</span>meta<span class="hljs-punctuation">]</span>
+dalfox_version <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;3.x&quot;</span>
+targets <span class="hljs-punctuation">=</span> <span class="hljs-punctuation">[</span><span class="hljs-string">&quot;https://target.app&quot;</span><span class="hljs-punctuation">]</span>
+scan_duration_ms <span class="hljs-punctuation">=</span> <span class="hljs-number">1234</span>
+total_requests <span class="hljs-punctuation">=</span> <span class="hljs-number">87</span>
+findings_count <span class="hljs-punctuation">=</span> <span class="hljs-number">1</span>
+target_summary <span class="hljs-punctuation">=</span> <span class="hljs-punctuation">[</span><span class="hljs-punctuation">{</span> target <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;https://target.app&quot;</span><span class="hljs-punctuation">,</span> status <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;findings&quot;</span><span class="hljs-punctuation">,</span> findings_count <span class="hljs-punctuation">=</span> <span class="hljs-number">1</span> <span class="hljs-punctuation">}</span><span class="hljs-punctuation">]</span>
+
+<span class="hljs-punctuation">[</span><span class="hljs-punctuation">[</span>results<span class="hljs-punctuation">]</span><span class="hljs-punctuation">]</span>
+type <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;V&quot;</span>
+type_description <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;Vulnerable - dalfox asserts this input is exploitable; act on it&quot;</span>
+detection_method <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;dom-verification&quot;</span>
+confidence <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;high&quot;</span>
+inject_type <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;inHTML&quot;</span>
+method <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;GET&quot;</span>
+data <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E&quot;</span>
+param <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;q&quot;</span>
+payload <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;&lt;svg/onload=alert(1)&gt;&quot;</span>
+evidence <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;payload reflected and DOM element verified&quot;</span>
+location <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;Query&quot;</span>
+cwe <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;CWE-79&quot;</span>
+severity <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;High&quot;</span>
+message_id <span class="hljs-punctuation">=</span> <span class="hljs-number">606</span>
+message_str <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;XSS found&quot;</span>
+</code></pre>
+<pre><code class="language-bash hljs">dalfox https://target.app -f toml -o report.toml
+</code></pre>
+<h2 id="sarif-github-code-scanning">SARIF → GitHub code scanning</h2>
+<pre><code class="language-bash hljs">dalfox scan urls.txt -f sarif -o dalfox.sarif
+</code></pre>
+<p>Upload <code>dalfox.sarif</code> through GitHub's <code>upload-sarif</code> action, and findings appear in the repository's <strong>Security → Code scanning</strong> tab.</p>
+<h2 id="ci-example">CI example</h2>
+<pre><code class="language-yaml hljs"><span class="hljs-comment"># .github/workflows/xss-scan.yml</span>
+- <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">Dalfox scan</span>
+  <span class="hljs-name">run</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox scan scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion</span>
+
+- <span class="hljs-name">uses</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">github/codeql-action/upload-sarif@v3</span>
+  <span class="hljs-name">with</span><span class="hljs-punctuation">:</span>
+    <span class="hljs-name">sarif_file</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox.sarif</span>
+</code></pre>
+<h3 id="gating-on-new-findings-only">Gating on new findings only</h3>
+<p>Commit <code>baseline.json</code> alongside the scope file and let the exit code fail the build. The step only goes red when something appeared that is not in the baseline:</p>
+<pre><code class="language-yaml hljs"><span class="hljs-comment"># .github/workflows/xss-scan.yml</span>
+- <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">Dalfox scan (new findings gate)</span>
+  <span class="hljs-name">run</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">|</span><span class="hljs-doctag">
+</span><span class="hljs-doctag">    dalfox scan scope.txt \
+</span><span class="hljs-doctag">      --baseline .dalfox/baseline.json \
+</span><span class="hljs-doctag">      --only-poc v \
+</span><span class="hljs-doctag">      -f json -o dalfox.json --silence</span>    
+
+- <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">Upload report</span>
+  <span class="hljs-name">if</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">always()</span>
+  <span class="hljs-name">uses</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">actions/upload-artifact@v4</span>
+  <span class="hljs-name">with</span><span class="hljs-punctuation">:</span>
+    <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox-report</span>
+    <span class="hljs-name">path</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox.json</span>
+</code></pre>
+<p>To refresh the baseline after triage, re-run <strong>without</strong> <code>--baseline</code> and point <code>-o</code> at it:</p>
+<pre><code class="language-bash hljs">dalfox scan scope.txt --only-poc v -f json -o .dalfox/baseline.json
+</code></pre>
+<p>Re-running the gate command above with <code>-o .dalfox/baseline.json</code> would write a report containing only the <em>new</em> findings over the file and wipe the recorded backlog — Dalfox warns on stderr when <code>--output</code> and <code>--baseline</code> resolve to the same path.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<p>Dalfox returns:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>Completed successfully, no findings</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Completed successfully, at least one finding <strong>of any tier</strong></td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Input/config/runtime error, <strong>or</strong> a session lost mid-scan <em>with no findings</em> under the default <code>--on-session-loss abort</code> (a run that did find something still exits <code>1</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>1</code> covers every tier — a lone <code>R</code>, or a single <code>I</code> from <code>--detect-outdated-libs</code>, fails the build exactly like a <code>V</code> does. To gate on what Dalfox asserts is exploitable, run <code>--only-poc v</code> and keep using the exit code; it filters before the code is decided. (Gating on <code>severity &gt;= High</code> with <code>jq</code> reaches the same set today, because severity currently tracks the tier; see <a href="https://dalfox.hahwul.com/guide/detection-model/">Detection Model</a>.)</p>
+<p><code>--baseline</code> narrows the same code to <em>novelty</em>: under the default <code>filter</code> mode, suppressed findings never reach the exit-code decision, so a run whose entire backlog is already in the baseline exits <code>0</code>. See <a href="#baselines-reporting-only-what-is-new">Baselines</a>.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li>Automate scans via the <a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a>.</li>
+<li>Let an AI driver handle it with the <a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a>.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Parameters &amp; Discovery</title>
+      <link>https://dalfox.hahwul.com/guide/parameters/</link>
+      <guid>https://dalfox.hahwul.com/guide/parameters/</guid>
+      <description>How Dalfox finds the inputs that matter, and how to steer the discovery phase.</description>
+      <content:encoded><![CDATA[<p>Finding XSS starts with finding the right parameter. Dalfox's discovery engine is a multi-stage pipeline; you rarely need to understand all of it, but knowing the moving parts helps when you want to tune a scan.</p>
+<h2 id="the-pipeline-briefly">The pipeline, briefly</h2>
+<ol>
+<li><strong>Discovery:</strong> Extract parameters from the URL, body, headers, cookies, path, fragment, and form fields.</li>
+<li><strong>Mining:</strong> Extend with DOM analysis (parameter names embedded in JS), dictionary wordlists, and framework-specific patterns.</li>
+<li><strong>Active probing:</strong> Fire a probe for each parameter to learn which special characters survive.</li>
+<li><strong>Fast probe:</strong> A single sandwich-marker request per discovered parameter. If neither a partial nor a full reflection shows up, the heavy payload loops are skipped for that parameter.</li>
+<li><strong>Payload generation:</strong> Build context-aware payloads (HTML, JS, attribute, CSS).</li>
+<li><strong>Reflection check:</strong> Send the payload, then see whether it comes back.</li>
+<li><strong>DOM verification:</strong> Parse the response and confirm the payload forms a real element. AST-based DOM-XSS analysis runs in parallel using the response captured during the fast probe.</li>
+</ol>
+<h2 id="targeting-specific-parameters">Targeting specific parameters</h2>
+<p>Tell Dalfox exactly which parameters to test:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -p q <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -p id:query <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -p auth:header <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -p token:cookie
+</code></pre>
+<p>Locations: <code>query</code>, <code>body</code>, <code>json</code>, <code>multipart</code>, <code>cookie</code>, <code>header</code>. Prefer <code>name:location</code> when the injection point is not the query string.</p>
+<p>Without a location hint (<code>-p q</code> only):</p>
+<ol>
+<li>If discovery/mining already found a param with that name, it is kept (filter).</li>
+<li>Otherwise Dalfox <strong>synthesizes</strong> it: location is inferred from the request (URL query → body → cookies → headers), defaulting to <code>query</code>.</li>
+</ol>
+<p>That means recipes like <code>-p q --skip-discovery --skip-mining</code> still test <code>q</code> instead of silently scanning nothing.</p>
+<h2 id="mining-with-wordlists">Mining with wordlists</h2>
+<p>Even if a parameter isn't in the URL, Dalfox can try common names:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># Local wordlist</span>
+dalfox https://target.app -W ./params.txt
+
+<span class="hljs-comment"># Remote wordlists (cached after first fetch)</span>
+dalfox https://target.app --remote-wordlists burp,assetnote
+</code></pre>
+<h3 id="auto-collapse">Auto-collapse</h3>
+<p>Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this two ways:</p>
+<ul>
+<li><strong>Sentinel pre-probe:</strong> Before iterating the wordlist, three random parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic <code>any</code> Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (&gt;15 entries) for the pre-probe to pay off.</li>
+<li><strong>EWMA collapse:</strong> While iterating, Dalfox watches the rolling reflection ratio. Once it stays ≥85% after at least 15 attempts, mining stops and any Query params already collected are folded into the same <code>any</code> placeholder.</li>
+</ul>
+<p>Both routes produce identical downstream state: Stage 5–7 sees one Query injection point regardless of which trigger fired.</p>
+<h2 id="pruning-the-noise">Pruning the noise</h2>
+<p>Ignore specific parameters:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --ignore-param csrf --ignore-param __RequestVerificationToken
+</code></pre>
+<p>Scope by URL pattern:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --include-url <span class="hljs-string">&#39;^https://api\.target\.app/&#39;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --exclude-url <span class="hljs-string">&#39;/static/|/health&#39;</span>
+</code></pre>
+<p>Out-of-scope domain list:</p>
+<pre><code class="language-bash hljs">dalfox scan urls.txt --out-of-scope-file scope-block.txt
+<span class="hljs-comment"># or inline, with wildcards</span>
+dalfox scan urls.txt --out-of-scope <span class="hljs-string">&#39;*.google.com,*.cdn.cloudflare.net&#39;</span>
+</code></pre>
+<h2 id="only-discover-dont-attack">Only discover, don't attack</h2>
+<p>Dry-run mode discovers and prints the attack plan without sending payloads:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --dry-run
+</code></pre>
+<p>Discovery-only mode is similar but completes the probing stage:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-discovery
+</code></pre>
+<p>Both help with scoping and CI pre-checks.</p>
+<h2 id="skipping-stages">Skipping stages</h2>
+<p>To move faster or work around a fragile target, skip parts of the pipeline:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Skips</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-discovery</code></td>
+<td>Entire discovery stage</td>
+</tr>
+<tr>
+<td><code>--skip-mining</code></td>
+<td>All wordlist/DOM mining</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dict</code></td>
+<td>Dictionary mining only</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dom</code></td>
+<td>Mining parameter names from HTML <code>id</code>/<code>name</code> attributes only</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-header</code></td>
+<td>Header reflection checks</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-cookie</code></td>
+<td>Cookie reflection checks</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-path</code></td>
+<td>Path reflection checks</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>--skip-mining-dom</code> only stops dalfox from harvesting parameter <em>names</em> out of the response HTML. It does <strong>not</strong> disable DOM-XSS detection: the static analysis of inline <code>&lt;script&gt;</code> blocks (which emits the <code>[A]</code> AST-detected findings, source→sink flows such as <code>location.hash</code> → <code>innerHTML</code>) is a separate pass controlled by <a href="https://dalfox.hahwul.com/guide/payloads/"><code>--skip-ast-analysis</code></a>. To filter those findings out of the output instead, use <code>--only-poc v,r</code>. See <a href="https://dalfox.hahwul.com/guide/detection-model/">Detection Model</a> for how the two subsystems differ and what each evidence tier proves.</p>
+</blockquote>
+<h2 id="injection-markers">Injection markers</h2>
+<p>Some endpoints need the payload in a specific location (e.g., inside a JWT). Use <code>--inject-marker</code>:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/api <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --inject-marker FUZZ <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -d <span class="hljs-string">&#39;{&quot;filter&quot;:&quot;FUZZ&quot;}&#39;</span>
+</code></pre>
+<p>Dalfox replaces every <code>FUZZ</code> with each payload and sends the request.</p>
+<h2 id="auto-pre-encoding">Auto pre-encoding</h2>
+<p>Some endpoints don't accept a payload as raw text. They expect it wrapped in some structural encoding (base64, JSON, JWT, and so on). Dalfox inspects each parameter's existing value during discovery and, when it recognises a structure, builds a transparent encoding pipeline so payloads round-trip through the same wrapping. There's nothing to configure: look for <code>pre_encoding</code> or <code>pre_encoding_pipeline</code> in debug output.</p>
+<p>Single-step encodings are detected on the existing parameter value:</p>
+<table>
+<thead>
+<tr>
+<th>Detected</th>
+<th>Encodes payload as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base64</code></td>
+<td><code>BASE64(payload)</code></td>
+</tr>
+<tr>
+<td><code>2base64</code></td>
+<td><code>BASE64(BASE64(payload))</code></td>
+</tr>
+<tr>
+<td><code>2url</code> / <code>3url</code></td>
+<td>Two- or three-round URL encoding</td>
+</tr>
+</tbody>
+</table>
+<p>Composable pipelines turn the value's structure into a chain of transformations. When the existing value decodes as a structured wrapper, Dalfox enumerates every leaf string field as its own virtual sub-parameter:</p>
+<table>
+<thead>
+<tr>
+<th>Wrapper shape</th>
+<th>Pipeline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Base64-of-JSON <code>?qs=eyJ…</code></td>
+<td><code>JsonField(/leaf) → Base64</code></td>
+</tr>
+<tr>
+<td>Base64URL-of-JSON</td>
+<td><code>JsonField(/leaf) → Base64Url</code></td>
+</tr>
+<tr>
+<td>Bare URL-encoded JSON <code>?blob=%7B…%7D</code></td>
+<td><code>JsonField(/leaf)</code></td>
+</tr>
+<tr>
+<td>JWT/JWS <code>?token=h.p.s</code></td>
+<td><code>JsonField(/leaf) → Base64Url → JwtAssemble</code></td>
+</tr>
+</tbody>
+</table>
+<p>Each leaf is registered as a separate Param using bracket-style display naming. A payload at the <code>move_url</code> field of <code>qs</code> shows up as <code>qs[move_url]</code>, and an array element appears as <code>qs[items][0]</code>. The wire-level substitution still targets the original parent param (<code>qs</code>), so the request looks normal to the server.</p>
+<p>For JWTs the original header and signature segments are preserved verbatim. The signature won't match the modified payload, so this only fires on endpoints that don't verify the token. Properly-signed JWTs return no findings. That's expected behaviour, not a miss.</p>
+<p>If your target uses a wrapping that Dalfox doesn't auto-detect, you can still force the injection point with <code>--inject-marker</code> (see above).</p>
+<h2 id="reflection-probe-shape">Reflection probe shape</h2>
+<p>Every discovery and mining probe sends a sandwich marker (<code>OPEN + INNER + CLOSE</code>) instead of a single token. The response is then classified into one of four cases:</p>
+<table>
+<thead>
+<tr>
+<th>Reflection</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Full</strong></td>
+<td>The complete <code>OPEN+INNER+CLOSE</code> survived. Standard reflection.</td>
+</tr>
+<tr>
+<td><strong>PrefixOnly</strong></td>
+<td><code>OPEN+INNER</code> is present, <code>CLOSE</code> was stripped. Suggests a suffix-strip filter.</td>
+</tr>
+<tr>
+<td><strong>SuffixOnly</strong></td>
+<td><code>INNER+CLOSE</code> is present, <code>OPEN</code> was stripped. Suggests a prefix-strip filter.</td>
+</tr>
+<tr>
+<td><strong>InnerOnly</strong></td>
+<td>Only <code>INNER</code> survives. Suggests a regex extract or both wraps removed.</td>
+</tr>
+</tbody>
+</table>
+<p>All four are treated as &quot;reflected&quot;: discovery records the parameter and the scan proceeds. A naive single-token check would have missed every case except <em>Full</em>, leaving prefix-/suffix-stripping endpoints undetected. The marker tokens are scan-unique (<code>dlx</code>/<code>dlxmid</code>/<code>xld</code> prefixes plus 8 hex chars per scan), so accidental collisions in HTML are negligible.</p>
+<h2 id="what-makes-a-finding-verified">What makes a finding &quot;verified&quot;</h2>
+<table>
+<thead>
+<tr>
+<th>Result</th>
+<th>How it&#39;s confirmed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>V</strong> (Vulnerable)</td>
+<td>Dalfox parses the response DOM and finds the payload in a position that would execute. This is a static parse of a real response, not browser execution; see <a href="https://dalfox.hahwul.com/guide/detection-model/">Detection Model</a>. The <code>evidence</code> field tags the path that proved it: DOM marker (CSS selector hit), executable URL (<code>javascript:</code>/<code>data:</code> in a dangerous attribute), HTML structural (an injected element with an <code>on*</code> handler whose value is a sink call), or JS-context AST (a sink call inside <code>&lt;script&gt;</code> that the parsed AST shows is covered by the payload&#39;s byte range).</td>
+</tr>
+<tr>
+<td><strong>A</strong> (AST-detected)</td>
+<td>Static JavaScript analysis traced a user-controlled source to a dangerous sink (e.g., <code>innerHTML = location.hash</code>).</td>
+</tr>
+<tr>
+<td><strong>R</strong> (Reflected)</td>
+<td>Payload text appeared in the response body, but no DOM evidence yet. Still worth investigating manually.</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> and <code>A</code> are the signals. <code>R</code> is a hint.</p>
+<h2 id="safe-contexts">Safe contexts</h2>
+<p>Dalfox ignores reflections inside <code>&lt;textarea&gt;</code>, <code>&lt;title&gt;</code>, <code>&lt;noscript&gt;</code>, <code>&lt;style&gt;</code>, <code>&lt;xmp&gt;</code>, and <code>&lt;plaintext&gt;</code>. Content there doesn't execute, so it would only produce false positives.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li>See how payloads are built in <a href="https://dalfox.hahwul.com/guide/payloads/">Payloads &amp; Encoding</a>.</li>
+<li>Dealing with a WAF? Jump to <a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a>.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Payloads &amp; Encoding</title>
+      <link>https://dalfox.hahwul.com/guide/payloads/</link>
+      <guid>https://dalfox.hahwul.com/guide/payloads/</guid>
+      <description>Built-in payload families, encoders, custom payloads, and remote wordlists.</description>
+      <content:encoded><![CDATA[<p>Dalfox ships with a curated, context-aware payload library. Most of the time you don't need to think about it. The engine picks the right payloads for each injection context. This page covers what's built in and how to extend it.</p>
+<h2 id="payload-families">Payload families</h2>
+<p>Dalfox composes payloads from several families:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Example</th>
+<th>Used when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTML tag</strong></td>
+<td><code>&lt;svg onload=alert(1)&gt;</code></td>
+<td>HTML context</td>
+</tr>
+<tr>
+<td><strong>Attribute breakout</strong></td>
+<td><code>&#39;&gt;&lt;img src=x onerror=alert(1)&gt;</code></td>
+<td>Inside an attribute</td>
+</tr>
+<tr>
+<td><strong>JavaScript</strong></td>
+<td><code>&quot;;alert(1);//</code></td>
+<td>Inside a <code>&lt;script&gt;</code> block</td>
+</tr>
+<tr>
+<td><strong>Event handler</strong></td>
+<td><code>onmouseover=alert(1)</code></td>
+<td>Existing attribute value</td>
+</tr>
+<tr>
+<td><strong>DOM clobbering</strong></td>
+<td><code>&lt;img id=x&gt;</code></td>
+<td>Legacy DOM lookups</td>
+</tr>
+<tr>
+<td><strong>URL protocol</strong></td>
+<td><code>javascript:alert(1)</code></td>
+<td><code>href</code>/<code>src</code>-like attributes</td>
+</tr>
+<tr>
+<td><strong>CSP bypass</strong></td>
+<td><code>strict-dynamic</code> script gadgets, nonce reuse, JSONP on allowed hosts</td>
+<td>When the response carries a bypassable CSP</td>
+</tr>
+<tr>
+<td><strong>mXSS</strong></td>
+<td><code>&lt;foreignobject&gt;</code>/DOMPurify bypasses</td>
+<td>Sanitizer-mutated DOM</td>
+</tr>
+<tr>
+<td><strong>Blind</strong></td>
+<td><code>&lt;script src=//callback/&gt;&lt;/script&gt;</code></td>
+<td><code>--blind</code> is set</td>
+</tr>
+</tbody>
+</table>
+<p>Each payload template carries a marker (<code>class={CLASS}</code> or <code>id={ID}</code>) so the verification stage can positively identify its own element in the DOM.</p>
+<h2 id="context-aware-selection">Context-aware selection</h2>
+<p>During discovery Dalfox classifies each parameter by <strong>injection context</strong>, the place where its reflected value lands:</p>
+<ul>
+<li>HTML body → HTML/attribute-breakout payloads</li>
+<li>Inside a quoted attribute → attribute-breakout payloads</li>
+<li>Inside <code>&lt;script&gt;</code> → JS-breakout payloads</li>
+<li>Inside <code>&lt;style&gt;</code> → CSS payloads</li>
+<li>Unknown → fallback mix of HTML + attribute</li>
+</ul>
+<p>This keeps request counts sane while maximising hit rate.</p>
+<h2 id="csp-aware-bypass-payloads">CSP-aware bypass payloads</h2>
+<p>When the preflight stage sees a <code>Content-Security-Policy</code> (or <code>…-Report-Only</code>)
+header, or a <code>&lt;meta http-equiv&gt;</code> equivalent, Dalfox parses it and tailors the
+script-execution payloads to that policy's actual weaknesses. Payloads are only
+generated for the directives that are genuinely exploitable, so a target with no
+CSP (or a hardened one) sees no extra requests.</p>
+<table>
+<thead>
+<tr>
+<th>CSP shape</th>
+<th>What Dalfox emits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>unsafe-inline</code> / <code>unsafe-eval</code></td>
+<td>direct inline / <code>eval</code>-family payloads</td>
+</tr>
+<tr>
+<td>missing <code>base-uri</code> / <code>object-src</code></td>
+<td><code>&lt;base&gt;</code> hijack / <code>&lt;object&gt;</code>/<code>&lt;embed&gt;</code> injection</td>
+</tr>
+<tr>
+<td><code>data:</code> / <code>blob:</code> in <code>script-src</code></td>
+<td><code>&lt;script src=data:…&gt;</code> / <code>Blob</code> URL loaders</td>
+</tr>
+<tr>
+<td>whitelisted CDN host</td>
+<td>the matching JSONP / framework <strong>script gadget</strong> for that host</td>
+</tr>
+<tr>
+<td><code>strict-dynamic</code></td>
+<td>DOM script-gadgets (RequireJS <code>data-main</code>, <code>document.write</code> self-propagation, AngularJS bootstrap) plus <strong>nonce reuse</strong> when a nonce is captured</td>
+</tr>
+</tbody>
+</table>
+<p>Two modern shapes that earlier releases parsed but never acted on are now live:</p>
+<ul>
+<li><strong><code>strict-dynamic</code>.</strong> Under <code>strict-dynamic</code> the browser ignores the host
+allowlist, so a plain <code>&lt;script src=allowed-host&gt;</code> no longer loads. Dalfox
+switches to DOM script-gadgets (payloads that get an already-trusted script
+to create the attacker script) and, when the policy pins a nonce, emits a
+<code>&lt;script nonce=…&gt;</code> reuse payload (effective when the nonce is static,
+predictable, or reflected).</li>
+<li><strong>Nonce / hash pinning.</strong> <code>'nonce-…'</code> and <code>'sha256-…'</code> tokens are parsed and
+used to classify the policy. A pure random-nonce/hash policy with no
+<code>strict-dynamic</code> and no gadget host is treated as <em>hardened</em> — Dalfox does not
+waste requests on it.</li>
+</ul>
+<p>The gadget set lives in an embedded, extensible database (JSONBee / H5SC /
+Google CSP-Evaluator shapes) rather than a hardcoded list, so coverage grows
+without touching the analyzer.</p>
+<h2 id="trusted-types-awareness">Trusted Types awareness</h2>
+<p><a href="https://web.dev/articles/trusted-types">Trusted Types</a> is the primary DOM-XSS
+mitigation in hardened apps. Dalfox's AST DOM-XSS analyzer understands it:</p>
+<ul>
+<li>A <strong>strict</strong> policy callback (<code>createPolicy('p', {createHTML: s =&gt; DOMPurify.sanitize(s)})</code>)
+clears taint just like any other sanitizer, so values routed through
+<code>p.createHTML(x)</code> no longer report.</li>
+<li>A <strong>permissive</strong> default policy (the classic bypassable no-op
+<code>createPolicy('default', {createHTML: x =&gt; x})</code>) is <em>not</em> mistaken for
+protection; the finding is kept and flagged.</li>
+<li>When the response CSP enforces <code>require-trusted-types-for 'script'</code> <strong>and</strong> the
+page defines a strict <code>'default'</code> policy, the browser auto-sanitizes every
+TrustedHTML sink — Dalfox suppresses those now-false-positive findings.</li>
+</ul>
+<p>The classifier is deliberately conservative: anything it can't prove safe stays
+permissive, so the finding is kept. Suppression never fires without enforcement,
+so a page that defines a default policy but forgets <code>require-trusted-types-for</code>
+still reports — no false negatives are introduced.</p>
+<h2 id="encoders">Encoders</h2>
+<p>Encoders transform the <em>same payload</em> into multiple forms so the WAF and server-side filters don't all see the same bytes.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -e url,html,base64
+</code></pre>
+<p>Available encoders:</p>
+<table>
+<thead>
+<tr>
+<th>Encoder</th>
+<th>Transforms <code>&lt;</code> to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>none</code></td>
+<td><code>&lt;</code> (raw)</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td><code>%3C</code></td>
+</tr>
+<tr>
+<td><code>2url</code></td>
+<td><code>%253C</code> (double)</td>
+</tr>
+<tr>
+<td><code>3url</code></td>
+<td><code>%25253C</code> (triple)</td>
+</tr>
+<tr>
+<td><code>4url</code></td>
+<td>quadruple URL</td>
+</tr>
+<tr>
+<td><code>html</code></td>
+<td><code>&amp;#x003c;</code></td>
+</tr>
+<tr>
+<td><code>htmlpad</code></td>
+<td>zero-padded HTML entity</td>
+</tr>
+<tr>
+<td><code>base64</code></td>
+<td>base64 of payload</td>
+</tr>
+<tr>
+<td><code>unicode</code></td>
+<td>fullwidth mapping</td>
+</tr>
+<tr>
+<td><code>zwsp</code></td>
+<td>zero-width space insertion</td>
+</tr>
+</tbody>
+</table>
+<p>Defaults: <code>url,html</code>. If you add <code>none</code> to the list, Dalfox sends only the raw payloads.</p>
+<h2 id="custom-payloads">Custom payloads</h2>
+<p>Provide your own list, one payload per line:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --custom-payload mypayloads.txt
+</code></pre>
+<p>Swap out the built-in library entirely:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --custom-payload mypayloads.txt --only-custom-payload
+</code></pre>
+<h2 id="remote-payload-sources">Remote payload sources</h2>
+<p>Pull community wordlists on demand:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --remote-payloads portswigger,payloadbox
+</code></pre>
+<p>Supported sources: <code>portswigger</code>, <code>payloadbox</code>. Fetched once per run, respecting <code>--proxy</code> and <code>--timeout</code>.</p>
+<h2 id="inspecting-payloads">Inspecting payloads</h2>
+<p>Print a payload family without running a scan:</p>
+<pre><code class="language-bash hljs">dalfox payload event-handlers  <span class="hljs-comment"># onerror, onmouseover, ...</span>
+dalfox payload useful-tags     <span class="hljs-comment"># svg, img, script, ...</span>
+dalfox payload uri-scheme      <span class="hljs-comment"># javascript:, data:</span>
+dalfox payload special-chars   <span class="hljs-comment"># &lt; &gt; &quot; &#39; ` ( ) ... and encoded variants</span>
+dalfox payload functions       <span class="hljs-comment"># confirmable sinks: alert(1), window[&#39;alert&#39;](1), ...</span>
+dalfox payload awesome-alert   <span class="hljs-comment"># PoC alerts: alert(document.domain), alert(document.cookie)</span>
+dalfox payload dom-clobbering  <span class="hljs-comment"># DOM clobbering vectors</span>
+dalfox payload mxss            <span class="hljs-comment"># mutation-XSS / sanitizer-bypass payloads</span>
+dalfox payload blind           <span class="hljs-comment"># blind-XSS skeletons ({} = your callback URL)</span>
+dalfox payload portswigger     <span class="hljs-comment"># fetch + print remote list</span>
+</code></pre>
+<p>Every selector prints one entry per line, so it composes with the usual shell tools:</p>
+<pre><code class="language-bash hljs">dalfox payload functions <span class="hljs-punctuation">|</span> grep -i prompt
+dalfox payload special-chars <span class="hljs-punctuation">|</span> wc -l
+</code></pre>
+<p>The <code>special-chars</code> group is handy for manual reflection testing — inject each byte on
+its own to see which characters survive verbatim, which come back HTML/URL-encoded, and
+which are stripped. <code>functions</code> and <code>awesome-alert</code> are curated to <em>visibly</em> fire (and to
+render the host/origin), so a single screenshot proves impact.</p>
+<h2 id="customising-the-alert">Customising the &quot;alert&quot;</h2>
+<p>The classic <code>alert(1)</code> can be loud. Swap it out so you can prove impact without popping dialogs everywhere:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --custom-alert-value <span class="hljs-string">&quot;document.domain&quot;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --custom-alert-type str
+</code></pre>
+<ul>
+<li><code>--custom-alert-value</code>: value passed to <code>alert</code>/<code>prompt</code>/<code>confirm</code> (default <code>1</code>).</li>
+<li><code>--custom-alert-type</code>: <code>none</code> keeps the original function, <code>str</code> wraps the value in quotes.</li>
+</ul>
+<h2 id="blind-xss">Blind XSS</h2>
+<p>Blind XSS fires later, in a context you can't see (an admin panel, a support agent's dashboard). You need an out-of-band listener:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -b https://your-callback.interact.sh
+</code></pre>
+<p>Custom blind templates:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -b https://your-callback.example <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --custom-blind-xss-payload blind-templates.txt
+<span class="hljs-comment"># each line may contain {} (replaced with the callback URL)</span>
+</code></pre>
+<h2 id="http-parameter-pollution-hpp">HTTP Parameter Pollution (HPP)</h2>
+<p>Some filters only inspect the <em>first</em> occurrence of a parameter. Dalfox can duplicate parameters to slip a payload into the second slot:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --hpp
+</code></pre>
+<h2 id="deep-scan">Deep scan</h2>
+<p>By default Dalfox stops testing a parameter once it finds a verified payload. <code>--deep-scan</code> keeps going:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --deep-scan
+</code></pre>
+<p>Useful for research; slower for production pipelines.</p>
+<h2 id="skipping-payload-stages">Skipping payload stages</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-xss-scanning</code></td>
+<td>Discover and probe only; no payload injection</td>
+</tr>
+<tr>
+<td><code>--skip-ast-analysis</code></td>
+<td>Skip AST-based DOM-XSS detection of inline scripts (the <code>[A]</code> findings)</td>
+</tr>
+</tbody>
+</table>
+<p><code>--skip-ast-analysis</code> is the control for the static DOM-XSS pass that reports <code>source → sink</code> flows (e.g. <code>location.hash</code> → <code>innerHTML</code>) as <code>[A]</code> (AST-detected) findings — independent of parameter mining. <code>--skip-mining-dom</code> does <strong>not</strong> affect it. To keep the pass running but hide those findings from the output, use <code>--only-poc v,r</code>. What <code>[A]</code> actually proves (and why a pure client-side DOM-XSS never reaches <code>[V]</code>) is covered in <a href="https://dalfox.hahwul.com/guide/detection-model/">Detection Model</a>.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li>Pair this with <a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a> to bend payloads around filters.</li>
+<li>See <a href="https://dalfox.hahwul.com/guide/output/">Output &amp; Reports</a> to export findings.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Scanning Modes</title>
+      <link>https://dalfox.hahwul.com/guide/scanning-modes/</link>
+      <guid>https://dalfox.hahwul.com/guide/scanning-modes/</guid>
+      <description>Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow.</description>
+      <content:encoded><![CDATA[<p>Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.</p>
+<p>Under the hood there are four subcommands: <code>scan</code> (the scanner), <code>server</code> (long-lived REST API), <code>payload</code> (payload utilities), and <code>mcp</code> (Model Context Protocol stdio server). Everything below labelled &quot;URL / File / Pipe / Raw HTTP / HAR / SXSS&quot; is a <em>shape of input</em> that the <code>scan</code> subcommand handles via <code>--input-type</code>; they are not independent subcommands.</p>
+<blockquote>
+<p>The fan-out input shapes (<code>file</code>, <code>pipe</code>, <code>raw-http</code>, <code>har</code>) are <code>scan</code>-only: each expands one input into many targets. The <code>server</code> and <code>mcp</code> interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.</p>
+</blockquote>
+<h2 id="auto-default">Auto (default)</h2>
+<p>Just give Dalfox a URL. It figures out the rest.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/search?q<span class="hljs-operator">=</span><span class="hljs-built_in">test</span>
+</code></pre>
+<p>Under the hood, Dalfox uses the <code>scan</code> subcommand with <code>--input-type auto</code>. It auto-detects whether the argument is a URL, a file path, or a stream on <code>stdin</code>.</p>
+<h2 id="url-mode">URL mode</h2>
+<p>Force URL parsing (rarely needed, useful in scripts):</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type url https://target.app
+</code></pre>
+<h2 id="file-mode">File mode</h2>
+<p>Scan a list of URLs, one per line:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># urls.txt</span>
+<span class="hljs-comment"># https://target.app/search?q=1</span>
+<span class="hljs-comment"># https://target.app/profile?id=2</span>
+dalfox scan urls.txt
+<span class="hljs-comment"># or, explicit:</span>
+dalfox scan --input-type file urls.txt
+</code></pre>
+<p>Comments (<code>#</code>) and blank lines are ignored. Each URL runs through the full pipeline.</p>
+<h2 id="pipe-mode">Pipe mode</h2>
+<p>Read from <code>stdin</code>, the common case when chaining recon tools:</p>
+<pre><code class="language-bash hljs">cat urls.txt <span class="hljs-punctuation">|</span> dalfox scan
+waybackurls example.com <span class="hljs-punctuation">|</span> gf xss <span class="hljs-punctuation">|</span> dalfox scan
+hakrawler -url https://target.app <span class="hljs-punctuation">|</span> dalfox scan
+</code></pre>
+<p>Dalfox buffers the input, deduplicates, and scans every line as a target.</p>
+<h3 id="piping-alongside-a-command-line-target">Piping alongside a command-line target</h3>
+<p>Give Dalfox a target <em>and</em> pipe one, and the two lists merge:</p>
+<pre><code class="language-bash hljs">cat urls.txt <span class="hljs-punctuation">|</span> dalfox scan https://target.app/one
+<span class="hljs-comment"># [info] Merged 12 target(s) from stdin and 1 target(s) from arguments</span>
+</code></pre>
+<p>Here the command-line target is already enough to scan, so Dalfox waits only ~500 ms for <code>stdin</code> to produce its first byte. A pipe that a wrapper, CI job, or job runner left open and idle is skipped with a warning instead of blocking the run. Once the stream does start talking, it's read to the end — a long or slowly written list is never truncated.</p>
+<p>Two knobs adjust that. <code>DALFOX_STDIN_WAIT_MS</code> raises the wait, or disables the merge with <code>0</code> (see <a href="https://dalfox.hahwul.com/reference/environment/">Environment</a>); <code>--input-type pipe</code> says <code>stdin</code> <em>is</em> the input, so Dalfox waits for it however long it takes.</p>
+<h3 id="collapsing-near-duplicate-urls">Collapsing near-duplicate URLs</h3>
+<p>By default Dalfox only drops targets that are byte-identical (<code>--dedup-urls exact</code>): the full URL, query values included, plus the method. A <code>gau</code> / <code>katana</code> / <code>waybackurls</code> dump rarely looks like that — it is usually the same handful of endpoints with thousands of harvested values, and <code>?id=1</code> … <code>?id=9999</code> are 9999 separate full scans of one injection point.</p>
+<p><code>--dedup-urls signature</code> collapses them. The key is the method, scheme, host, port, path, and the <em>sorted set of parameter names</em> — query and body (form, JSON, multipart) alike. Values are excluded, so a value-only family becomes one target. Dalfox logs what it dropped, and the count lands in the scan metadata (<code>dedup_mode</code>, <code>targets_deduplicated</code>) so a collapsed run is never read as full coverage of the list.</p>
+<p>The surviving representative is the first member listed, except that a member whose parameters all carry a value beats an earlier one with an empty value: recon dumps often list <code>?id=</code> before <code>?id=42</code>, and a valueless URL frequently 404s, which would report the whole family clean off a dud. Scope filters (<code>--include-url</code>, <code>--exclude-url</code>, <code>--out-of-scope</code>) are applied <em>before</em> dedup, so they always get to rule members out first.</p>
+<pre><code class="language-bash hljs">gau target.app <span class="hljs-punctuation">|</span> dalfox scan --dedup-urls signature
+<span class="hljs-comment"># INF dedup (signature): 8214 duplicate target(s) collapsed, 37 remaining — dropped e.g. …</span>
+</code></pre>
+<p><strong>The bigger win is coverage, not saved requests.</strong> <code>--max-targets-per-host</code> caps a host at 100 targets by default, and a recon dump arrives sorted — so one endpoint's thousands of harvested values are contiguous and consume the entire budget before any other endpoint is reached. Measured on a 5200-URL list (5000 × <code>/html?q=N</code>, then 200 distinct <code>/users/N</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What the 100-target budget was spent on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>exact</code> (default)</td>
+<td>100 variants of <code>/html</code> — the 200 <code>/users/N</code> endpoints never scanned</td>
+</tr>
+<tr>
+<td><code>signature</code></td>
+<td>1 × <code>/html</code> + 99 distinct <code>/users/N</code></td>
+</tr>
+</tbody>
+</table>
+<p>The truncation is reported either way (<code>TRUNCATED_PER_HOST_CAP</code>), but only <code>signature</code> spends the budget on <em>different</em> endpoints. Raise <code>--max-targets-per-host</code> as well if you want both.</p>
+<p>When is it safe? When the parameter <em>name</em> is what decides where input lands — the common case. It is <strong>not</strong> safe when a value picks the code path: an <code>action=</code> / <code>mode=</code> / <code>template=</code> discriminator that routes to a different handler on the same path, a routing token, or a locale that swaps the rendering template. There, <code>signature</code> scans one branch and reports on all of them, which is why it stays opt-in.</p>
+<p><code>--dedup-urls off</code> disables deduplication entirely, for the rare case where every line must be scanned as given. Note that per-target reporting is keyed by URL, so repeated lines still share one <code>target_summary</code> entry.</p>
+<h2 id="resuming-an-interrupted-scan">Resuming an interrupted scan</h2>
+<p>Ctrl-C stops a scan cleanly and still reports what was found, but on its own it buys you a partial report and nothing else: nothing records <em>which</em> targets finished, so re-running a 50k-URL list that stopped at 80% redoes the 80%. The same applies to a crash, a dropped SSH session, or an OOM on a shared box.</p>
+<p><code>--state-file</code> (opt-in — without it, behavior is exactly as before) records each target as it reaches a terminal state, and skips the finished ones on the next run:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type file urls.txt --state-file scan.state
+<span class="hljs-comment"># ^C</span>
+<span class="hljs-comment"># [!] Ctrl-C received — stopping in-flight tasks (press again to force exit)</span>
+
+dalfox scan --input-type file urls.txt --state-file scan.state
+<span class="hljs-comment"># INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan</span>
+</code></pre>
+<p><strong>Only completed targets are skipped.</strong> Anything whose coverage is unknown is scanned again:</p>
+<table>
+<thead>
+<tr>
+<th>Recorded outcome</th>
+<th>When</th>
+<th>Next run</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>completed</code></td>
+<td>The target was scanned to the end with a live session</td>
+<td>Skipped</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Ctrl-C, <code>--scan-timeout</code> expiry, or a session that died mid-scan</td>
+<td>Retried</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>Dropped during preflight — unreachable, content-type mismatch, <code>--max-targets-per-host</code> cap</td>
+<td>Retried</td>
+</tr>
+</tbody>
+</table>
+<p>A target's identity is its URL plus method, the same key <code>--dedup-urls exact</code> uses. One state file can therefore back a shell loop of per-URL invocations as easily as a single <code>--input-type file</code> run.</p>
+<p><strong>A configuration change starts over.</strong> The file's header carries a hash of the scan-affecting configuration; when it does not match, the recorded targets were tested under settings this run does not use. Dalfox moves the old file to <code>scan.state.bak</code>, starts a new one, and scans everything:</p>
+<pre><code>Warning: scan configuration changed since 'scan.state' was written (recorded a5f8…, now 6447…) — starting fresh (previous state kept at 'scan.state.bak')
+</code></pre>
+<p>The old file is set aside rather than overwritten, because it is a record of real work: resuming an authenticated campaign with a rotated <code>--cookies</code> value lands on this path, and losing 40k completions to it would be worse than the redundant scan. Nothing is ever destroyed in place — a file at that path that is <em>not</em> a Dalfox state file (a typo pointing at your target list, say) is refused outright rather than adopted.</p>
+<p>Output and pacing flags are deliberately outside that hash — <code>--format</code>, <code>--output</code>, <code>--silence</code>, <code>--only-poc</code>, <code>--baseline</code>, <code>--timeout</code>, <code>--scan-timeout</code>, <code>--delay</code>, <code>--rate-limit</code>, <code>--workers</code>, <code>--max-concurrent-targets</code>, and the target list itself. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file — including <code>--deep-scan</code>, <code>--encoders</code>, <code>--custom-payload</code>, the mining and discovery toggles, the WAF options, <code>--limit</code>, and <code>--cookies</code> / <code>--headers</code>.</p>
+<p>The file is append-only JSONL: one header line, then one line per target. A hard kill can at worst tear the final line, which is skipped on read while every complete record before it still counts. A target whose outcome is unchanged from the last run is not re-recorded, so a permanently unreachable host does not grow the file once per run.</p>
+<p><code>--dry-run</code> and <code>--only-discovery</code> open the file <strong>read-only</strong>: their plan reflects the resume, but they send no attack payloads and complete nothing, so they never create it, extend it, or set it aside — pricing out <code>--deep-scan</code> with a <code>--dry-run</code> cannot cost you a campaign. Every envelope that applies the filter (scan, dry-run, only-discovery, Markdown) carries a <code>resumed</code> block with the state-file path and how many targets were skipped, so a short report from a resumed run is never mistaken for full coverage of the input list.</p>
+<p>CLI only: <code>dalfox server</code> and MCP run one scan per job with their own lifecycle, and never resume a previous process's work.</p>
+<h2 id="raw-http-mode">Raw HTTP mode</h2>
+<p>Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalfox:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type raw-http request.txt
+</code></pre>
+<p>The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves every header, cookie, and body parameter.</p>
+<p>For live proxy workflows (especially Caido Active Workflows) see the dedicated <strong><a href="https://dalfox.hahwul.com/integrations/caido/">Caido integration guide</a></strong>. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.</p>
+<h2 id="har-mode">HAR mode</h2>
+<p>A <a href="http://www.softwareishard.com/blog/har-12-spec/">HAR</a> (HTTP Archive) export is the JSON capture that browser DevTools and intercepting proxies (Burp, Caido, ZAP, Charles, mitmproxy) produce. Hand Dalfox the whole file and it scans every request in it, preserving each one's URL, method, headers, cookies, and body:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># Auto-detected from the file content:</span>
+dalfox scan capture.har
+<span class="hljs-comment"># or explicit:</span>
+dalfox scan --input-type har capture.har
+<span class="hljs-comment"># or piped from another tool:</span>
+mitmdump -nr flows -w /dev/stdout --set <span class="hljs-variable">hardump</span><span class="hljs-operator">=</span>- <span class="hljs-punctuation">|</span> dalfox scan -i har
+</code></pre>
+<p>Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each <code>log.entries[].request</code> becomes one target; requests are deduplicated by URL + method and run through the same scope filters as every other mode. Non-<code>http(s)</code> entries (<code>data:</code>, <code>blob:</code>, WebSocket, browser-extension URLs) are skipped automatically.</p>
+<p>This restores a capability the Go v2.x line had that the v3 rewrite initially dropped. CLI request flags still apply on top — e.g. <code>-H &quot;Authorization: Bearer …&quot;</code> is appended to every entry, and <code>--include-url</code> / <code>--out-of-scope</code> narrow the set.</p>
+<h2 id="stored-xss-mode-sxss">Stored XSS mode (SXSS)</h2>
+<p>Test the classic &quot;inject on form A, payload appears on page B&quot; pattern:</p>
+<pre><code class="language-bash hljs">dalfox scan https://target.app/post-comment <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss-url https://target.app/comments
+</code></pre>
+<p>Dalfox injects into the first URL, then fetches the second to check whether the payload landed. See the <a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS guide</a> for the full flow.</p>
+<h2 id="session-monitoring">Session monitoring</h2>
+<p>Static credentials (<code>--cookies</code>, <code>-H 'Cookie: …'</code>, <code>--cookie-from-raw</code>) are
+attached to every request and never revisited. If that session expires an hour
+into a long scan, every request after it is answered by a login page, nothing
+reflects, and Dalfox exits <code>0</code> with an empty report — indistinguishable from a
+genuinely clean target.</p>
+<p>Session monitoring closes that gap. During preflight Dalfox fingerprints the
+authenticated landing response (status, where the request landed after
+redirects, whether a login form was already on the page) at <strong>no extra request
+cost</strong> — it reuses the body preflight already fetched. It then re-probes after
+each target's injection stage, and again at the dispatch boundary when the
+baseline is already more than 30 seconds old. (On a short or single-target run
+only the post-scan probe fires; re-probing a baseline that is seconds old
+proves nothing.)</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># Nothing to configure: credentials switch it on.</span>
+dalfox scan https://app.example.com/dashboard?q<span class="hljs-operator">=</span><span class="hljs-number">1</span> --cookies <span class="hljs-string">&quot;</span><span class="hljs-string">sid=</span><span class="hljs-variable">$SESSION</span><span class="hljs-string">&quot;</span>
+</code></pre>
+<p>A session is reported lost when any of these fires:</p>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Status moves into <code>401</code> / <code>403</code></td>
+<td>the app started rejecting the cookie</td>
+</tr>
+<tr>
+<td>The request now lands on a login-shaped URL</td>
+<td><code>302 → /users/sign_in</code></td>
+</tr>
+<tr>
+<td>A password field appeared where the baseline had none</td>
+<td>the app now renders the login wall inline</td>
+</tr>
+</tbody>
+</table>
+<p><code>403</code> is also what an origin or WAF returns once it decides to block a scanner.
+When Dalfox has already fingerprinted a WAF on the target, the <code>403</code> signal is
+suppressed entirely — a block explains it better than an expired session, and
+calling it a logout would abort the host group over a WAF rule. Use
+<code>--session-check</code> if you need <code>403</code>-as-expiry on a WAF-fronted origin.</p>
+<h3 id="making-it-exact">Making it exact</h3>
+<p>The heuristics are deliberately narrow — the default is to abort, so a false
+positive costs a whole scan. When you know exactly what an authenticated
+response looks like, say so and the heuristics step aside entirely:</p>
+<pre><code class="language-bash hljs">dalfox scan https://app.example.com/dashboard?q<span class="hljs-operator">=</span><span class="hljs-number">1</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --cookies <span class="hljs-string">&quot;</span><span class="hljs-string">sid=</span><span class="hljs-variable">$SESSION</span><span class="hljs-string">&quot;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --session-check <span class="hljs-string">&#39;Signed in as&#39;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --session-check-url https://app.example.com/api/me
+</code></pre>
+<p><code>--session-check-url</code> is worth setting when the scan target is expensive,
+paginated, or itself public — point it at a cheap authenticated endpoint
+instead. The baseline is then taken from that endpoint too (one extra preflight
+request per target, only when you set the flag), so a login-shaped probe path
+like <code>/auth/session</code> is compared against its own authenticated response rather
+than against the target's.</p>
+<h3 id="what-happens-on-loss">What happens on loss</h3>
+<p><code>--on-session-loss abort</code> (the default) stops the affected target and skips the
+remaining targets for that host: continuing to spend the request budget against
+a login page has no upside. <code>--on-session-loss continue</code> keeps scanning, for
+targets where the heuristics misfire.</p>
+<p>Either way the run is honest about it:</p>
+<ul>
+<li>a <code>SESSION LOST</code> line on <strong>stderr</strong>, so structured stdout stays parseable</li>
+<li>the target reported as <code>incomplete</code> (or <code>skipped</code>) with <code>error_code: SESSION_LOST</code>
+and the signal that fired in <code>error_message</code></li>
+<li><code>meta.incomplete: true</code> in the <a href="https://dalfox.hahwul.com/guide/output/#scan-metadata-envelope">scan metadata envelope</a></li>
+<li>exit code <code>2</code> under <code>abort</code> when the run found nothing — so
+<code>dalfox scan … &amp;&amp; echo &quot;no XSS found&quot;</code> cannot print that line after being
+logged out. A run that <em>did</em> find something still exits <code>1</code>; findings are
+real regardless, and <code>meta.incomplete</code> carries the caveat. <code>continue</code> leaves
+the exit code alone entirely.</li>
+</ul>
+<p>Dalfox also flags the case where the <strong>preflight</strong> response already looks
+unauthenticated — or where a <code>--session-check</code> marker never matched the baseline
+at all (a typo, or a marker that lives on another page). Both are reported as
+<code>SESSION_LOST</code> rather than merely logged: from such a baseline no later probe
+can detect a <em>change</em>, so stale credentials would otherwise produce a silent,
+completely clean run. The target is still scanned; the flag and exit code are
+what make the result honest.</p>
+<p>&quot;Already looks unauthenticated&quot; means the sign-in page itself: a <code>401</code>, an
+inline password field, or a redirect onto <code>/login</code>, <code>/signin</code>, <code>/users/sign_in</code>.
+A redirect onto a merely auth-<em>shaped</em> path is not enough: plenty of apps serve
+their authenticated home from <code>/auth/home</code> or <code>/sso/dashboard</code>, and calling that
+a dead session would fail a scan whose session was fine. Dalfox prints a
+<code>SESSION?</code> advisory for that case instead — visible, but with no <code>SESSION_LOST</code>
+entry, no <code>meta.incomplete</code>, and no effect on the exit code. If your app is one
+of those and you want the check to be exact anyway, <code>--session-check</code> settles
+it.</p>
+<p>Monitoring is off (and costs nothing) when no credentials are supplied and
+neither <code>--session-check</code> flag is set. Logging in is out of scope: this is
+detection only.</p>
+<h2 id="server-mode">Server mode</h2>
+<p>Run Dalfox as a long-lived HTTP service. Submit scans via REST, poll for results, cancel running jobs:</p>
+<pre><code class="language-bash hljs">dalfox server --port <span class="hljs-number">6664</span> --api-key <span class="hljs-string">&quot;</span><span class="hljs-variable">$DALFOX_API_KEY</span><span class="hljs-string">&quot;</span>
+</code></pre>
+<p>See <a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a> for endpoints and request shapes.</p>
+<h2 id="mcp-mode">MCP mode</h2>
+<p>Expose Dalfox as a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server so AI agents and IDEs (like Claude) can drive scans:</p>
+<pre><code class="language-bash hljs">dalfox mcp
+</code></pre>
+<p>The tools (<code>scan_with_dalfox</code>, <code>get_results_dalfox</code>, <code>list_scans_dalfox</code>, <code>cancel_scan_dalfox</code>, <code>delete_scan_dalfox</code>, <code>preflight_dalfox</code>) are described in <a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a>.</p>
+<h2 id="payload-mode-utility">Payload mode (utility)</h2>
+<p>Not a scanning mode, but useful alongside: print or fetch payloads without running a scan.</p>
+<pre><code class="language-bash hljs">dalfox payload event-handlers    <span class="hljs-comment"># list DOM event handlers</span>
+dalfox payload useful-tags       <span class="hljs-comment"># list useful HTML tags</span>
+dalfox payload portswigger       <span class="hljs-comment"># fetch PortSwigger XSS cheatsheet</span>
+dalfox payload payloadbox        <span class="hljs-comment"># fetch PayloadBox XSS list</span>
+dalfox payload uri-scheme        <span class="hljs-comment"># print javascript:/data: payloads</span>
+</code></pre>
+<h2 id="choosing-a-mode">Choosing a mode</h2>
+<table>
+<thead>
+<tr>
+<th>You want to…</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Test one URL</td>
+<td>Auto / URL</td>
+</tr>
+<tr>
+<td>Scan a list from your crawler</td>
+<td>File or Pipe</td>
+</tr>
+<tr>
+<td>Replay a specific request</td>
+<td>Raw HTTP</td>
+</tr>
+<tr>
+<td>Replay a whole captured session (proxy/DevTools export)</td>
+<td>HAR</td>
+</tr>
+<tr>
+<td>Test a form that writes to another page</td>
+<td>SXSS</td>
+</tr>
+<tr>
+<td>Run many scans from a dashboard or CI</td>
+<td>Server</td>
+</tr>
+<tr>
+<td>Let an AI agent drive scans</td>
+<td>MCP</td>
+</tr>
+<tr>
+<td>Just see what payloads Dalfox would send</td>
+<td>Payload utility or <code>--dry-run</code></td>
+</tr>
+</tbody>
+</table>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>Stored XSS</title>
+      <link>https://dalfox.hahwul.com/guide/stored-xss/</link>
+      <guid>https://dalfox.hahwul.com/guide/stored-xss/</guid>
+      <description>Inject on one URL, verify the payload fires on another.</description>
+      <content:encoded><![CDATA[<p>A Stored XSS lives on the server: you submit it once (a comment, a profile field, a chat message) and it triggers every time someone views that page. Dalfox has a dedicated mode for this pattern.</p>
+<h2 id="the-basic-flow">The basic flow</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app/post-comment <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss-url https://target.app/comments
+</code></pre>
+<p>Dalfox will:</p>
+<ol>
+<li><strong>Inject</strong> each payload into the first URL (<code>post-comment</code>).</li>
+<li><strong>Retrieve</strong> the second URL (<code>comments</code>) with a GET (configurable via <code>--sxss-method</code>).</li>
+<li><strong>Verify</strong> whether the payload reflects in the retrieval response, and whether it produced a real DOM element.</li>
+</ol>
+<p>Only findings that survive both steps are reported as SXSS.</p>
+<h2 id="choosing-the-retrieval-url">Choosing the retrieval URL</h2>
+<p>Pick the page the stored value <strong>reads</strong> from. Examples:</p>
+<table>
+<thead>
+<tr>
+<th>Injection URL</th>
+<th>Retrieval URL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /comments/new</code></td>
+<td><code>GET /post/123/comments</code></td>
+</tr>
+<tr>
+<td><code>PATCH /profile</code></td>
+<td><code>GET /u/myself</code></td>
+</tr>
+<tr>
+<td><code>POST /support/ticket</code></td>
+<td><code>GET /admin/tickets</code> (if you have admin access)</td>
+</tr>
+</tbody>
+</table>
+<p>If you omit <code>--sxss-url</code>, Dalfox tries to auto-detect it from the response headers (e.g., a <code>Location</code> redirect after a POST).</p>
+<h2 id="retrieval-method">Retrieval method</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app/form --sxss <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss-url https://target.app/list <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss-method GET
+</code></pre>
+<p><code>GET</code> is the default. Use <code>POST</code> or others if the retrieval endpoint needs it.</p>
+<h2 id="authentication">Authentication</h2>
+<p>Stored-XSS often requires two sessions: one that writes (user), and one that reads (admin). Use headers/cookies that grant enough access for the retrieval GET to see what you wrote.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/profile <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss --sxss-url https://target.app/admin/users <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -H <span class="hljs-string">&quot;Cookie: admin_session=abc; role=admin&quot;</span>
+</code></pre>
+<h2 id="blind-stored">Blind + stored</h2>
+<p>If the retrieval page is behind a login you don't have, switch to blind XSS. The payload fires on the admin's browser, and your callback server records it:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/support/ticket <span class="hljs-string">\
+</span><span class="hljs-string"></span>  -b https://callback.interact.sh
+</code></pre>
+<p>You still need to wait for someone to view the page; the callback tells you when it happens.</p>
+<h2 id="tips">Tips</h2>
+<ul>
+<li><strong>Scope narrowly.</strong> Use <code>-p</code> to name the field(s) you know are rendered on the retrieval URL. That way Dalfox isn't testing every cookie.</li>
+<li><strong>Watch for sanitisation-then-render.</strong> Stored XSS often survives a HTML sanitizer on write but breaks on a second sanitization on read. Dalfox's mXSS payloads are tuned for this.</li>
+<li><strong>Slow down.</strong> Some apps debounce or batch writes. A small <code>--delay</code> helps the retrieval see your payload.</li>
+</ul>
+<h2 id="next">Next</h2>
+<ul>
+<li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads &amp; Encoding</a> for tuning the injected payloads.</li>
+<li><a href="https://dalfox.hahwul.com/guide/output/">Output &amp; Reports</a> for shipping findings.</li>
+</ul>
+]]></content:encoded>
+    </item>
+    <item>
+      <title>WAF Bypass</title>
+      <link>https://dalfox.hahwul.com/guide/waf-bypass/</link>
+      <guid>https://dalfox.hahwul.com/guide/waf-bypass/</guid>
+      <description>Detect WAFs automatically and apply per-WAF evasion strategies.</description>
+      <content:encoded><![CDATA[<p>Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatically chooses an evasion strategy: extra encoders and payload mutations tuned to that specific WAF's rules.</p>
+<h2 id="how-it-works">How it works</h2>
+<ol>
+<li>Dalfox sends a small set of <strong>fingerprint probes</strong> to the target.</li>
+<li>If a known WAF signature shows up (headers like <code>cf-ray</code>, body markers like &quot;Attention required!&quot;, or a 429/403 shape), Dalfox notes the WAF and its confidence.</li>
+<li>The scanner merges the WAF's <strong>extra encoders</strong> into your encoder list and adds the WAF's <strong>mutation list</strong> to the payload generator.</li>
+<li>Payload mutations are capped (4 variants per base payload) so request volume stays sane. The cap only applies once a WAF is detected, so the extra effort lands exactly on the scans that need it.</li>
+</ol>
+<p>This is all on by default. You only touch flags if you want to disable or steer it.</p>
+<h2 id="supported-wafs">Supported WAFs</h2>
+<ul>
+<li>Cloudflare</li>
+<li>AWS WAF</li>
+<li>Akamai</li>
+<li>Imperva / Incapsula</li>
+<li>ModSecurity</li>
+<li>OWASP CRS</li>
+<li>Sucuri</li>
+<li>F5 BIG-IP</li>
+<li>Barracuda</li>
+<li>FortiWeb</li>
+<li>Azure WAF</li>
+<li>Google Cloud Armor</li>
+<li>Fastly</li>
+<li>Wordfence</li>
+<li>Citrix NetScaler</li>
+</ul>
+<p>Unrecognised WAFs trigger a generic fallback strategy.</p>
+<h2 id="tuning-the-behaviour">Tuning the behaviour</h2>
+<h3 id="auto-default">Auto (default)</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app
+<span class="hljs-comment"># equivalent to:</span>
+dalfox https://target.app --waf-bypass auto
+</code></pre>
+<h3 id="force-a-specific-waf">Force a specific WAF</h3>
+<p>Skip fingerprinting and apply a chosen WAF's strategy directly:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --waf-bypass force <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --force-waf cloudflare
+</code></pre>
+<p>Handy when the WAF masks its headers or sits behind a CDN.</p>
+<h3 id="disable-waf-logic">Disable WAF logic</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-bypass off
+</code></pre>
+<p>No extra encoders, no mutations: just your configured payloads.</p>
+<h3 id="skip-the-probe">Skip the probe</h3>
+<pre><code class="language-bash hljs">dalfox https://target.app --skip-waf-probe
+</code></pre>
+<p>Still uses header-based passive detection, but no provocation requests. Use when the target is flaky and you don't want to burn rate limit on a probe.</p>
+<h3 id="evasion-throttle">Evasion throttle</h3>
+<p>When a WAF is detected, <code>--waf-evasion</code> switches Dalfox to <strong>adaptive timing</strong> instead of a blunt slowdown: it randomizes the inter-request interval (jitter) so the cadence can't be fingerprinted, and escalates a cooldown pause whenever it sees a cluster of blocked responses (403/406/429/503). The per-WAF pacing hint is also applied automatically on detection, even without the flag.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --waf-evasion
+</code></pre>
+<p>For a hard ceiling on the request rate (independent of WAF detection and shared across <strong>all</strong> workers and targets), combine it with <code>--rate-limit</code> (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since <code>--delay</code> only spaces a single worker:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># At most 15 requests/second across the whole scan, with adaptive evasion</span>
+dalfox https://target.app --rate-limit <span class="hljs-number">15</span> --waf-evasion
+</code></pre>
+<p>Transient failures (5xx, timeouts, connection resets) can be retried with <code>--retries</code> / <code>--retry-delay</code>; HTTP 429 is always retried with <code>Retry-After</code> honored.</p>
+<h3 id="filter-weak-fingerprints">Filter weak fingerprints</h3>
+<p>Each fingerprint carries a confidence score (0.0–1.0). Generic markers like <code>Request blocked</code> (0.3) or <code>Server: Google Frontend</code> (0.15) sometimes false-positive on benign origins. Use <code>--waf-min-confidence</code> to discard anything below the threshold:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># Keep only confident matches (drops 0.3/0.15 noise)</span>
+dalfox https://target.app --waf-min-confidence 0.7
+</code></pre>
+<p>Default is <code>0.3</code> (suppresses weak/generic matches like <code>Server: Google Frontend</code>). Pass <code>--waf-min-confidence 0.0</code> to keep every match, or raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.</p>
+<h2 id="mutation-tactics-under-the-hood">Mutation tactics (under the hood)</h2>
+<p>Different WAFs fall to different tricks. A small sample:</p>
+<table>
+<thead>
+<tr>
+<th>Mutation</th>
+<th>Example</th>
+<th>Works against</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>HTML comment split</strong></td>
+<td><code>&lt;scr&lt;!----&gt;ipt&gt;</code></td>
+<td>Signature regex</td>
+</tr>
+<tr>
+<td><strong>JS comment split</strong></td>
+<td><code>al/**/ert(1)</code></td>
+<td>Keyword filters</td>
+</tr>
+<tr>
+<td><strong>Backtick call</strong></td>
+<td>`<code> alert</code>1<code> </code>`</td>
+<td><code>alert(</code> regex</td>
+</tr>
+<tr>
+<td><strong>Constructor chain</strong></td>
+<td><code>[].constructor.constructor(&#39;alert(1)&#39;)()</code></td>
+<td>Heavy keyword blocks</td>
+</tr>
+<tr>
+<td><strong>Unicode JS escape</strong></td>
+<td><code>alert(1)</code></td>
+<td>JS-token filters</td>
+</tr>
+<tr>
+<td><strong>Slash separator</strong></td>
+<td><code>&lt;svg/onload=alert(1)/class=x&gt;</code></td>
+<td>CRS 941160</td>
+</tr>
+<tr>
+<td><strong>SVG animate</strong></td>
+<td><code>&lt;svg&gt;&lt;animate onbegin=alert(1) attributeName=x&gt;</code></td>
+<td>CRS 941110</td>
+</tr>
+<tr>
+<td><strong>HTML entity parens</strong></td>
+<td><code>alert&amp;#40;1&amp;#41;</code></td>
+<td>CRS 941370</td>
+</tr>
+<tr>
+<td><strong>Exotic whitespace</strong></td>
+<td>form-feed / vertical tab</td>
+<td>CRS 941320</td>
+</tr>
+<tr>
+<td><strong>Case alternation</strong></td>
+<td><code>&lt;ScRiPt&gt;</code></td>
+<td>Case-sensitive rules</td>
+</tr>
+<tr>
+<td><strong>zwsp insertion</strong></td>
+<td><code>al​ert(1)</code></td>
+<td>Lexer-based detection</td>
+</tr>
+<tr>
+<td><strong>Keyword entity encode</strong></td>
+<td><code>onerror=&amp;#97;lert(1)</code></td>
+<td><code>alert</code>/handler keyword regex (attribute-decoded)</td>
+</tr>
+<tr>
+<td><strong>Multi-slash</strong></td>
+<td><code>&lt;img/src=x/onerror=alert(1)&gt;</code></td>
+<td>Regexes anchored on <code>\s</code> between later attributes</td>
+</tr>
+<tr>
+<td><strong>Scheme break</strong></td>
+<td><code>href=java&amp;#9;script:alert(1)</code></td>
+<td>Literal <code>javascript:</code> scheme regex (URL-parser strips the TAB)</td>
+</tr>
+<tr>
+<td><strong>Entity scheme</strong></td>
+<td><code>href=&amp;#106;avascript:alert(1)</code></td>
+<td>Literal <code>javascript:</code> scheme regex (attribute-decoded)</td>
+</tr>
+</tbody>
+</table>
+<p>The last four exploit that the HTML tokenizer decodes character references <strong>inside attribute values</strong> before the URL parser or the event-handler JS compiler sees them. They fire only in attribute / event-handler / <code>javascript:</code>-URL context and are skipped for bare body text and <code>&lt;script&gt;</code>/<code>&lt;style&gt;</code> payloads, where no entity decoding happens.</p>
+<p>You don't configure these directly; they're selected automatically per WAF. To inspect what's happening, run with <code>--debug</code>.</p>
+<h2 id="inspection-window-overflow">Inspection-window overflow</h2>
+<p>Some WAFs (e.g. AWS WAF-style configs) only inspect the <strong>first N bytes</strong> of a parameter value. A vector at the start of the value trips a block, but the same vector reflects untouched once it's pushed past the inspected window.</p>
+<p>During active probing, when a parameter's special-character probe comes back fully blocked, Dalfox re-tries it behind a long benign filler prefix. If the characters now reflect, it concludes the value sits behind a size-limited inspection window and automatically prepends that filler to every payload for the parameter — so the real vector always lands past the window. The reported PoC URL includes the filler, so it reproduces as-is. This is automatic; nothing to configure.</p>
+<h2 id="combining-with-encoders">Combining with encoders</h2>
+<p>Your <code>--encoders</code> list and the WAF's extra encoders are merged. So this:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -e url,base64
+<span class="hljs-comment"># Cloudflare detected → extra encoders: unicode, 4url, zwsp</span>
+<span class="hljs-comment"># Effective: url, base64, unicode, 4url, zwsp</span>
+</code></pre>
+<p>De-duplicates automatically, preserves order.</p>
+<h2 id="rate-limiting-backoff">Rate limiting &amp; backoff</h2>
+<p>Dalfox tracks consecutive WAF blocks and automatically backs off with exponential sleep to avoid permanent blocks. You can help it along with <code>--delay</code> (per-request ms) and smaller <code>--workers</code> for fragile targets.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --delay <span class="hljs-number">500</span> --workers <span class="hljs-number">10</span>
+</code></pre>
+<h2 id="debugging">Debugging</h2>
+<p>Turn on the debug stream to see fingerprint decisions and the active strategy:</p>
+<pre><code class="language-bash hljs">dalfox --debug https://target.app 2&gt;<span class="hljs-punctuation">&amp;</span><span class="hljs-number">1</span> <span class="hljs-punctuation">|</span> grep -i waf
+</code></pre>
+<h2 id="next">Next</h2>
+<ul>
+<li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a> covers the inject-here-verify-there pattern, which often interacts with WAFs.</li>
+<li><a href="https://dalfox.hahwul.com/guide/output/">Output &amp; Reports</a> for integrating findings into your pipeline.</li>
+</ul>
+]]></content:encoded>
+    </item>
+  </channel>
+</rss>

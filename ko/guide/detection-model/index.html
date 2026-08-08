@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Dalfox 결과의 세 축(신뢰도, 방식, 영향도)과 각 증거 등급이 실제로 무엇을 증명하는지.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>탐지 모델 · Dalfox</title>
+  <meta property="og:title" content="탐지 모델">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/guide/detection-model/">
+  <meta property="og:description" content="Dalfox 결과의 세 축(신뢰도, 방식, 영향도)과 각 증거 등급이 실제로 무엇을 증명하는지.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-guide-detection-model.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="탐지 모델">
+  <meta name="twitter:description" content="Dalfox 결과의 세 축(신뢰도, 방식, 영향도)과 각 증거 등급이 실제로 무엇을 증명하는지.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-guide-detection-model.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/detection-model/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/detection-model/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/guide/detection-model/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"탐지 모델","url":"https://dalfox.hahwul.com/ko/guide/detection-model/","description":"Dalfox 결과의 세 축(신뢰도, 방식, 영향도)과 각 증거 등급이 실제로 무엇을 증명하는지.","image":"https://dalfox.hahwul.com/og-images/ko-guide-detection-model.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://dalfox.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"탐지 모델"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/guide/detection-model/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.2.0" target="_blank" rel="noopener" title="Dalfox v3.2.0 release notes">v3.2.0</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>탐지 모델</h1>
+          <p>Dalfox의 모든 결과는 서로 다른 세 질문에 답합니다. 이 셋을 하나의 척도로 읽는 것이 출력에 대한 오해의 가장 큰 원인이라, 별도 필드로 분리되어 있습니다.</p>
+<table>
+<thead>
+<tr>
+<th>축</th>
+<th>필드</th>
+<th>답하는 질문</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>신뢰도</strong></td>
+<td><code>type</code> — <code>V</code> / <code>R</code></td>
+<td>이것을 취약점이라고 말할 수 있나?</td>
+</tr>
+<tr>
+<td><strong>방식</strong></td>
+<td><code>detection_method</code></td>
+<td>어떻게 찾았나?</td>
+</tr>
+<tr>
+<td><strong>영향도</strong></td>
+<td><code>severity</code></td>
+<td>악용되면 얼마나 나쁜가?</td>
+</tr>
+</tbody>
+</table>
+<p>셋 중 둘은 서로 독립적으로 움직입니다. <strong><code>severity</code>는 아직 아닙니다.</strong> XSS
+결과에서 severity는 현재 티어를 다시 말한 값이라(<code>V</code> → <code>High</code>, <code>A</code> →
+<code>Medium</code>, <code>R</code> → <code>Info</code>), 여기에 필터나 정렬을 걸어도 <code>type</code>이 주지 않는 정보는
+없습니다. 실제 정보를 담는 건 라이브러리 권고에서 값을 가져오는 <code>I</code>뿐입니다.
+severity가 스스로 영향도를 판정하기 전까지는 표시용 편의로 보세요.</p>
+<p><code>[A]</code>는 이 분리보다 먼저 만들어졌습니다. <code>type</code> 필드에 앉아 있으면서 <em>방식</em> 질문에 답하기 때문에, 코드를 포함해 누구도 이것이 신뢰도 척도에서 어디에 속하는지 말할 수 없었습니다. 아래 <strong>이관</strong> 절에 따라 흡수될 예정입니다.</p>
+<p>이 페이지는 그 구분이 출력만 봐서는 드러나지 않기 때문에 존재합니다. <a href="https://github.com/hahwul/dalfox/issues/1238">이슈 #1238</a>에서 <a href="https://github.com/OSTARA711">@OSTARA711</a>과 정리한 내용을 토대로 작성했습니다.</p>
+<h2 id="신뢰도-type의-의미">신뢰도: <code>type</code>의 의미</h2>
+<table>
+<thead>
+<tr>
+<th>태그</th>
+<th>이름</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V</code></td>
+<td><strong>Vulnerable(취약)</strong></td>
+<td>Dalfox가 이 입력이 악용 가능하다고 판단합니다. 조치하세요.</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td><strong>Reflected(반사됨)</strong></td>
+<td>페이로드가 응답에 돌아왔지만 실행 가능한 위치인지는 확인되지 않았습니다. 주장이 아니라 신호이므로 직접 확인하세요.</td>
+</tr>
+<tr>
+<td><code>A</code></td>
+<td>AST 탐지</td>
+<td>과도기 — 방식 라벨입니다. 아래 이관 절 참고.</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td>정보성</td>
+<td>XSS 주장이 아닙니다 (예: 알려진 취약 JS 라이브러리, CWE-1104).</td>
+</tr>
+</tbody>
+</table>
+<p><code>--only-poc</code>로 필터링합니다 (예: <code>--only-poc v</code>, <code>--only-poc v,a</code>, <code>--only-poc i</code>).</p>
+<h3 id="v가-뜻하지-않는-것"><code>V</code>가 뜻하지 않는 것</h3>
+<p><code>V</code>는 브라우저 실행이 <strong>아닙니다.</strong> Dalfox는 브라우저를 구동하지 않고 CDP도 쓰지 않습니다. 페이지를 렌더링하거나 <code>alert()</code>가 뜨는 것을 관찰하지 않습니다. 요청 기반 방식에서 <code>V</code>는 페이로드가 <em>실제 HTTP 응답으로 파싱한 DOM 트리</em>에서 발견됐다는 뜻입니다. 여전히 정적 분석이며, <code>R</code>의 단순 문자열 매칭보다 강한 증거일 뿐입니다.</p>
+<p>Dalfox가 실제 실행을 관측하는 방식은 <strong>대역외 콜백</strong>(blind XSS) 하나뿐입니다. 주입된 <code>&lt;script src=…&gt;</code>가 콜백을 보내오면, 실제 브라우저가 그것을 파싱하고 가져간 것입니다. 이건 경험적 증거이며 Dalfox가 만들어내는 가장 강한 증거입니다. 다만 Dalfox가 제어하는 브라우저가 아니라 다른 누군가의 브라우저에서 옵니다.</p>
+<h2 id="방식-detection-method의-의미">방식: <code>detection_method</code>의 의미</h2>
+<table>
+<thead>
+<tr>
+<th>값</th>
+<th>무엇을 읽는가</th>
+<th>페이로드 전송?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reflection</code></td>
+<td>응답 본문에서 페이로드 바이트</td>
+<td>예</td>
+</tr>
+<tr>
+<td><code>dom-verification</code></td>
+<td>HTML로 파싱한 응답에서 실행 가능한 위치</td>
+<td>예</td>
+</tr>
+<tr>
+<td><code>ast</code></td>
+<td>응답에 담긴 자바스크립트에서 소스→싱크 흐름</td>
+<td>아니오</td>
+</tr>
+<tr>
+<td><code>oob</code></td>
+<td>실제 브라우저가 보낸 대역외 콜백</td>
+<td>예</td>
+</tr>
+<tr>
+<td><code>library</code></td>
+<td><code>&lt;script&gt;</code> 태그에서 알려진 취약 버전</td>
+<td>아니오</td>
+</tr>
+</tbody>
+</table>
+<p><strong>AST 결과를 선택할 때는 <code>type == &quot;A&quot;</code>가 아니라 <code>detection_method == &quot;ast&quot;</code>를 쓰세요.</strong> 방식 필드는 안정적이고, 티어는 그렇지 않습니다.</p>
+<h3 id="실제로-나오는-조합">실제로 나오는 조합</h3>
+<p>티어와 방식은 따로 정해지므로 <code>V</code>가 곧 <code>dom-verification</code>을 뜻하지 않습니다.
+Dalfox가 내보내는 결과는 다음 중 하나입니다.</p>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th><code>detection_method</code></th>
+<th><code>confidence</code></th>
+<th><code>severity</code></th>
+<th>산출 경로</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V</code></td>
+<td><code>dom-verification</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>전용 DOM 검증 요청</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>reflection</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>반사 단계에서, 반사 응답 자체가 <em>이미</em> 실행 가능한 위치로 파싱되는 경우</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>oob</code></td>
+<td><code>high</code></td>
+<td>High</td>
+<td>대역외 콜백</td>
+</tr>
+<tr>
+<td><code>V</code></td>
+<td><code>ast</code></td>
+<td><code>high</code> <strong>또는</strong> <code>low</code></td>
+<td>High</td>
+<td>레거시 AST 승격 두 곳 — 아래 이관 절이 다루는 바로 그 불일치</td>
+</tr>
+<tr>
+<td><code>A</code></td>
+<td><code>ast</code></td>
+<td><code>high</code> <strong>또는</strong> <code>low</code></td>
+<td>Medium</td>
+<td>그 외 모든 소스→싱크 흐름</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td><code>reflection</code></td>
+<td><code>low</code></td>
+<td>Info</td>
+<td>실행 가능 위치가 확인되지 않은 반사. <code>--hpp</code>의 중복 파라미터 반사(<code>inject_type: inHTML-HPP</code>) 포함</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td><code>library</code></td>
+<td><em>(없음)</em></td>
+<td>Low / Medium / High</td>
+<td><code>--detect-outdated-libs</code></td>
+</tr>
+</tbody>
+</table>
+<p>의외로 받아들여지는 건 <code>V</code> + <code>reflection</code> 행입니다. <code>reflection</code>은 증거가 얼마나
+약한지가 아니라 <em>어느 요청에서 증거가 나왔는지</em>를 가리킵니다. 이 행도
+<code>dom-verification</code> 행과 똑같은 DOM을 파싱했고, 다만 요청을 하나 더 쓰는 대신 이미
+받아둔 응답에서 했을 뿐입니다.</p>
+<h3 id="dom-verification의-증거"><code>dom-verification</code>의 증거</h3>
+<p>페이로드가 실행 가능한 위치에 도달했음을 증명하는 다섯 경로: CSS 셀렉터로 매칭된 Dalfox 마커, 위험한 속성에 들어간 실행 가능 스킴(<code>javascript:</code>, <code>data:text/html</code>), 싱크를 호출하는 핸들러를 가진 주입된 엘리먼트, 페이로드의 범위를 포함하는 <code>&lt;script&gt;</code> 내부 싱크 호출, 그리고 페이로드가 감싸는 JS 문자열을 종료시킨 인라인 핸들러 브레이크아웃. 어느 것이 발동했는지는 <code>evidence</code> 필드가 알려줍니다.</p>
+<h3 id="ast와-dom-xss의-천장"><code>ast</code>와 DOM-XSS의 천장</h3>
+<p>AST 패스는 응답에 담긴 자바스크립트를 파싱해, 위험한 소스(<code>location.hash</code>, <code>location.search</code>, <code>document.referrer</code>, <code>postMessage</code> 등)에서 온 데이터가 살균 없이 위험한 싱크(<code>innerHTML</code>, <code>document.write</code>, <code>eval</code> 등)에 도달하는지 추적합니다. 각 <code>&lt;script&gt;</code> 블록을 한 번 읽고 발견한 모든 흐름을 보고하므로, 명령줄에 넘기지 않은 입력이 결과에 등장할 수 있습니다 — 서버로 전송조차 되지 않는 URL 프래그먼트도 포함됩니다. <code>-p</code>로 좁혀지지 않는데, <code>-p</code>는 어떤 파라미터를 <em>요청</em>할지를 정하는 옵션이고 이 패스는 아무것도 보내지 않기 때문입니다.</p>
+<p>이것으로 결함처럼 보이지만 아닌 결과도 설명됩니다. <strong>순수 클라이언트 사이드 DOM-XSS</strong>에서는 페이로드를 런타임에 자바스크립트가 페이지에 써 넣으므로 서버 응답에는 절대 나타나지 않고, 응답을 파싱하는 방식들이 찾을 대상 자체가 없습니다. <code>location.hash → innerHTML</code>만 취약한 정적 페이지라면 <code>--only-poc v</code>가 아무것도 반환하지 않는 것이 정상입니다. 브라우저에서 devtools를 켜고 POC URL을 열어 확인하세요 — Dalfox는 모든 AST 결과에 완성된 POC URL을 출력하며, URL에 담을 수 없는 소스(<code>window.name</code>, <code>document.referrer</code>, 쿠키, <code>postMessage</code> 등)에는 <code>[manual POC: …]</code> 재현 힌트를 붙입니다.</p>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>효과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--skip-ast-analysis</code></td>
+<td>소스→싱크 분석을 끕니다</td>
+</tr>
+<tr>
+<td><code>--analyze-external-js</code></td>
+<td>동일 출처 <code>&lt;script src&gt;</code> 번들도 가져와 분석합니다</td>
+</tr>
+</tbody>
+</table>
+<p><code>--skip-mining-dom</code>은 이 패스에 영향을 주지 <strong>않습니다</strong> — 그쪽은 HTML <code>id</code>/<code>name</code> 속성에서 파라미터 <em>이름</em>을 수집하는 작업입니다. <a href="../parameters/">파라미터와 탐색</a>을 참고하세요.</p>
+<h2 id="confidence-주장의-근거-등급"><code>confidence</code>: 주장의 근거 등급</h2>
+<p>모든 XSS 결과는 <code>high</code> 또는 <code>low</code>의 <code>confidence</code>와, 판단 신호를 나열한 <code>confidence_reason</code>을 함께 가집니다. 요청 기반 방식은 증거를 그대로 따르고, AST 결과는 흐름의 형태로 판정합니다.</p>
+<p><code>high</code>는 다음을 <strong>모두</strong> 만족해야 합니다.</p>
+<ul>
+<li><strong>링크만으로 공격자가 도달할 수 있는 소스</strong> — <code>location.*</code>, <code>document.URL</code>, <code>URLSearchParams</code>는 페이로드를 URL에 직접 싣습니다. 원래라면 공격자가 제어하는 구동 페이지가 필요한 소스(<code>window.name</code>, <code>document.referrer</code>, <code>postMessage</code>, 스토리지, <code>history.state</code>)는 <code>low</code>입니다. 다만 <strong>페이지가 그 소스를 쿼리 파라미터에서 스스로 채워 넣는 경우는 예외</strong>로, 이때는 링크만으로도 구동되므로 <code>high</code>가 되고 근거에 <code>non-URL source seeded from a query parameter by the page</code>가 붙습니다.</li>
+<li><strong>페이지 CSP가 실행을 허용하는 페이로드</strong> — 인라인 스크립트가 허용되거나, 싱크가 스크립트를 직접 실행해서(<code>eval</code>, <code>Function</code>, <code>document.write</code>, <code>&lt;script&gt;</code> 텍스트) 인라인 핸들러 권한에 의존하지 않는 경우입니다. report-only CSP는 아무것도 강제하지 않으므로 등급을 낮추지 않습니다.</li>
+<li><strong>Trusted Types에 가로막히지 않음</strong> — <code>require-trusted-types-for 'script'</code>와 TrustedHTML 계열 싱크의 조합은 <code>low</code>입니다.</li>
+</ul>
+<p>살균 함수는 판정 신호가 아닙니다. 이미 <em>필터</em>로 작동하기 때문입니다. 분석기가 살균 함수를 taint clearer로 처리하므로, 결과가 존재한다는 것 자체가 경로에 인식된 살균이 없었다는 뜻입니다.</p>
+<p><code>confidence_reason</code>은 두 방향을 섞지 않습니다. <code>high</code>면 판단을 뒷받침한 신호를, <code>low</code>면 <strong>가로막은 것만</strong> 나열하므로 성립했던 신호는 표시되지 않습니다. 어느 쪽이든 정보성으로만 붙는 근거가 하나 있습니다. <code>flow sits inside a conditional branch</code>는 흐름이 조건 분기 안에 있다는 기록일 뿐, 그 자체로 등급을 바꾸지 않습니다.</p>
+<h3 id="등급이-보이는-곳과-보이지-않는-곳">등급이 보이는 곳과 보이지 않는 곳</h3>
+<p><code>confidence</code>는 <code>json</code>, <code>jsonl</code>, <code>toml</code>, <code>markdown</code>, <code>sarif</code>가 실어 나릅니다.
+기본 <code>plain</code> 출력에는 <strong>표시되지 않으므로</strong>, 아래 트리아지 안내는 기계 판독
+포맷을 전제로 합니다. 아직 이 값에 반응하는 동작도 없습니다. <code>--only-poc</code>,
+<code>--limit-result-type</code>, 중복 제거 순위, 종료 코드는 전부 <code>type</code>을 읽습니다.
+등급은 이관의 미리보기이지 아직 제어 수단이 아닙니다.</p>
+<h2 id="이관">이관</h2>
+<p>등급이 아직 아무것도 결정하지 않는다는 것이 핵심입니다. 무엇이 움직이기 전에 각 결과가 어디로 갈지 미리 볼 수 있습니다.</p>
+<ol>
+<li><strong>현재</strong> — <code>type</code> 그대로. <code>detection_method</code>와 <code>confidence</code>가 추가됩니다. 선택자로서의 <code>type == &quot;A&quot;</code>는 deprecate되며, <code>detection_method == &quot;ast&quot;</code>를 쓰세요.</li>
+<li><strong>다음</strong> — <code>--tier-model confidence</code> opt-in.</li>
+<li><strong>그 다음</strong> — 그것이 기본값이 되고, <code>--tier-model legacy</code>가 탈출구로 남습니다. <code>A</code>는 은퇴합니다. <code>high</code>로 판정된 AST 결과는 <code>V</code>, 나머지는 <code>R</code>로 갑니다. 원래 <code>R</code>이 그 자리였습니다. <code>R</code>의 이름도 이때 함께 바뀝니다. 그 시점부터 반사형 외의 결과도 담게 되므로, 정확히 그 순간 단어가 맞지 않게 됩니다.</li>
+</ol>
+<p><code>--only-poc a</code>는 계속 동작합니다. 티어가 사라진 뒤에는 <code>detection_method == &quot;ast&quot;</code>를 선택합니다. 플래그 값은 절대 제거되지 않습니다.</p>
+<p>과도기에는 <code>type</code>과 <code>confidence</code>가 어긋날 수 있습니다. <code>type=V, confidence=low</code>인 결과가 나오는 식입니다. 레거시 경로 두 곳이 근거가 부족한 상태로 AST 결과를 <code>V</code>로 승격시키기 때문입니다. 등급은 Dalfox가 실제로 주장할 수 있는 것을, 티어는 지금까지 출력해 온 것을 보고합니다. 이 불일치는 버그가 아니라 미리보기 신호입니다.</p>
+<p>티어가 등급에서 파생되기 시작하면 티어를 읽는 모든 것이 함께 움직입니다. 같은 <code>--only-poc v</code>가 다른 집합을 고르고, 종료 코드도 다른 집합에서 뒤집히며, 중복 제거의 우선순위도 달라집니다. 이는 우회해야 할 부작용이 아니라 의도된 효과입니다.</p>
+<h2 id="여러-방식이-섞인-출력-읽기">여러 방식이 섞인 출력 읽기</h2>
+<pre><code>INF found reflected 0 params
+WRN XSS found 0 XSS (+3 A)
+[POC][A][GET][DOM-XSS] https://target.app/?q=%3Cimg+src%3Dx+onerror%3D…
+  ├── Issue: DOM-based XSS via URLSearchParams.get(q) to innerHTML (needs runtime confirmation)
+  └── Payload: q=&lt;img src=x onerror=alert(1) class=dlx1944740c&gt;
+</code></pre>
+<ul>
+<li><code>found reflected 0 params</code> — <strong>reflection</strong> 방식이 서버 측 반사를 찾지 못했다는 뜻입니다. 정적 사이트에서는 당연한 결과입니다.</li>
+<li><code>XSS found 0 XSS</code> — 대표 숫자는 <code>V</code>만 셉니다. <code>(+3 A)</code>가 아래에 출력될 나머지 등급을 알려줍니다.</li>
+<li><code>[A]</code> 블록은 위 두 줄과 무관하게 <strong>ast</strong> 방식에서 나옵니다.</li>
+</ul>
+<p>DOM-XSS 대상에서 요약 줄만 읽고 멈추면 보고서의 모든 결과를 놓치게 됩니다.</p>
+<h3 id="티어-합계가-발견-수와-다른-이유">티어 합계가 발견 수와 다른 이유</h3>
+<p>출력 전에 후처리가 두 번 돌기 때문에, 티어별 개수는 스캔 중 기록된 결과 수와
+같지 않습니다.</p>
+<ul>
+<li><strong>중복 <code>R</code> 붕괴</strong> — 같은 대상에서 같은 <code>(param, inject_type)</code>에 <code>V</code>가 있으면
+<code>R</code>은 제거됩니다. 둘 다 남기면 같은 입력이 서로 다른 강도로 두 번 나열되기
+때문입니다. <code>V</code>와 <code>A</code>는 제거되지 않습니다.</li>
+<li><strong>AST 중복 제거</strong> — 같은 소스→싱크 흐름을 프리플라이트, 프로브, 반사 루프가
+각각 찾을 수 있습니다. 지문당 하나만 남으며, 기준은 <code>type</code> 다음 <code>severity</code>
+입니다. <code>confidence</code>는 여기에 관여하지 않으므로 등급이 없는 <code>V</code>가 여전히
+<code>high</code>인 <code>A</code>보다 앞섭니다.</li>
+</ul>
+<p><code>--stream-findings</code>는 결과가 기록되는 즉시 내보내는데, 이는 붕괴 <em>이전</em>입니다.
+따라서 스트림에 보였던 <code>R</code>이 최종 보고서에는 없을 수 있습니다. 둘이 다르면 최종
+보고서가 정답입니다.</p>
+<h3 id="티어-선택-only-poc와-limit-result-type">티어 선택: <code>--only-poc</code>와 <code>--limit-result-type</code></h3>
+<p>둘 다 <code>v</code> / <code>r</code> / <code>a</code> / <code>i</code>를 받지만 하는 일이 다릅니다.</p>
+<table>
+<thead>
+<tr>
+<th>플래그</th>
+<th>효과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--only-poc</code></td>
+<td><strong>출력을 필터링합니다.</strong> 다른 티어는 버려집니다</td>
+</tr>
+<tr>
+<td><code>--limit-result-type</code></td>
+<td><strong><code>--limit</code> 카운트 대상만 정합니다.</strong> 다른 티어도 그대로 보고되며, 한도만 소모하지 않습니다</td>
+</tr>
+</tbody>
+</table>
+<p><code>--limit 2 --limit-result-type v</code>는 &quot;<code>V</code> 두 개가 쌓일 때까지 스캔하고, 그 과정에서
+찾은 것은 전부 보여줘&quot;라는 뜻입니다. 나머지를 실제로 숨기려면 <code>--only-poc v</code>를
+함께 주세요.</p>
+<h3 id="종료-코드">종료 코드</h3>
+<p><code>0</code>은 결과 없음, <code>1</code>은 <strong>티어와 무관하게</strong> 결과가 하나라도 있음(<code>--only-poc</code>와 위
+붕괴를 적용한 뒤 기준), <code>2</code>는 하드 에러(잘못된 입력, 모든 대상 도달 불가,
+<code>--output</code> 기록 실패)입니다. <code>R</code> 하나나 <code>--detect-outdated-libs</code>가 만든 <code>I</code> 하나도
+<code>V</code>와 똑같이 <code>1</code>을 냅니다. Dalfox가 악용 가능하다고 판단한 것에만 CI를 실패시키려면
+<code>--only-poc v</code>를 쓰세요.</p>
+<h2 id="목적별-플래그-선택">목적별 플래그 선택</h2>
+<table>
+<thead>
+<tr>
+<th>목적</th>
+<th>플래그</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dalfox가 악용 가능하다고 판단한 것만 보기</td>
+<td><code>--only-poc v</code></td>
+</tr>
+<tr>
+<td>운영 중인 대상에서 정적 분석 노이즈 억제</td>
+<td><code>--skip-ast-analysis</code></td>
+</tr>
+<tr>
+<td>이름 수집만 끄고 DOM-XSS 탐지는 유지</td>
+<td><code>--skip-mining-dom</code></td>
+</tr>
+<tr>
+<td>파라미터 하나만 테스트하되 모든 DOM 싱크는 확인</td>
+<td><code>-p q</code> (<code>[A]</code>는 <code>-p</code> 범위를 따르지 않습니다)</td>
+</tr>
+<tr>
+<td>대량의 AST 결과 트리아지</td>
+<td><code>-f json</code>으로 받아 <code>confidence</code>로 정렬한 뒤 <code>confidence_reason</code> 읽기</td>
+</tr>
+<tr>
+<td>악용 가능 판단에만 CI 실패시키기</td>
+<td><code>--only-poc v</code> (그렇지 않으면 어떤 티어든 <code>1</code>)</td>
+</tr>
+</tbody>
+</table>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#신뢰도-type의-의미">신뢰도: type의 의미</a><ul><li><a href="#v가-뜻하지-않는-것">V가 뜻하지 않는 것</a></li></ul></li><li><a href="#방식-detection-method의-의미">방식: detection_method의 의미</a><ul><li><a href="#실제로-나오는-조합">실제로 나오는 조합</a></li><li><a href="#dom-verification의-증거">dom-verification의 증거</a></li><li><a href="#ast와-dom-xss의-천장">ast와 DOM-XSS의 천장</a></li></ul></li><li><a href="#confidence-주장의-근거-등급">confidence: 주장의 근거 등급</a><ul><li><a href="#등급이-보이는-곳과-보이지-않는-곳">등급이 보이는 곳과 보이지 않는 곳</a></li></ul></li><li><a href="#이관">이관</a></li><li><a href="#여러-방식이-섞인-출력-읽기">여러 방식이 섞인 출력 읽기</a><ul><li><a href="#티어-합계가-발견-수와-다른-이유">티어 합계가 발견 수와 다른 이유</a></li><li><a href="#티어-선택-only-poc와-limit-result-type">티어 선택: --only-poc와 --limit-result-type</a></li><li><a href="#종료-코드">종료 코드</a></li></ul></li><li><a href="#목적별-플래그-선택">목적별 플래그 선택</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/detection-model.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

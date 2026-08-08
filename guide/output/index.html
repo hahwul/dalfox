@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Output &amp; Reports · Dalfox</title>
+  <meta property="og:title" content="Output &amp; Reports">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/guide/output/">
+  <meta property="og:description" content="Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/guide-output.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Output &amp; Reports">
+  <meta name="twitter:description" content="Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/guide-output.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/output/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/output/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/guide/output/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Output \u0026 Reports","url":"https://dalfox.hahwul.com/guide/output/","description":"Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.","image":"https://dalfox.hahwul.com/og-images/guide-output.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Guide","item":"https://dalfox.hahwul.com/guide/"},{"@type":"ListItem","position":3,"name":"Output \u0026 Reports"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/guide/output/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.2.0" target="_blank" rel="noopener" title="Dalfox v3.2.0 release notes">v3.2.0</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Output &amp; Reports</h1>
+          <p>Every scan produces the same internal result structure. Dalfox renders it in whichever format you pick. Machine-readable formats automatically suppress the banner so your file stays clean.</p>
+<h2 id="choosing-a-format">Choosing a format</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json -o report.json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Flag</th>
+<th>Machine-readable</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plain</code></td>
+<td><code>-f plain</code> (default)</td>
+<td>No</td>
+<td>Human terminal output</td>
+</tr>
+<tr>
+<td><code>json</code></td>
+<td><code>-f json</code></td>
+<td>Yes</td>
+<td>Single JSON doc, dashboards, <code>jq</code></td>
+</tr>
+<tr>
+<td><code>jsonl</code></td>
+<td><code>-f jsonl</code></td>
+<td>Yes</td>
+<td>Streaming, log pipelines</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td><code>-f markdown</code></td>
+<td>No</td>
+<td>Reports, pull-request comments</td>
+</tr>
+<tr>
+<td><code>sarif</code></td>
+<td><code>-f sarif</code></td>
+<td>Yes</td>
+<td>GitHub code scanning, SARIF consumers</td>
+</tr>
+<tr>
+<td><code>toml</code></td>
+<td><code>-f toml</code></td>
+<td>Yes</td>
+<td>Humans + pipelines</td>
+</tr>
+</tbody>
+</table>
+<h2 id="writing-to-a-file">Writing to a file</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app -f jsonl -o findings.jsonl
+</code></pre>
+<p>Without <code>-o</code>, output goes to <code>stdout</code>.</p>
+<h2 id="result-fields">Result fields</h2>
+<p>Every finding includes:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Example</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td><code>V</code>, <code>A</code>, <code>R</code>, <code>I</code></td>
+<td>Confidence: Vulnerable / AST-detected / Reflected / Informational</td>
+</tr>
+<tr>
+<td><code>type_description</code></td>
+<td><code>&quot;Vulnerable - dalfox asserts this input is exploitable; act on it&quot;</code></td>
+<td>Human label (the full sentence, not the bare word)</td>
+</tr>
+<tr>
+<td><code>detection_method</code></td>
+<td><code>&quot;ast&quot;</code></td>
+<td>How it was found: <code>reflection</code>, <code>dom-verification</code>, <code>ast</code>, <code>oob</code>, <code>library</code></td>
+</tr>
+<tr>
+<td><code>confidence</code></td>
+<td><code>&quot;high&quot;</code></td>
+<td>Whether Dalfox can claim a vulnerability (<code>high</code> / <code>low</code>); absent on <code>I</code></td>
+</tr>
+<tr>
+<td><code>confidence_reason</code></td>
+<td><code>&quot;URL-carried source; inline script permitted&quot;</code></td>
+<td>The deciding signals</td>
+</tr>
+<tr>
+<td><code>inject_type</code></td>
+<td><code>&quot;inHTML&quot;</code></td>
+<td>Context (<code>inHTML</code>, <code>inAttr</code>, <code>inJS</code>, …)</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td><code>&quot;GET&quot;</code></td>
+<td>HTTP method</td>
+</tr>
+<tr>
+<td><code>param</code></td>
+<td><code>&quot;q&quot;</code></td>
+<td>Parameter that was exploited</td>
+</tr>
+<tr>
+<td><code>payload</code></td>
+<td><code>&lt;svg/onload=alert(1)&gt;</code></td>
+<td>The exact payload</td>
+</tr>
+<tr>
+<td><code>evidence</code></td>
+<td><code>&quot;payload reflected in response&quot;</code></td>
+<td>Why Dalfox believes it</td>
+</tr>
+<tr>
+<td><code>cwe</code></td>
+<td><code>&quot;CWE-79&quot;</code></td>
+<td>Standard CWE</td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td><code>&quot;High&quot;</code></td>
+<td>High / Medium / Low / Info</td>
+</tr>
+<tr>
+<td><code>message_str</code></td>
+<td><code>&quot;XSS found&quot;</code></td>
+<td>Short message</td>
+</tr>
+</tbody>
+</table>
+<p>What each tier is actually evidence of, and why a pure client-side DOM-XSS
+never reaches <code>V</code>, is covered in <a href="../detection-model/">Detection Model</a>.</p>
+<p><code>V</code> / <code>A</code> / <code>R</code> are XSS findings. <code>I</code> (<strong>Informational</strong>) is a non-exploitable
+observation — currently only <strong>outdated / known-vulnerable JS libraries</strong>
+(<code>inject_type: &quot;OutdatedComponent&quot;</code>, <code>CWE-1104</code>), rendered as a compact
+<code>[INF]</code> line with no payload/parameter. It is <strong>opt-in</strong>: Dalfox focuses on
+verified XSS by default, so library reporting is off unless you pass
+<code>--detect-outdated-libs</code> (it adds <strong>0 extra requests</strong>, inspecting the
+preflight response's <code>&lt;script&gt;</code> tags). Filter it out with <code>--only-poc v,a,r</code>.</p>
+<p>Optionally include the full request/response:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app -f json --include-all -o report.json
+<span class="hljs-comment"># or granularly:</span>
+dalfox ... --include-request
+dalfox ... --include-response
+</code></pre>
+<h2 id="scan-metadata-envelope">Scan metadata envelope</h2>
+<p>JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level metadata envelope (previously JSON/JSONL only; see <a href="https://github.com/hahwul/dalfox/issues/1093">#1093</a>):</p>
+<ul>
+<li><code>dalfox_version</code></li>
+<li><code>targets</code> (the input targets)</li>
+<li><code>scan_duration_ms</code></li>
+<li><code>total_requests</code></li>
+<li><code>findings_count</code></li>
+<li><code>target_summary[]</code> — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected</li>
+<li><code>dedup_mode</code> / <code>targets_deduplicated</code> — the <a href="../scanning-modes/"><code>--dedup-urls</code></a> mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)</li>
+<li><code>baseline</code> — only when <code>--baseline</code> was used; see <a href="#baselines-reporting-only-what-is-new">Baselines</a></li>
+<li><code>incomplete</code> — <code>true</code> when at least one target was <strong>not fully tested</strong>; today that means its authenticated session died mid-scan (see <a href="../scanning-modes/">Session monitoring</a>). Read this one field instead of scanning every <code>target_summary</code> entry: <code>&quot;findings_count&quot;: 0</code> plus <code>&quot;incomplete&quot;: true</code> is <em>not</em> a clean bill of health</li>
+</ul>
+<p>A target whose session died is reported as <code>&quot;status&quot;: &quot;incomplete&quot;</code> (or <code>&quot;skipped&quot;</code> if it never ran) with <code>&quot;error_code&quot;: &quot;SESSION_LOST&quot;</code> and the signal that fired in <code>&quot;error_message&quot;</code> — never as <code>&quot;clean&quot;</code>.</p>
+<p>In <strong>SARIF</strong> the envelope is duplicated under <code>runs[0].properties</code> and <code>runs[0].tool.driver.properties</code> so GitHub code scanning and other consumers retain context.</p>
+<p>In <strong>TOML</strong> it appears as a top-level <code>[meta]</code> table (findings under <code>[[results]]</code>).</p>
+<p>In <strong>Markdown</strong> it is rendered as human-readable tables (<code>## Scan Metadata</code> + <code>### Target Summary</code>) above the findings summary.</p>
+<p>Plain text output remains findings-focused only.</p>
+<h2 id="silence-mode">Silence mode</h2>
+<p>Emit <strong>only findings</strong> on <code>stdout</code>, no logs:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --silence
+<span class="hljs-comment"># Pipe findings into another tool:</span>
+cat urls.txt <span class="hljs-punctuation">|</span> dalfox --silence -f jsonl <span class="hljs-punctuation">|</span> jq <span class="hljs-string">&#39;select(.severity==&quot;High&quot;)&#39;</span>
+</code></pre>
+<p>Useful in shell pipelines and cron jobs.</p>
+<h2 id="streaming-findings-during-long-scans">Streaming findings during long scans</h2>
+<p>By default the plain renderer prints each finding block (POC + Issue /
+Payload / Line) <strong>after</strong> the end-of-scan <code>WRN XSS found N XSS</code> summary,
+so the log reads in natural order: start → progress → summary → details.</p>
+<p>For long scans against large targets, you can flip to mid-scan emission
+with <code>--stream-findings</code>. Each finding is printed the moment it is
+verified, above the progress bars:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --stream-findings
+</code></pre>
+<p><code>--stream-findings</code> only affects the <code>plain</code> format and is auto-disabled
+when the end-of-scan path needs to apply filters the streamer can't
+mirror cleanly (<code>--output</code>, <code>--limit</code>, <code>--only-poc</code>).</p>
+<h2 id="poc-styles">POC styles</h2>
+<p>Re-render the proof-of-concept in different client shapes:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --poc-type curl      <span class="hljs-comment"># curl command</span>
+dalfox https://target.app --poc-type httpie    <span class="hljs-comment"># HTTPie</span>
+dalfox https://target.app --poc-type http-request  <span class="hljs-comment"># raw HTTP</span>
+</code></pre>
+<p>Default is <code>plain</code>. Good for filing tickets.</p>
+<h2 id="filtering">Filtering</h2>
+<p>Show only certain result types:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --only-poc v     <span class="hljs-comment"># only verified</span>
+dalfox https://target.app --only-poc v,a   <span class="hljs-comment"># verified + AST</span>
+</code></pre>
+<p>Cap the number of results:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --limit <span class="hljs-number">50</span>
+dalfox https://target.app --limit <span class="hljs-number">10</span> --limit-result-type v
+</code></pre>
+<h2 id="baselines-reporting-only-what-is-new">Baselines: reporting only what is new</h2>
+<p><code>--only-poc</code> and <code>--limit</code> filter by <em>shape</em>. They cannot tell a finding you already triaged from one that appeared this morning, so a repo with 100 known findings shows the same 100 on every pull request and the gate is either permanently red or switched off.</p>
+<p><code>--baseline</code> fixes that. Point it at a previous report and Dalfox suppresses everything already in it:</p>
+<pre><code class="language-bash hljs">dalfox scan scope.txt -f json -o baseline.json      <span class="hljs-comment"># once, to record the backlog</span>
+dalfox scan scope.txt --baseline baseline.json      <span class="hljs-comment"># every run after</span>
+</code></pre>
+<p>There is <strong>no separate baseline writer</strong> — an ordinary <code>-f json -o</code> (or <code>-f jsonl -o</code>) report <em>is</em> the baseline.</p>
+<h3 id="modes">Modes</h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Flag</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>filter</code> (default)</td>
+<td><code>--baseline-mode filter</code></td>
+<td>Drops known findings. Counts, <code>--limit</code>, and the <strong>exit code</strong> all describe only what is new — this is the CI-gate mode.</td>
+</tr>
+<tr>
+<td><code>annotate</code></td>
+<td><code>--baseline-mode annotate</code></td>
+<td>Keeps every finding and adds <code>new: true</code> / <code>new: false</code> to each, for dashboards that want the whole set with novelty marked.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-counts-as-the-same-finding">What counts as &quot;the same finding&quot;</h3>
+<p>Findings are matched on a fingerprint built from the vulnerability's identity, not the run that surfaced it:</p>
+<p><strong>Included:</strong> host + path · parameter name · parameter location (query / header / cookie / body / path) · injection context · CWE · finding tier · evidence family (the <code>Source → Sink</code> pair for DOM findings).</p>
+<p><strong>Excluded:</strong> the payload and the query string it lands in, payload ordering, AST line/column numbers, timestamps, request/response captures.</p>
+<p>So re-running the same scan matches cleanly even though every run embeds a different payload, and a bundler that shifts <code>app.js</code> line numbers does not resurrect a triaged DOM finding. Because the <strong>tier</strong> is part of the fingerprint, a finding that was <code>R</code> last week and is <code>V</code> today is reported as new — an escalation is exactly what a gate should catch.</p>
+<h3 id="the-metabaseline-block">The <code>meta.baseline</code> block</h3>
+<p>Every structured format reports what the diff did:</p>
+<pre><code class="language-json hljs"><span class="hljs-string">&quot;baseline&quot;</span>: <span class="hljs-punctuation">{</span>
+  <span class="hljs-name">&quot;path&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;baseline.json&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;mode&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-string">&quot;filter&quot;</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;enabled&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">true</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;baseline_findings&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">100</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;new&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">2</span><span class="hljs-punctuation">,</span>
+  <span class="hljs-name">&quot;known&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-number">98</span>
+<span class="hljs-punctuation">}</span>
+</code></pre>
+<p>A baseline that is missing, malformed, or written by a different major version <strong>warns on stderr and disables the diff</strong> rather than failing the scan — a stale path in a pipeline should not turn a working scan into a red build with nothing reported. That case is visible in the envelope as <code>&quot;enabled&quot;: false</code> with a <code>warning</code>, so a pipeline can tell &quot;nothing new&quot; apart from &quot;the diff never ran&quot;.</p>
+<h3 id="refreshing-the-baseline">Refreshing the baseline</h3>
+<p>There is no special command. Re-run <strong>without</strong> <code>--baseline</code> (so the report holds the full set, not just the new findings) and replace the file:</p>
+<pre><code class="language-bash hljs">dalfox scan scope.txt -f json -o baseline.json
+git commit -am <span class="hljs-string">&quot;chore: refresh dalfox baseline&quot;</span>
+</code></pre>
+<p>Running with <code>--baseline</code> and <code>-o</code> pointed at the same file destroys the baseline under <code>filter</code> mode: the report written back holds only what was new, so the next run re-reports the whole backlog. Dalfox warns when the two paths match.</p>
+<h3 id="caveats">Caveats</h3>
+<ul>
+<li><strong><code>--limit</code> counts before the diff.</strong> The scan-time stop condition counts every finding as it is collected, baseline-known ones included, so <code>--limit 10 --baseline b.json</code> against a target whose first 10 findings are all known halts early and reports 0 new without testing the rest. Drop <code>--limit</code> when gating on new findings; Dalfox warns when both are set.</li>
+<li><strong><code>--stream-findings</code> is disabled by <code>--baseline</code></strong>, for the same reason it is disabled by <code>--only-poc</code>: the streamer cannot know a finding is already in the baseline, so it would print the whole triaged backlog live while the summary reports only the new ones.</li>
+<li><strong>CLI only.</strong> <code>--baseline</code> is not applied by <code>dalfox server</code> or the MCP server; a shared config file's <code>scan.baseline</code> is silently ignored there.</li>
+</ul>
+<h2 id="colour-tty-behaviour">Colour &amp; TTY behaviour</h2>
+<pre><code class="language-bash hljs">dalfox https://target.app --no-color
+<span class="hljs-comment"># or</span>
+<span class="hljs-variable">NO_COLOR</span><span class="hljs-operator">=</span><span class="hljs-number">1</span> dalfox https://target.app
+</code></pre>
+<p>Dalfox also auto-disables colour when output is redirected to a file or a non-TTY.</p>
+<h2 id="toml">TOML</h2>
+<p>Same data shape as JSON (plus top-level <code>[meta]</code> envelope for parity with other formats), written as TOML. Findings render as a <code>[[results]]</code> array of tables:</p>
+<pre><code class="language-toml hljs"><span class="hljs-punctuation">[</span>meta<span class="hljs-punctuation">]</span>
+dalfox_version <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;3.x&quot;</span>
+targets <span class="hljs-punctuation">=</span> <span class="hljs-punctuation">[</span><span class="hljs-string">&quot;https://target.app&quot;</span><span class="hljs-punctuation">]</span>
+scan_duration_ms <span class="hljs-punctuation">=</span> <span class="hljs-number">1234</span>
+total_requests <span class="hljs-punctuation">=</span> <span class="hljs-number">87</span>
+findings_count <span class="hljs-punctuation">=</span> <span class="hljs-number">1</span>
+target_summary <span class="hljs-punctuation">=</span> <span class="hljs-punctuation">[</span><span class="hljs-punctuation">{</span> target <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;https://target.app&quot;</span><span class="hljs-punctuation">,</span> status <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;findings&quot;</span><span class="hljs-punctuation">,</span> findings_count <span class="hljs-punctuation">=</span> <span class="hljs-number">1</span> <span class="hljs-punctuation">}</span><span class="hljs-punctuation">]</span>
+
+<span class="hljs-punctuation">[</span><span class="hljs-punctuation">[</span>results<span class="hljs-punctuation">]</span><span class="hljs-punctuation">]</span>
+type <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;V&quot;</span>
+type_description <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;Vulnerable - dalfox asserts this input is exploitable; act on it&quot;</span>
+detection_method <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;dom-verification&quot;</span>
+confidence <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;high&quot;</span>
+inject_type <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;inHTML&quot;</span>
+method <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;GET&quot;</span>
+data <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E&quot;</span>
+param <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;q&quot;</span>
+payload <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;&lt;svg/onload=alert(1)&gt;&quot;</span>
+evidence <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;payload reflected and DOM element verified&quot;</span>
+location <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;Query&quot;</span>
+cwe <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;CWE-79&quot;</span>
+severity <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;High&quot;</span>
+message_id <span class="hljs-punctuation">=</span> <span class="hljs-number">606</span>
+message_str <span class="hljs-punctuation">=</span> <span class="hljs-string">&quot;XSS found&quot;</span>
+</code></pre>
+<pre><code class="language-bash hljs">dalfox https://target.app -f toml -o report.toml
+</code></pre>
+<h2 id="sarif-github-code-scanning">SARIF → GitHub code scanning</h2>
+<pre><code class="language-bash hljs">dalfox scan urls.txt -f sarif -o dalfox.sarif
+</code></pre>
+<p>Upload <code>dalfox.sarif</code> through GitHub's <code>upload-sarif</code> action, and findings appear in the repository's <strong>Security → Code scanning</strong> tab.</p>
+<h2 id="ci-example">CI example</h2>
+<pre><code class="language-yaml hljs"><span class="hljs-comment"># .github/workflows/xss-scan.yml</span>
+- <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">Dalfox scan</span>
+  <span class="hljs-name">run</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox scan scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion</span>
+
+- <span class="hljs-name">uses</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">github/codeql-action/upload-sarif@v3</span>
+  <span class="hljs-name">with</span><span class="hljs-punctuation">:</span>
+    <span class="hljs-name">sarif_file</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox.sarif</span>
+</code></pre>
+<h3 id="gating-on-new-findings-only">Gating on new findings only</h3>
+<p>Commit <code>baseline.json</code> alongside the scope file and let the exit code fail the build. The step only goes red when something appeared that is not in the baseline:</p>
+<pre><code class="language-yaml hljs"><span class="hljs-comment"># .github/workflows/xss-scan.yml</span>
+- <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">Dalfox scan (new findings gate)</span>
+  <span class="hljs-name">run</span><span class="hljs-punctuation">:</span> <span class="hljs-punctuation">|</span><span class="hljs-doctag">
+</span><span class="hljs-doctag">    dalfox scan scope.txt \
+</span><span class="hljs-doctag">      --baseline .dalfox/baseline.json \
+</span><span class="hljs-doctag">      --only-poc v \
+</span><span class="hljs-doctag">      -f json -o dalfox.json --silence</span>    
+
+- <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">Upload report</span>
+  <span class="hljs-name">if</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">always()</span>
+  <span class="hljs-name">uses</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">actions/upload-artifact@v4</span>
+  <span class="hljs-name">with</span><span class="hljs-punctuation">:</span>
+    <span class="hljs-name">name</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox-report</span>
+    <span class="hljs-name">path</span><span class="hljs-punctuation">:</span> <span class="hljs-literal">dalfox.json</span>
+</code></pre>
+<p>To refresh the baseline after triage, re-run <strong>without</strong> <code>--baseline</code> and point <code>-o</code> at it:</p>
+<pre><code class="language-bash hljs">dalfox scan scope.txt --only-poc v -f json -o .dalfox/baseline.json
+</code></pre>
+<p>Re-running the gate command above with <code>-o .dalfox/baseline.json</code> would write a report containing only the <em>new</em> findings over the file and wipe the recorded backlog — Dalfox warns on stderr when <code>--output</code> and <code>--baseline</code> resolve to the same path.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<p>Dalfox returns:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>Completed successfully, no findings</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Completed successfully, at least one finding <strong>of any tier</strong></td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Input/config/runtime error, <strong>or</strong> a session lost mid-scan <em>with no findings</em> under the default <code>--on-session-loss abort</code> (a run that did find something still exits <code>1</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>1</code> covers every tier — a lone <code>R</code>, or a single <code>I</code> from <code>--detect-outdated-libs</code>, fails the build exactly like a <code>V</code> does. To gate on what Dalfox asserts is exploitable, run <code>--only-poc v</code> and keep using the exit code; it filters before the code is decided. (Gating on <code>severity &gt;= High</code> with <code>jq</code> reaches the same set today, because severity currently tracks the tier; see <a href="../detection-model/">Detection Model</a>.)</p>
+<p><code>--baseline</code> narrows the same code to <em>novelty</em>: under the default <code>filter</code> mode, suppressed findings never reach the exit-code decision, so a run whose entire backlog is already in the baseline exits <code>0</code>. See <a href="#baselines-reporting-only-what-is-new">Baselines</a>.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li>Automate scans via the <a href="../../integrations/server/">REST API Server</a>.</li>
+<li>Let an AI driver handle it with the <a href="../../integrations/mcp/">MCP Server</a>.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#choosing-a-format">Choosing a format</a></li><li><a href="#writing-to-a-file">Writing to a file</a></li><li><a href="#result-fields">Result fields</a></li><li><a href="#scan-metadata-envelope">Scan metadata envelope</a></li><li><a href="#silence-mode">Silence mode</a></li><li><a href="#streaming-findings-during-long-scans">Streaming findings during long scans</a></li><li><a href="#poc-styles">POC styles</a></li><li><a href="#filtering">Filtering</a></li><li><a href="#baselines-reporting-only-what-is-new">Baselines: reporting only what is new</a><ul><li><a href="#modes">Modes</a></li><li><a href="#what-counts-as-the-same-finding">What counts as &quot;the same finding&quot;</a></li><li><a href="#the-metabaseline-block">The meta.baseline block</a></li><li><a href="#refreshing-the-baseline">Refreshing the baseline</a></li><li><a href="#caveats">Caveats</a></li></ul></li><li><a href="#colour-tty-behaviour">Colour &amp; TTY behaviour</a></li><li><a href="#toml">TOML</a></li><li><a href="#sarif-github-code-scanning">SARIF → GitHub code scanning</a></li><li><a href="#ci-example">CI example</a><ul><li><a href="#gating-on-new-findings-only">Gating on new findings only</a></li></ul></li><li><a href="#exit-codes">Exit codes</a></li><li><a href="#next">Next</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/output.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="단일 URL, 파일 배치, 파이프라인, 저장형 XSS, 서버, MCP까지. 워크플로에 맞는 모드를 선택하세요.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>스캔 모드 · Dalfox</title>
+  <meta property="og:title" content="스캔 모드">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/ko/guide/scanning-modes/">
+  <meta property="og:description" content="단일 URL, 파일 배치, 파이프라인, 저장형 XSS, 서버, MCP까지. 워크플로에 맞는 모드를 선택하세요.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/ko-guide-scanning-modes.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="스캔 모드">
+  <meta name="twitter:description" content="단일 URL, 파일 배치, 파이프라인, 저장형 XSS, 서버, MCP까지. 워크플로에 맞는 모드를 선택하세요.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/ko-guide-scanning-modes.png">
+  <link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">
+<link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/guide/scanning-modes/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"스캔 모드","url":"https://dalfox.hahwul.com/ko/guide/scanning-modes/","description":"단일 URL, 파일 배치, 파이프라인, 저장형 XSS, 서버, MCP까지. 워크플로에 맞는 모드를 선택하세요.","image":"https://dalfox.hahwul.com/og-images/ko-guide-scanning-modes.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/ko/"},{"@type":"ListItem","position":2,"name":"가이드","item":"https://dalfox.hahwul.com/ko/guide/"},{"@type":"ListItem","position":3,"name":"스캔 모드"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="guide">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/ko/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/ko/getting-started/">시작하기</a>
+          <a href="https://dalfox.hahwul.com/ko/guide/">가이드</a>
+          <a href="https://dalfox.hahwul.com/ko/integrations/">연동</a>
+          <a href="https://dalfox.hahwul.com/ko/reference/">레퍼런스</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="검색">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>검색</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="언어">
+          <a class="lang-switch-item" href="https://dalfox.hahwul.com/guide/scanning-modes/" hreflang="en">EN</a><span class="lang-switch-item is-active" aria-current="true">KO</span>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        시작하기
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/installation/">설치</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/quick-start/">빠른 시작</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/getting-started/configuration/">설정</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        가이드
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/guide/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/scanning-modes/">스캔 모드</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/parameters/">파라미터와 탐색</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/payloads/">페이로드와 인코딩</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/waf-bypass/">WAF 우회</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/stored-xss/">저장형 XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/guide/output/">출력과 리포트</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        연동
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/server/">REST API 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/mcp/">MCP 서버</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/caido/">Caido 워크플로</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/integrations/skills/">에이전트 스킬</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        레퍼런스
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/ko/reference/">개요</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/cli/">CLI 레퍼런스</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/config/">설정 파일</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/environment/">환경 변수</a></li>
+        <li><a href="https://dalfox.hahwul.com/ko/reference/xssmaze/">XSSMaze 점수</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.2.0" target="_blank" rel="noopener" title="Dalfox v3.2.0 release notes">v3.2.0</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="사이드바 접기" title="사이드바 접기">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="사이드바 펼치기" title="사이드바 펼치기">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>스캔 모드</h1>
+          <p>Dalfox는 여러 형태의 대상을 받아들입니다. 모든 모드는 동일한 탐색, 페이로드, 검증 엔진을 공유하며, URL을 입력하는 방식과 결과가 어디로 가는지만 다릅니다.</p>
+<p>내부적으로는 네 개의 서브커맨드가 있습니다: <code>scan</code>(스캐너), <code>server</code>(장시간 유지되는 REST API), <code>payload</code>(페이로드 유틸리티), <code>mcp</code>(Model Context Protocol stdio 서버). 아래에서 &quot;URL / File / Pipe / Raw HTTP / HAR / SXSS&quot;로 표시된 것은 모두 <code>scan</code> 서브커맨드가 <code>--input-type</code>으로 처리하는 <em>입력 형태</em>이지, 독립적인 서브커맨드가 아닙니다.</p>
+<blockquote>
+<p>팬아웃 입력 형태(<code>file</code>, <code>pipe</code>, <code>raw-http</code>, <code>har</code>)는 <code>scan</code> 전용입니다. 각각 하나의 입력을 여러 대상으로 확장합니다. <code>server</code>와 <code>mcp</code> 인터페이스는 호출당 단일 대상을 다룹니다. 하나의 URL에 명시적인 메서드/헤더/쿠키/본문(HAR 항목 하나가 담는 것과 동일한 충실도)을 더해서 받으므로, 캡처한 세션을 재생하려면 요청마다 한 번씩 호출하면 됩니다.</p>
+</blockquote>
+<h2 id="auto-기본값">Auto (기본값)</h2>
+<p>Dalfox에 URL만 넘겨주세요. 나머지는 알아서 판단합니다.</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/search?q<span class="hljs-operator">=</span><span class="hljs-built_in">test</span>
+</code></pre>
+<p>내부적으로는 <code>scan</code> 서브커맨드를 <code>--input-type auto</code>로 실행합니다. 인자가 URL인지, 파일 경로인지, <code>stdin</code>으로 들어오는 스트림인지는 알아서 판별합니다.</p>
+<h2 id="url-모드">URL 모드</h2>
+<p>URL 파싱을 강제합니다(거의 필요하지 않지만 스크립트에서 유용합니다):</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type url https://target.app
+</code></pre>
+<h2 id="file-모드">File 모드</h2>
+<p>URL 목록을 한 줄에 하나씩 스캔합니다:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># urls.txt</span>
+<span class="hljs-comment"># https://target.app/search?q=1</span>
+<span class="hljs-comment"># https://target.app/profile?id=2</span>
+dalfox scan urls.txt
+<span class="hljs-comment"># or, explicit:</span>
+dalfox scan --input-type file urls.txt
+</code></pre>
+<p>주석(<code>#</code>)과 빈 줄은 무시됩니다. 각 URL은 전체 파이프라인을 거칩니다.</p>
+<h2 id="pipe-모드">Pipe 모드</h2>
+<p><code>stdin</code>에서 읽습니다. 정찰 도구를 체이닝할 때 흔히 쓰이는 방식입니다:</p>
+<pre><code class="language-bash hljs">cat urls.txt <span class="hljs-punctuation">|</span> dalfox scan
+waybackurls example.com <span class="hljs-punctuation">|</span> gf xss <span class="hljs-punctuation">|</span> dalfox scan
+hakrawler -url https://target.app <span class="hljs-punctuation">|</span> dalfox scan
+</code></pre>
+<p>Dalfox는 입력을 버퍼링하고 중복을 제거한 뒤 모든 줄을 대상으로 스캔합니다.</p>
+<h3 id="명령줄-대상과-함께-파이프하기">명령줄 대상과 함께 파이프하기</h3>
+<p>대상을 인자로 주면서 동시에 파이프로도 넘기면 두 목록이 병합됩니다:</p>
+<pre><code class="language-bash hljs">cat urls.txt <span class="hljs-punctuation">|</span> dalfox scan https://target.app/one
+<span class="hljs-comment"># [info] Merged 12 target(s) from stdin and 1 target(s) from arguments</span>
+</code></pre>
+<p>이 경우 명령줄 대상만으로도 이미 스캔이 가능하므로, Dalfox는 <code>stdin</code>의 첫 바이트를 약 500ms만 기다립니다. 래퍼나 CI 잡, 잡 러너가 열어둔 채 아무것도 쓰지 않는 파이프는 실행을 막지 않고 경고와 함께 건너뜁니다. 일단 스트림이 데이터를 보내기 시작하면 끝까지 읽으므로, 길거나 천천히 쓰이는 목록이 잘리는 일은 없습니다.</p>
+<p>이 동작을 조정하려면 <code>DALFOX_STDIN_WAIT_MS</code>로 대기 시간을 늘리거나 <code>0</code>으로 병합을 끌 수 있습니다(<a href="../../reference/environment/">Environment</a> 참고). <code>stdin</code>이 곧 입력이며 얼마가 걸리든 기다려야 한다면 <code>--input-type pipe</code>를 사용하세요.</p>
+<h3 id="거의-같은-url-묶기">거의 같은 URL 묶기</h3>
+<p>기본값(<code>--dedup-urls exact</code>)에서 Dalfox는 완전히 같은 대상만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드가 모두 일치해야 합니다. 그런데 <code>gau</code> / <code>katana</code> / <code>waybackurls</code> 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 <code>?id=1</code> … <code>?id=9999</code>가 주입 지점 하나를 9999번 풀스캔하게 됩니다.</p>
+<p><code>--dedup-urls signature</code>는 이것을 하나로 묶습니다. 키는 메서드, 스킴, 호스트, 포트, 경로, 그리고 <em>정렬된 파라미터 이름 집합</em>입니다. 쿼리는 물론 본문(form, JSON, multipart) 파라미터도 같은 자격으로 포함됩니다. 값은 키에서 제외되므로 값만 다른 URL 무리는 대상 하나로 묶입니다. 무엇을 버렸는지는 로그로 남고, 그 개수는 스캔 메타데이터(<code>dedup_mode</code>, <code>targets_deduplicated</code>)에도 실리므로 축소된 실행이 목록 전체를 커버한 것처럼 보이지 않습니다.</p>
+<p>대표로 남는 것은 목록에서 가장 먼저 나온 URL입니다. 단, 값이 비어 있는 앞쪽 URL보다 모든 파라미터에 값이 채워진 뒤쪽 URL이 우선합니다. 정찰 결과에는 <code>?id=42</code>보다 <code>?id=</code>가 먼저 오는 경우가 많은데, 값이 빈 URL은 404가 되기 쉬워서 그것이 대표가 되면 무리 전체를 깨끗한 것으로 잘못 보고하게 되기 때문입니다. 스코프 필터(<code>--include-url</code>, <code>--exclude-url</code>, <code>--out-of-scope</code>)는 중복 제거보다 <em>먼저</em> 적용되므로, 필터가 항상 먼저 구성원을 걸러낼 기회를 갖습니다.</p>
+<pre><code class="language-bash hljs">gau target.app <span class="hljs-punctuation">|</span> dalfox scan --dedup-urls signature
+<span class="hljs-comment"># INF dedup (signature): 8214 duplicate target(s) collapsed, 37 remaining — dropped e.g. …</span>
+</code></pre>
+<p><strong>요청 절약보다 커버리지 쪽이 더 큰 이득입니다.</strong> <code>--max-targets-per-host</code>는 호스트당 대상을 기본 100개로 제한하는데, 수집 도구의 덤프는 정렬된 상태로 나오기 때문에 한 엔드포인트에서 수집된 수천 개의 값이 연속으로 붙어 있고, 다른 엔드포인트에 닿기도 전에 예산을 다 써 버립니다. 5200개 URL 목록(<code>/html?q=N</code> 5000개 뒤에 서로 다른 <code>/users/N</code> 200개)으로 측정한 결과입니다:</p>
+<table>
+<thead>
+<tr>
+<th>모드</th>
+<th>대상 100개 예산을 쓴 곳</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>exact</code> (기본값)</td>
+<td><code>/html</code> 변형 100개 — <code>/users/N</code> 200개는 아예 스캔되지 않음</td>
+</tr>
+<tr>
+<td><code>signature</code></td>
+<td><code>/html</code> 1개 + 서로 다른 <code>/users/N</code> 99개</td>
+</tr>
+</tbody>
+</table>
+<p>잘림 자체는 어느 쪽이든 보고됩니다(<code>TRUNCATED_PER_HOST_CAP</code>). 다만 예산을 <em>서로 다른</em> 엔드포인트에 쓰는 것은 <code>signature</code>뿐입니다. 둘 다 원한다면 <code>--max-targets-per-host</code>도 함께 올리세요.</p>
+<p>언제 안전할까요? 입력이 어디로 흘러가는지를 파라미터 <em>이름</em>이 결정하는 경우, 즉 대부분의 경우입니다. 반대로 값이 코드 경로를 고르는 경우에는 <strong>안전하지 않습니다.</strong> 같은 경로에서 다른 핸들러로 분기하는 <code>action=</code> / <code>mode=</code> / <code>template=</code> 같은 판별자, 라우팅 토큰, 렌더링 템플릿을 바꾸는 로케일 값이 그렇습니다. 이런 곳에서는 한 분기만 스캔하고 전체를 보고하게 되므로, <code>signature</code>는 옵트인으로 남겨 두었습니다.</p>
+<p>모든 줄을 입력 그대로 스캔해야 하는 드문 경우에는 <code>--dedup-urls off</code>로 중복 제거를 완전히 끌 수 있습니다. 다만 대상별 리포팅은 URL을 키로 삼으므로, 같은 URL이 여러 번 나와도 <code>target_summary</code> 항목은 하나로 합쳐집니다.</p>
+<h2 id="중단된-스캔-이어하기">중단된 스캔 이어하기</h2>
+<p>Ctrl-C는 스캔을 깔끔하게 멈추고 그때까지 찾은 것도 정상적으로 출력합니다. 하지만 그것만으로는 부분 리포트 하나가 남을 뿐입니다. <strong>어떤 대상까지 끝났는지가 어디에도 기록되지 않으므로</strong>, 5만 URL 목록을 80%에서 멈췄다면 다시 돌릴 때 그 80%를 처음부터 훑습니다. 크래시, 끊어진 SSH 세션, 공용 서버의 OOM도 마찬가지입니다.</p>
+<p><code>--state-file</code>은 옵트인입니다(지정하지 않으면 동작은 지금까지와 완전히 동일합니다). 각 대상이 종료 상태에 도달할 때마다 기록해 두고, 다음 실행에서 끝난 것들을 건너뜁니다:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type file urls.txt --state-file scan.state
+<span class="hljs-comment"># ^C</span>
+<span class="hljs-comment"># [!] Ctrl-C received — stopping in-flight tasks (press again to force exit)</span>
+
+dalfox scan --input-type file urls.txt --state-file scan.state
+<span class="hljs-comment"># INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan</span>
+</code></pre>
+<p><strong>건너뛰는 것은 완료된 대상뿐입니다.</strong> 어디까지 검사됐는지 알 수 없는 것은 전부 다시 스캔합니다:</p>
+<table>
+<thead>
+<tr>
+<th>기록된 상태</th>
+<th>언제</th>
+<th>다음 실행</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>completed</code></td>
+<td>세션이 살아 있는 상태로 끝까지 스캔됨</td>
+<td>건너뜀</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>Ctrl-C, <code>--scan-timeout</code> 만료, 스캔 도중 세션 끊김</td>
+<td>재시도</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>프리플라이트에서 제외됨 — 도달 불가, content-type 불일치, <code>--max-targets-per-host</code> 상한</td>
+<td>재시도</td>
+</tr>
+</tbody>
+</table>
+<p>대상의 식별자는 URL + 메서드로, <code>--dedup-urls exact</code>가 쓰는 키와 같습니다. 그래서 하나의 state 파일로 <code>--input-type file</code> 한 번짜리 실행뿐 아니라, URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.</p>
+<p><strong>설정이 바뀌면 처음부터 다시 시작합니다.</strong> 파일 헤더에는 스캔에 영향을 주는 설정의 해시가 들어 있습니다. 해시가 맞지 않으면 기록된 대상들은 이번 실행과 다른 설정에서 검사된 것이므로, Dalfox는 기존 파일을 <code>scan.state.bak</code>으로 옮기고 새 파일로 시작한 뒤 전부 다시 스캔합니다:</p>
+<pre><code>Warning: scan configuration changed since 'scan.state' was written (recorded a5f8…, now 6447…) — starting fresh (previous state kept at 'scan.state.bak')
+</code></pre>
+<p>덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 만료된 세션 쿠키를 갈아끼우고 인증 스캔을 이어가는 경우가 바로 이 경로를 타는데, 그것 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 제자리에서 파괴하지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 <strong>아니면</strong>(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.</p>
+<p>출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — <code>--format</code>, <code>--output</code>, <code>--silence</code>, <code>--only-poc</code>, <code>--baseline</code>, <code>--timeout</code>, <code>--scan-timeout</code>, <code>--delay</code>, <code>--rate-limit</code>, <code>--workers</code>, <code>--max-concurrent-targets</code>, 그리고 대상 목록 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — <code>--deep-scan</code>, <code>--encoders</code>, <code>--custom-payload</code>, 마이닝/탐색 토글, WAF 옵션, <code>--limit</code>, <code>--cookies</code> / <code>--headers</code> 등이 여기에 해당합니다.</p>
+<p>파일은 append-only JSONL입니다. 헤더 한 줄 뒤에 대상당 한 줄이 붙습니다. 강제 종료로 잘릴 수 있는 것은 마지막 줄 하나뿐이고, 그 줄은 읽을 때 건너뛰되 앞의 온전한 기록은 모두 그대로 유효합니다. 지난 실행과 결과가 같은 대상은 다시 기록하지 않으므로, 계속 죽어 있는 호스트 때문에 파일이 실행마다 커지지 않습니다.</p>
+<p><code>--dry-run</code>과 <code>--only-discovery</code>는 파일을 <strong>읽기 전용</strong>으로 엽니다. 계획에는 이어하기가 반영되지만 공격 페이로드를 보내지도, 무엇을 완료하지도 않으므로 파일을 만들거나 덧붙이거나 옮기지 않습니다 — <code>--dry-run</code>으로 <code>--deep-scan</code> 비용을 가늠해 보다가 진행 상황을 날릴 일이 없습니다. 이 필터가 적용되는 모든 출력(스캔, dry-run, only-discovery, Markdown)에는 state 파일 경로와 건너뛴 대상 수가 담긴 <code>resumed</code> 블록이 들어갑니다. 이어서 돌린 실행의 짧은 리포트를 입력 목록 전체에 대한 커버리지로 오해할 일이 없도록 하기 위해서입니다.</p>
+<p>CLI 전용입니다. <code>dalfox server</code>와 MCP는 잡 단위로 각자의 수명 주기를 가지며, 이전 프로세스의 작업을 이어받지 않습니다.</p>
+<h2 id="raw-http-모드">Raw HTTP 모드</h2>
+<p>Burp, Caido, ZAP에서 캡처한 요청을 파일로 저장한 뒤 Dalfox에 넘겨줍니다:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type raw-http request.txt
+</code></pre>
+<p>이 파일은 표준 raw HTTP 요청(메서드 + 경로 + 헤더 + 빈 줄 + 본문)입니다. Dalfox는 모든 헤더, 쿠키, 본문 파라미터를 보존합니다.</p>
+<p>실시간 프록시 워크플로, 그중에서도 Caido Active Workflows는 전용 <a href="../../integrations/caido/">Caido 연동 가이드</a>를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.</p>
+<h2 id="har-모드">HAR 모드</h2>
+<p><a href="http://www.softwareishard.com/blog/har-12-spec/">HAR</a>(HTTP Archive) 익스포트는 브라우저 DevTools와 가로채기 프록시(Burp, Caido, ZAP, Charles, mitmproxy)가 만들어 내는 JSON 캡처입니다. 파일을 통째로 넘겨주면 그 안의 모든 요청을 각각의 URL, 메서드, 헤더, 쿠키, 본문을 보존한 채로 스캔합니다:</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># Auto-detected from the file content:</span>
+dalfox scan capture.har
+<span class="hljs-comment"># or explicit:</span>
+dalfox scan --input-type har capture.har
+<span class="hljs-comment"># or piped from another tool:</span>
+mitmdump -nr flows -w /dev/stdout --set <span class="hljs-variable">hardump</span><span class="hljs-operator">=</span>- <span class="hljs-punctuation">|</span> dalfox scan -i har
+</code></pre>
+<p>HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 <code>log.entries[].request</code>는 하나의 대상이 되며, 요청은 URL + 메서드로 중복 제거되고 다른 모든 모드와 동일한 스코프 필터를 거칩니다. <code>http(s)</code>가 아닌 항목(<code>data:</code>, <code>blob:</code>, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.</p>
+<p>이는 Go v2.x 라인이 가졌으나 v3 재작성에서 처음에 빠졌던 기능을 복원한 것입니다. CLI 요청 플래그는 그 위에 그대로 적용됩니다. 예를 들어 <code>-H &quot;Authorization: Bearer …&quot;</code>는 모든 항목에 추가되고, <code>--include-url</code> / <code>--out-of-scope</code>는 대상 집합을 좁힙니다.</p>
+<h2 id="저장형-xss-모드-sxss">저장형 XSS 모드 (SXSS)</h2>
+<p>전형적인 &quot;폼 A에 주입하면 페이지 B에 페이로드가 나타난다&quot; 패턴을 테스트합니다:</p>
+<pre><code class="language-bash hljs">dalfox scan https://target.app/post-comment <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --sxss-url https://target.app/comments
+</code></pre>
+<p>Dalfox는 첫 번째 URL에 주입한 다음, 두 번째 URL을 가져와 페이로드가 도달했는지 확인합니다. 전체 흐름은 <a href="../stored-xss/">저장형 XSS 가이드</a>를 참고하세요.</p>
+<h2 id="세션-모니터링">세션 모니터링</h2>
+<p>정적 자격증명(<code>--cookies</code>, <code>-H 'Cookie: …'</code>, <code>--cookie-from-raw</code>)은 모든 요청에 그대로 붙을 뿐 유효성을 다시 확인하지 않습니다. 긴 스캔 도중 한 시간쯤 지나 세션이 만료되면 이후 모든 요청은 로그인 페이지를 받고, 아무것도 반사되지 않으며, Dalfox는 빈 리포트와 함께 <code>0</code>으로 종료합니다 — 진짜로 안전한 대상과 구분할 수 없습니다.</p>
+<p>세션 모니터링이 이 간극을 메웁니다. 프리플라이트 단계에서 인증된 랜딩 응답의 지문(상태 코드, 리다이렉트 후 최종 도착지, 로그인 폼이 이미 있었는지)을 <strong>추가 요청 없이</strong> 확보합니다 — 프리플라이트가 이미 가져온 본문을 재사용합니다. 이후 각 대상의 주입 단계가 끝난 직후에 다시 조회하고, 기준 지문이 30초 이상 지났다면 디스패치 경계에서도 한 번 더 조회해 비교합니다. (짧거나 단일 대상 실행에서는 사후 조회만 발생합니다. 방금 잡은 기준을 다시 확인해 봐야 알 수 있는 것이 없기 때문입니다.)</p>
+<pre><code class="language-bash hljs"><span class="hljs-comment"># 별도 설정이 필요 없습니다. 자격증명이 있으면 자동으로 켜집니다.</span>
+dalfox scan https://app.example.com/dashboard?q<span class="hljs-operator">=</span><span class="hljs-number">1</span> --cookies <span class="hljs-string">&quot;</span><span class="hljs-string">sid=</span><span class="hljs-variable">$SESSION</span><span class="hljs-string">&quot;</span>
+</code></pre>
+<p>다음 중 하나라도 감지되면 세션이 끊어진 것으로 보고합니다:</p>
+<table>
+<thead>
+<tr>
+<th>신호</th>
+<th>예시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>상태 코드가 <code>401</code> / <code>403</code>으로 바뀜</td>
+<td>앱이 쿠키를 거부하기 시작</td>
+</tr>
+<tr>
+<td>요청이 로그인 형태의 URL로 도착</td>
+<td><code>302 → /users/sign_in</code></td>
+</tr>
+<tr>
+<td>기준에는 없던 비밀번호 입력 필드가 등장</td>
+<td>앱이 로그인 화면을 인라인으로 렌더링</td>
+</tr>
+</tbody>
+</table>
+<p><code>403</code>은 오리진이나 WAF가 스캐너를 차단하기 시작했을 때도 반환됩니다. 해당 대상에서 이미 WAF가 탐지된 경우 <code>403</code> 신호는 아예 무시합니다 — 만료된 세션보다 차단이 더 그럴듯한 설명이고, 이를 로그아웃으로 판단하면 WAF 규칙 하나 때문에 호스트 전체를 중단하게 되기 때문입니다. WAF 뒤에 있는 오리진에서 <code>403</code>을 만료 신호로 쓰려면 <code>--session-check</code>를 사용하세요.</p>
+<h3 id="정확하게-지정하기">정확하게 지정하기</h3>
+<p>휴리스틱은 의도적으로 좁게 잡혀 있습니다 — 기본 동작이 중단(abort)이므로 오탐 하나가 스캔 전체를 날립니다. 인증된 응답이 어떤 모습인지 정확히 안다면 그것을 지정하세요. 그러면 휴리스틱은 완전히 물러납니다:</p>
+<pre><code class="language-bash hljs">dalfox scan https://app.example.com/dashboard?q<span class="hljs-operator">=</span><span class="hljs-number">1</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --cookies <span class="hljs-string">&quot;</span><span class="hljs-string">sid=</span><span class="hljs-variable">$SESSION</span><span class="hljs-string">&quot;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --session-check <span class="hljs-string">&#39;Signed in as&#39;</span> <span class="hljs-string">\
+</span><span class="hljs-string"></span>  --session-check-url https://app.example.com/api/me
+</code></pre>
+<p>스캔 대상이 무겁거나, 페이지네이션이 있거나, 그 자체로 공개 페이지라면 <code>--session-check-url</code>로 가벼운 인증 엔드포인트를 따로 지정하세요. 이 경우 기준 지문도 해당 엔드포인트에서 잡습니다(플래그를 지정했을 때만, 대상당 프리플라이트 요청 1건 추가). 덕분에 <code>/auth/session</code>처럼 로그인 형태의 프로브 경로도 스캔 대상이 아니라 자기 자신의 인증된 응답과 비교됩니다.</p>
+<h3 id="세션이-끊어졌을-때">세션이 끊어졌을 때</h3>
+<p><code>--on-session-loss abort</code>(기본값)는 해당 대상을 중단하고 같은 호스트의 남은 대상도 건너뜁니다. 로그인 페이지를 상대로 요청 예산을 계속 쓰는 것은 아무 이득이 없기 때문입니다. <code>--on-session-loss continue</code>는 휴리스틱이 오탐하는 대상을 위해 스캔을 계속합니다.</p>
+<p>어느 쪽이든 실행 결과는 이 사실을 숨기지 않습니다:</p>
+<ul>
+<li><strong>stderr</strong>에 <code>SESSION LOST</code> 한 줄 — 구조화된 stdout은 그대로 파싱 가능</li>
+<li>해당 대상은 <code>incomplete</code>(또는 <code>skipped</code>) 상태에 <code>error_code: SESSION_LOST</code>, 그리고 어떤 신호가 감지됐는지 <code>error_message</code>에 기록</li>
+<li><a href="../output/#%EC%8A%A4%EC%BA%94-%EB%A9%94%ED%83%80%EB%8D%B0%EC%9D%B4%ED%84%B0-%EC%97%94%EB%B2%A8%EB%A1%9C%ED%94%84">스캔 메타데이터 엔벨로프</a>의 <code>meta.incomplete: true</code></li>
+<li>탐지 결과가 없는 실행에 한해 <code>abort</code>에서 종료 코드 <code>2</code> — 따라서 로그아웃된 상태에서 <code>dalfox scan … &amp;&amp; echo &quot;no XSS found&quot;</code>가 그 줄을 출력할 수 없습니다. 탐지 결과가 <em>있었다면</em> 여전히 <code>1</code>로 종료합니다. 발견된 취약점은 어쨌든 실재하고, 불완전하다는 사실은 <code>meta.incomplete</code>가 전달하기 때문입니다. <code>continue</code>는 종료 코드를 전혀 바꾸지 않습니다</li>
+</ul>
+<p><strong>프리플라이트</strong> 응답부터 이미 미인증으로 보이거나, <code>--session-check</code> 마커가 기준 응답에 애초에 없었던 경우(오타이거나 다른 페이지에 있는 마커)도 표시합니다. 두 경우 모두 단순 로그가 아니라 <code>SESSION_LOST</code>로 보고합니다: 그런 기준에서는 이후 어떤 조회도 <em>변화</em>를 감지할 수 없으므로, 만료된 자격증명이 조용하고 완벽하게 &quot;깨끗한&quot; 실행을 만들어 내기 때문입니다. 대상 스캔 자체는 그대로 진행되며, 결과를 정직하게 만드는 것은 이 표시와 종료 코드입니다.</p>
+<p>&quot;이미 미인증으로 보인다&quot;는 것은 로그인 페이지 그 자체, 즉 <code>401</code>이나 페이지에 직접 렌더링된 비밀번호 입력란, <code>/login</code>, <code>/signin</code>, <code>/users/sign_in</code>으로의 리다이렉트를 뜻합니다. 단지 인증<em>처럼 생긴</em> 경로로 리다이렉트되는 것만으로는 부족합니다. 인증된 홈을 <code>/auth/home</code>이나 <code>/sso/dashboard</code>에서 서빙하는 앱이 많고, 그걸 끊어진 세션으로 판정하면 멀쩡한 세션의 스캔을 실패시키게 됩니다. 이 경우 Dalfox는 대신 <code>SESSION?</code> 참고 메시지를 출력합니다 — 눈에는 보이지만 <code>SESSION_LOST</code> 항목도, <code>meta.incomplete</code>도, 종료 코드 변화도 없습니다. 앱이 여기 해당하는데도 검사를 정확히 하고 싶다면 <code>--session-check</code>로 확정하세요.</p>
+<p>자격증명이 없고 <code>--session-check</code> 계열 플래그도 지정하지 않으면 모니터링은 꺼져 있으며 비용도 들지 않습니다. 자동 로그인은 범위 밖입니다. 이 기능은 감지만 담당합니다.</p>
+<h2 id="서버-모드">서버 모드</h2>
+<p>Dalfox를 장시간 유지되는 HTTP 서비스로 실행합니다. REST로 스캔을 제출하고, 결과를 폴링하고, 실행 중인 작업을 취소합니다:</p>
+<pre><code class="language-bash hljs">dalfox server --port <span class="hljs-number">6664</span> --api-key <span class="hljs-string">&quot;</span><span class="hljs-variable">$DALFOX_API_KEY</span><span class="hljs-string">&quot;</span>
+</code></pre>
+<p>엔드포인트와 요청 형태는 <a href="../../integrations/server/">REST API Server</a>를 참고하세요.</p>
+<h2 id="mcp-모드">MCP 모드</h2>
+<p>Dalfox를 <a href="https://modelcontextprotocol.io">Model Context Protocol</a> 서버로 노출하여 AI 에이전트와 IDE(예: Claude)가 스캔을 구동할 수 있게 합니다:</p>
+<pre><code class="language-bash hljs">dalfox mcp
+</code></pre>
+<p>도구(<code>scan_with_dalfox</code>, <code>get_results_dalfox</code>, <code>list_scans_dalfox</code>, <code>cancel_scan_dalfox</code>, <code>delete_scan_dalfox</code>, <code>preflight_dalfox</code>)는 <a href="../../integrations/mcp/">MCP Server</a>에 설명되어 있습니다.</p>
+<h2 id="payload-모드-유틸리티">Payload 모드 (유틸리티)</h2>
+<p>스캔 모드는 아니지만 함께 유용합니다. 스캔을 실행하지 않고 페이로드를 출력하거나 가져옵니다.</p>
+<pre><code class="language-bash hljs">dalfox payload event-handlers    <span class="hljs-comment"># list DOM event handlers</span>
+dalfox payload useful-tags       <span class="hljs-comment"># list useful HTML tags</span>
+dalfox payload portswigger       <span class="hljs-comment"># fetch PortSwigger XSS cheatsheet</span>
+dalfox payload payloadbox        <span class="hljs-comment"># fetch PayloadBox XSS list</span>
+dalfox payload uri-scheme        <span class="hljs-comment"># print javascript:/data: payloads</span>
+</code></pre>
+<h2 id="모드-선택하기">모드 선택하기</h2>
+<table>
+<thead>
+<tr>
+<th>원하는 작업</th>
+<th>사용할 모드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL 하나 테스트</td>
+<td>Auto / URL</td>
+</tr>
+<tr>
+<td>크롤러가 만든 목록 스캔</td>
+<td>File이나 Pipe</td>
+</tr>
+<tr>
+<td>특정 요청 재생</td>
+<td>Raw HTTP</td>
+</tr>
+<tr>
+<td>캡처한 세션 전체 재생(프록시/DevTools 익스포트)</td>
+<td>HAR</td>
+</tr>
+<tr>
+<td>다른 페이지에 기록하는 폼 테스트</td>
+<td>SXSS</td>
+</tr>
+<tr>
+<td>대시보드나 CI에서 여러 스캔 실행</td>
+<td>Server</td>
+</tr>
+<tr>
+<td>AI 에이전트가 스캔을 구동하게 하기</td>
+<td>MCP</td>
+</tr>
+<tr>
+<td>Dalfox가 보낼 페이로드만 확인</td>
+<td>Payload 유틸리티나 <code>--dry-run</code></td>
+</tr>
+</tbody>
+</table>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">목차</div>
+          <div class="toc-content">
+            <ul><li><a href="#auto-기본값">Auto (기본값)</a></li><li><a href="#url-모드">URL 모드</a></li><li><a href="#file-모드">File 모드</a></li><li><a href="#pipe-모드">Pipe 모드</a><ul><li><a href="#명령줄-대상과-함께-파이프하기">명령줄 대상과 함께 파이프하기</a></li><li><a href="#거의-같은-url-묶기">거의 같은 URL 묶기</a></li></ul></li><li><a href="#중단된-스캔-이어하기">중단된 스캔 이어하기</a></li><li><a href="#raw-http-모드">Raw HTTP 모드</a></li><li><a href="#har-모드">HAR 모드</a></li><li><a href="#저장형-xss-모드-sxss">저장형 XSS 모드 (SXSS)</a></li><li><a href="#세션-모니터링">세션 모니터링</a><ul><li><a href="#정확하게-지정하기">정확하게 지정하기</a></li><li><a href="#세션이-끊어졌을-때">세션이 끊어졌을 때</a></li></ul></li><li><a href="#서버-모드">서버 모드</a></li><li><a href="#mcp-모드">MCP 모드</a></li><li><a href="#payload-모드-유틸리티">Payload 모드 (유틸리티)</a></li><li><a href="#모드-선택하기">모드 선택하기</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/guide/scanning-modes.ko.md" target="_blank" rel="noopener">GitHub에서 이 문서 편집</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="문서 검색..." aria-label="문서 검색" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>MIT 라이선스로 배포</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span><a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">이슈</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">기여하기</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>
