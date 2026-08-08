@@ -128,6 +128,14 @@ debug = false
 
 ## 키 레퍼런스
 
+### 입력
+
+| 키 | 타입 | 기본값 | 설명 |
+|-----|------|---------|-------------|
+| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `dedup_urls` | string | `"exact"` | `exact`, `signature`(파라미터 값만 다른 URL을 하나로 병합), `off` |
+| `state_file` | string | — | 완료된 대상을 기록해 재실행 시 건너뜁니다. **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
+
 ### 출력
 
 | 키 | 타입 | 기본값 | 설명 |
