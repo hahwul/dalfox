@@ -128,6 +128,14 @@ debug = false
 
 ## Key reference
 
+### Input
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `dedup_urls` | string | `"exact"` | `exact`, `signature` (collapse URLs differing only in param values), `off` |
+| `state_file` | string | — | Record completed targets and skip them on re-run. **CLI only** — ignored by `dalfox server` / MCP |
+
 ### Output
 
 | Key | Type | Default | Description |
