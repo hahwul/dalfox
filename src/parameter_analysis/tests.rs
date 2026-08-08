@@ -1755,7 +1755,10 @@ fn test_probe_chars_drop_semicolon_for_cookie_params_only() {
         probe_test_param(Location::Header, "X-Forwarded-For"),
         probe_test_param(Location::Query, "session"),
     ] {
-        assert_eq!(probe_chars_for(&target, &param), SPECIAL_PROBE_CHARS.to_vec());
+        assert_eq!(
+            probe_chars_for(&target, &param),
+            SPECIAL_PROBE_CHARS.to_vec()
+        );
     }
 }
 
