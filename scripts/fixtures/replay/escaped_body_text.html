@@ -1,0 +1,23 @@
+<!-- replay-fixture
+name: escaped_body_text
+content-type: text/html; charset=utf-8
+escape: html
+why: Search-results page that echoes the raw query into element content after
+  replacing every one of & < > " ' with its character reference. An escaped
+  value can only ever become a text node: no tag can be opened, no attribute
+  can be started, and the HTML parser never turns a character reference back
+  into markup inside normal element content. Benign for every possible input,
+  including nested and partially-encoded payloads.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Search</title>
+</head>
+<body>
+  <h1>Search results</h1>
+  <p>No documents matched <strong>{input}</strong>.</p>
+  <p>Try a broader term, or <a href="/page/escaped_body_text?q=">start over</a>.</p>
+</body>
+</html>

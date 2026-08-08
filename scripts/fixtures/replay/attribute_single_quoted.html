@@ -1,0 +1,23 @@
+<!-- replay-fixture
+name: attribute_single_quoted
+content-type: text/html; charset=utf-8
+escape: html
+why: The single-quote variant of escaped_attribute, kept separate because a
+  half-done escaper that only handles " is a real and common bug and this
+  fixture is where it would show up. The escaper emits &#39; for the apostrophe
+  as well, so a single-quoted attribute cannot be terminated either; < is still
+  escaped, so no tag can start. The attributes are ordinary data attributes and
+  a title, not event handlers, so the decoded entity remains a string.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Saved filter</title>
+</head>
+<body>
+  <h1>Saved filter</h1>
+  <p title='Filter: {input}'>Hover for the raw filter expression.</p>
+  <span class='badge' data-filter='{input}'>1 filter active</span>
+</body>
+</html>

@@ -1,0 +1,25 @@
+<!-- replay-fixture
+name: meta_refresh
+content-type: text/html; charset=utf-8
+escape: html
+why: A meta refresh whose target URL carries the query forward. The URL is not
+  taken from the request: it is assembled from the hard-coded relative path
+  "/page/meta_refresh?q=" plus the percent-encoded input, so the scheme
+  position is unreachable and "javascript:" or "data:" can never be the target.
+  Percent-encoding also removes the quote and semicolon that would be needed to
+  break out of the content="..." attribute or to append a second directive. The
+  delay is 30 seconds so the fixture never self-navigates during a scan.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="30;url=/page/meta_refresh?q={input:url}">
+  <title>Redirecting</title>
+</head>
+<body>
+  <h1>Redirecting</h1>
+  <p>Your search for <strong>{input}</strong> is being re-run.</p>
+  <p>If nothing happens, <a href="/page/meta_refresh?q={input:url}">continue</a>.</p>
+</body>
+</html>

@@ -1,0 +1,422 @@
+{
+  "generated_at": "2026-08-08T16:10:38Z",
+  "tool": "replay_corpus",
+  "dalfox_version": "3.2.0",
+  "strict": "va",
+  "base_url": "http://127.0.0.1:4804",
+  "total": {
+    "fixtures": 21,
+    "clean": 15,
+    "warn": 6,
+    "failed": 0,
+    "errored": 0,
+    "findings": 6
+  },
+  "fixtures": [
+    {
+      "name": "attribute_single_quoted",
+      "file": "scripts/fixtures/replay/attribute_single_quoted.html",
+      "url": "/page/attribute_single_quoted?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "data_attribute",
+      "file": "scripts/fixtures/replay/data_attribute.html",
+      "url": "/page/data_attribute?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "warn",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 1,
+        "I": 0
+      },
+      "findings": [
+        {
+          "type": "R",
+          "param": "q",
+          "payload": "\"><svg onload=alert(1) class=dlx826c48a4>",
+          "evidence": "Reflected XSS detected for param q (reflected after HTML-entity and URL/form decoding)",
+          "detection_method": "reflection"
+        }
+      ]
+    },
+    {
+      "name": "double_decode_escaped",
+      "file": "scripts/fixtures/replay/double_decode_escaped.html",
+      "url": "/page/double_decode_escaped?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": true,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "escaped_attribute",
+      "file": "scripts/fixtures/replay/escaped_attribute.html",
+      "url": "/page/escaped_attribute?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "escaped_body_text",
+      "file": "scripts/fixtures/replay/escaped_body_text.html",
+      "url": "/page/escaped_body_text?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "html_comment",
+      "file": "scripts/fixtures/replay/html_comment.html",
+      "url": "/page/html_comment?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "json_api",
+      "file": "scripts/fixtures/replay/json_api.html",
+      "url": "/page/json_api?q=replayseed",
+      "content_type": "application/json; charset=utf-8",
+      "status": 200,
+      "escape": "json",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "jsonp_callback",
+      "file": "scripts/fixtures/replay/jsonp_callback.html",
+      "url": "/page/jsonp_callback?q=replayseed&callback=render",
+      "content_type": "application/javascript; charset=utf-8",
+      "status": 200,
+      "escape": "json",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "meta_refresh",
+      "file": "scripts/fixtures/replay/meta_refresh.html",
+      "url": "/page/meta_refresh?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "warn",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 1,
+        "I": 0
+      },
+      "findings": [
+        {
+          "type": "R",
+          "param": "q",
+          "payload": "\"><svg onload=alert(1) class=dlxa3fc26d3>",
+          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
+          "detection_method": "reflection"
+        }
+      ]
+    },
+    {
+      "name": "noscript_block",
+      "file": "scripts/fixtures/replay/noscript_block.html",
+      "url": "/page/noscript_block?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "not_found_404",
+      "file": "scripts/fixtures/replay/not_found_404.html",
+      "url": "/page/not_found_404?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 404,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "plain_text",
+      "file": "scripts/fixtures/replay/plain_text.html",
+      "url": "/page/plain_text?q=replayseed",
+      "content_type": "text/plain; charset=utf-8",
+      "status": 200,
+      "escape": "raw",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "redirect_relative",
+      "file": "scripts/fixtures/replay/redirect_relative.html",
+      "url": "/page/redirect_relative?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 302,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "warn",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 1,
+        "I": 0
+      },
+      "findings": [
+        {
+          "type": "R",
+          "param": "q",
+          "payload": "x onmouseover=alert(1) class=dlx5bba4e4c ",
+          "evidence": "Reflected XSS detected for param q (reflected)",
+          "detection_method": "reflection"
+        }
+      ]
+    },
+    {
+      "name": "script_html_entities",
+      "file": "scripts/fixtures/replay/script_html_entities.html",
+      "url": "/page/script_html_entities?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "script_json_string",
+      "file": "scripts/fixtures/replay/script_json_string.html",
+      "url": "/page/script_json_string?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "json",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "search_shell",
+      "file": "scripts/fixtures/replay/search_shell.html",
+      "url": "/page/search_shell?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "warn",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 1,
+        "I": 0
+      },
+      "findings": [
+        {
+          "type": "R",
+          "param": "q",
+          "payload": "\"><svg onload=alert(1) class=dlx3c70ccea>",
+          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
+          "detection_method": "reflection"
+        }
+      ]
+    },
+    {
+      "name": "self_link",
+      "file": "scripts/fixtures/replay/self_link.html",
+      "url": "/page/self_link?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "warn",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 1,
+        "I": 0
+      },
+      "findings": [
+        {
+          "type": "R",
+          "param": "q",
+          "payload": "\"><svg onload=alert(1) class=dlxed3bc2ce>",
+          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
+          "detection_method": "reflection"
+        }
+      ]
+    },
+    {
+      "name": "strict_csp",
+      "file": "scripts/fixtures/replay/strict_csp.html",
+      "url": "/page/strict_csp?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "textarea_rawtext",
+      "file": "scripts/fixtures/replay/textarea_rawtext.html",
+      "url": "/page/textarea_rawtext?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "title_rawtext",
+      "file": "scripts/fixtures/replay/title_rawtext.html",
+      "url": "/page/title_rawtext?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "html",
+      "url_decode": false,
+      "verdict": "clean",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 0,
+        "I": 0
+      },
+      "findings": []
+    },
+    {
+      "name": "url_encoded_echo",
+      "file": "scripts/fixtures/replay/url_encoded_echo.html",
+      "url": "/page/url_encoded_echo?q=replayseed",
+      "content_type": "text/html; charset=utf-8",
+      "status": 200,
+      "escape": "url",
+      "url_decode": false,
+      "verdict": "warn",
+      "counts": {
+        "V": 0,
+        "A": 0,
+        "R": 1,
+        "I": 0
+      },
+      "findings": [
+        {
+          "type": "R",
+          "param": "q",
+          "payload": "\"><svg onload=alert(1) class=dlxdf290d68>",
+          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
+          "detection_method": "reflection"
+        }
+      ]
+    }
+  ]
+}

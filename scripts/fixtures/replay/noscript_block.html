@@ -1,0 +1,26 @@
+<!-- replay-fixture
+name: noscript_block
+content-type: text/html; charset=utf-8
+escape: html
+why: <noscript> is parsed two different ways depending on whether scripting is
+  enabled -- as raw text when it is, as ordinary markup when it is not -- which
+  is why an unescaped echo here is a real bug that scanners look for. This
+  fixture escapes, so both parse modes are covered by the same argument: with
+  scripting on the content is raw text and no tag exists; with scripting off
+  the escaped < can still not start one. Character references are not decoded
+  in the raw-text mode, so nothing is reconstituted later.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Report</title>
+</head>
+<body>
+  <h1>Report</h1>
+  <noscript>
+    <p>JavaScript is disabled, so your search for {input} was not saved.</p>
+  </noscript>
+  <p>Enable JavaScript for live results.</p>
+</body>
+</html>

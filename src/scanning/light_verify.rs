@@ -29,17 +29,13 @@ pub async fn verify_dom_xss_light_with_client(
     let body_method =
         crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
     let request = match param.location {
-        Location::Header => {
-            let parsed_url = target.url.clone();
-            let rb = crate::utils::build_request(
-                client,
-                target,
-                default_method,
-                parsed_url,
-                target.data.clone(),
-            );
-            crate::utils::apply_header_overrides(rb, &[(param.name.clone(), payload.to_string())])
-        }
+        Location::Header => crate::scanning::url_inject::build_header_request(
+            client,
+            target,
+            param,
+            payload,
+            default_method,
+        ),
         Location::Body => {
             let parsed_url = param
                 .form_action_url

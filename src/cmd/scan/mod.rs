@@ -51,7 +51,7 @@ pub use args::{
     DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS,
     DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, ENCODER_VALUES,
     FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ON_SESSION_LOSS_VALUES, ONLY_POC_VALUES,
-    POC_TYPE_VALUES, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES,
+    POC_TYPE_VALUES, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES, format_is_machine,
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::{log_info, log_warn};

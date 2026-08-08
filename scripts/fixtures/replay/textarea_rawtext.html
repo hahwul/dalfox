@@ -1,0 +1,26 @@
+<!-- replay-fixture
+name: textarea_rawtext
+content-type: text/html; charset=utf-8
+escape: html
+why: <textarea> is an RCDATA element: tags are not recognised inside it, only
+  the literal closing sequence </textarea> ends it, and character references
+  ARE decoded into the control's value. Escaping covers both halves. The
+  escaped < means </textarea> can never be produced, so the payload cannot
+  reach a markup context; and although the entities decode, they decode into
+  the *value* of a form control, which is a string, not a node -- the decoded
+  < is never re-parsed as markup.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Feedback</title>
+</head>
+<body>
+  <h1>Feedback</h1>
+  <form action="/page/textarea_rawtext" method="get">
+    <textarea name="q" rows="4" cols="60">{input}</textarea>
+    <button type="submit">Save draft</button>
+  </form>
+</body>
+</html>

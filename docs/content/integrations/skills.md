@@ -67,7 +67,7 @@ Other clients read from their own skills directory; see your agent's docs for th
 
 ## Prerequisite
 
-The skill assumes the `dalfox` binary or [MCP server](./mcp/) is reachable from the agent's environment. Install Dalfox first ([installation guide](../../getting-started/installation/)), then install the skill.
+The skill assumes the `dalfox` binary or [MCP server](../mcp/) is reachable from the agent's environment. Install Dalfox first ([installation guide](../../getting-started/installation/)), then install the skill.
 
 ## Authoring tips
 

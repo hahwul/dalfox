@@ -1,0 +1,25 @@
+<!-- replay-fixture
+name: not_found_404
+content-type: text/html; charset=utf-8
+status: 404
+escape: html
+why: The "we could not find that" page, echoing what was asked for, served with
+  a 404 status. The escaping argument is identical to escaped_body_text -- the
+  value can only become a text node. The fixture exists because error pages are
+  a favourite reflection surface and because a non-200 status must not change
+  the verdict in either direction: an escaped echo is not XSS at 404, and a
+  scanner must not suppress or invent a finding on the strength of the status
+  code alone.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>404</title>
+</head>
+<body>
+  <h1>404 - not found</h1>
+  <p>We have no page called <strong>{input}</strong>.</p>
+  <p><a href="/page/not_found_404?q=">Back to search</a></p>
+</body>
+</html>

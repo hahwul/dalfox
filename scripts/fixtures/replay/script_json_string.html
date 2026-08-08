@@ -1,0 +1,27 @@
+<!-- replay-fixture
+name: script_json_string
+content-type: text/html; charset=utf-8
+escape: json
+why: The correct way to hand a server value to inline script: JSON string
+  escaping, extended so that < > & U+2028 and U+2029 are emitted as \u00xx
+  escapes. Backslash and quote are escaped by JSON itself, so the string
+  literal cannot be terminated; < is escaped, so the byte sequence </script
+  cannot be produced and the script element cannot be closed; U+2028/U+2029 are
+  escaped so they cannot act as line terminators inside the literal. The parsed
+  value is then written with textContent, which is not a markup sink.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>App</title>
+</head>
+<body>
+  <h1>App</h1>
+  <p id="out">loading</p>
+  <script>
+    var initialState = {"query": "{input}", "results": 0};
+    document.getElementById('out').textContent = initialState.query;
+  </script>
+</body>
+</html>

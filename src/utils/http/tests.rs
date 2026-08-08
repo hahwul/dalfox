@@ -528,6 +528,32 @@ async fn test_read_body_capped_truncates_oversized_body() {
     assert_eq!(body, "0123456789");
 }
 
+#[test]
+fn test_scraper_parse_error_collection_stays_disabled() {
+    // Companion bound to MAX_RESPONSE_BODY_BYTES. The byte cap limits what we
+    // READ; this limits what PARSING those bytes can cost.
+    //
+    // scraper's default features include `errors`, which makes every `Html`
+    // retain one heap-allocated message per tokenizer parse error for the life
+    // of the document. That vec grows with the number of MALFORMED characters
+    // rather than with body size, so a body of `<` or NUL bytes costs one
+    // allocation per byte: at our 16 MiB cap that measured ~16.7M allocations
+    // and 1-2 GB of RSS from a 521 KB gzipped response. Nothing reads
+    // `Html::errors`, so the feature is pure overhead — but a plain
+    // `scraper = "0.27"` silently turns it back on, and the cost is invisible
+    // until someone points a bomb at us. Pin it here.
+    let manifest = include_str!("../../../Cargo.toml");
+    let dep = manifest
+        .lines()
+        .find(|l| l.starts_with("scraper "))
+        .expect("scraper dependency line in Cargo.toml");
+    assert!(
+        dep.contains("default-features = false"),
+        "scraper must keep default-features off (its `errors` feature is an \
+         unbounded per-parse-error allocation on hostile bodies); found: {dep}"
+    );
+}
+
 #[tokio::test]
 async fn test_read_body_capped_handles_utf8_split_at_cap() {
     crate::ensure_crypto_provider();
@@ -538,4 +564,83 @@ async fn test_read_body_capped_handles_utf8_split_at_cap() {
     let resp = reqwest::Client::new().get(&url).send().await.unwrap();
     let body = read_body_capped(resp, 2).await.unwrap();
     assert_eq!(body, "a\u{FFFD}");
+}
+
+#[test]
+fn test_content_type_is_inert_data_with_nosniff_covers_text_plain() {
+    // `text/plain` is excluded from the plain deny-list because a browser
+    // sniffs it as HTML — but only when the server has *not* said not to.
+    // With `nosniff` present the body can never be markup, so a reflection in
+    // it is not exploitable. This is the FP the replay corpus caught: a
+    // `text/plain; charset=utf-8` + `nosniff` response echoing a payload was
+    // reported `[V]`.
+    assert!(!content_type_is_inert_data("text/plain"));
+    assert!(!content_type_is_inert_data_with_nosniff(
+        "text/plain",
+        false
+    ));
+    assert!(content_type_is_inert_data_with_nosniff("text/plain", true));
+    assert!(content_type_is_inert_data_with_nosniff(
+        "text/plain; charset=utf-8",
+        true
+    ));
+}
+
+#[test]
+fn test_content_type_is_inert_data_with_nosniff_keeps_live_types_live() {
+    // `nosniff` must not turn a genuinely executable or renderable type inert:
+    // it constrains sniffing, not parsing. JSONP is the one that would hurt —
+    // `application/javascript` executes via `<script src>` regardless.
+    for ct in [
+        "text/html",
+        "application/xhtml+xml",
+        "image/svg+xml",
+        "application/javascript",
+        "text/javascript",
+    ] {
+        assert!(
+            !content_type_is_inert_data_with_nosniff(ct, true),
+            "{ct} must stay scannable even under nosniff"
+        );
+    }
+    // An absent content-type stays live: `nosniff` does not stop a navigation
+    // to a typeless response from being sniffed.
+    assert!(!content_type_is_inert_data_with_nosniff("", true));
+}
+
+#[test]
+fn test_content_type_is_inert_data_with_nosniff_is_superset() {
+    // Whatever the plain version calls inert stays inert regardless of the
+    // header, so the new gate can never *lose* a suppression.
+    for ct in ["application/json", "text/csv", "image/png", "font/woff2"] {
+        assert!(content_type_is_inert_data_with_nosniff(ct, false));
+        assert!(content_type_is_inert_data_with_nosniff(ct, true));
+    }
+}
+
+#[test]
+fn test_headers_declare_nosniff() {
+    use reqwest::header::{HeaderMap, HeaderValue};
+
+    let mut headers = HeaderMap::new();
+    assert!(!headers_declare_nosniff(&headers));
+
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    assert!(headers_declare_nosniff(&headers));
+
+    // Servers do send mixed case and stray whitespace.
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("  NoSniff "),
+    );
+    assert!(headers_declare_nosniff(&headers));
+
+    // Anything that is not the nosniff token does not count.
+    let mut headers = HeaderMap::new();
+    headers.insert("x-content-type-options", HeaderValue::from_static("sniff"));
+    assert!(!headers_declare_nosniff(&headers));
 }

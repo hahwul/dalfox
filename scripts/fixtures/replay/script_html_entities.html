@@ -1,0 +1,31 @@
+<!-- replay-fixture
+name: script_html_entities
+content-type: text/html; charset=utf-8
+escape: html
+why: A sloppy-but-safe template that runs the value through the HTML escaper
+  even though it lands inside <script>. This is the known false-positive class:
+  character references are NOT decoded in script data, so the payload sits
+  there as the literal text &lt;svg onload=... and never becomes markup or
+  code. Two independent reasons it is inert. (1) < is escaped, so the byte
+  sequence </script cannot be produced and the script element can never be
+  closed -- there is no way back out to the HTML parser. (2) " is escaped, so
+  the JavaScript string literal cannot be terminated either. The worst an
+  attacker achieves is a SyntaxError (a trailing backslash escaping the closing
+  quote), which stops this inline block from running at all -- it never runs
+  attacker-controlled code.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recent search</title>
+</head>
+<body>
+  <h1>Recent search</h1>
+  <p id="out">loading</p>
+  <script>
+    var lastQuery = "{input}";
+    document.getElementById('out').textContent = 'length: ' + lastQuery.length;
+  </script>
+</body>
+</html>

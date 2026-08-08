@@ -1,0 +1,17 @@
+<!-- replay-fixture
+name: plain_text
+content-type: text/plain; charset=utf-8
+escape: raw
+header: X-Content-Type-Options: nosniff
+why: The only fixture in the corpus that echoes the input completely unescaped,
+  and it is still benign: the response is text/plain with X-Content-Type-Options
+  nosniff, so no browser will HTML-parse it and no content sniffing can promote
+  it to markup. Every byte the attacker sends is rendered as literal text. This
+  is the deliberate "inert content type" regression test -- the marker really is
+  present in the body verbatim, and a scanner must still not call it XSS. Note
+  the benign claim depends on the nosniff header being sent; that header is part
+  of the fixture, not incidental.
+-->
+query: {input}
+results: 0
+took_ms: 2

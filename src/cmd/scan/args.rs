@@ -104,6 +104,21 @@ const _: () = assert!(CLI_MAX_SCAN_TIMEOUT_SECS == crate::job::MAX_SCAN_TIMEOUT_
 // Default HTTP method (used by CLI and target parsing)
 pub const DEFAULT_METHOD: &str = "GET";
 
+/// True when `format` makes stdout a *document* rather than human-facing
+/// output, so the banner — and anything else decorative — must be suppressed
+/// or it corrupts the document.
+///
+/// Deliberately derived from `plain` being the only human renderer instead of
+/// listing the machine ones. The machine list was spelled out literally in two
+/// places in `main.rs` and drifted: `markdown` was missing from both, so
+/// `dalfox scan URL -f markdown > report.md` produced a file whose first
+/// seventeen lines were the ASCII banner, while the same run written with `-o`
+/// was clean. Phrasing it as "not plain" makes a newly added format
+/// document-safe by default, which is the safe direction to fail in.
+pub fn format_is_machine(format: &str) -> bool {
+    format != "plain"
+}
+
 /// clap value-parser for `--force-waf`. Accepts the same alias set that
 /// `parse_waf_type` recognises (case-insensitive) and rejects anything
 /// else at parse time so a typo like `--force-waf cloudflair` doesn't
@@ -1358,5 +1373,27 @@ mod arg_parser_tests {
             encoders: vec![],
         });
         assert_eq!(huge.timeout, DEFAULT_TIMEOUT_SECS);
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    #[test]
+    fn test_format_is_machine_covers_every_non_plain_format() {
+        // Every format but `plain` produces a document on stdout, so the
+        // banner must be suppressed for all of them. `markdown` is the one
+        // that was missing from the hand-written list this replaced, which
+        // put seventeen lines of ASCII art at the top of `-f markdown` output.
+        for format in FORMAT_VALUES {
+            assert_eq!(
+                format_is_machine(format),
+                *format != "plain",
+                "{format} classified wrongly"
+            );
+        }
+        assert!(format_is_machine("markdown"));
+        assert!(!format_is_machine("plain"));
     }
 }

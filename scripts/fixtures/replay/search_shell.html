@@ -1,0 +1,40 @@
+<!-- replay-fixture
+name: search_shell
+content-type: text/html; charset=utf-8
+escape: html
+why: A realistic application shell that echoes the same value at seven points
+  at once -- <title> (RCDATA), breadcrumb text, a double-quoted input value, a
+  hidden field carrying a percent-encoded return path, a self-link href, a
+  data-* attribute and an HTML comment. Every point uses the escaping its own
+  context requires: HTML escaping everywhere a value lands in markup, and
+  percent-encoding for the two positions that land inside a URL. No single
+  point relies on another being escaped, so the page is benign point by point;
+  it is in the corpus because multi-echo pages are where scanners tend to mix
+  up which reflection they proved something about.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Search: {input} - Acme</title>
+</head>
+<body>
+  <!-- rendered for q={input} -->
+  <nav aria-label="Breadcrumb">Home / Search / {input}</nav>
+  <main data-last-query="{input}">
+    <h1>Sign in to see all results</h1>
+    <form action="/page/search_shell" method="get">
+      <label for="q">Search</label>
+      <input id="q" type="text" name="q" value="{input}">
+      <input type="hidden" name="next" value="/page/search_shell?q={input:url}">
+      <label for="user">Email</label>
+      <input id="user" type="email" name="user" value="" autocomplete="username">
+      <label for="pass">Password</label>
+      <input id="pass" type="password" name="pass" autocomplete="current-password">
+      <button type="submit">Sign in and search</button>
+    </form>
+    <p><a href="/page/search_shell?q={input:url}">Share this search</a></p>
+  </main>
+  <footer><small>Query recorded: {input}</small></footer>
+</body>
+</html>

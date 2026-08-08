@@ -146,7 +146,7 @@ dalfox scan --input-type raw-http request.txt
 
 이 파일은 표준 raw HTTP 요청(메서드 + 경로 + 헤더 + 빈 줄 + 본문)입니다. Dalfox는 모든 헤더, 쿠키, 본문 파라미터를 보존합니다.
 
-실시간 프록시 워크플로, 그중에서도 Caido Active Workflows는 전용 [Caido 연동 가이드](../integrations/caido/)를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.
+실시간 프록시 워크플로, 그중에서도 Caido Active Workflows는 전용 [Caido 연동 가이드](../../integrations/caido/)를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.
 
 ## HAR 모드
 

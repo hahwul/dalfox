@@ -1,0 +1,26 @@
+<!-- replay-fixture
+name: strict_csp
+content-type: text/html; charset=utf-8
+escape: html
+header: Content-Security-Policy: default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+why: An escaped echo on a page that also ships a strict, source-less CSP. The
+  primary reason it is benign is the escaping, exactly as in
+  escaped_body_text -- the CSP is deliberately NOT load-bearing here, because a
+  fixture whose only defence was a header would be a mitigated bug rather than
+  a non-bug, and reporting it would be defensible. The header is present so the
+  corpus also exercises the CSP-analysis path: default-src 'none' admits no
+  script source at all, no 'unsafe-inline', no 'unsafe-eval', and no wildcard,
+  so there is nothing for a CSP audit to flag either.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Secure search</title>
+</head>
+<body>
+  <h1>Secure search</h1>
+  <p>Your query <strong>{input}</strong> returned no results.</p>
+  <p>This page allows no scripts, no styles and no embedded objects.</p>
+</body>
+</html>

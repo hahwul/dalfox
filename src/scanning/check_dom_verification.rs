@@ -783,48 +783,17 @@ fn build_inject_request(
 ) -> reqwest::RequestBuilder {
     let default_method = target.parse_method();
     match param.location {
-        Location::Header => {
-            build_header_request(client, target, param, encoded_payload, default_method)
-        }
+        Location::Header => crate::scanning::url_inject::build_header_request(
+            client,
+            target,
+            param,
+            encoded_payload,
+            default_method,
+        ),
         Location::Body => build_body_request(client, target, param, encoded_payload),
         Location::JsonBody => build_json_body_request(client, target, param, encoded_payload),
         Location::MultipartBody => build_multipart_request(client, target, param, encoded_payload),
         _ => build_url_inject_request(client, target, param, encoded_payload, default_method),
-    }
-}
-
-fn build_header_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    encoded_payload: &str,
-    method: reqwest::Method,
-) -> reqwest::RequestBuilder {
-    let parsed_url = target.url.clone();
-    if target.cookies.iter().any(|(name, _)| name == &param.name) {
-        let others =
-            crate::utils::compose_cookie_header_excluding(&target.cookies, Some(&param.name));
-        let cookie_header = match others {
-            Some(rest) if !rest.is_empty() => {
-                format!("{}={}; {}", param.name, encoded_payload, rest)
-            }
-            _ => format!("{}={}", param.name, encoded_payload),
-        };
-        crate::utils::build_request_with_cookie(
-            client,
-            target,
-            method,
-            parsed_url,
-            target.data.clone(),
-            Some(cookie_header),
-        )
-    } else {
-        let base =
-            crate::utils::build_request(client, target, method, parsed_url, target.data.clone());
-        crate::utils::apply_header_overrides(
-            base,
-            &[(param.name.clone(), encoded_payload.to_string())],
-        )
     }
 }
 

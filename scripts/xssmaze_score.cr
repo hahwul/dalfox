@@ -26,6 +26,7 @@ require "json"
 require "http/client"
 require "uri"
 require "file_utils"
+require "./lib/dalfox"
 
 BASE_URL    = ENV.fetch("XSSMAZE_URL", "http://localhost:3000").rstrip("/")
 IMAGE       = ENV.fetch("XSSMAZE_IMAGE", "ghcr.io/hahwul/xssmaze:main")
@@ -216,9 +217,9 @@ def run_dalfox(maze : Maze, json_body : Bool) : {Bool, Bool}
     output: Process::Redirect::Close,
     error: Process::Redirect::Close)
 
-  findings = parse_findings(out_file)
+  findings = Dalfox.parse_report(out_file)
   detected = !findings.empty? || status.exit_code == 1
-  verified = findings.any? { |f| f["type"]?.try(&.as_s?) == "V" }
+  verified = findings.any?(&.verified?)
   {detected, verified}
 ensure
   File.delete(out_file) if out_file && File.exists?(out_file)
@@ -232,16 +233,6 @@ def scan(maze : Maze) : {Bool, Bool}
   return {detected, verified} if detected
   return {detected, verified} if body_params(maze).empty?
   run_dalfox(maze, true)
-end
-
-def parse_findings(out_file : String) : Array(JSON::Any)
-  return [] of JSON::Any unless File.exists?(out_file)
-  body = File.read(out_file).strip
-  return [] of JSON::Any if body.empty?
-  parsed = JSON.parse(body)
-  parsed.as_a? || [] of JSON::Any
-rescue
-  [] of JSON::Any
 end
 
 # ---------------------------------------------------------------------------

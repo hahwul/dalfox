@@ -13,6 +13,8 @@
 //!   unicode escaping) can be layered in higher-level modules if needed.
 
 use crate::parameter_analysis::{Location, Param};
+use crate::target_parser::Target;
+use reqwest::Client;
 use std::borrow::Cow;
 
 const HEX: &[u8; 16] = b"0123456789ABCDEF";
@@ -513,6 +515,65 @@ pub fn build_hpp_urls(
 /// previously copy-pasted (byte-identical) across the reflection check, light
 /// verify, DOM verify, and PoC builders; keeping one implementation prevents
 /// the drift those parallel copies were prone to.
+/// True when `param` is one of the target's cookies rather than a plain
+/// request header.
+///
+/// Cookies have no `Location` of their own — per-cookie discovery
+/// (`parameter_analysis::discovery`) files them as [`Location::Header`] with the
+/// *cookie's* name — so every injection site has to re-derive this. Matching
+/// `param_type_label`, which reports exactly these params as `"cookie"` to the
+/// user.
+pub fn param_is_cookie(target: &Target, param: &Param) -> bool {
+    matches!(param.location, Location::Header)
+        && target.cookies.iter().any(|(name, _)| name == &param.name)
+}
+
+/// Build a request injecting `value` into a [`Location::Header`] parameter,
+/// routing cookie params into the `Cookie` header instead of a header of the
+/// same name.
+///
+/// This distinction is load-bearing and was previously implemented in only one
+/// of the three injection paths. Per-cookie discovery yields a param named
+/// after the cookie (`session`, `theme`, …); injecting that as
+/// `session: <payload>` sets an HTTP header the application never reads, so
+/// the payload never reaches the sink, no reflection is observed, and the whole
+/// parameter is dropped. Measured: a page reflecting the *first* of three
+/// cookies was found when it was the only cookie and missed entirely when two
+/// others followed it.
+///
+/// The injected cookie is written first and the target's other cookies are
+/// preserved after it, so neighbouring cookies keep whatever session state the
+/// application needs to render the sink at all.
+pub fn build_header_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+    method: reqwest::Method,
+) -> reqwest::RequestBuilder {
+    let parsed_url = target.url.clone();
+    if param_is_cookie(target, param) {
+        let others =
+            crate::utils::compose_cookie_header_excluding(&target.cookies, Some(&param.name));
+        let cookie_header = match others {
+            Some(rest) if !rest.is_empty() => format!("{}={}; {}", param.name, value, rest),
+            _ => format!("{}={}", param.name, value),
+        };
+        crate::utils::build_request_with_cookie(
+            client,
+            target,
+            method,
+            parsed_url,
+            target.data.clone(),
+            Some(cookie_header),
+        )
+    } else {
+        let base =
+            crate::utils::build_request(client, target, method, parsed_url, target.data.clone());
+        crate::utils::apply_header_overrides(base, &[(param.name.clone(), value.to_string())])
+    }
+}
+
 pub fn urlencoded_body(data: Option<&str>, name: &str, value: &str) -> String {
     match data {
         Some(data) => {

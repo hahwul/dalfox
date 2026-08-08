@@ -190,7 +190,13 @@ curl http://127.0.0.1:6664/health
     "skip_discovery": false,
     "deep_scan": false,
     "skip_ast_analysis": false,
+    "analyze_external_js": false,
     "detect_outdated_libs": false,
+    "waf_bypass": "auto",
+    "skip_waf_probe": false,
+    "force_waf": "cloudflare",
+    "waf_evasion": false,
+    "waf_min_confidence": 0.3,
     "max_payloads_per_param": 0
   }
 }
@@ -204,6 +210,11 @@ curl http://127.0.0.1:6664/health
 건너뜁니다). 인증서 검증을 강제하려면 `"insecure": false` (또는 `GET /scan`에서
 `?insecure=false`)를 보내세요.
 
+`analyze_external_js`는 옵트인 방식입니다 (기본값 `false`). `true`로 설정하면
+프리플라이트 시점에 동일 출처의 `<script src>` 번들을 가져와 DOM XSS를 위한 AST
+분석을 수행합니다. 싱크(sink) 로직이 전부 외부 번들에 들어 있는 SPA에 유용합니다.
+추가 요청 비용이 들기 때문에 기본적으로 꺼져 있습니다.
+
 `rate_limit`은 스캔의 초당 아웃바운드 요청 수를 제한합니다 (`0` = 무제한, 기본값).
 모든 워커 태스크에 걸쳐 적용됩니다. 서버 전역 `--rate-limit` 플래그는 상한선입니다.
 요청은 더 낮은 속도를 지정할 수는 있으나 이를 초과하거나 비활성화할 수는 없습니다.
@@ -212,6 +223,14 @@ curl http://127.0.0.1:6664/health
 (기본값 `0` = 명시적 상한 없음. 내장 페이로드 안전 상한은 그대로 적용됩니다).
 스모크 스캔에는 작은 값(예: `10`~`50`)을 쓰세요. MCP 스캔 도구의 동명 필드와
 대응됩니다.
+
+WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선택 사항입니다. 생략하면
+스캐너 기본값이 적용됩니다. `waf_bypass`는 처리 모드를 고릅니다: `"auto"`(탐지 후
+우회, 기본값), `"force"`(`force_waf`를 사용), `"off"`(탐지만). `skip_waf_probe`는
+(기본값 `false`) WAF 핑거프린팅 프로브를 아예 건너뜁니다. `force_waf`는 WAF를
+탐지하는 대신 특정 프로필(예: `"cloudflare"`)을 고정합니다. `waf_evasion`은
+(기본값 `false`) 적응형 우회를 켭니다. `waf_min_confidence`는 `[0.0, 1.0]` 범위의
+탐지 신뢰도 하한입니다 (기본값 `0.3`). 이 값보다 낮은 핑거프린트는 버려집니다.
 
 `method`와 `encoders`는 CLI가 허용하는 것과 동일한 값 집합으로 검증됩니다.
 `method`는 자동으로 대문자로 바뀌며(`"post"` → `"POST"`), 지원하지 않는 메서드나

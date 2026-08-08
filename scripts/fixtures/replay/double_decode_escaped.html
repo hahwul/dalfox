@@ -1,0 +1,27 @@
+<!-- replay-fixture
+name: double_decode_escaped
+content-type: text/html; charset=utf-8
+escape: html
+url-decode: true
+why: A legacy handler that percent-decodes the query string a second time
+  before using it -- so %253Cscript%253E really does become <script> inside the
+  application. The double decode is a genuine and common bug, and this fixture
+  reproduces it faithfully; what makes the page benign is that the extra decode
+  happens BEFORE the escaper, never after. Escaping is the last transformation
+  applied to the value, so whatever the decode produces is still converted to
+  character references on the way into the document. This is the near-miss the
+  corpus exists to pin: a scanner that reasons "the payload survives an extra
+  decode, therefore it is exploitable" will fire here.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Legacy search</title>
+</head>
+<body>
+  <h1>Legacy search</h1>
+  <p>Decoded query: <strong>{input}</strong></p>
+  <p>0 rows.</p>
+</body>
+</html>

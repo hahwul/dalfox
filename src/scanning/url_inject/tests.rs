@@ -916,3 +916,107 @@ fn json_body_no_data_builds_object() {
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["q"], "PAY");
 }
+
+// ---------------------------------------------------------------------------
+// Cookie params are headers by Location but must be injected into `Cookie`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_param_is_cookie_distinguishes_cookies_from_headers() {
+    let target = cookie_target(&[("session", "abc")]);
+    let cookie_param = make_param(Location::Header, "session");
+    let header_param = make_param(Location::Header, "X-Forwarded-For");
+    // Same name, but a query param is never a cookie.
+    let query_param = make_param(Location::Query, "session");
+
+    assert!(param_is_cookie(&target, &cookie_param));
+    assert!(!param_is_cookie(&target, &header_param));
+    assert!(!param_is_cookie(&target, &query_param));
+}
+
+#[test]
+fn test_build_header_request_routes_cookie_params_into_the_cookie_header() {
+    // Regression: a cookie param used to be injected as an HTTP header named
+    // after the cookie (`session: <payload>`), which the application never
+    // reads — so the payload never reached the sink, no reflection was seen,
+    // and the parameter was dropped. A page reflecting the FIRST of three
+    // cookies was detected when it was the only cookie and missed entirely
+    // once two others followed it.
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let target = cookie_target(&[("first", "a"), ("second", "b")]);
+    let param = make_param(Location::Header, "first");
+    let req = build_header_request(&client, &target, &param, "PAYLOAD", reqwest::Method::GET)
+        .build()
+        .expect("request builds");
+
+    let cookie = req
+        .headers()
+        .get(reqwest::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .expect("a Cookie header is set");
+
+    // The payload lands on the right cookie...
+    assert!(
+        cookie.contains("first=PAYLOAD"),
+        "payload must be injected into the cookie, got: {cookie}"
+    );
+    // ...the neighbours survive, so the app still renders the sink...
+    assert!(
+        cookie.contains("second=b"),
+        "other cookies must be preserved, got: {cookie}"
+    );
+    // ...and no header named after the cookie is added.
+    assert!(
+        req.headers().get("first").is_none(),
+        "a cookie param must not become a header of the same name"
+    );
+}
+
+#[test]
+fn test_build_header_request_still_sets_plain_headers() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let target = cookie_target(&[("session", "abc")]);
+    let param = make_param(Location::Header, "X-Forwarded-For");
+    let req = build_header_request(&client, &target, &param, "PAYLOAD", reqwest::Method::GET)
+        .build()
+        .expect("request builds");
+
+    assert_eq!(
+        req.headers()
+            .get("X-Forwarded-For")
+            .and_then(|v| v.to_str().ok()),
+        Some("PAYLOAD")
+    );
+}
+
+/// A target carrying `cookies`, for the cookie-injection tests above.
+fn cookie_target(cookies: &[(&str, &str)]) -> Target {
+    let mut target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    target.cookies = cookies
+        .iter()
+        .map(|(n, v)| (n.to_string(), v.to_string()))
+        .collect();
+    target
+}
+
+/// Minimal `Param` for the cookie-injection tests above.
+fn make_param(location: Location, name: &str) -> Param {
+    Param {
+        name: name.into(),
+        value: "".into(),
+        location,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    }
+}

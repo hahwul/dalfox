@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-08-08T16:13:16Z",
+  "tool": "perf_budget",
+  "dalfox_version": "3.2.0",
+  "scan_args": [
+    "--skip-mining",
+    "--timeout",
+    "5"
+  ],
+  "scenarios": {
+    "echo": {
+      "path": "/echo",
+      "note": "plain reflection in HTML body",
+      "params": 1,
+      "requests": 22,
+      "reported_requests": 22,
+      "requests_per_param": 22.0,
+      "duration_s": 0.015,
+      "findings": 1,
+      "verified": 1,
+      "timed_out": false,
+      "bytes_sent": 2304,
+      "distinct_payloads": 6,
+      "requests_per_second": 3047.51
+    },
+    "reflect_all": {
+      "path": "/reflect-all",
+      "note": "attribute + script + href at once (amplification shape)",
+      "params": 1,
+      "requests": 23,
+      "reported_requests": 23,
+      "requests_per_param": 23.0,
+      "duration_s": 0.01,
+      "findings": 1,
+      "verified": 1,
+      "timed_out": false,
+      "bytes_sent": 5251,
+      "distinct_payloads": 7,
+      "requests_per_second": 6419.2
+    },
+    "many": {
+      "path": "/many",
+      "note": "five reflecting params (per-param cost scaling)",
+      "params": 5,
+      "requests": 38,
+      "reported_requests": 38,
+      "requests_per_param": 7.6,
+      "duration_s": 0.026,
+      "findings": 5,
+      "verified": 5,
+      "timed_out": false,
+      "bytes_sent": 7028,
+      "distinct_payloads": 9,
+      "requests_per_second": 2071.63
+    },
+    "inert": {
+      "path": "/inert",
+      "note": "HTML-escaped, nothing exploitable (wasted work)",
+      "params": 1,
+      "requests": 5388,
+      "reported_requests": 5388,
+      "requests_per_param": 5388.0,
+      "duration_s": 0.386,
+      "findings": 0,
+      "verified": 0,
+      "timed_out": false,
+      "bytes_sent": 1577174,
+      "distinct_payloads": 2193,
+      "requests_per_second": 14220.9
+    },
+    "slow": {
+      "path": "/slow",
+      "note": "fixed small delay (timing sanity)",
+      "params": 1,
+      "requests": 22,
+      "reported_requests": 22,
+      "requests_per_param": 22.0,
+      "duration_s": 0.615,
+      "findings": 1,
+      "verified": 1,
+      "timed_out": false,
+      "bytes_sent": 2304,
+      "distinct_payloads": 6,
+      "requests_per_second": 39.82
+    }
+  },
+  "total": {
+    "requests": 5493,
+    "duration_s": 1.052,
+    "findings": 8
+  }
+}
