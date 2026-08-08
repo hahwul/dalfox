@@ -463,3 +463,21 @@ fn test_report_only_and_full_csp_parse_identically() {
     assert_eq!(analysis.nonce_values, vec!["abc".to_string()]);
     assert!(analysis.require_trusted_types_for);
 }
+
+#[test]
+fn test_dedup_preserve_order_keeps_first_occurrence() {
+    let payloads = ["a", "b", "a", "c", "b"].map(str::to_string).to_vec();
+    assert_eq!(dedup_preserve_order(payloads), ["a", "b", "c"]);
+}
+
+#[test]
+fn test_dedup_preserve_order_keeps_unique_input_unchanged() {
+    // Unsorted on purpose: the order that survives is the input's, not a sorted one.
+    let payloads = ["c", "a", "b"].map(str::to_string).to_vec();
+    assert_eq!(dedup_preserve_order(payloads.clone()), payloads);
+}
+
+#[test]
+fn test_dedup_preserve_order_on_empty_input() {
+    assert!(dedup_preserve_order(Vec::new()).is_empty());
+}
