@@ -39,6 +39,43 @@ fn test_host_patterns_are_lowercase() {
 }
 
 #[test]
+fn test_host_matches_dotted_pattern_exact_match() {
+    assert!(host_matches("googleapis.com", "googleapis.com"));
+}
+
+#[test]
+fn test_host_matches_dotted_pattern_subdomain_match() {
+    assert!(host_matches("ajax.googleapis.com", "googleapis.com"));
+}
+
+#[test]
+fn test_host_matches_dotted_pattern_requires_label_boundary() {
+    assert!(!host_matches("notgoogleapis.com", "googleapis.com"));
+}
+
+#[test]
+fn test_host_matches_dotted_pattern_must_be_terminal_suffix() {
+    assert!(!host_matches("googleapis.com.spoof.test", "googleapis.com"));
+}
+
+#[test]
+fn test_host_matches_bare_fragment_substring_match() {
+    assert!(host_matches("code.jquery.com", "jquery"));
+}
+
+#[test]
+fn test_host_matches_bare_fragment_intentionally_matches_untrusted_substring() {
+    // Bare library fragments intentionally use loose substring matching, even
+    // when the matching host is not a trusted library domain.
+    assert!(host_matches("evil-jquery-cdn.attacker.com", "jquery"));
+}
+
+#[test]
+fn test_host_matches_bare_fragment_non_match() {
+    assert!(!host_matches("example.com", "jquery"));
+}
+
+#[test]
 fn test_gadgets_for_host_matches_cdnjs() {
     let hits: Vec<_> = gadgets_for_host("https://cdnjs.cloudflare.com").collect();
     assert!(hits.iter().any(|g| g.template.contains("angular")));
