@@ -503,6 +503,93 @@ fn bare_param(name: &str, location: Location) -> Param {
 }
 
 #[test]
+fn test_infer_location_for_bare_param_query_takes_precedence() {
+    let mut target = parse_target("https://example.com/?shared=query").unwrap();
+    target.data = Some("shared=body".to_string());
+    target
+        .cookies
+        .push(("shared".to_string(), "cookie".to_string()));
+    target
+        .headers
+        .push(("shared".to_string(), "header".to_string()));
+
+    assert_eq!(
+        infer_location_for_bare_param("shared", &target),
+        Location::Query
+    );
+}
+
+#[test]
+fn test_infer_location_for_bare_param_form_body_takes_precedence() {
+    let mut target = parse_target("https://example.com/submit").unwrap();
+    target.data = Some("shared=body".to_string());
+    target
+        .cookies
+        .push(("shared".to_string(), "cookie".to_string()));
+    target
+        .headers
+        .push(("shared".to_string(), "header".to_string()));
+
+    assert_eq!(
+        infer_location_for_bare_param("shared", &target),
+        Location::Body
+    );
+}
+
+#[test]
+fn test_infer_location_for_bare_param_json_body_takes_precedence() {
+    let mut target = parse_target("https://example.com/submit").unwrap();
+    target.data = Some(r#"{"shared":"body"}"#.to_string());
+    target
+        .cookies
+        .push(("shared".to_string(), "cookie".to_string()));
+    target
+        .headers
+        .push(("shared".to_string(), "header".to_string()));
+
+    assert_eq!(
+        infer_location_for_bare_param("shared", &target),
+        Location::JsonBody
+    );
+}
+
+#[test]
+fn test_infer_location_for_bare_param_cookie_uses_header_location() {
+    let mut target = parse_target("https://example.com/").unwrap();
+    target
+        .cookies
+        .push(("session".to_string(), "cookie".to_string()));
+
+    assert_eq!(
+        infer_location_for_bare_param("session", &target),
+        Location::Header
+    );
+}
+
+#[test]
+fn test_infer_location_for_bare_param_header_name_is_case_insensitive() {
+    let mut target = parse_target("https://example.com/").unwrap();
+    target
+        .headers
+        .push(("X-Trace-Id".to_string(), "header".to_string()));
+
+    assert_eq!(
+        infer_location_for_bare_param("x-trace-id", &target),
+        Location::Header
+    );
+}
+
+#[test]
+fn test_infer_location_for_bare_param_defaults_to_query() {
+    let target = parse_target("https://example.com/").unwrap();
+
+    assert_eq!(
+        infer_location_for_bare_param("missing", &target),
+        Location::Query
+    );
+}
+
+#[test]
 fn test_ensure_explicit_params_synthesizes_missing_targets() {
     let target = parse_target("https://example.com/?present=1").unwrap();
     // Discovery seeded only `present`; the other explicit targets were dropped
