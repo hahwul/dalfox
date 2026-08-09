@@ -161,6 +161,39 @@ fn test_interpolation_brackets_skipped_when_vue_detected() {
 }
 
 #[test]
+fn test_has_interpolation_brackets_matches_identifier_shaped_expressions() {
+    for body in [
+        "{{ user.name }}",
+        "{{count}}",
+        "{{ items[0] }}",
+        "{{ $scope.value }}",
+        "{{ TODO }}",
+        "<p>prefix {{x}} suffix</p>",
+    ] {
+        assert!(has_interpolation_brackets(body), "should match {:?}", body);
+    }
+}
+
+#[test]
+fn test_has_interpolation_brackets_rejects_non_identifier_contents() {
+    for body in [
+        "{{ }}",
+        "{{}}",
+        "{{ 1 + 2 }}",
+        "{{ user name }}",
+        "{ single brace }",
+        "{{ user.name",
+        "plain text with no braces",
+    ] {
+        assert!(
+            !has_interpolation_brackets(body),
+            "should not match {:?}",
+            body
+        );
+    }
+}
+
+#[test]
 fn test_multiple_techs_detected() {
     let headers = make_headers(&[]);
     let body = "<div ng-app></div><script src='jquery.min.js'></script>";
