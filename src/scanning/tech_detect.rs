@@ -416,7 +416,10 @@ pub fn detect_technologies(headers: &HeaderMap, body: Option<&str>) -> TechDetec
 /// interpolation. Conservative: requires an identifier-shaped token
 /// (`a-zA-Z_$` start, optionally followed by `\w` / `.` / `[…]` chain)
 /// between the braces so we don't trip on prose like `{{ }}` or
-/// `{{ TODO }}` placeholders rendered as plain text.
+/// `{{ 1 + 2 }}`. An identifier-shaped placeholder such as `{{ TODO }}`
+/// does match, deliberately: that is the shape a real interpolation
+/// takes, so it is cheaper to send the template payloads than to miss a
+/// sink on a minified SPA.
 fn has_interpolation_brackets(body: &str) -> bool {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
