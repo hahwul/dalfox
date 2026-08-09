@@ -481,3 +481,54 @@ fn test_dedup_preserve_order_keeps_unique_input_unchanged() {
 fn test_dedup_preserve_order_on_empty_input() {
     assert!(dedup_preserve_order(Vec::new()).is_empty());
 }
+
+// --- parse_nonce_token / parse_hash_token unit tests ----------------------
+
+#[test]
+fn test_parse_nonce_token_extracts_case_sensitive_value() {
+    let token = "'nonce-AbC123=='";
+    let lower = token.to_ascii_lowercase();
+    assert_eq!(parse_nonce_token(token, &lower), Some("AbC123==".to_string()));
+}
+
+#[test]
+fn test_parse_nonce_token_empty_inner_returns_none() {
+    let token = "'nonce-'";
+    let lower = token.to_ascii_lowercase();
+    assert_eq!(parse_nonce_token(token, &lower), None);
+}
+
+#[test]
+fn test_parse_nonce_token_rejects_hash_token() {
+    let token = "'sha256-xxxx'";
+    let lower = token.to_ascii_lowercase();
+    assert_eq!(parse_nonce_token(token, &lower), None);
+}
+
+#[test]
+fn test_parse_hash_token_extracts_sha256_with_prefix() {
+    let token = "'sha256-AbC123=='";
+    let lower = token.to_ascii_lowercase();
+    assert_eq!(parse_hash_token(token, &lower), Some("sha256-AbC123==".to_string()));
+}
+
+#[test]
+fn test_parse_hash_token_extracts_sha384() {
+    let token = "'sha384-AbC123=='";
+    let lower = token.to_ascii_lowercase();
+    assert_eq!(parse_hash_token(token, &lower), Some("sha384-AbC123==".to_string()));
+}
+
+#[test]
+fn test_parse_hash_token_extracts_sha512() {
+    let token = "'sha512-AbC123=='";
+    let lower = token.to_ascii_lowercase();
+    assert_eq!(parse_hash_token(token, &lower), Some("sha512-AbC123==".to_string()));
+}
+
+#[test]
+fn test_parse_hash_token_rejects_nonce_token() {
+    let token = "'nonce-xxxx'";
+    let lower = token.to_ascii_lowercase();
+    assert_eq!(parse_hash_token(token, &lower), None);
+}
