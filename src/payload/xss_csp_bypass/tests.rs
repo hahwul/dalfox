@@ -488,7 +488,10 @@ fn test_dedup_preserve_order_on_empty_input() {
 fn test_parse_nonce_token_extracts_case_sensitive_value() {
     let token = "'nonce-AbC123=='";
     let lower = token.to_ascii_lowercase();
-    assert_eq!(parse_nonce_token(token, &lower), Some("AbC123==".to_string()));
+    assert_eq!(
+        parse_nonce_token(token, &lower),
+        Some("AbC123==".to_string())
+    );
 }
 
 #[test]
@@ -509,21 +512,30 @@ fn test_parse_nonce_token_rejects_hash_token() {
 fn test_parse_hash_token_extracts_sha256_with_prefix() {
     let token = "'sha256-AbC123=='";
     let lower = token.to_ascii_lowercase();
-    assert_eq!(parse_hash_token(token, &lower), Some("sha256-AbC123==".to_string()));
+    assert_eq!(
+        parse_hash_token(token, &lower),
+        Some("sha256-AbC123==".to_string())
+    );
 }
 
 #[test]
 fn test_parse_hash_token_extracts_sha384() {
     let token = "'sha384-AbC123=='";
     let lower = token.to_ascii_lowercase();
-    assert_eq!(parse_hash_token(token, &lower), Some("sha384-AbC123==".to_string()));
+    assert_eq!(
+        parse_hash_token(token, &lower),
+        Some("sha384-AbC123==".to_string())
+    );
 }
 
 #[test]
 fn test_parse_hash_token_extracts_sha512() {
     let token = "'sha512-AbC123=='";
     let lower = token.to_ascii_lowercase();
-    assert_eq!(parse_hash_token(token, &lower), Some("sha512-AbC123==".to_string()));
+    assert_eq!(
+        parse_hash_token(token, &lower),
+        Some("sha512-AbC123==".to_string())
+    );
 }
 
 #[test]
