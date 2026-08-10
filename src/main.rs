@@ -3,7 +3,7 @@ Code by @hahwul
 Happy hacking :D
 */
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use dalfox::cmd::scan::ScanOutcome;
 use dalfox::{DEBUG, cmd, config, mcp, server, utils};
@@ -64,6 +64,8 @@ enum Commands {
     Payload(cmd::payload::PayloadArgs),
     /// Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
     Mcp,
+    /// Generate shell completion scripts (bash, zsh, fish, powershell, elvish)
+    Completion(CompletionArgs),
 
     #[clap(hide = true)]
     Url(cmd::url::UrlArgs),
@@ -71,6 +73,27 @@ enum Commands {
     File(cmd::file::FileArgs),
     #[clap(hide = true)]
     Pipe(cmd::pipe::PipeArgs),
+}
+
+/// Arguments for the `completion` subcommand.
+#[derive(clap::Args)]
+struct CompletionArgs {
+    /// Shell to generate the completion script for
+    shell: clap_complete::Shell,
+}
+
+/// Generate a shell completion script for the given shell and print it to
+/// stdout. Used by packagers and users to enable tab-completion.
+fn print_completion(shell: clap_complete::Shell) {
+    use std::io::Write;
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    let mut buf: Vec<u8> = Vec::new();
+    clap_complete::generate(shell, &mut cmd, name, &mut buf);
+    if let Err(e) = std::io::stdout().write_all(&buf) {
+        eprintln!("dalfox: failed to write completion script: {e}");
+        std::process::exit(2);
+    }
 }
 
 // Bounded file/stdin readers moved to `crate::utils::fs` so the
@@ -133,6 +156,14 @@ async fn main() {
     }
 
     let cli = Cli::parse();
+
+    // `completion` prints a shell script to stdout and exits before the
+    // banner/config machinery so its output stays clean and parseable.
+    if let Some(Commands::Completion(args)) = &cli.command {
+        print_completion(args.shell);
+        return;
+    }
+
     // Set global debug toggle for downstream modules
     DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
     // Skip banner for MCP subcommand (stdout is JSON-RPC) and for every
@@ -382,6 +413,7 @@ async fn main() {
                 }
                 outcome = ScanOutcome::Clean;
             }
+            Commands::Completion(_) => unreachable!(),
 
             Commands::Url(args) => {
                 let config = config_load.as_ref().ok().map(|r| &r.config);

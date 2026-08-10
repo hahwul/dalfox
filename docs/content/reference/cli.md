@@ -5,7 +5,7 @@ weight = 1
 toc = true
 +++
 
-Dalfox is organised into four subcommands, plus the built-in `help`. The default (when you just pass a target) is `scan`.
+Dalfox is organised into five subcommands, plus the built-in `help`. The default (when you just pass a target) is `scan`.
 
 ```
 dalfox [SUBCOMMAND] [TARGET] [FLAGS]
@@ -17,6 +17,7 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 | `server` | Run a REST API server |
 | `payload` | List or fetch built-in/remote payloads |
 | `mcp` | Run a Model Context Protocol stdio server |
+| `completion` | Generate shell completion scripts |
 | `help` | Print help for any subcommand |
 
 ## Global flags
@@ -262,6 +263,42 @@ dalfox mcp
 ```
 
 No additional flags. See [MCP Server](../../integrations/mcp/) for tool definitions.
+
+---
+
+## `dalfox completion`
+
+Generate a shell completion script for the given shell and print it to stdout. Pipe the output to a file sourced by your shell to enable tab-completion.
+
+```bash
+dalfox completion <SHELL>
+```
+
+`<SHELL>` is one of: `bash`, `zsh`, `fish`, `powershell`, `elvish`.
+
+Examples:
+
+```bash
+# bash
+dalfox completion bash > ~/.local/share/bash-completion/completions/dalfox
+
+# zsh
+dalfox completion zsh > "${fpath[1]}/_dalfox"
+
+# fish
+dalfox completion fish > ~/.config/fish/completions/dalfox.fish
+
+# powershell
+dalfox completion powershell | Out-String | Invoke-Expression
+```
+
+| Shell | Recommended install path |
+|-------|--------------------------|
+| `bash` | `~/.local/share/bash-completion/completions/dalfox` (or `/usr/share/bash-completion/completions/dalfox`) |
+| `zsh` | a directory on `$fpath` (e.g. `~/.zfunc/_dalfox`) |
+| `fish` | `~/.config/fish/completions/dalfox.fish` |
+| `powershell` | sourced via your `$PROFILE` |
+| `elvish` | eval from `~/.elvish/rc.elv` |
 
 ---
 
