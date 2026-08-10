@@ -21,6 +21,11 @@ build:
 dev:
     cargo build
 
+# Generate the roff man page (man/dalfox.1) from the clap definition.
+[group('build')]
+man:
+    cargo run -- man > man/dalfox.1
+
 # Update Nix flake lock.
 [group('build')]
 nix-update:

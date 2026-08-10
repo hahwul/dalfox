@@ -20,6 +20,16 @@ just dev      # cargo build (debug)
 just test     # unit + integration tests
 ```
 
+To regenerate the `dalfox` man page from the current CLI definition:
+
+```bash
+just man             # cargo run -- man > man/dalfox.1
+man ./man/dalfox.1   # preview
+```
+
+The hidden `dalfox man` subcommand renders the roff page straight from the
+clap `Command`, so the man page never drifts from the real flags.
+
 Before opening a PR, please run `just fix` (runs `cargo fmt` + `cargo clippy --fix`) and `just test`.
 
 ## Reporting Issues

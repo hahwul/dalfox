@@ -1,0 +1,49 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH dalfox 1  "dalfox 3.2.0" 
+.SH NAME
+dalfox \- Powerful open\-source XSS scanner
+.SH SYNOPSIS
+\fBdalfox\fR [\fB\-\-config\fR] [\fB\-\-debug\fR] [\fB\-\-no\-color\fR] [\fB\-S\fR|\fB\-\-silence\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fITARGET\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+Powerful open\-source XSS scanner
+.SH OPTIONS
+.TP
+\fB\-\-config\fR \fI<FILE>\fR
+Path to a config file (TOML or JSON). Overrides default search path
+.TP
+\fB\-\-debug\fR
+Enable debug logging (show DBG lines)
+.TP
+\fB\-\-no\-color\fR
+Disable colored output (also respects NO_COLOR env var)
+.TP
+\fB\-S\fR, \fB\-\-silence\fR
+Silence all logs except POC output to STDOUT
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.TP
+[\fITARGET\fR]
+Targets (when no subcommand is provided, defaults to scan)
+.SH SUBCOMMANDS
+.TP
+dalfox\-scan(1)
+Scan targets for XSS
+.TP
+dalfox\-server(1)
+Run API/server mode
+.TP
+dalfox\-payload(1)
+Manage or enumerate payloads
+.TP
+dalfox\-mcp(1)
+Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
+.TP
+dalfox\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v3.2.0
