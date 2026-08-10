@@ -143,6 +143,20 @@ Supported sources: `portswigger`, `payloadbox`. Fetched once per run, respecting
 
 Print a payload family without running a scan:
 
+| Selector | Description | Example |
+|----------|-------------|---------|
+| `event-handlers` | List all DOM event handler attribute names (e.g., `onclick`, `onmouseover`) | `dalfox payload event-handlers` |
+| `useful-tags` | List useful HTML tag names often used in XSS contexts (e.g., `script`, `img`, `svg`) | `dalfox payload useful-tags` |
+| `payloadbox` | Fetch and print remote XSS payloads from PayloadBox | `dalfox payload payloadbox` |
+| `portswigger` | Fetch and print remote XSS payloads from PortSwigger | `dalfox payload portswigger` |
+| `uri-scheme` | Print scheme-based XSS payloads (`javascript:`, `data:`, etc.) | `dalfox payload uri-scheme` |
+| `special-chars` | Print special characters (and encoded variants) for context probing / breakout | `dalfox payload special-chars` |
+| `functions` | Print visibly-confirmable sinks with filter-surviving variants (`alert`, `prompt`, ...) | `dalfox payload functions` |
+| `awesome-alert` | Print polished alert PoCs for clean screenshots/demos (`alert(document.domain)`, ...) | `dalfox payload awesome-alert` |
+| `dom-clobbering` | Print DOM clobbering payloads | `dalfox payload dom-clobbering` |
+| `mxss` | Print mutation-XSS / sanitizer-bypass payloads | `dalfox payload mxss` |
+| `blind` | Print blind-XSS skeletons (`{}` = your OOB callback URL) | `dalfox payload blind` |
+
 ```bash
 dalfox payload event-handlers  # onerror, onmouseover, ...
 dalfox payload useful-tags     # svg, img, script, ...
