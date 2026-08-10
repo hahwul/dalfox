@@ -7,6 +7,7 @@
 //! - jQuery → $.globalEval, $.html vectors
 //! - Handlebars/Mustache → template injection
 //! - Svelte/Ember → framework-specific vectors
+//! - Alpine.js/Preact/Lit/SolidJS → modern reactive frameworks
 
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,10 @@ pub enum TechType {
     Express,
     NextJs,
     Nuxt,
+    Alpine,
+    Preact,
+    Lit,
+    Solid,
 }
 
 impl std::fmt::Display for TechType {
@@ -48,6 +53,10 @@ impl std::fmt::Display for TechType {
             TechType::Express => write!(f, "Express"),
             TechType::NextJs => write!(f, "Next.js"),
             TechType::Nuxt => write!(f, "Nuxt"),
+            TechType::Alpine => write!(f, "Alpine.js"),
+            TechType::Preact => write!(f, "Preact"),
+            TechType::Lit => write!(f, "Lit"),
+            TechType::Solid => write!(f, "SolidJS"),
         }
     }
 }
@@ -369,6 +378,56 @@ pub fn detect_technologies(headers: &HeaderMap, body: Option<&str>) -> TechDetec
                 tech: TechType::NextJs,
                 evidence: "_next/static path",
             },
+            // Alpine.js
+            BodyDetectRule {
+                pattern: "x-data",
+                tech: TechType::Alpine,
+                evidence: "x-data attribute (Alpine.js)",
+            },
+            BodyDetectRule {
+                pattern: "x-init",
+                tech: TechType::Alpine,
+                evidence: "x-init attribute (Alpine.js)",
+            },
+            BodyDetectRule {
+                pattern: "alpine.min.js",
+                tech: TechType::Alpine,
+                evidence: "alpine.min.js script",
+            },
+            // Preact
+            BodyDetectRule {
+                pattern: "preact.min.js",
+                tech: TechType::Preact,
+                evidence: "preact.min.js script",
+            },
+            BodyDetectRule {
+                pattern: "preact.module.js",
+                tech: TechType::Preact,
+                evidence: "preact.module.js script",
+            },
+            // Lit
+            BodyDetectRule {
+                pattern: "lit-element",
+                tech: TechType::Lit,
+                evidence: "lit-element import (Lit)",
+            },
+            BodyDetectRule {
+                pattern: "lit-html",
+                tech: TechType::Lit,
+                evidence: "lit-html import (Lit)",
+            },
+            // SolidJS. The runtime hydration marker is `_$HY`; the body is
+            // lowercased before matching, so the pattern is lowercased too.
+            BodyDetectRule {
+                pattern: "_$hy",
+                tech: TechType::Solid,
+                evidence: "_$HY hydration marker (SolidJS)",
+            },
+            BodyDetectRule {
+                pattern: "solid-js",
+                tech: TechType::Solid,
+                evidence: "solid-js import (SolidJS)",
+            },
         ];
 
         for rule in &body_rules {
@@ -543,14 +602,19 @@ pub fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<String> {
                     class_marker
                 ));
             }
-            // Server-side techs: no specific client-side payloads needed
+            // Server-side / reactive techs: no specific client-side payloads
+            // needed (generic HTML payloads still apply via the default scan)
             TechType::Svelte
             | TechType::Backbone
             | TechType::ASPNet
             | TechType::PHP
             | TechType::Express
             | TechType::NextJs
-            | TechType::Nuxt => {}
+            | TechType::Nuxt
+            | TechType::Alpine
+            | TechType::Preact
+            | TechType::Lit
+            | TechType::Solid => {}
         }
     }
 

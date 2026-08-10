@@ -364,6 +364,50 @@ fn test_detect_wordpress_from_body() {
     assert!(result.has(&TechType::WordPress));
 }
 
+// --- New framework detection (#1327) ---
+
+#[test]
+fn test_detect_alpine_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<div x-data=\"{count: 0}\" x-init=\"count = 1\"></div>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Alpine));
+}
+
+#[test]
+fn test_detect_preact_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script type='module' src='https://cdn.jsdelivr.net/npm/preact.min.js'></script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Preact));
+}
+
+#[test]
+fn test_detect_lit_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script type='module'>import { html, render } from 'lit-html';</script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Lit));
+}
+
+#[test]
+fn test_detect_solid_from_body() {
+    let headers = make_headers(&[]);
+    // SolidJS emits the `_$HY` hydration marker; the detector lowercases the
+    // body, so it matches the lowercased `_$hy` pattern.
+    let body = "<script>var _$HY = {}; import 'solid-js';</script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Solid));
+}
+
+#[test]
+fn test_display_new_tech_types() {
+    assert_eq!(format!("{}", TechType::Alpine), "Alpine.js");
+    assert_eq!(format!("{}", TechType::Preact), "Preact");
+    assert_eq!(format!("{}", TechType::Lit), "Lit");
+    assert_eq!(format!("{}", TechType::Solid), "SolidJS");
+}
+
 // --- Additional tech-specific payload generation ---
 
 #[test]
@@ -456,4 +500,8 @@ fn test_display_all_tech_types() {
     assert_eq!(format!("{}", TechType::Express), "Express");
     assert_eq!(format!("{}", TechType::NextJs), "Next.js");
     assert_eq!(format!("{}", TechType::Nuxt), "Nuxt");
+    assert_eq!(format!("{}", TechType::Alpine), "Alpine.js");
+    assert_eq!(format!("{}", TechType::Preact), "Preact");
+    assert_eq!(format!("{}", TechType::Lit), "Lit");
+    assert_eq!(format!("{}", TechType::Solid), "SolidJS");
 }
