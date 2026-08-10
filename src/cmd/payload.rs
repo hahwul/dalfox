@@ -34,6 +34,13 @@ pub struct PayloadArgs {
         long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)"
     )]
     pub selector: Option<String>,
+
+    /// Emit the payload list as a JSON array of strings instead of one-per-line text
+    #[arg(
+        long = "json",
+        help = "Print the payload list as a JSON array of strings"
+    )]
+    pub json: bool,
 }
 
 fn uri_scheme_payloads() -> &'static [&'static str] {
@@ -115,11 +122,25 @@ fn awesome_alert_payloads() -> &'static [&'static str] {
     ]
 }
 
+/// Render a list of displayable items as a pretty JSON array of strings.
+/// Used by the `--json` flag so the output is machine-parseable (jq/CI).
+fn payload_list_json<T: std::fmt::Display>(list: &[T]) -> String {
+    let arr: Vec<String> = list.iter().map(|e| e.to_string()).collect();
+    serde_json::to_string_pretty(&arr).unwrap_or_else(|e| {
+        eprintln!("dalfox: failed to serialize payload list as JSON: {e}");
+        "[]".to_string()
+    })
+}
+
 /// Print a list one entry per line and log the count. Generic over the element
 /// type so every listing selector — static `&[&str]` slices and owned
 /// `Vec<String>` families alike — emits through the same path with identical
-/// formatting and log wording.
-fn print_lines<T: std::fmt::Display>(selector: &str, list: &[T]) {
+/// formatting and log wording. When `json` is set, print a JSON array instead.
+fn print_lines<T: std::fmt::Display>(selector: &str, list: &[T], json: bool) {
+    if json {
+        println!("{}", payload_list_json(list));
+        return;
+    }
     for entry in list.iter() {
         println!("{}", entry);
     }
@@ -160,7 +181,7 @@ fn print_summary() {
 /// Returns `true` when initialization (and any printing) finished without an
 /// error path being taken; `false` on runtime build failure, fetch failure,
 /// or an uninitialized cache. Callers translate this into the CLI exit code.
-fn fetch_and_print_remote(provider: &str) -> bool {
+fn fetch_and_print_remote(provider: &str, json: bool) -> bool {
     let provider = provider.to_string();
     let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let ok_clone = ok.clone();
@@ -178,10 +199,14 @@ fn fetch_and_print_remote(provider: &str) -> bool {
                     }
                     if let Some(list) = crate::utils::get_remote_payloads() {
                         let count = list.len();
-                        for p in list.iter() {
-                            println!("{}", p);
+                        if json {
+                            println!("{}", payload_list_json(&list));
+                        } else {
+                            for p in list.iter() {
+                                println!("{}", p);
+                            }
+                            crate::dbg_log!("{}: {} payloads", provider, count);
                         }
-                        crate::dbg_log!("{}: {} payloads", provider, count);
                         ok_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                     } else {
                         eprintln!(
@@ -205,11 +230,13 @@ fn fetch_and_print_remote(provider: &str) -> bool {
 }
 
 pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
+    let json = args.json;
     match args.selector.as_deref() {
         Some("event-handlers") => {
             print_lines(
                 "event-handlers",
                 crate::payload::xss_event::common_event_handler_names(),
+                json,
             );
             ScanOutcome::Clean
         }
@@ -217,48 +244,50 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             print_lines(
                 "useful-tags",
                 crate::payload::xss_html::useful_html_tag_names(),
+                json,
             );
             ScanOutcome::Clean
         }
         Some("payloadbox") => {
-            if fetch_and_print_remote("payloadbox") {
+            if fetch_and_print_remote("payloadbox", json) {
                 ScanOutcome::Clean
             } else {
                 ScanOutcome::Error
             }
         }
         Some("portswigger") => {
-            if fetch_and_print_remote("portswigger") {
+            if fetch_and_print_remote("portswigger", json) {
                 ScanOutcome::Clean
             } else {
                 ScanOutcome::Error
             }
         }
         Some("uri-scheme") => {
-            print_lines("uri-scheme", uri_scheme_payloads());
+            print_lines("uri-scheme", uri_scheme_payloads(), json);
             ScanOutcome::Clean
         }
         Some("special-chars") => {
-            print_lines("special-chars", special_chars_payloads());
+            print_lines("special-chars", special_chars_payloads(), json);
             ScanOutcome::Clean
         }
         Some("functions") => {
-            print_lines("functions", functions_payloads());
+            print_lines("functions", functions_payloads(), json);
             ScanOutcome::Clean
         }
         Some("awesome-alert") => {
-            print_lines("awesome-alert", awesome_alert_payloads());
+            print_lines("awesome-alert", awesome_alert_payloads(), json);
             ScanOutcome::Clean
         }
         Some("dom-clobbering") => {
             print_lines(
                 "dom-clobbering",
                 &crate::payload::get_dom_clobbering_payloads(),
+                json,
             );
             ScanOutcome::Clean
         }
         Some("mxss") => {
-            print_lines("mxss", &crate::payload::get_mxss_payloads());
+            print_lines("mxss", &crate::payload::get_mxss_payloads(), json);
             ScanOutcome::Clean
         }
         Some("blind") => {
@@ -266,7 +295,7 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             // URL; printed verbatim (as a value, never a format string) so the
             // skeleton shows where the URL goes — users wire it up with
             // `-b https://your-callback`.
-            print_lines("blind", crate::payload::XSS_BLIND_PAYLOADS);
+            print_lines("blind", crate::payload::XSS_BLIND_PAYLOADS, json);
             ScanOutcome::Clean
         }
         Some(other) => {

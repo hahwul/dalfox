@@ -235,6 +235,10 @@ List or fetch payload collections.
 dalfox payload <SELECTOR>
 ```
 
+| Flag | Description |
+|------|-------------|
+| `--json` | Print the payload list as a JSON array of strings (machine-parseable for `jq`/CI) instead of one item per line |
+
 Selectors:
 
 | Selector | What it prints |
