@@ -42,6 +42,12 @@ fix:
     cargo fmt
     cargo clippy --fix --allow-dirty
 
+# Check formatting and lints without modifying files (matches CI).
+[group('build')]
+lint:
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --all-features -- -D warnings
+
 # Report dalfox version across all version-bearing files.
 [group('release')]
 version-check:
