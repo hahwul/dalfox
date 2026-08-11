@@ -119,6 +119,20 @@ dalfox https://target.app --remote-payloads portswigger,payloadbox
 
 스캔을 실행하지 않고 페이로드 계열을 출력합니다:
 
+| 셀렉터 | 설명 | 예시 |
+|--------|------|------|
+| `event-handlers` | 모든 DOM 이벤트 핸들러 속성 이름을 나열합니다 (예: `onclick`, `onmouseover`) | `dalfox payload event-handlers` |
+| `useful-tags` | XSS 컨텍스트에서 자주 사용되는 유용한 HTML 태그 이름을 나열합니다 (예: `script`, `img`, `svg`) | `dalfox payload useful-tags` |
+| `payloadbox` | PayloadBox에서 원격 XSS 페이로드를 가져와 출력합니다 | `dalfox payload payloadbox` |
+| `portswigger` | PortSwigger에서 원격 XSS 페이로드를 가져와 출력합니다 | `dalfox payload portswigger` |
+| `uri-scheme` | 스킴 기반 XSS 페이로드를 출력합니다 (`javascript:`, `data:` 등) | `dalfox payload uri-scheme` |
+| `special-chars` | 컨텍스트 프로빙/브레이크아웃을 위한 특수 문자(및 인코딩된 변형)를 출력합니다 | `dalfox payload special-chars` |
+| `functions` | 필터를 통과하는 변형을 포함해 눈으로 확인 가능한 싱크를 출력합니다 (`alert`, `prompt` 등) | `dalfox payload functions` |
+| `awesome-alert` | 깔끔한 스크린샷/데모용으로 다듬어진 alert PoC를 출력합니다 (`alert(document.domain)` 등) | `dalfox payload awesome-alert` |
+| `dom-clobbering` | DOM 클로버링 페이로드를 출력합니다 | `dalfox payload dom-clobbering` |
+| `mxss` | mutation-XSS / 새니타이저 우회 페이로드를 출력합니다 | `dalfox payload mxss` |
+| `blind` | blind-XSS 스켈레톤을 출력합니다 (`{}` = 콜백 URL) | `dalfox payload blind` |
+
 ```bash
 dalfox payload event-handlers  # onerror, onmouseover, ...
 dalfox payload useful-tags     # svg, img, script, ...
