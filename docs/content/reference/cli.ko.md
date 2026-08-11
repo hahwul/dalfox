@@ -249,6 +249,7 @@ dalfox payload <SELECTOR>
 | `blind` | Blind-XSS 스켈레톤(`{}` = OOB 콜백 URL) |
 | `portswigger` | 원격: PortSwigger XSS 치트시트 |
 | `payloadbox` | 원격: PayloadBox XSS 목록 |
+| `all` | 위의 모든 로컬 선택자를 한 번에, 각 그룹 앞에 `# name` 헤더를 붙여 출력 (네트워크 요청 없음) |
 
 ---
 

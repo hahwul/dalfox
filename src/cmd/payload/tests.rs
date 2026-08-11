@@ -1,11 +1,13 @@
 use super::{
     KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, fetch_and_print_remote,
     functions_payloads, print_summary, run_payload, special_chars_payloads, static_selector_counts,
-    summary_block, uri_scheme_payloads,
+    static_selector_groups, summary_block, uri_scheme_payloads,
 };
 use crate::cmd::scan::ScanOutcome;
 
 const NETWORK_SELECTORS: [&str; 2] = ["payloadbox", "portswigger"];
+/// Selectors that print other selectors instead of a list of their own.
+const AGGREGATE_SELECTORS: [&str; 1] = ["all"];
 
 #[test]
 fn test_uri_scheme_payloads_shape() {
@@ -142,11 +144,20 @@ fn test_static_selector_counts_cover_every_local_selector() {
                 "{} needs a fetch and must not be counted",
                 selector
             );
+        } else if AGGREGATE_SELECTORS.contains(selector) {
+            assert!(
+                !named.contains(selector),
+                "{} prints other selectors and is not a list of its own",
+                selector
+            );
         } else {
             assert!(named.contains(selector), "{} is missing a count", selector);
         }
     }
-    assert_eq!(named.len(), KNOWN_SELECTORS.len() - NETWORK_SELECTORS.len());
+    assert_eq!(
+        named.len(),
+        KNOWN_SELECTORS.len() - NETWORK_SELECTORS.len() - AGGREGATE_SELECTORS.len()
+    );
 }
 
 #[test]
@@ -207,4 +218,35 @@ fn test_summary_block_renders_a_line_per_static_selector() {
             selector
         );
     }
+}
+
+#[test]
+fn test_run_payload_all_selector_returns_clean() {
+    let outcome = run_payload(PayloadArgs {
+        selector: Some("all".to_string()),
+    });
+    assert_eq!(outcome, ScanOutcome::Clean);
+}
+
+#[test]
+fn test_all_selector_included_in_known_selectors() {
+    assert!(KNOWN_SELECTORS.contains(&"all"));
+}
+
+#[test]
+fn test_all_selector_groups_cover_every_static_selector_in_order() {
+    let groups: Vec<&str> = static_selector_groups()
+        .iter()
+        .map(|(selector, _)| *selector)
+        .collect();
+    let counted: Vec<&str> = static_selector_counts().iter().map(|(s, _)| *s).collect();
+
+    // `all` dumps exactly what the summary counts — one list, one order.
+    assert_eq!(groups, counted);
+    assert!(
+        static_selector_groups()
+            .iter()
+            .all(|(_, lines)| lines.len() != 0),
+        "an empty group would print a header with nothing under it"
+    );
 }

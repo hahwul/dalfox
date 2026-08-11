@@ -250,6 +250,7 @@ Selectors:
 | `blind` | Blind-XSS skeletons (`{}` = your OOB callback URL) |
 | `portswigger` | Remote: PortSwigger XSS cheatsheet |
 | `payloadbox` | Remote: PayloadBox XSS list |
+| `all` | Every local selector above in one pass, each under a `# name` header (no network fetch) |
 
 ---
 

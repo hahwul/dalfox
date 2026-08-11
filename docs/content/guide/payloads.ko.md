@@ -132,6 +132,7 @@ dalfox https://target.app --remote-payloads portswigger,payloadbox
 | `dom-clobbering` | DOM 클로버링 페이로드를 출력합니다 | `dalfox payload dom-clobbering` |
 | `mxss` | mutation-XSS / 새니타이저 우회 페이로드를 출력합니다 | `dalfox payload mxss` |
 | `blind` | blind-XSS 스켈레톤을 출력합니다 (`{}` = 콜백 URL) | `dalfox payload blind` |
+| `all` | 위의 모든 로컬 셀렉터를 한 번에, 각 그룹 앞에 `# name` 헤더를 붙여 출력합니다 (원격 셀렉터 제외 — 네트워크 요청 없음) | `dalfox payload all` |
 
 ```bash
 dalfox payload event-handlers  # onerror, onmouseover, ...
@@ -144,6 +145,7 @@ dalfox payload dom-clobbering  # DOM 클로버링 벡터
 dalfox payload mxss            # mutation-XSS / 새니타이저 우회 페이로드
 dalfox payload blind           # blind-XSS 스켈레톤 ({} = 콜백 URL)
 dalfox payload portswigger     # 원격 목록을 가져와 출력
+dalfox payload all             # 모든 로컬 셀렉터를 "# name" 헤더로 묶어 출력
 ```
 
 모든 셀렉터는 한 줄에 하나씩 출력하므로 일반적인 셸 도구와 조합할 수 있습니다:

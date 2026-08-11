@@ -14,6 +14,7 @@ const KNOWN_SELECTORS: &[&str] = &[
     "dom-clobbering",
     "mxss",
     "blind",
+    "all",
 ];
 
 /// Manage or inspect payloads (no local flags).
@@ -25,13 +26,13 @@ const KNOWN_SELECTORS: &[&str] = &[
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Manage or inspect payloads",
-    long_about = "Selectors:\n  - event-handlers: list all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: list useful HTML tag names often used in XSS contexts (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)"
+    long_about = "Selectors:\n  - event-handlers: list all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: list useful HTML tag names often used in XSS contexts (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
 )]
 pub struct PayloadArgs {
     #[arg(
         value_name = "SELECTOR",
-        help = "Payload selector\nAvailable selectors:\n  - event-handlers\n  - useful-tags\n  - payloadbox\n  - portswigger\n  - uri-scheme\n  - special-chars\n  - functions\n  - awesome-alert\n  - dom-clobbering\n  - mxss\n  - blind",
-        long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)"
+        help = "Payload selector\nAvailable selectors:\n  - event-handlers\n  - useful-tags\n  - payloadbox\n  - portswigger\n  - uri-scheme\n  - special-chars\n  - functions\n  - awesome-alert\n  - dom-clobbering\n  - mxss\n  - blind\n  - all",
+        long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
     )]
     pub selector: Option<String>,
 }
@@ -140,30 +141,76 @@ fn print_lines<T: std::fmt::Display>(selector: &str, list: &[T]) {
     crate::dbg_log!("{}: {} items", selector, list.len());
 }
 
-/// Every static selector paired with the number of entries it prints. The
-/// remote selectors (`payloadbox`, `portswigger`) are absent: their size is
-/// only known after a fetch, and the summary must not touch the network.
-fn static_selector_counts() -> Vec<(&'static str, usize)> {
+/// The lines one selector prints: either a compile-time slice or a family
+/// built at call time. Keeping both shapes behind one type lets the summary
+/// and the `all` dump walk a single list of selectors.
+enum SelectorLines {
+    Static(&'static [&'static str]),
+    Owned(Vec<String>),
+}
+
+impl SelectorLines {
+    fn len(&self) -> usize {
+        match self {
+            SelectorLines::Static(list) => list.len(),
+            SelectorLines::Owned(list) => list.len(),
+        }
+    }
+
+    fn print(&self, selector: &str) {
+        match self {
+            SelectorLines::Static(list) => print_lines(selector, list),
+            SelectorLines::Owned(list) => print_lines(selector, list),
+        }
+    }
+}
+
+/// Every static selector paired with the lines it prints — the single source
+/// of truth behind both the summary counts and the `all` dump, so a selector
+/// added to one can never be missed by the other. The remote selectors
+/// (`payloadbox`, `portswigger`) are absent: their contents are only known
+/// after a fetch, and neither the summary nor `all` may touch the network.
+fn static_selector_groups() -> Vec<(&'static str, SelectorLines)> {
     vec![
         (
             "event-handlers",
-            crate::payload::xss_event::common_event_handler_names().len(),
+            SelectorLines::Static(crate::payload::xss_event::common_event_handler_names()),
         ),
         (
             "useful-tags",
-            crate::payload::xss_html::useful_html_tag_names().len(),
+            SelectorLines::Static(crate::payload::xss_html::useful_html_tag_names()),
         ),
-        ("uri-scheme", uri_scheme_payloads().len()),
-        ("special-chars", special_chars_payloads().len()),
-        ("functions", functions_payloads().len()),
-        ("awesome-alert", awesome_alert_payloads().len()),
+        ("uri-scheme", SelectorLines::Static(uri_scheme_payloads())),
+        (
+            "special-chars",
+            SelectorLines::Static(special_chars_payloads()),
+        ),
+        ("functions", SelectorLines::Static(functions_payloads())),
+        (
+            "awesome-alert",
+            SelectorLines::Static(awesome_alert_payloads()),
+        ),
         (
             "dom-clobbering",
-            crate::payload::get_dom_clobbering_payloads().len(),
+            SelectorLines::Owned(crate::payload::get_dom_clobbering_payloads()),
         ),
-        ("mxss", crate::payload::get_mxss_payloads().len()),
-        ("blind", crate::payload::XSS_BLIND_PAYLOADS.len()),
+        (
+            "mxss",
+            SelectorLines::Owned(crate::payload::get_mxss_payloads()),
+        ),
+        (
+            "blind",
+            SelectorLines::Static(crate::payload::XSS_BLIND_PAYLOADS),
+        ),
     ]
+}
+
+/// Every static selector paired with the number of entries it prints.
+fn static_selector_counts() -> Vec<(&'static str, usize)> {
+    static_selector_groups()
+        .into_iter()
+        .map(|(selector, lines)| (selector, lines.len()))
+        .collect()
 }
 
 /// The `Summary:` block, built as text so the rendered counts are assertable
@@ -194,7 +241,8 @@ fn print_summary() {
     println!("  dalfox payload awesome-alert");
     println!("  dalfox payload dom-clobbering");
     println!("  dalfox payload mxss");
-    println!("  dalfox payload blind\n");
+    println!("  dalfox payload blind");
+    println!("  dalfox payload all\n");
 
     print!("{}", summary_block());
 
@@ -253,6 +301,21 @@ fn fetch_and_print_remote(provider: &str) -> bool {
         return false;
     }
     ok.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Print every static selector's entries in one pass, with a `# name` header
+/// before each group. Network selectors (`payloadbox`, `portswigger`) are
+/// intentionally excluded — they require a remote fetch, so bundling them into
+/// `all` would make a "just show me everything local" command silently hit the
+/// network.
+fn print_all_payloads() {
+    for (index, (selector, lines)) in static_selector_groups().into_iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+        println!("# {}", selector);
+        lines.print(selector);
+    }
 }
 
 pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
@@ -318,6 +381,10 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             // skeleton shows where the URL goes — users wire it up with
             // `-b https://your-callback`.
             print_lines("blind", crate::payload::XSS_BLIND_PAYLOADS);
+            ScanOutcome::Clean
+        }
+        Some("all") => {
+            print_all_payloads();
             ScanOutcome::Clean
         }
         Some(other) => {
