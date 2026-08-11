@@ -126,9 +126,47 @@ fn print_lines<T: std::fmt::Display>(selector: &str, list: &[T]) {
     crate::dbg_log!("{}: {} items", selector, list.len());
 }
 
-fn print_summary() {
-    let js_count = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len();
+/// Every static selector paired with the number of entries it prints. The
+/// remote selectors (`payloadbox`, `portswigger`) are absent: their size is
+/// only known after a fetch, and the summary must not touch the network.
+fn static_selector_counts() -> Vec<(&'static str, usize)> {
+    vec![
+        (
+            "event-handlers",
+            crate::payload::xss_event::common_event_handler_names().len(),
+        ),
+        (
+            "useful-tags",
+            crate::payload::xss_html::useful_html_tag_names().len(),
+        ),
+        ("uri-scheme", uri_scheme_payloads().len()),
+        ("special-chars", special_chars_payloads().len()),
+        ("functions", functions_payloads().len()),
+        ("awesome-alert", awesome_alert_payloads().len()),
+        (
+            "dom-clobbering",
+            crate::payload::get_dom_clobbering_payloads().len(),
+        ),
+        ("mxss", crate::payload::get_mxss_payloads().len()),
+        ("blind", crate::payload::XSS_BLIND_PAYLOADS.len()),
+    ]
+}
 
+/// The `Summary:` block, built as text so the rendered counts are assertable
+/// without capturing stdout.
+fn summary_block() -> String {
+    let mut out = String::from("Summary:\n");
+    out.push_str(&format!(
+        "- Canonical JavaScript payloads: {}\n",
+        crate::payload::XSS_JAVASCRIPT_PAYLOADS.len()
+    ));
+    for (selector, count) in static_selector_counts() {
+        out.push_str(&format!("- {}: {}\n", selector, count));
+    }
+    out
+}
+
+fn print_summary() {
     println!("Dalfox payload");
     println!("----------------");
     println!("Provide a selector to list payloads. Examples:");
@@ -144,8 +182,7 @@ fn print_summary() {
     println!("  dalfox payload mxss");
     println!("  dalfox payload blind\n");
 
-    println!("Summary:");
-    println!("- Canonical JavaScript payloads: {}", js_count);
+    print!("{}", summary_block());
 
     println!("\nTips:");
     println!("- Use scanning to apply payloads: dalfox scan <target>");
