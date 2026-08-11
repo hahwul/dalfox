@@ -16,6 +16,42 @@ const KNOWN_SELECTORS: &[&str] = &[
     "blind",
 ];
 
+fn levenshtein_distance(left: &str, right: &str) -> usize {
+    let right_chars: Vec<_> = right.chars().collect();
+    let mut previous: Vec<_> = (0..=right_chars.len()).collect();
+    let mut current = vec![0; right_chars.len() + 1];
+
+    for (left_index, left_char) in left.chars().enumerate() {
+        current[0] = left_index + 1;
+
+        for (right_index, right_char) in right_chars.iter().enumerate() {
+            let substitution_cost = usize::from(left_char != *right_char);
+            current[right_index + 1] = (current[right_index] + 1)
+                .min(previous[right_index + 1] + 1)
+                .min(previous[right_index] + substitution_cost);
+        }
+
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[right_chars.len()]
+}
+
+fn closest_selector(input: &str) -> Option<&'static str> {
+    let mut best_match = None;
+
+    for &selector in KNOWN_SELECTORS {
+        let distance = levenshtein_distance(input, selector);
+        if best_match.is_none_or(|(_, best_distance)| distance < best_distance) {
+            best_match = Some((selector, distance));
+        }
+    }
+
+    best_match
+        .filter(|(_, distance)| *distance <= 2)
+        .map(|(selector, _)| selector)
+}
+
 /// Manage or inspect payloads (no local flags).
 ///
 /// Note:
@@ -322,6 +358,9 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
         }
         Some(other) => {
             eprintln!("Unknown selector: {}", other);
+            if let Some(selector) = closest_selector(other) {
+                eprintln!("Did you mean: {}?", selector);
+            }
             eprintln!("Available selectors: {}", KNOWN_SELECTORS.join(", "));
             ScanOutcome::Error
         }

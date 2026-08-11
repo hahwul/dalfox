@@ -1,5 +1,5 @@
 use super::{
-    KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, fetch_and_print_remote,
+    KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_print_remote,
     functions_payloads, print_summary, run_payload, special_chars_payloads, static_selector_counts,
     summary_block, uri_scheme_payloads,
 };
@@ -83,6 +83,12 @@ fn test_run_payload_unknown_selector_returns_error() {
         selector: Some("not-a-selector".to_string()),
     });
     assert_eq!(outcome, ScanOutcome::Error);
+}
+
+#[test]
+fn test_closest_selector_suggests_only_near_matches() {
+    assert_eq!(closest_selector("event-handler"), Some("event-handlers"));
+    assert_eq!(closest_selector("not-a-selector"), None);
 }
 
 #[test]
