@@ -1,8 +1,11 @@
 use super::{
-    PayloadArgs, awesome_alert_payloads, fetch_and_print_remote, functions_payloads, print_summary,
-    run_payload, special_chars_payloads, uri_scheme_payloads,
+    KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, fetch_and_print_remote,
+    functions_payloads, print_summary, run_payload, special_chars_payloads, static_selector_counts,
+    summary_block, uri_scheme_payloads,
 };
 use crate::cmd::scan::ScanOutcome;
+
+const NETWORK_SELECTORS: [&str; 2] = ["payloadbox", "portswigger"];
 
 #[test]
 fn test_uri_scheme_payloads_shape() {
@@ -126,4 +129,82 @@ fn test_fetch_and_print_remote_unknown_provider_no_network_path() {
 #[test]
 fn test_print_summary_executes() {
     print_summary();
+}
+
+#[test]
+fn test_static_selector_counts_cover_every_local_selector() {
+    let named: Vec<&str> = static_selector_counts().iter().map(|(s, _)| *s).collect();
+
+    for selector in KNOWN_SELECTORS {
+        if NETWORK_SELECTORS.contains(selector) {
+            assert!(
+                !named.contains(selector),
+                "{} needs a fetch and must not be counted",
+                selector
+            );
+        } else {
+            assert!(named.contains(selector), "{} is missing a count", selector);
+        }
+    }
+    assert_eq!(named.len(), KNOWN_SELECTORS.len() - NETWORK_SELECTORS.len());
+}
+
+#[test]
+fn test_static_selector_counts_match_the_lists_they_describe() {
+    let counts = static_selector_counts();
+    let count_of = |selector: &str| -> usize {
+        counts
+            .iter()
+            .find(|(s, _)| *s == selector)
+            .unwrap_or_else(|| panic!("no count for {}", selector))
+            .1
+    };
+
+    assert_eq!(
+        count_of("event-handlers"),
+        crate::payload::xss_event::common_event_handler_names().len()
+    );
+    assert_eq!(
+        count_of("useful-tags"),
+        crate::payload::xss_html::useful_html_tag_names().len()
+    );
+    assert_eq!(count_of("uri-scheme"), uri_scheme_payloads().len());
+    assert_eq!(count_of("special-chars"), special_chars_payloads().len());
+    assert_eq!(count_of("functions"), functions_payloads().len());
+    assert_eq!(count_of("awesome-alert"), awesome_alert_payloads().len());
+    assert_eq!(
+        count_of("dom-clobbering"),
+        crate::payload::get_dom_clobbering_payloads().len()
+    );
+    assert_eq!(count_of("mxss"), crate::payload::get_mxss_payloads().len());
+    assert_eq!(count_of("blind"), crate::payload::XSS_BLIND_PAYLOADS.len());
+
+    // Distinct lists, so a copy-pasted accessor would collapse two counts.
+    assert_ne!(count_of("special-chars"), count_of("functions"));
+    assert!(counts.iter().all(|(_, n)| *n > 0));
+}
+
+#[test]
+fn test_summary_block_renders_a_line_per_static_selector() {
+    let rendered = summary_block();
+
+    assert!(rendered.starts_with("Summary:\n"));
+    assert!(rendered.contains(&format!(
+        "- Canonical JavaScript payloads: {}\n",
+        crate::payload::XSS_JAVASCRIPT_PAYLOADS.len()
+    )));
+    for (selector, count) in static_selector_counts() {
+        assert!(
+            rendered.contains(&format!("- {}: {}\n", selector, count)),
+            "summary is missing the {} count",
+            selector
+        );
+    }
+    for selector in NETWORK_SELECTORS {
+        assert!(
+            !rendered.contains(selector),
+            "{} must not appear in the summary counts",
+            selector
+        );
+    }
 }
