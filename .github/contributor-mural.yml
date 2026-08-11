@@ -6,6 +6,7 @@ output: docs/static/images/CONTRIBUTORS.svg
 
 contributors:
   include_bots: true # matches the previous list; the excludes below do the filtering
+  include_anonymous: true # commits whose email is not linked to a GitHub account
 
 exclude:
   - dependabot[bot]
