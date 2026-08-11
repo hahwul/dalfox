@@ -7,9 +7,27 @@ use crate::cmd::scan::ScanOutcome;
 #[test]
 fn test_uri_scheme_payloads_shape() {
     let payloads = uri_scheme_payloads();
-    assert_eq!(payloads.len(), 5);
+    assert_eq!(payloads.len(), 11);
     assert!(payloads.iter().any(|p| p.starts_with("javascript:")));
     assert!(payloads.iter().all(|p| !p.is_empty()));
+}
+
+#[test]
+fn test_curated_selector_lists_have_no_duplicates() {
+    for (name, list) in [
+        ("uri-scheme", uri_scheme_payloads()),
+        ("special-chars", special_chars_payloads()),
+    ] {
+        let mut seen = std::collections::HashSet::new();
+        for entry in list {
+            assert!(
+                seen.insert(*entry),
+                "{} has a duplicate entry: {:?}",
+                name,
+                entry
+            );
+        }
+    }
 }
 
 #[test]
