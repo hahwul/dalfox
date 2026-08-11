@@ -16,6 +16,10 @@ pub enum TechType {
     Angular,
     React,
     Vue,
+    Alpine,
+    Preact,
+    Lit,
+    Solid,
     JQuery,
     Handlebars,
     Svelte,
@@ -36,6 +40,10 @@ impl std::fmt::Display for TechType {
             TechType::Angular => write!(f, "Angular"),
             TechType::React => write!(f, "React"),
             TechType::Vue => write!(f, "Vue.js"),
+            TechType::Alpine => write!(f, "Alpine.js"),
+            TechType::Preact => write!(f, "Preact"),
+            TechType::Lit => write!(f, "Lit"),
+            TechType::Solid => write!(f, "SolidJS"),
             TechType::JQuery => write!(f, "jQuery"),
             TechType::Handlebars => write!(f, "Handlebars"),
             TechType::Svelte => write!(f, "Svelte"),
@@ -242,6 +250,26 @@ pub fn detect_technologies(headers: &HeaderMap, body: Option<&str>) -> TechDetec
                 pattern: "vue.global",
                 tech: TechType::Vue,
                 evidence: "vue.global script",
+            },
+            BodyDetectRule {
+                pattern: "x-data",
+                tech: TechType::Alpine,
+                evidence: "x-data attribute (Alpine.js)",
+            },
+            BodyDetectRule {
+                pattern: "preact.min.js",
+                tech: TechType::Preact,
+                evidence: "preact.min.js script",
+            },
+            BodyDetectRule {
+                pattern: "lit-element",
+                tech: TechType::Lit,
+                evidence: "lit-element reference",
+            },
+            BodyDetectRule {
+                pattern: "_$hy",
+                tech: TechType::Solid,
+                evidence: "_$HY hydration marker (SolidJS)",
             },
             // jQuery
             BodyDetectRule {
@@ -544,7 +572,11 @@ pub fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<String> {
                 ));
             }
             // Server-side techs: no specific client-side payloads needed
-            TechType::Svelte
+            TechType::Alpine
+            | TechType::Preact
+            | TechType::Lit
+            | TechType::Solid
+            | TechType::Svelte
             | TechType::Backbone
             | TechType::ASPNet
             | TechType::PHP

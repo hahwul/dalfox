@@ -37,6 +37,21 @@ fn test_detect_vue_from_body() {
 }
 
 #[test]
+fn test_detect_modern_frameworks_from_body() {
+    let headers = make_headers(&[]);
+    for (body, tech, name) in [
+        ("<div x-data></div>", TechType::Alpine, "Alpine.js"),
+        ("<script src=preact.min.js>", TechType::Preact, "Preact"),
+        ("<lit-element>", TechType::Lit, "Lit"),
+        ("<script>_$HY</script>", TechType::Solid, "SolidJS"),
+    ] {
+        let result = detect_technologies(&headers, Some(body));
+        assert!(result.has(&tech));
+        assert_eq!(tech.to_string(), name);
+    }
+}
+
+#[test]
 fn test_detect_jquery_from_body() {
     let headers = make_headers(&[]);
     let body = "<script src='https://code.jquery.com/jquery.min.js'></script>";
