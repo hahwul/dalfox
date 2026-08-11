@@ -156,6 +156,7 @@ Print a payload family without running a scan:
 | `dom-clobbering` | Print DOM clobbering payloads | `dalfox payload dom-clobbering` |
 | `mxss` | Print mutation-XSS / sanitizer-bypass payloads | `dalfox payload mxss` |
 | `blind` | Print blind-XSS skeletons (`{}` = your OOB callback URL) | `dalfox payload blind` |
+| `all` | Print every local selector above in one pass, each under a `# name` header (remote selectors excluded — no network fetch) | `dalfox payload all` |
 
 ```bash
 dalfox payload event-handlers  # onerror, onmouseover, ...
@@ -168,6 +169,7 @@ dalfox payload dom-clobbering  # DOM clobbering vectors
 dalfox payload mxss            # mutation-XSS / sanitizer-bypass payloads
 dalfox payload blind           # blind-XSS skeletons ({} = your callback URL)
 dalfox payload portswigger     # fetch + print remote list
+dalfox payload all             # every local selector, grouped under "# name" headers
 ```
 
 Every selector prints one entry per line, so it composes with the usual shell tools:
