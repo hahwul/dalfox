@@ -38,9 +38,8 @@ pub(crate) use crate::job::{
     AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS,
     MAX_DISCOVERED_PARAMS, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS, MAX_WORKERS,
     cap_reflection_params, effective_rate_limit, effective_scan_timeout, enforce_retention_cap,
-    has_http_scheme, now_ms,
-    parse_job_status, purge_expired_jobs as purge_jobs_map, run_within_scan_budget,
-    send_reachability_probe, split_cookie_pairs, unreachable_error_message,
+    has_http_scheme, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
+    run_within_scan_budget, send_reachability_probe, split_cookie_pairs, unreachable_error_message,
 };
 pub(crate) use crate::parameter_analysis::analyze_parameters;
 pub(crate) use crate::scanning::result::{Result as ScanResult, SanitizedResult};

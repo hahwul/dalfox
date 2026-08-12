@@ -43,8 +43,7 @@ use crate::{
     job::{
         AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_DELAY_MS,
         MAX_DISCOVERED_PARAMS, MAX_RETAINED_SCANS_MCP, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS,
-        MAX_WORKERS,
-        cap_reflection_params, has_http_scheme, now_ms, parse_job_status,
+        MAX_WORKERS, cap_reflection_params, has_http_scheme, now_ms, parse_job_status,
         purge_expired_jobs as purge_jobs_map, run_within_scan_budget, send_reachability_probe,
         split_cookie_pairs, unreachable_error_message,
     },

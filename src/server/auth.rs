@@ -92,10 +92,16 @@ impl Denied {
         match self {
             Denied::Unauthorized => format!("Unauthorized access to {}", route),
             Denied::CrossSite(signal) => {
-                format!("blocked cross-site browser request to {} ({})", route, signal)
+                format!(
+                    "blocked cross-site browser request to {} ({})",
+                    route, signal
+                )
             }
             Denied::UntrustedHost(host) => {
-                format!("blocked request to {} with untrusted Host '{}'", route, host)
+                format!(
+                    "blocked request to {} with untrusted Host '{}'",
+                    route, host
+                )
             }
         }
     }

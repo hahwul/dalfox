@@ -262,7 +262,10 @@ fn enforce_retention_cap_evicts_oldest_finished_first() {
 fn enforce_retention_cap_never_evicts_active_jobs() {
     let mut jobs: HashMap<String, Job> = HashMap::new();
     // Two active jobs with no finished_at, plus one finished job.
-    jobs.insert("queued".to_string(), Job::new_queued("http://a".to_string()));
+    jobs.insert(
+        "queued".to_string(),
+        Job::new_queued("http://a".to_string()),
+    );
     let mut running = Job::new_queued("http://b".to_string());
     running.status = JobStatus::Running;
     jobs.insert("running".to_string(), running);

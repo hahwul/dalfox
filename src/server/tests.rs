@@ -3930,7 +3930,10 @@ async fn test_cross_site_browser_request_is_refused_and_starts_no_scan() {
 
     let resp = get_scan_handler(
         State(state.clone()),
-        header_map(&[("Sec-Fetch-Site", "cross-site"), ("Sec-Fetch-Dest", "image")]),
+        header_map(&[
+            ("Sec-Fetch-Site", "cross-site"),
+            ("Sec-Fetch-Dest", "image"),
+        ]),
         Query(scan_query()),
     )
     .await
@@ -4113,7 +4116,10 @@ async fn test_untrusted_host_is_refused_but_ip_literals_and_localhost_pass() {
 
     let resp = get_scan_handler(
         State(state.clone()),
-        header_map(&[("Host", "evil.example:6664"), ("Sec-Fetch-Site", "same-origin")]),
+        header_map(&[
+            ("Host", "evil.example:6664"),
+            ("Sec-Fetch-Site", "same-origin"),
+        ]),
         Query(scan_query()),
     )
     .await
@@ -4141,7 +4147,12 @@ async fn test_untrusted_host_is_refused_but_ip_literals_and_localhost_pass() {
         )
         .await
         .into_response();
-        assert_eq!(resp.status(), StatusCode::OK, "Host {} must be allowed", host);
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "Host {} must be allowed",
+            host
+        );
     }
 }
 
@@ -4173,7 +4184,13 @@ async fn test_retention_cap_evicts_oldest_finished_scans_only() {
         jobs.contains_key("running"),
         "an active scan must never be evicted"
     );
-    assert!(!jobs.contains_key("old"), "the oldest finished scan is evicted");
+    assert!(
+        !jobs.contains_key("old"),
+        "the oldest finished scan is evicted"
+    );
     assert!(!jobs.contains_key("mid"), "eviction continues until at cap");
-    assert!(jobs.contains_key("new"), "the newest finished scan survives");
+    assert!(
+        jobs.contains_key("new"),
+        "the newest finished scan survives"
+    );
 }
