@@ -18,9 +18,10 @@ Dalfox v3 is written in Rust. The Go (v2.x) sources live on the [`v2` branch](ht
 just build    # cargo build --release
 just dev      # cargo build (debug)
 just test     # unit + integration tests
+just lint     # cargo fmt --check + clippy -D warnings (read-only, matches CI)
 ```
 
-Before opening a PR, please run `just fix` (runs `cargo fmt` + `cargo clippy --fix`) and `just test`.
+Before opening a PR, please run `just fix` (runs `cargo fmt` + `cargo clippy --fix`) and `just test`. To check formatting and lints without modifying files, run `just lint`.
 
 ## Reporting Issues
 
