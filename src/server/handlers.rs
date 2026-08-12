@@ -15,14 +15,15 @@ pub(crate) async fn start_scan_handler(
     // is now consistent across happy and error paths for clients.
     req: Result<Json<ScanRequest>, JsonRejection>,
 ) -> impl IntoResponse {
-    if !check_api_key(&state, &headers) {
-        log(&state, "AUTH", "Unauthorized access to /scan");
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 401,
-            msg: "unauthorized".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    if let Err(denied) = authorize_request(&state, &headers) {
+        log(&state, "AUTH", &denied.log_message("/scan"));
+        return make_api_response(
+            &state,
+            &headers,
+            &params,
+            denied.status(),
+            &denied.api_response(),
+        );
     }
 
     purge_expired_jobs(&state).await;
@@ -120,14 +121,15 @@ pub(crate) async fn get_result_handler(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if !check_api_key(&state, &headers) {
-        log(&state, "AUTH", "Unauthorized access to /result");
-        let resp = ApiResponse::<ResultPayload> {
-            code: 401,
-            msg: "unauthorized".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    if let Err(denied) = authorize_request(&state, &headers) {
+        log(&state, "AUTH", &denied.log_message("/result"));
+        return make_api_response(
+            &state,
+            &headers,
+            &params,
+            denied.status(),
+            &denied.api_response(),
+        );
     }
 
     purge_expired_jobs(&state).await;
@@ -255,14 +257,15 @@ pub(crate) async fn get_scan_handler(
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if !check_api_key(&state, &headers) {
-        log(&state, "AUTH", "Unauthorized access to /scan");
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 401,
-            msg: "unauthorized".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    if let Err(denied) = authorize_request(&state, &headers) {
+        log(&state, "AUTH", &denied.log_message("/scan"));
+        return make_api_response(
+            &state,
+            &headers,
+            &params,
+            denied.status(),
+            &denied.api_response(),
+        );
     }
 
     purge_expired_jobs(&state).await;
@@ -492,6 +495,21 @@ pub(crate) async fn health_handler(
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
+    // No API key: /health is capability discovery and stays open to
+    // unauthenticated callers. The source gate still applies, so a web page
+    // the operator visits can't use it to fingerprint whether a dalfox server
+    // is listening on their machine.
+    if let Err(denied) = check_request_source(&state, &headers) {
+        log(&state, "AUTH", &denied.log_message("/health"));
+        return make_api_response(
+            &state,
+            &headers,
+            &params,
+            denied.status(),
+            &denied.api_response(),
+        );
+    }
+
     let resp = ApiResponse {
         code: 200,
         msg: "ok".to_string(),
@@ -535,13 +553,15 @@ pub(crate) async fn cancel_scan_handler(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if !check_api_key(&state, &headers) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 401,
-            msg: "unauthorized".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    if let Err(denied) = authorize_request(&state, &headers) {
+        log(&state, "AUTH", &denied.log_message("/scan/{id}"));
+        return make_api_response(
+            &state,
+            &headers,
+            &params,
+            denied.status(),
+            &denied.api_response(),
+        );
     }
 
     purge_expired_jobs(&state).await;
@@ -643,13 +663,15 @@ pub(crate) async fn list_scans_handler(
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if !check_api_key(&state, &headers) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 401,
-            msg: "unauthorized".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    if let Err(denied) = authorize_request(&state, &headers) {
+        log(&state, "AUTH", &denied.log_message("/scans"));
+        return make_api_response(
+            &state,
+            &headers,
+            &params,
+            denied.status(),
+            &denied.api_response(),
+        );
     }
 
     purge_expired_jobs(&state).await;
@@ -790,13 +812,15 @@ pub(crate) async fn preflight_handler(
     // responses the same shape as success responses.
     req: Result<Json<ScanRequest>, JsonRejection>,
 ) -> impl IntoResponse {
-    if !check_api_key(&state, &headers) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 401,
-            msg: "unauthorized".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    if let Err(denied) = authorize_request(&state, &headers) {
+        log(&state, "AUTH", &denied.log_message("/preflight"));
+        return make_api_response(
+            &state,
+            &headers,
+            &params,
+            denied.status(),
+            &denied.api_response(),
+        );
     }
 
     purge_expired_jobs(&state).await;

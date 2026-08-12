@@ -34,6 +34,40 @@ X-API-KEY: change-me
 
 If you don't set an API key, the server accepts unauthenticated requests; bind to `127.0.0.1` in that case.
 
+### Browser requests
+
+Binding to `127.0.0.1` keeps the network out, but it does not keep *browsers*
+out: a web page you happen to visit can make your own browser call a loopback
+API. That matters here more than for most services, because `GET /scan` starts a
+scan from query parameters alone and `callback_url` POSTs the findings anywhere
+— so an attacker never needs to read a response to get the results.
+
+The server therefore refuses requests that a browser identifies as cross-site:
+
+- an `Origin` header that isn't in `--allowed-origins`, or
+- `Sec-Fetch-Site: cross-site` / `same-site` (the header browsers attach to
+  every subresource load, including `<img>` and `<script>`).
+
+Both are answered with `403`. Non-browser clients — curl, the CLI, agents, your
+CI job — send neither header and are unaffected.
+
+The `Host` header is checked the same way, which is what blocks DNS rebinding
+(a hostname the attacker controls, re-resolved to your machine, which the
+browser then treats as same-origin). IP literals and `localhost` are always
+accepted; any other hostname must be listed:
+
+```bash
+# only needed when a proxy forwards a public hostname to dalfox
+dalfox server --allowed-hosts "dalfox.internal,scan.corp.example"
+```
+
+To let a real web UI call the API, name its origin — that is the supported way
+through the gate:
+
+```bash
+dalfox server --allowed-origins "https://app.example.com"
+```
+
 ### CORS
 
 ```bash
@@ -53,6 +87,12 @@ For browser clients that can't set custom headers:
 dalfox server --jsonp --callback-param-name callback
 # then GET /scan?target=...&callback=myFunction
 ```
+
+JSONP is delivered to `<script src>` loads, which carry no `Origin` to check, so
+enabling it necessarily switches off the cross-site gate described above — any
+site can then launch scans through this API and read the results. Pair it with
+`--api-key`, or prefer CORS (`--allowed-origins`), which keeps the gate on. The
+server prints a startup warning when `--jsonp` is enabled without an API key.
 
 ## Endpoints
 
@@ -256,6 +296,16 @@ flag caps every submitted scan the same way `--rate-limit` does.
   the blocking pool against a flood of submissions.
 - `--max-body-bytes <n>` — explicit request-body cap for `POST /scan` and
   `/preflight` (default `1048576` = 1 MiB); oversized bodies get `413`.
+- `--max-retained-scans <n>` — cap on *finished* scans kept in memory (default
+  `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
+  so without this a flood of quick scans holds every result — response bodies
+  included, when `include_response` was set — until the one-hour retention TTL.
+  Once the cap is hit the oldest finished scans are dropped; queued and running
+  scans are never dropped.
+- `--allowed-hosts <names>` — extra hostnames accepted in the request `Host`
+  header, on top of the bind host, `localhost`, and any IP literal. Needed when
+  a reverse proxy forwards a public hostname; see
+  [Browser requests](#browser-requests).
 
 ## Job lifecycle
 
@@ -308,7 +358,10 @@ sudo systemctl enable --now dalfox
 
 ## Security notes
 
-- **Bind to localhost** unless you absolutely need remote access.
+- **Bind to localhost** unless you absolutely need remote access — but treat
+  that as keeping the *network* out, not as a security boundary. A web page you
+  visit can reach a loopback API through your own browser, which is what the
+  cross-site and `Host` gate in [Browser requests](#browser-requests) blocks.
 - **Always set `--api-key`** on a remote bind.
 - **Keep the API key out of logs.** Dalfox does not log it, but reverse proxies might.
 - **Put it behind TLS** (nginx, Caddy, Traefik) if you expose it over a network.
@@ -321,8 +374,9 @@ sudo systemctl enable --now dalfox
   primitive for anyone who can submit a scan, so set `--api-key` and restrict
   egress when exposing the API to untrusted callers.
 - **`--jsonp` makes `GET` endpoints readable cross-origin** via `<script>`,
-  which is not subject to the CORS allow-list. Enable it only when you intend
-  that, and pair it with `--api-key`.
+  which is not subject to the CORS allow-list — and, because a script load
+  carries no `Origin` to check, it also switches off the cross-site gate.
+  Enable it only when you intend that, and pair it with `--api-key`.
 - **Bound scan runtime with `--scan-timeout`.** The per-request `timeout` only
   caps a single HTTP request; a scan with many parameters and payloads (or
   `deep_scan`) can still run for a long time. Set `--scan-timeout <secs>` so

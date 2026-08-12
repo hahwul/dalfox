@@ -37,9 +37,9 @@ pub(crate) use crate::cmd::scan::ScanArgs;
 pub(crate) use crate::job::{
     AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS,
     MAX_DISCOVERED_PARAMS, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS, MAX_WORKERS,
-    cap_reflection_params, effective_rate_limit, effective_scan_timeout, has_http_scheme, now_ms,
-    parse_job_status, purge_expired_jobs as purge_jobs_map, run_within_scan_budget,
-    send_reachability_probe, split_cookie_pairs, unreachable_error_message,
+    cap_reflection_params, effective_rate_limit, effective_scan_timeout, enforce_retention_cap,
+    has_http_scheme, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
+    run_within_scan_budget, send_reachability_probe, split_cookie_pairs, unreachable_error_message,
 };
 pub(crate) use crate::parameter_analysis::analyze_parameters;
 pub(crate) use crate::scanning::result::{Result as ScanResult, SanitizedResult};
@@ -128,6 +128,22 @@ pub async fn run_server(args: ServerArgs) {
         .clone()
         .unwrap_or_else(|| "Content-Type,X-API-KEY,Authorization".to_string());
 
+    // Hostnames accepted in the `Host` header. The bind host is always one of
+    // them (an operator who ran `--host dalfox.internal` means it), and
+    // `auth::check_host` additionally accepts IP literals and `localhost`.
+    let mut allowed_hosts: Vec<String> = args
+        .allowed_hosts
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let bind_host = args.host.trim().to_ascii_lowercase();
+    if !bind_host.is_empty() && !allowed_hosts.contains(&bind_host) {
+        allowed_hosts.push(bind_host);
+    }
+
     let state = AppState {
         api_key,
         jobs: Arc::new(Mutex::new(HashMap::new())),
@@ -142,6 +158,8 @@ pub async fn run_server(args: ServerArgs) {
         rate_limit: args.rate_limit,
         scan_timeout: args.scan_timeout,
         max_concurrent_scans: args.max_concurrent_scans,
+        allowed_hosts,
+        max_retained_scans: args.max_retained_scans,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     };
@@ -181,6 +199,11 @@ pub async fn run_server(args: ServerArgs) {
     // deployment that fronts the server with its own auth/egress controls still
     // starts. `auth_disabled` mirrors `check_api_key`: an empty key string is
     // treated as no auth, same as `--api-key` help ("Leave empty to disable").
+    //
+    // Note this warning is about *network* reach only. Binding to loopback is
+    // not by itself a security boundary: a web page the operator visits can
+    // drive a loopback API through their browser, which is what the
+    // origin/Host gate in `auth.rs` exists to stop.
     let auth_disabled = state.api_key.as_deref().is_none_or(|s| s.is_empty());
     if auth_disabled && !addr.ip().is_loopback() {
         log(
@@ -192,6 +215,20 @@ pub async fn run_server(args: ServerArgs) {
                  network. Set --api-key (or DALFOX_API_KEY), or bind to 127.0.0.1.",
                 addr_str
             ),
+        );
+    }
+
+    // JSONP is served to `<script src>` loads, which carry no Origin to check,
+    // so turning it on necessarily switches off the cross-site gate (see
+    // `auth::check_cross_site`). Combined with no API key, that means any page
+    // the operator visits can both launch scans and read their results.
+    if state.jsonp_enabled && auth_disabled {
+        log(
+            &state,
+            "WRN",
+            "--jsonp is enabled with NO API key — any website the operator visits can \
+             launch scans through this API and read the results cross-origin. Set \
+             --api-key (or DALFOX_API_KEY), or drop --jsonp.",
         );
     }
 
