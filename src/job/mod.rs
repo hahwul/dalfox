@@ -74,6 +74,10 @@ pub const MAX_PAYLOADS_PER_PARAM: usize = 100_000;
 /// grow the job map / blocking pool without bound.
 pub const MAX_ACTIVE_SCANS_MCP: usize = 100;
 
+/// Ceiling on retained *finished* scans for the MCP runtime, mirroring the REST
+/// server's `--max-retained-scans` (which MCP has no config surface for).
+pub const MAX_RETAINED_SCANS_MCP: usize = 1000;
+
 /// Resolve the effective per-scan request-rate limit (requests/second) from a
 /// per-request value and an optional server-side cap.
 ///
@@ -258,6 +262,43 @@ pub fn purge_expired_jobs(jobs: &mut HashMap<String, Job>, retention_secs: i64) 
         Some(finished) => finished >= cutoff,
         None => true,
     });
+}
+
+/// Drop the oldest finished jobs until the map holds at most `cap` entries.
+/// `cap == 0` disables the cap.
+///
+/// The admission caps (`--max-concurrent-scans`, [`MAX_ACTIVE_SCANS_MCP`])
+/// count only *active* jobs, and [`purge_expired_jobs`] only collects entries
+/// past the retention TTL — so a flood of quick scans retains every result
+/// (including raw response bodies when `include_response` was set) for an hour
+/// with nothing bounding the total. This is the bound. Callers apply it while
+/// admitting a new scan, since that is where the jobs lock is already held.
+///
+/// Only terminal jobs are evicted: a queued/running job still has a worker
+/// writing to it, and dropping its entry would strand that worker and lose the
+/// caller's scan_id. If every job is active, the map simply stays over the cap
+/// until they settle.
+pub fn enforce_retention_cap(jobs: &mut HashMap<String, Job>, cap: usize) {
+    if cap == 0 || jobs.len() <= cap {
+        return;
+    }
+    let mut finished: Vec<(String, i64)> = jobs
+        .iter()
+        .filter(|(_, job)| job.is_terminal())
+        .map(|(id, job)| (id.clone(), job.finished_at_ms.unwrap_or(job.queued_at_ms)))
+        .collect();
+    // Oldest first, then by id so two jobs finishing in the same millisecond
+    // evict deterministically rather than in HashMap iteration order.
+    finished.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+
+    let mut excess = jobs.len() - cap;
+    for (id, _) in finished {
+        if excess == 0 {
+            break;
+        }
+        jobs.remove(&id);
+        excess -= 1;
+    }
 }
 
 /// RAII guard that aborts a background `JoinHandle` on drop, including the

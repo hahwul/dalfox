@@ -239,3 +239,59 @@ async fn run_within_scan_budget_zero_disables_the_cap() {
     assert!(!timed_out, "a 0 budget must never report a timeout");
     assert!(!cancel.load(std::sync::atomic::Ordering::Relaxed));
 }
+
+#[test]
+fn enforce_retention_cap_evicts_oldest_finished_first() {
+    let mut jobs: HashMap<String, Job> = HashMap::new();
+    for i in 0..5i64 {
+        let mut job = Job::new_queued(format!("http://example.com/{}", i));
+        job.status = JobStatus::Done;
+        job.finished_at_ms = Some(1_000 + i);
+        jobs.insert(format!("job{}", i), job);
+    }
+
+    enforce_retention_cap(&mut jobs, 3);
+
+    assert_eq!(jobs.len(), 3);
+    assert!(!jobs.contains_key("job0"), "oldest evicted first");
+    assert!(!jobs.contains_key("job1"));
+    assert!(jobs.contains_key("job4"), "newest retained");
+}
+
+#[test]
+fn enforce_retention_cap_never_evicts_active_jobs() {
+    let mut jobs: HashMap<String, Job> = HashMap::new();
+    // Two active jobs with no finished_at, plus one finished job.
+    jobs.insert("queued".to_string(), Job::new_queued("http://a".to_string()));
+    let mut running = Job::new_queued("http://b".to_string());
+    running.status = JobStatus::Running;
+    jobs.insert("running".to_string(), running);
+    let mut done = Job::new_queued("http://c".to_string());
+    done.status = JobStatus::Done;
+    done.finished_at_ms = Some(now_ms());
+    jobs.insert("done".to_string(), done);
+
+    enforce_retention_cap(&mut jobs, 1);
+
+    // Only the finished one can go; the map stays over cap rather than
+    // stranding a worker that is still writing to its entry.
+    assert_eq!(jobs.len(), 2);
+    assert!(jobs.contains_key("queued"));
+    assert!(jobs.contains_key("running"));
+    assert!(!jobs.contains_key("done"));
+}
+
+#[test]
+fn enforce_retention_cap_zero_disables_the_cap() {
+    let mut jobs: HashMap<String, Job> = HashMap::new();
+    for i in 0..4 {
+        let mut job = Job::new_queued(format!("http://example.com/{}", i));
+        job.status = JobStatus::Done;
+        job.finished_at_ms = Some(now_ms());
+        jobs.insert(format!("job{}", i), job);
+    }
+
+    enforce_retention_cap(&mut jobs, 0);
+
+    assert_eq!(jobs.len(), 4);
+}

@@ -212,6 +212,12 @@ pub(crate) async fn try_admit_and_queue(
             finished_at_ms: None,
         },
     );
+    // Bound retained finished scans. The admission cap above counts only active
+    // jobs, so without this the map grows with every quick scan until the
+    // retention TTL expires. Applied after the insert so the steady state is
+    // exactly `max_retained_scans`; the job just added is non-terminal and so
+    // is never a candidate for eviction.
+    enforce_retention_cap(&mut jobs, state.max_retained_scans);
     Some(id)
 }
 

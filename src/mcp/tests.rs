@@ -1804,3 +1804,43 @@ async fn test_preflight_dalfox_reports_the_normalized_method() {
         "preflight must report (and probe with) the normalized verb: {parsed}"
     );
 }
+
+#[tokio::test]
+async fn test_scan_with_dalfox_bounds_retained_finished_scans() {
+    // Parity with the REST server's --max-retained-scans: MAX_ACTIVE_SCANS_MCP
+    // only counts active scans, so an agent loop of quick scans would otherwise
+    // retain every result until the retention TTL expires.
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.lock_jobs();
+        // Recent timestamps: scan_with_dalfox purges by retention TTL first, so
+        // epoch-ish values would be swept before the cap ever applies.
+        let base = now_ms() - MAX_RETAINED_SCANS_MCP as i64;
+        for i in 0..MAX_RETAINED_SCANS_MCP {
+            let mut job = test_job(JobStatus::Done, None);
+            job.finished_at_ms = Some(base + i as i64);
+            jobs.insert(format!("old{:05}", i), job);
+        }
+    }
+
+    let resp = mcp
+        .scan_with_dalfox(Parameters(default_scan_params("http://127.0.0.1:1/")))
+        .await
+        .expect("scan_with_dalfox should queue");
+    let scan_id = parse_result_json(&resp)["scan_id"]
+        .as_str()
+        .expect("scan_id")
+        .to_string();
+
+    let jobs = mcp.lock_jobs();
+    assert_eq!(
+        jobs.len(),
+        MAX_RETAINED_SCANS_MCP,
+        "the map must settle at the cap, not grow past it"
+    );
+    assert!(jobs.contains_key(&scan_id), "the new scan is retained");
+    assert!(
+        !jobs.contains_key("old00000"),
+        "the oldest finished scan is evicted"
+    );
+}

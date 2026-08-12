@@ -47,6 +47,25 @@ pub struct ServerArgs {
     #[arg(long = "max-concurrent-scans", default_value_t = 100)]
     pub max_concurrent_scans: usize,
 
+    /// Comma-separated hostnames accepted in the request `Host` header, on top
+    /// of the bind host, `localhost`, and any IP literal (which cannot be
+    /// rebound). Requests naming anything else are refused, which is what a DNS
+    /// rebinding attack looks like. Set this when a reverse proxy forwards a
+    /// public hostname to this server.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "allowed-hosts")]
+    pub allowed_hosts: Option<String>,
+
+    /// Maximum number of finished (done/error/cancelled) scans kept in memory.
+    /// Once exceeded, the oldest finished scans are dropped to make room; scans
+    /// still queued or running are never dropped. 0 disables the cap. This
+    /// bounds memory independently of `--max-concurrent-scans`, which only
+    /// counts active scans, so a flood of quick scans could otherwise retain
+    /// their results (including response bodies) until the retention TTL.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "max-retained-scans", default_value_t = 1000)]
+    pub max_retained_scans: usize,
+
     /// Maximum accepted request-body size (bytes) for POST /scan and /preflight.
     /// Replaces axum's implicit 2 MiB default with an explicit, documented bound.
     #[clap(help_heading = "SERVER")]
@@ -112,6 +131,12 @@ pub(crate) struct AppState {
     pub(crate) scan_timeout: Option<u64>,
     // Max concurrent (queued + running) scans; 0 = unlimited.
     pub(crate) max_concurrent_scans: usize,
+    /// Hostnames accepted in the request `Host` header, lowercased, including
+    /// the bind host. IP literals and `localhost` are always accepted without
+    /// being listed here. See `auth::check_host` for why this exists.
+    pub(crate) allowed_hosts: Vec<String>,
+    /// Max finished scans retained in the jobs map; 0 = unlimited.
+    pub(crate) max_retained_scans: usize,
     /// Throttle state for the best-effort job-retention purge: the last time
     /// (ms since epoch) a sweep ran. The purge is O(n) over the whole job map
     /// and used to run on every request (including the high-frequency poll

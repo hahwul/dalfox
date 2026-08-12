@@ -42,7 +42,8 @@ use crate::{
     cmd::scan::ScanArgs,
     job::{
         AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_DELAY_MS,
-        MAX_DISCOVERED_PARAMS, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS, MAX_WORKERS,
+        MAX_DISCOVERED_PARAMS, MAX_RETAINED_SCANS_MCP, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS,
+        MAX_WORKERS,
         cap_reflection_params, has_http_scheme, now_ms, parse_job_status,
         purge_expired_jobs as purge_jobs_map, run_within_scan_budget, send_reachability_probe,
         split_cookie_pairs, unreachable_error_message,
@@ -1315,6 +1316,11 @@ browser execution; only detection_method=oob observes a real browser."
             }
             let id = crate::utils::make_unique_scan_id(&target, |id| jobs.contains_key(id));
             jobs.insert(id.clone(), Job::new_queued(target.clone()));
+            // Bound retained *finished* scans too: the check above counts only
+            // active jobs, so an agent running many quick scans would otherwise
+            // hold every result (raw response bodies included, when
+            // include_response was set) until the retention TTL expires.
+            crate::job::enforce_retention_cap(&mut jobs, MAX_RETAINED_SCANS_MCP);
             id
         };
 
