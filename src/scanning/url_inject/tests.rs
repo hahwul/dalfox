@@ -991,6 +991,125 @@ fn test_build_header_request_still_sets_plain_headers() {
     );
 }
 
+/// A `Body` injection must declare `application/x-www-form-urlencoded`.
+///
+/// Regression: the reflection and DOM-verify paths set this, but the
+/// light-verify path built its own request and omitted it. A form-parsing
+/// server given a body with no `Content-Type` never binds the parameter, so
+/// the payload never reached the sink and light verification reported a
+/// negative — a silent false negative on every `Body` param it re-checked.
+/// All three paths now share `build_inject_request`, so the header is set once.
+#[test]
+fn test_build_inject_request_body_sets_urlencoded_content_type() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    let param = make_param(Location::Body, "q");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    assert_eq!(
+        req.headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/x-www-form-urlencoded"),
+        "a urlencoded body must declare its Content-Type or the server won't parse it"
+    );
+    let body = req
+        .body()
+        .and_then(|b| b.as_bytes())
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .expect("a body is sent");
+    assert!(
+        body.contains("q=PAYLOAD"),
+        "payload must be in the body: {body}"
+    );
+}
+
+/// A `JsonBody` injection must declare `application/json`.
+#[test]
+fn test_build_inject_request_json_body_sets_json_content_type() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    let param = make_param(Location::JsonBody, "q");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    assert_eq!(
+        req.headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+}
+
+/// Multipart must NOT get a hand-written `Content-Type`: reqwest derives it
+/// from the form so it carries the generated boundary. Overriding it with a
+/// bare `multipart/form-data` would make the body unparseable.
+#[test]
+fn test_build_inject_request_multipart_keeps_generated_boundary() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    let param = make_param(Location::MultipartBody, "q");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    let ct = req
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .expect("multipart sets a Content-Type");
+    assert!(
+        ct.starts_with("multipart/form-data; boundary="),
+        "multipart Content-Type must carry the boundary, got: {ct}"
+    );
+}
+
+/// A cookie param routes to the `Cookie` header, not a same-named header —
+/// the dispatcher must keep delegating `Header` to `build_header_request`.
+#[test]
+fn test_build_inject_request_header_location_routes_cookies() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let target = cookie_target(&[("session", "abc")]);
+    let param = make_param(Location::Header, "session");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    assert!(
+        req.headers()
+            .get(reqwest::header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|c| c.contains("session=PAYLOAD")),
+        "a cookie param must be injected into the Cookie header"
+    );
+    assert!(req.headers().get("session").is_none());
+}
+
+/// Query injection puts the payload in the URL and leaves headers alone.
+#[test]
+fn test_build_inject_request_query_injects_into_url() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let target = crate::target_parser::parse_target("http://example.test/?q=1").expect("target");
+    let param = make_param(Location::Query, "q");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    assert!(
+        req.url().as_str().contains("q=PAYLOAD"),
+        "payload must be in the query string, got: {}",
+        req.url()
+    );
+}
+
 /// A target carrying `cookies`, for the cookie-injection tests above.
 fn cookie_target(cookies: &[(&str, &str)]) -> Target {
     let mut target = crate::target_parser::parse_target("http://example.test/").expect("target");

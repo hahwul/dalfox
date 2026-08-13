@@ -679,16 +679,15 @@ pub(crate) async fn run_scan_job(
                     scan_report = crate::scanning::run_scanning(
                         &target,
                         args.clone(),
-                        results.clone(),
-                        None,
-                        None,
-                        findings_count.clone(),
-                        Some(cancel_flag.clone()),
-                        None,
+                        crate::scanning::ScanRunHandles::new(
+                            results.clone(),
+                            findings_count.clone(),
+                        )
+                        .with_cancel(cancel_flag.clone())
                         // Feed the live per-parameter completion counter so
                         // GET /scan/{id} reports `params_tested` climbing
                         // during the scan instead of staying at 0 until done.
-                        Some(progress.params_tested.clone()),
+                        .with_params_done(progress.params_tested.clone()),
                     )
                     .await;
 

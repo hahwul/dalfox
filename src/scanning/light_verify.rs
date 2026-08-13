@@ -1,4 +1,4 @@
-use crate::parameter_analysis::{Location, Param};
+use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::Client;
 
@@ -25,76 +25,11 @@ pub async fn verify_dom_xss_light_with_client(
     param: &Param,
     payload: &str,
 ) -> (bool, Option<String>, Option<String>) {
-    let default_method = target.parse_method();
-    let body_method =
-        crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
-    let request = match param.location {
-        Location::Header => crate::scanning::url_inject::build_header_request(
-            client,
-            target,
-            param,
-            payload,
-            default_method,
-        ),
-        Location::Body => {
-            let parsed_url = param
-                .form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let body = Some(crate::scanning::url_inject::urlencoded_body(
-                target.data.as_deref(),
-                &param.name,
-                payload,
-            ));
-            crate::utils::build_request(client, target, body_method, parsed_url, body)
-        }
-        Location::JsonBody => {
-            let parsed_url = param
-                .form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let body = Some(crate::scanning::url_inject::json_body(
-                target.data.as_deref(),
-                &param.name,
-                &param.value,
-                payload,
-            ));
-            let rb = crate::utils::build_request(client, target, body_method, parsed_url, body);
-            rb.header("Content-Type", "application/json")
-        }
-        Location::MultipartBody => {
-            let parsed_url = param
-                .form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let form = crate::scanning::url_inject::multipart_form(
-                target.data.as_deref(),
-                &param.name,
-                payload,
-            );
-            crate::utils::build_request(client, target, body_method, parsed_url, None)
-                .multipart(form)
-        }
-        _ => {
-            // GET form discovery sets form_action_url; light-verify must
-            // follow it to the action endpoint — otherwise the reflection
-            // we're confirming lives on a different URL.
-            let base_url = crate::scanning::url_inject::effective_query_base(&target.url, param);
-            let inject_url =
-                crate::scanning::url_inject::build_injected_url(&base_url, param, payload);
-            let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| base_url.clone());
-            crate::utils::build_request(
-                client,
-                target,
-                default_method,
-                parsed_url,
-                target.data.clone(),
-            )
-        }
-    };
+    // Shared with the reflection and DOM-verify paths. This path used to
+    // build its own request and omitted the urlencoded `Content-Type`, so a
+    // form-parsing server never bound the param and light verification came
+    // back negative on Body params.
+    let request = crate::scanning::url_inject::build_inject_request(client, target, param, payload);
 
     let mut note: Option<String> = None;
     // Honor --rate-limit on this verification re-request without changing the

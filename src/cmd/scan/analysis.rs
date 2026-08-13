@@ -68,7 +68,7 @@ async fn record_session_baseline(
 
 pub(crate) async fn run_preflight_and_analysis(
     args: &ScanArgs,
-    host_groups: &mut std::collections::HashMap<String, Vec<Target>>,
+    host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
 ) {
     // Rebind the shared state to owned locals so the loop body below is
@@ -116,8 +116,9 @@ pub(crate) async fn run_preflight_and_analysis(
         }
 
         // Bound overall concurrency for preflight + analysis with the same cap as scanning
-        let pre_analyze_semaphore =
-            Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
+        let pre_analyze_semaphore = Arc::new(tokio::sync::Semaphore::new(
+            crate::utils::semaphore_permits(args.max_concurrent_targets),
+        ));
 
         // Move targets out of the group to own them in spawned tasks
         let mut drained: Vec<Target> = Vec::new();

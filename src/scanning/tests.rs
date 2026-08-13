@@ -1041,13 +1041,7 @@ async fn test_xss_scanning_get_query() {
     run_scanning(
         &target,
         Arc::new(args),
-        results,
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results, Arc::new(AtomicUsize::new(0))),
     )
     .await;
 
@@ -1080,13 +1074,7 @@ async fn test_xss_scanning_post_body() {
     run_scanning(
         &target,
         Arc::new(args),
-        results,
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results, Arc::new(AtomicUsize::new(0))),
     )
     .await;
 
@@ -1133,13 +1121,7 @@ async fn test_run_scanning_with_reflection_params() {
     run_scanning(
         &target,
         Arc::new(args),
-        results,
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results, Arc::new(AtomicUsize::new(0))),
     )
     .await;
 }
@@ -1208,13 +1190,7 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
     run_scanning(
         &target,
         args,
-        results.clone(),
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
 
@@ -1331,13 +1307,7 @@ async fn test_run_scanning_dom_phase_early_exits_on_inert_echo() {
     run_scanning(
         &target,
         Arc::new(integration_scan_args(false)),
-        results.clone(),
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
 
@@ -1426,13 +1396,7 @@ async fn test_run_scanning_dom_phase_preserves_recall_on_executable_echo() {
     run_scanning(
         &target,
         Arc::new(integration_scan_args(false)),
-        results.clone(),
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
 
@@ -1527,13 +1491,7 @@ async fn test_run_scanning_dom_phase_inert_echo_count_is_cumulative() {
     run_scanning(
         &target,
         Arc::new(integration_scan_args(false)),
-        results.clone(),
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
 
@@ -1598,13 +1556,11 @@ async fn test_run_scanning_increments_params_done_counter() {
     run_scanning(
         &target,
         Arc::new(integration_scan_args(false)),
-        Arc::new(Mutex::new(Vec::new())),
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        Some(params_done.clone()),
+        ScanRunHandles::new(
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(AtomicUsize::new(0)),
+        )
+        .with_params_done(params_done.clone()),
     )
     .await;
 
@@ -1635,13 +1591,7 @@ async fn test_run_scanning_empty_params() {
     run_scanning(
         &target,
         Arc::new(args),
-        results,
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results, Arc::new(AtomicUsize::new(0))),
     )
     .await;
 }
@@ -2602,13 +2552,7 @@ async fn test_run_scanning_hpp_phase_reports_duplicated_param_bypass() {
     run_scanning(
         &target,
         args,
-        results.clone(),
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
 
@@ -2707,13 +2651,7 @@ async fn test_run_scanning_without_hpp_flag_reports_no_hpp_finding() {
     run_scanning(
         &target,
         args,
-        results.clone(),
-        None,
-        None,
-        Arc::new(AtomicUsize::new(0)),
-        None,
-        None,
-        None,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
 

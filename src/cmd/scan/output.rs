@@ -15,7 +15,7 @@ use crate::target_parser::Target;
 
 pub(crate) async fn render_dry_run(
     args: &ScanArgs,
-    host_groups: &std::collections::HashMap<String, Vec<Target>>,
+    host_groups: &std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
 ) -> ScanOutcome {
     let skipped_targets = &state.skipped_targets;
@@ -202,7 +202,7 @@ pub(crate) async fn render_dry_run(
 
 pub(crate) fn render_only_discovery(
     args: &ScanArgs,
-    host_groups: &std::collections::HashMap<String, Vec<Target>>,
+    host_groups: &std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
 ) -> ScanOutcome {
     // Collect once so we can render both human-readable plain

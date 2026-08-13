@@ -813,8 +813,8 @@ fn target_with_params(url: &str, params: Vec<Param>) -> Target {
 }
 
 /// Wrap targets into the `host_groups` shape the output renderers consume.
-fn host_group(targets: Vec<Target>) -> HashMap<String, Vec<Target>> {
-    let mut m = HashMap::new();
+fn host_group(targets: Vec<Target>) -> std::collections::BTreeMap<String, Vec<Target>> {
+    let mut m = std::collections::BTreeMap::new();
     m.insert("host".to_string(), targets);
     m
 }
@@ -2456,7 +2456,7 @@ async fn test_run_preflight_and_analysis_analyze_external_js_produces_finding() 
     args.skip_waf_probe = true;
 
     let state = make_scan_state(vec![]);
-    let mut host_groups = std::collections::HashMap::new();
+    let mut host_groups = std::collections::BTreeMap::new();
     host_groups.insert(host, vec![target]);
 
     run_preflight_and_analysis(&args, &mut host_groups, &state).await;

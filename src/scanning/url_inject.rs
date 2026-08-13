@@ -670,5 +670,117 @@ pub fn multipart_form(data: Option<&str>, name: &str, value: &str) -> reqwest::m
     form
 }
 
+/// Resolve the URL a body-bearing injection must be sent to: the discovered
+/// `<form action=...>` endpoint when the param came from a form, else the
+/// target's own URL. A form-discovered body param reflects at the action
+/// endpoint, not at the page that contained the form.
+pub fn resolve_form_action_url(param: &Param, target: &Target) -> url::Url {
+    param
+        .form_action_url
+        .as_ref()
+        .and_then(|u| url::Url::parse(u).ok())
+        .unwrap_or_else(|| target.url.clone())
+}
+
+/// `application/x-www-form-urlencoded` body injection.
+pub fn build_body_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let body = Some(urlencoded_body(target.data.as_deref(), &param.name, value));
+    let method = body_location_method_for_param(&target.method, param);
+    let base = crate::utils::build_request(client, target, method, parsed_url, body);
+    crate::utils::apply_header_overrides(
+        base,
+        &[(
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        )],
+    )
+}
+
+/// `application/json` body injection.
+pub fn build_json_body_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let body = Some(json_body(
+        target.data.as_deref(),
+        &param.name,
+        &param.value,
+        value,
+    ));
+    let method = body_location_method_for_param(&target.method, param);
+    let base = crate::utils::build_request(client, target, method, parsed_url, body);
+    crate::utils::apply_header_overrides(
+        base,
+        &[("Content-Type".to_string(), "application/json".to_string())],
+    )
+}
+
+/// `multipart/form-data` body injection. No explicit `Content-Type` override:
+/// reqwest derives it from the form, and it must carry the generated boundary.
+pub fn build_multipart_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let form = multipart_form(target.data.as_deref(), &param.name, value);
+    let method = body_location_method_for_param(&target.method, param);
+    crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
+}
+
+/// Query / Path injection: the payload goes into the URL and the target's own
+/// body (if any) rides along unchanged.
+pub fn build_url_inject_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+    method: reqwest::Method,
+) -> reqwest::RequestBuilder {
+    // Query params discovered through a `<form action=...>` must be injected at
+    // the action URL — that's where the sink lives. Path params keep
+    // `target.url` because path-segment injection depends on the original path
+    // layout.
+    let base_url = effective_query_base(&target.url, param);
+    let inject_url_str = build_injected_url(&base_url, param, value);
+    let inject_url = url::Url::parse(&inject_url_str).unwrap_or_else(|_| base_url.clone());
+    crate::utils::build_request(client, target, method, inject_url, target.data.clone())
+}
+
+/// Build the injection request for `value` at `param`'s location.
+///
+/// Single source of truth for the reflection / light-verify / DOM-verify
+/// request builders, which were three near-identical copies of this `match`.
+/// They had already drifted: the light-verify copy sent an urlencoded body
+/// with **no `Content-Type`**, so form-parsing servers never bound the param
+/// and the verification silently came back negative.
+pub fn build_inject_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+) -> reqwest::RequestBuilder {
+    let default_method = target.parse_method();
+    match param.location {
+        // A cookie param must go into the `Cookie` header, not a header named
+        // after the cookie — see `build_header_request`.
+        Location::Header => build_header_request(client, target, param, value, default_method),
+        Location::Body => build_body_request(client, target, param, value),
+        Location::JsonBody => build_json_body_request(client, target, param, value),
+        Location::MultipartBody => build_multipart_request(client, target, param, value),
+        _ => build_url_inject_request(client, target, param, value, default_method),
+    }
+}
+
 #[cfg(test)]
 mod tests;

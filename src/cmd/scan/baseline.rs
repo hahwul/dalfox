@@ -65,6 +65,28 @@ impl Baseline {
     }
 }
 
+/// The fields a finding's identity is derived from.
+///
+/// Named rather than positional: [`finding_key`] used to take these as nine
+/// consecutive `&str` parameters, so any two could be swapped and still
+/// compile. That is not a cosmetic risk here. The key is derived on two
+/// independent paths — from a live [`Result`] and from a loaded
+/// [`BaselineFinding`], whose field declaration orders differ — and both must
+/// produce byte-identical keys. Transpose one and every finding either reads
+/// as new (noise) or, under `filter` mode, collides with an unrelated one and
+/// is suppressed: the silent false-clean this module exists to avoid.
+struct FindingIdentity<'a> {
+    data: &'a str,
+    param: &'a str,
+    location: &'a str,
+    inject_type: &'a str,
+    cwe: &'a str,
+    tier: &'a str,
+    evidence: &'a str,
+    detection_method: &'a str,
+    payload: &'a str,
+}
+
 /// Stable cross-run identity of a finding.
 ///
 /// Deliberately built from *what the finding is* and not *how this particular
@@ -85,42 +107,31 @@ impl Baseline {
 ///     falling back to the detection method for everything else. The raw
 ///     evidence string is *not* used — it carries line/column numbers and
 ///     payload text that shift for unrelated reasons.
-#[allow(clippy::too_many_arguments)]
-fn finding_key(
-    data: &str,
-    param: &str,
-    location: &str,
-    inject_type: &str,
-    cwe: &str,
-    tier: &str,
-    evidence: &str,
-    detection_method: &str,
-    payload: &str,
-) -> String {
+fn finding_key(id: FindingIdentity<'_>) -> String {
     format!(
         "v1|{}|{}|{}|{}|{}|{}|{}",
-        identity_path(data, location, payload),
-        param,
-        location,
-        inject_type,
-        cwe,
-        tier,
-        evidence_family(evidence, detection_method),
+        identity_path(id.data, id.location, id.payload),
+        id.param,
+        id.location,
+        id.inject_type,
+        id.cwe,
+        id.tier,
+        evidence_family(id.evidence, id.detection_method),
     )
 }
 
 pub(crate) fn key_for_result(r: &Result) -> String {
-    finding_key(
-        &r.data,
-        &r.param,
-        &r.location,
-        &r.inject_type,
-        &r.cwe,
-        r.result_type.short(),
-        &r.evidence,
-        r.detection_method.as_str(),
-        &r.payload,
-    )
+    finding_key(FindingIdentity {
+        data: &r.data,
+        param: &r.param,
+        location: &r.location,
+        inject_type: &r.inject_type,
+        cwe: &r.cwe,
+        tier: r.result_type.short(),
+        evidence: &r.evidence,
+        detection_method: r.detection_method.as_str(),
+        payload: &r.payload,
+    })
 }
 
 /// The payload-invariant part of a finding URL: scheme + host + path, with the
@@ -273,17 +284,17 @@ pub(crate) fn load(path: &str, mode: &str) -> Baseline {
         if f.data.is_empty() && f.param.is_empty() {
             continue;
         }
-        keys.insert(finding_key(
-            &f.data,
-            &f.param,
-            &f.location,
-            &f.inject_type,
-            &f.cwe,
-            &f.tier,
-            &f.evidence,
-            &f.detection_method,
-            &f.payload,
-        ));
+        keys.insert(finding_key(FindingIdentity {
+            data: &f.data,
+            param: &f.param,
+            location: &f.location,
+            inject_type: &f.inject_type,
+            cwe: &f.cwe,
+            tier: &f.tier,
+            evidence: &f.evidence,
+            detection_method: &f.detection_method,
+            payload: &f.payload,
+        }));
     }
 
     // Entries were present but none of them looked like findings: the file

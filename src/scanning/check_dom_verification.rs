@@ -19,7 +19,7 @@
 //! the stored payload. Applies `pre_encoding` as `encoded_payload` for the
 //! request but checks DOM evidence against the raw `payload`.
 
-use crate::parameter_analysis::{Location, Param};
+use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::Client;
 use std::sync::OnceLock;
@@ -774,114 +774,13 @@ pub async fn check_dom_verification(
     check_dom_verification_with_client(&client, target, param, payload, args).await
 }
 
-/// Build the HTTP request for injecting the payload based on the parameter location.
-fn build_inject_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    encoded_payload: &str,
-) -> reqwest::RequestBuilder {
-    let default_method = target.parse_method();
-    match param.location {
-        Location::Header => crate::scanning::url_inject::build_header_request(
-            client,
-            target,
-            param,
-            encoded_payload,
-            default_method,
-        ),
-        Location::Body => build_body_request(client, target, param, encoded_payload),
-        Location::JsonBody => build_json_body_request(client, target, param, encoded_payload),
-        Location::MultipartBody => build_multipart_request(client, target, param, encoded_payload),
-        _ => build_url_inject_request(client, target, param, encoded_payload, default_method),
-    }
-}
-
-fn resolve_form_action_url(param: &Param, target: &Target) -> url::Url {
-    param
-        .form_action_url
-        .as_ref()
-        .and_then(|u| url::Url::parse(u).ok())
-        .unwrap_or_else(|| target.url.clone())
-}
-
-fn build_body_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    encoded_payload: &str,
-) -> reqwest::RequestBuilder {
-    let parsed_url = resolve_form_action_url(param, target);
-    let body = Some(crate::scanning::url_inject::urlencoded_body(
-        target.data.as_deref(),
-        &param.name,
-        encoded_payload,
-    ));
-    let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_request(client, target, method, parsed_url, body);
-    crate::utils::apply_header_overrides(
-        base,
-        &[(
-            "Content-Type".to_string(),
-            "application/x-www-form-urlencoded".to_string(),
-        )],
-    )
-}
-
-fn build_json_body_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    encoded_payload: &str,
-) -> reqwest::RequestBuilder {
-    let parsed_url = resolve_form_action_url(param, target);
-    let body = Some(crate::scanning::url_inject::json_body(
-        target.data.as_deref(),
-        &param.name,
-        &param.value,
-        encoded_payload,
-    ));
-    let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_request(client, target, method, parsed_url, body);
-    crate::utils::apply_header_overrides(
-        base,
-        &[("Content-Type".to_string(), "application/json".to_string())],
-    )
-}
-
-fn build_multipart_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    encoded_payload: &str,
-) -> reqwest::RequestBuilder {
-    let parsed_url = resolve_form_action_url(param, target);
-    let form = crate::scanning::url_inject::multipart_form(
-        target.data.as_deref(),
-        &param.name,
-        encoded_payload,
-    );
-    let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
-    crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
-}
-
-fn build_url_inject_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    encoded_payload: &str,
-    method: reqwest::Method,
-) -> reqwest::RequestBuilder {
-    // Query params discovered through a `<form action=...>` must be verified
-    // at the action URL — that's where the sink lives. Path params keep
-    // target.url because path-segment injection depends on the original
-    // path layout.
-    let base_url = crate::scanning::url_inject::effective_query_base(&target.url, param);
-    let inject_url_str =
-        crate::scanning::url_inject::build_injected_url(&base_url, param, encoded_payload);
-    let inject_url = url::Url::parse(&inject_url_str).unwrap_or_else(|_| base_url.clone());
-    crate::utils::build_request(client, target, method, inject_url, target.data.clone())
-}
+// The injection request builders live in `url_inject` so the reflection,
+// light-verify, and DOM-verify paths cannot drift apart again (they had:
+// light-verify was omitting the urlencoded `Content-Type`). Re-exported so
+// this module's tests keep addressing them through `super::*`.
+pub(crate) use crate::scanning::url_inject::build_inject_request;
+#[cfg(test)]
+pub(crate) use crate::scanning::url_inject::{build_json_body_request, build_multipart_request};
 
 /// Verify DOM evidence in a stored XSS scenario by checking secondary URLs.
 async fn verify_sxss_dom(

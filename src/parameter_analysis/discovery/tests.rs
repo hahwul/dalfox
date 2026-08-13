@@ -959,3 +959,71 @@ fn test_explicit_param_names() {
         vec!["a".to_string(), "c".to_string()],
     );
 }
+
+/// Discovery fans its per-parameter probes out with `tokio::spawn`, and tokio
+/// task-locals are NOT inherited across `spawn`. Before those workers re-entered
+/// the captured scopes they wrote only to the process-wide globals, so a
+/// REST/MCP job's `requests_sent` under-counted the discovery and mining phase
+/// — and, the part that actually matters, those requests bypassed the per-job
+/// rate limiter, letting a job submitted with `rate_limit: N` hammer the target
+/// unthrottled for its whole analysis phase.
+///
+/// The assertion compares the per-job counter against what the server actually
+/// received. Asserting merely `> 0` is NOT enough and does not fail without the
+/// fix: `check_query_discovery` also issues several probes inline (outside any
+/// spawn), and those tick the per-job counter either way.
+#[tokio::test]
+async fn spawned_discovery_requests_reach_the_per_job_counter() {
+    crate::ensure_crypto_provider();
+
+    // Count what the server truly received, independent of dalfox's bookkeeping.
+    static SERVER_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    SERVER_HITS.store(0, std::sync::atomic::Ordering::SeqCst);
+
+    async fn counting_handler(uri: Uri) -> axum::response::Html<String> {
+        SERVER_HITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let q = uri.query().unwrap_or("").to_string();
+        axum::response::Html(format!("<html><body><div>{q}</div></body></html>"))
+    }
+
+    let app = Router::new()
+        .route("/", any(counting_handler))
+        .route("/{*rest}", any(counting_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("serve") });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/?a=1&b=2&c=3")).expect("target");
+    let per_job = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let params = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+
+    crate::REQUEST_COUNT_JOB
+        .scope(per_job.clone(), async {
+            check_query_discovery(
+                &target,
+                params.clone(),
+                std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+            )
+            .await;
+        })
+        .await;
+
+    let counted = per_job.load(std::sync::atomic::Ordering::Relaxed) as usize;
+    let served = SERVER_HITS.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(served > 0, "the mock server should have been probed at all");
+    // `>=` rather than `==`: `record_outbound_request()` ticks *before*
+    // `send()`, so a request that fails at the transport layer is counted but
+    // never served, and this repo has a documented ephemeral-port-exhaustion
+    // flake class under parallel test runs. `>=` still fails loudly on the
+    // regression (uncounted spawned workers give counted < served) without
+    // turning an environment hiccup into a false regression report.
+    assert!(
+        counted >= served,
+        "every request the server saw must be billed to the per-job counter; \
+         {counted} counted vs {served} served means the spawned workers fell back \
+         to the process-wide globals — which is also the rate-limit bypass"
+    );
+}
