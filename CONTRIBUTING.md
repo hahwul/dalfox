@@ -20,6 +20,14 @@ just dev      # cargo build (debug)
 just test     # unit + integration tests
 just lint     # cargo fmt --check + clippy -D warnings (read-only, matches CI)
 ```
+To regenerate the `dalfox` man page from the current CLI definition:
+
+```bash
+just man
+man ./man/dalfox.1
+```
+
+The hidden `dalfox man` subcommand renders the roff page directly from the Clap command definition, keeping the generated man page in sync with the CLI.
 
 Before opening a PR, please run `just fix` (runs `cargo fmt` + `cargo clippy --fix`) and `just test`. To check formatting and lints without modifying files, run `just lint`.
 

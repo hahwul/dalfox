@@ -21,6 +21,11 @@ build:
 dev:
     cargo build
 
+# Generate the roff man page from the current Clap definition.
+[group('build')]
+man:
+    cargo run -- man | sed -E "s/[[:space:]]+$//" > man/dalfox.1
+
 # Update Nix flake lock.
 [group('build')]
 nix-update:
