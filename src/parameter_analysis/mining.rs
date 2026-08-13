@@ -680,109 +680,73 @@ pub async fn probe_dictionary_params(
             let pb_clone = pb.clone();
             let stats_clone = stats.clone();
 
-            let handle = tokio::spawn(async move {
-                let permit = semaphore_clone
-                    .acquire()
-                    .await
-                    .expect("acquire semaphore permit");
-                let request = crate::utils::build_request(
-                    &client_clone,
-                    &target_clone,
-                    parsed_method,
-                    url,
-                    data.clone(),
-                );
+            let handle = tokio::spawn(crate::with_job_scopes(
+                crate::JobScopes::capture(),
+                async move {
+                    let permit = semaphore_clone
+                        .acquire()
+                        .await
+                        .expect("acquire semaphore permit");
+                    let request = crate::utils::build_request(
+                        &client_clone,
+                        &target_clone,
+                        parsed_method,
+                        url,
+                        data.clone(),
+                    );
 
-                crate::record_outbound_request().await;
-                let resp = request.send().await;
+                    crate::record_outbound_request().await;
+                    let resp = request.send().await;
 
-                let mut discovered: Option<Param> = None;
-                if let Ok(r) = resp {
-                    // Skip server error responses (5xx) — debug error pages often
-                    // reflect query params in stack traces, causing false positives.
-                    let status = r.status();
-                    if status.is_server_error() {
-                        let mut st = stats_clone.lock().await;
-                        st.record_attempt();
-                        drop(permit);
-                        if delay > 0 {
-                            sleep(Duration::from_millis(delay)).await;
-                        }
-                        if let Some(ref pb) = pb_clone {
-                            pb.inc(1);
-                        }
-                        return discovered;
-                    }
-                    // Check for redirect reflection: if the response is a 3xx redirect,
-                    // the Location header may contain the reflected marker value.
-                    let is_redirect = status.is_redirection();
-                    let location_has_marker = if is_redirect {
-                        r.headers()
-                            .get("location")
-                            .and_then(|v| v.to_str().ok())
-                            .is_some_and(|loc| {
-                                crate::scanning::markers::classify_probe_reflection(loc).detected()
-                            })
-                    } else {
-                        false
-                    };
-
-                    if location_has_marker {
-                        // Redirect context: marker reflected in Location header.
-                        let mut st = stats_clone.lock().await;
-                        st.record_attempt();
-                        st.record_reflection();
-                        if !st.collapsed {
-                            discovered = Some(Param {
-                                name: param_name.clone(),
-                                value: crate::scanning::markers::bracketed_marker().to_string(),
-                                location: crate::parameter_analysis::Location::Query,
-                                injection_context: Some(
-                                    crate::parameter_analysis::InjectionContext::AttributeUrl(None),
-                                ),
-                                valid_specials: None,
-                                invalid_specials: None,
-                                pre_encoding: None,
-                                pre_encoding_pipeline: None,
-                                wire_name: None,
-                                form_action_url: None,
-                                form_origin_url: None,
-                                framework_sink: None,
-                                escaped_specials: None,
-                                js_breakout: None,
-                            });
-                            if !silence {
-                                eprintln!(
-                                    "Discovered parameter (redirect): {} (EWMA {:.2}, {}/{})",
-                                    param_name, st.ewma_ratio, st.reflections, st.attempts
-                                );
+                    let mut discovered: Option<Param> = None;
+                    if let Ok(r) = resp {
+                        // Skip server error responses (5xx) — debug error pages often
+                        // reflect query params in stack traces, causing false positives.
+                        let status = r.status();
+                        if status.is_server_error() {
+                            let mut st = stats_clone.lock().await;
+                            st.record_attempt();
+                            drop(permit);
+                            if delay > 0 {
+                                sleep(Duration::from_millis(delay)).await;
                             }
-                            if st.should_collapse() {
-                                st.collapsed = true;
-                                if !silence {
-                                    eprintln!(
-                                        "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
-                                        st.ewma_ratio, st.attempts, st.reflections
-                                    );
-                                }
+                            if let Some(ref pb) = pb_clone {
+                                pb.inc(1);
                             }
+                            return discovered;
                         }
-                    } else if let Ok(text) = crate::utils::http::read_body(r).await {
-                        let mut st = stats_clone.lock().await;
-                        st.record_attempt();
-                        if crate::scanning::markers::classify_probe_reflection(&text).detected() {
+                        // Check for redirect reflection: if the response is a 3xx redirect,
+                        // the Location header may contain the reflected marker value.
+                        let is_redirect = status.is_redirection();
+                        let location_has_marker = if is_redirect {
+                            r.headers()
+                                .get("location")
+                                .and_then(|v| v.to_str().ok())
+                                .is_some_and(|loc| {
+                                    crate::scanning::markers::classify_probe_reflection(loc)
+                                        .detected()
+                                })
+                        } else {
+                            false
+                        };
+
+                        if location_has_marker {
+                            // Redirect context: marker reflected in Location header.
+                            let mut st = stats_clone.lock().await;
+                            st.record_attempt();
                             st.record_reflection();
                             if !st.collapsed {
-                                let context = detect_injection_context(&text);
-                                let (valid, invalid) =
-                                    crate::parameter_analysis::classify_special_chars(&text);
                                 discovered = Some(Param {
                                     name: param_name.clone(),
                                     value: crate::scanning::markers::bracketed_marker().to_string(),
                                     location: crate::parameter_analysis::Location::Query,
-                                    injection_context: Some(context),
-                                    valid_specials: Some(valid),
-                                    invalid_specials: Some(invalid),
+                                    injection_context: Some(
+                                        crate::parameter_analysis::InjectionContext::AttributeUrl(
+                                            None,
+                                        ),
+                                    ),
+                                    valid_specials: None,
+                                    invalid_specials: None,
                                     pre_encoding: None,
                                     pre_encoding_pipeline: None,
                                     wire_name: None,
@@ -790,11 +754,11 @@ pub async fn probe_dictionary_params(
                                     form_origin_url: None,
                                     framework_sink: None,
                                     escaped_specials: None,
-                                    js_breakout: detect_js_breakout(&text),
+                                    js_breakout: None,
                                 });
                                 if !silence {
                                     eprintln!(
-                                        "Discovered parameter: {} (EWMA {:.2}, {}/{})",
+                                        "Discovered parameter (redirect): {} (EWMA {:.2}, {}/{})",
                                         param_name, st.ewma_ratio, st.reflections, st.attempts
                                     );
                                 }
@@ -808,21 +772,65 @@ pub async fn probe_dictionary_params(
                                     }
                                 }
                             }
-                        } else {
-                            st.record_non_reflection();
+                        } else if let Ok(text) = crate::utils::http::read_body(r).await {
+                            let mut st = stats_clone.lock().await;
+                            st.record_attempt();
+                            if crate::scanning::markers::classify_probe_reflection(&text).detected()
+                            {
+                                st.record_reflection();
+                                if !st.collapsed {
+                                    let context = detect_injection_context(&text);
+                                    let (valid, invalid) =
+                                        crate::parameter_analysis::classify_special_chars(&text);
+                                    discovered = Some(Param {
+                                        name: param_name.clone(),
+                                        value: crate::scanning::markers::bracketed_marker()
+                                            .to_string(),
+                                        location: crate::parameter_analysis::Location::Query,
+                                        injection_context: Some(context),
+                                        valid_specials: Some(valid),
+                                        invalid_specials: Some(invalid),
+                                        pre_encoding: None,
+                                        pre_encoding_pipeline: None,
+                                        wire_name: None,
+                                        form_action_url: None,
+                                        form_origin_url: None,
+                                        framework_sink: None,
+                                        escaped_specials: None,
+                                        js_breakout: detect_js_breakout(&text),
+                                    });
+                                    if !silence {
+                                        eprintln!(
+                                            "Discovered parameter: {} (EWMA {:.2}, {}/{})",
+                                            param_name, st.ewma_ratio, st.reflections, st.attempts
+                                        );
+                                    }
+                                    if st.should_collapse() {
+                                        st.collapsed = true;
+                                        if !silence {
+                                            eprintln!(
+                                                "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
+                                                st.ewma_ratio, st.attempts, st.reflections
+                                            );
+                                        }
+                                    }
+                                }
+                            } else {
+                                st.record_non_reflection();
+                            }
                         }
                     }
-                }
 
-                if delay > 0 {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                drop(permit);
-                if let Some(ref pb) = pb_clone {
-                    pb.inc(1);
-                }
-                discovered
-            });
+                    if delay > 0 {
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+                    drop(permit);
+                    if let Some(ref pb) = pb_clone {
+                        pb.inc(1);
+                    }
+                    discovered
+                },
+            ));
 
             handles.push(handle);
         }
@@ -970,81 +978,92 @@ pub async fn probe_body_params(
             let pb_clone = pb.clone();
             let stats_clone = stats.clone();
 
-            let handle = tokio::spawn(async move {
-                let permit = semaphore_clone
-                    .acquire()
-                    .await
-                    .expect("acquire semaphore permit");
-                let m = parsed_method;
-                let base =
-                    crate::utils::build_request(&client_clone, &target_clone, m, url, Some(body));
-                let overrides = vec![(
-                    "Content-Type".to_string(),
-                    "application/x-www-form-urlencoded".to_string(),
-                )];
-                let request = crate::utils::apply_header_overrides(base, &overrides);
+            let handle = tokio::spawn(crate::with_job_scopes(
+                crate::JobScopes::capture(),
+                async move {
+                    let permit = semaphore_clone
+                        .acquire()
+                        .await
+                        .expect("acquire semaphore permit");
+                    let m = parsed_method;
+                    let base = crate::utils::build_request(
+                        &client_clone,
+                        &target_clone,
+                        m,
+                        url,
+                        Some(body),
+                    );
+                    let overrides = vec![(
+                        "Content-Type".to_string(),
+                        "application/x-www-form-urlencoded".to_string(),
+                    )];
+                    let request = crate::utils::apply_header_overrides(base, &overrides);
 
-                crate::record_outbound_request().await;
-                let resp = request.send().await;
+                    crate::record_outbound_request().await;
+                    let resp = request.send().await;
 
-                let mut discovered: Option<Param> = None;
-                if let Ok(r) = resp
-                    && let Ok(text) = crate::utils::http::read_body(r).await
-                {
-                    let mut st = stats_clone.lock().await;
-                    st.record_attempt();
-                    if crate::scanning::markers::classify_probe_reflection(&text).detected() {
-                        st.record_reflection();
-                        if !st.collapsed {
-                            let context = detect_injection_context(&text);
-                            let (valid, invalid) =
-                                crate::parameter_analysis::classify_special_chars(&text);
-                            discovered = Some(Param {
-                                name: param_name_cloned.clone(),
-                                value: crate::scanning::markers::bracketed_marker().to_string(),
-                                location: Location::Body,
-                                injection_context: Some(context),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
-                                pre_encoding: None,
-                                pre_encoding_pipeline: None,
-                                wire_name: None,
-                                form_action_url: None,
-                                form_origin_url: None,
-                                framework_sink: None,
-                                escaped_specials: None,
-                                js_breakout: detect_js_breakout(&text),
-                            });
-                            if !silence {
-                                eprintln!(
-                                    "Discovered body param: {} (EWMA {:.2}, {}/{})",
-                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
-                                );
-                            }
-                            if st.should_collapse() {
-                                st.collapsed = true;
+                    let mut discovered: Option<Param> = None;
+                    if let Ok(r) = resp
+                        && let Ok(text) = crate::utils::http::read_body(r).await
+                    {
+                        let mut st = stats_clone.lock().await;
+                        st.record_attempt();
+                        if crate::scanning::markers::classify_probe_reflection(&text).detected() {
+                            st.record_reflection();
+                            if !st.collapsed {
+                                let context = detect_injection_context(&text);
+                                let (valid, invalid) =
+                                    crate::parameter_analysis::classify_special_chars(&text);
+                                discovered = Some(Param {
+                                    name: param_name_cloned.clone(),
+                                    value: crate::scanning::markers::bracketed_marker().to_string(),
+                                    location: Location::Body,
+                                    injection_context: Some(context),
+                                    valid_specials: Some(valid),
+                                    invalid_specials: Some(invalid),
+                                    pre_encoding: None,
+                                    pre_encoding_pipeline: None,
+                                    wire_name: None,
+                                    form_action_url: None,
+                                    form_origin_url: None,
+                                    framework_sink: None,
+                                    escaped_specials: None,
+                                    js_breakout: detect_js_breakout(&text),
+                                });
                                 if !silence {
                                     eprintln!(
-                                        "[mining-collapse] Body mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                        st.ewma_ratio, st.attempts, st.reflections
+                                        "Discovered body param: {} (EWMA {:.2}, {}/{})",
+                                        param_name_cloned,
+                                        st.ewma_ratio,
+                                        st.reflections,
+                                        st.attempts
                                     );
                                 }
+                                if st.should_collapse() {
+                                    st.collapsed = true;
+                                    if !silence {
+                                        eprintln!(
+                                            "[mining-collapse] Body mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                            st.ewma_ratio, st.attempts, st.reflections
+                                        );
+                                    }
+                                }
                             }
+                        } else {
+                            st.record_non_reflection();
                         }
-                    } else {
-                        st.record_non_reflection();
                     }
-                }
 
-                if delay > 0 {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                drop(permit);
-                if let Some(ref pb) = pb_clone {
-                    pb.inc(1);
-                }
-                discovered
-            });
+                    if delay > 0 {
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+                    drop(permit);
+                    if let Some(ref pb) = pb_clone {
+                        pb.inc(1);
+                    }
+                    discovered
+                },
+            ));
 
             handles.push(handle);
         }
@@ -1241,89 +1260,99 @@ pub async fn probe_response_id_params(
             let pb_clone = pb.clone();
             let stats_clone = stats.clone();
 
-            let handle = tokio::spawn(async move {
-                let permit = semaphore_clone
-                    .acquire()
-                    .await
-                    .expect("acquire semaphore permit");
-                let m = parsed_method;
-                let request =
-                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
-                // Prepare optional discovered Param container for batched return
-                let mut discovered: Option<Param> = None;
-                crate::record_outbound_request().await;
-                let __resp = request.send().await;
-                if let Ok(resp) = __resp {
-                    // Skip 5xx error responses — debug pages often reflect params
-                    if resp.status().is_server_error() {
-                        let mut st = stats_clone.lock().await;
-                        st.record_attempt();
-                        drop(permit);
-                        if delay > 0 {
-                            sleep(Duration::from_millis(delay)).await;
+            let handle = tokio::spawn(crate::with_job_scopes(
+                crate::JobScopes::capture(),
+                async move {
+                    let permit = semaphore_clone
+                        .acquire()
+                        .await
+                        .expect("acquire semaphore permit");
+                    let m = parsed_method;
+                    let request = crate::utils::build_request(
+                        &client_clone,
+                        &target_clone,
+                        m,
+                        url,
+                        data.clone(),
+                    );
+                    // Prepare optional discovered Param container for batched return
+                    let mut discovered: Option<Param> = None;
+                    crate::record_outbound_request().await;
+                    let __resp = request.send().await;
+                    if let Ok(resp) = __resp {
+                        // Skip 5xx error responses — debug pages often reflect params
+                        if resp.status().is_server_error() {
+                            let mut st = stats_clone.lock().await;
+                            st.record_attempt();
+                            drop(permit);
+                            if delay > 0 {
+                                sleep(Duration::from_millis(delay)).await;
+                            }
+                            if let Some(ref pb) = pb_clone {
+                                pb.inc(1);
+                            }
+                            return discovered;
                         }
-                        if let Some(ref pb) = pb_clone {
-                            pb.inc(1);
-                        }
-                        return discovered;
-                    }
-                    if let Ok(text) = crate::utils::http::read_body(resp).await {
-                        let mut st = stats_clone.lock().await;
-                        st.record_attempt();
-                        if crate::scanning::markers::classify_probe_reflection(&text).detected() {
-                            st.record_reflection();
-                            if !st.collapsed {
-                                let context = detect_injection_context(&text);
-                                let (valid, invalid) =
-                                    crate::parameter_analysis::classify_special_chars(&text);
-                                // Store discovered Param for return (batched later)
-                                discovered = Some(Param {
-                                    name: param.clone(),
-                                    value: crate::scanning::markers::bracketed_marker().to_string(),
-                                    location: crate::parameter_analysis::Location::Query,
-                                    injection_context: Some(context),
-                                    valid_specials: Some(valid),
-                                    invalid_specials: Some(invalid),
-                                    pre_encoding: None,
-                                    pre_encoding_pipeline: None,
-                                    wire_name: None,
-                                    form_action_url: None,
-                                    form_origin_url: None,
-                                    framework_sink: None,
-                                    escaped_specials: None,
-                                    js_breakout: detect_js_breakout(&text),
-                                });
-                                if !silence {
-                                    eprintln!(
-                                        "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
-                                        param, st.ewma_ratio, st.reflections, st.attempts
-                                    );
-                                }
-                                if st.should_collapse() {
-                                    st.collapsed = true;
+                        if let Ok(text) = crate::utils::http::read_body(resp).await {
+                            let mut st = stats_clone.lock().await;
+                            st.record_attempt();
+                            if crate::scanning::markers::classify_probe_reflection(&text).detected()
+                            {
+                                st.record_reflection();
+                                if !st.collapsed {
+                                    let context = detect_injection_context(&text);
+                                    let (valid, invalid) =
+                                        crate::parameter_analysis::classify_special_chars(&text);
+                                    // Store discovered Param for return (batched later)
+                                    discovered = Some(Param {
+                                        name: param.clone(),
+                                        value: crate::scanning::markers::bracketed_marker()
+                                            .to_string(),
+                                        location: crate::parameter_analysis::Location::Query,
+                                        injection_context: Some(context),
+                                        valid_specials: Some(valid),
+                                        invalid_specials: Some(invalid),
+                                        pre_encoding: None,
+                                        pre_encoding_pipeline: None,
+                                        wire_name: None,
+                                        form_action_url: None,
+                                        form_origin_url: None,
+                                        framework_sink: None,
+                                        escaped_specials: None,
+                                        js_breakout: detect_js_breakout(&text),
+                                    });
                                     if !silence {
                                         eprintln!(
-                                            "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                            st.ewma_ratio, st.attempts, st.reflections
+                                            "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
+                                            param, st.ewma_ratio, st.reflections, st.attempts
                                         );
                                     }
+                                    if st.should_collapse() {
+                                        st.collapsed = true;
+                                        if !silence {
+                                            eprintln!(
+                                                "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                                st.ewma_ratio, st.attempts, st.reflections
+                                            );
+                                        }
+                                    }
                                 }
+                            } else {
+                                st.record_non_reflection();
                             }
-                        } else {
-                            st.record_non_reflection();
                         }
                     }
-                }
-                if delay > 0 {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                drop(permit);
-                if let Some(ref pb) = pb_clone {
-                    pb.inc(1);
-                }
-                // Return discovered Param (if any) for batch processing
-                discovered
-            });
+                    if delay > 0 {
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+                    drop(permit);
+                    if let Some(ref pb) = pb_clone {
+                        pb.inc(1);
+                    }
+                    // Return discovered Param (if any) for batch processing
+                    discovered
+                },
+            ));
             handles.push(handle);
         }
 
@@ -1467,110 +1496,113 @@ pub async fn probe_json_body_params(
         let stats_clone = stats.clone();
         let base_json_clone = base_json.clone();
 
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone
-                .acquire()
-                .await
-                .expect("acquire semaphore permit");
+        let handle = tokio::spawn(crate::with_job_scopes(
+            crate::JobScopes::capture(),
+            async move {
+                let permit = semaphore_clone
+                    .acquire()
+                    .await
+                    .expect("acquire semaphore permit");
 
-            // Build mutated JSON with this key set to marker
-            let mut root = base_json_clone;
-            if let Some(map) = root.as_object_mut() {
-                map.insert(
-                    param_name_cloned.clone(),
-                    serde_json::Value::String(
-                        crate::scanning::markers::bracketed_marker().to_string(),
-                    ),
+                // Build mutated JSON with this key set to marker
+                let mut root = base_json_clone;
+                if let Some(map) = root.as_object_mut() {
+                    map.insert(
+                        param_name_cloned.clone(),
+                        serde_json::Value::String(
+                            crate::scanning::markers::bracketed_marker().to_string(),
+                        ),
+                    );
+                } else {
+                    let mut map = serde_json::Map::new();
+                    map.insert(
+                        param_name_cloned.clone(),
+                        serde_json::Value::String(
+                            crate::scanning::markers::bracketed_marker().to_string(),
+                        ),
+                    );
+                    root = serde_json::Value::Object(map);
+                }
+                let body = serde_json::to_string(&root).unwrap_or_else(|_| {
+                    format!(
+                        "{{\"{}\":\"{}\"}}",
+                        param_name_cloned,
+                        crate::scanning::markers::bracketed_marker()
+                    )
+                });
+
+                let base = crate::utils::build_request(
+                    &client_clone,
+                    &target_clone,
+                    parsed_method,
+                    url,
+                    Some(body),
                 );
-            } else {
-                let mut map = serde_json::Map::new();
-                map.insert(
-                    param_name_cloned.clone(),
-                    serde_json::Value::String(
-                        crate::scanning::markers::bracketed_marker().to_string(),
-                    ),
-                );
-                root = serde_json::Value::Object(map);
-            }
-            let body = serde_json::to_string(&root).unwrap_or_else(|_| {
-                format!(
-                    "{{\"{}\":\"{}\"}}",
-                    param_name_cloned,
-                    crate::scanning::markers::bracketed_marker()
-                )
-            });
+                let overrides = vec![("Content-Type".to_string(), "application/json".to_string())];
+                let request = crate::utils::apply_header_overrides(base, &overrides);
 
-            let base = crate::utils::build_request(
-                &client_clone,
-                &target_clone,
-                parsed_method,
-                url,
-                Some(body),
-            );
-            let overrides = vec![("Content-Type".to_string(), "application/json".to_string())];
-            let request = crate::utils::apply_header_overrides(base, &overrides);
+                crate::record_outbound_request().await;
+                let resp = request.send().await;
 
-            crate::record_outbound_request().await;
-            let resp = request.send().await;
-
-            let mut discovered: Option<Param> = None;
-            if let Ok(r) = resp
-                && let Ok(text) = crate::utils::http::read_body(r).await
-            {
-                let mut st = stats_clone.lock().await;
-                st.record_attempt();
-                if crate::scanning::markers::classify_probe_reflection(&text).detected() {
-                    st.record_reflection();
-                    if !st.collapsed {
-                        let context = detect_injection_context(&text);
-                        let (valid, invalid) =
-                            crate::parameter_analysis::classify_special_chars(&text);
-                        discovered = Some(Param {
-                            name: param_name_cloned.clone(),
-                            value: crate::scanning::markers::bracketed_marker().to_string(),
-                            location: Location::JsonBody,
-                            injection_context: Some(context),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
-                            form_action_url: None,
-                            form_origin_url: None,
-                            framework_sink: None,
-                            escaped_specials: None,
-                            js_breakout: detect_js_breakout(&text),
-                        });
-                        if !silence {
-                            eprintln!(
-                                "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
-                                param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
-                            );
-                        }
-                        if st.should_collapse() {
-                            st.collapsed = true;
+                let mut discovered: Option<Param> = None;
+                if let Ok(r) = resp
+                    && let Ok(text) = crate::utils::http::read_body(r).await
+                {
+                    let mut st = stats_clone.lock().await;
+                    st.record_attempt();
+                    if crate::scanning::markers::classify_probe_reflection(&text).detected() {
+                        st.record_reflection();
+                        if !st.collapsed {
+                            let context = detect_injection_context(&text);
+                            let (valid, invalid) =
+                                crate::parameter_analysis::classify_special_chars(&text);
+                            discovered = Some(Param {
+                                name: param_name_cloned.clone(),
+                                value: crate::scanning::markers::bracketed_marker().to_string(),
+                                location: Location::JsonBody,
+                                injection_context: Some(context),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                                pre_encoding: None,
+                                pre_encoding_pipeline: None,
+                                wire_name: None,
+                                form_action_url: None,
+                                form_origin_url: None,
+                                framework_sink: None,
+                                escaped_specials: None,
+                                js_breakout: detect_js_breakout(&text),
+                            });
                             if !silence {
                                 eprintln!(
-                                    "[mining-collapse] JSON mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                    st.ewma_ratio, st.attempts, st.reflections
+                                    "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
+                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
                                 );
                             }
+                            if st.should_collapse() {
+                                st.collapsed = true;
+                                if !silence {
+                                    eprintln!(
+                                        "[mining-collapse] JSON mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                        st.ewma_ratio, st.attempts, st.reflections
+                                    );
+                                }
+                            }
                         }
+                    } else {
+                        st.record_non_reflection();
                     }
-                } else {
-                    st.record_non_reflection();
                 }
-            }
 
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
-            }
-            drop(permit);
-            if let Some(ref pb) = pb_clone {
-                pb.inc(1);
-            }
-            discovered
-        });
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+                drop(permit);
+                if let Some(ref pb) = pb_clone {
+                    pb.inc(1);
+                }
+                discovered
+            },
+        ));
 
         handles.push(handle);
     }
@@ -1703,61 +1735,65 @@ pub async fn probe_multipart_params(
         let pairs_clone = pairs.clone();
         let field_name = field.clone();
 
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone
-                .acquire()
-                .await
-                .expect("acquire semaphore permit");
-            let mut form = reqwest::multipart::Form::new();
-            let mut placed = false;
-            for (k, v) in &pairs_clone {
-                if *k == field_name {
-                    form = form.text(k.clone(), marker.to_string());
-                    placed = true;
-                } else {
-                    form = form.text(k.clone(), v.clone());
+        let handle = tokio::spawn(crate::with_job_scopes(
+            crate::JobScopes::capture(),
+            async move {
+                let permit = semaphore_clone
+                    .acquire()
+                    .await
+                    .expect("acquire semaphore permit");
+                let mut form = reqwest::multipart::Form::new();
+                let mut placed = false;
+                for (k, v) in &pairs_clone {
+                    if *k == field_name {
+                        form = form.text(k.clone(), marker.to_string());
+                        placed = true;
+                    } else {
+                        form = form.text(k.clone(), v.clone());
+                    }
                 }
-            }
-            if !placed {
-                form = form.text(field_name.clone(), marker.to_string());
-            }
-
-            let method = crate::scanning::url_inject::body_location_method(&target_clone.method);
-            let request =
-                crate::utils::build_request(&client_clone, &target_clone, method, url, None)
-                    .multipart(form);
-            crate::record_outbound_request().await;
-
-            let mut discovered: Option<Param> = None;
-            if let Ok(r) = request.send().await
-                && let Ok(text) = crate::utils::http::read_body(r).await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
-            {
-                let context = detect_injection_context(&text);
-                let (valid, invalid) = crate::parameter_analysis::classify_special_chars(&text);
-                if !silence {
-                    eprintln!("Discovered multipart field: {}", field_name);
+                if !placed {
+                    form = form.text(field_name.clone(), marker.to_string());
                 }
-                discovered = Some(Param {
-                    name: field_name,
-                    value: marker.to_string(),
-                    location: Location::MultipartBody,
-                    injection_context: Some(context),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: detect_js_breakout(&text),
-                });
-            }
-            drop(permit);
-            discovered
-        });
+
+                let method =
+                    crate::scanning::url_inject::body_location_method(&target_clone.method);
+                let request =
+                    crate::utils::build_request(&client_clone, &target_clone, method, url, None)
+                        .multipart(form);
+                crate::record_outbound_request().await;
+
+                let mut discovered: Option<Param> = None;
+                if let Ok(r) = request.send().await
+                    && let Ok(text) = crate::utils::http::read_body(r).await
+                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                {
+                    let context = detect_injection_context(&text);
+                    let (valid, invalid) = crate::parameter_analysis::classify_special_chars(&text);
+                    if !silence {
+                        eprintln!("Discovered multipart field: {}", field_name);
+                    }
+                    discovered = Some(Param {
+                        name: field_name,
+                        value: marker.to_string(),
+                        location: Location::MultipartBody,
+                        injection_context: Some(context),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                        pre_encoding: None,
+                        pre_encoding_pipeline: None,
+                        wire_name: None,
+                        form_action_url: None,
+                        form_origin_url: None,
+                        framework_sink: None,
+                        escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
+                    });
+                }
+                drop(permit);
+                discovered
+            },
+        ));
         handles.push(handle);
     }
 

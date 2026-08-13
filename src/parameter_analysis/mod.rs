@@ -867,29 +867,37 @@ pub async fn active_probe_param(
             let param_clone = param.clone();
             let valid_ref = valid_specials.clone();
             let invalid_ref = invalid_specials.clone();
-            handles.push(tokio::spawn(async move {
-                let probe = format!(
-                    "{}{}{}",
-                    crate::scanning::markers::open_marker(),
-                    c,
-                    crate::scanning::markers::close_marker()
-                );
-                let pp = crate::encoding::pre_encoding::apply_param_encoding(&probe, &param_clone);
-                let _permit = sem.acquire().await.expect("acquire semaphore permit");
-                let resp =
-                    send_probe_request_for_param(&client_clone, &target_clone, &param_clone, &pp)
-                        .await;
-                let ok = resp
-                    .as_deref()
-                    .and_then(extract_reflected_segment)
-                    .map(|seg| char_reflected_in_segment(seg, c))
-                    .unwrap_or(false);
-                if ok {
-                    valid_ref.lock().await.push(c);
-                } else {
-                    invalid_ref.lock().await.push(c);
-                }
-            }));
+            handles.push(tokio::spawn(crate::with_job_scopes(
+                crate::JobScopes::capture(),
+                async move {
+                    let probe = format!(
+                        "{}{}{}",
+                        crate::scanning::markers::open_marker(),
+                        c,
+                        crate::scanning::markers::close_marker()
+                    );
+                    let pp =
+                        crate::encoding::pre_encoding::apply_param_encoding(&probe, &param_clone);
+                    let _permit = sem.acquire().await.expect("acquire semaphore permit");
+                    let resp = send_probe_request_for_param(
+                        &client_clone,
+                        &target_clone,
+                        &param_clone,
+                        &pp,
+                    )
+                    .await;
+                    let ok = resp
+                        .as_deref()
+                        .and_then(extract_reflected_segment)
+                        .map(|seg| char_reflected_in_segment(seg, c))
+                        .unwrap_or(false);
+                    if ok {
+                        valid_ref.lock().await.push(c);
+                    } else {
+                        invalid_ref.lock().await.push(c);
+                    }
+                },
+            )));
         }
         for h in handles {
             let _ = h.await;
@@ -1067,7 +1075,9 @@ pub async fn analyze_parameters(
 
     // === Stage 1: Discovery — identify reflecting parameters ===
     let reflection_params = Arc::new(Mutex::new(Vec::new()));
-    let semaphore = Arc::new(Semaphore::new(target.workers));
+    let semaphore = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
+        target.workers,
+    )));
     check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
 
     // === Stage 2: Mining — discover additional parameters from HTML/JS/dict ===
@@ -1122,15 +1132,18 @@ pub async fn analyze_parameters(
     target.reflection_params = params;
 
     // === Stage 3: Active Probing — confirm specials, detect pre_encoding ===
-    let probe_semaphore = Arc::new(Semaphore::new(target.workers));
+    let probe_semaphore = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
+        target.workers,
+    )));
     let probe_target = Arc::new(target.clone());
     let mut param_handles = Vec::new();
     for p in std::mem::take(&mut target.reflection_params) {
         let target_ref = probe_target.clone();
         let sem = probe_semaphore.clone();
-        param_handles.push(tokio::spawn(async move {
-            active_probe_param(target_ref.as_ref(), p, sem).await
-        }));
+        param_handles.push(tokio::spawn(crate::with_job_scopes(
+            crate::JobScopes::capture(),
+            async move { active_probe_param(target_ref.as_ref(), p, sem).await },
+        )));
     }
     let mut probed = Vec::with_capacity(param_handles.len());
     for h in param_handles {

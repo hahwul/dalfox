@@ -370,85 +370,88 @@ pub async fn check_query_discovery(
         let target_clone = arc_target.clone();
 
         // Spawn a task that returns Option<Param> instead of locking per discovery.
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone
-                .acquire()
-                .await
-                .expect("acquire semaphore permit");
-            let m = parsed_method;
-            let request =
-                crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
-            crate::record_outbound_request().await;
-            let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await {
-                // Check for redirect reflection: if the response is a 3xx redirect,
-                // the Location header may contain the reflected marker value.
-                let is_redirect = resp.status().is_redirection();
-                let location_reflection = if is_redirect {
-                    resp.headers()
-                        .get("location")
-                        .and_then(|v| v.to_str().ok())
-                        .is_some_and(|loc| {
-                            crate::scanning::markers::classify_probe_reflection(loc).detected()
-                        })
-                } else {
-                    false
-                };
+        let handle = tokio::spawn(crate::with_job_scopes(
+            crate::JobScopes::capture(),
+            async move {
+                let permit = semaphore_clone
+                    .acquire()
+                    .await
+                    .expect("acquire semaphore permit");
+                let m = parsed_method;
+                let request =
+                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
+                crate::record_outbound_request().await;
+                let mut discovered: Option<Param> = None;
+                if let Ok(resp) = request.send().await {
+                    // Check for redirect reflection: if the response is a 3xx redirect,
+                    // the Location header may contain the reflected marker value.
+                    let is_redirect = resp.status().is_redirection();
+                    let location_reflection = if is_redirect {
+                        resp.headers()
+                            .get("location")
+                            .and_then(|v| v.to_str().ok())
+                            .is_some_and(|loc| {
+                                crate::scanning::markers::classify_probe_reflection(loc).detected()
+                            })
+                    } else {
+                        false
+                    };
 
-                if location_reflection {
-                    // Redirect context: marker reflected in Location header.
-                    // Use Attribute context since the value is placed in a URI attribute.
-                    discovered = Some(Param {
-                        name,
-                        value,
-                        location: crate::parameter_analysis::Location::Query,
-                        injection_context: Some(
-                            crate::parameter_analysis::InjectionContext::AttributeUrl(None),
-                        ),
-                        valid_specials: None,
-                        invalid_specials: None,
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
-                        form_action_url: None,
-                        form_origin_url: None,
-                        framework_sink: None,
-                        escaped_specials: None,
-                        js_breakout: None,
-                    });
-                } else if let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
-                {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
-                        &text,
-                        crate::scanning::markers::bracketed_marker(),
-                    )
-                    .map(ToString::to_string);
-                    discovered = Some(Param {
-                        name,
-                        value,
-                        location: crate::parameter_analysis::Location::Query,
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
-                        form_action_url: None,
-                        form_origin_url: None,
-                        framework_sink,
-                        escaped_specials: None,
-                        js_breakout: detect_js_breakout(&text),
-                    });
+                    if location_reflection {
+                        // Redirect context: marker reflected in Location header.
+                        // Use Attribute context since the value is placed in a URI attribute.
+                        discovered = Some(Param {
+                            name,
+                            value,
+                            location: crate::parameter_analysis::Location::Query,
+                            injection_context: Some(
+                                crate::parameter_analysis::InjectionContext::AttributeUrl(None),
+                            ),
+                            valid_specials: None,
+                            invalid_specials: None,
+                            pre_encoding: None,
+                            pre_encoding_pipeline: None,
+                            wire_name: None,
+                            form_action_url: None,
+                            form_origin_url: None,
+                            framework_sink: None,
+                            escaped_specials: None,
+                            js_breakout: None,
+                        });
+                    } else if let Ok(text) = crate::utils::http::read_body(resp).await
+                        && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                    {
+                        let (valid, invalid) = classify_special_chars(&text);
+                        let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
+                            &text,
+                            crate::scanning::markers::bracketed_marker(),
+                        )
+                        .map(ToString::to_string);
+                        discovered = Some(Param {
+                            name,
+                            value,
+                            location: crate::parameter_analysis::Location::Query,
+                            injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                            pre_encoding: None,
+                            pre_encoding_pipeline: None,
+                            wire_name: None,
+                            form_action_url: None,
+                            form_origin_url: None,
+                            framework_sink,
+                            escaped_specials: None,
+                            js_breakout: detect_js_breakout(&text),
+                        });
+                    }
                 }
-            }
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
-            }
-            drop(permit);
-            discovered
-        });
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+                drop(permit);
+                discovered
+            },
+        ));
         handles.push(handle);
 
         // Drain this chunk before spawning more so the live task count (and the
@@ -840,51 +843,54 @@ pub async fn check_header_discovery(
         let target_clone = arc_target.clone();
 
         // Spawn task returning Option<Param> to batch reduce mutex contention
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone
-                .acquire()
-                .await
-                .expect("acquire semaphore permit");
-            let m = parsed_method;
-            let base =
-                crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
-            let overrides = vec![(header_name.clone(), test_value.to_string())];
-            let request = crate::utils::apply_header_overrides(base, &overrides);
-            crate::record_outbound_request().await;
-            let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await
-                && let Ok(text) = crate::utils::http::read_body(resp).await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
-                    &text,
-                    crate::scanning::markers::bracketed_marker(),
-                )
-                .map(ToString::to_string);
-                discovered = Some(Param {
-                    name: header_name,
-                    value: header_value,
-                    location: crate::parameter_analysis::Location::Header,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink,
-                    escaped_specials: None,
-                    js_breakout: detect_js_breakout(&text),
-                });
-            }
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
-            }
-            drop(permit);
-            discovered
-        });
+        let handle = tokio::spawn(crate::with_job_scopes(
+            crate::JobScopes::capture(),
+            async move {
+                let permit = semaphore_clone
+                    .acquire()
+                    .await
+                    .expect("acquire semaphore permit");
+                let m = parsed_method;
+                let base =
+                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
+                let overrides = vec![(header_name.clone(), test_value.to_string())];
+                let request = crate::utils::apply_header_overrides(base, &overrides);
+                crate::record_outbound_request().await;
+                let mut discovered: Option<Param> = None;
+                if let Ok(resp) = request.send().await
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
+                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                {
+                    let (valid, invalid) = classify_special_chars(&text);
+                    let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
+                        &text,
+                        crate::scanning::markers::bracketed_marker(),
+                    )
+                    .map(ToString::to_string);
+                    discovered = Some(Param {
+                        name: header_name,
+                        value: header_value,
+                        location: crate::parameter_analysis::Location::Header,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                        pre_encoding: None,
+                        pre_encoding_pipeline: None,
+                        wire_name: None,
+                        form_action_url: None,
+                        form_origin_url: None,
+                        framework_sink,
+                        escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
+                    });
+                }
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+                drop(permit);
+                discovered
+            },
+        ));
         handles.push(handle);
     }
 
@@ -969,111 +975,116 @@ pub async fn check_path_discovery(
         }
 
         // Spawn task returning Option<Param> for batched collection
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone
-                .acquire()
-                .await
-                .expect("acquire semaphore permit");
-            let m = parsed_method;
-            let request = crate::utils::build_request(
-                &client_clone,
-                &target_clone,
-                m.clone(),
-                new_url,
-                data.clone(),
-            );
+        let handle = tokio::spawn(crate::with_job_scopes(
+            crate::JobScopes::capture(),
+            async move {
+                let permit = semaphore_clone
+                    .acquire()
+                    .await
+                    .expect("acquire semaphore permit");
+                let m = parsed_method;
+                let request = crate::utils::build_request(
+                    &client_clone,
+                    &target_clone,
+                    m.clone(),
+                    new_url,
+                    data.clone(),
+                );
 
-            crate::record_outbound_request().await;
-            let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await {
-                // Pair discovery with the scan-time `should_suppress_path_*`
-                // policy so we don't pay payload-set requests for path
-                // segments the scanner would later throw away. Concretely:
-                //   * 2xx                              → always honor
-                //   * 3xx                              → drop (Location-only
-                //                                       echo, not a rendered
-                //                                       HTML sink)
-                //   * 4xx/5xx + marker only in URL attrs → drop (canonical
-                //                                       link / `<a href>`
-                //                                       echo noise)
-                //   * 4xx/5xx + marker outside URL attrs → keep
-                //                                       (genuine error-page
-                //                                       XSS — e.g. a 404
-                //                                       template that emits
-                //                                       `<td>{uri}</td>`).
-                let status = resp.status().as_u16();
-                if !(300..400).contains(&status)
-                    && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
-                {
-                    let exploitable_context = (200..300).contains(&status)
-                        || !crate::scanning::check_reflection::marker_reflects_in_url_attr_only(
-                            &text,
-                            crate::scanning::markers::bracketed_marker(),
-                        );
-                    // For 4xx/5xx error pages whose templates echo the URL
-                    // path into text content, require the second probe
-                    // (`<MARKER>`) to come back with raw `<` and `>` before
-                    // declaring the segment scannable. If the server
-                    // entity-escapes either bracket, no HTML-tag payload
-                    // will ever reflect — keeping the segment would burn
-                    // thousands of requests on guaranteed-negative payloads.
-                    //
-                    // Known limitation: `t.contains(&needle)` is case-sensitive,
-                    // so a server that ASCII-uppercases / -lowercases reflected
-                    // path bytes (e.g. xssmaze's `obfuscation/level2` shape, but
-                    // applied to a 4xx path-echo) would slip past this gate and
-                    // get treated as inert. Real-world servers rarely case-fold
-                    // URL paths, so the trade-off is acceptable; if it surfaces
-                    // in benchmarks, swap to the `ascii_ci_contains` helper used
-                    // by `check_reflection::marker_case_fold_reflected`.
-                    let bracket_survives = if exploitable_context && !(200..300).contains(&status) {
-                        let needle = format!("<{}>", crate::scanning::markers::bracketed_marker());
-                        let probe = crate::utils::build_request(
-                            &client_clone,
-                            &target_clone,
-                            m.clone(),
-                            bracket_url,
-                            data.clone(),
-                        );
-                        crate::record_outbound_request().await;
-                        match probe.send().await {
-                            Ok(r) => match crate::utils::http::read_body(r).await {
-                                Ok(t) => t.contains(&needle),
-                                Err(_) => false,
-                            },
-                            Err(_) => false,
+                crate::record_outbound_request().await;
+                let mut discovered: Option<Param> = None;
+                if let Ok(resp) = request.send().await {
+                    // Pair discovery with the scan-time `should_suppress_path_*`
+                    // policy so we don't pay payload-set requests for path
+                    // segments the scanner would later throw away. Concretely:
+                    //   * 2xx                              → always honor
+                    //   * 3xx                              → drop (Location-only
+                    //                                       echo, not a rendered
+                    //                                       HTML sink)
+                    //   * 4xx/5xx + marker only in URL attrs → drop (canonical
+                    //                                       link / `<a href>`
+                    //                                       echo noise)
+                    //   * 4xx/5xx + marker outside URL attrs → keep
+                    //                                       (genuine error-page
+                    //                                       XSS — e.g. a 404
+                    //                                       template that emits
+                    //                                       `<td>{uri}</td>`).
+                    let status = resp.status().as_u16();
+                    if !(300..400).contains(&status)
+                        && let Ok(text) = crate::utils::http::read_body(resp).await
+                        && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                    {
+                        let exploitable_context = (200..300).contains(&status)
+                            || !crate::scanning::check_reflection::marker_reflects_in_url_attr_only(
+                                &text,
+                                crate::scanning::markers::bracketed_marker(),
+                            );
+                        // For 4xx/5xx error pages whose templates echo the URL
+                        // path into text content, require the second probe
+                        // (`<MARKER>`) to come back with raw `<` and `>` before
+                        // declaring the segment scannable. If the server
+                        // entity-escapes either bracket, no HTML-tag payload
+                        // will ever reflect — keeping the segment would burn
+                        // thousands of requests on guaranteed-negative payloads.
+                        //
+                        // Known limitation: `t.contains(&needle)` is case-sensitive,
+                        // so a server that ASCII-uppercases / -lowercases reflected
+                        // path bytes (e.g. xssmaze's `obfuscation/level2` shape, but
+                        // applied to a 4xx path-echo) would slip past this gate and
+                        // get treated as inert. Real-world servers rarely case-fold
+                        // URL paths, so the trade-off is acceptable; if it surfaces
+                        // in benchmarks, swap to the `ascii_ci_contains` helper used
+                        // by `check_reflection::marker_case_fold_reflected`.
+                        let bracket_survives =
+                            if exploitable_context && !(200..300).contains(&status) {
+                                let needle =
+                                    format!("<{}>", crate::scanning::markers::bracketed_marker());
+                                let probe = crate::utils::build_request(
+                                    &client_clone,
+                                    &target_clone,
+                                    m.clone(),
+                                    bracket_url,
+                                    data.clone(),
+                                );
+                                crate::record_outbound_request().await;
+                                match probe.send().await {
+                                    Ok(r) => match crate::utils::http::read_body(r).await {
+                                        Ok(t) => t.contains(&needle),
+                                        Err(_) => false,
+                                    },
+                                    Err(_) => false,
+                                }
+                            } else {
+                                true
+                            };
+                        if exploitable_context && bracket_survives {
+                            let (valid, invalid) = classify_special_chars(&text);
+                            discovered = Some(Param {
+                                name: param_name,
+                                value: original_value,
+                                location: crate::parameter_analysis::Location::Path,
+                                injection_context: Some(detect_injection_context(&text)),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                                pre_encoding: None,
+                                pre_encoding_pipeline: None,
+                                wire_name: None,
+                                form_action_url: None,
+                                form_origin_url: None,
+                                framework_sink: None,
+                                escaped_specials: None,
+                                js_breakout: detect_js_breakout(&text),
+                            });
                         }
-                    } else {
-                        true
-                    };
-                    if exploitable_context && bracket_survives {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        discovered = Some(Param {
-                            name: param_name,
-                            value: original_value,
-                            location: crate::parameter_analysis::Location::Path,
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
-                            form_action_url: None,
-                            form_origin_url: None,
-                            framework_sink: None,
-                            escaped_specials: None,
-                            js_breakout: detect_js_breakout(&text),
-                        });
                     }
                 }
-            }
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
-            }
-            drop(permit);
-            discovered
-        });
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+                drop(permit);
+                discovered
+            },
+        ));
         handles.push(handle);
         new_segments[idx] = saved;
     }
@@ -1132,57 +1143,60 @@ pub async fn check_cookie_discovery(
         let target_clone = arc_target.clone();
 
         // Spawn task returning Option<Param> for batched collection
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone
-                .acquire()
-                .await
-                .expect("acquire semaphore permit");
-            let m = parsed_method;
-            // Compose cookie header overriding the probed cookie while preserving others
-            let others =
-                crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
-            let cookie_header = match others {
-                Some(s) => format!("{}; {}={}", s, cookie_name, test_value),
-                None => format!("{}={}", cookie_name, test_value),
-            };
-            let request = crate::utils::build_request_with_cookie(
-                &client_clone,
-                &target_clone,
-                m,
-                url,
-                data.clone(),
-                Some(cookie_header),
-            );
-            crate::record_outbound_request().await;
-            let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await
-                && let Ok(text) = crate::utils::http::read_body(resp).await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                discovered = Some(Param {
-                    name: cookie_name,
-                    value: cookie_value,
-                    location: crate::parameter_analysis::Location::Header,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: detect_js_breakout(&text),
-                });
-            }
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
-            }
-            drop(permit);
-            discovered
-        });
+        let handle = tokio::spawn(crate::with_job_scopes(
+            crate::JobScopes::capture(),
+            async move {
+                let permit = semaphore_clone
+                    .acquire()
+                    .await
+                    .expect("acquire semaphore permit");
+                let m = parsed_method;
+                // Compose cookie header overriding the probed cookie while preserving others
+                let others =
+                    crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
+                let cookie_header = match others {
+                    Some(s) => format!("{}; {}={}", s, cookie_name, test_value),
+                    None => format!("{}={}", cookie_name, test_value),
+                };
+                let request = crate::utils::build_request_with_cookie(
+                    &client_clone,
+                    &target_clone,
+                    m,
+                    url,
+                    data.clone(),
+                    Some(cookie_header),
+                );
+                crate::record_outbound_request().await;
+                let mut discovered: Option<Param> = None;
+                if let Ok(resp) = request.send().await
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
+                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                {
+                    let (valid, invalid) = classify_special_chars(&text);
+                    discovered = Some(Param {
+                        name: cookie_name,
+                        value: cookie_value,
+                        location: crate::parameter_analysis::Location::Header,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                        pre_encoding: None,
+                        pre_encoding_pipeline: None,
+                        wire_name: None,
+                        form_action_url: None,
+                        form_origin_url: None,
+                        framework_sink: None,
+                        escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
+                    });
+                }
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+                drop(permit);
+                discovered
+            },
+        ));
         handles.push(handle);
     }
 
