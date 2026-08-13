@@ -41,6 +41,47 @@ fn report(findings: &[Result]) -> String {
 
 // ---------------------------------------------------------------- key identity
 
+/// The identity key is derived on two independent paths — from a live `Result`
+/// and from a `BaselineFinding` parsed back out of a written report — and the
+/// two structs declare their fields in different orders. If either mapping is
+/// transposed, a saved baseline stops matching the run that produced it: every
+/// finding reads as new under `report` mode, and under `filter` mode a
+/// collision suppresses a real finding as already-known.
+///
+/// Every identity field is given a *distinct* value here, so swapping any two
+/// of them changes the key and fails this test. That is the whole point — the
+/// old positional `finding_key` took nine consecutive `&str`s, so no swap was
+/// a compile error.
+#[test]
+fn baseline_roundtrip_key_matches_the_live_finding_key() {
+    let mut f = finding(FindingType::Verified, "https://example.test/a?q=1", "q");
+    f.location = "Header".to_string();
+    f.detection_method = FindingMethod::DomVerification;
+    f.inject_type = "inJS-double(2)".to_string();
+    f.cwe = "CWE-80".to_string();
+    f.evidence = "Source: location.hash , Sink: innerHTML".to_string();
+
+    let live = key_for_result(&f);
+
+    // Round-trip through the exact bytes `--format json --output` writes.
+    let path = tmp("roundtrip-identity", &report(std::slice::from_ref(&f)));
+    let loaded = load(path.to_str().expect("utf-8 path"), BASELINE_MODE_FILTER);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        loaded.warning.is_none(),
+        "baseline should load cleanly, got: {:?}",
+        loaded.warning
+    );
+    assert!(
+        loaded.keys.contains(&live),
+        "a finding must match itself through a saved baseline;\n  live key: {}\n  loaded:   {:?}",
+        live,
+        loaded.keys
+    );
+    assert_eq!(loaded.keys.len(), 1);
+}
+
 #[test]
 fn key_ignores_the_payload_in_the_url() {
     // Two runs of the same scan embed different payloads in `data`. That is
