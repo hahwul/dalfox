@@ -111,6 +111,38 @@ fn validate_numeric_args_rejects_delay_over_cap() {
 }
 
 #[test]
+fn validate_numeric_args_rejects_sxss_retries_over_cap() {
+    // The stored-XSS re-check backoff is `500ms * attempt`, so the *total* wait
+    // grows quadratically: the un-capped 3000 someone could type is ~26 days,
+    // per check URL and per verified payload.
+    let mut args = default_scan_args();
+    args.sxss_retries = crate::cmd::scan::CLI_MAX_SXSS_RETRIES + 1;
+    let err = validate_numeric_args(&args).unwrap_err();
+    assert!(
+        err.1.contains("sxss-retries"),
+        "message must name the flag, got: {}",
+        err.1
+    );
+}
+
+#[test]
+fn validate_numeric_args_accepts_sxss_retries_at_cap() {
+    let mut args = default_scan_args();
+    args.sxss_retries = crate::cmd::scan::CLI_MAX_SXSS_RETRIES;
+    assert!(validate_numeric_args(&args).is_ok());
+}
+
+#[test]
+fn sxss_method_uses_the_same_parser_as_method() {
+    // `--sxss-method` had no value parser, so `post` went on the wire as the
+    // literal extension verb (reqwest's Method is case-sensitive) and
+    // `"GET junk"` failed to parse and silently degraded to GET.
+    use crate::cmd::scan::parse_http_method_arg;
+    assert_eq!(parse_http_method_arg("post").unwrap(), "POST");
+    assert!(parse_http_method_arg("GET junk").is_err());
+}
+
+#[test]
 fn validate_numeric_args_rejects_zero_concurrent_targets() {
     let mut args = default_scan_args();
     args.max_concurrent_targets = 0;
