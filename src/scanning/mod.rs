@@ -1583,16 +1583,26 @@ enum PhaseFlow {
 /// shapes that already failed, so cutting them is recall-neutral.
 const INERT_ECHO_BUDGET: u32 = 256;
 
-/// Issue #1156 — *consecutive* 5xx responses that end the DOM phase.
+/// Issue #1156 — *consecutive* dead-server responses that end the DOM phase.
 ///
 /// Scoped to **server errors (`status >= 500`) only**, deliberately *excluding*
 /// 4xx WAF blocks (`403`/`406`/`429`): a payload *variant* can bypass a WAF
 /// filter, so early-exiting on a 4xx block would risk cutting a working bypass
-/// (those are handled by the reflection-path WAF backoff instead). A 5xx, by
-/// contrast, is the server failing — no payload variant "bypasses" it and an
-/// error page cannot carry executable evidence — so a long consecutive run is a
-/// safe, recall-neutral stop. A single non-5xx response resets the streak, so a
-/// transient blip cannot abandon a recoverable parameter.
+/// (those are handled by the reflection-path WAF backoff instead). A 5xx that
+/// tells us nothing back is the server failing — no payload variant "bypasses"
+/// it — so a long consecutive run is a safe, recall-neutral stop. A single
+/// response that does not qualify resets the streak, so a transient blip cannot
+/// abandon a recoverable parameter.
+///
+/// A 5xx that **echoes the payload** is explicitly *not* counted. That
+/// combination is a framework development error page (Kemal, Werkzeug, Rails,
+/// Symfony …), which renders the request path, query string, or an exception
+/// message built from user input — one of the most common reflected-XSS sinks
+/// there is, and a 500 by construction. Counting it lost the entire class:
+/// after 64 payloads dalfox abandoned DOM verification and could only ever
+/// report `[R]` for a parameter that `--deep-scan` verifies as `[V]`. Fan-out
+/// on such an endpoint stays bounded by [`INERT_ECHO_BUDGET`], which is the
+/// budget designed for "reflects everything, verifies nothing".
 const BLOCKED_STREAK_LIMIT: u32 = 64;
 
 /// True for statuses that signal the endpoint will not yield a DOM verification
@@ -1600,6 +1610,9 @@ const BLOCKED_STREAK_LIMIT: u32 = 64;
 /// WAF blocks are intentionally excluded (see [`BLOCKED_STREAK_LIMIT`]); `0`
 /// (request error) is likewise not blocking — a transient network error should
 /// not, on its own, end the phase.
+///
+/// Status alone is not the whole test: see [`next_blocked_streak`], which
+/// additionally spares a 5xx that reflected the payload.
 fn is_blocking_dom_status(status: u16) -> bool {
     status >= 500
 }
@@ -1615,9 +1628,14 @@ fn next_inert_echo_count(prev: u32, reflected: bool) -> u32 {
 /// Fold one DOM response's status into the consecutive blocked streak: increment
 /// on a blocking status, reset to 0 otherwise. The reset is what makes the
 /// streak *consecutive* (one good response clears it), preserving recall on
-/// intermittently-failing endpoints. Pure for unit testing.
-fn next_blocked_streak(prev: u32, status: u16) -> u32 {
-    if is_blocking_dom_status(status) {
+/// intermittently-failing endpoints.
+///
+/// `reflected` spares the responses a 5xx status alone would condemn: a server
+/// error that hands our payload back is a rendered error page, not a dead
+/// server, and error pages are a first-class XSS sink (see
+/// [`BLOCKED_STREAK_LIMIT`]). Pure for unit testing.
+fn next_blocked_streak(prev: u32, status: u16, reflected: bool) -> u32 {
+    if is_blocking_dom_status(status) && !reflected {
         prev + 1
     } else {
         0
@@ -2323,7 +2341,7 @@ impl ScanWorkerCtx {
             // false`) must not be miscounted as an inert echo.
             if !dom_verified {
                 inert_echo_count = next_inert_echo_count(inert_echo_count, reflected);
-                blocked_streak = next_blocked_streak(blocked_streak, status);
+                blocked_streak = next_blocked_streak(blocked_streak, status, reflected);
             }
             if let Some(ref pb) = self.pb {
                 pb.inc(1);

@@ -584,13 +584,13 @@ fn test_framework_html_sink_returns_none_for_empty_marker() {
     );
 }
 
-// --- Pure-helper coverage: make_any_query_param / collapse_to_any_query_param ---
+// --- Pure-helper coverage: make_any_param / collapse_mined_params ---
 
 #[test]
-fn test_make_any_query_param_fills_classification_and_context() {
+fn test_make_any_param_fills_classification_and_context() {
     let marker = crate::scanning::markers::open_marker();
     let body = format!("<div>{} '\"<>(){{}}</div>", marker);
-    let p = make_any_query_param(&body);
+    let p = make_any_param(Location::Query, Some(&body), None);
     assert_eq!(p.name, "any");
     assert_eq!(p.location, Location::Query);
     assert_eq!(p.value, crate::scanning::markers::bracketed_marker());
@@ -604,72 +604,189 @@ fn test_make_any_query_param_fills_classification_and_context() {
     assert!(invalid.contains(&'\\'));
 }
 
+/// With no response body to classify, `any` inherits the measurements of a
+/// param the *stage itself mined* — an actual observation of how an arbitrary
+/// name behaves at this location. It must never inherit them from a param the
+/// target really carries, or a finding ends up reporting one parameter's
+/// evidence under another parameter's name.
+#[test]
+fn test_make_any_param_inherits_mined_sample_metadata() {
+    let mined = Param {
+        name: "mined_word".into(),
+        value: "MINEDVALUE".into(),
+        location: Location::Query,
+        injection_context: Some(InjectionContext::Html(None)),
+        valid_specials: Some(vec!['<', '>']),
+        invalid_specials: Some(vec!['"']),
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    let p = make_any_param(Location::Query, None, Some(&mined));
+    assert_eq!(p.name, "any");
+    assert_eq!(p.value, "MINEDVALUE");
+    assert_eq!(p.valid_specials, Some(vec!['<', '>']));
+    assert_eq!(p.invalid_specials, Some(vec!['"']));
+
+    // No sample at all still yields a usable param: payload selection needs an
+    // injection context, so the generic HTML default stands in.
+    let bare = make_any_param(Location::Body, None, None);
+    assert_eq!(bare.location, Location::Body);
+    assert_eq!(bare.injection_context, Some(InjectionContext::Html(None)));
+}
+
+fn bare_param(name: &str, location: Location) -> Param {
+    Param {
+        name: name.into(),
+        value: format!("{name}_value"),
+        location,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    }
+}
+
+fn names_at(params: &[Param], location: Location) -> Vec<&str> {
+    params
+        .iter()
+        .filter(|p| p.location == location)
+        .map(|p| p.name.as_str())
+        .collect()
+}
+
+/// Collapse folds away only what the *current mining stage* discovered.
+///
+/// Regression guard for the `any` false positive: on a page that echoes its
+/// whole query string, collapse used to clear every Query param — including the
+/// ones Stage 1 discovery had already confirmed reflect. The genuinely
+/// vulnerable parameter was deleted before Stage 3 saw it, so the scan reported
+/// a POC against `any` (a parameter the app does not have) and reported zero
+/// findings for the real one.
 #[tokio::test]
-async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
-    let initial = vec![
-        Param {
-            name: "q_old".into(),
-            value: "v".into(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
-        Param {
-            name: "q_old_2".into(),
-            value: "v".into(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
-        Param {
-            name: "h".into(),
-            value: "hv".into(),
-            location: Location::Header,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
-    ];
-    let params = Arc::new(Mutex::new(initial));
-    collapse_to_any_query_param(params.clone(), "<html></html>").await;
+async fn test_collapse_mined_params_keeps_discovered_params_and_folds_only_mined() {
+    let params = Arc::new(Mutex::new(vec![
+        bare_param("q_real", Location::Query),
+        bare_param("h", Location::Header),
+    ]));
+    // Snapshot is taken before the stage mines anything, exactly as the
+    // probe_* functions do.
+    let preexisting = snapshot_param_slots(&params).await;
+    params
+        .lock()
+        .await
+        .extend([bare_param("mined_a", Location::Query), {
+            let mut p = bare_param("mined_b", Location::Query);
+            p.valid_specials = Some(vec!['<']);
+            p
+        }]);
+
+    collapse_mined_params(&params, &preexisting, Location::Query, None).await;
+
     let guard = params.lock().await;
-    assert_eq!(guard.len(), 2);
-    assert!(
-        guard
-            .iter()
-            .any(|p| p.name == "h" && p.location == Location::Header)
+    assert_eq!(
+        names_at(&guard, Location::Query),
+        vec!["q_real", "any"],
+        "the discovered Query param must survive and `any` is appended, not substituted"
     );
+    assert_eq!(
+        names_at(&guard, Location::Header),
+        vec!["h"],
+        "params at other locations are untouched"
+    );
+    // `any` samples a mined param, never the target's own parameter.
     let any_q = guard
         .iter()
-        .find(|p| p.location == Location::Query)
+        .find(|p| p.name == "any")
         .expect("any query param present");
-    assert_eq!(any_q.name, "any");
+    assert_eq!(any_q.value, "mined_a_value");
+}
+
+/// Two stages can collapse the same location (dictionary mining, then DOM
+/// mining). The second must replace the first `any` rather than stack a
+/// duplicate injection point on top of it.
+#[tokio::test]
+async fn test_collapse_mined_params_replaces_a_previous_any_instead_of_duplicating() {
+    let params = Arc::new(Mutex::new(vec![bare_param("q_real", Location::Query)]));
+    let first_stage = snapshot_param_slots(&params).await;
+    collapse_mined_params(&params, &first_stage, Location::Query, None).await;
+
+    // Second stage snapshots *after* the first collapse, so `any` is in its
+    // preexisting set — the dedupe has to be explicit.
+    let second_stage = snapshot_param_slots(&params).await;
+    collapse_mined_params(&params, &second_stage, Location::Query, None).await;
+
+    let guard = params.lock().await;
+    assert_eq!(names_at(&guard, Location::Query), vec!["q_real", "any"]);
+}
+
+/// A target may genuinely carry a parameter called `any`. It is a discovered
+/// param like any other, so collapse must keep it — and must not stack the
+/// synthetic stand-in on top of it.
+#[tokio::test]
+async fn test_collapse_mined_params_preserves_a_real_param_named_any() {
+    let params = Arc::new(Mutex::new(vec![{
+        let mut p = bare_param("any", Location::Query);
+        p.valid_specials = Some(vec!['<', '>']);
+        p
+    }]));
+    let preexisting = snapshot_param_slots(&params).await;
+    params
+        .lock()
+        .await
+        .push(bare_param("mined_word", Location::Query));
+
+    collapse_mined_params(&params, &preexisting, Location::Query, None).await;
+
+    let guard = params.lock().await;
+    assert_eq!(names_at(&guard, Location::Query), vec!["any"]);
+    let real = &guard[0];
+    assert_eq!(
+        real.value, "any_value",
+        "the target's own `any` keeps its discovered value"
+    );
+    assert_eq!(
+        real.valid_specials,
+        Some(vec!['<', '>']),
+        "and its measured specials — the synthetic must not overwrite them"
+    );
+}
+
+/// The same guard for a non-Query location: a Body collapse must not wipe the
+/// body fields the user supplied via `-d`.
+#[tokio::test]
+async fn test_collapse_mined_params_scopes_to_one_location() {
+    let params = Arc::new(Mutex::new(vec![
+        bare_param("username", Location::Body),
+        bare_param("q_real", Location::Query),
+    ]));
+    let preexisting = snapshot_param_slots(&params).await;
+    params
+        .lock()
+        .await
+        .push(bare_param("mined_body", Location::Body));
+
+    collapse_mined_params(&params, &preexisting, Location::Body, None).await;
+
+    let guard = params.lock().await;
+    assert_eq!(names_at(&guard, Location::Body), vec!["username", "any"]);
+    assert_eq!(
+        names_at(&guard, Location::Query),
+        vec!["q_real"],
+        "a Body collapse must not add or remove Query params"
+    );
 }
 
 // --- Server-driven coverage for probe_* functions ---
