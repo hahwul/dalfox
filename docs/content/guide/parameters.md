@@ -127,6 +127,16 @@ dalfox https://target.app/api \
 
 Dalfox replaces every `FUZZ` with each payload and sends the request.
 
+You can also target a query parameter or a header directly:
+
+```bash
+# Query parameter
+dalfox scan 'https://example.com/?q=FUZZ&page=1' --inject-marker FUZZ
+
+# Header
+dalfox scan https://example.com -H 'X-Search: FUZZ' --inject-marker FUZZ
+```
+
 ## Auto pre-encoding
 
 Some endpoints don't accept a payload as raw text. They expect it wrapped in some structural encoding (base64, JSON, JWT, and so on). Dalfox inspects each parameter's existing value during discovery and, when it recognises a structure, builds a transparent encoding pipeline so payloads round-trip through the same wrapping. There's nothing to configure: look for `pre_encoding` or `pre_encoding_pipeline` in debug output.
