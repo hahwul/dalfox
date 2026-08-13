@@ -112,19 +112,52 @@ async fn pre_collapse_query_probe(client: &reqwest::Client, target: &Target) -> 
     first_text
 }
 
-/// Build the synthetic "any" Query param used as the lone discovered
-/// param when sentinel collapse fires. Mirrors the post-collapse path
-/// at the end of `probe_dictionary_params`.
-fn make_any_query_param(text: &str) -> Param {
-    let context = detect_injection_context(text);
-    let (valid, invalid) = crate::parameter_analysis::classify_special_chars(text);
-    Param {
+/// Identity of a parameter *slot*, used to tell the params a mining stage
+/// inherited apart from the ones it mined itself. `Location` is not `Hash`, so
+/// the key is built from its `Debug` rendering — the same shape
+/// `discovery::dedupe_reflection_params` uses.
+fn param_slot_key(p: &Param) -> String {
+    format!("{}|{:?}", p.name, p.location)
+}
+
+/// Snapshot the parameter slots already present before a mining stage starts.
+///
+/// Mining stages run sequentially (see [`mine_parameters`]), so this is a
+/// stable "everything Stage 1 discovery — or an earlier mining stage — already
+/// found" set, and a later collapse can subtract from it safely.
+async fn snapshot_param_slots(
+    reflection_params: &Arc<Mutex<Vec<Param>>>,
+) -> std::collections::HashSet<String> {
+    reflection_params
+        .lock()
+        .await
+        .iter()
+        .map(param_slot_key)
+        .collect()
+}
+
+/// Build the synthetic `any` param standing in for "this target echoes
+/// arbitrary parameter names at `location`".
+///
+/// Metadata comes from whichever sample the caller has: the response body that
+/// proved arbitrary names reflect (sentinel path), or one of the params the
+/// stage mined before collapsing (EWMA path). Both describe how an *arbitrary*
+/// name behaves here, which is what `any` represents. The params the target
+/// actually carries are deliberately not used as the sample — their measured
+/// specials belong to them, and copying those onto `any` produced findings that
+/// reported one parameter's evidence under another's name.
+fn make_any_param(
+    location: Location,
+    response_text: Option<&str>,
+    mined_sample: Option<&Param>,
+) -> Param {
+    let mut param = Param {
         name: "any".to_string(),
         value: crate::scanning::markers::bracketed_marker().to_string(),
-        location: Location::Query,
-        injection_context: Some(context),
-        valid_specials: Some(valid),
-        invalid_specials: Some(invalid),
+        location,
+        injection_context: Some(InjectionContext::Html(None)),
+        valid_specials: None,
+        invalid_specials: None,
         pre_encoding: None,
         pre_encoding_pipeline: None,
         wire_name: None,
@@ -132,29 +165,75 @@ fn make_any_query_param(text: &str) -> Param {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
-        js_breakout: detect_js_breakout(text),
+        js_breakout: None,
+    };
+    if let Some(text) = response_text {
+        let (valid, invalid) = crate::parameter_analysis::classify_special_chars(text);
+        param.injection_context = Some(detect_injection_context(text));
+        param.valid_specials = Some(valid);
+        param.invalid_specials = Some(invalid);
+        param.js_breakout = detect_js_breakout(text);
+    } else if let Some(sample) = mined_sample {
+        param.value = sample.value.clone();
+        param.injection_context = sample.injection_context.clone();
+        param.valid_specials = sample.valid_specials.clone();
+        param.invalid_specials = sample.invalid_specials.clone();
+        param.js_breakout = sample.js_breakout.clone();
     }
+    param
 }
 
-/// Replace every `Query`-located param in `reflection_params` with a single
-/// synthetic `any` param. Non-Query params (Body, Header, Path, JsonBody,
-/// Cookie, Fragment) are preserved. Mirrors the EWMA post-processing path
-/// so sentinel collapse and EWMA collapse produce identical downstream
-/// state — Stage 3-6 sees one Query injection point regardless of which
-/// route triggered the collapse.
-async fn collapse_to_any_query_param(
-    reflection_params: Arc<Mutex<Vec<Param>>>,
-    response_text: &str,
+/// Collapse the params *this mining stage itself discovered* at `location`
+/// into the single synthetic `any` param, leaving everything else untouched.
+///
+/// Collapse is a cost control. Once a target is known to echo arbitrary
+/// parameter names, walking the rest of the wordlist only manufactures
+/// injection points that all behave identically, and each one costs a full
+/// Stage 3-6 payload run. Dropping *those* is the point of the mechanism.
+///
+/// Dropping the parameters the target actually carries is not. Those come from
+/// Stage 1 discovery — the URL query string, form fields, headers — and were
+/// confirmed to reflect before mining ever ran. Earlier revisions cleared every
+/// param at `location` regardless of origin, so on any page that echoes its
+/// whole query string (a debug endpoint, a framework error page that dumps
+/// `request.query_params`) the genuinely vulnerable parameter was deleted
+/// before Stage 3 ever saw it: the scan then reported a POC against `any` — a
+/// parameter the application does not have — and missed the real one entirely.
+/// `preexisting` is the guard against that, and it is why every caller must
+/// snapshot with [`snapshot_param_slots`] before it starts pushing.
+async fn collapse_mined_params(
+    reflection_params: &Arc<Mutex<Vec<Param>>>,
+    preexisting: &std::collections::HashSet<String>,
+    location: Location,
+    response_text: Option<&str>,
 ) {
     let mut guard = reflection_params.lock().await;
-    let non_query: Vec<Param> = guard
+    let mut mined_sample: Option<Param> = None;
+    guard.retain(|p| {
+        if p.location != location || preexisting.contains(&param_slot_key(p)) {
+            return true;
+        }
+        if mined_sample.is_none() {
+            mined_sample = Some(p.clone());
+        }
+        false
+    });
+    // Don't add a second `any` to a slot that already has one. That covers the
+    // synthetic left by an earlier stage collapsing the same location, and —
+    // more importantly — a target that genuinely carries a parameter called
+    // `any`: it is a real, discovered param and overwriting it with the
+    // synthetic stand-in would reintroduce exactly the data loss this function
+    // exists to prevent.
+    if !guard
         .iter()
-        .filter(|p| !matches!(p.location, Location::Query))
-        .cloned()
-        .collect();
-    guard.clear();
-    guard.extend(non_query);
-    guard.push(make_any_query_param(response_text));
+        .any(|p| p.location == location && p.name == "any")
+    {
+        guard.push(make_any_param(
+            location,
+            response_text,
+            mined_sample.as_ref(),
+        ));
+    }
 }
 
 #[derive(Debug)]
@@ -562,6 +641,9 @@ pub async fn probe_dictionary_params(
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client_or_default();
+    // Taken before this stage pushes anything, so a collapse below can drop
+    // what the wordlist mined without touching what discovery already found.
+    let preexisting = snapshot_param_slots(&reflection_params).await;
 
     // Resolve candidate parameter names (remote, file, or built-ins)
     let mut params: Vec<String> = Vec::new();
@@ -615,19 +697,26 @@ pub async fn probe_dictionary_params(
 
     // Sentinel pre-probe: 3 unique random param names. If every one reflects,
     // the page echoes arbitrary input and the wordlist would just balloon
-    // into Stage 3-6 cost. Replace it with a single "any" param and bail.
-    // Skip when the wordlist is small enough that the pre-probe is more
-    // expensive than just running it.
+    // into Stage 3-6 cost. Skip the wordlist and add a single "any" param
+    // instead — the params discovered before this stage are kept and still
+    // scanned. Skip when the wordlist is small enough that the pre-probe is
+    // more expensive than just running it.
     if params.len() > SENTINEL_PROBE_COUNT * 5
         && let Some(text) = pre_collapse_query_probe(&client, target).await
     {
         if !silence {
             eprintln!(
                 "[mining-collapse] sentinel pre-probe collapsed Query mining: \
-                 every random param name reflected; using single 'any' param"
+                 every random param name reflected; adding single 'any' param"
             );
         }
-        collapse_to_any_query_param(reflection_params.clone(), &text).await;
+        collapse_mined_params(
+            &reflection_params,
+            &preexisting,
+            Location::Query,
+            Some(&text),
+        )
+        .await;
         if let Some(ref pb) = pb {
             pb.finish_and_clear();
         }
@@ -866,58 +955,12 @@ pub async fn probe_dictionary_params(
     } // end chunk loop
 
     // Apply collapse post-processing once (instead of inside tasks mutating aggressively).
-    // Only collapse Query params — preserve params discovered via other channels
-    // (Body from form discovery, Header from header discovery, Path, etc.).
+    // Only the Query params *this stage mined* collapse — params discovered via
+    // other channels (Body, Header, Path, JsonBody, …) and the Query params
+    // Stage 1 discovery already confirmed are left alone.
     let st_final = stats.lock().await;
     if st_final.collapsed {
-        let mut guard = reflection_params.lock().await;
-        // Preserve non-Query params (Body, Header, Path, JsonBody, Cookie, etc.)
-        let non_query: Vec<Param> = guard
-            .iter()
-            .filter(|p| !matches!(p.location, crate::parameter_analysis::Location::Query))
-            .cloned()
-            .collect();
-        let preserved = guard
-            .iter()
-            .find(|p| matches!(p.location, crate::parameter_analysis::Location::Query))
-            .cloned();
-        guard.clear();
-        guard.extend(non_query);
-        if let Some(orig) = preserved {
-            guard.push(Param {
-                name: "any".to_string(),
-                value: orig.value.clone(),
-                location: crate::parameter_analysis::Location::Query,
-                injection_context: orig.injection_context.clone(),
-                valid_specials: orig.valid_specials.clone(),
-                invalid_specials: orig.invalid_specials.clone(),
-                pre_encoding: None,
-                pre_encoding_pipeline: None,
-                wire_name: None,
-                form_action_url: None,
-                form_origin_url: None,
-                framework_sink: None,
-                escaped_specials: None,
-                js_breakout: orig.js_breakout.clone(),
-            });
-        } else {
-            guard.push(Param {
-                name: "any".to_string(),
-                value: crate::scanning::markers::bracketed_marker().to_string(),
-                location: crate::parameter_analysis::Location::Query,
-                injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
-                valid_specials: None,
-                invalid_specials: None,
-                pre_encoding: None,
-                pre_encoding_pipeline: None,
-                wire_name: None,
-                form_action_url: None,
-                form_origin_url: None,
-                framework_sink: None,
-                escaped_specials: None,
-                js_breakout: None,
-            });
-        }
+        collapse_mined_params(&reflection_params, &preexisting, Location::Query, None).await;
     }
 }
 
@@ -931,6 +974,7 @@ pub async fn probe_body_params(
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client_or_default();
+    let preexisting = snapshot_param_slots(&reflection_params).await;
 
     if let Some(data) = &args.data {
         // Assume form data for now (application/x-www-form-urlencoded)
@@ -1096,59 +1140,12 @@ pub async fn probe_body_params(
             guard.extend(batch);
         }
 
-        // If collapsed after attempts, normalize Body params to single 'any' param.
-        // Preserve non-Body params discovered via other channels.
+        // If collapsed after attempts, normalize the Body params this stage
+        // mined to a single 'any' param. Params discovered via other channels
+        // — and the Body params that were already known — are preserved.
         let st_final = stats.lock().await;
         if st_final.collapsed {
-            let mut guard = reflection_params.lock().await;
-            let non_body: Vec<Param> = guard
-                .iter()
-                .filter(|p| !matches!(p.location, Location::Body))
-                .cloned()
-                .collect();
-            let preserved = guard
-                .iter()
-                .find(|p| matches!(p.location, Location::Body))
-                .cloned();
-            guard.clear();
-            guard.extend(non_body);
-            if let Some(orig) = preserved {
-                guard.push(Param {
-                    name: "any".to_string(),
-                    value: orig.value.clone(),
-                    location: Location::Body,
-                    injection_context: orig.injection_context.clone(),
-                    valid_specials: orig.valid_specials.clone(),
-                    invalid_specials: orig.invalid_specials.clone(),
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: orig.js_breakout.clone(),
-                });
-            } else {
-                guard.push(Param {
-                    name: "any".to_string(),
-                    value: crate::scanning::markers::bracketed_marker().to_string(),
-                    location: Location::Body,
-                    injection_context: Some(crate::parameter_analysis::InjectionContext::Html(
-                        None,
-                    )),
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: None,
-                });
-            }
+            collapse_mined_params(&reflection_params, &preexisting, Location::Body, None).await;
         }
     }
 }
@@ -1163,6 +1160,7 @@ pub async fn probe_response_id_params(
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client_or_default();
+    let preexisting = snapshot_param_slots(&reflection_params).await;
 
     // First, get the HTML to find input ids and names
     let base_request = crate::utils::build_request(
@@ -1225,10 +1223,16 @@ pub async fn probe_response_id_params(
             if !silence {
                 eprintln!(
                     "[mining-collapse] sentinel pre-probe collapsed DOM mining: \
-                     every random param name reflected; using single 'any' param"
+                     every random param name reflected; adding single 'any' param"
                 );
             }
-            collapse_to_any_query_param(reflection_params.clone(), &text).await;
+            collapse_mined_params(
+                &reflection_params,
+                &preexisting,
+                Location::Query,
+                Some(&text),
+            )
+            .await;
             if let Some(ref pb) = pb {
                 pb.finish_and_clear();
             }
@@ -1383,59 +1387,13 @@ pub async fn probe_response_id_params(
             let mut guard = reflection_params.lock().await;
             guard.extend(batch);
         }
-        // Collapse post-processing (single 'any' param) if adaptive stats triggered it.
-        // Preserve non-Query params discovered via other channels.
+        // Collapse post-processing (single 'any' param) if adaptive stats
+        // triggered it. Only the Query params this stage mined are folded in;
+        // params discovered via other channels — and the ones discovery already
+        // confirmed — survive.
         let st_final = stats.lock().await;
         if st_final.collapsed {
-            let mut guard = reflection_params.lock().await;
-            let non_query: Vec<Param> = guard
-                .iter()
-                .filter(|p| !matches!(p.location, crate::parameter_analysis::Location::Query))
-                .cloned()
-                .collect();
-            let preserved = guard
-                .iter()
-                .find(|p| matches!(p.location, crate::parameter_analysis::Location::Query))
-                .cloned();
-            guard.clear();
-            guard.extend(non_query);
-            if let Some(orig) = preserved {
-                guard.push(Param {
-                    name: "any".to_string(),
-                    value: orig.value.clone(),
-                    location: crate::parameter_analysis::Location::Query,
-                    injection_context: orig.injection_context.clone(),
-                    valid_specials: orig.valid_specials.clone(),
-                    invalid_specials: orig.invalid_specials.clone(),
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: orig.js_breakout.clone(),
-                });
-            } else {
-                guard.push(Param {
-                    name: "any".to_string(),
-                    value: crate::scanning::markers::bracketed_marker().to_string(),
-                    location: crate::parameter_analysis::Location::Query,
-                    injection_context: Some(crate::parameter_analysis::InjectionContext::Html(
-                        None,
-                    )),
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: None,
-                });
-            }
+            collapse_mined_params(&reflection_params, &preexisting, Location::Query, None).await;
         }
     }
 }
@@ -1450,6 +1408,7 @@ pub async fn probe_json_body_params(
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client_or_default();
+    let preexisting = snapshot_param_slots(&reflection_params).await;
 
     // Detect JSON body from args.data; only proceed if it's a JSON object
     let base_json: serde_json::Value = match &args.data {
@@ -1635,57 +1594,11 @@ pub async fn probe_json_body_params(
         guard.extend(batch);
     }
 
-    // Collapse normalization to single 'any' JSON param if triggered.
-    // Preserve non-JsonBody params discovered via other channels.
+    // Collapse normalization to single 'any' JSON param if triggered. Only the
+    // JsonBody params this stage mined fold in; everything else is preserved.
     let st_final = stats.lock().await;
     if st_final.collapsed {
-        let mut guard = reflection_params.lock().await;
-        let non_json: Vec<Param> = guard
-            .iter()
-            .filter(|p| !matches!(p.location, Location::JsonBody))
-            .cloned()
-            .collect();
-        let preserved = guard
-            .iter()
-            .find(|p| matches!(p.location, Location::JsonBody))
-            .cloned();
-        guard.clear();
-        guard.extend(non_json);
-        if let Some(orig) = preserved {
-            guard.push(Param {
-                name: "any".to_string(),
-                value: orig.value.clone(),
-                location: Location::JsonBody,
-                injection_context: orig.injection_context.clone(),
-                valid_specials: orig.valid_specials.clone(),
-                invalid_specials: orig.invalid_specials.clone(),
-                pre_encoding: None,
-                pre_encoding_pipeline: None,
-                wire_name: None,
-                form_action_url: None,
-                form_origin_url: None,
-                framework_sink: None,
-                escaped_specials: None,
-                js_breakout: orig.js_breakout.clone(),
-            });
-        } else {
-            guard.push(Param {
-                name: "any".to_string(),
-                value: crate::scanning::markers::bracketed_marker().to_string(),
-                location: Location::JsonBody,
-                injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
-                valid_specials: None,
-                invalid_specials: None,
-                pre_encoding: None,
-                pre_encoding_pipeline: None,
-                wire_name: None,
-                form_action_url: None,
-                form_origin_url: None,
-                framework_sink: None,
-                escaped_specials: None,
-                js_breakout: None,
-            });
-        }
+        collapse_mined_params(&reflection_params, &preexisting, Location::JsonBody, None).await;
     }
 }
 

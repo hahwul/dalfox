@@ -959,14 +959,44 @@ fn test_is_blocking_dom_status_is_5xx_only() {
 
 #[test]
 fn test_next_blocked_streak_resets_on_non_block() {
-    // Consecutive 5xx accumulate…
-    assert_eq!(next_blocked_streak(0, 503), 1);
-    assert_eq!(next_blocked_streak(63, 503), 64);
+    // Consecutive silent 5xx accumulate…
+    assert_eq!(next_blocked_streak(0, 503, false), 1);
+    assert_eq!(next_blocked_streak(63, 503, false), 64);
     // …but ANY non-5xx response resets the streak to 0 — this is what makes the
     // streak *consecutive*, so 64 non-consecutive blocks never early-exit.
-    assert_eq!(next_blocked_streak(63, 200), 0);
-    assert_eq!(next_blocked_streak(63, 403), 0); // 4xx WAF block does not count
-    assert_eq!(next_blocked_streak(63, 0), 0); // request error does not count
+    assert_eq!(next_blocked_streak(63, 200, false), 0);
+    assert_eq!(next_blocked_streak(63, 403, false), 0); // 4xx WAF block does not count
+    assert_eq!(next_blocked_streak(63, 0, false), 0); // request error does not count
+}
+
+/// A 5xx that echoes the payload is a rendered error page, not a dead server.
+///
+/// Regression guard: framework development error pages (Kemal, Werkzeug, Rails,
+/// Symfony) reflect the request path / query string / an exception message built
+/// from user input, and they are a 500 by construction — GHSA-2x8p-5jvx-v7jw is
+/// exactly this shape. Counting them toward the streak ended the DOM phase after
+/// `BLOCKED_STREAK_LIMIT` payloads, so the parameter could only ever be reported
+/// `[R]` even though `--deep-scan` verifies it as `[V]`. Fan-out on these
+/// endpoints is bounded by `INERT_ECHO_BUDGET` instead, which is the budget
+/// meant for "reflects everything, verifies nothing".
+#[test]
+fn test_next_blocked_streak_spares_reflecting_error_pages() {
+    // A reflecting 5xx never accumulates, no matter how long the run.
+    assert_eq!(next_blocked_streak(0, 500, true), 0);
+    assert_eq!(next_blocked_streak(63, 500, true), 0);
+    assert_eq!(next_blocked_streak(63, 503, true), 0);
+    // …and it clears a streak built by preceding silent errors, exactly like any
+    // other response that proves the endpoint is still rendering.
+    assert_eq!(
+        next_blocked_streak(next_blocked_streak(0, 500, false), 500, true),
+        0
+    );
+    // The early exit therefore never fires on this endpoint via the streak.
+    assert!(!dom_phase_should_early_exit(
+        false,
+        0,
+        next_blocked_streak(63, 500, true)
+    ));
 }
 
 #[test]
