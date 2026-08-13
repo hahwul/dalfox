@@ -95,7 +95,7 @@ You'll need Rust (2024 edition). Install with [rustup](https://rustup.rs/) if yo
 dalfox --version
 ```
 
-You should see something like `dalfox 3.2.0` along with the Dalfox banner.
+You should see something like `dalfox 3.2.1` along with the Dalfox banner.
 
 ## Getting help
 
