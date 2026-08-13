@@ -632,8 +632,15 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     };
 
     // Group targets by host
-    let mut host_groups: std::collections::HashMap<String, Vec<Target>> =
-        std::collections::HashMap::new();
+    // A `BTreeMap`, not a `HashMap`: host order is user-visible in four places
+    // — the preflight/analysis pass, `--dry-run`, `--only-discovery`, and the
+    // scan loop's bounded dispatch (which decides what a `--limit` or Ctrl-C
+    // run reaches, and what a `--state-file` run records as completed).
+    // `HashMap` iterates under a per-process `RandomState` seed, so those all
+    // varied run to run and `--only-discovery --format json` could not be
+    // diffed against itself.
+    let mut host_groups: std::collections::BTreeMap<String, Vec<Target>> =
+        std::collections::BTreeMap::new();
     for target in parsed_targets {
         let host = target.url.host_str().unwrap_or("unknown").to_string();
         host_groups.entry(host).or_default().push(target);

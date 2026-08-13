@@ -592,17 +592,16 @@ impl DalfoxMcp {
                         scan_report = crate::scanning::run_scanning(
                             &target,
                             scan_args.clone(),
-                            results_arc.clone(),
-                            None,
-                            None,
-                            findings_count.clone(),
-                            Some(cancel_flag.clone()),
-                            None,
+                            crate::scanning::ScanRunHandles::new(
+                                results_arc.clone(),
+                                findings_count.clone(),
+                            )
+                            .with_cancel(cancel_flag.clone())
                             // Feed the live per-parameter completion counter
                             // so get_results_dalfox reports `params_tested`
                             // (and estimated_completion_pct) advancing during
                             // the scan instead of staying at 0 until done.
-                            Some(progress.params_tested.clone()),
+                            .with_params_done(progress.params_tested.clone()),
                         )
                         .await;
 

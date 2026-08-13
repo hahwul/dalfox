@@ -14,6 +14,31 @@ pub mod scan_id;
 pub mod shimmer;
 pub mod term;
 
+/// Largest permit count `tokio::sync::Semaphore::new` accepts; it asserts
+/// above this. Taken from tokio's own public constant rather than hand-copying
+/// its `usize::MAX >> 3` definition, which is a private detail tokio is free to
+/// change — a stale local copy would make this clamp itself the panic.
+pub const MAX_SEMAPHORE_PERMITS: usize = tokio::sync::Semaphore::MAX_PERMITS;
+
+/// Clamp a configured concurrency into the range `Semaphore::new` accepts.
+///
+/// Concurrency knobs (`--workers`, `--max-concurrent-targets`) reach a
+/// semaphore from four surfaces: the CLI, a config file, the REST
+/// `ScanOptions`, and MCP. Only the CLI path runs `validate_numeric_args`, and
+/// even there `max_concurrent_targets` is checked for zero but has no upper
+/// bound — so an absurd value used to reach `Semaphore::new` and panic the
+/// scanner on user input.
+///
+/// Both ends matter, and the lower one is the more damaging: `Semaphore::new(0)`
+/// is not a slow scan, it is a permanent deadlock — every worker blocks on
+/// `acquire()` forever and the scan hangs with no output. A helper whose whole
+/// point is holding regardless of which validator ran must therefore floor at 1
+/// as well as cap. Anything near the ceiling is already "effectively
+/// unlimited", so no realistic scan changes.
+pub fn semaphore_permits(requested: usize) -> usize {
+    requested.clamp(1, MAX_SEMAPHORE_PERMITS)
+}
+
 // Re-export banner helpers at `crate::utils::*`
 pub use banner::print_banner_once;
 // Re-export scan_id helpers at `crate::utils::*`

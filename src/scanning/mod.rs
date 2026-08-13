@@ -2434,30 +2434,120 @@ pub struct ScanRunReport {
     pub worker_panics: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The shared handles a [`run_scanning`] call needs beyond its target and args.
+///
+/// Grouped into a struct because the positional form took nine parameters, and
+/// the interchangeable ones sat next to each other: two `Option<Arc<..>>`
+/// progress bars in a row, then two *different* atomic counters
+/// (`findings_count`, a running findings tally, and `params_done`, a
+/// per-parameter completion counter) separated only by more `Option`s.
+/// Transposing any of them compiled fine and failed silently at runtime —
+/// which already happened once, when a caller stored the findings tally into
+/// `params_tested` (see the note in `server/job_runner.rs`).
+///
+/// Deliberately **not** `Default`. The two shared handles below are required,
+/// and defaulting them would be its own silent failure: a defaulted `results`
+/// is a private `Vec` nobody reads (every finding discarded), and a defaulted
+/// `findings_count` is a private counter nobody else writes (so `--limit`
+/// never fires). Trading "transpose two arguments" for "forget a field" would
+/// not have been an improvement — construct via [`ScanRunHandles::new`] and
+/// add the optional front-end handles with the `with_*` methods.
+#[derive(Clone)]
+pub struct ScanRunHandles {
+    /// Accumulates findings across every target in the run.
+    pub results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
+    /// Running findings tally, shared run-wide so `--limit` can stop the scan.
+    pub findings_count: Arc<AtomicUsize>,
+    /// CLI progress container; `None` for the REST/MCP front-ends.
+    pub multi_pb: Option<Arc<MultiProgress>>,
+    /// The run-wide bar this target ticks; `None` when no bar is drawn.
+    pub overall_pb: Option<Arc<indicatif::ProgressBar>>,
+    /// Cooperative cancellation, checked at per-parameter checkpoints.
+    pub cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Mid-scan finding stream; `None` disables streaming output.
+    pub finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
+    /// Live "parameters finished" counter for async front-ends (REST server,
+    /// MCP). Each per-parameter worker bumps it on completion so pollers see
+    /// `params_tested` climb during the scan instead of staying pinned at 0
+    /// until the very end. `None` for the CLI, which renders its own
+    /// indicatif progress bar from `total_tasks` instead.
+    pub params_done: Option<Arc<AtomicU32>>,
+}
+
+impl ScanRunHandles {
+    /// The two run-wide handles every caller must share; all optional
+    /// front-end handles start disabled.
+    pub fn new(
+        results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
+        findings_count: Arc<AtomicUsize>,
+    ) -> Self {
+        Self {
+            results,
+            findings_count,
+            multi_pb: None,
+            overall_pb: None,
+            cancel: None,
+            finding_tx: None,
+            params_done: None,
+        }
+    }
+
+    /// Attach the CLI's indicatif bars.
+    pub fn with_progress(
+        mut self,
+        multi_pb: Option<Arc<MultiProgress>>,
+        overall_pb: Option<Arc<indicatif::ProgressBar>>,
+    ) -> Self {
+        self.multi_pb = multi_pb;
+        self.overall_pb = overall_pb;
+        self
+    }
+
+    /// Attach the cooperative cancellation flag.
+    pub fn with_cancel(mut self, cancel: Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.cancel = Some(cancel);
+        self
+    }
+
+    /// Stream findings as they are confirmed instead of only at end-of-scan.
+    pub fn with_finding_tx(
+        mut self,
+        tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
+    ) -> Self {
+        self.finding_tx = tx;
+        self
+    }
+
+    /// Feed an async front-end's live `params_tested` counter.
+    pub fn with_params_done(mut self, params_done: Arc<AtomicU32>) -> Self {
+        self.params_done = Some(params_done);
+        self
+    }
+}
+
 pub async fn run_scanning(
     target: &Target,
     args: Arc<ScanArgs>,
-    results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
-    multi_pb: Option<Arc<MultiProgress>>,
-    overall_pb: Option<Arc<indicatif::ProgressBar>>,
-    findings_count: Arc<AtomicUsize>,
-    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
-    finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
-    // Live "parameters finished" counter for async front-ends (REST server,
-    // MCP). Each per-parameter worker bumps it on completion so pollers see
-    // `params_tested` climb during the scan instead of staying pinned at 0
-    // until the very end. `None` for the CLI, which renders its own
-    // indicatif progress bar from `total_tasks` instead.
-    params_done: Option<Arc<AtomicU32>>,
+    handles: ScanRunHandles,
 ) -> ScanRunReport {
+    let ScanRunHandles {
+        results,
+        multi_pb,
+        overall_pb,
+        findings_count,
+        cancel,
+        finding_tx,
+        params_done,
+    } = handles;
     // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
     if args.skip_xss_scanning {
         return ScanRunReport::default();
     }
     let arc_target = Arc::new(target.clone());
     let shared_client = Arc::new(arc_target.build_client_or_default());
-    let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
+    let semaphore = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
+        if args.sxss { 1 } else { target.workers },
+    )));
     let limit_result_type: Arc<str> = Arc::from(args.limit_result_type.to_uppercase());
 
     // Reset WAF block counters for this scan

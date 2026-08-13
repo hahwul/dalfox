@@ -10,9 +10,31 @@ use super::logging::start_spinner;
 use super::poc::render_finding_block;
 use super::session::{ProbePhase, SessionMonitor};
 use crate::target_parser::Target;
+use crate::utils::semaphore_permits;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+/// Host-group slots per configured concurrent target. Groups are cheap
+/// relative to targets and spend part of their life holding no target permit,
+/// so they are oversubscribed rather than matched 1:1 — the target semaphore
+/// stays the throttle that governs in-flight work.
+const HOST_GROUP_OVERSUBSCRIBE: usize = 4;
+
+/// Floor for host-group slots, so a low `--max-concurrent-targets` still lets
+/// several hosts prepare in parallel.
+const MIN_HOST_GROUP_SLOTS: usize = 32;
+
+/// How many host-group tasks may be alive at once for a given
+/// `--max-concurrent-targets`. See the call site for why this is deliberately
+/// looser than the target bound rather than equal to it.
+fn host_group_slots(max_concurrent_targets: usize) -> usize {
+    semaphore_permits(
+        max_concurrent_targets
+            .saturating_mul(HOST_GROUP_OVERSUBSCRIBE)
+            .max(MIN_HOST_GROUP_SLOTS),
+    )
+}
 
 /// Complete once `flag` is observed set. Used to mirror the process-wide
 /// SIGINT (Ctrl-C) flag into a per-target cancel flag from inside a
@@ -40,8 +62,9 @@ async fn poll_cancel(flag: &AtomicBool) {
 /// instead, never the shared `sigint` flag. A real Ctrl-C is mirrored from
 /// `sigint` into `target_cancel` so in-flight workers still stop. `fut` is
 /// driven to completion either way (not just dropped): `run_scanning`'s
-/// per-parameter workers are detached `tokio::spawn` tasks that a dropped
-/// future would leave hammering the target, so we keep polling until the
+/// per-parameter workers now live in a `JoinSet` and *are* aborted if this
+/// future is dropped, but aborting them mid-request skips their result
+/// collapse and progress accounting, so we still keep polling until the
 /// cooperative-cancel checkpoints let them drain. Returns whether the cap
 /// fired (callers print the per-target notice).
 async fn run_target_capped<T>(
@@ -73,7 +96,7 @@ async fn run_target_capped<T>(
 
 pub(crate) async fn run_scan_loop(
     args: &ScanArgs,
-    host_groups: std::collections::HashMap<String, Vec<Target>>,
+    host_groups: std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
     cancel_flag: Arc<AtomicBool>,
     stream_findings_enabled: bool,
@@ -117,7 +140,9 @@ pub(crate) async fn run_scan_loop(
         );
     }
 
-    let global_semaphore = Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
+    let global_semaphore = Arc::new(tokio::sync::Semaphore::new(semaphore_permits(
+        args.max_concurrent_targets,
+    )));
     let (finding_tx, finding_printer_handle) = if stream_findings_enabled {
         let (tx, mut rx) =
             tokio::sync::mpsc::unbounded_channel::<crate::scanning::result::Result>();
@@ -169,17 +194,62 @@ pub(crate) async fn run_scan_loop(
         (None, None)
     };
 
-    let mut group_handles = vec![];
+    // One `ScanArgs` for the whole run. This used to be cloned per host group —
+    // a deep copy of every `String`/`Vec<String>` field once per distinct host.
+    let args_arc = Arc::new(args.clone());
+
+    // Bound on host-group tasks alive at once. Previously one task was spawned
+    // per distinct host with no gate, so a target file spanning N hosts created
+    // N tasks — each holding a target list and, when a progress bar is drawn,
+    // each running the payload precount below before acquiring a single target
+    // permit. That is CPU and memory proportional to the host count rather than
+    // to the configured concurrency.
+    //
+    // Deliberately *loose* rather than mirroring `max_concurrent_targets`: a
+    // group can occupy a slot while holding zero target permits (during the
+    // precount, while walking targets skipped for session loss, and while
+    // draining at the end), so a tight bound would leave the target semaphore —
+    // the real throttle — idle. This only has to stop unbounded growth.
+    let group_semaphore = Arc::new(tokio::sync::Semaphore::new(host_group_slots(
+        args.max_concurrent_targets,
+    )));
+
+    // A `JoinSet`, not `Vec<JoinHandle>`: the `--limit` break below abandons the
+    // groups that haven't finished, and a dropped `JoinHandle` detaches its task
+    // instead of aborting it. Those groups kept scanning and kept pushing into
+    // `results` after this function returned, while the caller was already
+    // rendering output. Same failure the per-parameter workers hit; see the
+    // `JoinSet` note in `scanning::run_scanning`.
+    let mut group_handles = tokio::task::JoinSet::new();
+
+    // Stop dispatching once the user pressed Ctrl-C or `--limit` was reached.
+    // Checked *after* the permit is granted, not before: dispatch now blocks on
+    // `acquire_owned()`, so a check made before that await reads state from
+    // however long ago the loop parked. On a run with more host groups than
+    // slots that window is seconds, and admitting one more group then costs a
+    // full synchronous payload precount before its inner loop notices.
+    let should_stop = |flag: &AtomicBool, count: &std::sync::atomic::AtomicUsize| {
+        flag.load(Ordering::Relaxed)
+            || args
+                .limit
+                .is_some_and(|lim| count.load(Ordering::Relaxed) >= lim)
+    };
 
     for (host, group) in host_groups {
-        if let Some(lim) = args.limit
-            && findings_count.load(Ordering::Relaxed) >= lim
-        {
+        if should_stop(&cancel_flag, &findings_count) {
+            break;
+        }
+        // Backpressure: block dispatch once `group_slots` groups are live.
+        let Ok(group_permit) = group_semaphore.clone().acquire_owned().await else {
+            break;
+        };
+        // Re-check with the permit in hand — the state above may be stale.
+        if should_stop(&cancel_flag, &findings_count) {
             break;
         }
         let global_semaphore_clone = global_semaphore.clone();
         let multi_pb_clone = multi_pb.clone();
-        let args_arc = Arc::new(args.clone());
+        let args_arc = args_arc.clone();
         let results_clone = results.clone();
         let findings_count_group = findings_count.clone();
         let finding_tx_group = finding_tx.clone();
@@ -196,7 +266,9 @@ pub(crate) async fn run_scan_loop(
         // session; a dead session on one of them says nothing about a
         // different host in the same run.
         let session_lost_group = Arc::new(AtomicBool::new(false));
-        let group_handle = tokio::spawn(async move {
+        group_handles.spawn(async move {
+            // Released when this group finishes, admitting the next one.
+            let _group_permit = group_permit;
             // Skip the (expensive) payload-counting loop entirely when no
             // overall progress bar will be drawn — generating ~10k payloads
             // per param twice (here and again inside run_scanning) added a
@@ -259,7 +331,11 @@ pub(crate) async fn run_scan_loop(
                 None
             };
 
-            let mut target_handles = vec![];
+            // Also a `JoinSet`: when the run stops early under `--limit` the
+            // group task itself is aborted, and a `Vec<JoinHandle>` would let
+            // its in-flight targets detach and keep issuing requests. A
+            // `JoinSet` aborts them when it drops.
+            let mut target_handles = tokio::task::JoinSet::new();
 
             for target in group {
                 if let Some(lim) = args_arc.limit
@@ -321,7 +397,7 @@ pub(crate) async fn run_scan_loop(
                 let state_file_target = state_file_group.clone();
 
                 let multi_pb_active = multi_pb_clone_inner.is_some();
-                let target_handle = tokio::spawn(async move {
+                target_handles.spawn(async move {
                     if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
                         // Re-validate the session before spending this target's
                         // request budget. Throttled: on a short run the preflight
@@ -386,15 +462,15 @@ pub(crate) async fn run_scan_loop(
                         let scan_fut = crate::scanning::run_scanning(
                             &target,
                             args_clone.clone(),
-                            results_clone_inner,
-                            multi_pb_clone_inner,
-                            overall_pb_clone,
-                            findings_count_target,
-                            Some(target_cancel.clone()),
-                            finding_tx_target,
-                            // CLI renders its own indicatif progress bar; no
-                            // external params_tested counter to feed.
-                            None,
+                            // No `params_done`: the CLI renders its own
+                            // indicatif progress bar instead.
+                            crate::scanning::ScanRunHandles::new(
+                                results_clone_inner,
+                                findings_count_target,
+                            )
+                            .with_progress(multi_pb_clone_inner, overall_pb_clone)
+                            .with_cancel(target_cancel.clone())
+                            .with_finding_tx(finding_tx_target),
                         );
                         // Honor --scan-timeout as a hard wall-clock cap per
                         // target. When a slow endpoint streams a partial body
@@ -480,14 +556,13 @@ pub(crate) async fn run_scan_loop(
                     }
                     drop(permit);
                 });
-                target_handles.push(target_handle);
             }
 
-            for handle in target_handles {
+            while let Some(joined) = target_handles.join_next().await {
                 // Surface panics from per-target scan tasks instead of letting
                 // them disappear silently — a panic here points to a bug in
                 // the scanning pipeline and operators need a chance to see it.
-                if let Err(e) = handle.await
+                if let Err(e) = joined
                     && e.is_panic()
                 {
                     eprintln!("[scan] target task panicked: {}", e);
@@ -505,11 +580,10 @@ pub(crate) async fn run_scan_loop(
                 );
             }
         });
-        group_handles.push(group_handle);
     }
 
-    for handle in group_handles {
-        if let Err(e) = handle.await
+    while let Some(joined) = group_handles.join_next().await {
+        if let Err(e) = joined
             && e.is_panic()
         {
             eprintln!("[scan] target-group task panicked: {}", e);
@@ -517,7 +591,22 @@ pub(crate) async fn run_scan_loop(
         if let Some(lim) = args.limit
             && findings_count.load(Ordering::Relaxed) >= lim
         {
-            break;
+            // Stop the groups still running — but cooperatively, and keep
+            // draining rather than breaking.
+            //
+            // Breaking used to drop the remaining `JoinHandle`s, which detaches
+            // rather than aborts: those groups kept scanning and kept appending
+            // to `results` after this function returned, while the caller was
+            // already rendering the report. `abort_all()` fixes that but
+            // overcorrects — it kills targets mid-`run_scanning`, so they skip
+            // `collapse_target_results` (leaving `R` findings a later `V` would
+            // have collapsed), skip their `skipped_targets` marker (so
+            // `target_summary` calls a half-scanned target clean), and skip
+            // `finish_scan_bar` (orphaning a progress line).
+            //
+            // Setting the shared cancel flag instead stops them at their next
+            // checkpoint and lets each one run its normal completion path.
+            cancel_flag.store(true, Ordering::Relaxed);
         }
     }
 
@@ -536,7 +625,10 @@ pub(crate) async fn run_scan_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{poll_cancel, run_target_capped};
+    use super::{
+        MIN_HOST_GROUP_SLOTS, host_group_slots, poll_cancel, run_target_capped, semaphore_permits,
+    };
+    use crate::utils::MAX_SEMAPHORE_PERMITS;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
@@ -610,6 +702,49 @@ mod tests {
         assert!(!timed_out);
         assert!(!target_cancel.load(Ordering::Relaxed));
         assert!(!sigint.load(Ordering::Relaxed));
+    }
+
+    // Host-group dispatch must be bounded: one `tokio::spawn` per distinct host
+    // meant a target file spanning N hosts created N tasks — each holding a
+    // target list and, with a progress bar drawn, each running the payload
+    // precount — before a single request went out.
+    #[test]
+    fn host_group_slots_is_bounded_and_oversubscribed() {
+        // Never tighter than the floor, so a small --max-concurrent-targets
+        // still lets several hosts prepare at once.
+        assert_eq!(host_group_slots(1), MIN_HOST_GROUP_SLOTS);
+        assert_eq!(host_group_slots(0), MIN_HOST_GROUP_SLOTS);
+
+        // Above the floor it scales with the target bound, and stays LOOSER
+        // than it: a group can hold a slot while holding zero target permits
+        // (precount, session-loss skip walk, drain), so matching the target
+        // bound 1:1 would leave the target semaphore — the real throttle —
+        // idle behind groups doing no request work.
+        assert!(
+            host_group_slots(100) > 100,
+            "group admission must not throttle the target semaphore"
+        );
+
+        // Bounded, not unbounded: that is the whole point.
+        assert!(host_group_slots(usize::MAX) <= MAX_SEMAPHORE_PERMITS);
+    }
+
+    // `--max-concurrent-targets` is validated only as non-zero, and arrives
+    // from the CLI, a config file, REST `ScanOptions`, and MCP. A huge value
+    // used to reach `Semaphore::new` directly, which asserts above
+    // `MAX_PERMITS` — a panic driven straight by user input.
+    #[test]
+    fn semaphore_permits_never_exceeds_tokio_ceiling() {
+        assert_eq!(semaphore_permits(4), 4, "realistic values pass through");
+        assert_eq!(semaphore_permits(usize::MAX), MAX_SEMAPHORE_PERMITS);
+        // The lower bound matters more than the upper one: `Semaphore::new(0)`
+        // is not a slow scan, it is a permanent deadlock — every worker blocks
+        // on `acquire()` forever and the scan hangs with no output.
+        assert_eq!(semaphore_permits(0), 1, "zero permits would deadlock");
+
+        // The real assertion: constructing with the clamped value must not panic.
+        let _ = tokio::sync::Semaphore::new(semaphore_permits(usize::MAX));
+        let _ = tokio::sync::Semaphore::new(host_group_slots(usize::MAX));
     }
 
     #[tokio::test]
