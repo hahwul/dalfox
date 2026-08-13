@@ -7,6 +7,18 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
+## 3.2.1
+
+A false-positive / recall fix on framework error pages, stability hardening, and `dalfox payload` improvements.
+
+* Fan-out cost cuts no longer delete the finding they bound: mining collapse folds away only what it mined itself — a page echoing its whole query string used to report a POC against a synthetic `any` parameter while missing the real one — and a 5xx that reflects the payload no longer ends the DOM phase ([#1362](https://github.com/hahwul/dalfox/pull/1362)).
+* Hardened against crashes, hangs, and scans that reported clean without scanning: a panic on non-ASCII Trusted Types callbacks was swallowed into `0 XSS` / exit 0, quadratic HTML-nesting parses, unbounded memory in JS-breakout payloads and retained bodies, `--only-custom-payload` with no file, `--skip-xss-scanning` still firing blind payloads, `--cookies` folding into one cookie, and unvalidated `--sxss-*` ([#1361](https://github.com/hahwul/dalfox/pull/1361)).
+* `dalfox server` refuses browser-driven cross-site and DNS-rebound requests via an `Origin` / `Sec-Fetch-Site` / `Host` gate ([#1356](https://github.com/hahwul/dalfox/pull/1356)).
+* Cookie parameters are injected as cookies rather than same-named headers and survive the special-character probe (cookie recall 80.0% → 87.5%); no more `[V]` for `text/plain` + `nosniff`; `-f plain -o` no longer writes ANSI; `-f markdown` no longer prints the banner ([#1315](https://github.com/hahwul/dalfox/pull/1315)).
+* Light-verify sends a `Content-Type` with urlencoded bodies, `--limit` aborts workers instead of detaching them, and REST / MCP `rate_limit` now covers discovery and mining ([#1360](https://github.com/hahwul/dalfox/pull/1360)).
+* `dalfox payload`: JSON output, an `all` selector, per-selector counts, closest-selector suggestions, and wider uri-scheme / special-character lists ([#1358](https://github.com/hahwul/dalfox/pull/1358), [#1346](https://github.com/hahwul/dalfox/pull/1346), [#1348](https://github.com/hahwul/dalfox/pull/1348), [#1349](https://github.com/hahwul/dalfox/pull/1349), [#1350](https://github.com/hahwul/dalfox/pull/1350)).
+* Modern JavaScript framework detection ([#1352](https://github.com/hahwul/dalfox/pull/1352)).
+
 ## 3.2.0
 
 Mass-scan workflow features, wider DOM-XSS coverage, and CSP / false-positive fixes.
