@@ -258,6 +258,52 @@ pub struct Result {
     pub response: Option<String>,
 }
 
+/// Largest response body kept on a finding as evidence.
+///
+/// Findings accumulate in one in-memory `Vec` for the whole run, and each one
+/// used to carry its response body in full — up to the 16 MiB `read_body_capped`
+/// ceiling. That is fine for a handful of findings and fatal for a scan that
+/// produces thousands: `--deep-scan` lifts the first-hit-wins reflection lock,
+/// so a reflect-everything endpoint emits a finding **per payload**, and a
+/// 1 MiB page × a 3000-payload catalog is ~3 GB resident before anything is
+/// rendered. In the server that vector is submitter-controlled and takes the
+/// whole daemon — every concurrent scan and every retained result — with it.
+pub const MAX_EVIDENCE_BODY_BYTES: usize = 64 * 1024;
+
+/// Bound a response body kept as finding evidence, keeping the window around
+/// the payload rather than a blind prefix.
+///
+/// Centering on the payload is what makes the truncation safe: the body is read
+/// back by `extract_context` to render the `L1:` evidence line, which searches
+/// for the payload, so a prefix cut would silently blank that line whenever the
+/// reflection sat past the cap. Bodies within the cap — effectively all of them
+/// — are returned untouched. Only the reported line *number* degrades for
+/// oversized bodies, since it is counted within the retained window.
+pub fn bound_evidence_body(body: String, payload: &str) -> String {
+    if body.len() <= MAX_EVIDENCE_BODY_BYTES {
+        return body;
+    }
+    let half = MAX_EVIDENCE_BODY_BYTES / 2;
+    let center = body.find(payload).unwrap_or(0);
+    let mut start = center.saturating_sub(half);
+    while start > 0 && !body.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (start + MAX_EVIDENCE_BODY_BYTES).min(body.len());
+    while end > start && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = String::with_capacity(end - start + 32);
+    if start > 0 {
+        out.push_str("…[truncated]…");
+    }
+    out.push_str(&body[start..end]);
+    if end < body.len() {
+        out.push_str("…[truncated]…");
+    }
+    out
+}
+
 impl Result {
     /// Start building a finding. `result_type` is the only required field;
     /// every other field starts empty (`""` / `0` / `None`) and is filled in

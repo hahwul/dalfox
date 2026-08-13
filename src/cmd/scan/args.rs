@@ -89,6 +89,15 @@ pub const CLI_MAX_RATE_LIMIT: u32 = 100_000;
 /// Sanity cap for `--retries`. Retrying more than this turns a transient
 /// blip into a multi-minute hang per request.
 pub const CLI_MAX_RETRIES: u32 = 100;
+/// Sanity cap for `--sxss-retries`. Much tighter than [`CLI_MAX_RETRIES`]
+/// because the stored-XSS re-check backoff is `500ms * attempt`, i.e. the total
+/// wait grows *quadratically*: 20 retries is ~1.6 minutes per check URL, while
+/// the un-capped 3000 someone could type is ~26 days. Applied per check URL and
+/// per verified payload, so it multiplies.
+pub const CLI_MAX_SXSS_RETRIES: u32 = 20;
+/// Ceiling on a single stored-XSS re-check backoff sleep. Bounds the tail of
+/// the `500ms * attempt` ramp so the last attempts stay responsive.
+pub const MAX_SXSS_BACKOFF_MS: u64 = 5_000;
 /// Sanity cap for `--retry-delay` (ms), matching `--delay`'s ceiling.
 pub const CLI_MAX_RETRY_DELAY_MS: u64 = 60_000;
 /// Sanity cap for `--scan-timeout` (seconds). Kept in lockstep with the async
@@ -592,6 +601,15 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Only test custom payloads. Example: --only-custom-payload --custom-payload=p.txt
+    //
+    // Deliberately NOT `requires = "custom_payload"`. The pairing is real — on
+    // its own this flag yields an empty payload set and a scan that reports
+    // clean without sending anything — but clap validates argument
+    // relationships *before* the config file is overlaid, so `requires` would
+    // reject the legitimate `--only-custom-payload` + `custom_payload = "…"`
+    // in a config file. The check therefore lives in `run_scan`, which runs
+    // after `finalize_scan_args` has merged the config, plus in
+    // `Config::normalize_and_validate` for the all-config form.
     #[arg(long)]
     pub only_custom_payload: bool,
 
@@ -647,7 +665,11 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// HTTP method for checking Stored XSS (default "GET")
-    #[arg(long, default_value = "GET")]
+    // Same parser as `--method`. Without it `--sxss-method post` went on the
+    // wire as the literal extension verb `post` (`reqwest::Method` is
+    // case-sensitive) and `--sxss-method "GET junk"` failed to parse and
+    // silently degraded to GET.
+    #[arg(long, default_value = "GET", value_parser = parse_http_method_arg)]
     pub sxss_method: String,
 
     #[clap(help_heading = "XSS SCANNING")]

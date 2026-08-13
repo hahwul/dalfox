@@ -714,6 +714,20 @@ impl ScanConfig {
             }
         }
 
+        // `sxss_method` — same normalization as `method` above. `--sxss-method`
+        // now carries clap's parser, but a config value never passes through
+        // clap, so `sxss_method = "post"` would still reach
+        // `reqwest::Method::from_str` as the literal extension verb `post`.
+        if let Some(m) = &self.sxss_method {
+            match crate::cmd::scan::parse_http_method_arg(m) {
+                Ok(upper) => self.sxss_method = Some(upper),
+                Err(e) => {
+                    warnings.push(format!("config scan.sxss_method: {e}; ignoring"));
+                    self.sxss_method = None;
+                }
+            }
+        }
+
         // `force_waf` — lowercase + validate against the known WAF aliases,
         // mirroring `--force-waf`'s parser so a typo doesn't fall into the
         // silent `WafType::Unknown` bucket that skips targeted bypasses.
@@ -825,6 +839,14 @@ impl ScanConfig {
             );
             self.limit = None;
         }
+
+        // NOTE: the `only_custom_payload` / `custom_payload` pairing is
+        // deliberately NOT checked here. This validator runs on the config file
+        // alone, before CLI args are merged, so rejecting a config
+        // `only_custom_payload = true` whose file comes from `--custom-payload`
+        // on the command line would silently drop a flag the operator did set.
+        // `run_scan` enforces the rule post-merge, where it can see both
+        // sources, and errors out rather than running a payload-less scan.
 
         warnings
     }

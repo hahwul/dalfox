@@ -4288,6 +4288,55 @@ el.innerHTML = policy.createHTML(location.search);
     );
 }
 
+// --- non-ASCII Trusted Types callback parameter names -----------------------
+//
+// `identifier_referenced` used to advance its search cursor by one byte after
+// a rejected match, which lands inside a multi-byte codepoint and panics on the
+// next slice. A scanned page controls the callback parameter name, and JS
+// identifiers may start with any ID_Start character, so this was a
+// remote-triggerable panic: the analysis task died and the target was reported
+// clean with exit 0. All three cases below panicked before the fix.
+
+#[test]
+fn test_tt_non_ascii_param_sanitizer_branch_does_not_panic() {
+    // Sanitizer branch: the param is referenced only inside `sanitize(…)`, and
+    // `한글x` is a *different* identifier — so the wrapper is strict.
+    let code = r#"
+const policy = trustedTypes.createPolicy('p', { createHTML: function(한글){ var 한글x = 1; return DOMPurify.sanitize(한글); } });
+el.innerHTML = policy.createHTML(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "non-ASCII param sanitized wrapper must clear taint (and must not panic)"
+    );
+}
+
+#[test]
+fn test_tt_non_ascii_param_no_sanitizer_does_not_panic() {
+    let code = r#"
+const policy = trustedTypes.createPolicy('p', { createHTML: function(한글){ var 한글x = 1; return ""; } });
+el.innerHTML = policy.createHTML(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "non-ASCII param never referenced is strict (and must not panic)"
+    );
+}
+
+#[test]
+fn test_tt_non_ascii_param_passthrough_still_permissive() {
+    // The real reference sits *after* a rejected `한글x` match, so this also
+    // proves the cursor advance does not skip past a genuine later occurrence.
+    let code = r#"
+const policy = trustedTypes.createPolicy('p', { createHTML: function(한글){ var 한글x = 1; return 한글; } });
+el.innerHTML = policy.createHTML(location.hash);
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "non-ASCII param passed through must keep the finding"
+    );
+}
+
 #[test]
 fn test_tt_method_shorthand_strict_wrapper_clears() {
     // `createHTML(s) { return DOMPurify.sanitize(s); }` method shorthand.

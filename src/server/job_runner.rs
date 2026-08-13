@@ -355,15 +355,27 @@ pub(crate) async fn run_scan_job(
         ..Default::default()
     });
 
-    // Initialize remote resources if requested (honor timeout/proxy)
-    if !args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty() {
-        let _ = crate::utils::init_remote_resources_with_options(
+    // Initialize remote resources if requested (honor timeout/proxy).
+    // A failure here is not cosmetic: the scan proceeds without the payload or
+    // wordlist the caller explicitly asked for and still settles `done`, which
+    // reads as "scanned, found nothing". Log it so the difference is visible.
+    if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
+        && let Err(e) = crate::utils::init_remote_resources_with_options(
             &args.remote_payloads,
             &args.remote_wordlists,
             Some(args.timeout),
             args.proxy.clone(),
         )
-        .await;
+        .await
+    {
+        log(
+            &state,
+            "WRN",
+            &format!(
+                "job {}: remote resource fetch failed ({}); scanning without the requested remote lists",
+                job_id, e
+            ),
+        );
     }
     let results = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
 

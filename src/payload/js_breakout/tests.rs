@@ -285,3 +285,41 @@ fn escaped_breakout_executes_under_escaping_where_naive_fails() {
         );
     }
 }
+
+// --- hostile-prefix bounds --------------------------------------------------
+
+#[test]
+fn deeply_nested_prefix_yields_no_closer_instead_of_a_giant_one() {
+    // A response body of `foo(` × 1 000 000 used to produce a 1 MB closer that
+    // was then stored on the Param and cloned into every synthesized payload.
+    let prefix = "(".repeat(1_000_000);
+    let start = std::time::Instant::now();
+    let closer = compute_js_breakout(&prefix);
+    assert!(
+        closer.is_empty(),
+        "past the depth cap the closer must be empty"
+    );
+    assert!(
+        start.elapsed().as_millis() < 500,
+        "capped computation took {:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn nesting_within_the_cap_still_produces_a_closer() {
+    let prefix = format!("foo{}\"x", "(".repeat(200));
+    let closer = compute_js_breakout(&prefix);
+    assert!(closer.starts_with('"'), "must close the open string first");
+    assert_eq!(
+        closer.matches(')').count(),
+        200,
+        "all 200 parens must close"
+    );
+}
+
+#[test]
+fn template_expression_nesting_is_capped_too() {
+    let prefix = "`${".repeat(1_000);
+    assert!(compute_js_breakout(&prefix).is_empty());
+}

@@ -311,6 +311,57 @@ pub(crate) fn is_skippable_request_header(name: &str) -> bool {
     SKIP.iter().any(|s| name.eq_ignore_ascii_case(s))
 }
 
+/// The body of a raw HTTP request: everything after the blank line that ends
+/// the header block, byte-for-byte apart from one optional trailing newline.
+/// `None` when there is no separator or nothing follows it.
+///
+/// Operates on the original text rather than on a `lines()` re-join so that
+/// CRLF line endings *inside* the body survive: a `multipart/form-data` body
+/// captured from a real request uses CRLF around its boundaries, and RFC 7578
+/// parsers that match `\r\n--boundary` see zero parts once those become bare
+/// LFs.
+///
+/// Two details that a naive "find the first \r\n\r\n" gets wrong:
+///
+/// * **The separator must be found the same way the header loop finds it.**
+///   That loop ends on the first line whose `trim_end()` is empty, so a
+///   separator line carrying stray whitespace (`\r\n \r\n`) ends the headers
+///   there. Scanning for a literal `\r\n\r\n` would miss it and report no
+///   body at all, silently dropping every body parameter from the scan.
+/// * **A trailing newline is a file artifact, not body content.** Every text
+///   editor terminates a file with one, and the old `lines()` fold dropped it.
+///   Keeping it verbatim appended a `\n` to the last body parameter's value,
+///   which then rode along percent-encoded (`b=2%0A`) on every request of the
+///   scan. Exactly one trailing terminator is removed, so a multipart body's
+///   internal CRLFs — and its `--boundary--` close delimiter — are untouched.
+fn raw_http_body(raw: &str) -> Option<&str> {
+    let bytes = raw.as_bytes();
+    let mut line_start = 0usize;
+    let body_start = loop {
+        if line_start >= bytes.len() {
+            return None;
+        }
+        let rel_end = raw[line_start..]
+            .find('\n')
+            .map(|r| line_start + r)
+            .unwrap_or(bytes.len());
+        let line = &raw[line_start..rel_end];
+        let next = (rel_end + 1).min(bytes.len());
+        if line.trim_end().is_empty() {
+            break next;
+        }
+        line_start = next;
+    };
+    let mut body = &raw[body_start..];
+    // Drop one trailing terminator (CRLF or LF), never more.
+    if let Some(stripped) = body.strip_suffix("\r\n") {
+        body = stripped;
+    } else if let Some(stripped) = body.strip_suffix('\n') {
+        body = stripped;
+    }
+    (!body.is_empty()).then_some(body)
+}
+
 /// Parse a raw HTTP request into a Target.
 /// Supports:
 /// - Request line with absolute-form URI: GET http://example.com/path HTTP/1.1
@@ -390,15 +441,15 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
         }
     }
 
-    // 3) Body (remaining lines after the first blank line)
-    let body = lines.fold(String::new(), |mut acc, l| {
-        if !acc.is_empty() {
-            acc.push('\n');
-        }
-        acc.push_str(l);
-        acc
-    });
-    let data = if body.is_empty() { None } else { Some(body) };
+    // 3) Body — sliced verbatim out of the original text after the blank line
+    //    that ends the header block.
+    //
+    //    Rebuilding it by joining `lines()` with `\n` corrupted every body whose
+    //    line endings are load-bearing: a `multipart/form-data` body captured
+    //    from a real request uses CRLF around its boundaries, and RFC 7578
+    //    parsers that match `\r\n--boundary` see *zero* parts once the CRLFs
+    //    become bare LFs. The same fold also swallowed a leading blank line.
+    let data = raw_http_body(raw).map(str::to_string);
 
     // 4) Build URL
     let url = if uri.starts_with("http://") || uri.starts_with("https://") {
@@ -859,6 +910,89 @@ mod raw_http_tests {
         assert_eq!(t.method, "POST");
         assert_eq!(t.url.as_str(), "http://example.com/submit");
         assert_eq!(t.data.as_deref(), Some("a=1&b=2"));
+    }
+
+    #[test]
+    fn raw_http_body_preserves_crlf_line_endings() {
+        // A multipart body's CRLFs are load-bearing: RFC 7578 parsers match
+        // `\r\n--boundary`. Rebuilding the body from `lines()` joined with `\n`
+        // turned every one of them into a bare LF, so a strict server saw zero
+        // parts and the whole body-parameter scan silently tested nothing.
+        //
+        // The body's *final* terminator is a separate question — it is a file
+        // artifact and is dropped (see
+        // `raw_http_body_drops_exactly_one_trailing_newline`); the close
+        // delimiter itself and every internal CRLF survive.
+        let body = "--X\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\nv\r\n--X--";
+        let raw = format!(
+            "POST /u HTTP/1.1\r\nHost: e.com\r\nContent-Type: multipart/form-data; boundary=X\r\n\r\n{body}\r\n"
+        );
+        let t = parse_raw_http_request(&raw).expect("should parse");
+        assert_eq!(t.data.as_deref(), Some(body));
+    }
+
+    #[test]
+    fn raw_http_body_preserves_a_leading_blank_line() {
+        // The old `lines()` fold started the accumulator empty, so a body that
+        // legitimately begins with a blank line lost it.
+        let raw = "POST /u HTTP/1.1\r\nHost: e.com\r\n\r\n\r\nreal body";
+        let t = parse_raw_http_request(raw).expect("should parse");
+        assert_eq!(t.data.as_deref(), Some("\r\nreal body"));
+    }
+
+    #[test]
+    fn raw_http_lf_only_request_still_finds_its_body() {
+        let raw = "POST /u HTTP/1.1\nHost: e.com\n\na=1&b=2";
+        let t = parse_raw_http_request(raw).expect("should parse");
+        assert_eq!(t.data.as_deref(), Some("a=1&b=2"));
+    }
+
+    #[test]
+    fn raw_http_without_a_body_has_none() {
+        let raw = "GET /u HTTP/1.1\r\nHost: e.com\r\n\r\n";
+        let t = parse_raw_http_request(raw).expect("should parse");
+        assert_eq!(t.data, None);
+    }
+
+    #[test]
+    fn raw_http_body_drops_exactly_one_trailing_newline() {
+        // Every text editor terminates a file with a newline; keeping it made
+        // the last body parameter's value `2\n`, which then rode along
+        // percent-encoded on every request of the scan.
+        let t = parse_raw_http_request("POST /u HTTP/1.1\r\nHost: e\r\n\r\na=1&b=2\r\n")
+            .expect("should parse");
+        assert_eq!(t.data.as_deref(), Some("a=1&b=2"));
+        let lf =
+            parse_raw_http_request("POST /u HTTP/1.1\nHost: e\n\na=1&b=2\n").expect("should parse");
+        assert_eq!(lf.data.as_deref(), Some("a=1&b=2"));
+        // Only ONE terminator goes: a body that really ends in a blank line
+        // keeps the rest.
+        let two = parse_raw_http_request("POST /u HTTP/1.1\r\nHost: e\r\n\r\na=1\r\n\r\n")
+            .expect("should parse");
+        assert_eq!(two.data.as_deref(), Some("a=1\r\n"));
+    }
+
+    #[test]
+    fn raw_http_body_survives_a_whitespace_bearing_separator_line() {
+        // The header loop ends on the first line whose `trim_end()` is empty,
+        // so a separator carrying a stray space ends the headers there.
+        // Scanning for a literal `\r\n\r\n` missed it and reported NO body,
+        // silently dropping every body parameter from the scan.
+        let t = parse_raw_http_request("POST /u HTTP/1.1\r\nHost: e\r\n \r\na=1&b=2")
+            .expect("should parse");
+        assert_eq!(t.data.as_deref(), Some("a=1&b=2"));
+    }
+
+    #[test]
+    fn raw_http_multipart_close_delimiter_is_preserved() {
+        // The trailing-newline strip must not eat a multipart body's own CRLF
+        // structure; only the final terminator goes.
+        let body = "--X\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\nv\r\n--X--";
+        let raw = format!(
+            "POST /u HTTP/1.1\r\nHost: e\r\nContent-Type: multipart/form-data; boundary=X\r\n\r\n{body}\r\n"
+        );
+        let t = parse_raw_http_request(&raw).expect("should parse");
+        assert_eq!(t.data.as_deref(), Some(body));
     }
 
     #[test]

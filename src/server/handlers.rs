@@ -252,6 +252,51 @@ pub(crate) async fn options_scan_handler(
 }
 
 // GET /scan handler for JSONP-friendly GET inputs (URL + options via query)
+/// Split the `GET /scan` `header=` query value into individual headers.
+///
+/// The query form has always packed several headers into one comma-separated
+/// value, but a comma is also perfectly legal *inside* a header value —
+/// `Accept: text/html,application/xhtml+xml` is the canonical example. A blind
+/// `split(',')` therefore chopped that into `Accept: text/html` plus a
+/// nameless `application/xhtml+xml` fragment: before header validation existed
+/// the fragment was silently dropped and a truncated `Accept` went on the wire;
+/// with validation it would 400 an otherwise valid request.
+///
+/// So only split at a comma that actually starts a new header — one followed by
+/// `Name:`. Commas inside a value are kept, and the multi-header form keeps
+/// working. (`POST /scan` takes a JSON array and needs none of this.)
+pub(crate) fn split_header_query_param(raw: &str) -> Vec<String> {
+    if raw.trim().is_empty() {
+        return vec![];
+    }
+    let bytes = raw.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b != b',' {
+            continue;
+        }
+        // Does a `Name:` begin right after this comma?
+        let rest = raw[i + 1..].trim_start();
+        let name_len = rest
+            .bytes()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == b'-' || *c == b'_')
+            .count();
+        if name_len > 0 && rest[name_len..].starts_with(':') {
+            let piece = raw[start..i].trim();
+            if !piece.is_empty() {
+                out.push(piece.to_string());
+            }
+            start = i + 1;
+        }
+    }
+    let last = raw[start..].trim();
+    if !last.is_empty() {
+        out.push(last.to_string());
+    }
+    out
+}
+
 pub(crate) async fn get_scan_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -306,15 +351,7 @@ pub(crate) async fn get_scan_handler(
 
     // Build ScanOptions from query parameters
     let headers_param = params.get("header").cloned().unwrap_or_default();
-    let opt_headers: Vec<String> = if headers_param.is_empty() {
-        vec![]
-    } else {
-        headers_param
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
+    let opt_headers: Vec<String> = split_header_query_param(&headers_param);
     let encoders_param = params.get("encoders").cloned().unwrap_or_default();
     let encoders: Vec<String> = if encoders_param.is_empty() {
         vec!["url".to_string(), "html".to_string()]

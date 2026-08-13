@@ -11,7 +11,7 @@ use super::selectors;
 /// JS file has no `document.createElement('script')` of its own. The
 /// caller threads the returned set into `AstDomAnalyzer::with_script_element_ids`.
 pub fn extract_script_element_ids(html: &str) -> HashSet<String> {
-    let document = Html::parse_document(html);
+    let document = crate::utils::html::parse_document_bounded(html);
     script_element_ids_from_document(&document)
 }
 
@@ -37,7 +37,7 @@ fn script_element_ids_from_document(document: &Html) -> HashSet<String> {
 /// Extract JavaScript code from HTML response
 /// Looks for <script> tags and inline event handlers
 pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
-    let document = Html::parse_document(html);
+    let document = crate::utils::html::parse_document_bounded(html);
     js_blocks_from_document(&document)
 }
 
@@ -48,7 +48,7 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
 /// parsed the full response through html5ever twice. Sharing one parse tree
 /// yields byte-identical results at half the HTML-parse cost.
 pub fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<String>) {
-    let document = Html::parse_document(html);
+    let document = crate::utils::html::parse_document_bounded(html);
     let js_blocks = js_blocks_from_document(&document);
     let script_ids = script_element_ids_from_document(&document);
     (js_blocks, script_ids)
@@ -119,7 +119,7 @@ fn js_blocks_from_document(document: &Html) -> Vec<String> {
 /// Collect resolved, deduped, same-origin `<script src>` URLs from `html`,
 /// resolved relative to `base` (the response URL). Cross-origin srcs are dropped.
 pub fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Vec<url::Url> {
-    let document = Html::parse_document(html);
+    let document = crate::utils::html::parse_document_bounded(html);
     let selector = selectors::script();
     let mut seen = HashSet::new();
     let mut out = Vec::new();

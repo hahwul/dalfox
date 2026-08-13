@@ -158,7 +158,16 @@ pub(crate) struct ApiResponse<T> {
     pub(crate) data: Option<T>,
 }
 
+/// `deny_unknown_fields` for the same reason [`ScanOptions`] carries it, one
+/// level up. Without it the *envelope* silently swallowed anything it did not
+/// recognise — and the shape callers get wrong is precisely a flat option dict
+/// (`{"target": ..., "worker": 5, "header": [...]}`, the MCP spelling) instead
+/// of the nested `{"target": ..., "options": {...}}`. That returned `200 OK`
+/// with **every option discarded**: default workers, no headers, no cookies, no
+/// blind callback — and the resulting "clean" scan looked like a successful one.
+/// The inner struct's validation never ran because nothing ever reached it.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ScanRequest {
     /// Scan target. Named `target` to match the MCP `scan_with_dalfox` tool and
     /// the response payload's `target` field; `url` is accepted as a backwards-

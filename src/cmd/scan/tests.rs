@@ -1981,6 +1981,56 @@ async fn test_resolve_targets_url_applies_cli_overrides() {
 }
 
 #[tokio::test]
+async fn test_resolve_targets_splits_multi_cookie_values() {
+    // `--cookies "a=1; b=2"` is one flag carrying a whole Cookie header value.
+    // A bare `split_once('=')` folded it into a single cookie named `a` with
+    // value `1; b=2`: requests still went out byte-identical, so nothing looked
+    // wrong, but `b` was never enumerated as a cookie parameter and therefore
+    // never probed — a silent false negative for cookie-reflected XSS.
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.cookies = vec!["session=abc; csrf=xyz".to_string()];
+    let targets = resolve(&args).await.expect("resolve ok");
+    assert_eq!(
+        targets[0].cookies,
+        vec![
+            ("session".to_string(), "abc".to_string()),
+            ("csrf".to_string(), "xyz".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_targets_drops_nameless_cookie_pairs() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.cookies = vec!["=orphan; k=v".to_string()];
+    let targets = resolve(&args).await.expect("resolve ok");
+    assert_eq!(targets[0].cookies, vec![("k".to_string(), "v".to_string())]);
+}
+
+#[tokio::test]
+async fn test_resolve_targets_empty_user_agent_sends_no_header() {
+    // `--user-agent ""` means "no override", not "send a literal empty
+    // User-Agent header on every request" (the server path already guarded
+    // this; the CLI did not).
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.user_agent = Some(String::new());
+    let targets = resolve(&args).await.expect("resolve ok");
+    assert!(
+        !targets[0]
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("user-agent")),
+        "an empty --user-agent must not push a User-Agent header"
+    );
+}
+
+#[tokio::test]
 async fn test_resolve_targets_dedupes_identical() {
     let mut args = default_scan_args();
     args.input_type = "url".to_string();

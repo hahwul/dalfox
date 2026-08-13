@@ -144,6 +144,24 @@ pub async fn run_server(args: ServerArgs) {
         allowed_hosts.push(bind_host);
     }
 
+    // Prove `--log-file` is writable before serving anything. Every later write
+    // is a best-effort `let _ =` inside the log helper (a logging failure must
+    // not take a request down), so without this check a bad path — a typo, a
+    // missing directory, a read-only mount — made the flag a silent no-op for
+    // the whole process lifetime: logs still scrolled past on stdout, and the
+    // operator only discovered the empty file after the incident they wanted it
+    // for. Creating it up front also means the file exists immediately, so
+    // `tail -F` works from before the first request.
+    if let Some(path) = &args.log_file
+        && let Err(e) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+    {
+        eprintln!("Cannot open --log-file {}: {}", path, e);
+        return;
+    }
+
     let state = AppState {
         api_key,
         jobs: Arc::new(Mutex::new(HashMap::new())),
