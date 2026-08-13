@@ -46,7 +46,9 @@ Use the server when:
 
 Prefer MCP tools when you are an agent that can speak JSON-RPC over stdio.
 
-## dalfox payload <selector>
+## dalfox payload <selector> [--json]
+
+Pass `--json` to emit the selected payloads as a JSON array instead of one item per line.
 
 Lightweight enumeration / remote fetch command. No scanning.
 

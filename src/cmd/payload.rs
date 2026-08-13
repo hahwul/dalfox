@@ -1,4 +1,5 @@
 use clap::Args;
+use serde::Serialize;
 
 use crate::cmd::scan::ScanOutcome;
 
@@ -71,6 +72,10 @@ pub struct PayloadArgs {
         long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
     )]
     pub selector: Option<String>,
+
+    /// Print payloads as a JSON array instead of one item per line.
+    #[arg(long, help = "Print payloads as a JSON array")]
+    pub json: bool,
 }
 
 fn uri_scheme_payloads() -> &'static [&'static str] {
@@ -170,11 +175,34 @@ fn awesome_alert_payloads() -> &'static [&'static str] {
 /// type so every listing selector — static `&[&str]` slices and owned
 /// `Vec<String>` families alike — emits through the same path with identical
 /// formatting and log wording.
-fn print_lines<T: std::fmt::Display>(selector: &str, list: &[T]) {
-    for entry in list.iter() {
-        println!("{}", entry);
+fn render_lines<T: std::fmt::Display + Serialize>(
+    list: &[T],
+    json: bool,
+) -> Result<String, serde_json::Error> {
+    if json {
+        serde_json::to_string_pretty(list)
+    } else {
+        Ok(list
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
+fn print_lines<T: std::fmt::Display + Serialize>(selector: &str, list: &[T], json: bool) -> bool {
+    let rendered = match render_lines(list, json) {
+        Ok(rendered) => rendered,
+        Err(error) => {
+            eprintln!("[payload] failed to serialize {}: {}", selector, error);
+            return false;
+        }
+    };
+    if !rendered.is_empty() {
+        println!("{}", rendered);
     }
     crate::dbg_log!("{}: {} items", selector, list.len());
+    true
 }
 
 /// The lines one selector prints: either a compile-time slice or a family
@@ -195,8 +223,23 @@ impl SelectorLines {
 
     fn print(&self, selector: &str) {
         match self {
-            SelectorLines::Static(list) => print_lines(selector, list),
-            SelectorLines::Owned(list) => print_lines(selector, list),
+            SelectorLines::Static(list) => {
+                print_lines(selector, list, false);
+            }
+            SelectorLines::Owned(list) => {
+                print_lines(selector, list, false);
+            }
+        }
+    }
+
+    fn extend_strings(&self, output: &mut Vec<String>) {
+        match self {
+            SelectorLines::Static(list) => {
+                output.extend(list.iter().map(|entry| (*entry).to_string()));
+            }
+            SelectorLines::Owned(list) => {
+                output.extend(list.iter().cloned());
+            }
         }
     }
 }
@@ -295,7 +338,7 @@ fn print_summary() {
 /// Returns `true` when initialization (and any printing) finished without an
 /// error path being taken; `false` on runtime build failure, fetch failure,
 /// or an uninitialized cache. Callers translate this into the CLI exit code.
-fn fetch_and_print_remote(provider: &str) -> bool {
+fn fetch_and_print_remote(provider: &str, json: bool) -> bool {
     let provider = provider.to_string();
     let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let ok_clone = ok.clone();
@@ -312,12 +355,9 @@ fn fetch_and_print_remote(provider: &str) -> bool {
                         return;
                     }
                     if let Some(list) = crate::utils::get_remote_payloads() {
-                        let count = list.len();
-                        for p in list.iter() {
-                            println!("{}", p);
+                        if print_lines(&provider, &list, json) {
+                            ok_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
-                        crate::dbg_log!("{}: {} payloads", provider, count);
-                        ok_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                     } else {
                         eprintln!(
                             "[payload] no payloads initialized for provider {}",
@@ -344,7 +384,15 @@ fn fetch_and_print_remote(provider: &str) -> bool {
 /// intentionally excluded — they require a remote fetch, so bundling them into
 /// `all` would make a "just show me everything local" command silently hit the
 /// network.
-fn print_all_payloads() {
+fn print_all_payloads(json: bool) -> bool {
+    if json {
+        let mut payloads = Vec::new();
+        for (_, lines) in static_selector_groups() {
+            lines.extend_strings(&mut payloads);
+        }
+        return print_lines("all", &payloads, true);
+    }
+
     for (index, (selector, lines)) in static_selector_groups().into_iter().enumerate() {
         if index > 0 {
             println!();
@@ -352,77 +400,81 @@ fn print_all_payloads() {
         println!("# {}", selector);
         lines.print(selector);
     }
+    true
 }
 
 pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
+    let print_outcome = |ok| {
+        if ok {
+            ScanOutcome::Clean
+        } else {
+            ScanOutcome::Error
+        }
+    };
+
     match args.selector.as_deref() {
-        Some("event-handlers") => {
-            print_lines(
-                "event-handlers",
-                crate::payload::xss_event::common_event_handler_names(),
-            );
-            ScanOutcome::Clean
-        }
-        Some("useful-tags") => {
-            print_lines(
-                "useful-tags",
-                crate::payload::xss_html::useful_html_tag_names(),
-            );
-            ScanOutcome::Clean
-        }
+        Some("event-handlers") => print_outcome(print_lines(
+            "event-handlers",
+            crate::payload::xss_event::common_event_handler_names(),
+            args.json,
+        )),
+        Some("useful-tags") => print_outcome(print_lines(
+            "useful-tags",
+            crate::payload::xss_html::useful_html_tag_names(),
+            args.json,
+        )),
         Some("payloadbox") => {
-            if fetch_and_print_remote("payloadbox") {
+            if fetch_and_print_remote("payloadbox", args.json) {
                 ScanOutcome::Clean
             } else {
                 ScanOutcome::Error
             }
         }
         Some("portswigger") => {
-            if fetch_and_print_remote("portswigger") {
+            if fetch_and_print_remote("portswigger", args.json) {
                 ScanOutcome::Clean
             } else {
                 ScanOutcome::Error
             }
         }
         Some("uri-scheme") => {
-            print_lines("uri-scheme", uri_scheme_payloads());
-            ScanOutcome::Clean
+            print_outcome(print_lines("uri-scheme", uri_scheme_payloads(), args.json))
         }
-        Some("special-chars") => {
-            print_lines("special-chars", special_chars_payloads());
-            ScanOutcome::Clean
-        }
+        Some("special-chars") => print_outcome(print_lines(
+            "special-chars",
+            special_chars_payloads(),
+            args.json,
+        )),
         Some("functions") => {
-            print_lines("functions", functions_payloads());
-            ScanOutcome::Clean
+            print_outcome(print_lines("functions", functions_payloads(), args.json))
         }
-        Some("awesome-alert") => {
-            print_lines("awesome-alert", awesome_alert_payloads());
-            ScanOutcome::Clean
-        }
-        Some("dom-clobbering") => {
-            print_lines(
-                "dom-clobbering",
-                &crate::payload::get_dom_clobbering_payloads(),
-            );
-            ScanOutcome::Clean
-        }
-        Some("mxss") => {
-            print_lines("mxss", &crate::payload::get_mxss_payloads());
-            ScanOutcome::Clean
-        }
+        Some("awesome-alert") => print_outcome(print_lines(
+            "awesome-alert",
+            awesome_alert_payloads(),
+            args.json,
+        )),
+        Some("dom-clobbering") => print_outcome(print_lines(
+            "dom-clobbering",
+            &crate::payload::get_dom_clobbering_payloads(),
+            args.json,
+        )),
+        Some("mxss") => print_outcome(print_lines(
+            "mxss",
+            &crate::payload::get_mxss_payloads(),
+            args.json,
+        )),
         Some("blind") => {
             // XSS_BLIND_PAYLOADS carries a `{}` placeholder for the OOB callback
             // URL; printed verbatim (as a value, never a format string) so the
             // skeleton shows where the URL goes — users wire it up with
             // `-b https://your-callback`.
-            print_lines("blind", crate::payload::XSS_BLIND_PAYLOADS);
-            ScanOutcome::Clean
+            print_outcome(print_lines(
+                "blind",
+                crate::payload::XSS_BLIND_PAYLOADS,
+                args.json,
+            ))
         }
-        Some("all") => {
-            print_all_payloads();
-            ScanOutcome::Clean
-        }
+        Some("all") => print_outcome(print_all_payloads(args.json)),
         Some(other) => {
             eprintln!("Unknown selector: {}", other);
             if let Some(selector) = closest_selector(other) {

@@ -1,7 +1,7 @@
 use super::{
     KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_print_remote,
-    functions_payloads, print_summary, run_payload, special_chars_payloads, static_selector_counts,
-    static_selector_groups, summary_block, uri_scheme_payloads,
+    functions_payloads, print_summary, render_lines, run_payload, special_chars_payloads,
+    static_selector_counts, static_selector_groups, summary_block, uri_scheme_payloads,
 };
 use crate::cmd::scan::ScanOutcome;
 
@@ -69,6 +69,7 @@ fn test_run_payload_known_selectors_return_clean() {
     ] {
         let outcome = run_payload(PayloadArgs {
             selector: Some(selector.to_string()),
+            json: false,
         });
         assert_eq!(
             outcome,
@@ -83,6 +84,7 @@ fn test_run_payload_known_selectors_return_clean() {
 fn test_run_payload_unknown_selector_returns_error() {
     let outcome = run_payload(PayloadArgs {
         selector: Some("not-a-selector".to_string()),
+        json: false,
     });
     assert_eq!(outcome, ScanOutcome::Error);
 }
@@ -95,7 +97,10 @@ fn test_closest_selector_suggests_only_near_matches() {
 
 #[test]
 fn test_run_payload_none_returns_clean() {
-    let outcome = run_payload(PayloadArgs { selector: None });
+    let outcome = run_payload(PayloadArgs {
+        selector: None,
+        json: false,
+    });
     assert_eq!(outcome, ScanOutcome::Clean);
 }
 
@@ -106,12 +111,15 @@ fn test_run_payload_debug_paths_do_not_panic() {
 
     let _ = run_payload(PayloadArgs {
         selector: Some("event-handlers".to_string()),
+        json: false,
     });
     let _ = run_payload(PayloadArgs {
         selector: Some("useful-tags".to_string()),
+        json: false,
     });
     let _ = run_payload(PayloadArgs {
         selector: Some("uri-scheme".to_string()),
+        json: false,
     });
 
     crate::DEBUG.store(prev, std::sync::atomic::Ordering::Relaxed);
@@ -120,18 +128,20 @@ fn test_run_payload_debug_paths_do_not_panic() {
 #[test]
 fn test_run_payload_remote_selectors_dispatch_without_network_after_unknown_init() {
     // Prime remote cache to empty so provider selectors avoid network fetch in tests.
-    let _ = fetch_and_print_remote("__unknown_provider__");
+    let _ = fetch_and_print_remote("__unknown_provider__", false);
     let _ = run_payload(PayloadArgs {
         selector: Some("payloadbox".to_string()),
+        json: false,
     });
     let _ = run_payload(PayloadArgs {
         selector: Some("portswigger".to_string()),
+        json: false,
     });
 }
 
 #[test]
 fn test_fetch_and_print_remote_unknown_provider_no_network_path() {
-    let _ = fetch_and_print_remote("__unknown_provider__");
+    let _ = fetch_and_print_remote("__unknown_provider__", false);
 }
 
 #[test]
@@ -230,8 +240,25 @@ fn test_summary_block_renders_a_line_per_static_selector() {
 fn test_run_payload_all_selector_returns_clean() {
     let outcome = run_payload(PayloadArgs {
         selector: Some("all".to_string()),
+        json: false,
     });
     assert_eq!(outcome, ScanOutcome::Clean);
+}
+
+#[test]
+fn test_render_lines_json_is_an_array() {
+    let payloads = uri_scheme_payloads();
+    let rendered = render_lines(payloads, true).expect("payload strings serialize");
+    let parsed: Vec<String> = serde_json::from_str(&rendered).expect("valid JSON array");
+
+    assert_eq!(parsed, payloads);
+}
+
+#[test]
+fn test_render_lines_plain_remains_one_item_per_line() {
+    let rendered = render_lines(&["first", "second"], false).expect("plain rendering succeeds");
+
+    assert_eq!(rendered, "first\nsecond");
 }
 
 #[test]

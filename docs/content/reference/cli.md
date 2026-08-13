@@ -232,8 +232,10 @@ See [REST API Server](../../integrations/server/) for endpoints.
 List or fetch payload collections.
 
 ```bash
-dalfox payload <SELECTOR>
+dalfox payload <SELECTOR> [--json]
 ```
+
+Use `--json` to print the selected payloads as a JSON array instead of one item per line.
 
 Selectors:
 
