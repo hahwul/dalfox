@@ -1732,93 +1732,11 @@ async fn fetch_injection_response_with_client(
     // decodes the encoding and reflects the raw content.
     let encoded_payload = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
 
-    // Build injection request based on parameter location
-    let default_method = target.parse_method();
-    let inject_request = match param.location {
-        Location::Header => {
-            // Header injection. Shared with the DOM-verification and
-            // light-verify paths because a cookie param must go into the
-            // `Cookie` header, not a header named after the cookie — see
-            // `build_header_request`.
-            crate::scanning::url_inject::build_header_request(
-                client,
-                target,
-                param,
-                &encoded_payload,
-                default_method,
-            )
-        }
-        Location::Body => {
-            // Body injection: use form action URL if available, else original URL.
-            // Form-discovered sinks stay POST; own-body preserves QUERY/PUT/….
-            let method =
-                crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
-            let parsed_url = param
-                .form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let body = Some(crate::scanning::url_inject::urlencoded_body(
-                target.data.as_deref(),
-                &param.name,
-                &encoded_payload,
-            ));
-            let rb = crate::utils::build_request(client, target, method, parsed_url, body);
-            rb.header("Content-Type", "application/x-www-form-urlencoded")
-        }
-        Location::JsonBody => {
-            // JSON body injection: use form action URL if available, else original URL.
-            // Form-discovered sinks stay POST; own-body preserves QUERY/PUT/….
-            let method =
-                crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
-            let parsed_url = param
-                .form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let body = Some(crate::scanning::url_inject::json_body(
-                target.data.as_deref(),
-                &param.name,
-                &param.value,
-                &encoded_payload,
-            ));
-            let rb = crate::utils::build_request(client, target, method, parsed_url, body);
-            rb.header("Content-Type", "application/json")
-        }
-        Location::MultipartBody => {
-            let method =
-                crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
-            let parsed_url = param
-                .form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let form = crate::scanning::url_inject::multipart_form(
-                target.data.as_deref(),
-                &param.name,
-                &encoded_payload,
-            );
-            crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
-        }
-        _ => {
-            // Query / Path: inject encoded payload into the URL.
-            // `effective_query_base` rebases Query params discovered through
-            // a `<form action=...>` onto the action endpoint; Path keeps
-            // target.url because path-segment injection depends on the
-            // original path layout.
-            let base_url = crate::scanning::url_inject::effective_query_base(&target.url, param);
-            let inject_url =
-                crate::scanning::url_inject::build_injected_url(&base_url, param, &encoded_payload);
-            let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| base_url.clone());
-            crate::utils::build_request(
-                client,
-                target,
-                default_method,
-                parsed_url,
-                target.data.clone(),
-            )
-        }
-    };
+    // Build injection request based on parameter location. Shared with the
+    // light-verify and DOM-verify paths so the per-location URL, method, and
+    // Content-Type rules cannot drift apart again.
+    let inject_request =
+        crate::scanning::url_inject::build_inject_request(client, target, param, &encoded_payload);
 
     // Send the injection request. send_with_retry acquires a --rate-limit
     // permit and applies the --retries / --retry-delay policy internally.
