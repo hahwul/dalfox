@@ -408,7 +408,7 @@ pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     if !payload_has_any_marker(payload) {
         return false;
     }
-    let document = scraper::Html::parse_document(text);
+    let document = crate::utils::html::parse_document_bounded(text);
     has_marker_evidence_in_doc(payload, &document)
 }
 
@@ -679,7 +679,7 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
         return None;
     }
     if needs_markers || needs_attrs || needs_html_struct {
-        let document = scraper::Html::parse_document(text);
+        let document = crate::utils::html::parse_document_bounded(text);
         if needs_markers && has_marker_evidence_in_doc(payload, &document) {
             return Some(DomEvidenceKind::Marker);
         }
@@ -732,7 +732,7 @@ fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
     // single substring search cover the dominant on*-attribute escape
     // pattern that servers use (`&#39;` for `'`, `&quot;` for `"`).
     let decoded = decode_html_entities(text);
-    let document = scraper::Html::parse_document(&decoded);
+    let document = crate::utils::html::parse_document_bounded(&decoded);
     let selector = selectors::universal();
     for node in document.select(selector) {
         // Issue #1183: a handler on a `<input type="hidden">` — even one the
@@ -796,7 +796,11 @@ async fn verify_sxss_dom(
     for sxss_url in &check_urls {
         for attempt in 0u64..retries {
             if attempt > 0 {
-                sleep(Duration::from_millis(500 * attempt)).await;
+                // Clamped; see the twin loop in check_reflection.rs.
+                sleep(Duration::from_millis(
+                    (500 * attempt).min(crate::cmd::scan::MAX_SXSS_BACKOFF_MS),
+                ))
+                .await;
             }
             let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
             let check_request =

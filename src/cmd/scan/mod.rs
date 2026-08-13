@@ -45,13 +45,14 @@ mod validation;
 
 pub use args::{
     BASELINE_MODE_VALUES, BlindOobArgs, CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES,
-    CLI_MAX_RETRY_DELAY_MS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, CUSTOM_ALERT_TYPE_VALUES,
-    DEDUP_URLS_VALUES, DEFAULT_DEDUP_URLS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
-    DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
+    CLI_MAX_RETRY_DELAY_MS, CLI_MAX_SXSS_RETRIES, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS,
+    CUSTOM_ALERT_TYPE_VALUES, DEDUP_URLS_VALUES, DEFAULT_DEDUP_URLS, DEFAULT_DELAY_MS,
+    DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
     DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS,
     DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, ENCODER_VALUES,
-    FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, ON_SESSION_LOSS_VALUES, ONLY_POC_VALUES,
-    POC_TYPE_VALUES, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES, format_is_machine,
+    FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES, MAX_SXSS_BACKOFF_MS, ON_SESSION_LOSS_VALUES,
+    ONLY_POC_VALUES, POC_TYPE_VALUES, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES,
+    format_is_machine,
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::{log_info, log_warn};
@@ -287,6 +288,24 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             &args.format,
             crate::cmd::error_codes::PARSE_ERROR,
             &format!("--session-check-url is not a valid absolute URL: {u}"),
+        );
+        return ScanOutcome::Error;
+    }
+
+    // `--only-custom-payload` with no `--custom-payload` at all is the same
+    // catastrophe as an unreadable file — `get_dynamic_payloads` takes the
+    // only-custom branch, finds no file to read, and returns an empty vec, so
+    // the reflection phase sends *zero* attack payloads and the run prints
+    // `0 XSS` and exits 0. That is indistinguishable from a clean target, which
+    // is exactly what a CI gate keys on. The check below only runs inside
+    // `if let Some(path)`, so this pairing has to be rejected before it.
+    // Reachable from a config file too (`only_custom_payload = true`), which is
+    // why `Config::normalize_and_validate` carries the same rule.
+    if args.only_custom_payload && args.custom_payload.is_none() {
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            "--only-custom-payload requires --custom-payload <FILE>",
         );
         return ScanOutcome::Error;
     }
@@ -738,7 +757,15 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // registration outage never aborts the scan. Injection then runs over
     // whichever channel(s) are configured; the OOB poller is spawned once
     // `stream_findings_enabled` is known (below) and drained before rendering.
-    let blind_active = !args.dry_run && !args.only_discovery;
+    // `--skip-xss-scanning` means "send no attack payloads". Blind XSS payloads
+    // are attack payloads — stored ones, at that: they persist in the target
+    // after the run. Only the per-target injection stage used to honour the
+    // flag (scan_loop.rs), so `--skip-xss-scanning -b <callback>` (with `-b`
+    // commonly living in a shared config file) still wrote live stored-XSS
+    // payloads into every parameter and form of a production system the
+    // operator had explicitly asked not to attack. This also skips OOB session
+    // registration, which is correct: there is nothing left to call back.
+    let blind_active = !args.dry_run && !args.only_discovery && !args.skip_xss_scanning;
     let oob_session: Option<Arc<crate::oob::OobSession>> =
         if blind_active && args.blind_oob_enabled() {
             match crate::oob::OobSession::start(&args.oob_config()).await {

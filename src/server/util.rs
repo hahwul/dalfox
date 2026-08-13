@@ -86,6 +86,11 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
             c
         ));
     }
+    // Header syntax, checked here rather than discovered mid-scan. Shared with
+    // MCP so both front ends refuse the same inputs.
+    if let Some(headers) = &opts.header {
+        crate::job::validate_header_list(headers)?;
+    }
     Ok(())
 }
 

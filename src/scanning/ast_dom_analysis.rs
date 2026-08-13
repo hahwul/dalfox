@@ -1333,7 +1333,17 @@ impl<'a> DomXssVisitor<'a> {
             if before_ok && after_ok {
                 return true;
             }
-            from = start + 1;
+            // Advance past the whole match, never by one byte: `start` is a
+            // char boundary and the match spans exactly `name.len()` bytes, so
+            // `start + name.len()` is one too. `start + 1` lands *inside* the
+            // needle's first codepoint whenever that codepoint is multi-byte
+            // (JS identifiers may start with any ID_Start char, and a Trusted
+            // Types callback parameter name comes straight off the scanned
+            // page), and the next `src[from..]` then panics with "byte index N
+            // is not a char boundary". Skipping the match is also correct:
+            // an overlapping later occurrence starts inside `name`, so it is
+            // preceded by an identifier byte and could never pass `before_ok`.
+            from = start + name.len();
         }
         false
     }

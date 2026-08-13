@@ -1205,6 +1205,12 @@ browser execution; only detection_method=oob observes a real browser."
                 None,
             ));
         }
+        // Same shared check the REST server runs: a malformed header makes
+        // reqwest fail on the builder for every request in the job, which
+        // surfaces as the *target* being reported unreachable.
+        if let Err(e) = crate::job::validate_header_list(&headers) {
+            return Err(ErrorData::invalid_params(e, None));
+        }
         if workers == 0 || workers > MAX_WORKERS {
             return Err(ErrorData::invalid_params(
                 format!(
@@ -1407,14 +1413,24 @@ browser execution; only detection_method=oob observes a real browser."
         // registries before the scan reads them. Mirrors the REST server and
         // CLI; without this the `remote_payloads`/`remote_wordlists` fields
         // would be silently inert on the MCP path.
-        if !scan_args.remote_payloads.is_empty() || !scan_args.remote_wordlists.is_empty() {
-            let _ = crate::utils::init_remote_resources_with_options(
+        // A failure is logged rather than swallowed: the scan otherwise runs
+        // without the list the caller asked for and still reports success,
+        // which an agent reads as "scanned, found nothing".
+        if (!scan_args.remote_payloads.is_empty() || !scan_args.remote_wordlists.is_empty())
+            && let Err(e) = crate::utils::init_remote_resources_with_options(
                 &scan_args.remote_payloads,
                 &scan_args.remote_wordlists,
                 Some(scan_args.timeout),
                 scan_args.proxy.clone(),
             )
-            .await;
+            .await
+        {
+            Self::log(
+                "WRN",
+                &format!(
+                    "remote resource fetch failed ({e}); scanning without the requested remote lists"
+                ),
+            );
         }
 
         // Run the scan on tokio's managed blocking-threadpool. We still need a
@@ -1813,6 +1829,8 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
         let method = crate::cmd::scan::parse_http_method_arg(&params.method)
             .map_err(|e| ErrorData::invalid_params(e, None))?;
         crate::job::validate_encoders(&params.encoders)
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
+        crate::job::validate_header_list(&params.headers)
             .map_err(|e| ErrorData::invalid_params(e, None))?;
 
         let mut target = match parse_target(&target_url) {

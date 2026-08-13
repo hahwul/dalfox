@@ -111,6 +111,16 @@ pub(crate) fn validate_numeric_args(
             ),
         ));
     }
+    if args.sxss_retries > crate::cmd::scan::CLI_MAX_SXSS_RETRIES {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--sxss-retries must be at most {} (got {}); the re-check backoff is 500ms × attempt, so the total wait grows quadratically",
+                crate::cmd::scan::CLI_MAX_SXSS_RETRIES,
+                args.sxss_retries
+            ),
+        ));
+    }
     if args.retry_delay > CLI_MAX_RETRY_DELAY_MS {
         return Err((
             crate::cmd::error_codes::INVALID_INPUT_TYPE,

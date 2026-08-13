@@ -144,6 +144,9 @@ pub(crate) async fn run_preflight_and_analysis(
                 let mut handles = vec![];
 
                 for mut target in drained {
+            // Kept outside the task so a panicking task can still be reported
+            // against its target instead of vanishing (see the collector).
+            let panic_target_url = target.url.to_string();
             let args_clone = args_outer.clone();
             let sem = pre_analyze_semaphore_outer.clone();
             let preflight_idx_clone = preflight_idx_outer.clone();
@@ -158,7 +161,7 @@ pub(crate) async fn run_preflight_and_analysis(
             let session_baselines_clone = session_baselines_outer.clone();
             let session_lost_clone = session_lost_outer.clone();
 
-            handles.push(tokio::task::spawn_local(async move {
+            handles.push((panic_target_url, tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
                 let Ok(_permit) = sem.acquire_owned().await else {
                     return None;
@@ -768,16 +771,42 @@ pub(crate) async fn run_preflight_and_analysis(
                 }
 
                 Some(target)
-            }));
+            })));
         }
 
         // Collect processed targets (skipping those filtered by preflight)
                 let mut processed: Vec<Target> = Vec::new();
-                for handle in handles {
-                    if let Ok(res) = handle.await
-                        && let Some(t) = res {
-                            processed.push(t);
+                for (target_url, handle) in handles {
+                    match handle.await {
+                        Ok(Some(t)) => processed.push(t),
+                        // Preflight deliberately dropped this target; it has
+                        // already recorded its own `skipped_targets` entry.
+                        Ok(None) => {}
+                        // A panic in here used to be swallowed whole: the
+                        // target silently disappeared from `processed`, never
+                        // reached the injection stage, and the run finished
+                        // `0 XSS` with exit 0 — a scanner reporting "clean" for
+                        // a target it crashed on. Surface it and record the
+                        // target as skipped so `target_summary` says
+                        // INTERNAL_ERROR instead of clean. The injection
+                        // stage in `scan_loop.rs` does the same.
+                        Err(e) => {
+                            // Sanitized: a `JoinError`'s Display carries the
+                            // panic message, and panic messages quote the data
+                            // that caused them — a slice-boundary panic embeds
+                            // bytes straight from the scanned response. A raw
+                            // CR/LF there would let a target forge log lines.
+                            eprintln!(
+                                "[scan] preflight/analysis task failed for {}: {}",
+                                crate::utils::log::sanitize_log_message(&target_url),
+                                crate::utils::log::sanitize_log_message(&e.to_string())
+                            );
+                            skipped_targets_outer
+                                .lock()
+                                .await
+                                .insert(target_url, crate::cmd::error_codes::INTERNAL_ERROR);
                         }
+                    }
                 }
                 processed
             }).await

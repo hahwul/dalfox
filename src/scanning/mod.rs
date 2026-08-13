@@ -659,7 +659,10 @@ async fn run_ast_dom_analysis(
             if !source_uses_url_surface {
                 ast_result.request = Some(build_request_text(target, param, &payload));
             }
-            ast_result.response = Some(response_text.to_string());
+            ast_result.response = Some(crate::scanning::result::bound_evidence_body(
+                response_text.to_string(),
+                &payload,
+            ));
             // Lightweight runtime verification (non-headless)
             let (verified, rt_resp, note) =
                 crate::scanning::light_verify::verify_dom_xss_light_with_client(
@@ -667,7 +670,10 @@ async fn run_ast_dom_analysis(
                 )
                 .await;
             if let Some(runtime_response) = rt_resp {
-                ast_result.response = Some(runtime_response);
+                ast_result.response = Some(crate::scanning::result::bound_evidence_body(
+                    runtime_response,
+                    &payload,
+                ));
             }
             if verified {
                 ast_result.result_type = FindingType::Verified;
@@ -1022,7 +1028,7 @@ fn compute_waf_strategy(
 /// that logic, shared so the server / MCP surfaces cannot analyse a different
 /// policy than the CLI does for the same page.
 pub(crate) fn extract_meta_csp(html: &str) -> Option<(String, String)> {
-    let doc = scraper::Html::parse_document(html);
+    let doc = crate::utils::html::parse_document_bounded(html);
     // Prefer an ENFORCING `Content-Security-Policy` meta over a report-only one,
     // mirroring the header path's enforcing-over-report-only `.or_else`. A page
     // may carry both (report-only for telemetry, enforcing for protection), and
@@ -2152,7 +2158,9 @@ impl ScanWorkerCtx {
                     // line, which is the real evidence for that vector. Only
                     // execution-inferring consumers above are gated on
                     // `renderable`.
-                    result.response = reflection_body.map(|b| b.text);
+                    result.response = reflection_body.map(|b| {
+                        crate::scanning::result::bound_evidence_body(b.text, &reflection_payload)
+                    });
 
                     self.stream_finding(&result);
                     // Defer pushing to shared results (batched)
@@ -2297,7 +2305,8 @@ impl ScanWorkerCtx {
                             .build();
                     result.location = format!("{:?}", param.location);
                     result.request = Some(build_request_text(&self.target, param, &dom_payload));
-                    result.response = response_text;
+                    result.response = response_text
+                        .map(|t| crate::scanning::result::bound_evidence_body(t, &dom_payload));
 
                     self.stream_finding(&result);
                     // Defer pushing to shared results (batched)
@@ -2411,7 +2420,8 @@ impl ScanWorkerCtx {
                                 ))
                                 .build();
                         result.location = format!("{:?}", param.location);
-                        result.response = response_text;
+                        result.response = response_text
+                            .map(|t| crate::scanning::result::bound_evidence_body(t, hpp_payload));
                         self.stream_finding(&result);
                         state.local_results.push(result);
                         break 'hpp_outer; // One HPP finding per param is enough
@@ -2422,16 +2432,21 @@ impl ScanWorkerCtx {
     }
 }
 
-/// Outcome of a `run_scanning` call. Currently carries only the number of
-/// per-parameter worker tasks that panicked. The CLI ignores it (it returns it
-/// as a statement value); the REST server and MCP runners inspect
+/// Outcome of a `run_scanning` call. The REST server and MCP runners inspect
 /// `worker_panics` so a scan that lost workers to a panic can be surfaced as a
 /// partial/failed result instead of being silently reported `done` — a worker
 /// panic means the param's findings are incomplete, indistinguishable from
-/// "scanned, found nothing" otherwise.
+/// "scanned, found nothing" otherwise. The CLI additionally uses
+/// `limit_stopped` to decide a target's `--state-file` terminal state.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScanRunReport {
     pub worker_panics: usize,
+    /// The dispatch loop stopped early because `--limit` was reached, so this
+    /// target's remaining parameters were never tested. Distinguishing this
+    /// from a clean finish matters for `--state-file`: a target recorded
+    /// `completed` is skipped on every later run of the same command, which
+    /// would make those parameters permanently unscanned.
+    pub limit_stopped: bool,
 }
 
 /// The shared handles a [`run_scanning`] call needs beyond its target and args.
@@ -2598,6 +2613,9 @@ pub async fn run_scanning(
     // worker to completion, so partial/complete results and the panic tally are
     // unchanged.
     let mut handles = tokio::task::JoinSet::new();
+    // Set when the `--limit` cap cuts the dispatch loop short, so the caller
+    // can tell "finished this target" from "stopped part-way through it".
+    let mut limit_stopped = false;
     // Capture the per-job task-local scopes (request counter, WAF backoff, rate
     // limiter) bound by the REST/MCP runners. `tokio::spawn` does NOT inherit
     // task-locals, so each worker re-enters them via `with_job_scopes`;
@@ -2641,6 +2659,7 @@ pub async fn run_scanning(
         // worker-panic tally, and let late findings race the server's result
         // snapshot. The tail finishes the progress bar with "Completed scanning".
         if ctx.limit_reached() {
+            limit_stopped = true;
             break;
         }
 
@@ -2673,7 +2692,12 @@ pub async fn run_scanning(
             if e.is_panic() {
                 worker_panics += 1;
             }
-            eprintln!("[!] scanning task failed: {e}");
+            // Sanitized for the same reason as the sibling sites: the panic
+            // message can embed response bytes.
+            eprintln!(
+                "[!] scanning task failed: {}",
+                crate::utils::log::sanitize_log_message(&e.to_string())
+            );
         }
     }
 
@@ -2692,7 +2716,10 @@ pub async fn run_scanning(
         );
     }
 
-    ScanRunReport { worker_panics }
+    ScanRunReport {
+        worker_panics,
+        limit_stopped,
+    }
 }
 
 /// Drop Reflected findings on the *current target* that are already covered

@@ -43,6 +43,12 @@ pub mod error_codes {
     /// `status: "incomplete"` (it ran, but the session was gone by the end).
     /// The distinction that matters to a consumer: neither is `"clean"`.
     pub const SESSION_LOST: &str = "SESSION_LOST";
+    /// A dalfox task handling this target panicked, so the target was never
+    /// analyzed. Carried on `target_summary` entries with `status: "skipped"`.
+    /// Reporting the target as skipped rather than letting it fall through to
+    /// `"clean"` is the whole point: a crash inside the scanner must never be
+    /// indistinguishable from "we looked and found nothing".
+    pub const INTERNAL_ERROR: &str = "INTERNAL_ERROR";
 }
 
 #[cfg(test)]

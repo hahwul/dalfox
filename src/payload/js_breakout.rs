@@ -54,17 +54,38 @@ enum State {
     Block,    // /* … */
 }
 
+/// Deepest run of unbalanced `(`/`[`/`{`/`${` we will build a closer for.
+/// See the `push_open!` comment in [`compute_js_breakout`] — this bounds both
+/// the returned string and every payload it is interpolated into.
+const MAX_OPEN_DEPTH: usize = 256;
+
 /// Compute the minimal closer sequence that, injected at the end of `prefix`,
 /// escapes any open string/comment and unbalanced `()[]{}`/`${}` so a following
 /// `;<payload>//` reaches executable statement position.
 ///
 /// Returns an empty string when `prefix` already ends at statement/expression
-/// position (nothing to close).
+/// position (nothing to close), or when the prefix nests deeper than
+/// [`MAX_OPEN_DEPTH`].
 pub fn compute_js_breakout(prefix: &str) -> String {
     let chars: Vec<char> = prefix.chars().collect();
     let mut state = State::Code;
     let mut stack: Vec<Open> = Vec::new();
     let mut i = 0;
+
+    macro_rules! push_open {
+        ($opener:expr) => {{
+            stack.push($opener);
+            // The closer is one byte per unbalanced opener and is carried into
+            // every payload synthesized for the parameter, so an input like
+            // `foo(` × 1 000 000 turns one reflection into megabyte payloads.
+            // Nothing real nests this deep; past the bound we return "no
+            // breakout" and the caller falls back to the fixed catalog, which
+            // is the same path an already-balanced prefix takes.
+            if stack.len() > MAX_OPEN_DEPTH {
+                return String::new();
+            }
+        }};
+    }
 
     while i < chars.len() {
         let c = chars[i];
@@ -73,9 +94,9 @@ pub fn compute_js_breakout(prefix: &str) -> String {
                 '\'' => state = State::Single,
                 '"' => state = State::Double,
                 '`' => state = State::Template,
-                '(' => stack.push(Open::Paren),
-                '[' => stack.push(Open::Bracket),
-                '{' => stack.push(Open::Brace),
+                '(' => push_open!(Open::Paren),
+                '[' => push_open!(Open::Bracket),
+                '{' => push_open!(Open::Brace),
                 ')' => {
                     if stack.last() == Some(&Open::Paren) {
                         stack.pop();
@@ -130,7 +151,7 @@ pub fn compute_js_breakout(prefix: &str) -> String {
                 } else if c == '`' {
                     state = State::Code;
                 } else if c == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
-                    stack.push(Open::TplExpr);
+                    push_open!(Open::TplExpr);
                     state = State::Code;
                     i += 2;
                     continue;

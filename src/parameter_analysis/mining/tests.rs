@@ -1241,3 +1241,43 @@ async fn test_dom_mining_collapse_preserves_non_query_params() {
         "still exactly one collapsed Query param"
     );
 }
+
+#[test]
+fn test_detect_js_breakout_scans_a_huge_body_without_copying_it() {
+    // Smoke test at the `read_body_capped` ceiling: a 16 MiB body must not make
+    // breakout detection blow up. Deliberately NOT claimed as the regression
+    // test for the allocation — one 16 MiB `to_ascii_lowercase` is ~30 ms, so a
+    // wall-clock assertion cannot tell the allocating implementation from the
+    // allocation-free one. What the allocation-free search actually buys is
+    // recall, and that IS pinned:
+    // `test_detect_js_breakout_still_works_behind_a_large_inline_script` fails
+    // if any search window is reintroduced.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>{}\"{}", "var pad = 1;\n".repeat(1_300_000), marker);
+    assert!(
+        body.len() > 15 * 1024 * 1024,
+        "body is {} bytes",
+        body.len()
+    );
+    let start = std::time::Instant::now();
+    let _ = detect_js_breakout(&body);
+    assert!(
+        start.elapsed().as_secs() < 10,
+        "breakout detection took {:?} on a {} MiB body",
+        start.elapsed(),
+        body.len() / (1024 * 1024)
+    );
+}
+
+#[test]
+fn test_detect_js_breakout_still_works_behind_a_large_inline_script() {
+    // A framework app routinely inlines a serialized state blob or a whole
+    // bundle in one `<script>`, and a reflection after several hundred KiB of
+    // it is ordinary. At the original 64 KiB window such a reflection silently
+    // lost its computed closer and fell back to the fixed catalog — a recall
+    // loss on exactly the nested JS contexts this computation exists to cover.
+    let marker = crate::scanning::markers::open_marker();
+    let filler = "var pad = 1;\n".repeat(40_000); // ~520 KiB
+    let body = format!("<script>{filler}foo(\"{marker}\");</script>");
+    assert_eq!(detect_js_breakout(&body).as_deref(), Some("\")"));
+}

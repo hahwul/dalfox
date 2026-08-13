@@ -21,7 +21,6 @@ use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use crate::utils::shimmer::ShimmerSpinner;
-use scraper;
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, Semaphore};
@@ -247,13 +246,35 @@ pub fn detect_js_breakout(text: &str) -> Option<String> {
 /// `detect_js_breakout` with a caller-supplied marker string (mirrors
 /// `detect_injection_context_with_marker`). Used by probes that inject a
 /// non-standard marker, e.g. the numeric-only discovery probe.
+/// Offset of the last ASCII-case-insensitive occurrence of `needle` in
+/// `bytes[..before]`.
+///
+/// Allocation-free on purpose. The obvious spelling — `text[..mp]
+/// .to_ascii_lowercase().rfind(..)` — copies the whole prefix, and that prefix
+/// can be the full `read_body_capped` 16 MiB, once per probed parameter.
+/// Bounding the search window instead would have cost recall: framework apps
+/// routinely inline a serialized state blob or a whole bundle in one
+/// `<script>`, and a reflection several hundred KiB into it is ordinary, so any
+/// window short enough to be a useful cost bound also silently dropped those
+/// reflections back to the fixed catalog. Not allocating removes the need to
+/// choose. (`MAX_OPEN_DEPTH` in `js_breakout` remains the guard that stops a
+/// hostile prefix from producing a giant closer.)
+fn rfind_ascii_case_insensitive(bytes: &[u8], before: usize, needle: &[u8]) -> Option<usize> {
+    let before = before.min(bytes.len());
+    if needle.is_empty() || needle.len() > before {
+        return None;
+    }
+    (0..=before - needle.len())
+        .rev()
+        .find(|&start| bytes[start..start + needle.len()].eq_ignore_ascii_case(needle))
+}
+
 pub fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option<String> {
     let mp = text.find(marker)?;
     // Find the enclosing inline `<script …>` opening tag before the reflection.
     // `<script` (case-insensitive) never matches a closing `</script>` tag (the
-    // char after `<` is `/`, not `s`), so `rfind` lands on a real opener.
-    let lower_before = text[..mp].to_ascii_lowercase();
-    let open_tag = lower_before.rfind("<script")?;
+    // char after `<` is `/`, not `s`), so the last match is a real opener.
+    let open_tag = rfind_ascii_case_insensitive(text.as_bytes(), mp, b"<script")?;
     // Script content begins just after the `>` that ends the opening tag.
     let gt = text[open_tag..mp].find('>')?;
     let content_start = open_tag + gt + 1;
@@ -291,7 +312,7 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
     }
 
     // Parse HTML and locate marker via element text/attributes/script
-    let document = scraper::Html::parse_document(text);
+    let document = crate::utils::html::parse_document_bounded(text);
 
     // Heuristic to infer surrounding quote delimiter around the first marker.
     // Picks the *closest* opening quote before the marker (the one that
@@ -406,25 +427,18 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
         }
     }
 
-    // 3) HTML text context: marker in non-script, non-style text nodes
-    {
-        let any = selectors::universal();
-        for el in document.select(any) {
-            let tag = el.value().name();
-            if tag.eq_ignore_ascii_case("script") || tag.eq_ignore_ascii_case("style") {
-                continue;
-            }
-            let s = el.text().fold(String::new(), |mut acc, t| {
-                acc.push_str(t);
-                acc
-            });
-            if s.contains(marker) {
-                return InjectionContext::Html(None);
-            }
-        }
-    }
-
-    // Fallback to HTML
+    // 3) HTML text context — deliberately not scanned.
+    //
+    // There used to be a loop here that walked every element and materialized
+    // `el.text()` (that element's *entire subtree* text) looking for the
+    // marker, returning `InjectionContext::Html(None)` on a hit. It could not
+    // change the answer: the fallback below is the same value, so the loop's
+    // only observable effect was its cost — and that cost is quadratic, since
+    // each of N elements re-collects the text of everything beneath it. A body
+    // of `<div>` × 500 000 with the marker in a *comment* node (which matches
+    // no element, so the loop never short-circuits) ran it to completion.
+    //
+    // Fallback to HTML.
     InjectionContext::Html(None)
 }
 
@@ -450,7 +464,7 @@ pub fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static s
     if marker.is_empty() || !text.contains(marker) {
         return None;
     }
-    let document = scraper::Html::parse_document(text);
+    let document = crate::utils::html::parse_document_bounded(text);
     let any = selectors::universal();
     let mut found: Option<&'static str> = None;
     for el in document.select(any) {
@@ -1170,7 +1184,7 @@ pub async fn probe_response_id_params(
         // subsequent .await points. Extract owned String data, then drop
         // the document before hitting the async code below.
         let params_to_check: std::collections::HashSet<String> = {
-            let document = scraper::Html::parse_document(&text);
+            let document = crate::utils::html::parse_document_bounded(&text);
             let selector = selectors::input_with_id_or_name();
             let mut set = std::collections::HashSet::new();
             for element in document.select(selector) {

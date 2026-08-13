@@ -7,6 +7,7 @@ This module re-exports commonly used helpers so other modules can simply
 
 pub mod banner;
 pub mod fs;
+pub mod html;
 pub mod http;
 pub mod log;
 pub mod rate_limit;
@@ -160,13 +161,38 @@ pub async fn init_remote_resources(
         timeout_secs: None,
         proxy: None,
     };
-    if !payload_providers.is_empty() {
-        crate::payload::init_remote_payloads_with(payload_providers, opts.clone()).await?;
+    fetch_both(payload_providers, wordlist_providers, opts).await
+}
+
+/// Fetch both remote lists, **not** short-circuiting on the first failure, and
+/// report every failure together.
+///
+/// The `?`-chained version stopped at the first error, which mattered once an
+/// all-failed fetch started returning `Err` instead of caching an empty list: a
+/// payload-provider outage silently skipped the wordlist fetch too, so a scan
+/// that asked for both lost the one that was actually reachable.
+async fn fetch_both(
+    payload_providers: &[String],
+    wordlist_providers: &[String],
+    opts: crate::payload::RemoteFetchOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut errors: Vec<String> = Vec::new();
+    if !payload_providers.is_empty()
+        && let Err(e) =
+            crate::payload::init_remote_payloads_with(payload_providers, opts.clone()).await
+    {
+        errors.push(format!("payloads: {e}"));
     }
-    if !wordlist_providers.is_empty() {
-        crate::payload::init_remote_wordlists_with(wordlist_providers, opts).await?;
+    if !wordlist_providers.is_empty()
+        && let Err(e) = crate::payload::init_remote_wordlists_with(wordlist_providers, opts).await
+    {
+        errors.push(format!("wordlists: {e}"));
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; ").into())
+    }
 }
 
 /// Initialize remote resources with explicit options (timeout/proxy).
@@ -181,13 +207,7 @@ pub async fn init_remote_resources_with_options(
         timeout_secs,
         proxy,
     };
-    if !payload_providers.is_empty() {
-        crate::payload::init_remote_payloads_with(payload_providers, opts.clone()).await?;
-    }
-    if !wordlist_providers.is_empty() {
-        crate::payload::init_remote_wordlists_with(wordlist_providers, opts).await?;
-    }
-    Ok(())
+    fetch_both(payload_providers, wordlist_providers, opts).await
 }
 
 #[cfg(test)]

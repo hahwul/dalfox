@@ -118,7 +118,7 @@ pub(crate) async fn render_dry_run(
         .sum();
     let skipped = skipped_targets.lock().await;
 
-    if args.format == "json" || args.format == "jsonl" {
+    let report = if args.format == "json" || args.format == "jsonl" {
         let mut meta = serde_json::json!({
             "dalfox_version": env!("CARGO_PKG_VERSION"),
             "targets_input": args.targets.len(),
@@ -146,56 +146,66 @@ pub(crate) async fn render_dry_run(
             "targets": dry_run_targets,
         });
         if args.format == "json" {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&output).unwrap_or_default()
-            );
+            serde_json::to_string_pretty(&output).unwrap_or_default()
         } else {
-            println!("{}", serde_json::to_string(&output).unwrap_or_default());
+            serde_json::to_string(&output).unwrap_or_default()
         }
     } else {
-        println!("Dry-run summary:");
-        println!("  Targets (input):     {}", args.targets.len());
-        println!("  Targets (scannable): {}", dry_run_targets.len());
-        println!("  Targets (skipped):   {}", skipped.len());
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let _ = writeln!(out, "Dry-run summary:");
+        let _ = writeln!(out, "  Targets (input):     {}", args.targets.len());
+        let _ = writeln!(out, "  Targets (scannable): {}", dry_run_targets.len());
+        let _ = writeln!(out, "  Targets (skipped):   {}", skipped.len());
         if state.dedup.collapsed > 0 {
-            println!(
+            let _ = writeln!(
+                out,
                 "  Targets (deduped):   {} ({} mode)",
                 state.dedup.collapsed, state.dedup.mode
             );
         }
         if state.resumed_skipped > 0 {
-            println!(
+            let _ = writeln!(
+                out,
                 "  Targets (resumed):   {} already completed",
                 state.resumed_skipped
             );
         }
-        println!("  Params discovered:   {}", total_params);
-        println!("  Estimated requests:  {}", total_estimated);
+        let _ = writeln!(out, "  Params discovered:   {}", total_params);
+        let _ = writeln!(out, "  Estimated requests:  {}", total_estimated);
         if !warnings.is_empty() {
-            println!("  Warnings:");
+            let _ = writeln!(out, "  Warnings:");
             for w in &warnings {
-                println!("    - {}", w);
+                let _ = writeln!(out, "    - {}", w);
             }
         }
-        println!();
+        let _ = writeln!(out);
         for t in &dry_run_targets {
-            println!(
+            let _ = writeln!(
+                out,
                 "  {} ({}):",
                 t["target"].as_str().unwrap_or("?"),
                 t["method"].as_str().unwrap_or("?")
             );
             if let Some(params) = t["params"].as_array() {
                 for p in params {
-                    println!(
+                    let _ = writeln!(
+                        out,
                         "    - {} ({})",
                         p["name"].as_str().unwrap_or("?"),
                         p["location"].as_str().unwrap_or("?")
                     );
                 }
             }
-            println!("    estimated_requests: {}", t["estimated_requests"]);
+            let _ = writeln!(out, "    estimated_requests: {}", t["estimated_requests"]);
         }
+        // Trailing newline comes from the emitter, matching the JSON branches.
+        out.pop();
+        out
+    };
+
+    if write_output_or_stdout(args, &report) {
+        return ScanOutcome::Error;
     }
     ScanOutcome::Clean
 }
@@ -229,7 +239,8 @@ pub(crate) fn render_only_discovery(
             "targets_skipped_completed": state.resumed_skipped,
         })
     });
-    match args.format.as_str() {
+    use std::fmt::Write as _;
+    let report = match args.format.as_str() {
         "json" => {
             let mut meta = serde_json::json!({
                 "dalfox_version": env!("CARGO_PKG_VERSION"),
@@ -243,10 +254,7 @@ pub(crate) fn render_only_discovery(
                 "meta": meta,
                 "params": entries,
             });
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&envelope).unwrap_or_default()
-            );
+            serde_json::to_string_pretty(&envelope).unwrap_or_default()
         }
         "jsonl" => {
             // Meta line first (consistent with `-f jsonl` for scans),
@@ -260,21 +268,30 @@ pub(crate) fn render_only_discovery(
                 inner["resumed"] = r.clone();
             }
             let meta = serde_json::json!({ "meta": inner });
-            println!("{}", serde_json::to_string(&meta).unwrap_or_default());
+            let mut out = serde_json::to_string(&meta).unwrap_or_default();
             for e in &entries {
-                println!("{}", serde_json::to_string(e).unwrap_or_default());
+                let _ = write!(out, "\n{}", serde_json::to_string(e).unwrap_or_default());
             }
+            out
         }
         _ => {
+            let mut out = String::new();
             for e in &entries {
-                println!(
+                let _ = writeln!(
+                    out,
                     "[{}] {} ({})",
                     e["url"].as_str().unwrap_or(""),
                     e["param"].as_str().unwrap_or(""),
                     e["location"].as_str().unwrap_or("")
                 );
             }
+            out.pop();
+            out
         }
+    };
+
+    if write_output_or_stdout(args, &report) {
+        return ScanOutcome::Error;
     }
     ScanOutcome::Clean
 }
@@ -666,6 +683,21 @@ pub(crate) async fn render_results(
         output
     };
 
+    let output_write_failed = write_output_or_stdout(args, &output_content);
+
+    (final_results, output_write_failed)
+}
+
+/// Write a rendered report to `--output`, or to stdout when no file was asked
+/// for. Returns whether the file write failed.
+///
+/// Shared by the end-of-scan renderer and by the `--dry-run` /
+/// `--only-discovery` previews. Those two return before `render_results`, which
+/// used to be the only place that read `args.output`, so `-o plan.json` was
+/// silently ignored and the command still exited 0 — a pipeline consuming that
+/// file read a stale one, or failed on a missing one, with no indication that
+/// dalfox had skipped the write.
+fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
     let mut output_write_failed = false;
     if let Some(output_path) = &args.output {
         // Surface `..` traversal so the operator notices before a
@@ -691,7 +723,13 @@ pub(crate) async fn render_results(
         // in which escapes belong here; strip unconditionally rather than
         // mirroring the gate. Non-plain formats never contain escapes, so this
         // is a no-op for them.
-        let file_content = crate::utils::term::strip_ansi(&output_content);
+        let mut file_content = crate::utils::term::strip_ansi(output_content);
+        // A report file ends with a newline. stdout gets one from `cprintln!`;
+        // the file branch has to add its own, and the JSON/JSONL renderers
+        // produce a buffer without a trailing one.
+        if !file_content.ends_with('\n') {
+            file_content.push('\n');
+        }
         match std::fs::write(output_path, &file_content) {
             Ok(_) => {
                 if !args.silence {
@@ -716,6 +754,5 @@ pub(crate) async fn render_results(
         // is in effect so the final POC/finding block stays plain.
         crate::cprintln!("{}", output_content);
     }
-
-    (final_results, output_write_failed)
+    output_write_failed
 }

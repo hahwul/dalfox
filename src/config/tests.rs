@@ -436,6 +436,57 @@ fn test_normalize_and_validate_accepts_full_valid_config() {
 }
 
 #[test]
+fn test_normalize_and_validate_leaves_only_custom_payload_alone() {
+    // The pairing rule lives in `run_scan`, post-merge. Enforcing it here — on
+    // the config file alone — would drop the flag whenever the operator
+    // supplied the file with `--custom-payload` on the command line instead.
+    let mut cfg = Config {
+        scan: Some(ScanConfig {
+            only_custom_payload: Some(true),
+            ..Default::default()
+        }),
+    };
+    let warnings = cfg.normalize_and_validate();
+    assert!(
+        !warnings.iter().any(|w| w.contains("only_custom_payload")),
+        "config validation must not second-guess a CLI-supplied --custom-payload, got: {warnings:?}"
+    );
+    assert_eq!(
+        cfg.scan.as_ref().unwrap().only_custom_payload,
+        Some(true),
+        "the flag must survive to be merged with the CLI args"
+    );
+}
+
+#[test]
+fn test_normalize_and_validate_uppercases_sxss_method() {
+    // Same class as `method`: a config value skips clap's parser, so `"post"`
+    // reached `reqwest::Method::from_str` as the literal extension verb.
+    let mut cfg = Config {
+        scan: Some(ScanConfig {
+            sxss_method: Some("post".to_string()),
+            ..Default::default()
+        }),
+    };
+    let warnings = cfg.normalize_and_validate();
+    assert!(warnings.is_empty(), "got: {warnings:?}");
+    assert_eq!(
+        cfg.scan.as_ref().unwrap().sxss_method.as_deref(),
+        Some("POST")
+    );
+
+    let mut bad = Config {
+        scan: Some(ScanConfig {
+            sxss_method: Some("GET junk".to_string()),
+            ..Default::default()
+        }),
+    };
+    let warnings = bad.normalize_and_validate();
+    assert!(warnings.iter().any(|w| w.contains("sxss_method")));
+    assert_eq!(bad.scan.as_ref().unwrap().sxss_method, None);
+}
+
+#[test]
 fn test_normalize_and_validate_none_scan_is_noop() {
     let mut cfg = Config { scan: None };
     assert!(cfg.normalize_and_validate().is_empty());

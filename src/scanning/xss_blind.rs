@@ -433,7 +433,7 @@ pub async fn blind_scan_forms_with(
         fields: Vec<FormField>,
     }
     let forms: Vec<FormInfo> = {
-        let document = scraper::Html::parse_document(&html);
+        let document = crate::utils::html::parse_document_bounded(&html);
         let form_sel = crate::scanning::selectors::form();
         let input_sel = crate::scanning::selectors::input_textarea_select();
 

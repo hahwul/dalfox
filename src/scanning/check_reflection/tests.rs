@@ -2335,3 +2335,53 @@ async fn test_hpp_reflection_falls_back_to_target_url_when_hpp_url_is_unparseabl
         "the fallback must have hit the target URL"
     );
 }
+
+// --- URL-attribute back-walk budget ----------------------------------------
+
+#[test]
+fn url_attr_backwalk_length_is_bounded() {
+    // `MAX_PAYLOAD_OCCURRENCES` caps how many times the back-walk is *started*
+    // per body; it said nothing about how far each one runs. On a body with no
+    // `=`, `<` or `>` every walk ran to offset 0, so cost was
+    // occurrences × body-size — tens of seconds of byte comparison per
+    // parameter on a body a hostile target serves for free.
+    //
+    // This calls the looping helper directly and deliberately: the public
+    // `is_in_safe_context_decoded` chain is an ordered OR, and an earlier gate
+    // short-circuits before this loop is reached, while
+    // `marker_reflects_in_url_attr_only` returns after its first occurrence.
+    // Neither can expose the blowup, so neither is a valid regression site.
+    // Must decode to a dangerous scheme, or the function early-returns before
+    // ever reaching the occurrence loop this test is about.
+    let payload = "%6A%61%76%61%73%63%72%69%70%74%3Aalert1";
+    let filler = "A".repeat(1024);
+    let mut body = String::with_capacity(5 * 1024 * 1024);
+    for _ in 0..4200 {
+        body.push_str(&filler);
+        body.push_str(payload);
+    }
+    let start = std::time::Instant::now();
+    let _ = url_encoded_payload_reflects_in_unsafe_url_context(&body, payload);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 5,
+        "bounded back-walk took {elapsed:?} on a {} MiB body",
+        body.len() / (1024 * 1024)
+    );
+}
+
+#[test]
+fn url_attr_backwalk_verdicts_are_unchanged_for_normal_markup() {
+    // The budget must not alter the answer for ordinary attribute distances.
+    let payload = "%6A%61%76%61%73%63%72%69%70%74%3Aalert(1)";
+    let in_href = format!(r#"<html><body><a href="{payload}">x</a></body></html>"#);
+    assert!(
+        url_encoded_payload_reflects_in_unsafe_url_context(&in_href, payload),
+        "an encoded javascript: URL inside href is an unsafe URL context"
+    );
+    let in_text = format!("<html><body><div>{payload}</div></body></html>");
+    assert!(
+        !url_encoded_payload_reflects_in_unsafe_url_context(&in_text, payload),
+        "the same bytes in body text are not"
+    );
+}

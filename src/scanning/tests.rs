@@ -2661,3 +2661,77 @@ async fn test_run_scanning_without_hpp_flag_reports_no_hpp_finding() {
         "HPP findings must require --hpp"
     );
 }
+
+// --- evidence-body bounding -------------------------------------------------
+
+#[test]
+fn bound_evidence_body_leaves_normal_bodies_untouched() {
+    let body = "<html><body>PAYLOAD</body></html>".to_string();
+    assert_eq!(
+        crate::scanning::result::bound_evidence_body(body.clone(), "PAYLOAD"),
+        body
+    );
+}
+
+#[test]
+fn bound_evidence_body_keeps_the_window_around_the_payload() {
+    // A reflection far past the cap must survive: `extract_context` searches
+    // the retained body for the payload to render the `L1:` line, so a blind
+    // prefix cut would silently blank that evidence.
+    use crate::scanning::result::{MAX_EVIDENCE_BODY_BYTES, bound_evidence_body};
+    let payload = "<svg onload=alert(1)>";
+    let body = format!(
+        "{}{}{}",
+        "A".repeat(4 * 1024 * 1024),
+        payload,
+        "B".repeat(1024)
+    );
+    let bounded = bound_evidence_body(body, payload);
+    assert!(
+        bounded.len() < MAX_EVIDENCE_BODY_BYTES + 64,
+        "bounded body is {} bytes",
+        bounded.len()
+    );
+    assert!(
+        bounded.contains(payload),
+        "the payload must survive the cut"
+    );
+    assert!(bounded.starts_with('…'), "an elided prefix must be marked");
+}
+
+#[test]
+fn bound_evidence_body_cuts_on_char_boundaries() {
+    use crate::scanning::result::bound_evidence_body;
+    // Multi-byte characters straddling both cut points must not panic and must
+    // leave valid UTF-8 (the return type guarantees it; the point is no panic).
+    let body = format!("{}PAY{}", "한".repeat(1_000_000), "글".repeat(1_000_000));
+    let bounded = bound_evidence_body(body, "PAY");
+    assert!(bounded.contains("PAY"));
+}
+
+#[test]
+fn bound_evidence_body_falls_back_to_a_prefix_when_the_payload_is_absent() {
+    use crate::scanning::result::{MAX_EVIDENCE_BODY_BYTES, bound_evidence_body};
+    let body = "Z".repeat(4 * 1024 * 1024);
+    let bounded = bound_evidence_body(body, "not-present");
+    assert!(bounded.len() < MAX_EVIDENCE_BODY_BYTES + 64);
+    assert!(bounded.ends_with('…'), "an elided suffix must be marked");
+}
+
+// --- URL-attribute back-walk budget ----------------------------------------
+
+#[test]
+fn url_attr_reflection_in_a_normal_href_is_still_recognised() {
+    // The budget must not change the answer for ordinary markup: this is the
+    // suppression the back-walk exists to enable.
+    let html = r#"<html><body><a href="/path/MARKER1">x</a></body></html>"#;
+    assert!(
+        crate::scanning::check_reflection::marker_reflects_in_url_attr_only(html, "MARKER1"),
+        "a marker echoed only inside href must still read as URL-attr-only"
+    );
+    let text = r#"<html><body><div>MARKER1</div></body></html>"#;
+    assert!(
+        !crate::scanning::check_reflection::marker_reflects_in_url_attr_only(text, "MARKER1"),
+        "a marker in body text is not URL-attr-only"
+    );
+}

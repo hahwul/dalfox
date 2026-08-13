@@ -568,17 +568,27 @@ pub(crate) async fn resolve_targets(
                     if args.method != DEFAULT_METHOD {
                         target.method = args.method.clone();
                     }
-                    if let Some(ua) = &args.user_agent {
+                    // An empty `--user-agent ""` must not become a literal
+                    // `User-Agent:` header on every request (the server/MCP path
+                    // already guards this); it means "no override".
+                    if let Some(ua) = args.user_agent.as_ref().filter(|ua| !ua.is_empty()) {
                         target.headers.push(("User-Agent".to_string(), ua.clone()));
                         target.user_agent = Some(ua.clone());
                     } else {
                         target.user_agent = Some("".to_string());
                     }
+                    // `--cookies "a=1; b=2"` is one flag carrying a whole Cookie
+                    // header value, which a bare `split_once('=')` folded into
+                    // a single cookie named `a` with value `1; b=2`. Requests
+                    // still went out byte-identical, but cookie-parameter
+                    // coverage silently lost every cookie after the first: the
+                    // discovery stage iterates `target.cookies`, so `b` was
+                    // never enumerated or probed. Server and MCP have always
+                    // used this shared splitter.
                     target.cookies = args
                         .cookies
                         .iter()
-                        .filter_map(|c| c.split_once("="))
-                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .flat_map(|c| crate::job::split_cookie_pairs(c))
                         .collect();
                     target.timeout = args.timeout;
                     target.delay = args.delay;
@@ -1102,18 +1112,17 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
                 .push((name.trim().to_string(), value.trim().to_string()));
         }
     }
-    if let Some(ua) = &args.user_agent {
+    // Empty `--user-agent ""` means "no override", not a literal empty header.
+    if let Some(ua) = args.user_agent.as_ref().filter(|ua| !ua.is_empty()) {
         target.headers.push(("User-Agent".to_string(), ua.clone()));
         target.user_agent = Some(ua.clone());
     } else if target.user_agent.is_none() {
         target.user_agent = Some("".to_string());
     }
+    // Shared splitter: a `--cookies "a=1; b=2"` value carries several cookies
+    // and every one of them has to become its own probe-able parameter.
     for c in &args.cookies {
-        if let Some((k, v)) = c.split_once('=') {
-            target
-                .cookies
-                .push((k.trim().to_string(), v.trim().to_string()));
-        }
+        target.cookies.extend(crate::job::split_cookie_pairs(c));
     }
     target.timeout = args.timeout;
     target.delay = args.delay;

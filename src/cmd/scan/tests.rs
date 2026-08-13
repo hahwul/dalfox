@@ -111,6 +111,38 @@ fn validate_numeric_args_rejects_delay_over_cap() {
 }
 
 #[test]
+fn validate_numeric_args_rejects_sxss_retries_over_cap() {
+    // The stored-XSS re-check backoff is `500ms * attempt`, so the *total* wait
+    // grows quadratically: the un-capped 3000 someone could type is ~26 days,
+    // per check URL and per verified payload.
+    let mut args = default_scan_args();
+    args.sxss_retries = crate::cmd::scan::CLI_MAX_SXSS_RETRIES + 1;
+    let err = validate_numeric_args(&args).unwrap_err();
+    assert!(
+        err.1.contains("sxss-retries"),
+        "message must name the flag, got: {}",
+        err.1
+    );
+}
+
+#[test]
+fn validate_numeric_args_accepts_sxss_retries_at_cap() {
+    let mut args = default_scan_args();
+    args.sxss_retries = crate::cmd::scan::CLI_MAX_SXSS_RETRIES;
+    assert!(validate_numeric_args(&args).is_ok());
+}
+
+#[test]
+fn sxss_method_uses_the_same_parser_as_method() {
+    // `--sxss-method` had no value parser, so `post` went on the wire as the
+    // literal extension verb (reqwest's Method is case-sensitive) and
+    // `"GET junk"` failed to parse and silently degraded to GET.
+    use crate::cmd::scan::parse_http_method_arg;
+    assert_eq!(parse_http_method_arg("post").unwrap(), "POST");
+    assert!(parse_http_method_arg("GET junk").is_err());
+}
+
+#[test]
 fn validate_numeric_args_rejects_zero_concurrent_targets() {
     let mut args = default_scan_args();
     args.max_concurrent_targets = 0;
@@ -1978,6 +2010,56 @@ async fn test_resolve_targets_url_applies_cli_overrides() {
     assert!(t.headers.iter().any(|(n, _)| n == "User-Agent"));
     assert_eq!(t.user_agent.as_deref(), Some("dalfox-ua"));
     assert_eq!(t.cookies, vec![("sid".to_string(), "abc".to_string())]);
+}
+
+#[tokio::test]
+async fn test_resolve_targets_splits_multi_cookie_values() {
+    // `--cookies "a=1; b=2"` is one flag carrying a whole Cookie header value.
+    // A bare `split_once('=')` folded it into a single cookie named `a` with
+    // value `1; b=2`: requests still went out byte-identical, so nothing looked
+    // wrong, but `b` was never enumerated as a cookie parameter and therefore
+    // never probed — a silent false negative for cookie-reflected XSS.
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.cookies = vec!["session=abc; csrf=xyz".to_string()];
+    let targets = resolve(&args).await.expect("resolve ok");
+    assert_eq!(
+        targets[0].cookies,
+        vec![
+            ("session".to_string(), "abc".to_string()),
+            ("csrf".to_string(), "xyz".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_targets_drops_nameless_cookie_pairs() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.cookies = vec!["=orphan; k=v".to_string()];
+    let targets = resolve(&args).await.expect("resolve ok");
+    assert_eq!(targets[0].cookies, vec![("k".to_string(), "v".to_string())]);
+}
+
+#[tokio::test]
+async fn test_resolve_targets_empty_user_agent_sends_no_header() {
+    // `--user-agent ""` means "no override", not "send a literal empty
+    // User-Agent header on every request" (the server path already guarded
+    // this; the CLI did not).
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.user_agent = Some(String::new());
+    let targets = resolve(&args).await.expect("resolve ok");
+    assert!(
+        !targets[0]
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("user-agent")),
+        "an empty --user-agent must not push a User-Agent header"
+    );
 }
 
 #[tokio::test]

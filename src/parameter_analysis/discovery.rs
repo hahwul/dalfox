@@ -22,7 +22,6 @@ use crate::parameter_analysis::{
 };
 use crate::scanning::url_inject::build_injected_url;
 use crate::target_parser::Target;
-use scraper;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
@@ -1241,6 +1240,11 @@ pub async fn check_form_discovery(
         Err(_) => return,
     };
 
+    /// Most fields probed per discovered form. See the truncation site below:
+    /// the probing cost is quadratic in the field count, so this bounds what a
+    /// single hostile (or generated) page can make a scan spend.
+    const MAX_FORM_FIELDS: usize = 200;
+
     // Fully-owned form descriptor extracted from the HTML. Keeping these as
     // Send-safe `String` / `Url` lets the scraper document get dropped before
     // the async probing loop below, which is a prerequisite for ever moving
@@ -1255,7 +1259,7 @@ pub async fn check_form_discovery(
     // Parse forms in a tight scope so `scraper::Html` (which is !Send) never
     // escapes. Collect into `Vec<FormInfo>` before touching any await.
     let forms: Vec<FormInfo> = {
-        let document = scraper::Html::parse_document(&html);
+        let document = crate::utils::html::parse_document_bounded(&html);
         let form_sel = selectors::form();
         let input_sel = selectors::input_textarea_select();
 
@@ -1287,6 +1291,29 @@ pub async fn check_form_discovery(
             if fields.is_empty() {
                 continue;
             }
+            // Cap the field list. Probing a form is O(fields²) in work *and* in
+            // bytes: each field gets its own request, and each of those
+            // requests rebuilds the entire multipart body. A page serving a
+            // form with 50 000 inputs therefore costs 50 000 requests carrying
+            // ~2.5e9 field copies between them. `MAX_DISCOVERED_PARAMS` bounds
+            // the params a scan carries, but only *after* discovery has already
+            // paid for them, and only on the server/MCP paths.
+            //
+            // Note what is capped: the number of fields *probed*, not the field
+            // list itself. Truncating `fields` looked equivalent but was not —
+            // the same vector builds the submitted body, so a >200-field form
+            // would be probed with an incomplete body. Servers reject a form
+            // submission missing its required fields, so those probes come back
+            // non-reflecting and the form can lose discovery of *every* one of
+            // its parameters, not just the ones past the cap.
+            if fields.len() > MAX_FORM_FIELDS {
+                crate::dbg_log!(
+                    "form at {} has {} fields; probing the first {} (all are still submitted)",
+                    form_url,
+                    fields.len(),
+                    MAX_FORM_FIELDS
+                );
+            }
 
             out.push(FormInfo {
                 url: form_url,
@@ -1309,7 +1336,9 @@ pub async fn check_form_discovery(
     {
         if is_post && is_multipart {
             // Multipart form: test each field via multipart/form-data POST
-            for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
+            for (field_idx, (field_name, field_value)) in
+                fields.iter().enumerate().take(MAX_FORM_FIELDS)
+            {
                 let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                 let mut form = reqwest::multipart::Form::new();
                 for (i, (n, v)) in fields.iter().enumerate() {
@@ -1370,7 +1399,9 @@ pub async fn check_form_discovery(
                 url::form_urlencoded::byte_serialize(test_value.as_bytes()).collect();
 
             // Test each field for reflection via POST
-            for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
+            for (field_idx, (field_name, field_value)) in
+                fields.iter().enumerate().take(MAX_FORM_FIELDS)
+            {
                 let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                 // Build body by joining pre-encoded pairs, substituting the target field
                 let body = encoded_fields.iter().enumerate().fold(

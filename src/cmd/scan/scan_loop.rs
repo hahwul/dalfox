@@ -72,14 +72,18 @@ async fn run_target_capped<T>(
     scan_timeout_secs: u64,
     sigint: &AtomicBool,
     target_cancel: &AtomicBool,
-) -> bool {
+) -> (bool, T) {
     tokio::pin!(fut);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(scan_timeout_secs);
     let mut timed_out = false;
+    let out;
     loop {
         tokio::select! {
             biased;
-            _ = &mut fut => break,
+            // The cap cancels *cooperatively*: it flips `target_cancel` and
+            // keeps polling, so the future always runs to completion and
+            // always yields its report.
+            res = &mut fut => { out = res; break }
             // Mirror a process-wide Ctrl-C into this target's flag, then keep
             // draining. Disabled once already cancelled (by either source).
             _ = poll_cancel(sigint), if !target_cancel.load(Ordering::Relaxed) => {
@@ -91,7 +95,7 @@ async fn run_target_capped<T>(
             }
         }
     }
-    timed_out
+    (timed_out, out)
 }
 
 pub(crate) async fn run_scan_loop(
@@ -336,6 +340,10 @@ pub(crate) async fn run_scan_loop(
             // its in-flight targets detach and keep issuing requests. A
             // `JoinSet` aborts them when it drops.
             let mut target_handles = tokio::task::JoinSet::new();
+            // task id -> target URL, so a panicking task can be attributed to
+            // the target it was scanning (a `JoinError` carries only the id).
+            let mut panicked_target_of: std::collections::HashMap<tokio::task::Id, String> =
+                std::collections::HashMap::new();
 
             for target in group {
                 if let Some(lim) = args_arc.limit
@@ -397,7 +405,8 @@ pub(crate) async fn run_scan_loop(
                 let state_file_target = state_file_group.clone();
 
                 let multi_pb_active = multi_pb_clone_inner.is_some();
-                target_handles.spawn(async move {
+                let panic_target_url = target.url.to_string();
+                let spawned = target_handles.spawn(async move {
                     if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
                         // Re-validate the session before spending this target's
                         // request budget. Throttled: on a short run the preflight
@@ -478,7 +487,7 @@ pub(crate) async fn run_scan_loop(
                         // the per-target scan would otherwise serialize each
                         // phase × per-request timeout and run far longer than
                         // the user expects. Setting the cap to 0 disables it.
-                        let timed_out = if timeout_set {
+                        let (timed_out, scan_report) = if timeout_set {
                             run_target_capped(
                                 scan_fut,
                                 args_clone.scan_timeout,
@@ -487,8 +496,7 @@ pub(crate) async fn run_scan_loop(
                             )
                             .await
                         } else {
-                            scan_fut.await;
-                            false
+                            (false, scan_fut.await)
                         };
                         if timed_out && !args_clone.silence {
                             eprintln!(
@@ -526,13 +534,19 @@ pub(crate) async fn run_scan_loop(
                         // Terminal state for `--state-file`. Only a target that
                         // ran to the end under a live session is `completed`
                         // and therefore skippable next run; a Ctrl-C, a
-                        // `--scan-timeout` expiry, or a session that died
-                        // mid-scan all leave coverage unknown, so they are
-                        // recorded `cancelled` and retried.
+                        // `--scan-timeout` expiry, a session that died
+                        // mid-scan, or a `--limit` cap that cut the dispatch
+                        // loop short all leave coverage unknown, so they are
+                        // recorded `cancelled` and retried. `--limit` matters
+                        // as much as the others even though the run "succeeded":
+                        // `limit` is part of the config hash, so re-running the
+                        // identical command would skip this target forever with
+                        // most of its parameters never tested.
                         if let Some(sf) = &state_file_target {
                             let outcome = if timed_out
                                 || cancel_flag_inner.load(Ordering::Relaxed)
                                 || session_died
+                                || scan_report.limit_stopped
                             {
                                 super::state_file::TargetOutcome::Cancelled
                             } else {
@@ -556,6 +570,7 @@ pub(crate) async fn run_scan_loop(
                     }
                     drop(permit);
                 });
+                panicked_target_of.insert(spawned.id(), panic_target_url);
             }
 
             while let Some(joined) = target_handles.join_next().await {
@@ -565,7 +580,23 @@ pub(crate) async fn run_scan_loop(
                 if let Err(e) = joined
                     && e.is_panic()
                 {
-                    eprintln!("[scan] target task panicked: {}", e);
+                    // Sanitized: a panic message quotes the data that caused
+                    // it, which for this pipeline can be bytes straight from a
+                    // scanned response — raw CR/LF there forges log lines.
+                    eprintln!(
+                        "[scan] target task panicked: {}",
+                        crate::utils::log::sanitize_log_message(&e.to_string())
+                    );
+                    // Logging alone still left the target reported `clean`:
+                    // it produced no findings and nothing marked it otherwise,
+                    // which for a scanner is the worst possible outcome. Record
+                    // it the same way the preflight/analysis stage does.
+                    if let Some(url) = panicked_target_of.get(&e.id()) {
+                        skipped_targets_group
+                            .lock()
+                            .await
+                            .insert(url.clone(), crate::cmd::error_codes::INTERNAL_ERROR);
+                    }
                 }
                 // Update global overall progress line when multiple targets
                 overall_done_clone.fetch_add(1, Ordering::Relaxed);
@@ -652,7 +683,7 @@ mod tests {
         let fut = cooperative_worker(target_cancel.clone());
         // 1s is the smallest expressible budget; the cap fires and the
         // cooperative worker then drains via the per-target flag.
-        let timed_out = run_target_capped(fut, 1, &sigint, &target_cancel).await;
+        let (timed_out, ()) = run_target_capped(fut, 1, &sigint, &target_cancel).await;
         assert!(timed_out, "the per-target cap should fire");
         assert!(
             target_cancel.load(Ordering::Relaxed),
@@ -678,7 +709,7 @@ mod tests {
             sig.store(true, Ordering::Relaxed);
         });
         // Budget far larger than the SIGINT delay so the cap can't be the cause.
-        let timed_out = run_target_capped(fut, 3600, &sigint, &target_cancel).await;
+        let (timed_out, ()) = run_target_capped(fut, 3600, &sigint, &target_cancel).await;
         assert!(
             !timed_out,
             "ended via SIGINT mirror, not the wall-clock cap"
@@ -698,7 +729,7 @@ mod tests {
         let fut = async {
             tokio::time::sleep(Duration::from_millis(10)).await;
         };
-        let timed_out = run_target_capped(fut, 3600, &sigint, &target_cancel).await;
+        let (timed_out, ()) = run_target_capped(fut, 3600, &sigint, &target_cancel).await;
         assert!(!timed_out);
         assert!(!target_cancel.load(Ordering::Relaxed));
         assert!(!sigint.load(Ordering::Relaxed));

@@ -260,7 +260,7 @@ fn next_char_boundary(s: &str, mut idx: usize) -> usize {
 /// Like `is_in_safe_context` but also checks decoded forms of the payload.
 /// This catches cases where an encoded payload (URL/HTML-entity) is sent,
 /// the server decodes it, and reflects the decoded form inside a safe tag.
-fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
+pub(crate) fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     // Check the raw payload form (only if it's actually present in the HTML)
     if html.contains(payload) && is_in_safe_context(html, payload) {
         return true;
@@ -384,7 +384,10 @@ pub(crate) fn marker_reflects_in_url_attr_only(html: &str, marker: &str) -> bool
         }
         any = true;
         let abs = search_start + pos;
-        if !occurrence_is_in_url_attr(bytes, abs) {
+        // `None` (walk budget exhausted) takes the same branch as
+        // "not in a URL attribute": both mean we cannot claim URL-attr-only,
+        // so the URL-echo suppression does not apply and the finding stays.
+        if occurrence_is_in_url_attr(bytes, abs) != Some(true) {
             return false;
         }
         search_start = next_char_boundary(html, abs + 1);
@@ -435,25 +438,48 @@ fn url_valued_attr_name_before_eq(bytes: &[u8], eq: usize) -> bool {
 /// "reconcile" them by tightening this one, or the legitimate
 /// `href="javascript:…"` `[R]` is lost; nor loosen the gates, or the #1153
 /// self-/canonical-link false positive returns.
-fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
+/// How far back [`occurrence_is_in_url_attr`] will walk looking for the `=`
+/// that opens the attribute value it might be inside.
+///
+/// `MAX_PAYLOAD_OCCURRENCES` caps how many times that walk is *started* per
+/// body, not how far each one runs. A 16 MiB body containing no `=`, `<` or `>`
+/// makes every one of those walks scan all the way to offset 0, and the
+/// decoded-form × variant fan-out multiplies it — tens of seconds of pure byte
+/// comparison per parameter, on a body a hostile target serves for free. No
+/// real attribute value comes close to 8 KiB.
+const MAX_ATTR_BACKWALK: usize = 8 * 1024;
+
+/// `Some(true)` / `Some(false)` when the walk reached a verdict; `None` when it
+/// hit [`MAX_ATTR_BACKWALK`] first and the answer is genuinely unknown.
+///
+/// The tri-state is deliberate. Each caller below suppresses a finding on a
+/// *different* polarity of this answer, so there is no single boolean that is
+/// "the safe default" for all of them — collapsing `None` into `false` would
+/// silently suppress findings at two of the three sites. Every caller instead
+/// maps `None` onto whichever branch **keeps** the finding.
+fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> Option<bool> {
     if at == 0 || at > bytes.len() {
-        return false;
+        return Some(false);
     }
     // Walk back to the attribute's `=` without crossing a tag boundary.
     let mut i = at;
+    let floor = at.saturating_sub(MAX_ATTR_BACKWALK);
     loop {
         if i == 0 {
-            return false;
+            return Some(false);
+        }
+        if i <= floor {
+            return None;
         }
         i -= 1;
         match bytes[i] {
             b'=' => break,
             // Crossing a tag boundary means we're outside any attribute.
-            b'<' | b'>' => return false,
+            b'<' | b'>' => return Some(false),
             _ => {}
         }
     }
-    url_valued_attr_name_before_eq(bytes, i)
+    Some(url_valued_attr_name_before_eq(bytes, i))
 }
 
 /// True when a decoded payload form is a JS-executable URL scheme — the schemes
@@ -1217,7 +1243,9 @@ fn url_encoded_payload_reflects_in_unsafe_url_context(html: &str, payload: &str)
             return true;
         }
         let abs = search_start + pos;
-        if occurrence_is_in_url_attr(bytes, abs) {
+        // `None` keeps the finding here, and so does `Some(true)`: the caller
+        // suppresses only on `false`.
+        if occurrence_is_in_url_attr(bytes, abs) != Some(false) {
             return true;
         }
         search_start = next_char_boundary(html, abs + 1);
@@ -1323,7 +1351,9 @@ fn is_inert_encoded_reflection(html: &str, payload: &str) -> bool {
                     return false;
                 }
                 let abs = start + pos;
-                if occurrence_is_in_url_attr(bytes, abs) {
+                // Same rule as the other two sites: anything but a definite
+                // `false` keeps the finding.
+                if occurrence_is_in_url_attr(bytes, abs) != Some(false) {
                     return false;
                 }
                 start = next_char_boundary(decoded, abs + 1);
@@ -1803,7 +1833,12 @@ async fn fetch_injection_response_with_client(
             // Retry with delay to handle session / content propagation
             for attempt in 0u64..retries {
                 if attempt > 0 {
-                    sleep(Duration::from_millis(500 * attempt)).await;
+                    // Clamped: the ramp is quadratic in total, so the tail of a
+                    // long retry run would otherwise sleep for minutes at a time.
+                    sleep(Duration::from_millis(
+                        (500 * attempt).min(crate::cmd::scan::MAX_SXSS_BACKOFF_MS),
+                    ))
+                    .await;
                 }
                 let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
                 let check_request =

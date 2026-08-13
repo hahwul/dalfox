@@ -120,6 +120,17 @@ pub async fn init_remote_payloads_with(
     let sanitized = sanitize_lines(&lines);
     let dedup_sorted = dedup_and_sort(sanitized);
 
+    // Never cache "we got nothing" for a provider set that named real URLs.
+    // The cache is a process-global `OnceLock`, so in the server/MCP daemon a
+    // single egress blip during the *first* remote-fetch job would otherwise
+    // poison every later job for the process's lifetime: each one short-circuits
+    // on the already-set cache, scans with an empty list, and reports `done`
+    // with no indication that what it asked for was never fetched. Leaving the
+    // cell unset costs one retry and keeps the failure transient.
+    if dedup_sorted.is_empty() {
+        return Err("remote payload fetch returned no usable entries".into());
+    }
+
     let _ = REMOTE_PAYLOADS.set(Arc::new(dedup_sorted));
     Ok(())
 }
@@ -145,6 +156,17 @@ pub async fn init_remote_wordlists_with(
     let lines = fetch_multiple_text_lists(&client, &urls).await;
     let sanitized = sanitize_lines(&lines);
     let dedup_sorted = dedup_and_sort(sanitized);
+
+    // Never cache "we got nothing" for a provider set that named real URLs.
+    // The cache is a process-global `OnceLock`, so in the server/MCP daemon a
+    // single egress blip during the *first* remote-fetch job would otherwise
+    // poison every later job for the process's lifetime: each one short-circuits
+    // on the already-set cache, scans with an empty list, and reports `done`
+    // with no indication that what it asked for was never fetched. Leaving the
+    // cell unset costs one retry and keeps the failure transient.
+    if dedup_sorted.is_empty() {
+        return Err("remote wordlist fetch returned no usable entries".into());
+    }
 
     let _ = REMOTE_WORDS.set(Arc::new(dedup_sorted));
     Ok(())
@@ -175,6 +197,17 @@ pub async fn init_remote_payloads(providers: &[String]) -> Result<(), Box<dyn st
     let lines = fetch_multiple_text_lists(&client, &urls).await;
     let sanitized = sanitize_lines(&lines);
     let dedup_sorted = dedup_and_sort(sanitized);
+
+    // Never cache "we got nothing" for a provider set that named real URLs.
+    // The cache is a process-global `OnceLock`, so in the server/MCP daemon a
+    // single egress blip during the *first* remote-fetch job would otherwise
+    // poison every later job for the process's lifetime: each one short-circuits
+    // on the already-set cache, scans with an empty list, and reports `done`
+    // with no indication that what it asked for was never fetched. Leaving the
+    // cell unset costs one retry and keeps the failure transient.
+    if dedup_sorted.is_empty() {
+        return Err("remote payload fetch returned no usable entries".into());
+    }
 
     let _ = REMOTE_PAYLOADS.set(Arc::new(dedup_sorted));
     Ok(())
@@ -211,6 +244,17 @@ pub async fn init_remote_wordlists(providers: &[String]) -> Result<(), Box<dyn s
     let lines = fetch_multiple_text_lists(&client, &urls).await;
     let sanitized = sanitize_lines(&lines);
     let dedup_sorted = dedup_and_sort(sanitized);
+
+    // Never cache "we got nothing" for a provider set that named real URLs.
+    // The cache is a process-global `OnceLock`, so in the server/MCP daemon a
+    // single egress blip during the *first* remote-fetch job would otherwise
+    // poison every later job for the process's lifetime: each one short-circuits
+    // on the already-set cache, scans with an empty list, and reports `done`
+    // with no indication that what it asked for was never fetched. Leaving the
+    // cell unset costs one retry and keeps the failure transient.
+    if dedup_sorted.is_empty() {
+        return Err("remote wordlist fetch returned no usable entries".into());
+    }
 
     let _ = REMOTE_WORDS.set(Arc::new(dedup_sorted));
     Ok(())

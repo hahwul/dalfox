@@ -875,7 +875,7 @@ async fn test_get_scan_handler_success_parses_query_options_and_jsonp() {
     let mut params = Map::new();
     params.insert("cb".to_string(), "getCb".to_string());
     params.insert("url".to_string(), "http://127.0.0.1:1/".to_string());
-    params.insert("header".to_string(), "X-A:1,Invalid,X-B:2".to_string());
+    params.insert("header".to_string(), "X-A:1,X-B:2".to_string());
     params.insert("encoders".to_string(), "url,html,base64".to_string());
     params.insert("worker".to_string(), "3".to_string());
     params.insert("delay".to_string(), "1".to_string());
@@ -921,6 +921,72 @@ async fn test_get_scan_handler_success_parses_query_options_and_jsonp() {
 }
 
 #[test]
+fn test_split_header_query_param_keeps_commas_inside_values() {
+    // `GET /scan?header=...` packs several headers into one comma-separated
+    // value, but a comma is legal inside a header value. A blind split chopped
+    // `Accept: text/html,application/xhtml+xml` into a truncated Accept plus a
+    // nameless fragment — silently dropped before header validation existed,
+    // and a 400 for an otherwise valid request afterwards.
+    assert_eq!(
+        split_header_query_param("Accept: text/html,application/xhtml+xml"),
+        vec!["Accept: text/html,application/xhtml+xml".to_string()]
+    );
+    // The multi-header form still works.
+    assert_eq!(
+        split_header_query_param("X-A: 1,X-B: 2"),
+        vec!["X-A: 1".to_string(), "X-B: 2".to_string()]
+    );
+    // Mixed: a value with commas followed by a genuine second header.
+    assert_eq!(
+        split_header_query_param("Accept: a/b,c/d,X-Trace: 9"),
+        vec!["Accept: a/b,c/d".to_string(), "X-Trace: 9".to_string()]
+    );
+    assert!(split_header_query_param("").is_empty());
+    assert!(split_header_query_param("   ").is_empty());
+}
+
+#[tokio::test]
+async fn test_get_scan_handler_rejects_a_malformed_header_entry() {
+    // A header entry with no `Name: value` shape used to be dropped on the
+    // floor and the scan queued anyway, so a caller whose header never went out
+    // got a `200 OK` and a "clean" result. reqwest rejects it on every request
+    // in the job, which surfaced as the *target* being reported unreachable.
+    // Refuse at the boundary and name the offender instead.
+    let state = make_state(None, None, false, true, "cb");
+    let mut params = Map::new();
+    params.insert("url".to_string(), "http://127.0.0.1:1/".to_string());
+    // A leading entry with no `Name: value` shape is unambiguously malformed.
+    // (A bare fragment *after* a valid header is not: the comma-packed query
+    // form cannot tell it apart from a comma inside that header's value, so
+    // `split_header_query_param` keeps it as part of the value — see
+    // `test_split_header_query_param_keeps_commas_inside_values`.)
+    params.insert("header".to_string(), "Invalid,X-B:2".to_string());
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert!(state.jobs.lock().await.is_empty(), "no job may be queued");
+}
+
+#[tokio::test]
+async fn test_get_scan_handler_accepts_a_comma_bearing_header_value() {
+    // Regression for the interaction between the comma-packed `header=` query
+    // form and strict header validation: `Accept: text/html,application/xhtml+xml`
+    // must not be chopped into a nameless fragment and 400 the request.
+    let state = make_state(None, None, false, true, "cb");
+    let mut params = Map::new();
+    params.insert("url".to_string(), "http://127.0.0.1:1/".to_string());
+    params.insert(
+        "header".to_string(),
+        "Accept: text/html,application/xhtml+xml".to_string(),
+    );
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[test]
 fn test_split_cookie_pairs_handles_http_style_header() {
     // Regression: previously the server's singular `cookie` option was
     // fed through a single `split_once('=')`, so `"a=b; c=d"` collapsed to
@@ -961,18 +1027,15 @@ fn test_split_cookie_pairs_handles_http_style_header() {
     assert!(split_cookie_pairs("").is_empty());
     // Single piece without an `=` is dropped (no empty name/value pair).
     assert!(split_cookie_pairs("nosemi").is_empty());
-    // Empty key (e.g. `=v`) is preserved as a pair with an empty name —
-    // matches the upstream `split_once('=')` contract. Callers that need
-    // to reject empty names must do so themselves, but record the current
-    // behavior so a future refactor doesn't silently change it.
+    // A nameless pair (`=v`) is dropped. It used to be preserved to match the
+    // raw `split_once('=')` contract, but no caller could do anything useful
+    // with it: `compose_cookie_header` re-serializes it as a leading `=v` that
+    // no server parses as a cookie, and the discovery stage spent a probe per
+    // scan injecting into a cookie that cannot exist. The raw-HTTP and HAR
+    // parsers already dropped nameless cookies, so this also makes the four
+    // cookie sources agree.
     let leading_eq = split_cookie_pairs("=v; k=w");
-    assert_eq!(
-        leading_eq,
-        vec![
-            ("".to_string(), "v".to_string()),
-            ("k".to_string(), "w".to_string()),
-        ]
-    );
+    assert_eq!(leading_eq, vec![("k".to_string(), "w".to_string())]);
     // Empty value (`k=`) is preserved as an empty string, mirroring how
     // real browsers send `Set-Cookie: k=` to clear the cookie.
     let empty_val = split_cookie_pairs("k=; j=1");
@@ -2129,6 +2192,42 @@ async fn test_preflight_handler_unreachable_target() {
 #[test]
 fn test_validate_scan_options_accepts_defaults() {
     assert!(validate_scan_options(&mut ScanOptions::default()).is_ok());
+}
+
+#[test]
+fn test_validate_scan_options_rejects_malformed_headers() {
+    // Both REST (`POST /scan`, `GET /scan`) and MCP funnel through here, so
+    // this is the one place that has to know a header is unusable. reqwest
+    // errors on the builder for these, which made *every* request in the job
+    // fail — surfacing as the target being reported unreachable rather than as
+    // the caller's malformed input.
+    for bad in [
+        "no-colon-at-all",
+        "X Custom: v",             // space in the name
+        "X-Bad: a\r\nInjected: 1", // CRLF in the value
+        "X-Null: a\0b",            // NUL in the value
+    ] {
+        let mut opts = ScanOptions {
+            header: Some(vec![bad.to_string()]),
+            ..ScanOptions::default()
+        };
+        assert!(
+            validate_scan_options(&mut opts).is_err(),
+            "header {bad:?} must be rejected"
+        );
+    }
+
+    // Legal headers still pass, including obs-text in a value (`café`), which
+    // `HeaderValue` accepts and an over-strict check would have broken.
+    let mut ok = ScanOptions {
+        header: Some(vec![
+            "X-Api-Key: abc123".to_string(),
+            "Accept: text/html,application/xhtml+xml".to_string(),
+            "X-Note: caf\u{e9}".to_string(),
+        ]),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut ok).is_ok());
 }
 
 #[test]
