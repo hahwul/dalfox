@@ -3,7 +3,7 @@ Code by @hahwul
 Happy hacking :D
 */
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use dalfox::cmd::scan::ScanOutcome;
 use dalfox::{DEBUG, cmd, config, mcp, server, utils};
@@ -64,6 +64,9 @@ enum Commands {
     Payload(cmd::payload::PayloadArgs),
     /// Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
     Mcp,
+    /// Generate a roff man page and print it to stdout
+    #[clap(hide = true)]
+    Man,
 
     #[clap(hide = true)]
     Url(cmd::url::UrlArgs),
@@ -79,6 +82,25 @@ enum Commands {
 // but the safety model — refuse non-regular files, enforce a hard
 // byte budget — is identical).
 use dalfox::utils::fs::read_bounded;
+
+/// Render the top-level `dalfox` man page from the Clap command definition.
+fn print_man_page() {
+    use std::io::Write;
+
+    let cmd = Cli::command();
+    let man = clap_mangen::Man::new(cmd);
+    let mut buf = Vec::new();
+
+    if let Err(e) = man.render(&mut buf) {
+        eprintln!("dalfox: failed to render man page: {e}");
+        std::process::exit(2);
+    }
+
+    if let Err(e) = std::io::stdout().write_all(&buf) {
+        eprintln!("dalfox: failed to write man page: {e}");
+        std::process::exit(2);
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -133,6 +155,14 @@ async fn main() {
     }
 
     let cli = Cli::parse();
+
+    // Keep man-page output as pure roff by handling it before the
+    // banner/config machinery writes anything else to stdout.
+    if let Some(Commands::Man) = &cli.command {
+        print_man_page();
+        return;
+    }
+
     // Set global debug toggle for downstream modules
     DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
     // Skip banner for MCP subcommand (stdout is JSON-RPC) and for every
@@ -382,6 +412,10 @@ async fn main() {
                 }
                 outcome = ScanOutcome::Clean;
             }
+
+            // `dalfox man` is handled immediately after parsing so this arm
+            // should never execute. It exists only for match exhaustiveness.
+            Commands::Man => unreachable!(),
 
             Commands::Url(args) => {
                 let config = config_load.as_ref().ok().map(|r| &r.config);

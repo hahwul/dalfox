@@ -59,6 +59,14 @@
 
           inherit nativeBuildInputs buildInputs;
 
+          # Render the man page with the binary that was just installed rather
+          # than shipping a generated .1 in the source tree. This runs the
+          # built binary, so it applies to native builds only.
+          postInstall = ''
+            mkdir -p $out/share/man/man1
+            $out/bin/dalfox man > $out/share/man/man1/dalfox.1
+          '';
+
           meta = with pkgs.lib; {
             description = "Dalfox is a powerful open-source XSS scanner and utility focused on automation";
             homepage = "https://github.com/hahwul/dalfox";

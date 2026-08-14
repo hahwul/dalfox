@@ -21,6 +21,14 @@ build:
 dev:
     cargo build
 
+# Render the roff man page into target/ for local preview (never committed —
+# packaging generates it from the freshly built binary at release time).
+[group('build')]
+man:
+    mkdir -p target/man
+    cargo run --quiet -- man > target/man/dalfox.1
+    @echo "wrote target/man/dalfox.1 — preview with: man target/man/dalfox.1"
+
 # Update Nix flake lock.
 [group('build')]
 nix-update:
