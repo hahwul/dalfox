@@ -168,12 +168,32 @@ jobs:
           mkdir -p target/release
           cp "target/${{ matrix.target }}/release/dalfox" target/release/dalfox
 
+      # Render the man page from the binary we just built rather than from a
+      # committed .1 file, so it can never drift from the CLI definition. Both
+      # packaging targets build natively (x86_64 on ubuntu-latest, aarch64 on
+      # ubuntu-24.04-arm), so the binary is runnable here. `set -o pipefail`
+      # plus the size check keeps a failed render from shipping an empty page.
+      - name: Render man page for packaging
+        if: |
+          matrix.target == 'x86_64-unknown-linux-gnu' ||
+          matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/man
+          target/release/dalfox man > target/man/dalfox.1
+          test -s target/man/dalfox.1
+          head -n 5 target/man/dalfox.1
+
       - name: Build Debian package
         if: |
           matrix.target == 'x86_64-unknown-linux-gnu' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           cargo deb --no-build
+          # The man page is a generated asset, so a path change would drop it
+          # silently. Fail here instead (matches `.1` and `.1.gz`).
+          dpkg-deb -c "$(find target/debian -name '*.deb' | head -n1)" | grep -q 'man1/dalfox\.1'
 
       - name: Build RPM package
         if: |

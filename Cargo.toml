@@ -84,8 +84,13 @@ It supports reflected, stored, and DOM-based XSS discovery with AST-backed verif
 depends = ["ca-certificates"]
 section = "utils"
 priority = "optional"
+# `target/man/dalfox.1` is rendered by the release workflow (`dalfox man`)
+# right before packaging — it is generated, never committed. Keep it out of
+# the `target/release/` prefix, which cargo-deb rewrites to the real target
+# dir when cross-building.
 assets = [
     { source = "target/release/dalfox", dest = "/usr/bin/dalfox", mode = "755" },
+    { source = "target/man/dalfox.1", dest = "/usr/share/man/man1/dalfox.1", mode = "644" },
 ]
 
 [package.metadata.generate-rpm]
@@ -95,6 +100,10 @@ group = "Applications/System"
 homepage = "https://github.com/hahwul/dalfox"
 description = """Dalfox is a powerful open-source XSS scanner and automation utility.
 It supports reflected, stored, and DOM-based XSS discovery with AST-backed verification."""
+# See the note above the `[package.metadata.deb]` assets: cargo-generate-rpm
+# rewrites `target/release/` too when `--target` is passed, so the generated
+# man page lives outside that prefix.
 assets = [
     { source = "target/release/dalfox", dest = "/usr/bin/dalfox", mode = "755" },
+    { source = "target/man/dalfox.1", dest = "/usr/share/man/man1/dalfox.1", mode = "644" },
 ]

@@ -38,4 +38,8 @@ package() {
     install -Dm0755 -t "$pkgdir/usr/bin/" "target/release/$pkgname"
     install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE.txt
     install -Dm0644 -t "$pkgdir/usr/share/doc/$pkgname/" README.md
+    # The man page is rendered by the binary we just built (`dalfox man`)
+    # instead of shipping a generated .1 in the source tree.
+    "target/release/$pkgname" man > "$pkgname.1"
+    install -Dm0644 "$pkgname.1" "$pkgdir/usr/share/man/man1/$pkgname.1"
 }

@@ -21,10 +21,13 @@ build:
 dev:
     cargo build
 
-# Generate the roff man page from the current Clap definition.
+# Render the roff man page into target/ for local preview (never committed —
+# packaging generates it from the freshly built binary at release time).
 [group('build')]
 man:
-    cargo run -- man | sed -E "s/[[:space:]]+$//" > man/dalfox.1
+    mkdir -p target/man
+    cargo run --quiet -- man > target/man/dalfox.1
+    @echo "wrote target/man/dalfox.1 — preview with: man target/man/dalfox.1"
 
 # Update Nix flake lock.
 [group('build')]
