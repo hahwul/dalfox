@@ -325,6 +325,30 @@ waf_type = "Citrix"
 confidence = 0.85
 evidence_label = "ns_af AppFirewall cookie (NetScaler)"
 
+# Wallarm
+[[header]]
+header = "server"
+value_contains = "nginx-wallarm"
+waf_type = "Wallarm"
+confidence = 0.9
+evidence_label = "Server: nginx-wallarm"
+
+# NAXSI
+[[header]]
+header = "x-data-origin"
+value_contains = "naxsi"
+waf_type = "Naxsi"
+confidence = 0.9
+evidence_label = "x-data-origin: naxsi header"
+
+# SafeLine
+[[header]]
+header = "set-cookie"
+value_contains = "sl-session="
+waf_type = "SafeLine"
+confidence = 0.85
+evidence_label = "sl-session cookie (SafeLine)"
+
 
 # ── Body rules ──────────────────────────────────────────────────────────
 
@@ -501,3 +525,10 @@ pattern = "google cloud armor"
 waf_type = "CloudArmor"
 confidence = 0.9
 evidence_label = "Google Cloud Armor in body"
+
+# NAXSI
+[[body]]
+pattern = "blocked by naxsi"
+waf_type = "Naxsi"
+confidence = 0.85
+evidence_label = "NAXSI block message in body"

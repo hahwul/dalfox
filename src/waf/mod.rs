@@ -37,6 +37,13 @@ pub enum WafType {
     /// `Connection` header (`nnCoection` / `Cneonction`) and `citrix_ns_id`
     /// / `ns_af` persistence cookies.
     Citrix,
+    /// Wallarm. Fingerprinted by its `Server: nginx-wallarm` header.
+    Wallarm,
+    /// NAXSI (Nginx Anti XSS & SQL Injection). Fingerprinted by the
+    /// `X-Data-Origin: naxsi` header or "blocked by naxsi" body text.
+    Naxsi,
+    /// SafeLine. Fingerprinted by its `sl-session` cookie.
+    SafeLine,
     Unknown(String),
 }
 
@@ -58,6 +65,9 @@ impl std::fmt::Display for WafType {
             WafType::Fastly => write!(f, "Fastly"),
             WafType::Wordfence => write!(f, "Wordfence"),
             WafType::Citrix => write!(f, "Citrix NetScaler"),
+            WafType::Wallarm => write!(f, "Wallarm"),
+            WafType::Naxsi => write!(f, "NAXSI"),
+            WafType::SafeLine => write!(f, "SafeLine"),
             WafType::Unknown(hint) => write!(f, "Unknown ({})", hint),
         }
     }
@@ -154,6 +164,9 @@ fn parse_waf_type_from_rule(name: &str) -> WafType {
         "Fastly" => WafType::Fastly,
         "Wordfence" => WafType::Wordfence,
         "Citrix" => WafType::Citrix,
+        "Wallarm" => WafType::Wallarm,
+        "Naxsi" => WafType::Naxsi,
+        "SafeLine" => WafType::SafeLine,
         other => WafType::Unknown(other.to_string()),
     }
 }

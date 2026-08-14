@@ -372,6 +372,12 @@ pub fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
             ],
             extra_delay_hint_ms: 0,
         },
+        // No WAF-specific mutation strategy yet; use the conservative
+        // generic strategy until fingerprint-specific bypass behavior is
+        // validated.
+        WafType::Wallarm => unknown_strategy_for("Wallarm"),
+        WafType::Naxsi => unknown_strategy_for("NAXSI"),
+        WafType::SafeLine => unknown_strategy_for("SafeLine"),
         WafType::Unknown(hint) => unknown_strategy_for(hint),
     }
 }

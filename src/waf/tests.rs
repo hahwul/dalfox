@@ -183,6 +183,9 @@ fn rules_toml_loads_and_covers_all_waf_families() {
         "Fastly",
         "Wordfence",
         "Citrix",
+        "Wallarm",
+        "Naxsi",
+        "SafeLine",
     ] {
         assert!(
             waf_names.contains(expected),
@@ -645,4 +648,34 @@ fn test_parse_waf_type_from_rule_named_and_fallback() {
         parse_waf_type_from_rule(""),
         WafType::Unknown(String::new()),
     );
+}
+
+#[test]
+fn test_wallarm_detection_by_header() {
+    let headers = make_headers(&[("server", "nginx-wallarm")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Wallarm));
+    assert!(result.primary().unwrap().confidence >= 0.9);
+}
+
+#[test]
+fn test_naxsi_detection_by_header() {
+    let headers = make_headers(&[("x-data-origin", "naxsi")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Naxsi));
+}
+
+#[test]
+fn test_naxsi_detection_by_body() {
+    let headers = make_headers(&[]);
+    let body = "Request blocked by naxsi";
+    let result = fingerprint_from_response(&headers, Some(body), 403);
+    assert!(result.waf_types().contains(&&WafType::Naxsi));
+}
+
+#[test]
+fn test_safeline_detection_by_cookie() {
+    let headers = make_headers(&[("set-cookie", "sl-session=abc123; Path=/; Secure")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::SafeLine));
 }
