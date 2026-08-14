@@ -83,6 +83,8 @@ dalfox [mode] [target] [flags]
 * Single URL: `dalfox scan http://example.com -b https://callback`
 * File Mode: `dalfox scan urls.txt --custom-payload mypayloads.txt`
 * Pipeline: `cat urls.txt | dalfox scan --headers "AuthToken: xxx"`
+* Custom injection point (query): `dalfox scan 'https://example.com/?q=FUZZ&page=1' --inject-marker FUZZ`
+* Custom injection point (header): `dalfox scan https://example.com -H 'X-Search: FUZZ' --inject-marker FUZZ`
 
 Check the [CLI reference](https://dalfox.hahwul.com/reference/cli/) and [Quick start](https://dalfox.hahwul.com/getting-started/quick-start/) documents for more examples.
 

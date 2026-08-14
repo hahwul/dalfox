@@ -127,6 +127,16 @@ dalfox https://target.app/api \
 
 Dalfox는 모든 `FUZZ`를 각 페이로드로 치환해 요청을 보냅니다.
 
+쿼리 파라미터나 헤더를 직접 지정할 수도 있습니다:
+
+```bash
+# 쿼리 파라미터
+dalfox scan 'https://example.com/?q=FUZZ&page=1' --inject-marker FUZZ
+
+# 헤더
+dalfox scan https://example.com -H 'X-Search: FUZZ' --inject-marker FUZZ
+```
+
 ## 자동 사전 인코딩(Auto pre-encoding)
 
 일부 엔드포인트는 페이로드를 원시 텍스트로 받아들이지 않습니다. 이들은 어떤 구조적 인코딩(base64, JSON, JWT 등)으로 감싸진 형태를 기대합니다. Dalfox는 탐색 중 각 파라미터의 기존 값을 검사하고, 구조를 알아보면 페이로드가 같은 래핑을 그대로 거쳐 왕복(round-trip)하도록 투명한 인코딩 파이프라인을 구성합니다. 설정할 것은 없습니다. 디버그 출력에서 `pre_encoding`이나 `pre_encoding_pipeline`을 찾아보세요.
