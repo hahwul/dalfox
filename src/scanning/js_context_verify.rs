@@ -20,7 +20,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// Identifier or member-property names whose call we treat as an XSS sink.
 /// Includes the obvious dialog/eval/timer family plus the DOM mutation sinks
@@ -170,14 +170,20 @@ fn collect_spans_on_stack(script_src: &str) -> ParsedSpans {
 /// process.
 fn cached_parsed_spans(script_src: &str) -> ParsedSpans {
     let key = hash_block(script_src);
+    // Recover from poisoning instead of propagating it. The guard only ever
+    // covers a map get/insert — there is no invariant a panicking holder could
+    // leave broken — so re-panicking here would turn one unrelated task panic
+    // into a permanent, scan-wide failure of every later JS-context check.
+    // Matches the posture of every other `std::sync::Mutex` in the crate
+    // (`payload::remote`, `oob::registry`, `utils::rate_limit`, `mcp`, …).
     {
-        let cache = sink_cache().lock().expect("sink cache poisoned");
+        let cache = sink_cache().lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(v) = cache.get(&key) {
             return v.clone();
         }
     }
     let result = collect_parsed_spans(script_src);
-    let mut cache = sink_cache().lock().expect("sink cache poisoned");
+    let mut cache = sink_cache().lock().unwrap_or_else(PoisonError::into_inner);
     if cache.len() >= SINK_CACHE_CAPACITY {
         let drop_n = cache.len() / 4;
         let to_drop: Vec<u64> = cache.keys().take(drop_n).copied().collect();

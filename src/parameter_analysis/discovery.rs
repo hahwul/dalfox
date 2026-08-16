@@ -358,7 +358,17 @@ pub async fn check_query_discovery(
             js_breakout: None,
         };
         let url_str = build_injected_url(&target.url, &tmp_param, test_value);
-        let url = url::Url::parse(&url_str).expect("build_injected_url produces valid URL");
+        // `build_injected_url` reassembles the query by hand, so a pathological
+        // param name/value in the *target's own* URL can yield a string the URL
+        // parser rejects. That is one unprobeable parameter, not a reason to
+        // abort every target in the run — skip it (same fallback posture as
+        // `url_inject::build_inject_request` and `check_reflection`).
+        let Ok(url) = url::Url::parse(&url_str) else {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[discovery] skipping param {name}: unparseable probe URL {url_str}");
+            }
+            continue;
+        };
         let client_clone = client.clone();
         let data = target.data.clone();
         let parsed_method = target.parse_method();
@@ -630,7 +640,14 @@ pub async fn check_query_discovery(
                 js_breakout: None,
             };
             let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
-            let url = url::Url::parse(&url_str).expect("valid URL");
+            let Ok(url) = url::Url::parse(&url_str) else {
+                if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[discovery] skipping numeric probe for {name}: unparseable probe URL {url_str}"
+                    );
+                }
+                continue;
+            };
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
