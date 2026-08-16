@@ -26,7 +26,7 @@ Scope:
 Primary modules:
 - `src/main.rs`: CLI entrypoint, global flags, config load/init, subcommand dispatch
 - `src/cmd/scan/`: scan command, split into focused submodules — `mod.rs` (`run_scan` orchestrator + `ScanArgs`-independent glue), `args.rs` (`ScanArgs` + default/cap constants + value parsers), `validation.rs`, `preflight.rs`, `input.rs` (target resolution), `analysis.rs` (preflight/param loop), `scan_loop.rs` (scanning loop), `output.rs` (dry-run/only-discovery/result rendering), `poc.rs`, `postprocess.rs`, `logging.rs`
-- `src/cmd/mod.rs`: shared `error_codes` constants + `JobStatus` enum (used by server + MCP)
+- `src/cmd/mod.rs`: shared `error_codes` constants (used by CLI + server + MCP)
 - `src/config.rs`: config schema + precedence (`apply_to_scan_args_if_default`)
 - `src/scanning/`: reflection/DOM checks, AST integration, payload execution pipeline, result models
 - `src/parameter_analysis/`: discovery + mining + parameter filtering
@@ -35,8 +35,8 @@ Primary modules:
 - `src/target_parser/`: URL/file/raw-HTTP target normalization
 - `src/waf/`: WAF fingerprinting + bypass strategies
 - `src/utils/`: shared CLI helpers (banner, color, logging)
-- `src/cmd/server.rs`: async scan API server + CORS/JSONP/API-key logic
-- `src/cmd/job.rs`: shared async job lifecycle + progress + bounds validation (used by server + MCP)
+- `src/server/`: async scan API server, split into focused submodules — `mod.rs` (router + `ServerArgs`), `types.rs` (`ScanOptions` + request/response bodies), `handlers.rs` (route handlers), `job_runner.rs` (`run_scan_job`), `auth.rs` (API key), `cors.rs`, `response.rs` (JSON/JSONP rendering), `util.rs` (option validation + logging)
+- `src/job/`: shared job model — `JobStatus` enum, `Job` record, progress counters, retention/cap purging, and bounds helpers (`effective_rate_limit`, `effective_scan_timeout`) used by server + MCP
 - `src/mcp/mod.rs`: MCP stdio tool server (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`)
 
 Top-level commands:
@@ -45,6 +45,7 @@ Top-level commands:
 - `payload`
 - `mcp`
 - hidden compatibility commands: `url`, `file`, `pipe`
+- hidden packaging helper: `man` (renders the roff man page to stdout)
 
 Behavioral default:
 - No subcommand => defaults to `scan` in `src/main.rs`.
@@ -119,7 +120,8 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
     fails if the `Default` entry disagrees with the `default_value` you declared.
   - behavior in `src/cmd/scan/mod.rs` (`run_scan`)
   - `src/config.rs` (`ScanConfig`, template, precedence mapping)
-  - If relevant: `src/cmd/server.rs` `ScanOptions`
+  - If relevant: `src/server/types.rs` `ScanOptions` (plus its mapping into
+    `ScanArgs` in `src/server/job_runner.rs`)
   - If relevant: `src/mcp/mod.rs` tool args parsing
   - Note: `--state-file`'s config hash covers `ScanArgs` as a whole (a denylist
     over its `Debug` repr, `cmd::scan::state_file::config_hash`), so any new
@@ -144,7 +146,9 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
   - integration tests under `tests/integration/`
 
 - Server API behavior:
-  - `src/cmd/server.rs` (auth, CORS, JSONP, scan options mapping)
+  - `src/server/` — routes in `mod.rs`, handlers in `handlers.rs`, auth in
+    `auth.rs`, CORS in `cors.rs`, JSONP rendering in `response.rs`, scan-option
+    mapping in `types.rs` + `job_runner.rs`
   - keep callback validation strict for JSONP
   - Endpoints (axum path syntax `{id}`):
     - `POST /scan` — submit a scan
@@ -165,7 +169,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 - New error code:
   - Add constant to `src/cmd/mod.rs` `error_codes` module
   - Use the constant in all three interfaces (CLI, server, MCP) plus the agent skill bundle (`skills/dalfox/references/results.md`)
-  - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `STDIN_NOT_PIPED`, `INPUT_TOO_LARGE`, `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, `CONTENT_TYPE_MISMATCH`, `TRUNCATED_PER_HOST_CAP`
+  - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `STDIN_NOT_PIPED`, `INPUT_TOO_LARGE`, `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, `CONTENT_TYPE_MISMATCH`, `TRUNCATED_PER_HOST_CAP`, `SESSION_LOST`, `INTERNAL_ERROR`
 
 ---
 

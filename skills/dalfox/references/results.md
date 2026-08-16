@@ -196,7 +196,7 @@ separate baseline writer — an ordinary `-f json -o` report is the baseline.
 
 ## Error Codes (appear in JSON `meta`, MCP, server)
 
-See `cmd/mod.rs` for the canonical list. Common ones:
+See `src/cmd/mod.rs` for the canonical list. Common ones:
 
 - `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`
 - `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`

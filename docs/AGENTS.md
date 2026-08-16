@@ -66,9 +66,9 @@ This site documents [Dalfox](https://github.com/hahwul/dalfox), a Rust XSS scann
 
 ### Source of truth for flags and defaults
 
-- **CLI flags / default values**: `src/cmd/scan.rs` (look for `pub struct ScanArgs` and `DEFAULT_*` constants). When you add or change a flag in code, update `docs/content/reference/cli.md` *in the same commit*.
+- **CLI flags / default values**: `src/cmd/scan/args.rs` (look for `pub struct ScanArgs` and `DEFAULT_*` constants). When you add or change a flag in code, update `docs/content/reference/cli.md` *in the same commit*.
 - **Agent skill surface**: `skills/dalfox/` (SKILL.md + `references/*.md`). The published agent skill must stay in sync with flag names, defaults, error codes, MCP tool schemas, and the invariants in the repo-root `AGENTS.md`. Treat it as a fourth interface alongside CLI / server / MCP.
-- **Output formats**: `src/scanning/result.rs` and `src/cmd/scan.rs` (output routing). Keep `docs/content/guide/output.md` aligned.
+- **Output formats**: `src/scanning/result.rs` and `src/cmd/scan/output.rs` (output routing). Keep `docs/content/guide/output.md` aligned.
 - **Stage names**: see `src/lib.rs` doc-comment (authoritative 6-stage table) and `src/parameter_analysis/mining.rs` / `src/scanning/mod.rs` headers. Don't invent stage numbers — read what the code already labels.
 
 ### Stage model (current)
