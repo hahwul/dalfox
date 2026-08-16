@@ -333,6 +333,52 @@ async fn cookie_from_raw_appends_cookies_to_targets() {
     assert!(cookies.iter().any(|(k, v)| k == "b" && v == "2"));
 }
 
+/// A `--cookie-from-raw` the operator supplied but that cannot be read must
+/// stop the run. Continuing means scanning *logged out*: the scan reports
+/// `0 XSS` and exits 0, which the CI gate that asked for the credentials
+/// cannot tell apart from a clean target. Note `-S` (silence) is set here —
+/// this used to print nothing at all in that mode.
+#[tokio::test]
+async fn cookie_from_raw_unreadable_file_is_fatal() {
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--cookie-from-raw",
+        "/nonexistent/dalfox-cookie-file",
+        "https://example.com/",
+    ]);
+    assert!(
+        resolve(&args).await.is_err(),
+        "an unreadable --cookie-from-raw must not fall through to a logged-out scan"
+    );
+}
+
+/// The quieter half of the same failure: the file reads fine but carries no
+/// `Cookie:` header, so zero cookies are attached. That produced no message at
+/// any verbosity and scanned logged out.
+#[tokio::test]
+async fn cookie_from_raw_without_cookie_header_is_fatal() {
+    let p = tmp_file(
+        "nocookie",
+        "GET / HTTP/1.1\r\nHost: x\r\nAccept: */*\r\n\r\n",
+    );
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--cookie-from-raw",
+        p.to_str().unwrap(),
+        "https://example.com/",
+    ]);
+    let outcome = resolve(&args).await;
+    let _ = std::fs::remove_file(&p);
+    assert!(
+        outcome.is_err(),
+        "a --cookie-from-raw file with no Cookie: header must not scan logged out"
+    );
+}
+
 // ── load_request_source ─────────────────────────────────────────────
 
 #[test]

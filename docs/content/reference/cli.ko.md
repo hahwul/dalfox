@@ -89,7 +89,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--cookies` | — | — | 쿠키 (반복 지정 가능) |
 | `--method` | `-X` | `GET` | HTTP 메서드 재정의 (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` / RFC 10008) |
 | `--user-agent` | — | — | 사용자 지정 User-Agent |
-| `--cookie-from-raw` | — | — | raw HTTP 요청 파일에서 쿠키를 불러옵니다 |
+| `--cookie-from-raw` | — | — | raw HTTP 요청 파일에서 쿠키를 불러옵니다. 파일을 읽을 수 없거나 `Cookie:` 헤더가 없으면 종료 코드 `2`로 중단합니다 — 그대로 진행하면 로그아웃 상태로 스캔해 `0 XSS`를 보고하기 때문입니다 |
 
 ### 세션
 
