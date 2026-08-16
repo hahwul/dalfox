@@ -89,7 +89,7 @@ See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for th
 | `--cookies` | — | — | Cookie (repeatable) |
 | `--method` | `-X` | `GET` | HTTP method override (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` / RFC 10008) |
 | `--user-agent` | — | — | Custom User-Agent |
-| `--cookie-from-raw` | — | — | Load cookies from a raw HTTP request file |
+| `--cookie-from-raw` | — | — | Load cookies from a raw HTTP request file. Fatal (exit `2`) if the file cannot be read or carries no `Cookie:` header — continuing would scan logged out and report `0 XSS` |
 
 ### Session
 

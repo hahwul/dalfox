@@ -588,7 +588,7 @@ pub(crate) async fn resolve_targets(
         return Err(ScanOutcome::Error);
     }
 
-    load_cookies_from_raw_http(args, &mut parsed_targets);
+    load_cookies_from_raw_http(args, &mut parsed_targets)?;
 
     Ok(ResolvedTargets {
         targets: parsed_targets,
@@ -1036,46 +1036,63 @@ pub(crate) fn apply_out_of_scope_filter(args: &ScanArgs, parsed_targets: &mut Ve
 /// Apply `--cookie-from-raw`: lift the `Cookie` header out of a saved raw HTTP
 /// request and attach it to every resolved target.
 ///
-/// Non-fatal by design as it stands: an unreadable file prints to stderr (and
-/// says nothing at all under `--silence`), then the scan proceeds *without the
-/// cookies* — i.e. logged out, which typically reports `0 XSS` and exits 0. A
-/// CI gate cannot tell that apart from a clean target. Preserved here because
-/// changing it changes exit codes; worth revisiting on its own.
-fn load_cookies_from_raw_http(args: &ScanArgs, parsed_targets: &mut [Target]) {
-    // Load cookies from raw HTTP request file if specified
-    if let Some(path) = &args.cookie_from_raw {
-        match crate::utils::fs::read_bounded(
-            std::path::Path::new(path),
-            MAX_TARGET_LIST_BYTES,
-            "raw cookie file",
-        ) {
-            Ok(content) => {
-                let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
-                for line in content.lines() {
-                    // HTTP header names are case-insensitive (RFC 7230 §3.2;
-                    // HTTP/2 mandates lowercase), so match `Cookie`/`cookie`/
-                    // `COOKIE` alike and tolerate arbitrary spacing after the
-                    // colon. Delegate value splitting to the shared
-                    // `split_cookie_pairs` so this parses identically to the
-                    // server / preflight cookie paths.
-                    if let Some((name, value)) = line.split_once(':')
-                        && name.trim().eq_ignore_ascii_case("cookie")
-                    {
-                        cookies_from_raw.extend(crate::job::split_cookie_pairs(value));
-                    }
-                }
-                if !cookies_from_raw.is_empty() {
-                    for target in parsed_targets.iter_mut() {
-                        target.cookies.extend(cookies_from_raw.iter().cloned());
-                    }
-                }
-            }
-            Err(e) if !args.silence => {
-                eprintln!("Error reading cookie file {}: {}", path, e);
-            }
-            Err(_) => {}
+/// Both failure modes are fatal, because neither is recoverable in a way the
+/// operator would want: continuing means scanning *logged out*, which reports
+/// `0 XSS` and exits 0 — indistinguishable from a clean target to the CI gate
+/// that asked for the credentials in the first place. Previously an unreadable
+/// file only warned (and said nothing at all under `--silence`), while a file
+/// carrying no `Cookie:` header was silent even at full verbosity.
+fn load_cookies_from_raw_http(
+    args: &ScanArgs,
+    parsed_targets: &mut [Target],
+) -> std::result::Result<(), ScanOutcome> {
+    let Some(path) = &args.cookie_from_raw else {
+        return Ok(());
+    };
+
+    let content = match crate::utils::fs::read_bounded(
+        std::path::Path::new(path),
+        MAX_TARGET_LIST_BYTES,
+        "raw cookie file",
+    ) {
+        Ok(content) => content,
+        Err(e) => {
+            emit_error(
+                &args.format,
+                crate::cmd::error_codes::FILE_READ_ERROR,
+                &format!("--cookie-from-raw could not be read ({}): {}", path, e),
+            );
+            return Err(ScanOutcome::Error);
+        }
+    };
+
+    let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
+    for line in content.lines() {
+        // HTTP header names are case-insensitive (RFC 7230 §3.2; HTTP/2
+        // mandates lowercase), so match `Cookie`/`cookie`/`COOKIE` alike and
+        // tolerate arbitrary spacing after the colon. Delegate value splitting
+        // to the shared `split_cookie_pairs` so this parses identically to the
+        // server / preflight cookie paths.
+        if let Some((name, value)) = line.split_once(':')
+            && name.trim().eq_ignore_ascii_case("cookie")
+        {
+            cookies_from_raw.extend(crate::job::split_cookie_pairs(value));
         }
     }
+
+    if cookies_from_raw.is_empty() {
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::PARSE_ERROR,
+            &format!("--cookie-from-raw found no `Cookie:` header in {}", path),
+        );
+        return Err(ScanOutcome::Error);
+    }
+
+    for target in parsed_targets.iter_mut() {
+        target.cookies.extend(cookies_from_raw.iter().cloned());
+    }
+    Ok(())
 }
 
 /// Decide which input mode a bare `dalfox scan …` is really asking for.
