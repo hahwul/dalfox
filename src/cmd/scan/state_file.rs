@@ -145,6 +145,21 @@ pub(crate) fn config_hash(args: &ScanArgs) -> String {
     a.workers = d.workers;
     a.max_concurrent_targets = d.max_concurrent_targets;
 
+    // Provenance, not configuration: `explicit` records *which* flags were
+    // typed, and every value it could influence is already hashed on its own
+    // above. Hashing it too would mean `dalfox scan --workers 50` and a config
+    // file supplying the same 50 produce different hashes for an identical
+    // scan, so the state file would reset whenever a setting moved between the
+    // two — a difference that changes nothing about what a target was tested
+    // with.
+    //
+    // Note this neutralization does not make the *upgrade* free: the field
+    // still widens `ScanArgs: Debug`, so every state file written before it
+    // existed hashes differently and resets once on first run after upgrading.
+    // That is the direction this function deliberately errs in (see the
+    // denylist rationale above) — a needless re-scan, never a silent skip.
+    a.explicit = d.explicit.clone();
+
     // `ScanArgs: Debug` is the whole struct by construction, which is what
     // makes the denylist above self-maintaining.
     let mut hasher = Sha256::new();

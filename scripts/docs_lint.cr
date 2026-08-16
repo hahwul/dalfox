@@ -19,6 +19,7 @@
 #   skill-digest  the recorded `sha256:` in the agent-skills discovery document
 #                 still matches the SKILL.md it points at, and the published
 #                 copy still matches the repo-root `skills/` original
+#   agents-paths  every repo-rooted path cited by an AGENTS.md still exists
 #
 # Site conventions this encodes, from docs/config.toml + docs/AGENTS.md:
 #   * `content/index.md` → `/`, `content/x/_index.md` → `/x/`,
@@ -46,7 +47,23 @@ STATIC_DIR  = File.join(DOCS_DIR, "static")
 SKILLS_DIR  = ENV.fetch("SKILLS_DIR", "skills")
 ONLY        = ENV["DOCS_LINT_ONLY"]?
 
-CHECKS = %w[ko-siblings frontmatter links assets inline-script markers skill-digest]
+CHECKS = %w[ko-siblings frontmatter links assets inline-script markers skill-digest agents-paths]
+
+# Agent-facing prose that cites repo paths, read directly rather than through
+# the `Page` model (none of it lives under `docs/content`). The skill bundle is
+# in here because AGENTS.md calls it "a fourth interface alongside CLI / server
+# / MCP" and it rots the same way — `skill-digest` only hashes SKILL.md, so
+# nothing else looks at `references/`.
+AGENT_GUIDES = ["AGENTS.md", File.join(DOCS_DIR, "AGENTS.md")] +
+               Dir.glob(File.join(SKILLS_DIR, "**", "*.md")).sort
+
+# Extensions that make an *unrooted* token a file citation rather than prose.
+# Without this, a path under a renamed top-level directory is skipped by the
+# root filter — the check would go quiet exactly when the guide is most wrong.
+# Deliberately narrow: these three name files that can only be repo sources, so
+# widening the net costs no false alarms. `.toml` is excluded on purpose —
+# `.dalfox/config.toml` is where dalfox *looks at runtime*, not a repo file.
+PATH_EXTENSIONS = %w[.rs .cr .md]
 
 def run?(name : String) : Bool
   ONLY.nil? || ONLY == name
@@ -553,6 +570,84 @@ if run?("skill-digest")
     rescue ex
       report.fail("agent-skills discovery document parses", "#{index_path}: #{ex.message}")
     end
+  end
+end
+
+# ---------------------------------------------------------------------------
+# agents-paths — an AGENTS.md is the map a coding agent reads before touching
+# anything, and it points at files by name. When a module is split the prose
+# keeps naming the old path (`src/cmd/server.rs` outlived the move to
+# `src/server/` by several releases), and an agent sent there either edits the
+# wrong file or re-derives the layout from scratch. Nothing else checks this:
+# the guides are prose, so a stale path is invisible to the compiler and to
+# every other gate here.
+#
+# Only repo-rooted, backticked tokens are checked. A bare `mod.rs` in a
+# sentence that already named its directory is prose, not a path, and requiring
+# a real top-level first segment keeps unrelated backticked text
+# (`application/json`, `report-only`) from being read as a filename.
+# ---------------------------------------------------------------------------
+
+if run?("agents-paths")
+  report.group("agents-paths")
+
+  guides, absent = AGENT_GUIDES.partition { |p| File.exists?(p) }
+  # A guide that vanished is reported by name, not folded into a quiet pass:
+  # only one of them has to move for the check to silently narrow to whatever
+  # survived while the missing one's citations rot unobserved.
+  report.check_empty("every agent guide named here still exists", absent)
+
+  if guides.empty?
+    report.fail("agent guides readable", "none of #{AGENT_GUIDES.join(", ")}")
+  else
+    # `target/` is build output: present on a developer's machine, absent in a
+    # fresh checkout, so a path under it would make this check environment
+    # dependent. Nothing else at the top level is generated.
+    roots = Dir.children(".").to_set - Set{"target"}
+    missing = [] of String
+    checked = 0
+
+    guides.each do |guide|
+      # A guide cites paths from the repo root (`src/config.rs`) but also from
+      # its own vantage point: `docs/AGENTS.md` writes `content/index.md`, and
+      # `skills/dalfox/references/cli.md` writes `references/advanced.md` —
+      # relative to the bundle root, one level above itself. Resolving against
+      # every ancestor of the guide covers both without hand-listing bases.
+      bases = ["."] of String
+      dir = File.dirname(guide)
+      while dir != "." && dir != "/"
+        bases << dir
+        dir = File.dirname(dir)
+      end
+
+      File.read(guide).each_line.with_index(1) do |line, lineno|
+        line.scan(/`([^`\s]+)`/) do |m|
+          token = m[1]
+          # Trim the citation forms that decorate a path with what is inside
+          # it: `file.rs::symbol` and `file.rs:Symbol`. Splitting on `:` also
+          # neutralizes URLs — `https://x` becomes `https`, which has no `/`.
+          path = token.split("::").first.split(':').first.chomp('/')
+          next unless path.includes?('/')
+          next if path.includes?('*')          # a glob (`src/**`) names a tree
+          next if path.includes?('$')          # `$HOME/...` is a runtime path
+          next if path.starts_with?('~')       # likewise `~/.config/...`
+          next unless roots.includes?(path.split('/').first) ||
+                      PATH_EXTENSIONS.includes?(File.extname(path))
+          checked += 1
+          next if bases.any? { |base| File.exists?(File.join(base, path)) }
+          missing << "#{guide}:#{lineno}: #{token}"
+        end
+      end
+    end
+
+    # Assert the scanner still finds paths before trusting its verdict: a
+    # regex that stops matching would otherwise report a clean sweep of zero.
+    if checked.zero?
+      report.fail("agent guides cite repo paths", "no repo-rooted path found in #{guides.join(", ")}")
+    else
+      report.pass("agent guides cite repo paths", "#{checked} across #{guides.size} guide(s)")
+    end
+    report.check_empty("every repo path cited by an AGENTS.md exists", missing)
   end
 end
 

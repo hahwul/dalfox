@@ -28,10 +28,10 @@ This directory holds detailed, lookup-oriented reference material so the main `S
 ## How to Keep This Accurate
 
 When you change behavior in:
-- `src/cmd/scan.rs` (ScanArgs + defaults)
+- `src/cmd/scan/args.rs` (ScanArgs + defaults)
 - `src/mcp/mod.rs` (tool signatures)
 - `src/config.rs` (precedence + template)
-- `src/cmd/server.rs` or `src/cmd/payload.rs`
+- `src/server/` or `src/cmd/payload.rs`
 
 ...update the corresponding reference file **and** any workflow examples in the main `SKILL.md` in the same change.
 

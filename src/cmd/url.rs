@@ -20,6 +20,10 @@ fn into_scan_args(args: UrlArgs) -> ScanArgs {
     // clear parse error instead of being silently ignored).
     if scan_args.input_type == "auto" {
         scan_args.input_type = "url".to_string();
+        // Invoking `dalfox url` *is* the choice of input type, so record it as
+        // explicit: a config-file `input_type` must not overwrite it, exactly
+        // as it would not overwrite a typed `-i url`.
+        scan_args.explicit.insert("input_type");
     }
     scan_args.targets = vec![args.url];
     scan_args

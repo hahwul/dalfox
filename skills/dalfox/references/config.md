@@ -14,7 +14,7 @@ There is **no automatic project-local** `.dalfox/config.toml` discovery in the c
 
 **CLI flags always win.**
 
-The function `Config::apply_to_scan_args_if_default` only fills fields that are still at their built-in default values. Any flag the user actually typed on the command line overrides the config file.
+The function `Config::apply_to_scan_args_if_default` only fills fields the operator did not supply on the command line. Which fields those are comes from clap's `ValueSource`, not from comparing values, so a flag typed with the value that happens to be its built-in default (`--workers 50`, `--method GET`) still wins over the config file.
 
 This is the same rule used by the server and (indirectly) by MCP callers who pass explicit parameters.
 

@@ -20,6 +20,9 @@ fn into_scan_args(args: FileArgs) -> ScanArgs {
     // document instead — and only force the default when left at `auto`.
     if scan_args.input_type == "auto" {
         scan_args.input_type = "file".to_string();
+        // See `cmd::url::into_scan_args`: the subcommand is the choice, so a
+        // config-file `input_type` must not overwrite it.
+        scan_args.explicit.insert("input_type");
     }
     scan_args.targets = vec![args.file];
     scan_args
