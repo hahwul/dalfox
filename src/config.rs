@@ -160,7 +160,7 @@ impl Config {
         if let Some(scan) = &self.scan {
             // INPUT
             if let Some(v) = &scan.input_type
-                && args.input_type == "auto"
+                && !args.was_explicit("input_type")
             {
                 args.input_type = v.clone();
             }
@@ -177,7 +177,7 @@ impl Config {
 
             // OUTPUT
             if let Some(v) = &scan.format
-                && args.format == "plain"
+                && !args.was_explicit("format")
             {
                 args.format = v.clone();
             }
@@ -217,7 +217,7 @@ impl Config {
                 args.stream_findings = v;
             }
             if let Some(v) = &scan.poc_type
-                && args.poc_type == "plain"
+                && !args.was_explicit("poc_type")
             {
                 args.poc_type = v.clone();
             }
@@ -227,7 +227,7 @@ impl Config {
                 args.limit = Some(v);
             }
             if let Some(v) = &scan.limit_result_type
-                && args.limit_result_type == "all"
+                && !args.was_explicit("limit_result_type")
             {
                 args.limit_result_type = v.clone();
             }
@@ -280,7 +280,7 @@ impl Config {
                 args.cookies = v.clone();
             }
             if let Some(v) = &scan.method
-                && args.method == "GET"
+                && !args.was_explicit("method")
             {
                 args.method = v.clone();
             }
@@ -396,32 +396,32 @@ impl Config {
 
             // NETWORK
             if let Some(v) = scan.timeout
-                && args.timeout == crate::cmd::scan::DEFAULT_TIMEOUT_SECS
+                && !args.was_explicit("timeout")
             {
                 args.timeout = v;
             }
             if let Some(v) = scan.scan_timeout
-                && args.scan_timeout == 0
+                && !args.was_explicit("scan_timeout")
             {
                 args.scan_timeout = v;
             }
             if let Some(v) = scan.delay
-                && args.delay == crate::cmd::scan::DEFAULT_DELAY_MS
+                && !args.was_explicit("delay")
             {
                 args.delay = v;
             }
             if let Some(v) = scan.rate_limit
-                && args.rate_limit == crate::cmd::scan::DEFAULT_RATE_LIMIT
+                && !args.was_explicit("rate_limit")
             {
                 args.rate_limit = v;
             }
             if let Some(v) = scan.retries
-                && args.retries == crate::cmd::scan::DEFAULT_RETRIES
+                && !args.was_explicit("retries")
             {
                 args.retries = v;
             }
             if let Some(v) = scan.retry_delay
-                && args.retry_delay == crate::cmd::scan::DEFAULT_RETRY_DELAY_MS
+                && !args.was_explicit("retry_delay")
             {
                 args.retry_delay = v;
             }
@@ -454,30 +454,26 @@ impl Config {
 
             // ENGINE
             if let Some(v) = scan.workers
-                && args.workers == crate::cmd::scan::DEFAULT_WORKERS
+                && !args.was_explicit("workers")
             {
                 args.workers = v;
             }
             if let Some(v) = scan.max_concurrent_targets
-                && args.max_concurrent_targets == crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS
+                && !args.was_explicit("max_concurrent_targets")
             {
                 args.max_concurrent_targets = v;
             }
             if let Some(v) = scan.max_targets_per_host
-                && args.max_targets_per_host == crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST
+                && !args.was_explicit("max_targets_per_host")
             {
                 args.max_targets_per_host = v;
             }
 
             // XSS SCANNING
-            if let Some(v) = &scan.encoders {
-                // Override only if current encoders equal the canonical defaults (user did not supply CLI override).
-                // Canonical defaults are defined in cmd::scan::DEFAULT_ENCODERS (["url","html"]).
-                if args.encoders.iter().map(String::as_str).collect::<Vec<_>>()
-                    == crate::cmd::scan::DEFAULT_ENCODERS
-                {
-                    args.encoders = v.clone();
-                }
+            if let Some(v) = &scan.encoders
+                && !args.was_explicit("encoders")
+            {
+                args.encoders = v.clone();
             }
             if let Some(v) = &scan.remote_payloads
                 && args.remote_payloads.is_empty()
@@ -525,12 +521,12 @@ impl Config {
                 args.inject_marker = Some(v.clone());
             }
             if let Some(v) = &scan.custom_alert_value
-                && args.custom_alert_value == "1"
+                && !args.was_explicit("custom_alert_value")
             {
                 args.custom_alert_value = v.clone();
             }
             if let Some(v) = &scan.custom_alert_type
-                && args.custom_alert_type == "none"
+                && !args.was_explicit("custom_alert_type")
             {
                 args.custom_alert_type = v.clone();
             }
@@ -540,7 +536,7 @@ impl Config {
                 args.skip_xss_scanning = v;
             }
             if let Some(v) = scan.max_payloads_per_param
-                && args.max_payloads_per_param == 0
+                && !args.was_explicit("max_payloads_per_param")
             {
                 args.max_payloads_per_param = v;
             }
@@ -560,12 +556,12 @@ impl Config {
                 args.sxss_url = Some(v.clone());
             }
             if let Some(v) = &scan.sxss_method
-                && args.sxss_method == "GET"
+                && !args.was_explicit("sxss_method")
             {
                 args.sxss_method = v.clone();
             }
             if let Some(v) = scan.sxss_retries
-                && args.sxss_retries == 3
+                && !args.was_explicit("sxss_retries")
             {
                 args.sxss_retries = v;
             }
@@ -591,7 +587,7 @@ impl Config {
             }
             // WAF
             if let Some(v) = &scan.waf_bypass
-                && args.waf_bypass == "auto"
+                && !args.was_explicit("waf_bypass")
             {
                 args.waf_bypass = v.clone();
             }
@@ -610,13 +606,8 @@ impl Config {
             {
                 args.waf_evasion = v;
             }
-            // Only override when the CLI was left at the default (0.3)
-            // — same precedence pattern as the other numeric overrides
-            // so users who pass --waf-min-confidence on the command
-            // line keep authority over what the config file says.
             if let Some(v) = scan.waf_min_confidence
-                && (args.waf_min_confidence - crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE).abs()
-                    < f32::EPSILON
+                && !args.was_explicit("waf_min_confidence")
             {
                 args.waf_min_confidence = v;
             }

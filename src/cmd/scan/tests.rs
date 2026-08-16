@@ -2584,7 +2584,10 @@ fn test_finalize_scan_args_keeps_explicit_over_config() {
         }),
     };
     let mut args = default_scan_args();
-    args.format = "sarif".to_string(); // explicit non-default → config must NOT win
+    // `--format sarif`: the value *and* the record that the operator typed it.
+    // Precedence keys off the latter, so the value alone is no longer enough.
+    args.format = "sarif".to_string();
+    args.explicit.insert("format");
     let out = finalize_scan_args(args, false, false, Some(&cfg));
     assert_eq!(out.format, "sarif", "explicit format outranks config");
 }

@@ -177,12 +177,13 @@ fn test_encoders_not_override_when_custom_cli() {
         }),
     };
 
-    // CLI provided non-default encoders (e.g., includes 'none')
+    // CLI provided encoders (e.g., includes 'none')
     let mut args = default_scan_args();
-    args.encoders = vec!["none".to_string(), "url".to_string()]; // Custom CLI setting
+    args.encoders = vec!["none".to_string(), "url".to_string()];
+    args.explicit.insert("encoders");
 
     cfg.apply_to_scan_args_if_default(&mut args);
-    // Should NOT override because starting encoders != canonical defaults
+    // Should NOT override because the operator supplied `--encoders`
     assert_eq!(
         args.encoders,
         vec!["none", "url"],
@@ -205,8 +206,12 @@ fn test_apply_to_scan_args_if_default_waf_precedence() {
     assert_eq!(args.force_waf.as_deref(), Some("cloudflare"));
 
     // Case 2: CLI explicitly set both -> CLI wins, config is ignored.
+    // `force_waf` is `Option`, so its `is_none()` guard already encodes
+    // "untouched"; `waf_bypass` always holds a value, so it needs the record
+    // of the operator having typed `--waf-bypass`.
     let mut args = default_scan_args();
     args.waf_bypass = "force".to_string();
+    args.explicit.insert("waf_bypass");
     args.force_waf = Some("akamai".to_string());
     cfg.apply_to_scan_args_if_default(&mut args);
     assert_eq!(args.waf_bypass, "force");
@@ -606,6 +611,204 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
     cfg.apply_to_scan_args_if_default(&mut args);
     assert_eq!(args.on_session_loss_mode(), "abort");
     assert_eq!(args.baseline_mode(), "filter");
+}
+
+/// The generalization of the test above: `--baseline-mode` and
+/// `--on-session-loss` were rescued one at a time by re-typing them as
+/// `Option<String>`, but every other flag whose default is a real value had
+/// the same hole. `--workers 50` against a config-file `workers = 200` ran
+/// 200 workers, so an operator could not dial concurrency *down* to the
+/// default for one fragile target; `--method GET` against `method = "POST"`
+/// silently sent POST. `ExplicitArgs` closes all of them at once, so this
+/// walks the whole set rather than the two that happened to get reported.
+#[test]
+fn test_config_cannot_override_a_cli_value_that_equals_the_default() {
+    // Every config value here is deliberately different from the built-in
+    // default, and every CLI value below is deliberately *equal* to it — the
+    // combination the old `args.X == DEFAULT` guard could not distinguish
+    // from "the operator said nothing".
+    let cfg = Config {
+        scan: Some(ScanConfig {
+            input_type: Some("har".to_string()),
+            format: Some("json".to_string()),
+            poc_type: Some("curl".to_string()),
+            limit_result_type: Some("v".to_string()),
+            method: Some("POST".to_string()),
+            timeout: Some(99),
+            scan_timeout: Some(77),
+            delay: Some(500),
+            rate_limit: Some(7),
+            retries: Some(9),
+            retry_delay: Some(1234),
+            workers: Some(200),
+            max_concurrent_targets: Some(11),
+            max_targets_per_host: Some(13),
+            custom_alert_value: Some("zzz".to_string()),
+            custom_alert_type: Some("str".to_string()),
+            max_payloads_per_param: Some(42),
+            sxss_method: Some("PUT".to_string()),
+            sxss_retries: Some(8),
+            waf_bypass: Some("off".to_string()),
+            waf_min_confidence: Some(0.95),
+            encoders: Some(vec!["none".to_string()]),
+            ..Default::default()
+        }),
+    };
+
+    // Sanity: with nothing marked explicit, the config *does* apply. Without
+    // this half the test could pass on a config that is simply being ignored.
+    let mut untouched = default_scan_args();
+    cfg.apply_to_scan_args_if_default(&mut untouched);
+    assert_eq!(untouched.workers, 200, "config applies when CLI is silent");
+    assert_eq!(untouched.method, "POST");
+    assert_eq!(untouched.encoders, vec!["none".to_string()]);
+    assert_eq!(untouched.waf_min_confidence, 0.95);
+
+    // Now the operator types each flag with the value the CLI already held.
+    // The baseline is `default_scan_args()` rather than `ScanArgs::default()`
+    // because the helper pins a couple of fields itself (`insecure`,
+    // `waf_min_confidence`); what matters is that nothing below *moves*.
+    let d = default_scan_args();
+    let mut args = default_scan_args();
+    for id in [
+        "input_type",
+        "format",
+        "poc_type",
+        "limit_result_type",
+        "method",
+        "timeout",
+        "scan_timeout",
+        "delay",
+        "rate_limit",
+        "retries",
+        "retry_delay",
+        "workers",
+        "max_concurrent_targets",
+        "max_targets_per_host",
+        "custom_alert_value",
+        "custom_alert_type",
+        "max_payloads_per_param",
+        "sxss_method",
+        "sxss_retries",
+        "waf_bypass",
+        "waf_min_confidence",
+        "encoders",
+    ] {
+        args.explicit.insert(id);
+    }
+    cfg.apply_to_scan_args_if_default(&mut args);
+
+    assert_eq!(args.input_type, d.input_type);
+    assert_eq!(args.format, d.format);
+    assert_eq!(args.poc_type, d.poc_type);
+    assert_eq!(args.limit_result_type, d.limit_result_type);
+    assert_eq!(args.method, d.method);
+    assert_eq!(args.timeout, d.timeout);
+    assert_eq!(args.scan_timeout, d.scan_timeout);
+    assert_eq!(args.delay, d.delay);
+    assert_eq!(args.rate_limit, d.rate_limit);
+    assert_eq!(args.retries, d.retries);
+    assert_eq!(args.retry_delay, d.retry_delay);
+    assert_eq!(args.workers, d.workers);
+    assert_eq!(args.max_concurrent_targets, d.max_concurrent_targets);
+    assert_eq!(args.max_targets_per_host, d.max_targets_per_host);
+    assert_eq!(args.custom_alert_value, d.custom_alert_value);
+    assert_eq!(args.custom_alert_type, d.custom_alert_type);
+    assert_eq!(args.max_payloads_per_param, d.max_payloads_per_param);
+    assert_eq!(args.sxss_method, d.sxss_method);
+    assert_eq!(args.sxss_retries, d.sxss_retries);
+    assert_eq!(args.waf_bypass, d.waf_bypass);
+    assert_eq!(args.waf_min_confidence, d.waf_min_confidence);
+    assert_eq!(args.encoders, d.encoders);
+}
+
+/// `was_explicit` takes a clap argument id as a *string*, and nothing in the
+/// type system ties those literals to `ScanArgs`. A renamed field — or an
+/// `#[arg(id = "…")]` — would make the lookup miss forever and silently
+/// reinstate the exact bug this mechanism exists to prevent: a config-file
+/// value would start winning over a typed flag again, with every existing test
+/// still green (they insert the same literals by hand).
+///
+/// So this reads the ids straight out of `config.rs` and checks each one
+/// against clap's real argument list. It cannot drift, because both sides are
+/// derived rather than restated.
+#[test]
+fn every_was_explicit_id_is_a_real_clap_argument() {
+    use clap::{CommandFactory, Parser};
+
+    #[derive(Parser)]
+    struct ScanCli {
+        #[command(flatten)]
+        scan: crate::cmd::scan::ScanArgs,
+    }
+
+    let cmd = ScanCli::command();
+    let valid: std::collections::HashSet<String> = cmd
+        .get_arguments()
+        .map(|a| a.get_id().as_str().to_string())
+        .collect();
+    assert!(
+        valid.contains("workers"),
+        "sanity: the clap argument list should not be empty/renamed wholesale"
+    );
+
+    // Pull `was_explicit("…")` literals out of the precedence function itself.
+    let src = include_str!("../config.rs");
+    let mut queried: Vec<&str> = Vec::new();
+    for tail in src.split("was_explicit(\"").skip(1) {
+        queried.push(
+            tail.split('"')
+                .next()
+                .expect("literal must be terminated by a closing quote"),
+        );
+    }
+
+    assert!(
+        queried.len() >= 20,
+        "expected the precedence guards to be found in config.rs, got {} — \
+         the extractor is looking for `was_explicit(\"…\")`",
+        queried.len()
+    );
+
+    let unknown: Vec<&str> = queried
+        .iter()
+        .copied()
+        .filter(|id| !valid.contains(*id))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "config.rs asks was_explicit() about ids clap does not define: {unknown:?} — \
+         these always return false, so a config file would silently override the flag"
+    );
+}
+
+/// Marking one flag explicit must not shield its neighbours: the record is
+/// per-argument, so a config file still fills everything the operator left
+/// alone. Without this, a coarser implementation (a single "CLI was used at
+/// all" boolean) would pass the test above while disabling config files.
+#[test]
+fn test_explicit_marking_is_per_flag_not_global() {
+    let cfg = Config {
+        scan: Some(ScanConfig {
+            workers: Some(200),
+            method: Some("POST".to_string()),
+            ..Default::default()
+        }),
+    };
+
+    let mut args = default_scan_args();
+    args.explicit.insert("workers");
+    cfg.apply_to_scan_args_if_default(&mut args);
+
+    assert_eq!(
+        args.workers,
+        crate::cmd::scan::ScanArgs::default().workers,
+        "the explicitly-typed flag keeps its CLI value"
+    );
+    assert_eq!(
+        args.method, "POST",
+        "an untouched flag is still filled from the config file"
+    );
 }
 
 #[test]

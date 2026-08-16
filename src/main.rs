@@ -3,7 +3,7 @@ Code by @hahwul
 Happy hacking :D
 */
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use dalfox::cmd::scan::ScanOutcome;
 use dalfox::{DEBUG, cmd, config, mcp, server, utils};
@@ -102,6 +102,20 @@ fn print_man_page() {
     }
 }
 
+/// Which of `name`'s flags the operator actually typed, for the scan-bearing
+/// subcommands (`scan`, and the compat `url` / `file` / `pipe`, which all carry
+/// a flattened `ScanArgs`).
+///
+/// Empty when the subcommand is absent — which is also the correct answer for
+/// the no-subcommand path (`dalfox <TARGET>`), since the root `Cli` declares no
+/// scan flags of its own for a config file to contend with.
+fn explicit_args_for(matches: &clap::ArgMatches, name: &str) -> cmd::scan::ExplicitArgs {
+    matches
+        .subcommand_matches(name)
+        .map(cmd::scan::ExplicitArgs::from_matches)
+        .unwrap_or_default()
+}
+
 #[tokio::main]
 async fn main() {
     // Install the rustls crypto provider (ring) before anything builds a
@@ -154,7 +168,20 @@ async fn main() {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 
-    let cli = Cli::parse();
+    // Parsed via `ArgMatches` rather than `Cli::parse()` so the raw matches
+    // survive: they are the only record of *which* flags the operator actually
+    // typed, which `ExplicitArgs` needs to keep a config file from overriding
+    // an explicit choice that happens to equal the built-in default.
+    //
+    // `parse()` is these two steps plus `format_error`, which attaches the
+    // command so a failure prints usage instead of a bare message; it is
+    // mirrored here rather than dropped. (Only the `get_matches` half can fail
+    // on user input — everything reachable from `from_arg_matches` is a
+    // definition/access mismatch — but the two must not diverge in how they
+    // report.)
+    let matches = Cli::command().get_matches();
+    let cli =
+        Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.format(&mut Cli::command()).exit());
 
     // Keep man-page output as pure roff by handling it before the
     // banner/config machinery writes anything else to stdout.
@@ -386,7 +413,8 @@ async fn main() {
 
     if let Some(command) = cli.command {
         match command {
-            Commands::Scan(args) => {
+            Commands::Scan(mut args) => {
+                args.explicit = explicit_args_for(&matches, "scan");
                 // `--no-color`/`--silence` are global on `Cli`, config defaults
                 // overlay, and `--include-all` expands — all folded in one shared
                 // helper so this path and `url`/`file`/`pipe` stay identical.
@@ -417,15 +445,20 @@ async fn main() {
             // should never execute. It exists only for match exhaustiveness.
             Commands::Man => unreachable!(),
 
-            Commands::Url(args) => {
+            // The compat subcommands flatten `ScanArgs`, so their own matches
+            // carry the same argument ids the `scan` arm reads above.
+            Commands::Url(mut args) => {
+                args.scan_args.explicit = explicit_args_for(&matches, "url");
                 let config = config_load.as_ref().ok().map(|r| &r.config);
                 outcome = cmd::url::run_url(args, cli.no_color, cli.silence, config).await;
             }
-            Commands::File(args) => {
+            Commands::File(mut args) => {
+                args.scan_args.explicit = explicit_args_for(&matches, "file");
                 let config = config_load.as_ref().ok().map(|r| &r.config);
                 outcome = cmd::file::run_file(args, cli.no_color, cli.silence, config).await;
             }
-            Commands::Pipe(args) => {
+            Commands::Pipe(mut args) => {
+                args.scan_args.explicit = explicit_args_for(&matches, "pipe");
                 let config = config_load.as_ref().ok().map(|r| &r.config);
                 outcome = cmd::pipe::run_pipe(args, cli.no_color, cli.silence, config).await;
             }

@@ -5,6 +5,69 @@
 
 use clap::Args;
 
+/// The set of `ScanArgs` fields the operator actually supplied on the command
+/// line, as clap's argument ids (the snake_case field names).
+///
+/// Config precedence needs to answer one question — "did the user ask for
+/// this?" — and for most of `ScanArgs` the field itself cannot answer it. A
+/// flag like `--workers` always holds *some* value, so the only way to tell an
+/// untouched default from a deliberately re-asserted one used to be comparing
+/// against the default, which reads a re-assertion as silence: `--workers 50`
+/// against a config-file `workers = 200` silently ran 200 workers, and the
+/// operator had no way to dial concurrency back down for one fragile target.
+/// Two flags (`--baseline-mode`, `--on-session-loss`) were rescued
+/// individually by re-typing them as `Option<String>`; this records the answer
+/// once, for every flag, from the only place that genuinely knows it —
+/// clap's [`clap::parser::ValueSource`].
+///
+/// Empty for every non-CLI construction (`Default::default()`, the REST and
+/// MCP runners, tests). Those paths never consult a config file, so "nothing
+/// was explicit" is both true and inert.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExplicitArgs(std::collections::BTreeSet<String>);
+
+impl ExplicitArgs {
+    /// Collect every argument id that came from the command line or an
+    /// environment variable, i.e. everything except clap's own defaults.
+    ///
+    /// An env var counts as explicit on purpose: the precedence contract is
+    /// CLI > env > config file > built-in default, so `DALFOX_X=…` has to beat
+    /// a config value the same way typing the flag does.
+    pub fn from_matches(matches: &clap::ArgMatches) -> Self {
+        use clap::parser::ValueSource;
+        Self(
+            matches
+                .ids()
+                .filter(|id| {
+                    matches!(
+                        matches.value_source(id.as_str()),
+                        Some(ValueSource::CommandLine) | Some(ValueSource::EnvVariable)
+                    )
+                })
+                .map(|id| id.as_str().to_string())
+                .collect(),
+        )
+    }
+
+    /// Whether `id` (a `ScanArgs` field name) was supplied by the operator.
+    pub fn contains(&self, id: &str) -> bool {
+        self.0.contains(id)
+    }
+
+    /// Record `id` as operator-chosen. Used by the `url` / `file` / `pipe`
+    /// subcommands, which *derive* `input_type` from which subcommand was
+    /// invoked: choosing `dalfox file list.txt` is as deliberate as typing
+    /// `-i file`, so a config-file `input_type` must not overwrite it.
+    pub fn insert(&mut self, id: &str) {
+        self.0.insert(id.to_string());
+    }
+
+    /// True when nothing was recorded — every non-CLI construction path.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// Default encoders used when the user does not specify any via CLI or config.
 /// Centralizing this allows config.rs to reference the same canonical defaults.
 pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
@@ -741,6 +804,24 @@ pub struct ScanArgs {
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
     pub targets: Vec<String>,
+
+    /// Which of the fields above the operator actually typed. Not a flag —
+    /// `#[arg(skip)]` keeps it out of the CLI surface entirely; it is filled in
+    /// from clap's `ArgMatches` in `main.rs` and read only by
+    /// [`crate::config::Config::apply_to_scan_args_if_default`]. See
+    /// [`ExplicitArgs`].
+    #[arg(skip)]
+    pub explicit: ExplicitArgs,
+}
+
+impl ScanArgs {
+    /// Whether the operator supplied `id` (a field name) on the command line,
+    /// as opposed to it holding a built-in default. Config precedence hangs off
+    /// this: a config value may fill a field the operator left alone, never one
+    /// they chose — including when their choice equals the default.
+    pub fn was_explicit(&self, id: &str) -> bool {
+        self.explicit.contains(id)
+    }
 }
 
 /// Every field carries exactly the value clap's `default_value` /
@@ -846,6 +927,7 @@ impl Default for ScanArgs {
             waf_evasion: false,
             waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
             targets: vec![],
+            explicit: ExplicitArgs::default(),
         }
     }
 }
@@ -1042,6 +1124,75 @@ impl ScanArgs {
 mod arg_parser_tests {
     use super::*;
     use crate::cmd::scan::DEFAULT_TIMEOUT_SECS;
+
+    /// Build the `ArgMatches` for a `ScanArgs`-flattened command line, the way
+    /// `main.rs` does for the `scan` subcommand.
+    #[cfg(test)]
+    fn matches_for(argv: &[&str]) -> clap::ArgMatches {
+        use clap::{Args as _, CommandFactory, Parser};
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            scan: ScanArgs,
+        }
+        let _ = ScanArgs::augment_args; // keep the trait import honest
+        TestCli::command()
+            .try_get_matches_from(argv)
+            .expect("parse should succeed")
+    }
+
+    /// The load-bearing property: a flag typed with its *default* value is
+    /// still recorded as explicit. Comparing `args.timeout` against
+    /// `DEFAULT_TIMEOUT_SECS` cannot tell these apart — that is the whole bug
+    /// `ExplicitArgs` exists to fix — so it has to come from clap's
+    /// `ValueSource`.
+    #[test]
+    fn explicit_args_records_flags_typed_with_their_default_value() {
+        let m = matches_for(&[
+            "dalfox",
+            "--timeout",
+            &DEFAULT_TIMEOUT_SECS.to_string(),
+            "--method",
+            "GET",
+            "http://example.com",
+        ]);
+        let explicit = ExplicitArgs::from_matches(&m);
+
+        assert!(
+            explicit.contains("timeout"),
+            "--timeout <default> must count as explicit"
+        );
+        assert!(
+            explicit.contains("method"),
+            "--method GET must count as explicit even though GET is the default"
+        );
+    }
+
+    /// The other half: flags the operator never typed must not be recorded,
+    /// or a config file would become unreachable for every flag at once.
+    #[test]
+    fn explicit_args_omits_untyped_flags() {
+        let m = matches_for(&["dalfox", "--workers", "10", "http://example.com"]);
+        let explicit = ExplicitArgs::from_matches(&m);
+
+        assert!(explicit.contains("workers"));
+        for untyped in ["timeout", "method", "format", "delay", "encoders"] {
+            assert!(
+                !explicit.contains(untyped),
+                "{untyped} was never typed, so it must stay config-overridable"
+            );
+        }
+    }
+
+    /// A bare run records nothing — the state every non-CLI construction
+    /// (`Default::default()`, REST, MCP) is in.
+    #[test]
+    fn explicit_args_is_empty_for_a_bare_command_line() {
+        let explicit = ExplicitArgs::from_matches(&matches_for(&["dalfox"]));
+        assert!(explicit.is_empty());
+        assert!(ScanArgs::default().explicit.is_empty());
+    }
 
     /// `ScanArgs::default()` must equal what clap produces for a bare run with
     /// no flags. Construction sites use `..Default::default()` to stand in for
