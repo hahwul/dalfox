@@ -8,8 +8,12 @@ use clap_complete::{Shell, generate};
 use dalfox::cmd::scan::ScanOutcome;
 use dalfox::{DEBUG, cmd, config, mcp, server, utils};
 
+/// Binary name, shared by the clap definition, the completion command tree and
+/// the `bin_name` the generated scripts key off, so the three cannot drift.
+const BIN_NAME: &str = "dalfox";
+
 #[derive(Parser)]
-#[command(name = "dalfox")]
+#[command(name = BIN_NAME)]
 #[command(about = "Powerful open-source XSS scanner")]
 #[command(version, short_flag = 'V')]
 #[command(
@@ -107,6 +111,40 @@ fn print_man_page() {
     }
 }
 
+/// The command tree the shell-completion scripts are generated from: `Cli`
+/// minus every `hide = true` subcommand.
+///
+/// `clap_mangen` drops hidden subcommands on its own, but `clap_complete`'s
+/// generators walk `Command::get_subcommands()` unfiltered, so `dalfox <TAB>`
+/// would offer the deprecated compat commands (`url` / `file` / `pipe`) and the
+/// packaging helper (`man`) that `--help` and the man page both hide — and
+/// carry four copies of the flattened `ScanArgs` while doing it.
+///
+/// `clap::Command` has no `remove_subcommand`, so the root is re-assembled from
+/// the real definition's own arguments and its visible subcommands instead. No
+/// part of the CLI surface is restated here — the flags and subcommands are
+/// `Cli`'s own — and the two root fields that are come from the same constants
+/// the derive reads. Only cosmetic root settings the completion scripts never
+/// render (usage string, help template) are left behind.
+///
+/// The subcommand tree is one level deep, so filtering the root's children is
+/// the whole job; a nested hidden subcommand would need this to recurse.
+fn completion_command() -> clap::Command {
+    let full = Cli::command();
+    let mut cmd = clap::Command::new(BIN_NAME)
+        .version(env!("CARGO_PKG_VERSION"))
+        .args(full.get_arguments().cloned())
+        .subcommands(
+            full.get_subcommands()
+                .filter(|sc| !sc.is_hide_set())
+                .cloned(),
+        );
+    if let Some(about) = full.get_about() {
+        cmd = cmd.about(about.clone());
+    }
+    cmd
+}
+
 /// Which of `name`'s flags the operator actually typed, for the scan-bearing
 /// subcommands (`scan`, and the compat `url` / `file` / `pipe`, which all carry
 /// a flattened `ScanArgs`).
@@ -197,8 +235,8 @@ async fn main() {
                 return;
             }
             Commands::Completion { shell } => {
-                let mut cmd = Cli::command();
-                generate(*shell, &mut cmd, "dalfox", &mut std::io::stdout());
+                let mut cmd = completion_command();
+                generate(*shell, &mut cmd, BIN_NAME, &mut std::io::stdout());
                 return;
             }
             _ => {}

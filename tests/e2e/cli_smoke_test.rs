@@ -537,3 +537,94 @@ fn test_e2e_non_regular_file_rejected() {
         stderr
     );
 }
+
+/// Every shell `dalfox completion` accepts (i.e. every `clap_complete::Shell`).
+const COMPLETION_SHELLS: [&str; 5] = ["bash", "zsh", "fish", "powershell", "elvish"];
+
+/// How each shell's generator declares one subcommand, with `{}` standing in
+/// for its name. Asserting a *visible* subcommand matches keeps these patterns
+/// honest: if a `clap_complete` upgrade changes the emitted shape, the
+/// visible-subcommand half fails instead of the hidden-subcommand half quietly
+/// passing against a pattern that can no longer match anything.
+const SUBCOMMAND_DECLARATION: [(&str, &str); 5] = [
+    ("bash", "dalfox,{})"),
+    // zsh indents the first `case` arm and no others, so the pattern anchors on
+    // the trailing newline only.
+    ("zsh", "({})\n"),
+    ("fish", "__fish_dalfox_using_subcommand {}"),
+    ("powershell", "'dalfox;{}'"),
+    ("elvish", "&'dalfox;{}'="),
+];
+
+fn completion_script(shell: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["completion", shell])
+        .output()
+        .unwrap_or_else(|e| panic!("failed to execute dalfox completion {shell}: {e}"));
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "dalfox completion {shell} should exit 0, stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "dalfox completion {shell} should write nothing to stderr, got:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .unwrap_or_else(|e| panic!("dalfox completion {shell} emitted non-UTF-8: {e}"))
+}
+
+/// The subcommand returns before the banner/config machinery runs, so the
+/// script is the *only* thing on stdout. Users redirect this straight into
+/// `/etc/bash_completion.d/dalfox`, so a stray banner line is a broken shell,
+/// not cosmetic noise.
+#[test]
+fn test_completion_writes_only_the_script_to_stdout() {
+    for shell in COMPLETION_SHELLS {
+        let script = completion_script(shell);
+
+        assert!(
+            script.contains("only-poc"),
+            "dalfox completion {shell} should carry the scan subtree's flags"
+        );
+        assert!(
+            script.contains("completion"),
+            "dalfox completion {shell} should carry the completion subcommand itself"
+        );
+        // `█` is unique to the ASCII-art banner, which must never reach stdout
+        // on this path.
+        assert!(
+            !script.contains('█'),
+            "dalfox completion {shell} leaked the banner into the script"
+        );
+    }
+}
+
+/// `clap_complete`'s generators walk `Command::get_subcommands()` without
+/// filtering `hide = true` entries — unlike `clap_mangen`, which drops them —
+/// so the completion scripts are the one surface where the deprecated compat
+/// commands (`url` / `file` / `pipe`) and the packaging helper (`man`) can be
+/// advertised to users. `completion_command()` in `src/main.rs` filters them.
+#[test]
+fn test_completion_omits_hidden_subcommands() {
+    for (shell, declaration) in SUBCOMMAND_DECLARATION {
+        let script = completion_script(shell);
+
+        for visible in ["scan", "server", "payload", "mcp", "completion"] {
+            assert!(
+                script.contains(&declaration.replace("{}", visible)),
+                "dalfox completion {shell} should declare the `{visible}` subcommand"
+            );
+        }
+
+        for hidden in ["man", "url", "file", "pipe"] {
+            assert!(
+                !script.contains(&declaration.replace("{}", hidden)),
+                "dalfox completion {shell} advertises the hidden `{hidden}` subcommand"
+            );
+        }
+    }
+}
