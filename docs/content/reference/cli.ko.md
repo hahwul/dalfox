@@ -5,7 +5,7 @@ weight = 1
 toc = true
 +++
 
-Dalfox는 네 개의 서브커맨드와 기본 제공 `help`로 구성되어 있습니다. 기본값(대상만 전달했을 때)은 `scan`입니다.
+Dalfox는 다섯 개의 서브커맨드와 기본 제공 `help`로 구성되어 있습니다. 기본값(대상만 전달했을 때)은 `scan`입니다.
 
 ```
 dalfox [SUBCOMMAND] [TARGET] [FLAGS]
@@ -17,6 +17,7 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 | `server` | REST API 서버를 실행합니다 |
 | `payload` | 내장/원격 페이로드를 나열하거나 가져옵니다 |
 | `mcp` | Model Context Protocol stdio 서버를 실행합니다 |
+| `completion` | 셸 자동완성 스크립트를 생성합니다 |
 | `help` | 서브커맨드별 도움말을 출력합니다 |
 
 ## 전역 플래그
@@ -262,6 +263,33 @@ dalfox mcp
 ```
 
 추가 플래그는 없습니다. 도구 정의는 [MCP Server](../../integrations/mcp/)를 참조하세요.
+
+---
+
+## `dalfox completion`
+
+셸 자동완성 스크립트를 생성해 stdout으로 출력합니다.
+
+```bash
+dalfox completion <SHELL>
+```
+
+지원하는 셸: `bash`, `zsh`, `fish`, `powershell`, `elvish`.
+
+```bash
+# bash
+dalfox completion bash > /etc/bash_completion.d/dalfox
+
+# zsh
+dalfox completion zsh > "${fpath[1]}/_dalfox"
+
+# fish
+dalfox completion fish > ~/.config/fish/completions/dalfox.fish
+```
+
+stdout에는 스크립트 외에 아무것도 출력되지 않으므로, 출력을 그대로 파일로 리다이렉트해도 안전합니다.
+
+숨김 서브커맨드(구버전 호환용 `url` / `file` / `pipe`와 패키징 헬퍼 `man`)는 `--help`에서와 마찬가지로 생성된 스크립트에도 포함되지 않습니다.
 
 ---
 
