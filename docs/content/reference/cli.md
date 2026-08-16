@@ -17,6 +17,7 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 | `server` | Run a REST API server |
 | `payload` | List or fetch built-in/remote payloads |
 | `mcp` | Run a Model Context Protocol stdio server |
+| `completion` | Generate a shell completion script |
 | `help` | Print help for any subcommand |
 
 ## Global flags
@@ -267,6 +268,29 @@ dalfox mcp
 No additional flags. See [MCP Server](../../integrations/mcp/) for tool definitions.
 
 ---
+
+## `dalfox completion`
+
+Generate a shell completion script and print it to stdout.
+
+```bash
+dalfox completion <SHELL>
+```
+
+Supported shells: `bash`, `zsh`, `fish`, `powershell`, `elvish`.
+
+```bash
+# bash
+dalfox completion bash > /etc/bash_completion.d/dalfox
+
+# zsh
+dalfox completion zsh > "${fpath[1]}/_dalfox"
+
+# fish
+dalfox completion fish > ~/.config/fish/completions/dalfox.fish
+```
+
+Nothing else is written to stdout, so the output can always be safely redirected to a file.
 
 ## See also
 

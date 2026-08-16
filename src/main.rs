@@ -4,7 +4,7 @@ Happy hacking :D
 */
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-
+use clap_complete::{Shell, generate};
 use dalfox::cmd::scan::ScanOutcome;
 use dalfox::{DEBUG, cmd, config, mcp, server, utils};
 
@@ -64,6 +64,11 @@ enum Commands {
     Payload(cmd::payload::PayloadArgs),
     /// Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
     Mcp,
+    /// Generate shell completion scripts
+    Completion {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
     /// Generate a roff man page and print it to stdout
     #[clap(hide = true)]
     Man,
@@ -185,9 +190,19 @@ async fn main() {
 
     // Keep man-page output as pure roff by handling it before the
     // banner/config machinery writes anything else to stdout.
-    if let Some(Commands::Man) = &cli.command {
-        print_man_page();
-        return;
+    if let Some(command) = &cli.command {
+        match command {
+            Commands::Man => {
+                print_man_page();
+                return;
+            }
+            Commands::Completion { shell } => {
+                let mut cmd = Cli::command();
+                generate(*shell, &mut cmd, "dalfox", &mut std::io::stdout());
+                return;
+            }
+            _ => {}
+        }
     }
 
     // Set global debug toggle for downstream modules
@@ -440,6 +455,8 @@ async fn main() {
                 }
                 outcome = ScanOutcome::Clean;
             }
+
+            Commands::Completion { .. } => unreachable!(),
 
             // `dalfox man` is handled immediately after parsing so this arm
             // should never execute. It exists only for match exhaustiveness.
