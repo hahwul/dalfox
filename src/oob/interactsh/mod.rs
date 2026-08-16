@@ -32,7 +32,7 @@ const OOB_MAX_BODY_BYTES: usize = 32 << 20; // 32 MiB
 const OOB_MAX_ENTRIES_HINT: usize = 4096;
 const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 
-pub struct InteractshClient {
+pub(crate) struct InteractshClient {
     /// Bare host[:port] embedded in payload callback hosts and matched against
     /// interaction `full-id`s.
     server: String,
@@ -118,10 +118,13 @@ impl InteractshClient {
         })
     }
 
-    pub fn server_domain(&self) -> &str {
+    pub(crate) fn server_domain(&self) -> &str {
         &self.server
     }
 
+    /// The per-session correlation id. Read by the interaction-matching tests,
+    /// which build the full `<id><nonce>.oast.fun` host the server echoes back.
+    #[cfg(test)]
     pub fn correlation_id(&self) -> &str {
         &self.correlation_id
     }

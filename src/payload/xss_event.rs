@@ -1,6 +1,6 @@
 /// Expose a comprehensive set of common DOM event handler attribute names
 /// (e.g., "onmouseover", "onclick") that can be used for attribute-based XSS payloads.
-pub fn common_event_handler_names() -> &'static [&'static str] {
+pub(crate) fn common_event_handler_names() -> &'static [&'static str] {
     &[
         "onabort",
         "onanimationend",
@@ -107,7 +107,7 @@ pub fn common_event_handler_names() -> &'static [&'static str] {
 /// JavaScript execution primitives from XSS_JAVASCRIPT_PAYLOADS.
 /// This replaces the previous static XSS_ATTRIBUTE_PAYLOADS constant to ensure
 /// automatic synchronization when JavaScript payload list changes.
-pub fn get_dynamic_xss_attribute_payloads() -> Vec<String> {
+pub(crate) fn get_dynamic_xss_attribute_payloads() -> Vec<String> {
     // Memoized: combines the static event-handler name list with the stable
     // XSS_JAVASCRIPT_PAYLOADS_SMALL const, so the catalog is identical per
     // process. Avoids rebuilding once per reflection parameter.

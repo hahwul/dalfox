@@ -66,7 +66,7 @@ const MAX_OPEN_DEPTH: usize = 256;
 /// Returns an empty string when `prefix` already ends at statement/expression
 /// position (nothing to close), or when the prefix nests deeper than
 /// [`MAX_OPEN_DEPTH`].
-pub fn compute_js_breakout(prefix: &str) -> String {
+pub(crate) fn compute_js_breakout(prefix: &str) -> String {
     let chars: Vec<char> = prefix.chars().collect();
     let mut state = State::Code;
     let mut stack: Vec<Open> = Vec::new();
@@ -217,7 +217,7 @@ const NESTING_SHELLS: &[&str] = &[
 /// produced by running [`compute_js_breakout`] on `shell + quote`, so the
 /// closer sequences are exactly what the scanner would compute for a real
 /// prefix — deduplicated and ordered shallowest-first (highest confidence).
-pub fn breakout_templates(quote: char) -> Vec<String> {
+pub(crate) fn breakout_templates(quote: char) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for shell in NESTING_SHELLS {
@@ -244,7 +244,7 @@ pub fn breakout_templates(quote: char) -> Vec<String> {
 /// Only meaningful for `'` / `"` delimiters — the quote-escape probe never flags
 /// a backtick (a template literal isn't closed by `\``), so synthesis never
 /// calls this with one.
-pub fn escaped_breakout_templates(quote: char) -> Vec<String> {
+pub(crate) fn escaped_breakout_templates(quote: char) -> Vec<String> {
     breakout_templates(quote)
         .into_iter()
         .map(|t| format!("\\{t}"))

@@ -17,7 +17,7 @@ static PRINT_ONCE: Once = Once::new();
 /// Render the banner as a String.
 /// - `version`: Typically env!("CARGO_PKG_VERSION")
 /// - `color`: Enable ANSI color when true
-pub fn render_banner(version: &str, color: bool) -> String {
+pub(crate) fn render_banner(version: &str, color: bool) -> String {
     // ANSI colors
     let reset = if color { "\x1b[0m" } else { "" };
     let dim = if color { "\x1b[90m" } else { "" };
@@ -63,7 +63,7 @@ pub fn render_banner(version: &str, color: bool) -> String {
 
 /// Print the banner to stdout (no trailing extra newline beyond what render_banner includes).
 /// Flushes stdout after printing.
-pub fn print_banner(version: &str, color: bool) {
+pub(crate) fn print_banner(version: &str, color: bool) {
     let s = render_banner(version, color);
     print!("{}", s);
     let _ = io::stdout().flush();

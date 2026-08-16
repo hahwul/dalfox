@@ -24,7 +24,7 @@
 
 /// A single CSP-bypass script gadget.
 #[derive(Debug, Clone, Copy)]
-pub struct ScriptGadget {
+pub(crate) struct ScriptGadget {
     /// Lowercase host substrings that make this gadget reachable when present in
     /// a `script-src` host allowlist. Matched with `allowed_origin.contains(p)`,
     /// so a bare host (`code.jquery.com`) or a brand fragment (`jquery`) both
@@ -40,7 +40,9 @@ pub struct ScriptGadget {
     /// per-scan reflection markers so the verification stage can positively
     /// identify its own element.
     pub template: &'static str,
-    /// Short human-readable label naming the gadget.
+    /// Short human-readable label naming the gadget. Documentation for the
+    /// registry below rather than something the scan reads.
+    #[allow(dead_code)]
     pub label: &'static str,
 }
 
@@ -122,14 +124,17 @@ static GADGETS: &[ScriptGadget] = &[
 ];
 
 /// All registered gadgets.
-pub fn all() -> &'static [ScriptGadget] {
+#[cfg(test)]
+pub(crate) fn all() -> &'static [ScriptGadget] {
     GADGETS
 }
 
 /// Gadgets reachable when `allowed_origin` (a value from a `script-src` host
 /// allowlist) is present. Used for CSPs *without* `strict-dynamic`, where a
 /// whitelisted host genuinely permits loading a `<script src>` from it.
-pub fn gadgets_for_host(allowed_origin: &str) -> impl Iterator<Item = &'static ScriptGadget> {
+pub(crate) fn gadgets_for_host(
+    allowed_origin: &str,
+) -> impl Iterator<Item = &'static ScriptGadget> {
     let lowered = allowed_origin.to_ascii_lowercase();
     let component = host_component(&lowered);
     // A `*.D` (or `https://*.D`) origin allows ANY subdomain of D, so a gadget
@@ -182,12 +187,12 @@ fn host_matches(host: &str, pattern: &str) -> bool {
 /// Gadgets that survive `strict-dynamic` — DOM script-gadgets that get a trusted
 /// script to create the attacker script, independent of the (ignored) host
 /// allowlist.
-pub fn strict_dynamic_gadgets() -> impl Iterator<Item = &'static ScriptGadget> {
+pub(crate) fn strict_dynamic_gadgets() -> impl Iterator<Item = &'static ScriptGadget> {
     GADGETS.iter().filter(|g| g.strict_dynamic)
 }
 
 /// Render a gadget template, substituting the reflection markers.
-pub fn render(template: &str, class_marker: &str, id_marker: &str) -> String {
+pub(crate) fn render(template: &str, class_marker: &str, id_marker: &str) -> String {
     template
         .replace("{CLASS}", class_marker)
         .replace("{ID}", id_marker)

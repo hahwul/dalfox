@@ -16,7 +16,7 @@ use std::path::Path;
 /// fast, clear error instead of OOM-ing the process. Shared by the
 /// target-list, mining-wordlist, and custom-payload read paths so the limit
 /// has a single source of truth. See [`read_bounded`] / [`read_stdin_bounded`].
-pub const MAX_FILE_READ_BYTES: u64 = 256 << 20;
+pub(crate) const MAX_FILE_READ_BYTES: u64 = 256 << 20;
 
 /// Read a UTF-8 file with a hard byte cap. Refuses non-regular files
 /// (a symlink that resolves to a regular file is fine, since
@@ -80,7 +80,7 @@ pub fn read_bounded(path: &Path, max_bytes: u64, label: &str) -> std::io::Result
 /// in full — the committed input mode reads the whole file afterwards. Refuses
 /// non-regular files. The text may end on a U+FFFD replacement if the cut falls
 /// mid-multibyte-char, which is harmless for the ASCII markers callers sniff.
-pub fn read_prefix_lossy(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+pub(crate) fn read_prefix_lossy(path: &Path, max_bytes: u64) -> std::io::Result<String> {
     let md = std::fs::metadata(path)?;
     if !md.is_file() {
         return Err(std::io::Error::new(
@@ -98,7 +98,7 @@ pub fn read_prefix_lossy(path: &Path, max_bytes: u64) -> std::io::Result<String>
 /// Read STDIN into a String with a hard byte cap. Same intent as
 /// `read_bounded` but for the streaming side — `cat /dev/zero | dalfox`
 /// would otherwise OOM the process.
-pub fn read_stdin_bounded(max_bytes: u64, label: &str) -> std::io::Result<String> {
+pub(crate) fn read_stdin_bounded(max_bytes: u64, label: &str) -> std::io::Result<String> {
     let mut buf = String::new();
     std::io::stdin()
         .lock()
@@ -124,7 +124,7 @@ pub fn read_stdin_bounded(max_bytes: u64, label: &str) -> std::io::Result<String
 
 /// Outcome of [`read_stdin_bounded_within`].
 #[derive(Debug)]
-pub enum StdinRead {
+pub(crate) enum StdinRead {
     /// stdin answered within the grace window — it either delivered bytes or
     /// hit an immediate EOF. The payload is the whole stream, read to EOF.
     Data(String),
@@ -154,7 +154,7 @@ pub enum StdinRead {
 /// a pipe that goes quiet and later floods can't grow a buffer nobody will
 /// ever look at. Until then it is parked in `read()`, holding one chunk, and
 /// is reaped at process exit.
-pub fn read_stdin_bounded_within(
+pub(crate) fn read_stdin_bounded_within(
     max_bytes: u64,
     label: &str,
     grace: std::time::Duration,

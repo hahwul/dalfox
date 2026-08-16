@@ -37,7 +37,7 @@ use std::borrow::Cow;
 /// Maximum element nesting depth handed to html5ever. Matches the order of the
 /// caps real browser parsers apply; real-world documents are one to two orders
 /// of magnitude shallower.
-pub const MAX_HTML_NESTING_DEPTH: usize = 512;
+pub(crate) const MAX_HTML_NESTING_DEPTH: usize = 512;
 
 /// Elements that never nest: they have no end tag at all.
 const VOID_ELEMENTS: &[&str] = &[
@@ -302,7 +302,7 @@ fn nesting_overflow_offset(html: &str, limit: usize) -> Option<usize> {
 /// `html`, truncated just before the point where its element nesting would
 /// exceed [`MAX_HTML_NESTING_DEPTH`]. Borrows unchanged in the overwhelmingly
 /// common case that the document is within the bound.
-pub fn bound_html_nesting(html: &str) -> Cow<'_, str> {
+pub(crate) fn bound_html_nesting(html: &str) -> Cow<'_, str> {
     match nesting_overflow_offset(html, MAX_HTML_NESTING_DEPTH) {
         Some(cut) => {
             crate::dbg_log!(
@@ -318,7 +318,7 @@ pub fn bound_html_nesting(html: &str) -> Cow<'_, str> {
 
 /// `scraper::Html::parse_document` with the nesting guard applied. Use this
 /// anywhere the input is (or could be) a response body.
-pub fn parse_document_bounded(html: &str) -> scraper::Html {
+pub(crate) fn parse_document_bounded(html: &str) -> scraper::Html {
     scraper::Html::parse_document(&bound_html_nesting(html))
 }
 

@@ -302,7 +302,7 @@ fn templates_for(context: &InjectionContext) -> Vec<&'static str> {
 /// shells don't cover (deeper or unusual nesting) is still reached. It is
 /// strictly additive: the fixed catalog still follows as a fallback, and the
 /// observed closer dedupes against it when they coincide.
-pub fn synthesize_payloads(
+pub(crate) fn synthesize_payloads(
     context: &InjectionContext,
     invalid_specials: &[char],
     valid_specials: &[char],

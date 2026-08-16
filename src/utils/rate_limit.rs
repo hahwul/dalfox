@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 /// evasion always throttles even when the user passed no `--delay` and the
 /// detected WAF advertised no pacing hint. Randomized jitter is layered on
 /// top of this floor.
-pub const EVASION_FLOOR_MS: u64 = 150;
+pub(crate) const EVASION_FLOOR_MS: u64 = 150;
 
 /// A process-wide / per-job request rate limiter.
 ///
@@ -44,7 +44,7 @@ pub const EVASION_FLOOR_MS: u64 = 150;
 /// reserves a distinct future slot, so concurrent workers wake staggered by
 /// `interval` rather than in a thundering herd.
 #[derive(Debug)]
-pub struct RateLimiter {
+pub(crate) struct RateLimiter {
     /// Minimum spacing between grants (`1 / rate`).
     interval: Duration,
     /// Burst tolerance: a request may be admitted up to this far ahead of the
@@ -59,14 +59,14 @@ impl RateLimiter {
     /// (burst of one). Returns `None` when `rate == 0` so callers can treat
     /// "unlimited" as "no limiter installed" and pay zero overhead on the
     /// hot path.
-    pub fn per_second(rate: u32) -> Option<Arc<Self>> {
+    pub(crate) fn per_second(rate: u32) -> Option<Arc<Self>> {
         Self::with_burst(rate, 1)
     }
 
     /// Build a limiter for `rate` requests/second allowing up to `burst`
     /// requests to fire back-to-back before steady-state pacing applies.
     /// `burst` is clamped to at least 1. Returns `None` when `rate == 0`.
-    pub fn with_burst(rate: u32, burst: u32) -> Option<Arc<Self>> {
+    pub(crate) fn with_burst(rate: u32, burst: u32) -> Option<Arc<Self>> {
         if rate == 0 {
             return None;
         }
@@ -121,7 +121,7 @@ impl RateLimiter {
 /// jitter. Returns 0 for `modulo <= 1`. Not cryptographically secure — it is
 /// only used to scatter inter-request timing so a WAF cannot lock onto a
 /// fixed cadence, which does not need real randomness.
-pub fn fast_jitter(modulo: u64) -> u64 {
+pub(crate) fn fast_jitter(modulo: u64) -> u64 {
     if modulo <= 1 {
         return 0;
     }
@@ -153,7 +153,11 @@ pub fn fast_jitter(modulo: u64) -> u64 {
 ///   `[center/2, center*3/2]` around a floor of [`EVASION_FLOOR_MS`]) so a
 ///   WAF cannot fingerprint a constant inter-request interval. Without it the
 ///   pause is simply `base_delay_ms + waf_extra_ms`.
-pub fn inter_request_pause(base_delay_ms: u64, waf_extra_ms: u64, evasion: bool) -> Duration {
+pub(crate) fn inter_request_pause(
+    base_delay_ms: u64,
+    waf_extra_ms: u64,
+    evasion: bool,
+) -> Duration {
     let base = base_delay_ms.saturating_add(waf_extra_ms);
     if !evasion {
         return Duration::from_millis(base);

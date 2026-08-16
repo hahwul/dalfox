@@ -1,6 +1,6 @@
 /// DOM Clobbering payloads that exploit named property access on DOM elements
 /// to override global variables and object properties used by application logic.
-pub fn get_dom_clobbering_payloads() -> Vec<String> {
+pub(crate) fn get_dom_clobbering_payloads() -> Vec<String> {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
 

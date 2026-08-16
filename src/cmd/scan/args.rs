@@ -50,7 +50,7 @@ impl ExplicitArgs {
     }
 
     /// Whether `id` (a `ScanArgs` field name) was supplied by the operator.
-    pub fn contains(&self, id: &str) -> bool {
+    pub(crate) fn contains(&self, id: &str) -> bool {
         self.0.contains(id)
     }
 
@@ -58,12 +58,13 @@ impl ExplicitArgs {
     /// subcommands, which *derive* `input_type` from which subcommand was
     /// invoked: choosing `dalfox file list.txt` is as deliberate as typing
     /// `-i file`, so a config-file `input_type` must not overwrite it.
-    pub fn insert(&mut self, id: &str) {
+    pub(crate) fn insert(&mut self, id: &str) {
         self.0.insert(id.to_string());
     }
 
     /// True when nothing was recorded — every non-CLI construction path.
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
@@ -87,10 +88,10 @@ pub const ONLY_POC_VALUES: &[&str] = &["v", "r", "a", "i", "V", "R", "A", "I"];
 /// `--baseline-mode filter`: drop findings already in the baseline, so the
 /// counts, the exit code, and `--limit` all describe only what is new. The
 /// CI-gate default.
-pub const BASELINE_MODE_FILTER: &str = "filter";
+pub(crate) const BASELINE_MODE_FILTER: &str = "filter";
 /// `--baseline-mode annotate`: keep every finding and tag each with
 /// `new: true|false`, for dashboards that want the whole set.
-pub const BASELINE_MODE_ANNOTATE: &str = "annotate";
+pub(crate) const BASELINE_MODE_ANNOTATE: &str = "annotate";
 pub const BASELINE_MODE_VALUES: &[&str] = &[BASELINE_MODE_FILTER, BASELINE_MODE_ANNOTATE];
 pub const ENCODER_VALUES: &[&str] = &[
     "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
@@ -169,7 +170,7 @@ pub const CLI_MAX_RETRY_DELAY_MS: u64 = 60_000;
 /// per-target `Instant::now() + Duration::from_secs(scan_timeout)` in
 /// `scan_loop::run_target_capped` can overflow and panic, so — like every other
 /// duration arg — this must be range-checked before it reaches the scan loop.
-pub const CLI_MAX_SCAN_TIMEOUT_SECS: u64 = 86_400;
+pub(crate) const CLI_MAX_SCAN_TIMEOUT_SECS: u64 = 86_400;
 // Enforce the "identical bound across CLI / server / MCP" claim at compile time
 // so a future edit to one constant can't silently diverge from the other.
 const _: () = assert!(CLI_MAX_SCAN_TIMEOUT_SECS == crate::job::MAX_SCAN_TIMEOUT_SECS);
@@ -819,7 +820,7 @@ impl ScanArgs {
     /// as opposed to it holding a built-in default. Config precedence hangs off
     /// this: a config value may fill a field the operator left alone, never one
     /// they chose — including when their choice equals the default.
-    pub fn was_explicit(&self, id: &str) -> bool {
+    pub(crate) fn was_explicit(&self, id: &str) -> bool {
         self.explicit.contains(id)
     }
 }
@@ -985,14 +986,14 @@ pub struct BlindOobArgs {
 }
 
 /// Default end-of-scan OOB drain window when `--blind-oob-wait` is unset.
-pub const DEFAULT_BLIND_OOB_WAIT_SECS: u64 = 30;
+pub(crate) const DEFAULT_BLIND_OOB_WAIT_SECS: u64 = 30;
 
 impl ScanArgs {
     /// Effective `--dedup-urls` mode: the operator's choice, else the built-in
     /// [`DEFAULT_DEDUP_URLS`]. The field is an `Option` so config precedence can
     /// tell "unset" from an explicit `exact`; every reader should go through
     /// this instead of unwrapping the field.
-    pub fn dedup_urls_mode(&self) -> &str {
+    pub(crate) fn dedup_urls_mode(&self) -> &str {
         self.dedup_urls.as_deref().unwrap_or(DEFAULT_DEDUP_URLS)
     }
 
@@ -1001,7 +1002,7 @@ impl ScanArgs {
     /// [`ScanArgs::dedup_urls_mode`] — an explicit `--baseline-mode filter` has
     /// to beat a config-file `annotate`, which a "field equals the default"
     /// test cannot express.
-    pub fn baseline_mode(&self) -> &str {
+    pub(crate) fn baseline_mode(&self) -> &str {
         self.baseline_mode_arg
             .as_deref()
             .unwrap_or(BASELINE_MODE_FILTER)
@@ -1010,14 +1011,14 @@ impl ScanArgs {
     /// Effective `--on-session-loss` policy: the operator's choice, else
     /// `abort`. `Option` so an explicit `--on-session-loss abort` beats a
     /// config-file `continue`; see [`ScanArgs::dedup_urls_mode`].
-    pub fn on_session_loss_mode(&self) -> &str {
+    pub(crate) fn on_session_loss_mode(&self) -> &str {
         self.on_session_loss_arg
             .as_deref()
             .unwrap_or(DEFAULT_ON_SESSION_LOSS)
     }
 
     /// True when `--blind-oob` was supplied (with or without a server list).
-    pub fn blind_oob_enabled(&self) -> bool {
+    pub(crate) fn blind_oob_enabled(&self) -> bool {
         self.oob.blind_oob.is_some()
     }
 
@@ -1027,7 +1028,7 @@ impl ScanArgs {
     /// `--blind-oob=,,`, or stray whitespace (`--blind-oob=" oast.fun , "`)
     /// degrade to a clean list (or the public mesh) instead of attempting a
     /// doomed registration against an empty host.
-    pub fn blind_oob_servers(&self) -> Vec<String> {
+    pub(crate) fn blind_oob_servers(&self) -> Vec<String> {
         let cleaned: Vec<String> = self
             .oob
             .blind_oob
@@ -1047,19 +1048,19 @@ impl ScanArgs {
     }
 
     /// Self-hosted interactsh auth token, if any.
-    pub fn blind_oob_secret(&self) -> Option<&str> {
+    pub(crate) fn blind_oob_secret(&self) -> Option<&str> {
         self.oob.blind_oob_secret.as_deref()
     }
 
     /// End-of-scan OOB drain window in seconds.
-    pub fn blind_oob_wait(&self) -> u64 {
+    pub(crate) fn blind_oob_wait(&self) -> u64 {
         self.oob
             .blind_oob_wait
             .unwrap_or(DEFAULT_BLIND_OOB_WAIT_SECS)
     }
 
     /// Build [`crate::oob::OobConfig`] from the parsed args + scan HTTP knobs.
-    pub fn oob_config(&self) -> crate::oob::OobConfig {
+    pub(crate) fn oob_config(&self) -> crate::oob::OobConfig {
         crate::oob::OobConfig {
             servers: self.blind_oob_servers(),
             secret: self.blind_oob_secret().map(str::to_string),
@@ -1077,7 +1078,7 @@ impl ScanArgs {
 
     /// Build a ScanArgs configured for preflight analysis only (no attack payloads).
     /// Used by both MCP preflight_dalfox and REST API /preflight endpoint.
-    pub fn for_preflight(opts: PreflightOptions) -> Self {
+    pub(crate) fn for_preflight(opts: PreflightOptions) -> Self {
         let timeout = if opts.timeout > 0 && opts.timeout < 300 {
             opts.timeout
         } else {

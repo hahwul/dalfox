@@ -19,7 +19,7 @@ pub mod term;
 /// above this. Taken from tokio's own public constant rather than hand-copying
 /// its `usize::MAX >> 3` definition, which is a private detail tokio is free to
 /// change — a stale local copy would make this clamp itself the panic.
-pub const MAX_SEMAPHORE_PERMITS: usize = tokio::sync::Semaphore::MAX_PERMITS;
+pub(crate) const MAX_SEMAPHORE_PERMITS: usize = tokio::sync::Semaphore::MAX_PERMITS;
 
 /// Clamp a configured concurrency into the range `Semaphore::new` accepts.
 ///
@@ -36,21 +36,20 @@ pub const MAX_SEMAPHORE_PERMITS: usize = tokio::sync::Semaphore::MAX_PERMITS;
 /// point is holding regardless of which validator ran must therefore floor at 1
 /// as well as cap. Anything near the ceiling is already "effectively
 /// unlimited", so no realistic scan changes.
-pub fn semaphore_permits(requested: usize) -> usize {
+pub(crate) fn semaphore_permits(requested: usize) -> usize {
     requested.clamp(1, MAX_SEMAPHORE_PERMITS)
 }
 
 // Re-export banner helpers at `crate::utils::*`
 pub use banner::print_banner_once;
 // Re-export scan_id helpers at `crate::utils::*`
-pub use scan_id::{make_scan_id, make_unique_scan_id, short_scan_id};
+pub(crate) use scan_id::{make_scan_id, make_unique_scan_id, short_scan_id};
 // Re-export http helpers at `crate::utils::*`
-pub use http::{
-    apply_header_overrides, apply_headers_ua_cookies, build_preflight_request, build_request,
-    build_request_with_cookie, compose_cookie_header_excluding, content_type_is_inert_data,
-    content_type_is_inert_data_with_nosniff, content_type_primary, headers_declare_nosniff,
-    is_htmlish_content_type, is_javascript_content_type, is_xss_scannable_content_type,
-    send_with_retry,
+pub(crate) use http::{
+    apply_header_overrides, build_preflight_request, build_request, build_request_with_cookie,
+    compose_cookie_header_excluding, content_type_is_inert_data_with_nosniff, content_type_primary,
+    headers_declare_nosniff, is_htmlish_content_type, is_javascript_content_type,
+    is_xss_scannable_content_type, send_with_retry,
 };
 
 // Re-export remote payload/wordlist getters at `crate::utils::*`
@@ -72,7 +71,7 @@ pub use crate::payload::get_remote_payloads;
 /// Returns a 16-char lowercase hex string (truncated SHA-256). 64 bits
 /// is plenty of collision resistance for finding identity within a run,
 /// and it keeps SARIF output compact.
-pub fn stable_finding_fingerprint(
+pub(crate) fn stable_finding_fingerprint(
     target_url: &str,
     param: &str,
     inject_type: &str,
@@ -127,7 +126,7 @@ fn target_identity_key_owned(url: &str) -> String {
 /// same parent path for path injection (e.g. `/api/v1/foo` vs
 /// `/api/v1/bar`) will both match a single finding. This mirrors the
 /// pre-existing prefix-match behavior; single-target scans are unaffected.
-pub fn finding_belongs_to_target(target_url: &str, finding_url: &str) -> bool {
+pub(crate) fn finding_belongs_to_target(target_url: &str, finding_url: &str) -> bool {
     if target_url == finding_url {
         return true;
     }

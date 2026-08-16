@@ -88,12 +88,13 @@ pub struct WafDetectionResult {
 }
 
 impl WafDetectionResult {
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.detected.is_empty()
     }
 
     /// Return the highest-confidence WAF detected, if any.
-    pub fn primary(&self) -> Option<&WafFingerprint> {
+    #[cfg(test)]
+    pub(crate) fn primary(&self) -> Option<&WafFingerprint> {
         self.detected.iter().max_by(|a, b| {
             a.confidence
                 .partial_cmp(&b.confidence)
@@ -102,7 +103,7 @@ impl WafDetectionResult {
     }
 
     /// Return all detected WAF types.
-    pub fn waf_types(&self) -> Vec<&WafType> {
+    pub(crate) fn waf_types(&self) -> Vec<&WafType> {
         self.detected.iter().map(|f| &f.waf_type).collect()
     }
 }
@@ -189,7 +190,7 @@ fn rules() -> &'static RulesData {
 ///
 /// This runs during preflight with zero extra requests — it only analyzes the
 /// headers and body already fetched for content-type / CSP checks.
-pub fn fingerprint_from_response(
+pub(crate) fn fingerprint_from_response(
     headers: &HeaderMap,
     body: Option<&str>,
     status_code: u16,
@@ -348,7 +349,7 @@ fn merge_fingerprint(result: &mut WafDetectionResult, fp: WafFingerprint) {
 }
 
 /// Merge two detection results together, keeping highest confidence per WAF.
-pub fn merge_results(a: &mut WafDetectionResult, b: WafDetectionResult) {
+pub(crate) fn merge_results(a: &mut WafDetectionResult, b: WafDetectionResult) {
     for fp in b.detected {
         merge_fingerprint(a, fp);
     }

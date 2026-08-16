@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 /// `--no-color`, `NO_COLOR=*`, or any other code path has set the global
 /// toggle via [`crate::NO_COLOR`].
 #[inline]
-pub fn color_enabled() -> bool {
+pub(crate) fn color_enabled() -> bool {
     !crate::NO_COLOR.load(Ordering::Relaxed)
 }
 
@@ -24,7 +24,7 @@ pub fn color_enabled() -> bool {
 /// progress rendering checks this so piped runs (`dalfox ... | tee log`,
 /// CI) don't get spammed with cursor-redrawing frames.
 #[inline]
-pub fn stdout_is_tty() -> bool {
+pub(crate) fn stdout_is_tty() -> bool {
     std::io::IsTerminal::is_terminal(&std::io::stdout())
 }
 
@@ -42,7 +42,7 @@ fn cols_of(term: console::Term) -> usize {
 /// a wrapped line breaks the `\r` redraw and strands a row of debris behind
 /// the cursor. They write to stdout, so stdout is the stream to measure.
 #[inline]
-pub fn term_cols() -> usize {
+pub(crate) fn term_cols() -> usize {
     cols_of(console::Term::stdout())
 }
 
@@ -52,7 +52,7 @@ pub fn term_cols() -> usize {
 /// fallback) whenever stdout is piped while stderr is a TTY, e.g.
 /// `dalfox scan … | tee log`.
 #[inline]
-pub fn term_cols_stderr() -> usize {
+pub(crate) fn term_cols_stderr() -> usize {
     cols_of(console::Term::stderr())
 }
 
@@ -60,7 +60,7 @@ pub fn term_cols_stderr() -> usize {
 /// Conservative: only consumes sequences starting `ESC [` followed by
 /// `0-9;` parameters and a final byte in `0x40..=0x7E`. Anything else
 /// passes through verbatim.
-pub fn strip_ansi(s: &str) -> String {
+pub(crate) fn strip_ansi(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(bytes.len());
     let mut i = 0;

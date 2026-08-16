@@ -25,15 +25,13 @@
 pub mod discovery;
 pub mod mining;
 
-pub use mining::detect_injection_context;
-
-pub use discovery::*;
-pub use mining::*;
-pub static REQUEST_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub(crate) use mining::detect_injection_context;
 
 use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
+pub use discovery::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+pub use mining::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use std::sync::Arc;
@@ -42,12 +40,16 @@ use tokio::sync::{Mutex, Semaphore};
 /// Parameters after Stage 1 (Discovery) and Stage 2 (Mining).
 /// Each `Param` has naive `valid_specials`/`invalid_specials` and a tentative
 /// `injection_context`, but `pre_encoding` is still `None`.
-pub type DiscoveredParams = Vec<Param>;
+// Named for the stage contract documented in `lib.rs`'s pipeline table; both
+// are plain `Vec<Param>`, so nothing needs to construct them by name.
+#[allow(dead_code)]
+pub(crate) type DiscoveredParams = Vec<Param>;
 
 /// Parameters after Stage 3 (Active Probing).
 /// Each `Param` now carries actively confirmed `valid_specials`/`invalid_specials`,
 /// a refined `injection_context`, and auto-detected `pre_encoding`.
-pub type ProbedParams = Vec<Param>;
+#[allow(dead_code)]
+pub(crate) type ProbedParams = Vec<Param>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Location {
@@ -163,14 +165,14 @@ pub struct Param {
 impl Param {
     /// HTTP-level parameter name (parent param when this is a nested-field
     /// virtual param, otherwise `name`).
-    pub fn effective_wire_name(&self) -> &str {
+    pub(crate) fn effective_wire_name(&self) -> &str {
         self.wire_name.as_deref().unwrap_or(&self.name)
     }
 }
 
 /// Set of special characters to probe with patterns like: dalfox'<char>dalfox"
 /// Order preserved for deterministic output.
-pub const SPECIAL_PROBE_CHARS: &[char] = &[
+pub(crate) const SPECIAL_PROBE_CHARS: &[char] = &[
     '/', '\\', '\'', '{', '`', '<', '>', '"', '(', ')', ';', '=', '|', '}', '[', '.', ':', ']',
     '+', ',', '$', '-',
 ];
@@ -182,7 +184,7 @@ pub const SPECIAL_PROBE_CHARS: &[char] = &[
 /// 1. Actively send mutated payloads per character (e.g. dalfox'<c>dalfox")
 /// 2. Parse the reflected segment boundaries to avoid false positives
 /// 3. Detect normalization (HTML entity encoding, URL encoding) and still treat as "valid"
-pub fn classify_special_chars(body: &str) -> (Vec<char>, Vec<char>) {
+pub(crate) fn classify_special_chars(body: &str) -> (Vec<char>, Vec<char>) {
     let mut valid = Vec::new();
     let mut invalid = Vec::new();
     for c in SPECIAL_PROBE_CHARS {
@@ -197,7 +199,7 @@ pub fn classify_special_chars(body: &str) -> (Vec<char>, Vec<char>) {
 
 /// Return common encoded variants (HTML entities / numeric) for a character.
 /// Used to treat encoded reflection as still valid.
-pub fn encoded_variants(c: char) -> Vec<&'static str> {
+pub(crate) fn encoded_variants(c: char) -> Vec<&'static str> {
     match c {
         '<' => vec!["&lt;", "&#60;"],
         '>' => vec!["&gt;", "&#62;"],
@@ -1413,7 +1415,7 @@ fn infer_location_for_bare_param(name: &str, target: &Target) -> Location {
 /// Return `-p` specs that are still absent from `params` after filtering +
 /// synthesis. Used by dry-run to surface agent-visible warnings (e.g. only
 /// `path`/`fragment` specs, which cannot be synthesized by name).
-pub fn unresolved_explicit_param_specs(
+pub(crate) fn unresolved_explicit_param_specs(
     params: &[Param],
     param_specs: &[String],
     target: &Target,

@@ -8,7 +8,7 @@
 // and identity/locale fields. Kept de-duplicated and ordered most-common-first
 // so the EWMA collapse heuristic and any name cap still see the highest-value
 // names early.
-pub const GF_PATTERNS_PARAMS: &[&str] = &[
+pub(crate) const GF_PATTERNS_PARAMS: &[&str] = &[
     // --- original gf-patterns xss.json seed ---
     "q",
     "s",

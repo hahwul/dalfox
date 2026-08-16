@@ -61,7 +61,7 @@ impl CspAnalysis {
     /// nonce, or a whitelisted host (see [`is_gadget_bypassable`]).
     ///
     /// [`is_gadget_bypassable`]: CspAnalysis::is_gadget_bypassable
-    pub fn is_nonce_or_hash_based(&self) -> bool {
+    pub(crate) fn is_nonce_or_hash_based(&self) -> bool {
         !self.nonce_values.is_empty() || !self.hash_values.is_empty()
     }
 
@@ -75,7 +75,7 @@ impl CspAnalysis {
     /// works when the nonce is predictable or reflected — a contingency we
     /// can't read off the header. (Under `strict-dynamic` we still emit a
     /// best-effort reuse payload, but that path is gated on `has_strict_dynamic`.)
-    pub fn is_gadget_bypassable(&self) -> bool {
+    pub(crate) fn is_gadget_bypassable(&self) -> bool {
         if self.missing_script_src || self.has_unsafe_inline || self.has_unsafe_eval {
             return true;
         }
@@ -94,13 +94,13 @@ impl CspAnalysis {
     /// `strict-dynamic`, no `unsafe-*`, and no whitelisted gadget host. Useful
     /// for reporting/telemetry; the payload generator simply emits nothing
     /// actionable in this case.
-    pub fn is_hardened(&self) -> bool {
+    pub(crate) fn is_hardened(&self) -> bool {
         self.is_nonce_or_hash_based() && !self.is_gadget_bypassable()
     }
 }
 
 /// Parse a CSP header value into an analysis struct.
-pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
+pub(crate) fn analyze_csp(csp_value: &str) -> CspAnalysis {
     let mut analysis = CspAnalysis::default();
 
     let directives: Vec<&str> = csp_value.split(';').map(str::trim).collect();
@@ -251,7 +251,7 @@ fn parse_hash_token(token: &str, lower: &str) -> Option<String> {
 }
 
 /// Generate CSP bypass payloads based on CSP analysis.
-pub fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
+pub(crate) fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
     let class_marker = markers::class_marker();
     let id_marker = markers::id_marker();
     let mut payloads = Vec::new();

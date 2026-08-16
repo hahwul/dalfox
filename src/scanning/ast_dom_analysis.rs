@@ -5004,7 +5004,7 @@ impl AstDomAnalyzer {
     /// Attach the set of `<script>` element IDs from the surrounding HTML
     /// so `document.getElementById('id').innerText = tainted` can be
     /// recognised as a JS-eval sink even when the lookup is inline.
-    pub fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
+    pub(crate) fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
         self.script_element_ids = ids;
         self
     }
@@ -5012,7 +5012,7 @@ impl AstDomAnalyzer {
     /// Mark that the response CSP enforces `require-trusted-types-for 'script'`,
     /// so a strict `'default'` Trusted Types policy in the page neutralizes
     /// TrustedHTML sinks and those (now false-positive) findings are suppressed.
-    pub fn with_trusted_types_enforced(mut self, enforced: bool) -> Self {
+    pub(crate) fn with_trusted_types_enforced(mut self, enforced: bool) -> Self {
         self.trusted_types_enforced = enforced;
         self
     }

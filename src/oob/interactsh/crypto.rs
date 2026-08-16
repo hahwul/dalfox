@@ -21,7 +21,7 @@ type CryptoResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send +
 /// RSA key material for one OOB session. Cloneable so a single keypair is
 /// generated once per session and reused across server-fallback attempts.
 #[derive(Clone)]
-pub struct SessionKeys {
+pub(crate) struct SessionKeys {
     private: RsaPrivateKey,
     /// base64(PEM(SPKI)) of the public key — the exact form interactsh sends in
     /// `/register`. interactsh wraps the SPKI DER in a PEM block and ignores the
@@ -31,7 +31,7 @@ pub struct SessionKeys {
 
 impl SessionKeys {
     /// Generate a fresh RSA-2048 keypair and pre-compute the base64 PEM public key.
-    pub fn generate() -> CryptoResult<SessionKeys> {
+    pub(crate) fn generate() -> CryptoResult<SessionKeys> {
         let mut rng = OsRng;
         let private = RsaPrivateKey::new(&mut rng, 2048)?;
         let public = RsaPublicKey::from(&private);
@@ -44,7 +44,7 @@ impl SessionKeys {
     }
 
     /// Decrypt the RSA-OAEP(SHA-256) wrapped AES key from a poll response.
-    pub fn decrypt_aes_key(&self, wrapped_b64: &str) -> CryptoResult<Vec<u8>> {
+    pub(crate) fn decrypt_aes_key(&self, wrapped_b64: &str) -> CryptoResult<Vec<u8>> {
         let ct = B64.decode(wrapped_b64.trim())?;
         let key = self.private.decrypt(Oaep::new::<Sha256>(), &ct)?;
         Ok(key)
@@ -52,7 +52,7 @@ impl SessionKeys {
 }
 
 /// Decrypt one interactsh `data` entry: base64 → `[16-byte IV][AES-256-CTR ct]`.
-pub fn decrypt_interaction(aes_key: &[u8], data_b64: &str) -> CryptoResult<Vec<u8>> {
+pub(crate) fn decrypt_interaction(aes_key: &[u8], data_b64: &str) -> CryptoResult<Vec<u8>> {
     use ctr::cipher::{KeyIvInit, StreamCipher};
     type Aes256Ctr = ctr::Ctr128BE<aes::Aes256>;
 

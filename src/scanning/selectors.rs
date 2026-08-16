@@ -6,32 +6,32 @@
 use scraper::Selector;
 use std::sync::OnceLock;
 
-pub fn universal() -> &'static Selector {
+pub(crate) fn universal() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     SEL.get_or_init(|| Selector::parse("*").expect("valid CSS universal selector"))
 }
 
-pub fn script() -> &'static Selector {
+pub(crate) fn script() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     SEL.get_or_init(|| Selector::parse("script").expect("valid CSS script selector"))
 }
 
-pub fn style() -> &'static Selector {
+pub(crate) fn style() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     SEL.get_or_init(|| Selector::parse("style").expect("valid CSS style selector"))
 }
 
-pub fn input_with_id_or_name() -> &'static Selector {
+pub(crate) fn input_with_id_or_name() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     SEL.get_or_init(|| Selector::parse("input[id], input[name]").expect("valid CSS input selector"))
 }
 
-pub fn form() -> &'static Selector {
+pub(crate) fn form() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     SEL.get_or_init(|| Selector::parse("form").expect("valid CSS form selector"))
 }
 
-pub fn input_textarea_select() -> &'static Selector {
+pub(crate) fn input_textarea_select() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     // `button[name]` is part of the HTML form-submitter set per the
     // spec — login forms commonly carry `<button name="action"
@@ -43,7 +43,7 @@ pub fn input_textarea_select() -> &'static Selector {
     })
 }
 
-pub fn meta_csp() -> &'static Selector {
+pub(crate) fn meta_csp() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
     SEL.get_or_init(|| {
         Selector::parse("meta[http-equiv][content]").expect("valid CSS meta CSP selector")

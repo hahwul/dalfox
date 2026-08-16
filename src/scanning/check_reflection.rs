@@ -22,9 +22,6 @@ use reqwest::Client;
 use std::sync::OnceLock;
 use tokio::time::{Duration, sleep};
 
-/// Re-export for callers outside this module (e.g. DOM verification, active probing).
-pub use crate::encoding::pre_encoding::apply_pre_encoding;
-
 /// Maximum number of iterative URL-decode passes when building payload variants.
 const MAX_URL_DECODE_ITERATIONS: usize = 4;
 
@@ -45,7 +42,7 @@ const MAX_PAYLOAD_OCCURRENCES: usize = 4096;
 /// points behind letter-stripping filters (e.g. `gsub(/[a-zA-Z]/, "")`),
 /// which would erase a normal marker but leave digits intact. Shared with
 /// `parameter_analysis::discovery` so both probe paths stay in sync.
-pub const NUMERIC_PROBE_MARKER: &str = "90197752";
+pub(crate) const NUMERIC_PROBE_MARKER: &str = "90197752";
 
 /// Consecutive WAF block responses (HTTP 403/406/429/503) tolerated before
 /// adaptive backoff engages. Below this, blocks are assumed transient.

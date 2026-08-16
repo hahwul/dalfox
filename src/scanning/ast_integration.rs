@@ -10,7 +10,7 @@ use super::selectors;
 /// into a `<script>` body — i.e. an eval-equivalent sink — even when the
 /// JS file has no `document.createElement('script')` of its own. The
 /// caller threads the returned set into `AstDomAnalyzer::with_script_element_ids`.
-pub fn extract_script_element_ids(html: &str) -> HashSet<String> {
+pub(crate) fn extract_script_element_ids(html: &str) -> HashSet<String> {
     let document = crate::utils::html::parse_document_bounded(html);
     script_element_ids_from_document(&document)
 }
@@ -36,7 +36,8 @@ fn script_element_ids_from_document(document: &Html) -> HashSet<String> {
 
 /// Extract JavaScript code from HTML response
 /// Looks for <script> tags and inline event handlers
-pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
+#[cfg(test)]
+pub(crate) fn extract_javascript_from_html(html: &str) -> Vec<String> {
     let document = crate::utils::html::parse_document_bounded(html);
     js_blocks_from_document(&document)
 }
@@ -47,7 +48,7 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
 /// both for the same response body; calling the two extractors separately
 /// parsed the full response through html5ever twice. Sharing one parse tree
 /// yields byte-identical results at half the HTML-parse cost.
-pub fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<String>) {
+pub(crate) fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<String>) {
     let document = crate::utils::html::parse_document_bounded(html);
     let js_blocks = js_blocks_from_document(&document);
     let script_ids = script_element_ids_from_document(&document);
@@ -118,7 +119,7 @@ fn js_blocks_from_document(document: &Html) -> Vec<String> {
 
 /// Collect resolved, deduped, same-origin `<script src>` URLs from `html`,
 /// resolved relative to `base` (the response URL). Cross-origin srcs are dropped.
-pub fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Vec<url::Url> {
+pub(crate) fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Vec<url::Url> {
     let document = crate::utils::html::parse_document_bounded(html);
     let selector = selectors::script();
     let mut seen = HashSet::new();
@@ -175,7 +176,7 @@ fn extract_search_param_key(source: &str) -> Option<&str> {
 ///
 /// [`CspAnalysis`]: crate::payload::xss_csp_bypass::CspAnalysis
 #[derive(Debug, Clone, Copy)]
-pub struct PageSecurityPosture {
+pub(crate) struct PageSecurityPosture {
     /// `require-trusted-types-for 'script'` is enforced, so the browser routes
     /// every DOM-XSS sink string through a Trusted Types policy.
     pub trusted_types_enforced: bool,
@@ -195,7 +196,7 @@ impl Default for PageSecurityPosture {
 }
 
 impl PageSecurityPosture {
-    pub fn from_csp(csp: Option<&crate::payload::xss_csp_bypass::CspAnalysis>) -> Self {
+    pub(crate) fn from_csp(csp: Option<&crate::payload::xss_csp_bypass::CspAnalysis>) -> Self {
         // A report-only policy enforces nothing, so it must not lower
         // confidence — its directives describe intent, not a restriction.
         let Some(csp) = csp.filter(|c| !c.report_only) else {
@@ -221,7 +222,7 @@ impl PageSecurityPosture {
         }
     }
 
-    pub fn from_target(target: &crate::target_parser::Target) -> Self {
+    pub(crate) fn from_target(target: &crate::target_parser::Target) -> Self {
         Self::from_csp(target.csp_analysis.as_ref())
     }
 
@@ -230,7 +231,7 @@ impl PageSecurityPosture {
     /// precedence preflight does, or the identical target grades differently
     /// depending on which interface ran the scan. Enforcing header, then
     /// report-only header, then a `<meta http-equiv>` policy.
-    pub fn from_response(headers: &reqwest::header::HeaderMap, body: &str) -> Self {
+    pub(crate) fn from_response(headers: &reqwest::header::HeaderMap, body: &str) -> Self {
         let header_csp = headers
             .get("content-security-policy")
             .and_then(|v| v.to_str().ok())
@@ -417,7 +418,7 @@ fn extract_search_param_value<'a>(payload: &'a str, key: &str) -> &'a str {
     }
 }
 
-pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
+pub(crate) fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
     let marker = crate::scanning::markers::class_marker();
     // Sink-aware payload shape:
     //   * URL-attribute sinks (`src`, `href`, `xlink:href`, …) receive an
@@ -529,12 +530,6 @@ fn source_uses_bootstrap_query_param(source: &str) -> bool {
         || source.contains("postMessage")
 }
 
-pub fn has_self_bootstrap_for_source_in_html(html: &str, source: &str) -> bool {
-    extract_javascript_from_html(html)
-        .into_iter()
-        .any(|js_code| has_self_bootstrap_verification(&js_code, source))
-}
-
 /// Replace or optionally insert a query parameter in a URL.
 /// When `insert_if_missing` is false, returns the original URL unchanged if the key is not found.
 fn modify_query_param(
@@ -587,7 +582,7 @@ fn build_nested_search_param_value(chain: &[&str], payload: &str) -> Option<Stri
 /// Build a browser-usable PoC URL for DOM-XSS findings when the source is carried
 /// in the URL itself (for example `location.hash` or `location.search`) or when
 /// the page bootstraps browser state from a known query parameter such as `seed`.
-pub fn build_dom_xss_poc_url(base_url: &str, source: &str, payload: &str) -> String {
+pub(crate) fn build_dom_xss_poc_url(base_url: &str, source: &str, payload: &str) -> String {
     let Ok(mut url) = url::Url::parse(base_url) else {
         return base_url.to_string();
     };
@@ -651,7 +646,7 @@ pub fn build_dom_xss_poc_url(base_url: &str, source: &str, payload: &str) -> Str
 
 /// Build a concise manual reproduction hint for DOM-XSS sources that are not
 /// naturally carried in the URL itself.
-pub fn build_dom_xss_manual_poc_hint(
+pub(crate) fn build_dom_xss_manual_poc_hint(
     base_url: &str,
     source: &str,
     payload: &str,
@@ -811,7 +806,7 @@ fn has_storage_bootstrap(normalized_js: &str, storage_api: &str, key: &str) -> b
 /// Confirm pages that bootstrap a non-URL DOM source from a predictable query
 /// parameter in the same script block, which lets Dalfox emit a stronger result
 /// for deterministic self-triggering xssmaze-style flows.
-pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
+pub(crate) fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
     let normalized_js = normalize_js_for_pattern_matching(js_code);
     if !has_seed_query_bootstrap(&normalized_js) {
         return false;
@@ -941,7 +936,8 @@ pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
 
 /// Analyze JavaScript code for DOM XSS vulnerabilities using AST analysis
 /// Returns a list of (vulnerability, payload, description) tuples
-pub fn analyze_javascript_for_dom_xss(
+#[cfg(test)]
+pub(crate) fn analyze_javascript_for_dom_xss(
     js_code: &str,
     _url: &str,
 ) -> Vec<(
@@ -961,7 +957,7 @@ pub fn analyze_javascript_for_dom_xss(
 /// `require-trusted-types-for 'script'`; when set, a strict `'default'`
 /// Trusted Types policy in the page suppresses the (now false-positive)
 /// TrustedHTML-sink findings it neutralizes.
-pub fn analyze_javascript_for_dom_xss_with_html_context(
+pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     js_code: &str,
     _url: &str,
     script_element_ids: &HashSet<String>,
@@ -1076,7 +1072,7 @@ pub(crate) fn build_ast_dom_xss_result(
 /// CLI does — they previously skipped it because they didn't run the
 /// preflight step that produced the response body, so identical
 /// targets produced 0 findings via API but multiple via CLI.
-pub fn run_initial_ast_dom_analysis(
+pub(crate) fn run_initial_ast_dom_analysis(
     response_text: &str,
     target_url: &str,
     target_method: &str,

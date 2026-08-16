@@ -276,7 +276,7 @@ impl MiningSampleStats {
     }
 }
 
-pub fn detect_injection_context(text: &str) -> InjectionContext {
+pub(crate) fn detect_injection_context(text: &str) -> InjectionContext {
     // Inner marker survives every reflection form classified by
     // `classify_probe_reflection` (Full / PrefixOnly / SuffixOnly /
     // InnerOnly), so it's the most reliable anchor for context inference
@@ -312,7 +312,7 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
 /// reflection the context classifier anchored on. Uses raw response slicing
 /// (inline `<script>` content is CDATA-like, not HTML-entity-decoded by the
 /// browser), so the prefix matches the JS source the browser actually parses.
-pub fn detect_js_breakout(text: &str) -> Option<String> {
+pub(crate) fn detect_js_breakout(text: &str) -> Option<String> {
     let inner = crate::scanning::markers::inner_marker();
     let marker = if text.contains(inner) {
         inner
@@ -348,7 +348,7 @@ fn rfind_ascii_case_insensitive(bytes: &[u8], before: usize, needle: &[u8]) -> O
         .find(|&start| bytes[start..start + needle.len()].eq_ignore_ascii_case(needle))
 }
 
-pub fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option<String> {
+pub(crate) fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option<String> {
     let mp = text.find(marker)?;
     // Find the enclosing inline `<script …>` opening tag before the reflection.
     // `<script` (case-insensitive) never matches a closing `</script>` tag (the
@@ -376,7 +376,7 @@ pub fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option<String
 
 /// Like `detect_injection_context` but uses a caller-supplied marker string.
 /// Useful for probes that don't use the standard alphanumeric marker (e.g. numeric-only probes).
-pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> InjectionContext {
+pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> InjectionContext {
     if !text.contains(marker) {
         return InjectionContext::Html(None);
     }
@@ -539,7 +539,7 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
 ///   * any occurrence lives outside an HTML attribute (text node,
 ///     `<script>`, `<style>`), or
 ///   * the attribute name isn't in the recognised innerHTML-sink set.
-pub fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static str> {
+pub(crate) fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static str> {
     if marker.is_empty() || !text.contains(marker) {
         return None;
     }

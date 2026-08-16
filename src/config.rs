@@ -173,7 +173,7 @@ impl Config {
     /// `every_was_explicit_id_is_a_real_clap_argument` in `config::tests` reads
     /// this function's body and fails if an id here does not name a real clap
     /// argument, or does not match the field the same block assigns.
-    pub fn apply_to_scan_args_if_default(&self, args: &mut crate::cmd::scan::ScanArgs) {
+    pub(crate) fn apply_to_scan_args_if_default(&self, args: &mut crate::cmd::scan::ScanArgs) {
         if let Some(scan) = &self.scan {
             // INPUT
             if let Some(v) = &scan.input_type
@@ -921,7 +921,7 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
 // Resolve the configuration directory:
 // - $XDG_CONFIG_HOME/dalfox if XDG_CONFIG_HOME is set
 // - else $HOME/.config/dalfox
-pub fn resolve_config_dir() -> Result<PathBuf, io::Error> {
+pub(crate) fn resolve_config_dir() -> Result<PathBuf, io::Error> {
     if let Ok(xdg) = env::var("XDG_CONFIG_HOME")
         && !xdg.trim().is_empty()
     {
@@ -939,7 +939,8 @@ pub fn resolve_config_dir() -> Result<PathBuf, io::Error> {
 }
 
 // Save a config back to disk in the detected format.
-pub fn save(
+#[cfg(test)]
+pub(crate) fn save(
     config: &Config,
     path: &Path,
     format: ConfigFormat,

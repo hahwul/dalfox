@@ -1,5 +1,5 @@
 // inHTML, inAttr, ETC
-pub const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
+pub(crate) const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
     "alert(1)",                      // alert
     "prompt`1`",                     // prompt with backtick
     "confirm(1)",                    // confirm
@@ -21,7 +21,7 @@ pub const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
 ];
 
 // for inJS
-pub const XSS_JAVASCRIPT_PAYLOADS: &[&str] = &[
+pub(crate) const XSS_JAVASCRIPT_PAYLOADS: &[&str] = &[
     "alert(1)",                                                         // alert
     "alert`1`",                                                         // alert with backtick
     "prompt(1)",                                                        // prompt

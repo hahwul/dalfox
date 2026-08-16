@@ -33,7 +33,7 @@ pub fn make_scan_id(seed: &str) -> String {
 /// false. Callers hold whatever lock guards their id store and pass a closure
 /// that checks membership, so the check-and-reserve stays atomic at the call
 /// site. Shared by the REST server's `/scan` handlers and the MCP scan tool.
-pub fn make_unique_scan_id(seed: &str, exists: impl Fn(&str) -> bool) -> String {
+pub(crate) fn make_unique_scan_id(seed: &str, exists: impl Fn(&str) -> bool) -> String {
     let mut id = make_scan_id(seed);
     let mut attempt: u32 = 0;
     while exists(&id) {
