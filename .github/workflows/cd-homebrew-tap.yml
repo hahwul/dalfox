@@ -19,14 +19,18 @@ jobs:
           commit_email: hahwul@gmail.com
           depends_on: |
             "rust"
-          # The man page is rendered by the binary we just built (`dalfox man`)
-          # instead of shipping a generated .1 in the source tree, so it can
-          # never drift from the CLI definition.
+          # The man page and the shell completions are rendered by the binary we
+          # just built (`dalfox man`, `dalfox completion <shell>`) instead of
+          # shipping generated copies in the source tree, so neither can drift
+          # from the CLI definition. `generate_completions_from_executable`
+          # passes the shell as a positional argument by default, which is
+          # exactly the `dalfox completion <shell>` form.
           install: |
             system "cargo build --release"
             (buildpath/"dalfox.1").write Utils.safe_popen_read("#{buildpath}/target/release/dalfox", "man")
             bin.install "target/release/dalfox"
             man1.install "dalfox.1"
+            generate_completions_from_executable(bin/"dalfox", "completion")
           test: system "#{bin}/dalfox", "-V"
           update_readme_table: false
           skip_commit: false

@@ -38,8 +38,15 @@ package() {
     install -Dm0755 -t "$pkgdir/usr/bin/" "target/release/$pkgname"
     install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE.txt
     install -Dm0644 -t "$pkgdir/usr/share/doc/$pkgname/" README.md
-    # The man page is rendered by the binary we just built (`dalfox man`)
-    # instead of shipping a generated .1 in the source tree.
+    # The man page and the shell completions are rendered by the binary we just
+    # built (`dalfox man`, `dalfox completion <shell>`) instead of shipping
+    # generated copies in the source tree.
     "target/release/$pkgname" man > "$pkgname.1"
     install -Dm0644 "$pkgname.1" "$pkgdir/usr/share/man/man1/$pkgname.1"
+    "target/release/$pkgname" completion bash > "$pkgname.bash"
+    "target/release/$pkgname" completion zsh > "_$pkgname"
+    "target/release/$pkgname" completion fish > "$pkgname.fish"
+    install -Dm0644 "$pkgname.bash" "$pkgdir/usr/share/bash-completion/completions/$pkgname"
+    install -Dm0644 "_$pkgname" "$pkgdir/usr/share/zsh/site-functions/_$pkgname"
+    install -Dm0644 "$pkgname.fish" "$pkgdir/usr/share/fish/vendor_completions.d/$pkgname.fish"
 }

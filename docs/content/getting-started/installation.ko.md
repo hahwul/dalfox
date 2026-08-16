@@ -97,6 +97,20 @@ dalfox --version
 
 `dalfox 3.1.2` 같은 버전 정보와 함께 Dalfox 배너가 보이면 됩니다.
 
+## 셸 자동완성
+
+Homebrew, AUR 패키지, `.deb` / `.rpm` 패키지, Nix 플레이크로 설치하면 bash·zsh·fish 자동완성이 함께 설치되므로 따로 할 일이 없습니다.
+
+Cargo, 릴리스 아카이브, 소스 빌드처럼 다른 방법으로 설치했다면 직접 생성하면 됩니다.
+
+```bash
+dalfox completion bash > /etc/bash_completion.d/dalfox
+dalfox completion zsh > "${fpath[1]}/_dalfox"
+dalfox completion fish > ~/.config/fish/completions/dalfox.fish
+```
+
+`powershell`과 `elvish`도 지원합니다. 자세한 내용은 [CLI 레퍼런스](../../reference/cli/)를 참조하세요.
+
 ## 도움말 보기
 
 Dalfox는 [clap](https://github.com/clap-rs/clap)을 쓰기 때문에 도움말을 언제든 볼 수 있습니다.
