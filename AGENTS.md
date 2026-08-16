@@ -44,8 +44,12 @@ Top-level commands:
 - `server`
 - `payload`
 - `mcp`
+- `completion` (writes a `clap_complete` shell script to stdout; `bash`, `zsh`, `fish`, `powershell`, `elvish`)
 - hidden compatibility commands: `url`, `file`, `pipe`
 - hidden packaging helper: `man` (renders the roff man page to stdout)
+
+Both `man` and `completion` are dispatched immediately after parsing, before the
+banner/config machinery writes anything, so stdout stays a pure artifact.
 
 Behavioral default:
 - No subcommand => defaults to `scan` in `src/main.rs`.

@@ -5,7 +5,7 @@ weight = 1
 toc = true
 +++
 
-Dalfox is organised into four subcommands, plus the built-in `help`. The default (when you just pass a target) is `scan`.
+Dalfox is organised into five subcommands, plus the built-in `help`. The default (when you just pass a target) is `scan`.
 
 ```
 dalfox [SUBCOMMAND] [TARGET] [FLAGS]
