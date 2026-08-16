@@ -387,3 +387,48 @@ fn parse_report(
 
 #[cfg(test)]
 mod tests;
+
+/// Load `--baseline` before any request goes out.
+///
+/// Up front on purpose: a stale or malformed baseline path is exactly what a
+/// pipeline gets wrong, and finding out after a 20-minute scan is too late.
+/// The warnings go to stderr for every format (stdout stays a clean machine
+/// payload) rather than through `log_warn`, which only speaks in `plain`.
+pub(crate) fn load_from_args(args: &super::args::ScanArgs) -> Option<Baseline> {
+    args.baseline.as_ref().map(|path| {
+        // `--output` pointed at the baseline overwrites it with this run's
+        // report. Under the default `filter` mode that report holds only the
+        // NEW findings, so the recorded backlog is destroyed and the next run
+        // re-reports all of it. Refreshing a baseline means re-running WITHOUT
+        // `--baseline`; warn rather than refuse, since `annotate` mode writes a
+        // complete report and is a legitimate way to do it.
+        if args.output.as_deref() == Some(path.as_str()) {
+            eprintln!(
+                "Warning: --output and --baseline are the same path ('{}'); under --baseline-mode filter this overwrites the baseline with new findings only. Re-run without --baseline to refresh it.",
+                path
+            );
+        }
+        // `--limit` stops the scan once N findings accrue, and that count is
+        // taken before the baseline diff runs. A target whose first N findings
+        // are all already known therefore halts early and reports zero new
+        // findings without having tested the rest of its parameters.
+        if args.limit.is_some() {
+            eprintln!(
+                "Warning: --limit counts findings before the --baseline diff, so a run whose first {} findings are all in the baseline stops early and reports 0 new. Drop --limit when gating on new findings.",
+                args.limit.unwrap_or(0)
+            );
+        }
+        let loaded = load(path, args.baseline_mode());
+        match &loaded.warning {
+            Some(w) => eprintln!("Warning: {} — baseline diff disabled", w),
+            None => super::logging::log_info(
+                args,
+                &format!(
+                    "baseline loaded: {} known findings from {}",
+                    loaded.entries, path
+                ),
+            ),
+        }
+        loaded
+    })
+}

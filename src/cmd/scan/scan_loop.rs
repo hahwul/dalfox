@@ -11,9 +11,11 @@ use super::poc::render_finding_block;
 use super::session::{ProbePhase, SessionMonitor};
 use crate::target_parser::Target;
 use crate::utils::semaphore_permits;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 /// Host-group slots per configured concurrent target. Groups are cheap
 /// relative to targets and spend part of their life holding no target permit,
@@ -270,347 +272,26 @@ pub(crate) async fn run_scan_loop(
         // session; a dead session on one of them says nothing about a
         // different host in the same run.
         let session_lost_group = Arc::new(AtomicBool::new(false));
-        group_handles.spawn(async move {
-            // Released when this group finishes, admitting the next one.
-            let _group_permit = group_permit;
-            // Skip the (expensive) payload-counting loop entirely when no
-            // overall progress bar will be drawn — generating ~10k payloads
-            // per param twice (here and again inside run_scanning) added a
-            // measurable CPU tax for every --silence / non-TTY scan.
-            let overall_pb: Option<Arc<indicatif::ProgressBar>> = if let Some(ref mp) =
-                multi_pb_clone
-            {
-                // Calculate total overall tasks for this group. Must mirror what
-                // run_scanning actually increments — one tick per reflection
-                // payload, one per DOM payload — otherwise the overall bar rolls
-                // past 100% (the previous reflection-only count was the cause).
-                let mut total_overall_tasks = 0u64;
-                for target in &group {
-                    for param in &target.reflection_params {
-                        let reflection_payloads = if let Some(context) = &param.injection_context {
-                            crate::scanning::xss_common::get_dynamic_payloads(context, &args_arc)
-                                .unwrap_or_else(|_| vec![])
-                        } else {
-                            crate::scanning::xss_common::get_dynamic_payloads(
-                                &crate::parameter_analysis::InjectionContext::Html(None),
-                                &args_arc,
-                            )
-                            .unwrap_or_else(|_| vec![])
-                        };
-                        let dom_payloads = crate::scanning::get_dom_payloads(param, &args_arc)
-                            .unwrap_or_else(|_| vec![]);
-                        total_overall_tasks +=
-                            reflection_payloads.len() as u64 + dom_payloads.len() as u64;
-                    }
-                }
-                let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
-                // See `crate::scanning::req_per_sec_tracker` for why we
-                // replace `{per_sec}` (pb-position rate, inflated by
-                // skipped-payload `inc(1)` calls) with a `REQUEST_COUNT`-delta
-                // tracker.
-                let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
-                pb.set_style(
-                    indicatif::ProgressStyle::default_bar()
-                        .template("{spinner:.cyan} [{elapsed_precise}] [{bar:28.45/238}] {pos:>5}/{len:5} · {req_per_sec} · {wave}")
-                        .expect("valid progress bar template")
-                        .tick_chars(crate::utils::shimmer::TICK_CHARS)
-                        .with_key(
-                            "req_per_sec",
-                            crate::scanning::req_per_sec_tracker(req_start),
-                        )
-                        .with_key(
-                            "wave",
-                            crate::utils::shimmer::wave_tracker(
-                                "Overall scanning".to_string(),
-                                crate::utils::shimmer::BAR_WAVE_RESERVE,
-                            ),
-                        )
-                        .progress_chars("█▉▊▋▌▍▎▏░"),
-                );
-                pb.enable_steady_tick(Duration::from_millis(
-                    crate::utils::shimmer::FRAME_MS as u64,
-                ));
-                Some(Arc::new(pb))
-            } else {
-                None
-            };
-
-            // Also a `JoinSet`: when the run stops early under `--limit` the
-            // group task itself is aborted, and a `Vec<JoinHandle>` would let
-            // its in-flight targets detach and keep issuing requests. A
-            // `JoinSet` aborts them when it drops.
-            let mut target_handles = tokio::task::JoinSet::new();
-            // task id -> target URL, so a panicking task can be attributed to
-            // the target it was scanning (a `JoinError` carries only the id).
-            let mut panicked_target_of: std::collections::HashMap<tokio::task::Id, String> =
-                std::collections::HashMap::new();
-
-            for target in group {
-                if let Some(lim) = args_arc.limit
-                    && findings_count_group.load(Ordering::Relaxed) >= lim
-                {
-                    break;
-                }
-                // SIGINT bail-out at the per-target dispatch boundary —
-                // skip queuing any more targets once the user pressed
-                // Ctrl-C, even if some are still pending.
-                if cancel_flag_group.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
-                }
-                let Ok(permit) = global_semaphore_clone.clone().acquire_owned().await else {
-                    break;
-                };
-                // Session-loss bail-out at the same boundary. Once the shared
-                // session for this host is gone, every remaining target would
-                // be scanned against a login page — the exact silent
-                // false-negative run this exists to prevent. Record each one as
-                // SESSION_LOST rather than letting target_summary call them
-                // clean.
-                //
-                // Checked *after* acquiring the permit, not before: at
-                // `--max-concurrent-targets 1` the sibling that discovers the
-                // dead session is still holding the permit when this iteration
-                // begins, so a pre-acquire check would read a stale `false` and
-                // dispatch the target anyway. Targets already in flight are not
-                // recalled — their own post-scan probe covers them.
-                if session_lost_group.load(Ordering::Relaxed) {
-                    skipped_targets_group.lock().await.insert(
-                        target.url.to_string(),
-                        crate::cmd::error_codes::SESSION_LOST,
-                    );
-                    // `cancelled`, not `completed`: this target was never
-                    // tested, so a later run must pick it up again.
-                    if let Some(sf) = &state_file_group {
-                        sf.record(
-                            target.url.as_str(),
-                            &target.method,
-                            super::state_file::TargetOutcome::Cancelled,
-                        );
-                    }
-                    drop(permit);
-                    continue;
-                }
-                let args_clone = args_arc.clone();
-                let results_clone_inner = results_clone.clone();
-                let multi_pb_clone_inner = multi_pb_clone.clone();
-                let overall_pb_clone = overall_pb.clone();
-                let scan_idx_clone = scan_idx.clone();
-                let total_targets_copy = total_targets;
-                let findings_count_target = findings_count_group.clone();
-                let finding_tx_target = finding_tx_group.clone();
-                let cancel_flag_inner = cancel_flag_group.clone();
-                let session_monitor_target = session_monitor_group.clone();
-                let session_lost_target = session_lost_group.clone();
-                let skipped_targets_target = skipped_targets_group.clone();
-                let state_file_target = state_file_group.clone();
-
-                let multi_pb_active = multi_pb_clone_inner.is_some();
-                let panic_target_url = target.url.to_string();
-                let spawned = target_handles.spawn(async move {
-                    if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
-                        // Re-validate the session before spending this target's
-                        // request budget. Throttled: on a short run the preflight
-                        // baseline is seconds old and re-probing proves nothing
-                        // (see `session::pre_dispatch_probe_due`).
-                        if let Some(monitor) = &session_monitor_target
-                            && monitor
-                                .check(&target, ProbePhase::PreDispatch)
-                                .await
-                                .is_some()
-                            && monitor.abort_on_loss
-                        {
-                            session_lost_target.store(true, Ordering::Relaxed);
-                            skipped_targets_target.lock().await.insert(
-                                target.url.to_string(),
-                                crate::cmd::error_codes::SESSION_LOST,
-                            );
-                            if let Some(sf) = &state_file_target {
-                                sf.record(
-                                    target.url.as_str(),
-                                    &target.method,
-                                    super::state_file::TargetOutcome::Cancelled,
-                                );
-                            }
-                            drop(permit);
-                            return;
-                        }
-                        let __scan_spinner = {
-                            // When the indicatif bar is active, run_scanning renders a
-                            // per-target progress bar with rate/ETA — suppress the stdout
-                            // spinner so we don't show two competing scan indicators.
-                            let enabled =
-                                !args_clone.silence && total_targets_copy == 1 && !multi_pb_active;
-                            let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
-                            start_spinner(
-                                spinner_allowed,
-                                enabled,
-                                if total_targets_copy > 1 {
-                                    format!(
-                                        "[{}/{}] scanning: {}",
-                                        current, total_targets_copy, target.url
-                                    )
-                                } else {
-                                    format!("scanning: {}", target.url)
-                                },
-                            )
-                        };
-                        // Per-target cancellation flag. With a `--scan-timeout`
-                        // set, hand `run_scanning` a fresh per-target flag
-                        // (seeded from the real Ctrl-C flag) so the cap cancels
-                        // only this target — never the shared SIGINT flag, which
-                        // would abort every sibling and skip all pending targets
-                        // (see `run_target_capped`). With no cap, pass the shared
-                        // flag straight through so the common path keeps its
-                        // zero-overhead direct wiring.
-                        let timeout_set = args_clone.scan_timeout > 0;
-                        let target_cancel = if timeout_set {
-                            Arc::new(AtomicBool::new(cancel_flag_inner.load(Ordering::Relaxed)))
-                        } else {
-                            cancel_flag_inner.clone()
-                        };
-                        let scan_fut = crate::scanning::run_scanning(
-                            &target,
-                            args_clone.clone(),
-                            // No `params_done`: the CLI renders its own
-                            // indicatif progress bar instead.
-                            crate::scanning::ScanRunHandles::new(
-                                results_clone_inner,
-                                findings_count_target,
-                            )
-                            .with_progress(multi_pb_clone_inner, overall_pb_clone)
-                            .with_cancel(target_cancel.clone())
-                            .with_finding_tx(finding_tx_target),
-                        );
-                        // Honor --scan-timeout as a hard wall-clock cap per
-                        // target. When a slow endpoint streams a partial body
-                        // and pins every phase at the per-request `--timeout`,
-                        // the per-target scan would otherwise serialize each
-                        // phase × per-request timeout and run far longer than
-                        // the user expects. Setting the cap to 0 disables it.
-                        let (timed_out, scan_report) = if timeout_set {
-                            run_target_capped(
-                                scan_fut,
-                                args_clone.scan_timeout,
-                                &cancel_flag_inner,
-                                &target_cancel,
-                            )
-                            .await
-                        } else {
-                            (false, scan_fut.await)
-                        };
-                        if timed_out && !args_clone.silence {
-                            eprintln!(
-                                "[scan] {} exceeded --scan-timeout ({}s); cancelling target (stops at next checkpoint)",
-                                target.url, args_clone.scan_timeout,
-                            );
-                        }
-                        if let Some((tx, done_rx)) = __scan_spinner {
-                            let _ = tx.send(());
-                            let _ = done_rx.await;
-                        }
-                        // Post-scan re-validation — the probe that actually
-                        // catches the reported failure: a session that survived
-                        // preflight and died an hour into the injection stage,
-                        // leaving every request after that answered by a login
-                        // page. Never throttled, and skipped only when the run
-                        // was cut short anyway (Ctrl-C / --scan-timeout), where
-                        // "incomplete" is already established and a login-page
-                        // probe would just be noise.
-                        let mut session_died = false;
-                        if let Some(monitor) = &session_monitor_target
-                            && !timed_out
-                            && !cancel_flag_inner.load(Ordering::Relaxed)
-                            && monitor.check(&target, ProbePhase::PostScan).await.is_some()
-                        {
-                            session_died = true;
-                            if monitor.abort_on_loss {
-                                // Nothing left to abort for *this* target, but
-                                // the rest of the host group is still ahead of
-                                // us.
-                                session_lost_target.store(true, Ordering::Relaxed);
-                            }
-                        }
-
-                        // Terminal state for `--state-file`. Only a target that
-                        // ran to the end under a live session is `completed`
-                        // and therefore skippable next run; a Ctrl-C, a
-                        // `--scan-timeout` expiry, a session that died
-                        // mid-scan, or a `--limit` cap that cut the dispatch
-                        // loop short all leave coverage unknown, so they are
-                        // recorded `cancelled` and retried. `--limit` matters
-                        // as much as the others even though the run "succeeded":
-                        // `limit` is part of the config hash, so re-running the
-                        // identical command would skip this target forever with
-                        // most of its parameters never tested.
-                        if let Some(sf) = &state_file_target {
-                            let outcome = if timed_out
-                                || cancel_flag_inner.load(Ordering::Relaxed)
-                                || session_died
-                                || scan_report.limit_stopped
-                            {
-                                super::state_file::TargetOutcome::Cancelled
-                            } else {
-                                super::state_file::TargetOutcome::Completed
-                            };
-                            sf.record(target.url.as_str(), &target.method, outcome);
-                        }
-                    } else if let Some(sf) = &state_file_target {
-                        // `--skip-xss-scanning`: the injection stage is off, but
-                        // preflight, discovery, and mining already ran for this
-                        // target and that is the whole run. Recording it means a
-                        // resumed discovery-only campaign makes progress instead
-                        // of redoing every target while looking resumable. Safe
-                        // because `skip_xss_scanning` is part of the config hash:
-                        // a later run that does scan does not reuse these.
-                        sf.record(
-                            target.url.as_str(),
-                            &target.method,
-                            super::state_file::TargetOutcome::Completed,
-                        );
-                    }
-                    drop(permit);
-                });
-                panicked_target_of.insert(spawned.id(), panic_target_url);
-            }
-
-            while let Some(joined) = target_handles.join_next().await {
-                // Surface panics from per-target scan tasks instead of letting
-                // them disappear silently — a panic here points to a bug in
-                // the scanning pipeline and operators need a chance to see it.
-                if let Err(e) = joined
-                    && e.is_panic()
-                {
-                    // Sanitized: a panic message quotes the data that caused
-                    // it, which for this pipeline can be bytes straight from a
-                    // scanned response — raw CR/LF there forges log lines.
-                    eprintln!(
-                        "[scan] target task panicked: {}",
-                        crate::utils::log::sanitize_log_message(&e.to_string())
-                    );
-                    // Logging alone still left the target reported `clean`:
-                    // it produced no findings and nothing marked it otherwise,
-                    // which for a scanner is the worst possible outcome. Record
-                    // it the same way the preflight/analysis stage does.
-                    if let Some(url) = panicked_target_of.get(&e.id()) {
-                        skipped_targets_group
-                            .lock()
-                            .await
-                            .insert(url.clone(), crate::cmd::error_codes::INTERNAL_ERROR);
-                    }
-                }
-                // Update global overall progress line when multiple targets
-                overall_done_clone.fetch_add(1, Ordering::Relaxed);
-                // overall ticker handles rendering globally
-            }
-
-            if let Some(pb) = overall_pb {
-                crate::scanning::finish_scan_bar(
-                    &pb,
-                    console::style("✓").green().to_string(),
-                    format!("All scanning completed for {}", host),
-                );
-            }
-        });
+        group_handles.spawn(scan_host_group(HostGroupCtx {
+            host,
+            group,
+            group_permit,
+            global_semaphore_clone,
+            multi_pb_clone,
+            args_arc,
+            results_clone,
+            findings_count_group,
+            finding_tx_group,
+            scan_idx,
+            overall_done_clone,
+            cancel_flag_group,
+            session_monitor_group,
+            skipped_targets_group,
+            state_file_group,
+            session_lost_group,
+            total_targets,
+            spinner_allowed,
+        }));
     }
 
     while let Some(joined) = group_handles.join_next().await {
@@ -651,6 +332,394 @@ pub(crate) async fn run_scan_loop(
         && e.is_panic()
     {
         eprintln!("[scan] finding printer task panicked: {}", e);
+    }
+}
+
+/// The handles one host group's scan task needs.
+///
+/// Bundled rather than captured one by one: the task body took fifteen
+/// separately-cloned locals, so adding a handle meant editing two places that
+/// had to stay in step. Cloning this is the same set of refcount bumps the
+/// individual `let … = ….clone();` lines performed.
+pub(crate) struct HostGroupCtx {
+    pub(crate) host: String,
+    pub(crate) group: Vec<Target>,
+    pub(crate) group_permit: tokio::sync::OwnedSemaphorePermit,
+    pub(crate) global_semaphore_clone: Arc<tokio::sync::Semaphore>,
+    pub(crate) multi_pb_clone: Option<Arc<indicatif::MultiProgress>>,
+    pub(crate) args_arc: Arc<ScanArgs>,
+    pub(crate) results_clone: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
+    pub(crate) findings_count_group: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) finding_tx_group:
+        Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
+    pub(crate) scan_idx: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) overall_done_clone: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) cancel_flag_group: Arc<AtomicBool>,
+    pub(crate) session_monitor_group: Option<Arc<SessionMonitor>>,
+    pub(crate) skipped_targets_group: Arc<Mutex<HashMap<String, &'static str>>>,
+    pub(crate) state_file_group: Option<Arc<super::state_file::StateFile>>,
+    pub(crate) session_lost_group: Arc<AtomicBool>,
+    pub(crate) total_targets: usize,
+    pub(crate) spinner_allowed: bool,
+}
+
+/// Scan every target in one host group, under the global concurrency permit.
+pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
+    let HostGroupCtx {
+        host,
+        group,
+        group_permit,
+        global_semaphore_clone,
+        multi_pb_clone,
+        args_arc,
+        results_clone,
+        findings_count_group,
+        finding_tx_group,
+        scan_idx,
+        overall_done_clone,
+        cancel_flag_group,
+        session_monitor_group,
+        skipped_targets_group,
+        state_file_group,
+        session_lost_group,
+        total_targets,
+        spinner_allowed,
+    } = ctx;
+    // Released when this group finishes, admitting the next one.
+    let _group_permit = group_permit;
+    // Skip the (expensive) payload-counting loop entirely when no
+    // overall progress bar will be drawn — generating ~10k payloads
+    // per param twice (here and again inside run_scanning) added a
+    // measurable CPU tax for every --silence / non-TTY scan.
+    let overall_pb: Option<Arc<indicatif::ProgressBar>> = if let Some(ref mp) = multi_pb_clone {
+        // Calculate total overall tasks for this group. Must mirror what
+        // run_scanning actually increments — one tick per reflection
+        // payload, one per DOM payload — otherwise the overall bar rolls
+        // past 100% (the previous reflection-only count was the cause).
+        let mut total_overall_tasks = 0u64;
+        for target in &group {
+            for param in &target.reflection_params {
+                let reflection_payloads = if let Some(context) = &param.injection_context {
+                    crate::scanning::xss_common::get_dynamic_payloads(context, &args_arc)
+                        .unwrap_or_else(|_| vec![])
+                } else {
+                    crate::scanning::xss_common::get_dynamic_payloads(
+                        &crate::parameter_analysis::InjectionContext::Html(None),
+                        &args_arc,
+                    )
+                    .unwrap_or_else(|_| vec![])
+                };
+                let dom_payloads =
+                    crate::scanning::get_dom_payloads(param, &args_arc).unwrap_or_else(|_| vec![]);
+                total_overall_tasks += reflection_payloads.len() as u64 + dom_payloads.len() as u64;
+            }
+        }
+        let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
+        // See `crate::scanning::req_per_sec_tracker` for why we
+        // replace `{per_sec}` (pb-position rate, inflated by
+        // skipped-payload `inc(1)` calls) with a `REQUEST_COUNT`-delta
+        // tracker.
+        let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
+        pb.set_style(
+                indicatif::ProgressStyle::default_bar()
+                    .template("{spinner:.cyan} [{elapsed_precise}] [{bar:28.45/238}] {pos:>5}/{len:5} · {req_per_sec} · {wave}")
+                    .expect("valid progress bar template")
+                    .tick_chars(crate::utils::shimmer::TICK_CHARS)
+                    .with_key(
+                        "req_per_sec",
+                        crate::scanning::req_per_sec_tracker(req_start),
+                    )
+                    .with_key(
+                        "wave",
+                        crate::utils::shimmer::wave_tracker(
+                            "Overall scanning".to_string(),
+                            crate::utils::shimmer::BAR_WAVE_RESERVE,
+                        ),
+                    )
+                    .progress_chars("█▉▊▋▌▍▎▏░"),
+            );
+        pb.enable_steady_tick(Duration::from_millis(
+            crate::utils::shimmer::FRAME_MS as u64,
+        ));
+        Some(Arc::new(pb))
+    } else {
+        None
+    };
+
+    // Also a `JoinSet`: when the run stops early under `--limit` the
+    // group task itself is aborted, and a `Vec<JoinHandle>` would let
+    // its in-flight targets detach and keep issuing requests. A
+    // `JoinSet` aborts them when it drops.
+    let mut target_handles = tokio::task::JoinSet::new();
+    // task id -> target URL, so a panicking task can be attributed to
+    // the target it was scanning (a `JoinError` carries only the id).
+    let mut panicked_target_of: std::collections::HashMap<tokio::task::Id, String> =
+        std::collections::HashMap::new();
+
+    for target in group {
+        if let Some(lim) = args_arc.limit
+            && findings_count_group.load(Ordering::Relaxed) >= lim
+        {
+            break;
+        }
+        // SIGINT bail-out at the per-target dispatch boundary —
+        // skip queuing any more targets once the user pressed
+        // Ctrl-C, even if some are still pending.
+        if cancel_flag_group.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        let Ok(permit) = global_semaphore_clone.clone().acquire_owned().await else {
+            break;
+        };
+        // Session-loss bail-out at the same boundary. Once the shared
+        // session for this host is gone, every remaining target would
+        // be scanned against a login page — the exact silent
+        // false-negative run this exists to prevent. Record each one as
+        // SESSION_LOST rather than letting target_summary call them
+        // clean.
+        //
+        // Checked *after* acquiring the permit, not before: at
+        // `--max-concurrent-targets 1` the sibling that discovers the
+        // dead session is still holding the permit when this iteration
+        // begins, so a pre-acquire check would read a stale `false` and
+        // dispatch the target anyway. Targets already in flight are not
+        // recalled — their own post-scan probe covers them.
+        if session_lost_group.load(Ordering::Relaxed) {
+            skipped_targets_group.lock().await.insert(
+                target.url.to_string(),
+                crate::cmd::error_codes::SESSION_LOST,
+            );
+            // `cancelled`, not `completed`: this target was never
+            // tested, so a later run must pick it up again.
+            if let Some(sf) = &state_file_group {
+                sf.record(
+                    target.url.as_str(),
+                    &target.method,
+                    super::state_file::TargetOutcome::Cancelled,
+                );
+            }
+            drop(permit);
+            continue;
+        }
+        let args_clone = args_arc.clone();
+        let results_clone_inner = results_clone.clone();
+        let multi_pb_clone_inner = multi_pb_clone.clone();
+        let overall_pb_clone = overall_pb.clone();
+        let scan_idx_clone = scan_idx.clone();
+        let total_targets_copy = total_targets;
+        let findings_count_target = findings_count_group.clone();
+        let finding_tx_target = finding_tx_group.clone();
+        let cancel_flag_inner = cancel_flag_group.clone();
+        let session_monitor_target = session_monitor_group.clone();
+        let session_lost_target = session_lost_group.clone();
+        let skipped_targets_target = skipped_targets_group.clone();
+        let state_file_target = state_file_group.clone();
+
+        let multi_pb_active = multi_pb_clone_inner.is_some();
+        let panic_target_url = target.url.to_string();
+        let spawned = target_handles.spawn(async move {
+                if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
+                    // Re-validate the session before spending this target's
+                    // request budget. Throttled: on a short run the preflight
+                    // baseline is seconds old and re-probing proves nothing
+                    // (see `session::pre_dispatch_probe_due`).
+                    if let Some(monitor) = &session_monitor_target
+                        && monitor
+                            .check(&target, ProbePhase::PreDispatch)
+                            .await
+                            .is_some()
+                        && monitor.abort_on_loss
+                    {
+                        session_lost_target.store(true, Ordering::Relaxed);
+                        skipped_targets_target.lock().await.insert(
+                            target.url.to_string(),
+                            crate::cmd::error_codes::SESSION_LOST,
+                        );
+                        if let Some(sf) = &state_file_target {
+                            sf.record(
+                                target.url.as_str(),
+                                &target.method,
+                                super::state_file::TargetOutcome::Cancelled,
+                            );
+                        }
+                        drop(permit);
+                        return;
+                    }
+                    let __scan_spinner = {
+                        // When the indicatif bar is active, run_scanning renders a
+                        // per-target progress bar with rate/ETA — suppress the stdout
+                        // spinner so we don't show two competing scan indicators.
+                        let enabled =
+                            !args_clone.silence && total_targets_copy == 1 && !multi_pb_active;
+                        let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
+                        start_spinner(
+                            spinner_allowed,
+                            enabled,
+                            if total_targets_copy > 1 {
+                                format!(
+                                    "[{}/{}] scanning: {}",
+                                    current, total_targets_copy, target.url
+                                )
+                            } else {
+                                format!("scanning: {}", target.url)
+                            },
+                        )
+                    };
+                    // Per-target cancellation flag. With a `--scan-timeout`
+                    // set, hand `run_scanning` a fresh per-target flag
+                    // (seeded from the real Ctrl-C flag) so the cap cancels
+                    // only this target — never the shared SIGINT flag, which
+                    // would abort every sibling and skip all pending targets
+                    // (see `run_target_capped`). With no cap, pass the shared
+                    // flag straight through so the common path keeps its
+                    // zero-overhead direct wiring.
+                    let timeout_set = args_clone.scan_timeout > 0;
+                    let target_cancel = if timeout_set {
+                        Arc::new(AtomicBool::new(cancel_flag_inner.load(Ordering::Relaxed)))
+                    } else {
+                        cancel_flag_inner.clone()
+                    };
+                    let scan_fut = crate::scanning::run_scanning(
+                        &target,
+                        args_clone.clone(),
+                        // No `params_done`: the CLI renders its own
+                        // indicatif progress bar instead.
+                        crate::scanning::ScanRunHandles::new(
+                            results_clone_inner,
+                            findings_count_target,
+                        )
+                        .with_progress(multi_pb_clone_inner, overall_pb_clone)
+                        .with_cancel(target_cancel.clone())
+                        .with_finding_tx(finding_tx_target),
+                    );
+                    // Honor --scan-timeout as a hard wall-clock cap per
+                    // target. When a slow endpoint streams a partial body
+                    // and pins every phase at the per-request `--timeout`,
+                    // the per-target scan would otherwise serialize each
+                    // phase × per-request timeout and run far longer than
+                    // the user expects. Setting the cap to 0 disables it.
+                    let (timed_out, scan_report) = if timeout_set {
+                        run_target_capped(
+                            scan_fut,
+                            args_clone.scan_timeout,
+                            &cancel_flag_inner,
+                            &target_cancel,
+                        )
+                        .await
+                    } else {
+                        (false, scan_fut.await)
+                    };
+                    if timed_out && !args_clone.silence {
+                        eprintln!(
+                            "[scan] {} exceeded --scan-timeout ({}s); cancelling target (stops at next checkpoint)",
+                            target.url, args_clone.scan_timeout,
+                        );
+                    }
+                    if let Some((tx, done_rx)) = __scan_spinner {
+                        let _ = tx.send(());
+                        let _ = done_rx.await;
+                    }
+                    // Post-scan re-validation — the probe that actually
+                    // catches the reported failure: a session that survived
+                    // preflight and died an hour into the injection stage,
+                    // leaving every request after that answered by a login
+                    // page. Never throttled, and skipped only when the run
+                    // was cut short anyway (Ctrl-C / --scan-timeout), where
+                    // "incomplete" is already established and a login-page
+                    // probe would just be noise.
+                    let mut session_died = false;
+                    if let Some(monitor) = &session_monitor_target
+                        && !timed_out
+                        && !cancel_flag_inner.load(Ordering::Relaxed)
+                        && monitor.check(&target, ProbePhase::PostScan).await.is_some()
+                    {
+                        session_died = true;
+                        if monitor.abort_on_loss {
+                            // Nothing left to abort for *this* target, but
+                            // the rest of the host group is still ahead of
+                            // us.
+                            session_lost_target.store(true, Ordering::Relaxed);
+                        }
+                    }
+
+                    // Terminal state for `--state-file`. Only a target that
+                    // ran to the end under a live session is `completed`
+                    // and therefore skippable next run; a Ctrl-C, a
+                    // `--scan-timeout` expiry, a session that died
+                    // mid-scan, or a `--limit` cap that cut the dispatch
+                    // loop short all leave coverage unknown, so they are
+                    // recorded `cancelled` and retried. `--limit` matters
+                    // as much as the others even though the run "succeeded":
+                    // `limit` is part of the config hash, so re-running the
+                    // identical command would skip this target forever with
+                    // most of its parameters never tested.
+                    if let Some(sf) = &state_file_target {
+                        let outcome = if timed_out
+                            || cancel_flag_inner.load(Ordering::Relaxed)
+                            || session_died
+                            || scan_report.limit_stopped
+                        {
+                            super::state_file::TargetOutcome::Cancelled
+                        } else {
+                            super::state_file::TargetOutcome::Completed
+                        };
+                        sf.record(target.url.as_str(), &target.method, outcome);
+                    }
+                } else if let Some(sf) = &state_file_target {
+                    // `--skip-xss-scanning`: the injection stage is off, but
+                    // preflight, discovery, and mining already ran for this
+                    // target and that is the whole run. Recording it means a
+                    // resumed discovery-only campaign makes progress instead
+                    // of redoing every target while looking resumable. Safe
+                    // because `skip_xss_scanning` is part of the config hash:
+                    // a later run that does scan does not reuse these.
+                    sf.record(
+                        target.url.as_str(),
+                        &target.method,
+                        super::state_file::TargetOutcome::Completed,
+                    );
+                }
+                drop(permit);
+            });
+        panicked_target_of.insert(spawned.id(), panic_target_url);
+    }
+
+    while let Some(joined) = target_handles.join_next().await {
+        // Surface panics from per-target scan tasks instead of letting
+        // them disappear silently — a panic here points to a bug in
+        // the scanning pipeline and operators need a chance to see it.
+        if let Err(e) = joined
+            && e.is_panic()
+        {
+            // Sanitized: a panic message quotes the data that caused
+            // it, which for this pipeline can be bytes straight from a
+            // scanned response — raw CR/LF there forges log lines.
+            eprintln!(
+                "[scan] target task panicked: {}",
+                crate::utils::log::sanitize_log_message(&e.to_string())
+            );
+            // Logging alone still left the target reported `clean`:
+            // it produced no findings and nothing marked it otherwise,
+            // which for a scanner is the worst possible outcome. Record
+            // it the same way the preflight/analysis stage does.
+            if let Some(url) = panicked_target_of.get(&e.id()) {
+                skipped_targets_group
+                    .lock()
+                    .await
+                    .insert(url.clone(), crate::cmd::error_codes::INTERNAL_ERROR);
+            }
+        }
+        // Update global overall progress line when multiple targets
+        overall_done_clone.fetch_add(1, Ordering::Relaxed);
+        // overall ticker handles rendering globally
+    }
+
+    if let Some(pb) = overall_pb {
+        crate::scanning::finish_scan_bar(
+            &pb,
+            console::style("✓").green().to_string(),
+            format!("All scanning completed for {}", host),
+        );
     }
 }
 

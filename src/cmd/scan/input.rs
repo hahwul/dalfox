@@ -47,27 +47,28 @@ pub(crate) struct ResolvedTargets {
     pub(crate) dedup: DedupStats,
 }
 
+// Byte budget for any path that slurps a file or stdin into memory.
+// 256 MiB lands well above realistic URL lists (≈5 M URLs at ~50 B
+// each) while still cutting `/dev/zero`, runaway pipes, and
+// gigabyte misclassified blobs to a fast, clear error instead of
+// OOM-ing the process. The matching `read_bounded` / `read_stdin_
+// bounded` enforce the cap during the read itself, so a pseudo-
+// file that lies about its size (`/dev/zero` reports 0 bytes via
+// metadata) is still stopped.
+const MAX_TARGET_LIST_BYTES: u64 = crate::utils::fs::MAX_FILE_READ_BYTES;
+
+// Prefix budget for content sniffing during auto-detection. A raw HTTP
+// request is identified by its first line and a HAR by its leading
+// `{ … "log" … "entries"` preamble, so 8 KiB is enough to classify the
+// input without reading a (possibly huge) file in full — only the
+// committed input mode reads the whole file. Real HARs place `entries`
+// within the first few hundred bytes; the rare capture that buries it past
+// the budget can still be forced with `--input-type har`.
+const SNIFF_PREFIX_BYTES: u64 = 8 * 1024;
+
 pub(crate) async fn resolve_targets(
     args: &ScanArgs,
 ) -> std::result::Result<ResolvedTargets, ScanOutcome> {
-    // Byte budget for any path that slurps a file or stdin into memory.
-    // 256 MiB lands well above realistic URL lists (≈5 M URLs at ~50 B
-    // each) while still cutting `/dev/zero`, runaway pipes, and
-    // gigabyte misclassified blobs to a fast, clear error instead of
-    // OOM-ing the process. The matching `read_bounded` / `read_stdin_
-    // bounded` enforce the cap during the read itself, so a pseudo-
-    // file that lies about its size (`/dev/zero` reports 0 bytes via
-    // metadata) is still stopped.
-    const MAX_TARGET_LIST_BYTES: u64 = crate::utils::fs::MAX_FILE_READ_BYTES;
-    // Prefix budget for content sniffing during auto-detection. A raw HTTP
-    // request is identified by its first line and a HAR by its leading
-    // `{ … "log" … "entries"` preamble, so 8 KiB is enough to classify the
-    // input without reading a (possibly huge) file in full — only the
-    // committed input mode reads the whole file. Real HARs place `entries`
-    // within the first few hundred bytes; the rare capture that buries it past
-    // the budget can still be forced with `--input-type har`.
-    const SNIFF_PREFIX_BYTES: u64 = 8 * 1024;
-
     // stdin can only be read once. When auto-detection needs to peek at a
     // piped stream (to tell a HAR document apart from a line-based URL list),
     // it buffers the whole stream here so the parsing phase reuses the same
@@ -90,91 +91,7 @@ pub(crate) async fn resolve_targets(
         }
     };
 
-    let input_type = if args.input_type == "auto" {
-        if args.targets.is_empty() {
-            // No positional targets: only honour stdin if it's actually
-            // piped — never block waiting for terminal input.
-            if stdin_is_piped {
-                // Buffer stdin once, then auto-detect: a HAR document piped in
-                // (`cat capture.har | dalfox scan`) parses as `har`; anything
-                // else is treated as a line-based pipe from the same bytes.
-                match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe") {
-                    Ok(buf) => {
-                        let detected = if crate::target_parser::is_har_content(&buf) {
-                            "har"
-                        } else {
-                            "pipe"
-                        };
-                        buffered_stdin = Some(buf);
-                        detected.to_string()
-                    }
-                    Err(e) => {
-                        if !args.silence {
-                            emit_error(
-                                &args.format,
-                                crate::cmd::error_codes::STDIN_ERROR,
-                                &format!("Error reading from stdin: {}", e),
-                            );
-                        }
-                        return Err(ScanOutcome::Error);
-                    }
-                }
-            } else {
-                if !args.silence {
-                    emit_error(
-                        &args.format,
-                        crate::cmd::error_codes::NO_TARGETS,
-                        "No targets specified",
-                    );
-                }
-                return Err(ScanOutcome::Error);
-            }
-        } else {
-            // Classify the positional file args by sniffing a bounded *prefix*
-            // of each rather than slurping it in full: `is_raw_http_request`
-            // only inspects the first line and `is_har_content` only the
-            // leading `{ … "log" … "entries"` markers, so the first few KiB
-            // decide it. The committed input mode reads each file completely
-            // later. Raw HTTP pasted directly on the CLI is matched as a
-            // literal (it is not a path on disk). Both flags accumulate with
-            // AND, so a single non-match rules a type out.
-            let mut all_raw_http = true;
-            let mut all_har = true;
-            for t in &args.targets {
-                if crate::target_parser::is_raw_http_request(t) {
-                    all_har = false; // a raw-http literal is never a HAR
-                    continue;
-                }
-                match crate::utils::fs::read_prefix_lossy(
-                    std::path::Path::new(t),
-                    SNIFF_PREFIX_BYTES,
-                ) {
-                    Ok(prefix) => {
-                        all_raw_http &= crate::target_parser::is_raw_http_request(&prefix);
-                        all_har &= crate::target_parser::is_har_content(&prefix);
-                    }
-                    // Not a readable file (a bare URL/host literal, or an
-                    // unreadable path): neither a raw-http nor a HAR file.
-                    Err(_) => {
-                        all_raw_http = false;
-                        all_har = false;
-                    }
-                }
-                if !all_raw_http && !all_har {
-                    break; // neither type is still possible — stop sniffing
-                }
-            }
-            if all_raw_http {
-                "raw-http".to_string()
-            } else if all_har {
-                "har".to_string()
-            } else {
-                "auto".to_string()
-            }
-        }
-    } else {
-        args.input_type.clone()
-    };
+    let input_type = detect_input_type(args, stdin_is_piped, &mut buffered_stdin)?;
 
     let mut target_strings = Vec::new();
 
@@ -613,114 +530,9 @@ pub(crate) async fn resolve_targets(
         }
     }
 
-    // Apply URL scope filtering (--include-url / --exclude-url)
-    {
-        // Invalid scope patterns must always surface on stderr, even when
-        // `--silence` is on: silently discarding the user's filter means
-        // every target gets scanned anyway, which is exactly the opposite
-        // of what the operator asked for. stderr stays out of the stdout
-        // payload that scripts parse, so a noise-sensitive caller can
-        // still redirect `2>/dev/null` if they really want it gone.
-        let include_patterns: Vec<regex::Regex> = args
-            .include_url
-            .iter()
-            .filter_map(|p| match regex::Regex::new(p) {
-                Ok(r) => Some(r),
-                Err(e) => {
-                    eprintln!(
-                        "Warning: invalid --include-url regex '{}': {} (hint: --include-url takes a regex like '.*/api/.*', not a shell glob)",
-                        p, e
-                    );
-                    None
-                }
-            })
-            .collect();
-        let exclude_patterns: Vec<regex::Regex> = args
-            .exclude_url
-            .iter()
-            .filter_map(|p| match regex::Regex::new(p) {
-                Ok(r) => Some(r),
-                Err(e) => {
-                    eprintln!(
-                        "Warning: invalid --exclude-url regex '{}': {} (hint: --exclude-url takes a regex like '.*/admin.*', not a shell glob)",
-                        p, e
-                    );
-                    None
-                }
-            })
-            .collect();
+    apply_url_scope_filters(args, &mut parsed_targets);
 
-        if !include_patterns.is_empty() || !exclude_patterns.is_empty() {
-            let before = parsed_targets.len();
-            parsed_targets.retain(|t| {
-                let url_str = t.url.as_str();
-                // If include patterns are set, URL must match at least one
-                if !include_patterns.is_empty()
-                    && !include_patterns.iter().any(|r| r.is_match(url_str))
-                {
-                    return false;
-                }
-                // If exclude patterns are set, URL must not match any
-                if exclude_patterns.iter().any(|r| r.is_match(url_str)) {
-                    return false;
-                }
-                true
-            });
-            let filtered = before - parsed_targets.len();
-            if filtered > 0 {
-                log_info(
-                    args,
-                    &format!("scope filter: {} target(s) excluded", filtered),
-                );
-            }
-        }
-    }
-
-    // Apply out-of-scope domain filtering (--out-of-scope / --out-of-scope-file)
-    {
-        let mut oos_domains: Vec<String> = args.out_of_scope.clone();
-        if let Some(ref path) = args.out_of_scope_file {
-            match crate::utils::fs::read_bounded(
-                std::path::Path::new(path),
-                MAX_TARGET_LIST_BYTES,
-                "out-of-scope domain file",
-            ) {
-                Ok(contents) => {
-                    for line in contents.lines() {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                            oos_domains.push(trimmed.to_string());
-                        }
-                    }
-                }
-                Err(e) => {
-                    log_warn(
-                        args,
-                        &format!("failed to read --out-of-scope-file '{}': {}", path, e),
-                    );
-                }
-            }
-        }
-        if !oos_domains.is_empty() {
-            let before = parsed_targets.len();
-            parsed_targets.retain(|t| {
-                let host = match t.url.host_str() {
-                    Some(h) => h,
-                    None => return true,
-                };
-                !oos_domains
-                    .iter()
-                    .any(|pattern| domain_matches_pattern(host, pattern))
-            });
-            let filtered = before - parsed_targets.len();
-            if filtered > 0 {
-                log_info(
-                    args,
-                    &format!("out-of-scope filter: {} target(s) excluded", filtered),
-                );
-            }
-        }
-    }
+    apply_out_of_scope_filter(args, &mut parsed_targets);
 
     // Deduplicate targets per `--dedup-urls` (exact / signature / off) to avoid
     // redundant scans (e.g. pipe input with duplicates, or a `gau`/`katana`
@@ -776,40 +588,7 @@ pub(crate) async fn resolve_targets(
         return Err(ScanOutcome::Error);
     }
 
-    // Load cookies from raw HTTP request file if specified
-    if let Some(path) = &args.cookie_from_raw {
-        match crate::utils::fs::read_bounded(
-            std::path::Path::new(path),
-            MAX_TARGET_LIST_BYTES,
-            "raw cookie file",
-        ) {
-            Ok(content) => {
-                let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
-                for line in content.lines() {
-                    // HTTP header names are case-insensitive (RFC 7230 §3.2;
-                    // HTTP/2 mandates lowercase), so match `Cookie`/`cookie`/
-                    // `COOKIE` alike and tolerate arbitrary spacing after the
-                    // colon. Delegate value splitting to the shared
-                    // `split_cookie_pairs` so this parses identically to the
-                    // server / preflight cookie paths.
-                    if let Some((name, value)) = line.split_once(':')
-                        && name.trim().eq_ignore_ascii_case("cookie")
-                    {
-                        cookies_from_raw.extend(crate::job::split_cookie_pairs(value));
-                    }
-                }
-                if !cookies_from_raw.is_empty() {
-                    for target in &mut parsed_targets {
-                        target.cookies.extend(cookies_from_raw.iter().cloned());
-                    }
-                }
-            }
-            Err(e) if !args.silence => {
-                eprintln!("Error reading cookie file {}: {}", path, e);
-            }
-            Err(_) => {}
-        }
-    }
+    load_cookies_from_raw_http(args, &mut parsed_targets);
 
     Ok(ResolvedTargets {
         targets: parsed_targets,
@@ -1135,3 +914,270 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
 
 #[cfg(test)]
 mod tests;
+
+/// Drop targets excluded by `--include-url` / `--exclude-url`.
+///
+/// Runs before the out-of-scope domain filter and before dedup, so a URL the
+/// operator scoped out never reaches either.
+pub(crate) fn apply_url_scope_filters(args: &ScanArgs, parsed_targets: &mut Vec<Target>) {
+    // Apply URL scope filtering (--include-url / --exclude-url)
+    {
+        // Invalid scope patterns must always surface on stderr, even when
+        // `--silence` is on: silently discarding the user's filter means
+        // every target gets scanned anyway, which is exactly the opposite
+        // of what the operator asked for. stderr stays out of the stdout
+        // payload that scripts parse, so a noise-sensitive caller can
+        // still redirect `2>/dev/null` if they really want it gone.
+        let include_patterns: Vec<regex::Regex> = args
+            .include_url
+            .iter()
+            .filter_map(|p| match regex::Regex::new(p) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: invalid --include-url regex '{}': {} (hint: --include-url takes a regex like '.*/api/.*', not a shell glob)",
+                        p, e
+                    );
+                    None
+                }
+            })
+            .collect();
+        let exclude_patterns: Vec<regex::Regex> = args
+            .exclude_url
+            .iter()
+            .filter_map(|p| match regex::Regex::new(p) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: invalid --exclude-url regex '{}': {} (hint: --exclude-url takes a regex like '.*/admin.*', not a shell glob)",
+                        p, e
+                    );
+                    None
+                }
+            })
+            .collect();
+
+        if !include_patterns.is_empty() || !exclude_patterns.is_empty() {
+            let before = parsed_targets.len();
+            parsed_targets.retain(|t| {
+                let url_str = t.url.as_str();
+                // If include patterns are set, URL must match at least one
+                if !include_patterns.is_empty()
+                    && !include_patterns.iter().any(|r| r.is_match(url_str))
+                {
+                    return false;
+                }
+                // If exclude patterns are set, URL must not match any
+                if exclude_patterns.iter().any(|r| r.is_match(url_str)) {
+                    return false;
+                }
+                true
+            });
+            let filtered = before - parsed_targets.len();
+            if filtered > 0 {
+                log_info(
+                    args,
+                    &format!("scope filter: {} target(s) excluded", filtered),
+                );
+            }
+        }
+    }
+}
+
+/// Drop targets whose host matches `--out-of-scope` / `--out-of-scope-file`.
+pub(crate) fn apply_out_of_scope_filter(args: &ScanArgs, parsed_targets: &mut Vec<Target>) {
+    // Apply out-of-scope domain filtering (--out-of-scope / --out-of-scope-file)
+    {
+        let mut oos_domains: Vec<String> = args.out_of_scope.clone();
+        if let Some(ref path) = args.out_of_scope_file {
+            match crate::utils::fs::read_bounded(
+                std::path::Path::new(path),
+                MAX_TARGET_LIST_BYTES,
+                "out-of-scope domain file",
+            ) {
+                Ok(contents) => {
+                    for line in contents.lines() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                            oos_domains.push(trimmed.to_string());
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_warn(
+                        args,
+                        &format!("failed to read --out-of-scope-file '{}': {}", path, e),
+                    );
+                }
+            }
+        }
+        if !oos_domains.is_empty() {
+            let before = parsed_targets.len();
+            parsed_targets.retain(|t| {
+                let host = match t.url.host_str() {
+                    Some(h) => h,
+                    None => return true,
+                };
+                !oos_domains
+                    .iter()
+                    .any(|pattern| domain_matches_pattern(host, pattern))
+            });
+            let filtered = before - parsed_targets.len();
+            if filtered > 0 {
+                log_info(
+                    args,
+                    &format!("out-of-scope filter: {} target(s) excluded", filtered),
+                );
+            }
+        }
+    }
+}
+
+/// Apply `--cookie-from-raw`: lift the `Cookie` header out of a saved raw HTTP
+/// request and attach it to every resolved target.
+///
+/// Non-fatal by design as it stands: an unreadable file prints to stderr (and
+/// says nothing at all under `--silence`), then the scan proceeds *without the
+/// cookies* — i.e. logged out, which typically reports `0 XSS` and exits 0. A
+/// CI gate cannot tell that apart from a clean target. Preserved here because
+/// changing it changes exit codes; worth revisiting on its own.
+fn load_cookies_from_raw_http(args: &ScanArgs, parsed_targets: &mut [Target]) {
+    // Load cookies from raw HTTP request file if specified
+    if let Some(path) = &args.cookie_from_raw {
+        match crate::utils::fs::read_bounded(
+            std::path::Path::new(path),
+            MAX_TARGET_LIST_BYTES,
+            "raw cookie file",
+        ) {
+            Ok(content) => {
+                let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
+                for line in content.lines() {
+                    // HTTP header names are case-insensitive (RFC 7230 §3.2;
+                    // HTTP/2 mandates lowercase), so match `Cookie`/`cookie`/
+                    // `COOKIE` alike and tolerate arbitrary spacing after the
+                    // colon. Delegate value splitting to the shared
+                    // `split_cookie_pairs` so this parses identically to the
+                    // server / preflight cookie paths.
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.trim().eq_ignore_ascii_case("cookie")
+                    {
+                        cookies_from_raw.extend(crate::job::split_cookie_pairs(value));
+                    }
+                }
+                if !cookies_from_raw.is_empty() {
+                    for target in parsed_targets.iter_mut() {
+                        target.cookies.extend(cookies_from_raw.iter().cloned());
+                    }
+                }
+            }
+            Err(e) if !args.silence => {
+                eprintln!("Error reading cookie file {}: {}", path, e);
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+/// Decide which input mode a bare `dalfox scan …` is really asking for.
+///
+/// `--input-type` other than `auto` is taken at its word. Otherwise the shape
+/// of the arguments and of stdin decides: no positional targets plus a piped
+/// stdin means a list (or a HAR) is arriving on the pipe; a single argument
+/// that looks like a path is sniffed to tell a raw HTTP request and a HAR
+/// document apart from a line-based URL list.
+///
+/// `buffered_stdin` is an out-parameter on purpose: stdin can be read only
+/// once, so when detection has to peek at the stream it hands the bytes back
+/// for the parsing phase to reuse rather than reading an already-drained fd.
+fn detect_input_type(
+    args: &ScanArgs,
+    stdin_is_piped: bool,
+    buffered_stdin: &mut Option<String>,
+) -> Result<String, ScanOutcome> {
+    let input_type = if args.input_type == "auto" {
+        if args.targets.is_empty() {
+            // No positional targets: only honour stdin if it's actually
+            // piped — never block waiting for terminal input.
+            if stdin_is_piped {
+                // Buffer stdin once, then auto-detect: a HAR document piped in
+                // (`cat capture.har | dalfox scan`) parses as `har`; anything
+                // else is treated as a line-based pipe from the same bytes.
+                match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe") {
+                    Ok(buf) => {
+                        let detected = if crate::target_parser::is_har_content(&buf) {
+                            "har"
+                        } else {
+                            "pipe"
+                        };
+                        *buffered_stdin = Some(buf);
+                        detected.to_string()
+                    }
+                    Err(e) => {
+                        if !args.silence {
+                            emit_error(
+                                &args.format,
+                                crate::cmd::error_codes::STDIN_ERROR,
+                                &format!("Error reading from stdin: {}", e),
+                            );
+                        }
+                        return Err(ScanOutcome::Error);
+                    }
+                }
+            } else {
+                if !args.silence {
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::NO_TARGETS,
+                        "No targets specified",
+                    );
+                }
+                return Err(ScanOutcome::Error);
+            }
+        } else {
+            // Classify the positional file args by sniffing a bounded *prefix*
+            // of each rather than slurping it in full: `is_raw_http_request`
+            // only inspects the first line and `is_har_content` only the
+            // leading `{ … "log" … "entries"` markers, so the first few KiB
+            // decide it. The committed input mode reads each file completely
+            // later. Raw HTTP pasted directly on the CLI is matched as a
+            // literal (it is not a path on disk). Both flags accumulate with
+            // AND, so a single non-match rules a type out.
+            let mut all_raw_http = true;
+            let mut all_har = true;
+            for t in &args.targets {
+                if crate::target_parser::is_raw_http_request(t) {
+                    all_har = false; // a raw-http literal is never a HAR
+                    continue;
+                }
+                match crate::utils::fs::read_prefix_lossy(
+                    std::path::Path::new(t),
+                    SNIFF_PREFIX_BYTES,
+                ) {
+                    Ok(prefix) => {
+                        all_raw_http &= crate::target_parser::is_raw_http_request(&prefix);
+                        all_har &= crate::target_parser::is_har_content(&prefix);
+                    }
+                    // Not a readable file (a bare URL/host literal, or an
+                    // unreadable path): neither a raw-http nor a HAR file.
+                    Err(_) => {
+                        all_raw_http = false;
+                        all_har = false;
+                    }
+                }
+                if !all_raw_http && !all_har {
+                    break; // neither type is still possible — stop sniffing
+                }
+            }
+            if all_raw_http {
+                "raw-http".to_string()
+            } else if all_har {
+                "har".to_string()
+            } else {
+                "auto".to_string()
+            }
+        }
+    } else {
+        args.input_type.clone()
+    };
+    Ok(input_type)
+}

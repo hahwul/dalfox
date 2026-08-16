@@ -16,15 +16,13 @@
 
 use indicatif::MultiProgress;
 use std::collections::HashMap;
-use std::fs;
-use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::{
     OnceLock,
     atomic::{AtomicUsize, Ordering},
 };
 use std::time::Duration;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::Mutex;
 
 use crate::scanning::result::Result;
 use crate::target_parser::*;
@@ -32,6 +30,7 @@ use crate::target_parser::*;
 mod analysis;
 mod args;
 mod baseline;
+mod blind;
 mod input;
 mod logging;
 mod output;
@@ -40,6 +39,7 @@ mod postprocess;
 mod preflight;
 mod scan_loop;
 pub(crate) mod session;
+mod startup;
 mod state_file;
 mod validation;
 
@@ -55,8 +55,7 @@ pub use args::{
     WAF_BYPASS_VALUES, format_is_machine,
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
-pub(crate) use logging::{log_info, log_warn};
-pub(crate) use validation::validate_numeric_args;
+pub(crate) use logging::log_info;
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
@@ -241,228 +240,16 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
     }
-    // Validate numeric args up front so misconfigurations (workers: 0,
-    // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
-    // message instead of producing cryptic mid-scan failures.
-    if let Err((code, msg)) = validate_numeric_args(args) {
-        if !args.silence {
-            emit_error(&args.format, code, &msg);
-        }
-        return ScanOutcome::Error;
+    // Startup gate: numeric ranges, session-check inputs, the custom-payload
+    // file, and the process-wide rate limiter. Each failure it catches would
+    // otherwise surface mid-scan as a result rather than a mistake.
+    if let Err(outcome) = startup::prepare_and_validate(args) {
+        return outcome;
     }
 
-    // Install the process-wide request rate limiter (`--rate-limit`, req/sec;
-    // 0 = unlimited). Shared across every worker and target so the aggregate
-    // outbound rate stays bounded regardless of fan-out. Done before any
-    // requests go out (preflight included). Idempotent across CLI invocations.
-    crate::install_rate_limiter(args.rate_limit);
+    let baseline = baseline::load_from_args(args);
 
-    // `--limit-result-type` only affects which finding types count
-    // toward `--limit`; without `--limit` it is a no-op. Dogfood
-    // showed operators conflating it with `--only-poc`, which IS the
-    // output filter, so emit a one-line nudge on stderr when used
-    // alone. stderr stays out of the stdout payload that scripts
-    // parse.
-    if !args.limit_result_type.eq_ignore_ascii_case("all") && args.limit.is_none() {
-        eprintln!(
-            "Hint: --limit-result-type only affects counting toward --limit; for output filtering use --only-poc {}",
-            args.limit_result_type.to_uppercase()
-        );
-    }
-
-    // Validate the session-check inputs up front. Both are consulted only when
-    // a probe fires — potentially an hour into the scan — so a bad regex or a
-    // malformed probe URL must fail here, not there.
-    if let Err(e) = session::compile_session_check(args) {
-        emit_error(
-            &args.format,
-            crate::cmd::error_codes::PARSE_ERROR,
-            &format!("--session-check is not a valid regex: {e}"),
-        );
-        return ScanOutcome::Error;
-    }
-    if let Some(u) = &args.session_check_url
-        && url::Url::parse(u).is_err()
-    {
-        emit_error(
-            &args.format,
-            crate::cmd::error_codes::PARSE_ERROR,
-            &format!("--session-check-url is not a valid absolute URL: {u}"),
-        );
-        return ScanOutcome::Error;
-    }
-
-    // `--only-custom-payload` with no `--custom-payload` at all is the same
-    // catastrophe as an unreadable file — `get_dynamic_payloads` takes the
-    // only-custom branch, finds no file to read, and returns an empty vec, so
-    // the reflection phase sends *zero* attack payloads and the run prints
-    // `0 XSS` and exits 0. That is indistinguishable from a clean target, which
-    // is exactly what a CI gate keys on. The check below only runs inside
-    // `if let Some(path)`, so this pairing has to be rejected before it.
-    // Reachable from a config file too (`only_custom_payload = true`), which is
-    // why `Config::normalize_and_validate` carries the same rule.
-    if args.only_custom_payload && args.custom_payload.is_none() {
-        emit_error(
-            &args.format,
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            "--only-custom-payload requires --custom-payload <FILE>",
-        );
-        return ScanOutcome::Error;
-    }
-
-    // Validate --custom-payload up front. Without this check, a missing or
-    // unreadable file silently produces zero custom payloads mid-scan. With
-    // --only-custom-payload that's catastrophic (no payloads at all, scan
-    // reports clean), so fail fast. In additive mode it just degrades
-    // detection, so warn and continue.
-    if let Some(path) = &args.custom_payload {
-        match fs::metadata(path) {
-            Ok(m) if !m.is_file() => {
-                if args.only_custom_payload {
-                    emit_error(
-                        &args.format,
-                        crate::cmd::error_codes::FILE_READ_ERROR,
-                        &format!("--custom-payload is not a regular file: {}", path),
-                    );
-                    return ScanOutcome::Error;
-                }
-                log_warn(
-                    args,
-                    &format!(
-                        "--custom-payload is not a regular file ({}) — built-in payloads only",
-                        path
-                    ),
-                );
-            }
-            Err(e) => {
-                if args.only_custom_payload {
-                    emit_error(
-                        &args.format,
-                        crate::cmd::error_codes::FILE_READ_ERROR,
-                        &format!("--custom-payload not readable ({}): {}", path, e),
-                    );
-                    return ScanOutcome::Error;
-                }
-                log_warn(
-                    args,
-                    &format!(
-                        "--custom-payload not readable ({}: {}) — built-in payloads only",
-                        path, e
-                    ),
-                );
-            }
-            Ok(_) => {
-                // The stat above only proves a regular file exists. An empty,
-                // comment-only, non-UTF-8, or over-budget file passes it yet
-                // yields zero usable payloads — load_custom_payloads rejects
-                // those, but the scan driver swallows that error via
-                // `.unwrap_or_else(|_| vec![])`, so --only-custom-payload would
-                // "succeed" having scanned nothing. Validate the content here
-                // (this also warms the shared cache the scan reuses): fatal
-                // under --only-custom-payload, a warning in additive mode.
-                if let Err(e) = crate::scanning::xss_common::load_custom_payloads(path) {
-                    if args.only_custom_payload {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::FILE_READ_ERROR,
-                            &e.to_string(),
-                        );
-                        return ScanOutcome::Error;
-                    }
-                    log_warn(args, &format!("{} — built-in payloads only", e));
-                }
-            }
-        }
-    }
-
-    // Load `--baseline` before any request goes out. A stale or malformed
-    // baseline path is exactly the thing a pipeline gets wrong, and finding
-    // out after a 20-minute scan is too late — so the warning lands here, on
-    // stderr (every format; stdout stays a clean machine payload) rather than
-    // through log_warn, which only speaks in `plain`.
-    let baseline = args.baseline.as_ref().map(|path| {
-        // `--output` pointed at the baseline overwrites it with this run's
-        // report. Under the default `filter` mode that report holds only the
-        // NEW findings, so the recorded backlog is destroyed and the next run
-        // re-reports all of it. Refreshing a baseline means re-running WITHOUT
-        // `--baseline`; warn rather than refuse, since `annotate` mode writes a
-        // complete report and is a legitimate way to do it.
-        if args.output.as_deref() == Some(path.as_str()) {
-            eprintln!(
-                "Warning: --output and --baseline are the same path ('{}'); under --baseline-mode filter this overwrites the baseline with new findings only. Re-run without --baseline to refresh it.",
-                path
-            );
-        }
-        // `--limit` stops the scan once N findings accrue, and that count is
-        // taken before the baseline diff runs. A target whose first N findings
-        // are all already known therefore halts early and reports zero new
-        // findings without having tested the rest of its parameters.
-        if args.limit.is_some() {
-            eprintln!(
-                "Warning: --limit counts findings before the --baseline diff, so a run whose first {} findings are all in the baseline stops early and reports 0 new. Drop --limit when gating on new findings.",
-                args.limit.unwrap_or(0)
-            );
-        }
-        let loaded = baseline::load(path, args.baseline_mode());
-        match &loaded.warning {
-            Some(w) => eprintln!("Warning: {} — baseline diff disabled", w),
-            None => log_info(
-                args,
-                &format!(
-                    "baseline loaded: {} known findings from {}",
-                    loaded.entries, path
-                ),
-            ),
-        }
-        loaded
-    });
-
-    // Warn loudly about unknown remote-provider names *before* the init
-    // call swallows them as silent no-ops. Previously a typo like
-    // `--remote-payloads payloadboxx` would just not fetch anything and
-    // the user would never know.
-    if !args.remote_payloads.is_empty() {
-        let known: std::collections::HashSet<String> = crate::payload::list_payload_providers()
-            .into_iter()
-            .collect();
-        for p in &args.remote_payloads {
-            if !known.contains(&p.to_ascii_lowercase()) {
-                eprintln!(
-                    "Warning: unknown --remote-payloads provider '{}' (known: {})",
-                    p,
-                    crate::payload::list_payload_providers().join(", ")
-                );
-            }
-        }
-    }
-    if !args.remote_wordlists.is_empty() {
-        let known: std::collections::HashSet<String> = crate::payload::list_wordlist_providers()
-            .into_iter()
-            .collect();
-        for p in &args.remote_wordlists {
-            if !known.contains(&p.to_ascii_lowercase()) {
-                eprintln!(
-                    "Warning: unknown --remote-wordlists provider '{}' (known: {})",
-                    p,
-                    crate::payload::list_wordlist_providers().join(", ")
-                );
-            }
-        }
-    }
-
-    // Initialize remote payloads/wordlists if requested (honor timeout/proxy)
-    if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
-        && let Err(e) = crate::utils::init_remote_resources_with_options(
-            &args.remote_payloads,
-            &args.remote_wordlists,
-            Some(args.timeout),
-            args.proxy.clone(),
-        )
-        .await
-        && !args.silence
-    {
-        eprintln!("Error initializing remote resources: {}", e);
-    }
+    startup::init_remote_providers(args).await;
     // Resolve targets: input-type detection, file/stdin/raw-HTTP parsing,
     // dedup, scope + out-of-scope filtering, and --cookie-from-raw. Emits the
     // structured error itself on failure and returns Err for us to propagate.
@@ -671,56 +458,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let scan_idx = Arc::new(AtomicUsize::new(0));
     let overall_done = Arc::new(AtomicUsize::new(0));
 
-    // Start global overall progress ticker when multiple targets; runs across preflight, analysis, and scanning.
-    // Suppressed when stdout isn't a TTY — cursor-redraw frames look like garbage in logs.
-    let overall_ticker = if args.format == "plain"
-        && !args.silence
-        && total_targets > 1
-        && crate::utils::term::stdout_is_tty()
-    {
-        let findings_count_clone = findings_count.clone();
-        let overall_done_clone = overall_done.clone();
-        let total_targets_copy = total_targets;
-        let (tx, mut rx) = oneshot::channel::<()>();
-        let (done_tx, done_rx) = oneshot::channel::<()>();
-        tokio::spawn(async move {
-            use crate::utils::shimmer;
-            let mut phase = 0usize;
-            loop {
-                let done = overall_done_clone.load(Ordering::Relaxed);
-                let percent = (done * 100) / std::cmp::max(1, total_targets_copy);
-                let findings = findings_count_clone.load(Ordering::Relaxed);
-                let text = format!(
-                    "overall  {done}/{total_targets_copy} targets · {percent}% · {findings} findings"
-                );
-                // Truncate to the terminal width (reserving the glyph + space)
-                // and clear to EOL so the metallic line never wraps onto a
-                // second row, which would desync the `\r` redraw.
-                let budget = crate::utils::term::term_cols().saturating_sub(2).max(8);
-                let visible = console::truncate_str(&text, budget, "…");
-                crate::cprint!(
-                    "\r{} {}\x1b[K",
-                    shimmer::spin_glyph(phase),
-                    shimmer::shimmer(visible.as_ref(), phase)
-                );
-                let _ = io::stdout().flush();
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(shimmer::FRAME_MS as u64)) => {},
-                    _ = &mut rx => {
-                        // clear the line and exit
-                        crate::cprint!("\r\x1b[2K\r");
-                        let _ = io::stdout().flush();
-                        let _ = done_tx.send(());
-                        break;
-                    }
-                }
-                phase = phase.wrapping_add(1);
-            }
-        });
-        Some((tx, done_rx))
-    } else {
-        None
-    };
+    let overall_ticker =
+        logging::start_overall_ticker(args, total_targets, &findings_count, &overall_done);
 
     // Bundle the cross-task handles for the preflight/analysis loop, the
     // scanning loop, and result rendering. `host_groups`, `all_target_urls`,
@@ -747,78 +486,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         resumed_skipped,
     };
 
-    // Blind XSS: the static `-b/--blind` callback and/or OOB/OAST (interactsh)
-    // callbacks. Skipped in preview-only modes — `--dry-run` (which advertises
-    // "without sending attack payloads") and `--only-discovery` — because blind
-    // payloads are real attack traffic and OOB registration is an outbound side
-    // effect to a third-party server.
-    //
-    // Start an OOB session first — it fails soft (warn + continue), so a
-    // registration outage never aborts the scan. Injection then runs over
-    // whichever channel(s) are configured; the OOB poller is spawned once
-    // `stream_findings_enabled` is known (below) and drained before rendering.
-    // `--skip-xss-scanning` means "send no attack payloads". Blind XSS payloads
-    // are attack payloads — stored ones, at that: they persist in the target
-    // after the run. Only the per-target injection stage used to honour the
-    // flag (scan_loop.rs), so `--skip-xss-scanning -b <callback>` (with `-b`
-    // commonly living in a shared config file) still wrote live stored-XSS
-    // payloads into every parameter and form of a production system the
-    // operator had explicitly asked not to attack. This also skips OOB session
-    // registration, which is correct: there is nothing left to call back.
-    let blind_active = !args.dry_run && !args.only_discovery && !args.skip_xss_scanning;
-    let oob_session: Option<Arc<crate::oob::OobSession>> =
-        if blind_active && args.blind_oob_enabled() {
-            match crate::oob::OobSession::start(&args.oob_config()).await {
-                Ok(session) => {
-                    log_info(
-                        args,
-                        &format!(
-                            "OOB blind XSS armed via interactsh server: {}",
-                            session.server_domain()
-                        ),
-                    );
-                    Some(Arc::new(session))
-                }
-                Err(e) => {
-                    log_warn(
-                        args,
-                        &format!("--blind-oob disabled (could not register with any server): {e}"),
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-    if blind_active && (args.blind_callback_url.is_some() || oob_session.is_some()) {
-        if let Some(callback_url) = &args.blind_callback_url {
-            log_info(
-                args,
-                &format!(
-                    "Performing blind XSS scanning with callback URL: {}",
-                    callback_url
-                ),
-            );
-        }
-        let custom = args.custom_blind_xss_payload.as_deref();
-        for group in host_groups.values() {
-            for target in group {
-                let source = match (&args.blind_callback_url, &oob_session) {
-                    (Some(url), Some(session)) => crate::scanning::CallbackSource::Both {
-                        url: url.as_str(),
-                        session: session.as_ref(),
-                    },
-                    (Some(url), None) => crate::scanning::CallbackSource::Static(url.as_str()),
-                    (None, Some(session)) => crate::scanning::CallbackSource::Oob(session.as_ref()),
-                    // Guarded by the enclosing `if`: at least one is Some.
-                    (None, None) => continue,
-                };
-                crate::scanning::blind_scanning_with(target, source, custom).await;
-                crate::scanning::blind_scan_forms_with(target, source, custom).await;
-            }
-        }
-    }
+    let oob_session = blind::arm_and_dispatch(args, &host_groups).await;
 
     // Targets entering preflight, so the ones it drops can be told apart from
     // the ones that go on to be scanned. Only materialized when `--state-file`
@@ -947,57 +615,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         );
     }
 
-    // A scan where every supplied target failed reachability checks
-    // (DNS lookup failure, connection refused, content-type mismatch,
-    // etc.) used to fall through to `ScanOutcome::Clean` here — same
-    // exit code 0 as "scanned and found nothing." That silently masked
-    // hard failures from scripts like
-    //   `dalfox scan https://target && echo "no XSS found"`,
-    // so the operator could read a downed server or typo'd host as a
-    // clean pass. Treat the all-skipped case as an error instead; if
-    // even one target produced any scan activity (even with zero
-    // findings) the outcome falls through to Clean as before.
-    let all_unreachable = !all_target_urls.is_empty() && {
-        let skipped = state.skipped_targets.lock().await;
-        !skipped.is_empty() && all_target_urls.iter().all(|u| skipped.contains_key(u))
-    };
-    if all_unreachable {
-        return ScanOutcome::Error;
-    }
-
-    // An empty report after a dead session must not exit 0 — `dalfox scan ... &&
-    // echo "no XSS found"` is exactly the script this issue is about. Under
-    // `--on-session-loss continue` the operator has said the detection may be
-    // misfiring on their target and asked to keep going, so the exit code is
-    // left alone; the `incomplete` meta flag and the per-target SESSION_LOST
-    // entries still record what happened either way.
-    //
-    // Gated on there being no findings: a run that confirmed a `V` and *then*
-    // lost its session should exit 1 (vulnerabilities found), not 2 (hard
-    // error). CI that separates those two — a distinction the output guide
-    // documents — would otherwise read a successful detection as an
-    // infrastructure failure. `meta.incomplete` carries the incompleteness for
-    // both codes.
-    if final_results.is_empty()
-        && session::aborts_on_loss(args)
-        && !state.session_lost.lock().await.is_empty()
-    {
-        return ScanOutcome::Error;
-    }
-
-    // A requested `--output` file that couldn't be written is a hard failure,
-    // same as an all-unreachable run: the operator asked for results on disk and
-    // didn't get them. Report it via the exit code so scripts don't read it as a
-    // clean/successful pass.
-    if output_write_failed {
-        return ScanOutcome::Error;
-    }
-
-    if final_results.is_empty() {
-        ScanOutcome::Clean
-    } else {
-        ScanOutcome::Findings
-    }
+    output::derive_outcome(
+        args,
+        &all_target_urls,
+        &state,
+        &final_results,
+        output_write_failed,
+    )
+    .await
 }
 
 #[cfg(test)]
