@@ -57,14 +57,22 @@
             lockFile = ./Cargo.lock;
           };
 
-          inherit nativeBuildInputs buildInputs;
+          # `installShellFiles` is package-only (it provides
+          # `installShellCompletion` below); the dev shell has no use for it.
+          nativeBuildInputs = nativeBuildInputs ++ [ pkgs.installShellFiles ];
+          inherit buildInputs;
 
-          # Render the man page with the binary that was just installed rather
-          # than shipping a generated .1 in the source tree. This runs the
-          # built binary, so it applies to native builds only.
+          # Render the man page and the shell completions with the binary that
+          # was just installed rather than shipping generated copies in the
+          # source tree. This runs the built binary, so it applies to native
+          # builds only.
           postInstall = ''
             mkdir -p $out/share/man/man1
             $out/bin/dalfox man > $out/share/man/man1/dalfox.1
+            installShellCompletion --cmd dalfox \
+              --bash <($out/bin/dalfox completion bash) \
+              --zsh <($out/bin/dalfox completion zsh) \
+              --fish <($out/bin/dalfox completion fish)
           '';
 
           meta = with pkgs.lib; {

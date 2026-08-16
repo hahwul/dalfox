@@ -97,6 +97,20 @@ dalfox --version
 
 You should see something like `dalfox 3.2.1` along with the Dalfox banner.
 
+## Shell completions
+
+Homebrew, the AUR package, the `.deb` / `.rpm` packages and the Nix flake install bash, zsh and fish completions for you — nothing else to do.
+
+Installed another way (Cargo, a release archive, a source build)? Generate them yourself:
+
+```bash
+dalfox completion bash > /etc/bash_completion.d/dalfox
+dalfox completion zsh > "${fpath[1]}/_dalfox"
+dalfox completion fish > ~/.config/fish/completions/dalfox.fish
+```
+
+`powershell` and `elvish` are supported too — see the [CLI reference](../../reference/cli/).
+
 ## Getting help
 
 Dalfox uses [clap](https://github.com/clap-rs/clap), so help is always accessible:

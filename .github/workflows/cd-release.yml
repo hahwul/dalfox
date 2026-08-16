@@ -168,22 +168,27 @@ jobs:
           mkdir -p target/release
           cp "target/${{ matrix.target }}/release/dalfox" target/release/dalfox
 
-      # Render the man page from the binary we just built rather than from a
-      # committed .1 file, so it can never drift from the CLI definition. Both
-      # packaging targets build natively (x86_64 on ubuntu-latest, aarch64 on
-      # ubuntu-24.04-arm), so the binary is runnable here. `set -o pipefail`
-      # plus the size check keeps a failed render from shipping an empty page.
-      - name: Render man page for packaging
+      # Render the man page and the shell completions from the binary we just
+      # built rather than from committed copies, so they can never drift from
+      # the CLI definition. Both packaging targets build natively (x86_64 on
+      # ubuntu-latest, aarch64 on ubuntu-24.04-arm), so the binary is runnable
+      # here. `set -o pipefail` plus the size checks keep a failed render from
+      # shipping an empty file.
+      - name: Render man page and shell completions for packaging
         if: |
           matrix.target == 'x86_64-unknown-linux-gnu' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p target/man
+          mkdir -p target/man target/completions
           target/release/dalfox man > target/man/dalfox.1
           test -s target/man/dalfox.1
           head -n 5 target/man/dalfox.1
+          for shell in bash zsh fish; do
+            target/release/dalfox completion "$shell" > "target/completions/dalfox.$shell"
+            test -s "target/completions/dalfox.$shell"
+          done
 
       - name: Build Debian package
         if: |
@@ -191,9 +196,17 @@ jobs:
           matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           cargo deb --no-build
-          # The man page is a generated asset, so a path change would drop it
-          # silently. Fail here instead (matches `.1` and `.1.gz`).
-          dpkg-deb -c "$(find target/debian -name '*.deb' | head -n1)" | grep -q 'man1/dalfox\.1'
+          # The man page and completions are generated assets, so a path change
+          # would drop them silently. Fail here instead (the man entry matches
+          # both `.1` and `.1.gz`).
+          deb="$(find target/debian -name '*.deb' | head -n1)"
+          for entry in \
+            'man1/dalfox\.1' \
+            'bash-completion/completions/dalfox' \
+            'zsh/site-functions/_dalfox' \
+            'fish/vendor_completions\.d/dalfox\.fish'; do
+            dpkg-deb -c "$deb" | grep -q "$entry"
+          done
 
       - name: Build RPM package
         if: |
