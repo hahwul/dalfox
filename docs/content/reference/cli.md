@@ -292,6 +292,10 @@ dalfox completion fish > ~/.config/fish/completions/dalfox.fish
 
 Nothing else is written to stdout, so the output can always be safely redirected to a file.
 
+The deprecated `url` / `file` / `pipe` compat commands and the packaging helper `man` are hidden from `--help`, and the generated scripts leave them out too.
+
+---
+
 ## See also
 
 - [Config File reference](../config/)
