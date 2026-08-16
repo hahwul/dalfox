@@ -314,7 +314,9 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     for (k, v) in &headers {
         request = request.header(k, v);
     }
-    if let Some(ua) = &target.user_agent {
+    // Through `effective_user_agent` so the `Some("")` "no override" sentinel
+    // never reaches the wire as a literal `User-Agent:`.
+    if let Some(ua) = target.effective_user_agent() {
         request = request.header("User-Agent", ua);
     }
     let mut cookie_header = String::new();
@@ -406,7 +408,7 @@ pub async fn blind_scan_forms_with(
     for (k, v) in &target.headers {
         fetch = fetch.header(k, v);
     }
-    if let Some(ua) = &target.user_agent {
+    if let Some(ua) = target.effective_user_agent() {
         fetch = fetch.header("User-Agent", ua);
     }
     if let Some(ref h) = cookie_header {
@@ -525,7 +527,7 @@ pub async fn blind_scan_forms_with(
                 }
                 // Set Content-Type last to guarantee it wins.
                 request = request.header("Content-Type", "application/x-www-form-urlencoded");
-                if let Some(ua) = &target.user_agent {
+                if let Some(ua) = target.effective_user_agent() {
                     request = request.header("User-Agent", ua);
                 }
                 if let Some(ref h) = cookie_header {

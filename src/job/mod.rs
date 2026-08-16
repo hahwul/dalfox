@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::scanning::result::SanitizedResult;
 use crate::target_parser::Target;
 
+pub(crate) mod runner;
+
 /// Status of an asynchronous scan job (used by both REST server and MCP).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -455,7 +457,7 @@ pub async fn send_reachability_probe(target: &Target) -> bool {
             .join("; ");
         req = req.header("Cookie", cookie_header);
     }
-    if let Some(ua) = target.user_agent.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(ua) = target.effective_user_agent() {
         req = req.header("User-Agent", ua);
     }
     if let Some(body) = &target.data {

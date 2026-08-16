@@ -251,7 +251,10 @@ async fn send_probe_request_for_param(
     let url_original = target.url.clone();
     let headers = target.headers.clone();
     let cookies = target.cookies.clone();
-    let user_agent = target.user_agent.clone();
+    // `effective_user_agent`, not the raw field: `Some("")` is the "no
+    // override" sentinel every entry point sets when none was supplied, and
+    // sending it verbatim put a literal blank `User-Agent:` on every probe.
+    let user_agent = target.effective_user_agent().map(str::to_string);
     let data = target.data.clone();
     let param_name = param.name.clone();
     let wire_name = param.effective_wire_name().to_string();

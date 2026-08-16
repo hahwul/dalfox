@@ -103,9 +103,7 @@ pub fn apply_headers_ua_cookies(
     }
 
     // Apply UA (override any existing UA header)
-    if let Some(ua) = &target.user_agent
-        && !ua.is_empty()
-    {
+    if let Some(ua) = target.effective_user_agent() {
         rb = rb.header("User-Agent", ua);
     }
 

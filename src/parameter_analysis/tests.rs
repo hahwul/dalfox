@@ -1773,3 +1773,59 @@ fn test_transport_invalid_chars_marks_semicolon_for_cookies() {
         transport_invalid_chars(&target, &probe_test_param(Location::Query, "session")).is_empty()
     );
 }
+
+/// The stage-3 probe is the highest-volume request a scan makes, and it read
+/// `target.user_agent` raw. `Some("")` is the "no override" sentinel every
+/// entry point normalizes to when the operator supplied none, so every probe
+/// went out carrying a literal blank `User-Agent:` — a fingerprint no ordinary
+/// client sends, on the requests meant to look ordinary. Reached here through
+/// a reflecting param so the probe actually runs; the REST regression test for
+/// the same sentinel uses a non-reflecting target and never gets this far.
+#[tokio::test]
+async fn active_probe_omits_user_agent_for_the_no_override_sentinel() {
+    use axum::{Router, extract::State, http::HeaderMap, response::Html};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    type Seen = std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>;
+
+    async fn echo(State(seen): State<Seen>, headers: HeaderMap) -> Html<String> {
+        seen.lock().expect("record ua").push(
+            headers
+                .get("user-agent")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string),
+        );
+        Html("<div>ok</div>".to_string())
+    }
+
+    let seen: Seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/probe", axum::routing::get(echo))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/probe?q=seed")).unwrap();
+    target.user_agent = Some(String::new());
+
+    let _ = active_probe_param(
+        &target,
+        probe_param("q", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let uas = seen.lock().expect("uas").clone();
+    assert!(!uas.is_empty(), "the probe must have reached the server");
+    assert!(
+        !uas.iter().any(|ua| ua.as_deref() == Some("")),
+        "the empty sentinel must not become a blank User-Agent header; saw {uas:?}"
+    );
+}
