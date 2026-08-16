@@ -756,3 +756,70 @@ fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
     }
     output_write_failed
 }
+
+/// Decide the process exit code from what the scan actually produced.
+///
+/// Every branch here exists because a real script read the wrong thing from a
+/// zero exit: `dalfox scan https://target && echo "no XSS found"` must not
+/// print that when the host was down, when the session died, or when the
+/// `--output` file could not be written. Only "we looked and found nothing"
+/// is Clean.
+pub(crate) async fn derive_outcome(
+    args: &ScanArgs,
+    all_target_urls: &[String],
+    state: &ScanState,
+    final_results: &[Result],
+    output_write_failed: bool,
+) -> ScanOutcome {
+    // A scan where every supplied target failed reachability checks
+    // (DNS lookup failure, connection refused, content-type mismatch,
+    // etc.) used to fall through to `ScanOutcome::Clean` here — same
+    // exit code 0 as "scanned and found nothing." That silently masked
+    // hard failures from scripts like
+    //   `dalfox scan https://target && echo "no XSS found"`,
+    // so the operator could read a downed server or typo'd host as a
+    // clean pass. Treat the all-skipped case as an error instead; if
+    // even one target produced any scan activity (even with zero
+    // findings) the outcome falls through to Clean as before.
+    let all_unreachable = !all_target_urls.is_empty() && {
+        let skipped = state.skipped_targets.lock().await;
+        !skipped.is_empty() && all_target_urls.iter().all(|u| skipped.contains_key(u))
+    };
+    if all_unreachable {
+        return ScanOutcome::Error;
+    }
+
+    // An empty report after a dead session must not exit 0 — `dalfox scan ... &&
+    // echo "no XSS found"` is exactly the script this issue is about. Under
+    // `--on-session-loss continue` the operator has said the detection may be
+    // misfiring on their target and asked to keep going, so the exit code is
+    // left alone; the `incomplete` meta flag and the per-target SESSION_LOST
+    // entries still record what happened either way.
+    //
+    // Gated on there being no findings: a run that confirmed a `V` and *then*
+    // lost its session should exit 1 (vulnerabilities found), not 2 (hard
+    // error). CI that separates those two — a distinction the output guide
+    // documents — would otherwise read a successful detection as an
+    // infrastructure failure. `meta.incomplete` carries the incompleteness for
+    // both codes.
+    if final_results.is_empty()
+        && super::session::aborts_on_loss(args)
+        && !state.session_lost.lock().await.is_empty()
+    {
+        return ScanOutcome::Error;
+    }
+
+    // A requested `--output` file that couldn't be written is a hard failure,
+    // same as an all-unreachable run: the operator asked for results on disk and
+    // didn't get them. Report it via the exit code so scripts don't read it as a
+    // clean/successful pass.
+    if output_write_failed {
+        return ScanOutcome::Error;
+    }
+
+    if final_results.is_empty() {
+        ScanOutcome::Clean
+    } else {
+        ScanOutcome::Findings
+    }
+}

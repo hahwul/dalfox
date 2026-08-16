@@ -5,10 +5,11 @@ use super::output::{
 use super::poc::{build_ast_dom_message, generate_poc, render_finding_block};
 use super::postprocess::{dedupe_ast_results, extract_context};
 use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
+use super::validation::validate_numeric_args;
 use super::{
     CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
     CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, ScanArgs, ScanOutcome, ScanState,
-    finalize_scan_args, validate_numeric_args,
+    finalize_scan_args,
 };
 use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::scanning::result::{FindingType, Result as ScanResult};
