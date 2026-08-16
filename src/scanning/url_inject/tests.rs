@@ -1139,3 +1139,120 @@ fn make_param(location: Location, name: &str) -> Param {
         js_breakout: None,
     }
 }
+
+/// `build_injected_url` reassembles the query/fragment by hand rather than
+/// going through `Url`'s serializer, so its output must still be parseable by
+/// `Url::parse` for every shape a real target URL can take. Discovery builds a
+/// probe URL this way for each query parameter, and unparseable output there
+/// used to abort the whole run.
+///
+/// This is the invariant; `parameter_analysis::discovery` no longer *relies* on
+/// it (an unparseable probe URL skips that one parameter), but a regression
+/// here would silently drop parameters from discovery, so it is pinned.
+#[test]
+fn build_injected_url_output_is_always_parseable() {
+    const BASES: &[&str] = &[
+        "http://example.com",
+        "http://example.com/",
+        "http://example.com/a/b",
+        "http://example.com/a/b?c=d",
+        "http://example.com/a/b?c=d&e=f",
+        "http://example.com/a/b#frag",
+        // fragment containing a `?` with no query present: the prefix scan
+        // looks for the first `?` in the whole serialized URL.
+        "http://example.com/a/b#x?y=z",
+        "http://example.com/a/b#/route?url=v",
+        "http://example.com/#a=1&b=2",
+        "http://example.com/a/b?c=d#e?f=g",
+        "http://example.com/?=",
+        "http://example.com/?&&&",
+        "http://example.com/?a",
+        "http://example.com/?%C3%A9=%41",
+        "http://example.com/?a=%",
+        "http://example.com/?a=%zz",
+        "http://example.com/?a=%2",
+        "http://example.com/%C3%A9/%EA%B0%80?%C3%A9=%EA%B0%80#%C3%A9",
+        "https://u:p@example.com:8443/p%20a?q=1#f",
+        "http://[::1]:8080/a?b=c",
+        "http://example.com/a?a=1&a=2&a=3",
+        "http://example.com/?a[b]=c",
+        "http://example.com/#",
+        "http://example.com/?#",
+    ];
+    const NAMES: &[&str] = &[
+        "a",
+        "c",
+        "e",
+        "",
+        " ",
+        "=",
+        "&",
+        "?",
+        "#",
+        "%",
+        "%41",
+        "%zz",
+        "é",
+        "가",
+        "𝔘",
+        "__dalfox_key_inject__",
+        "path_segment_0",
+        "path_segment_1",
+        "path_segment_99",
+        "path_segment_-1",
+        "path_segment_",
+        "url",
+        "a\nb",
+        "a\0b",
+        "\u{200b}",
+        "..",
+        "/",
+        "//",
+    ];
+    const INJECTED: &[&str] = &[
+        "<script>alert(1)</script>",
+        "\"><svg onload=alert(1)>",
+        "a b",
+        "%",
+        "%41",
+        "%zz",
+        "#frag",
+        "?q=1",
+        "&x=y",
+        "=",
+        "é가𝔘",
+        "\u{0}",
+        "\n",
+        "\r\n",
+        "javascript:alert(1)",
+        "a%c3%a9b",
+        "%%%",
+        "\u{feff}",
+    ];
+    const LOCATIONS: &[Location] = &[
+        Location::Query,
+        Location::Body,
+        Location::JsonBody,
+        Location::MultipartBody,
+        Location::Header,
+        Location::Path,
+        Location::Fragment,
+    ];
+
+    for base_str in BASES {
+        let base = make_url(base_str);
+        for location in LOCATIONS {
+            for name in NAMES {
+                let param = make_param(location.clone(), name);
+                for injected in INJECTED {
+                    let out = build_injected_url(&base, &param, injected);
+                    assert!(
+                        Url::parse(&out).is_ok(),
+                        "unparseable injected URL: base={base_str:?} location={location:?} \
+                         name={name:?} injected={injected:?} -> {out:?}"
+                    );
+                }
+            }
+        }
+    }
+}

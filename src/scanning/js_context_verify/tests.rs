@@ -483,3 +483,38 @@ fn checks_every_payload_occurrence_not_just_the_first() {
         "the executable second occurrence must be detected"
     );
 }
+
+/// The sink-span cache guard covers nothing but a map get/insert, so a panic
+/// elsewhere that happens to poison it must not take the rest of the scan with
+/// it. Before this, both lock sites used `.expect(...)`, so one poisoning turned
+/// every subsequent JS-context check — for every target, in every concurrent
+/// server/MCP job — into a panic.
+#[test]
+fn poisoned_sink_cache_still_serves_lookups() {
+    let payload = "alert(1)";
+    let html = r#"<script>alert(1);</script>"#;
+    // Prime the cache so the read path has an entry to return.
+    assert!(has_js_context_evidence(payload, html));
+
+    // Poison the process-wide cache mutex from a panicking thread.
+    let poisoned = std::thread::spawn(|| {
+        let _guard = super::sink_cache().lock().expect("uncontended lock");
+        panic!("deliberate poisoning");
+    })
+    .join();
+    assert!(poisoned.is_err(), "the helper thread must have panicked");
+    assert!(
+        super::sink_cache().lock().is_err(),
+        "the cache mutex must actually be poisoned for this test to mean anything"
+    );
+
+    // Both the cached-hit path and the parse-and-insert path must still work.
+    assert!(
+        has_js_context_evidence(payload, html),
+        "a poisoned cache must not break the cached-hit path"
+    );
+    assert!(
+        has_js_context_evidence(payload, r#"<script>var q=1; alert(1);</script>"#),
+        "a poisoned cache must not break the parse-and-insert path"
+    );
+}
