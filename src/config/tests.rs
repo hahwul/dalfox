@@ -753,9 +753,23 @@ fn every_was_explicit_id_is_a_real_clap_argument() {
     );
 
     // Pull `was_explicit("…")` literals out of the precedence function itself.
+    // Scoped to the function *body* so the rule's own doc comment above it —
+    // which spells out `was_explicit("<field>")` as an example — is not read as
+    // a real guard.
     let src = include_str!("../config.rs");
+    let body = {
+        let start = src
+            .find("pub fn apply_to_scan_args_if_default")
+            .expect("precedence function must be present");
+        let rest = &src[start..];
+        let end = rest
+            .find("\n    /// Normalize and validate")
+            .expect("precedence function must be followed by normalize_and_validate");
+        &rest[..end]
+    };
+
     let mut queried: Vec<&str> = Vec::new();
-    for tail in src.split("was_explicit(\"").skip(1) {
+    for tail in body.split("was_explicit(\"").skip(1) {
         queried.push(
             tail.split('"')
                 .next()
@@ -779,6 +793,49 @@ fn every_was_explicit_id_is_a_real_clap_argument() {
         unknown.is_empty(),
         "config.rs asks was_explicit() about ids clap does not define: {unknown:?} — \
          these always return false, so a config file would silently override the flag"
+    );
+
+    // Existing is not enough: `!args.was_explicit("poc_type")` guarding an
+    // assignment to `args.format` names a real argument and passes every test
+    // above, while handing `--format` straight back to the config file. So each
+    // guard is also checked against the field its own block assigns.
+    //
+    // `if let Some(` opens each block, so splitting on it yields one guard plus
+    // one assignment per chunk.
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    for chunk in body.split("if let Some(") {
+        let Some(after_guard) = chunk.split_once("was_explicit(\"") else {
+            continue;
+        };
+        let id = after_guard
+            .1
+            .split('"')
+            .next()
+            .expect("literal must be terminated");
+        // First `args.<field> =` after the guard is that block's assignment.
+        let assigned = after_guard
+            .1
+            .split_once("args.")
+            .and_then(|(_, t)| t.split(|c: char| !c.is_alphanumeric() && c != '_').next())
+            .unwrap_or("<none>");
+        pairs.push((id, assigned));
+    }
+
+    assert_eq!(
+        pairs.len(),
+        queried.len(),
+        "the block-splitting extractor found {} guards but the literal scan found {} — \
+         the two disagree, so one of them is no longer reading the code correctly",
+        pairs.len(),
+        queried.len()
+    );
+
+    let mismatched: Vec<&(&str, &str)> = pairs.iter().filter(|(id, f)| id != f).collect();
+    assert!(
+        mismatched.is_empty(),
+        "was_explicit() guards that do not match the field their block assigns: \
+         {mismatched:?} (read as (guard_id, assigned_field)) — the guarded flag is \
+         still config-overridable"
     );
 }
 
