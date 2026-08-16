@@ -624,14 +624,30 @@ if run?("agents-paths")
         line.scan(/`([^`\s]+)`/) do |m|
           token = m[1]
           # Trim the citation forms that decorate a path with what is inside
-          # it: `file.rs::symbol` and `file.rs:Symbol`. Splitting on `:` also
-          # neutralizes URLs — `https://x` becomes `https`, which has no `/`.
-          path = token.split("::").first.split(':').first.chomp('/')
+          # it: `file.rs::symbol`, `file.rs:Symbol`, `page.md#heading`, and a
+          # `?query`. Splitting on `:` also neutralizes URLs — `https://x`
+          # becomes `https`, which has no `/`.
+          path = token.split("::").first
+            .split(':').first
+            .split('#').first
+            .split('?').first
+            .chomp('/')
           next unless path.includes?('/')
           next if path.includes?('*')          # a glob (`src/**`) names a tree
           next if path.includes?('$')          # `$HOME/...` is a runtime path
           next if path.starts_with?('~')       # likewise `~/.config/...`
-          next unless roots.includes?(path.split('/').first) ||
+          # `<module>/tests.rs` is a shape a guide teaches, not a file it cites.
+          next if path.includes?('<') || path.includes?('>')
+          # Somebody else's repo, not ours: a GitHub web path
+          # (`hahwul/dalfox/blob/main/src/lib.rs`) or a bare host
+          # (`dalfox.hahwul.com/docs`). Both can end in a real extension and
+          # would otherwise be reported as missing local files.
+          next if path.includes?("/blob/") || path.includes?("/tree/")
+          first = path.split('/').first
+          next if first.includes?('.')
+          # The extension fallback exists to survive a *renamed* top-level
+          # directory, so it must not be a blanket bypass of the root filter.
+          next unless roots.includes?(first) ||
                       PATH_EXTENSIONS.includes?(File.extname(path))
           checked += 1
           next if bases.any? { |base| File.exists?(File.join(base, path)) }

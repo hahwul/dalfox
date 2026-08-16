@@ -182,8 +182,24 @@ Broader validation:
 - `cargo test -- --include-ignored`
 - `cargo test -- --nocapture`
 
+Where a module's own tests live:
+- Inline `#[cfg(test)] mod tests { … }` while the block is small — a module you
+  can read end to end costs nothing to navigate.
+- Once the block passes **roughly 200 lines**, move it out to a sibling file and
+  leave `#[cfg(test)] mod tests;` behind. Rust 2018 resolves that to
+  `<module>/tests.rs` *next to* `<module>.rs`, so no directory move and no
+  `mod.rs` rename is needed: `src/scanning/check_reflection.rs` +
+  `src/scanning/check_reflection/tests.rs` is the shape.
+- Keep the module name (`tests`, `arg_parser_tests`, …) and the file name in
+  step, so `cargo test <module>::` keeps addressing the same set. A file gets
+  its module's name; splitting does not rename tests.
+- The threshold is a judgement call, not a lint. It exists so a reader knows
+  which convention a file follows before opening it, not to be enforced to the
+  line.
+
 Targeted suites:
-- unit + module-level tests in `src/**` (`#[cfg(test)]`)
+- unit + module-level tests in `src/**` (`#[cfg(test)]`, inline or
+  `<module>/tests.rs` per the rule above)
 - crate-level unit tests: `tests/unit/` (encoding, target_parser, utils)
 - integration tests: `tests/integration/` (markdown/sarif output, scanner pipeline)
 - functional mock-server tests: `tests/functional/` (driven by `tests/functional/mock_cases/`)

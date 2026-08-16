@@ -154,8 +154,25 @@ pub struct ScanConfig {
 }
 
 impl Config {
-    // Apply config only when current args fields equal clap default values (from clap on ScanArgs).
-    // This lets CLI-specified values win while config populates defaults.
+    /// Overlay config-file values onto `args`, filling only what the operator
+    /// left alone. Implements `CLI flag > config file > built-in default`.
+    ///
+    /// **Guard on `!args.was_explicit("<field>")`, never on the field's value.**
+    /// A value-comparison guard (`args.workers == DEFAULT_WORKERS`) cannot tell
+    /// "untouched" from "typed with the value that happens to be the default",
+    /// so it silently lets the config win over `--workers 50` / `--method GET`.
+    /// That was the bug across 22 flags; `ExplicitArgs` records the answer from
+    /// clap's `ValueSource` instead. `was_explicit` takes the clap argument id,
+    /// which is the `ScanArgs` field name.
+    ///
+    /// The only guards that may key on the value are the ones a command line
+    /// cannot forge: `Option::is_none()`, `Vec::is_empty()`, and `!bool` for a
+    /// flag whose default is `false` — in each case the sentinel *is*
+    /// "the operator said nothing".
+    ///
+    /// `every_was_explicit_id_is_a_real_clap_argument` in `config::tests` reads
+    /// this function's body and fails if an id here does not name a real clap
+    /// argument, or does not match the field the same block assigns.
     pub fn apply_to_scan_args_if_default(&self, args: &mut crate::cmd::scan::ScanArgs) {
         if let Some(scan) = &self.scan {
             // INPUT
