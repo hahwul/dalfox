@@ -94,7 +94,7 @@ fn selective_path_segment_encode(raw: &str) -> Cow<'_, str> {
 ///
 /// For non-Query locations and for params without a `form_action_url`, the
 /// caller's `target_url` is returned unchanged.
-pub fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
+pub(crate) fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
     let uses_form_action = matches!(
         param.location,
         Location::Query | Location::Body | Location::JsonBody | Location::MultipartBody
@@ -114,7 +114,7 @@ pub fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
 /// Body-less verbs (GET/HEAD/OPTIONS/TRACE) force POST. Body-capable verbs
 /// (POST/PUT/PATCH/DELETE/QUERY/…) are preserved so scans like
 /// `-X QUERY -d '…'` actually send QUERY (RFC 10008).
-pub fn body_location_method(target_method: &str) -> reqwest::Method {
+pub(crate) fn body_location_method(target_method: &str) -> reqwest::Method {
     match target_method.trim().to_ascii_uppercase().as_str() {
         "" | "GET" | "HEAD" | "OPTIONS" | "TRACE" => reqwest::Method::POST,
         other => other.parse().unwrap_or(reqwest::Method::POST),
@@ -125,7 +125,10 @@ pub fn body_location_method(target_method: &str) -> reqwest::Method {
 /// param. HTML form-discovered sinks (`form_action_url` set) always submit as
 /// POST — forms never use QUERY/PUT/etc. Own-body params fall through to
 /// [`body_location_method`].
-pub fn body_location_method_for_param(target_method: &str, param: &Param) -> reqwest::Method {
+pub(crate) fn body_location_method_for_param(
+    target_method: &str,
+    param: &Param,
+) -> reqwest::Method {
     if param.form_action_url.is_some() {
         return reqwest::Method::POST;
     }
@@ -136,7 +139,7 @@ pub fn body_location_method_for_param(target_method: &str, param: &Param) -> req
 /// request for `param`. Body-bearing locations use
 /// [`body_location_method_for_param`]; other locations keep the target's own
 /// method. Finding metadata must match the verb that is actually sent.
-pub fn effective_method(target_method: &str, param: &Param) -> String {
+pub(crate) fn effective_method(target_method: &str, param: &Param) -> String {
     match param.location {
         Location::Body | Location::JsonBody | Location::MultipartBody => {
             body_location_method_for_param(target_method, param)
@@ -154,7 +157,7 @@ pub fn effective_method(target_method: &str, param: &Param) -> String {
 ///
 /// Returns the new URL as a String. (We return String instead of Url to avoid
 /// repeated parse/serialize overhead in hot loops; caller already holds original Url.)
-pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> String {
+pub(crate) fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> String {
     match param.location {
         Location::Query => {
             // Build the URL string directly without cloning Url or allocating Vec
@@ -343,7 +346,7 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
 /// Different server stacks handle duplicate query parameters differently,
 /// so we generate multiple HPP variants to increase bypass probability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HppPosition {
+pub(crate) enum HppPosition {
     /// Payload appears as the last duplicate: `?p=safe&p=<payload>`
     /// Effective against: PHP/Apache (uses last), Ruby/Rack (uses last)
     Last,
@@ -358,7 +361,7 @@ pub enum HppPosition {
 /// Build an HPP URL variant for a query parameter.
 /// Returns the URL with the parameter duplicated according to the given `position`.
 /// For non-Query locations, returns `None` (HPP only applies to query params).
-pub fn build_hpp_url(
+pub(crate) fn build_hpp_url(
     base: &url::Url,
     param: &Param,
     injected: &str,
@@ -496,7 +499,8 @@ pub fn build_hpp_url(
 
 /// Generate all HPP URL variants for a given payload.
 /// Returns up to 3 variants (Last, First, Both) for query params, empty vec for others.
-pub fn build_hpp_urls(
+#[cfg(test)]
+pub(crate) fn build_hpp_urls(
     base: &url::Url,
     param: &Param,
     injected: &str,
@@ -523,7 +527,7 @@ pub fn build_hpp_urls(
 /// *cookie's* name — so every injection site has to re-derive this. Matching
 /// `param_type_label`, which reports exactly these params as `"cookie"` to the
 /// user.
-pub fn param_is_cookie(target: &Target, param: &Param) -> bool {
+pub(crate) fn param_is_cookie(target: &Target, param: &Param) -> bool {
     matches!(param.location, Location::Header)
         && target.cookies.iter().any(|(name, _)| name == &param.name)
 }
@@ -544,7 +548,7 @@ pub fn param_is_cookie(target: &Target, param: &Param) -> bool {
 /// The injected cookie is written first and the target's other cookies are
 /// preserved after it, so neighbouring cookies keep whatever session state the
 /// application needs to render the sink at all.
-pub fn build_header_request(
+pub(crate) fn build_header_request(
     client: &Client,
     target: &Target,
     param: &Param,
@@ -574,7 +578,7 @@ pub fn build_header_request(
     }
 }
 
-pub fn urlencoded_body(data: Option<&str>, name: &str, value: &str) -> String {
+pub(crate) fn urlencoded_body(data: Option<&str>, name: &str, value: &str) -> String {
     match data {
         Some(data) => {
             let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
@@ -615,7 +619,7 @@ pub fn urlencoded_body(data: Option<&str>, name: &str, value: &str) -> String {
 ///
 /// Single source of truth for the reflection / light-verify / DOM-verify / PoC
 /// JSON builders, which were byte-identical copies.
-pub fn json_body(data: Option<&str>, name: &str, param_value: &str, value: &str) -> String {
+pub(crate) fn json_body(data: Option<&str>, name: &str, param_value: &str, value: &str) -> String {
     match data {
         Some(data) => {
             if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
@@ -643,7 +647,11 @@ pub fn json_body(data: Option<&str>, name: &str, param_value: &str, value: &str)
 ///
 /// Single source of truth for the reflection / light-verify / DOM-verify /
 /// probe multipart builders.
-pub fn multipart_form(data: Option<&str>, name: &str, value: &str) -> reqwest::multipart::Form {
+pub(crate) fn multipart_form(
+    data: Option<&str>,
+    name: &str,
+    value: &str,
+) -> reqwest::multipart::Form {
     let mut form = reqwest::multipart::Form::new();
     let mut found = false;
     if let Some(data) = data {
@@ -674,7 +682,7 @@ pub fn multipart_form(data: Option<&str>, name: &str, value: &str) -> reqwest::m
 /// `<form action=...>` endpoint when the param came from a form, else the
 /// target's own URL. A form-discovered body param reflects at the action
 /// endpoint, not at the page that contained the form.
-pub fn resolve_form_action_url(param: &Param, target: &Target) -> url::Url {
+pub(crate) fn resolve_form_action_url(param: &Param, target: &Target) -> url::Url {
     param
         .form_action_url
         .as_ref()
@@ -683,7 +691,7 @@ pub fn resolve_form_action_url(param: &Param, target: &Target) -> url::Url {
 }
 
 /// `application/x-www-form-urlencoded` body injection.
-pub fn build_body_request(
+pub(crate) fn build_body_request(
     client: &Client,
     target: &Target,
     param: &Param,
@@ -703,7 +711,7 @@ pub fn build_body_request(
 }
 
 /// `application/json` body injection.
-pub fn build_json_body_request(
+pub(crate) fn build_json_body_request(
     client: &Client,
     target: &Target,
     param: &Param,
@@ -726,7 +734,7 @@ pub fn build_json_body_request(
 
 /// `multipart/form-data` body injection. No explicit `Content-Type` override:
 /// reqwest derives it from the form, and it must carry the generated boundary.
-pub fn build_multipart_request(
+pub(crate) fn build_multipart_request(
     client: &Client,
     target: &Target,
     param: &Param,
@@ -740,7 +748,7 @@ pub fn build_multipart_request(
 
 /// Query / Path injection: the payload goes into the URL and the target's own
 /// body (if any) rides along unchanged.
-pub fn build_url_inject_request(
+pub(crate) fn build_url_inject_request(
     client: &Client,
     target: &Target,
     param: &Param,
@@ -764,7 +772,7 @@ pub fn build_url_inject_request(
 /// They had already drifted: the light-verify copy sent an urlencoded body
 /// with **no `Content-Type`**, so form-parsing servers never bound the param
 /// and the verification silently came back negative.
-pub fn build_inject_request(
+pub(crate) fn build_inject_request(
     client: &Client,
     target: &Target,
     param: &Param,

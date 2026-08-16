@@ -9,46 +9,46 @@ pub mod url;
 /// `error_message`) and should be used consistently across all interfaces.
 pub mod error_codes {
     // Input validation
-    pub const NO_TARGETS: &str = "NO_TARGETS";
-    pub const NO_FILE: &str = "NO_FILE";
-    pub const INVALID_INPUT_TYPE: &str = "INVALID_INPUT_TYPE";
+    pub(crate) const NO_TARGETS: &str = "NO_TARGETS";
+    pub(crate) const NO_FILE: &str = "NO_FILE";
+    pub(crate) const INVALID_INPUT_TYPE: &str = "INVALID_INPUT_TYPE";
 
     // Parsing
-    pub const PARSE_ERROR: &str = "PARSE_ERROR";
+    pub(crate) const PARSE_ERROR: &str = "PARSE_ERROR";
 
     // I/O
-    pub const FILE_READ_ERROR: &str = "FILE_READ_ERROR";
-    pub const STDIN_ERROR: &str = "STDIN_ERROR";
+    pub(crate) const FILE_READ_ERROR: &str = "FILE_READ_ERROR";
+    pub(crate) const STDIN_ERROR: &str = "STDIN_ERROR";
     /// Input source (target list file or stdin pipe) exceeded the
     /// configured byte cap. Distinct from generic FILE_READ_ERROR so
     /// users see *why* the read was refused — most often a non-regular
     /// file like `/dev/zero` or an unintended huge file.
-    pub const INPUT_TOO_LARGE: &str = "INPUT_TOO_LARGE";
+    pub(crate) const INPUT_TOO_LARGE: &str = "INPUT_TOO_LARGE";
     /// `--input-type pipe` was set, but stdin is a terminal (no pipe
     /// attached). Reading would block forever waiting for Ctrl-D —
     /// fail fast with a clear message instead.
-    pub const STDIN_NOT_PIPED: &str = "STDIN_NOT_PIPED";
-    pub const CONNECTION_FAILED: &str = "CONNECTION_FAILED";
-    pub const DNS_RESOLUTION_FAILED: &str = "DNS_RESOLUTION_FAILED";
-    pub const TLS_HANDSHAKE_FAILED: &str = "TLS_HANDSHAKE_FAILED";
-    pub const REQUEST_TIMEOUT: &str = "REQUEST_TIMEOUT";
+    pub(crate) const STDIN_NOT_PIPED: &str = "STDIN_NOT_PIPED";
+    pub(crate) const CONNECTION_FAILED: &str = "CONNECTION_FAILED";
+    pub(crate) const DNS_RESOLUTION_FAILED: &str = "DNS_RESOLUTION_FAILED";
+    pub(crate) const TLS_HANDSHAKE_FAILED: &str = "TLS_HANDSHAKE_FAILED";
+    pub(crate) const REQUEST_TIMEOUT: &str = "REQUEST_TIMEOUT";
 
     // Scan filtering
-    pub const CONTENT_TYPE_MISMATCH: &str = "CONTENT_TYPE_MISMATCH";
-    pub const TRUNCATED_PER_HOST_CAP: &str = "TRUNCATED_PER_HOST_CAP";
+    pub(crate) const CONTENT_TYPE_MISMATCH: &str = "CONTENT_TYPE_MISMATCH";
+    pub(crate) const TRUNCATED_PER_HOST_CAP: &str = "TRUNCATED_PER_HOST_CAP";
     /// The authenticated session died (or was already dead) while scanning
     /// this target, so its results cannot be trusted. Carried on
     /// `target_summary` entries with `status: "skipped"` (the target never
     /// ran, or was cut short under `--on-session-loss abort`) or
     /// `status: "incomplete"` (it ran, but the session was gone by the end).
     /// The distinction that matters to a consumer: neither is `"clean"`.
-    pub const SESSION_LOST: &str = "SESSION_LOST";
+    pub(crate) const SESSION_LOST: &str = "SESSION_LOST";
     /// A dalfox task handling this target panicked, so the target was never
     /// analyzed. Carried on `target_summary` entries with `status: "skipped"`.
     /// Reporting the target as skipped rather than letting it fall through to
     /// `"clean"` is the whole point: a crash inside the scanner must never be
     /// indistinguishable from "we looked and found nothing".
-    pub const INTERNAL_ERROR: &str = "INTERNAL_ERROR";
+    pub(crate) const INTERNAL_ERROR: &str = "INTERNAL_ERROR";
 }
 
 #[cfg(test)]

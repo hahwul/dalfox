@@ -233,10 +233,10 @@ end
 def value_consts(sources : Array(String)) : Hash(String, Array(String))
   joined = sources.join("\n")
   strings = {} of String => String
-  joined.scan(/^pub const ([A-Z0-9_]+): &str = "([^"]*)";/m) { |m| strings[m[1]] = m[2] }
+  joined.scan(/^pub(?:\(crate\))? const ([A-Z0-9_]+): &str = "([^"]*)";/m) { |m| strings[m[1]] = m[2] }
 
   out = {} of String => Array(String)
-  joined.scan(/^pub const ([A-Z0-9_]+): &\[&str\] = &\[(.*?)\];/m) do |m|
+  joined.scan(/^pub(?:\(crate\))? const ([A-Z0-9_]+): &\[&str\] = &\[(.*?)\];/m) do |m|
     items = [] of String
     m[2].scan(/"([^"]*)"|([A-Z][A-Z0-9_]+)/) do |item|
       if lit = item[1]?
@@ -255,10 +255,10 @@ end
 def scalar_consts(sources : Array(String)) : Hash(String, String)
   joined = sources.join("\n")
   out = {} of String => String
-  joined.scan(/^pub const ([A-Z0-9_]+): (?:u8|u16|u32|u64|usize|f32|f64) = ([0-9_.]+);/m) do |m|
+  joined.scan(/^pub(?:\(crate\))? const ([A-Z0-9_]+): (?:u8|u16|u32|u64|usize|f32|f64) = ([0-9_.]+);/m) do |m|
     out[m[1]] = m[2].gsub('_', "")
   end
-  joined.scan(/^pub const ([A-Z0-9_]+): &str = "([^"]*)";/m) { |m| out[m[1]] = m[2] }
+  joined.scan(/^pub(?:\(crate\))? const ([A-Z0-9_]+): &str = "([^"]*)";/m) { |m| out[m[1]] = m[2] }
   out
 end
 
@@ -280,7 +280,7 @@ config_keys = struct_fields(config_src, "ScanConfig")
 # `apply_to_scan_args_if_default` is the only place config values reach
 # `ScanArgs`; a key absent from it is dead weight the user cannot tell apart
 # from a working one.
-apply_body = slice_between(config_src, "pub fn apply_to_scan_args_if_default", "    /// Normalize and validate config values")
+apply_body = slice_between(config_src, "fn apply_to_scan_args_if_default", "    /// Normalize and validate config values")
 normalize_body = slice_between(config_src, "impl ScanConfig {", "\npub fn load_or_init")
 
 rest_options = struct_fields(server_src, "ScanOptions")

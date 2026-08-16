@@ -1,10 +1,16 @@
-//! Dalfox XSS Scanner Library
+//! Dalfox XSS Scanner
 //!
-//! This library provides XSS scanning capabilities including:
-//! - Parameter analysis and discovery
-//! - XSS payload generation and encoding
-//! - Reflection and DOM-based XSS detection
-//! - AST-based JavaScript analysis
+//! The engine behind the `dalfox` binary: parameter discovery and mining,
+//! payload generation and encoding, reflection and DOM-based detection, and
+//! AST-backed JavaScript analysis.
+//!
+//! # Public surface
+//!
+//! This crate ships as a binary; the library target exists to hold the engine
+//! and to let `tests/` drive it. Most of it is `pub(crate)` for that reason —
+//! what stays `pub` is what `main.rs` dispatches through plus what the
+//! integration tests reach for, not a curated API. Treat anything here as
+//! internal unless the binary or a test in `tests/` actually uses it.
 //!
 //! # Scan Pipeline Overview
 //!
@@ -61,24 +67,24 @@
 pub mod cmd;
 pub mod config;
 pub mod encoding;
-pub mod job;
+pub(crate) mod job;
 pub mod mcp;
-pub mod oob;
+pub(crate) mod oob;
 pub mod parameter_analysis;
 pub mod payload;
 pub mod scanning;
 pub mod server;
 pub mod target_parser;
 pub mod utils;
-pub mod waf;
+pub(crate) mod waf;
 
 pub use std::sync::atomic::AtomicBool;
 pub use std::sync::atomic::AtomicU64;
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 pub static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
-pub static WAF_BLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
-pub static WAF_CONSECUTIVE_BLOCKS: std::sync::atomic::AtomicU32 =
+pub(crate) static WAF_BLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
+pub(crate) static WAF_CONSECUTIVE_BLOCKS: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
 pub static NO_COLOR: AtomicBool = AtomicBool::new(false);
 
@@ -115,25 +121,25 @@ tokio::task_local! {
     /// don't pollute each other's progress tallies. Callers use
     /// `tick_request_count` which bumps both the global counter and this
     /// task-local when it is bound.
-    pub static REQUEST_COUNT_JOB: std::sync::Arc<AtomicU64>;
+    pub(crate) static REQUEST_COUNT_JOB: std::sync::Arc<AtomicU64>;
 
     /// Per-scan consecutive-WAF-block counter. Bound by MCP and REST runners
     /// so concurrent scans don't trigger each other's adaptive backoff.
     /// Callers use `tick_waf_block` / `reset_waf_consecutive`.
-    pub static WAF_CONSECUTIVE_BLOCKS_JOB: std::sync::Arc<std::sync::atomic::AtomicU32>;
+    pub(crate) static WAF_CONSECUTIVE_BLOCKS_JOB: std::sync::Arc<std::sync::atomic::AtomicU32>;
 
     /// Per-scan request rate limiter, bound by the MCP / REST runners (see
     /// [`with_job_rate_limiter`]) so concurrent jobs get independent request
     /// budgets instead of sharing the process-wide one. Preferred over
     /// `RATE_LIMITER` by [`rate_limit_acquire`] when bound.
-    pub static RATE_LIMITER_JOB: std::sync::Arc<utils::rate_limit::RateLimiter>;
+    pub(crate) static RATE_LIMITER_JOB: std::sync::Arc<utils::rate_limit::RateLimiter>;
 }
 
 /// Install the process-wide request rate limiter from `--rate-limit`
 /// (requests/second; `0` = unlimited). Called once from the CLI scan entry
 /// point before any requests go out. Idempotent: only the first call wins,
 /// matching the once-per-process CLI lifecycle.
-pub fn install_rate_limiter(rate: u32) {
+pub(crate) fn install_rate_limiter(rate: u32) {
     let _ = RATE_LIMITER.set(utils::rate_limit::RateLimiter::per_second(rate));
 }
 
@@ -176,7 +182,7 @@ pub struct JobScopes {
 impl JobScopes {
     /// Capture whatever per-job task-locals are currently bound in the calling
     /// task. Returns all-`None` when called outside any per-job scope (the CLI).
-    pub fn capture() -> Self {
+    pub(crate) fn capture() -> Self {
         Self {
             requests: REQUEST_COUNT_JOB.try_with(std::sync::Arc::clone).ok(),
             waf: WAF_CONSECUTIVE_BLOCKS_JOB
@@ -187,7 +193,7 @@ impl JobScopes {
     }
 
     /// True when no per-job scope was captured (the CLI path).
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.requests.is_none() && self.waf.is_none() && self.limiter.is_none()
     }
 }
@@ -256,7 +262,7 @@ pub async fn record_outbound_request() {
 /// `REQUEST_COUNT.fetch_add` directly so concurrent scans get accurate
 /// per-job numbers.
 #[inline]
-pub fn tick_request_count() {
+pub(crate) fn tick_request_count() {
     REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _ = REQUEST_COUNT_JOB.try_with(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
 }
@@ -269,7 +275,7 @@ pub fn tick_request_count() {
 ///   value, isolating concurrent scans. Otherwise falls back to the global
 ///   `WAF_CONSECUTIVE_BLOCKS` atomic.
 #[inline]
-pub fn tick_waf_block() -> u32 {
+pub(crate) fn tick_waf_block() -> u32 {
     WAF_BLOCK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     match WAF_CONSECUTIVE_BLOCKS_JOB
         .try_with(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1)
@@ -282,7 +288,7 @@ pub fn tick_waf_block() -> u32 {
 /// Reset the consecutive-WAF-block counter after a non-blocking response.
 /// Prefers the per-job counter when bound; falls back to the global one.
 #[inline]
-pub fn reset_waf_consecutive() {
+pub(crate) fn reset_waf_consecutive() {
     match WAF_CONSECUTIVE_BLOCKS_JOB.try_with(|c| c.store(0, std::sync::atomic::Ordering::Relaxed))
     {
         Ok(_) => {}

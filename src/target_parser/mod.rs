@@ -74,7 +74,7 @@ impl Target {
     /// empty-check, and three of the four call sites that did so forgot —
     /// putting a literal blank `User-Agent:` on probe and blind-XSS requests,
     /// a fingerprint no ordinary client sends. Go through here instead.
-    pub fn effective_user_agent(&self) -> Option<&str> {
+    pub(crate) fn effective_user_agent(&self) -> Option<&str> {
         self.user_agent.as_deref().filter(|ua| !ua.is_empty())
     }
 
@@ -113,18 +113,8 @@ impl Target {
 
     /// Parse the method string into a `reqwest::Method`, defaulting to GET on failure.
     /// This avoids repeating `.method.parse().unwrap_or(reqwest::Method::GET)` everywhere.
-    pub fn parse_method(&self) -> reqwest::Method {
+    pub(crate) fn parse_method(&self) -> reqwest::Method {
         self.method.parse().unwrap_or(reqwest::Method::GET)
-    }
-
-    /// Whether this target's (enforcing) CSP requires Trusted Types
-    /// (`require-trusted-types-for 'script'`). Drives the AST DOM analyzer's
-    /// strict-default-policy suppression. False when no CSP was analysed or the
-    /// captured policy was report-only (neutralised at analysis time).
-    pub fn trusted_types_enforced(&self) -> bool {
-        self.csp_analysis
-            .as_ref()
-            .is_some_and(|c| c.require_trusted_types_for)
     }
 
     /// Build a reqwest Client, falling back to a default Client on error.
@@ -134,7 +124,7 @@ impl Target {
     /// (timeout, proxy, follow_redirects) tuple, so call sites that previously
     /// allocated a fresh Client per invocation (parameter mining, reflection
     /// checks, blind callbacks, etc.) now share a pooled connection set.
-    pub fn build_client_or_default(&self) -> Client {
+    pub(crate) fn build_client_or_default(&self) -> Client {
         self.build_client().unwrap_or_else(|e| {
             if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                 eprintln!("[warn] failed to build client: {}, using default", e);
@@ -143,7 +133,7 @@ impl Target {
         })
     }
 
-    pub fn build_client(&self) -> Result<Client, Box<dyn std::error::Error>> {
+    pub(crate) fn build_client(&self) -> Result<Client, Box<dyn std::error::Error>> {
         // Library consumers may build clients without going through `main()`,
         // so make sure the ring crypto provider is installed first.
         crate::ensure_crypto_provider();

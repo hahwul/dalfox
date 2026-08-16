@@ -3,7 +3,7 @@
 /// This replaces the previous static XSS_HTML_PAYLOADS constant to ensure automatic synchronization
 /// when JavaScript payload list changes.
 /// Expose useful HTML tag names commonly leveraged in XSS contexts
-pub fn useful_html_tag_names() -> &'static [&'static str] {
+pub(crate) fn useful_html_tag_names() -> &'static [&'static str] {
     &[
         "script", "img", "svg", "iframe", "math", "xmp", "details", "video", "audio", "object",
         "embed", "marquee", "body", "meta", "link", "input", "form", "textarea", "select",
@@ -13,7 +13,7 @@ pub fn useful_html_tag_names() -> &'static [&'static str] {
     ]
 }
 
-pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
+pub(crate) fn get_dynamic_xss_html_payloads() -> Vec<String> {
     // Memoize the built catalog: the templates are compile-time constants and
     // the only runtime inputs (class/id markers) are process-stable OnceLock
     // values, so the result is identical on every call. This collapses the
@@ -114,7 +114,7 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
 
 /// Generate mXSS (mutation XSS) payloads that exploit browser HTML parser quirks
 /// such as namespace confusion, innerHTML re-parsing, and DOMPurify bypass patterns.
-pub fn get_mxss_payloads() -> Vec<String> {
+pub(crate) fn get_mxss_payloads() -> Vec<String> {
     // Memoized for the same reason as get_dynamic_xss_html_payloads (stable
     // templates + process-stable markers).
     static CACHE: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
@@ -175,7 +175,7 @@ pub(crate) const JS_SCHEME_STRIP_MUTATION_PREFIXES: &[&str] =
 /// (iframe, embed, object, a href, etc.)
 /// These target contexts where a parameter value is placed directly into a `src` or `href`
 /// attribute, allowing `javascript:` or `data:` URI execution.
-pub fn get_protocol_injection_payloads() -> Vec<String> {
+pub(crate) fn get_protocol_injection_payloads() -> Vec<String> {
     // Memoized: depends only on the stable XSS_JAVASCRIPT_PAYLOADS_SMALL const
     // and pure formatting/base64, so the catalog is identical per process.
     static CACHE: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {

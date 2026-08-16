@@ -85,7 +85,7 @@ pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
 /// caller that also placed a User-Agent in `target.headers` ends up sending both.
 /// If `cookie_header` is Some, attach it. Otherwise, if no Cookie header exists in headers,
 /// auto-attach from target.cookies (when non-empty).
-pub fn apply_headers_ua_cookies(
+pub(crate) fn apply_headers_ua_cookies(
     mut rb: RequestBuilder,
     target: &Target,
     cookie_header: Option<String>,
@@ -130,7 +130,7 @@ pub fn apply_headers_ua_cookies(
 /// Build a RequestBuilder from the given client, maintaining consistent header/UA/Cookie application.
 /// If `body` is Some, attach it as the request body.
 /// Auto-attaches cookies (unless a Cookie header is already present in target.headers).
-pub fn build_request(
+pub(crate) fn build_request(
     client: &Client,
     target: &Target,
     method: Method,
@@ -145,7 +145,7 @@ pub fn build_request(
 /// Build a RequestBuilder with an explicit Cookie header override.
 /// If `cookie_header` is Some(string), it will be used regardless of target.headers/target.cookies.
 /// If None, behavior is identical to `build_request`.
-pub fn build_request_with_cookie(
+pub(crate) fn build_request_with_cookie(
     client: &Client,
     target: &Target,
     method: Method,
@@ -160,7 +160,7 @@ pub fn build_request_with_cookie(
 
 /// Apply arbitrary header overrides on top of an existing RequestBuilder (late binding).
 /// Provided `overrides` are appended after target headers and UA, so they take precedence.
-pub fn apply_header_overrides(
+pub(crate) fn apply_header_overrides(
     mut rb: RequestBuilder,
     overrides: &[(String, String)],
 ) -> RequestBuilder {
@@ -171,7 +171,7 @@ pub fn apply_header_overrides(
 }
 
 // Header parsing: splitn(2, ':') with both sides trim
-pub fn parse_header_line(line: &str) -> Option<(String, String)> {
+pub(crate) fn parse_header_line(line: &str) -> Option<(String, String)> {
     let mut parts = line.splitn(2, ':');
     let name = parts.next()?.trim();
     let value = parts.next()?.trim();
@@ -183,7 +183,8 @@ pub fn parse_header_line(line: &str) -> Option<(String, String)> {
 
 /// Parse a list of raw header lines into (name, value) pairs.
 /// Ignores lines without ":" or with empty header names.
-pub fn parse_headers(lines: &[String]) -> Vec<(String, String)> {
+#[cfg(test)]
+pub(crate) fn parse_headers(lines: &[String]) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for l in lines {
         if let Some((k, v)) = parse_header_line(l) {
@@ -196,7 +197,7 @@ pub fn parse_headers(lines: &[String]) -> Vec<(String, String)> {
 /// Extract primary type/subtype (lowercased) from a Content-Type header.
 /// Returns None for invalid formats.
 #[inline]
-pub fn content_type_primary(ct: &str) -> Option<String> {
+pub(crate) fn content_type_primary(ct: &str) -> Option<String> {
     if ct.trim().is_empty() {
         return None;
     }
@@ -217,7 +218,7 @@ pub fn content_type_primary(ct: &str) -> Option<String> {
 /// - text/xml, application/xml
 /// - application/rss+xml, application/atom+xml
 #[inline]
-pub fn is_htmlish_content_type(ct: &str) -> bool {
+pub(crate) fn is_htmlish_content_type(ct: &str) -> bool {
     let Some(primary) = content_type_primary(ct) else {
         return false;
     };
@@ -245,7 +246,7 @@ pub fn is_htmlish_content_type(ct: &str) -> bool {
 /// Deliberately excludes `text/plain` and empty/missing types, which browsers
 /// content-sniff into HTML when `X-Content-Type-Options: nosniff` is absent.
 #[inline]
-pub fn is_javascript_content_type(ct: &str) -> bool {
+pub(crate) fn is_javascript_content_type(ct: &str) -> bool {
     let Some(primary) = content_type_primary(ct) else {
         return false;
     };
@@ -266,7 +267,7 @@ pub fn is_javascript_content_type(ct: &str) -> bool {
 /// browser-executable or browser-consumed responses such as JSONP, raw JSON
 /// fragments, and SVG documents can still surface XSS gadgets or reflective
 /// payloads that Dalfox should analyze during preflight.
-pub fn is_xss_scannable_content_type(ct: &str) -> bool {
+pub(crate) fn is_xss_scannable_content_type(ct: &str) -> bool {
     if is_htmlish_content_type(ct) {
         return true;
     }
@@ -306,7 +307,7 @@ pub fn is_xss_scannable_content_type(ct: &str) -> bool {
 ///   * `text/plain` — browsers content-sniff it as HTML when
 ///     `X-Content-Type-Options: nosniff` is absent, so it is NOT inert.
 ///   * empty / missing Content-Type — also sniffable, NOT inert.
-pub fn content_type_is_inert_data(ct: &str) -> bool {
+pub(crate) fn content_type_is_inert_data(ct: &str) -> bool {
     let Some(primary) = content_type_primary(ct) else {
         return false;
     };
@@ -358,7 +359,7 @@ pub fn content_type_is_inert_data(ct: &str) -> bool {
 /// still treated as live: `nosniff` constrains MIME *checking* for scripts and
 /// styles, and a navigation to a typeless response is still sniffed, so the
 /// same reasoning does not carry over.
-pub fn content_type_is_inert_data_with_nosniff(ct: &str, nosniff: bool) -> bool {
+pub(crate) fn content_type_is_inert_data_with_nosniff(ct: &str, nosniff: bool) -> bool {
     if content_type_is_inert_data(ct) {
         return true;
     }
@@ -372,7 +373,7 @@ pub fn content_type_is_inert_data_with_nosniff(ct: &str, nosniff: bool) -> bool 
 ///
 /// The header is a single token by spec; compared case-insensitively because
 /// the value is not case-sensitive in practice and servers do send `NoSniff`.
-pub fn headers_declare_nosniff(headers: &reqwest::header::HeaderMap) -> bool {
+pub(crate) fn headers_declare_nosniff(headers: &reqwest::header::HeaderMap) -> bool {
     headers
         .get("x-content-type-options")
         .and_then(|v| v.to_str().ok())
@@ -383,7 +384,7 @@ pub fn headers_declare_nosniff(headers: &reqwest::header::HeaderMap) -> bool {
 /// - If `prefer_head` is true, uses HEAD; otherwise GET.
 /// - When using GET and `range_bytes` is Some(n), adds `Range: bytes=0-(n-1)`
 ///   to minimize transfer size while still allowing meta tag parsing if needed.
-pub fn build_preflight_request(
+pub(crate) fn build_preflight_request(
     client: &Client,
     target: &Target,
     prefer_head: bool,

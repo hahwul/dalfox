@@ -60,7 +60,7 @@ pub enum EncodingStep {
 }
 
 impl EncodingStep {
-    pub fn apply(&self, payload: &str) -> Result<String, String> {
+    pub(crate) fn apply(&self, payload: &str) -> Result<String, String> {
         match self {
             EncodingStep::Base64 => Ok(STANDARD.encode(payload)),
             EncodingStep::Base64Url => Ok(URL_SAFE_NO_PAD.encode(payload)),
@@ -93,14 +93,14 @@ impl EncodingPipeline {
         Self { steps }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }
 
     /// Run the payload through every step in order. Returns `Err` if any
     /// step fails (e.g. invalid JSON pointer); callers may fall back to the
     /// raw payload.
-    pub fn apply(&self, payload: &str) -> Result<String, String> {
+    pub(crate) fn apply(&self, payload: &str) -> Result<String, String> {
         let mut current = payload.to_string();
         for step in &self.steps {
             current = step.apply(&current)?;
@@ -163,7 +163,7 @@ fn set_by_pointer(
 
 /// One inferred injection point inside a structurally-encoded parameter.
 #[derive(Debug, Clone, PartialEq)]
-pub struct NestedField {
+pub(crate) struct NestedField {
     /// JSON pointer to the leaf, e.g. `/move_url` or `/items/0/name`.
     pub pointer: String,
     /// Field path components, for human-readable naming. Indexes are stored
@@ -200,7 +200,7 @@ const MIN_B64_CANDIDATE_LEN: usize = 16;
 ///
 /// Returns an empty vec when nothing matches — every caller treats "no
 /// nested fields" as "fall back to plain probes".
-pub fn infer_nested_pipelines(value: &str) -> Vec<NestedField> {
+pub(crate) fn infer_nested_pipelines(value: &str) -> Vec<NestedField> {
     type Strategy = fn(&str) -> Vec<NestedField>;
     const STRATEGIES: &[Strategy] = &[infer_jwt, infer_url_json, infer_b64_or_b64url_json];
     for strategy in STRATEGIES {

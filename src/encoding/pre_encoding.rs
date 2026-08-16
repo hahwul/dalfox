@@ -14,21 +14,21 @@ use super::{base64_encode, url_encode};
 /// inspectors; a WAF inspecting a larger window simply won't be detected as
 /// window-limited (the detection probe in `active_probe_param` won't reflect),
 /// so this never produces a false bypass.
-pub const WAF_WINDOW_PAD_LEN: usize = 256;
+pub(crate) const WAF_WINDOW_PAD_LEN: usize = 256;
 
 /// The benign prefix used by the `WafWindowPad` transform. A run of a single
 /// inert character (no HTML/JS metacharacters, so it can't change the
 /// reflection context) — its only job is to push the real payload past the
 /// WAF's inspection window. Shared by the encoder and the detection probe so
 /// both agree on the exact prefix.
-pub fn waf_window_pad() -> String {
+pub(crate) fn waf_window_pad() -> String {
     "A".repeat(WAF_WINDOW_PAD_LEN)
 }
 
 /// Known pre-encoding types.
 /// Using an enum prevents typo bugs from stringly-typed matching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreEncodingType {
+pub(crate) enum PreEncodingType {
     Base64,
     DoubleBase64,
     DoubleUrl,
@@ -47,7 +47,7 @@ pub enum PreEncodingType {
 
 impl PreEncodingType {
     /// Parse from the string representation stored in `Param.pre_encoding`.
-    pub fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
             "base64" => Some(Self::Base64),
             "2base64" => Some(Self::DoubleBase64),
@@ -59,7 +59,7 @@ impl PreEncodingType {
     }
 
     /// The canonical string name (for storing in `Param.pre_encoding`).
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::Base64 => "base64",
             Self::DoubleBase64 => "2base64",
@@ -70,7 +70,7 @@ impl PreEncodingType {
     }
 
     /// Encode a payload according to this pre-encoding type.
-    pub fn encode(&self, payload: &str) -> String {
+    pub(crate) fn encode(&self, payload: &str) -> String {
         match self {
             Self::Base64 => base64_encode(payload),
             Self::DoubleBase64 => base64_encode(&base64_encode(payload)),
@@ -85,7 +85,7 @@ impl PreEncodingType {
 /// stored in `Param.pre_encoding`.
 ///
 /// Returns the encoded payload, or the original if no encoding is needed.
-pub fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
+pub(crate) fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
     match pre_encoding.as_deref().and_then(PreEncodingType::parse) {
         Some(enc) => enc.encode(payload),
         None => payload.to_string(),
@@ -96,7 +96,10 @@ pub fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> Strin
 /// `pre_encoding_pipeline` when set; otherwise falls back to the legacy
 /// single-step `pre_encoding`. Pipeline failures (e.g. a stale JSON pointer)
 /// degrade to the raw payload so probing can still attempt an injection.
-pub fn apply_param_encoding(payload: &str, param: &crate::parameter_analysis::Param) -> String {
+pub(crate) fn apply_param_encoding(
+    payload: &str,
+    param: &crate::parameter_analysis::Param,
+) -> String {
     if let Some(pipeline) = &param.pre_encoding_pipeline
         && !pipeline.is_empty()
     {
@@ -109,14 +112,14 @@ pub fn apply_param_encoding(payload: &str, param: &crate::parameter_analysis::Pa
 
 /// A single pre-encoding probe: the encoding type and a function that
 /// applies it to a raw payload.
-pub type EncodingProbe = (PreEncodingType, fn(&str) -> String);
+pub(crate) type EncodingProbe = (PreEncodingType, fn(&str) -> String);
 
 /// Encoding probes used during discovery to detect parameters that require
 /// pre-encoding. Each probe has a type and its corresponding encode function.
 ///
 /// Returns all known pre-encoding types in probe order (base64 variants first,
 /// then URL variants).
-pub fn encoding_probes() -> &'static [EncodingProbe] {
+pub(crate) fn encoding_probes() -> &'static [EncodingProbe] {
     &[
         (PreEncodingType::Base64, |s: &str| {
             PreEncodingType::Base64.encode(s)
@@ -140,7 +143,7 @@ pub fn encoding_probes() -> &'static [EncodingProbe] {
 /// so we encode (N-1) times for N-decode detection.
 /// For Path params: `selective_path_segment_encode()` encodes `%` to `%25`
 /// (one layer), so we also encode (N-1) extra times.
-pub fn multi_url_decode_probes() -> &'static [(PreEncodingType, u8)] {
+pub(crate) fn multi_url_decode_probes() -> &'static [(PreEncodingType, u8)] {
     &[
         (PreEncodingType::DoubleUrl, 1),
         (PreEncodingType::TripleUrl, 2),

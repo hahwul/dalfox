@@ -7,7 +7,7 @@ use std::sync::{Mutex, PoisonError};
 
 /// What was injected for a given correlation nonce.
 #[derive(Debug, Clone, Default)]
-pub struct InjectionRecord {
+pub(crate) struct InjectionRecord {
     pub target_url: String,
     pub param: String,
     /// Wire location understood by `generate_poc`: `"Query"`, `"Body"`,
@@ -29,14 +29,14 @@ impl CorrelationRegistry {
         Self::default()
     }
 
-    pub fn record(&self, nonce: String, rec: InjectionRecord) {
+    pub(crate) fn record(&self, nonce: String, rec: InjectionRecord) {
         self.inner
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(nonce, rec);
     }
 
-    pub fn lookup(&self, nonce: &str) -> Option<InjectionRecord> {
+    pub(crate) fn lookup(&self, nonce: &str) -> Option<InjectionRecord> {
         self.inner
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -44,14 +44,18 @@ impl CorrelationRegistry {
             .cloned()
     }
 
-    pub fn len(&self) -> usize {
+    /// Live entry count. Used by the registry tests, which assert the
+    /// correlation map is pruned as interactions are matched.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.inner
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }

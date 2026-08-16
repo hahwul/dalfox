@@ -21,7 +21,7 @@ use std::sync::LazyLock;
 
 /// A detected outdated/vulnerable library instance.
 #[derive(Debug, Clone, PartialEq)]
-pub struct VulnLib {
+pub(crate) struct VulnLib {
     pub library: String,
     pub version: String,
     /// Advisory identifiers (CVE / GHSA) for the matched ranges.
@@ -315,7 +315,7 @@ fn judge(lib: &CompiledLib, version: &str) -> Option<VulnLib> {
 
 /// Scan a response body for outdated/known-vulnerable JS libraries. Returns one
 /// [`VulnLib`] per distinct `(library, version)` found and judged vulnerable.
-pub fn detect_vulnerable_libraries(body: &str) -> Vec<VulnLib> {
+pub(crate) fn detect_vulnerable_libraries(body: &str) -> Vec<VulnLib> {
     let mut out: Vec<VulnLib> = Vec::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
 
@@ -352,7 +352,7 @@ pub fn detect_vulnerable_libraries(body: &str) -> Vec<VulnLib> {
 /// payload-/parameter-free and carries the advisories + suggested upgrade in its
 /// evidence. `message_id` is a non-zero sentinel so these never enter the
 /// `message_id == 0` AST-dedup path.
-pub fn library_findings(
+pub(crate) fn library_findings(
     vulns: Vec<VulnLib>,
     target_url: &str,
     method: &str,

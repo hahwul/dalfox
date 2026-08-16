@@ -18,11 +18,11 @@ use std::sync::{Arc, Mutex};
 /// Smooth 10-frame braille spinner. Shared by the hand-rolled spinner
 /// (`start_spinner`, the overall ticker) and the indicatif bars (as
 /// `tick_chars`) so every spinner in the app rotates identically.
-pub const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+pub(crate) const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// `tick_chars` string for indicatif bars: the 10 running frames followed by
 /// the finished frame (indicatif shows the last entry once a bar completes).
-pub const TICK_CHARS: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✓";
+pub(crate) const TICK_CHARS: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✓";
 
 /// Safe upper bound (in columns) of the fixed furniture on the shared scan-bar
 /// template — everything before the trailing `{wave}`: spinner, `[elapsed]`,
@@ -30,7 +30,7 @@ pub const TICK_CHARS: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✓";
 /// the `reserve` so the shimmering target label is trimmed to the leftover
 /// width and the bar stays on one line (fits standard 80-column terminals).
 /// Keep this in sync (a little high) if the bar template changes width.
-pub const BAR_WAVE_RESERVE: usize = 80;
+pub(crate) const BAR_WAVE_RESERVE: usize = 80;
 
 /// Accent color (xterm-256) for the spinner glyph — a bright steel cyan that
 /// reads as "active" against the silver shimmer text.
@@ -39,7 +39,7 @@ const ACCENT: u8 = 45;
 /// Milliseconds per animation frame. Used to derive a frame counter from a
 /// bar's elapsed time so the indicatif shimmer advances at the same cadence
 /// as the hand-rolled spinner's steady tick.
-pub const FRAME_MS: u128 = 80;
+pub(crate) const FRAME_MS: u128 = 80;
 
 /// Per-frame advance of the highlight band, in character cells. A touch
 /// faster than one cell so the shine visibly travels.
@@ -85,7 +85,7 @@ fn cell_level(idx: f64, head: f64) -> f64 {
 /// color change, not per character) so the rendered line stays compact.
 ///
 /// Returns `text` unchanged when color output is disabled.
-pub fn shimmer_at(text: &str, head: f64) -> String {
+pub(crate) fn shimmer_at(text: &str, head: f64) -> String {
     if !crate::utils::term::color_enabled() {
         return text.to_string();
     }
@@ -108,7 +108,7 @@ pub fn shimmer_at(text: &str, head: f64) -> String {
 /// Paint `text` for animation frame `phase`. The highlight sweeps left→right
 /// and loops; `phase` is a monotonically increasing frame counter. Returns
 /// `text` unchanged when color output is disabled or the text is empty.
-pub fn shimmer(text: &str, phase: usize) -> String {
+pub(crate) fn shimmer(text: &str, phase: usize) -> String {
     let n = text.chars().count();
     if n == 0 {
         return String::new();
@@ -123,7 +123,7 @@ pub fn shimmer(text: &str, phase: usize) -> String {
 
 /// The spinner glyph for animation frame `phase`, painted in the steel accent
 /// (or plain when color is disabled).
-pub fn spin_glyph(phase: usize) -> String {
+pub(crate) fn spin_glyph(phase: usize) -> String {
     let frame = SPIN_FRAMES[phase % SPIN_FRAMES.len()];
     if crate::utils::term::color_enabled() {
         format!("\x1b[38;5;{ACCENT}m{frame}\x1b[0m")
@@ -145,7 +145,7 @@ pub fn spin_glyph(phase: usize) -> String {
 /// Pass `reserve` as a safe *upper bound* of the furniture: over-estimating
 /// only trims a few extra characters off the label, while under-estimating is
 /// what risks a wrap.
-pub fn wave_tracker(
+pub(crate) fn wave_tracker(
     label: String,
     reserve: usize,
 ) -> impl Fn(&indicatif::ProgressState, &mut dyn std::fmt::Write) + Send + Sync + Clone + 'static {
@@ -166,7 +166,7 @@ pub fn wave_tracker(
 /// "Mining DOM…"). indicatif's `ProgressState` can't expose the live `{msg}`
 /// to a custom key, so the displayed text is funneled through `label` (updated
 /// via [`ShimmerSpinner::set_message`]) and shimmered here.
-pub fn wave_tracker_shared(
+pub(crate) fn wave_tracker_shared(
     label: Arc<Mutex<String>>,
     reserve: usize,
 ) -> impl Fn(&indicatif::ProgressState, &mut dyn std::fmt::Write) + Send + Sync + Clone + 'static {
@@ -206,39 +206,40 @@ impl ShimmerSpinner {
     }
 
     /// The shared label cell, for wiring the `{wave}` tracker to this spinner.
-    pub fn label_cell(&self) -> Arc<Mutex<String>> {
+    #[cfg(test)]
+    pub(crate) fn label_cell(&self) -> Arc<Mutex<String>> {
         self.label.clone()
     }
 
     /// The wrapped bar, e.g. to finish it via `scanning::finish_scan_bar`.
-    pub fn bar(&self) -> &indicatif::ProgressBar {
+    pub(crate) fn bar(&self) -> &indicatif::ProgressBar {
         &self.bar
     }
 
     /// Update the shimmered message (mirrors `ProgressBar::set_message`).
-    pub fn set_message(&self, msg: impl Into<String>) {
+    pub(crate) fn set_message(&self, msg: impl Into<String>) {
         if let Ok(mut g) = self.label.lock() {
             *g = msg.into();
         }
     }
 
     /// Delegate to the wrapped bar (drives a redraw, refreshing the shimmer).
-    pub fn inc(&self, delta: u64) {
+    pub(crate) fn inc(&self, delta: u64) {
         self.bar.inc(delta);
     }
 
     /// Delegate to the wrapped bar.
-    pub fn set_length(&self, len: u64) {
+    pub(crate) fn set_length(&self, len: u64) {
         self.bar.set_length(len);
     }
 
     /// Delegate to the wrapped bar.
-    pub fn finish_and_clear(&self) {
+    pub(crate) fn finish_and_clear(&self) {
         self.bar.finish_and_clear();
     }
 
     /// Print a line above the spinner without shredding the live redraw.
-    pub fn println(&self, msg: impl AsRef<str>) {
+    pub(crate) fn println(&self, msg: impl AsRef<str>) {
         self.bar.println(msg);
     }
 }

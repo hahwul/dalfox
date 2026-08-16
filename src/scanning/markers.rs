@@ -18,7 +18,7 @@ fn short_id(seed: &str) -> String {
     }
 }
 
-pub fn open_marker() -> &'static str {
+pub(crate) fn open_marker() -> &'static str {
     OPEN_MARKER
         .get_or_init(|| format!("dlx{}", short_id("open")))
         .as_str()
@@ -27,25 +27,25 @@ pub fn open_marker() -> &'static str {
 /// Middle segment of the sandwich probe. Distinct prefix (`dlxmid`) so
 /// `classify_probe_reflection` can identify it without colliding with
 /// `open_marker()` or `close_marker()`.
-pub fn inner_marker() -> &'static str {
+pub(crate) fn inner_marker() -> &'static str {
     INNER_MARKER
         .get_or_init(|| format!("dlxmid{}", short_id("inner")))
         .as_str()
 }
 
-pub fn close_marker() -> &'static str {
+pub(crate) fn close_marker() -> &'static str {
     CLOSE_MARKER
         .get_or_init(|| format!("xld{}", short_id("close")))
         .as_str()
 }
 
-pub fn class_marker() -> &'static str {
+pub(crate) fn class_marker() -> &'static str {
     CLASS_MARKER
         .get_or_init(|| format!("dlx{}", short_id("class")))
         .as_str()
 }
 
-pub fn id_marker() -> &'static str {
+pub(crate) fn id_marker() -> &'static str {
     ID_MARKER
         .get_or_init(|| format!("dlx{}", short_id("id")))
         .as_str()
@@ -56,7 +56,7 @@ pub fn id_marker() -> &'static str {
 /// apart a full reflection from a prefix-/suffix-stripped variant. The
 /// substring `open_marker()` is preserved within this value, so legacy
 /// callers that still do `text.contains(open_marker())` keep working.
-pub fn bracketed_marker() -> &'static str {
+pub(crate) fn bracketed_marker() -> &'static str {
     BRACKETED_MARKER
         .get_or_init(|| format!("{}{}{}", open_marker(), inner_marker(), close_marker()))
         .as_str()
@@ -79,7 +79,7 @@ fn inner_close() -> &'static str {
 /// before echoing — those would be missed by a single-token
 /// `text.contains(open_marker())` check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProbeReflection {
+pub(crate) enum ProbeReflection {
     /// `OPEN + INNER + CLOSE` intact in the response.
     Full,
     /// `OPEN + INNER` present but `CLOSE` was stripped (suffix-strip filter).
@@ -95,14 +95,14 @@ pub enum ProbeReflection {
 
 impl ProbeReflection {
     /// Whether any of the four reflected forms was detected.
-    pub fn detected(self) -> bool {
+    pub(crate) fn detected(self) -> bool {
         !matches!(self, ProbeReflection::None)
     }
 }
 
 /// Layered substring check: cheap `contains(inner)` first; only escalate
 /// to the longer composite checks when the inner anchor is present.
-pub fn classify_probe_reflection(text: &str) -> ProbeReflection {
+pub(crate) fn classify_probe_reflection(text: &str) -> ProbeReflection {
     let inner = inner_marker();
     if !text.contains(inner) {
         return ProbeReflection::None;

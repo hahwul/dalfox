@@ -21,7 +21,7 @@ static DYNAMIC_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, std::sync::Arc<Vec<
     OnceLock::new();
 
 /// Generate dynamic payloads based on the injection context (memoized).
-pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
+pub(crate) fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
     let key = format!("{context:?}");
     let cache = DYNAMIC_PAYLOAD_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(guard) = cache.lock()
@@ -312,7 +312,7 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
 
 /// Generate adaptive payloads using per-parameter analysis data (valid/invalid specials).
 /// When a parameter has analysis data, this applies targeted encoding to bypass filters.
-pub fn generate_adaptive_payloads(
+pub(crate) fn generate_adaptive_payloads(
     context: &InjectionContext,
     invalid_specials: &[char],
     valid_specials: &[char],
@@ -448,7 +448,7 @@ pub fn generate_adaptive_payloads(
     out
 }
 
-pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub(crate) fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let cache = CUSTOM_PAYLOAD_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(guard) = cache.lock()
         && let Some(cached) = guard.get(path)
@@ -496,7 +496,7 @@ pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::erro
     Ok(payloads)
 }
 
-pub fn get_dynamic_payloads(
+pub(crate) fn get_dynamic_payloads(
     context: &InjectionContext,
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {

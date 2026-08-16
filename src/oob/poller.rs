@@ -22,7 +22,7 @@ type Seen = Arc<StdMutex<HashSet<String>>>;
 
 /// Handle to a running poller. Hold it for the scan's lifetime, then call
 /// [`finish`](PollerHandle::finish) to drain the grace window and deregister.
-pub struct PollerHandle {
+pub(crate) struct PollerHandle {
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
@@ -34,7 +34,7 @@ pub struct PollerHandle {
 }
 
 /// Spawn the background poll loop. It runs until `stop`/`cancel` is set.
-pub fn spawn_poller(
+pub(crate) fn spawn_poller(
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,

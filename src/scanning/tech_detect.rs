@@ -72,16 +72,12 @@ pub struct TechDetectionResult {
 }
 
 impl TechDetectionResult {
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.detected.is_empty()
     }
 
-    pub fn has(&self, tech: &TechType) -> bool {
+    pub(crate) fn has(&self, tech: &TechType) -> bool {
         self.detected.iter().any(|d| &d.tech == tech)
-    }
-
-    pub fn techs(&self) -> Vec<&TechType> {
-        self.detected.iter().map(|d| &d.tech).collect()
     }
 }
 
@@ -99,7 +95,7 @@ struct BodyDetectRule {
 }
 
 /// Detect technologies from response headers and body.
-pub fn detect_technologies(headers: &HeaderMap, body: Option<&str>) -> TechDetectionResult {
+pub(crate) fn detect_technologies(headers: &HeaderMap, body: Option<&str>) -> TechDetectionResult {
     let mut result = TechDetectionResult::default();
 
     // Header-based detection
@@ -465,7 +461,7 @@ fn merge_detection(result: &mut TechDetectionResult, detection: TechDetection) {
 }
 
 /// Generate framework-specific XSS payloads based on detected technologies.
-pub fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<String> {
+pub(crate) fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<String> {
     let class_marker = crate::scanning::markers::class_marker();
     let mut payloads = Vec::new();
 

@@ -759,7 +759,10 @@ fn every_was_explicit_id_is_a_real_clap_argument() {
     let src = include_str!("../config.rs");
     let body = {
         let start = src
-            .find("pub fn apply_to_scan_args_if_default")
+            // Anchored on the name alone: the visibility keyword in front of it
+            // is not part of what this test is about, and pinning `pub fn` made
+            // the guard fail the moment the item was narrowed to `pub(crate)`.
+            .find("fn apply_to_scan_args_if_default")
             .expect("precedence function must be present");
         let rest = &src[start..];
         let end = rest

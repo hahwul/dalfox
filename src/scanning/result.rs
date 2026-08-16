@@ -39,7 +39,7 @@ pub enum FindingType {
 
 impl FindingType {
     /// Short single-letter label used in compact output (POC lines, etc.).
-    pub fn short(&self) -> &'static str {
+    pub(crate) fn short(&self) -> &'static str {
         match self {
             FindingType::Verified => "V",
             FindingType::AstDetected => "A",
@@ -60,7 +60,8 @@ impl FindingType {
     /// response. It stops being accurate only when the tier migration moves
     /// low-confidence AST flows into `R`, so the rename belongs to that release,
     /// not this one.
-    pub fn description(&self) -> &'static str {
+    #[cfg(test)]
+    pub(crate) fn description(&self) -> &'static str {
         match self {
             FindingType::Verified => "Vulnerable",
             FindingType::AstDetected => "AST-Detected",
@@ -70,7 +71,7 @@ impl FindingType {
     }
 
     /// Detailed description suitable for agents and structured output.
-    pub fn long_description(&self) -> &'static str {
+    pub(crate) fn long_description(&self) -> &'static str {
         match self {
             // NOT "confirmed executed": dalfox has no browser and never
             // observes execution. The claim it can make is that the payload
@@ -135,7 +136,7 @@ impl FindingMethod {
     /// Resolved once in [`Result::builder`], which is what keeps the legacy AST
     /// promotions honest: they flip `result_type` to `Verified` *after* the
     /// finding is built, so the method stays `Ast`.
-    pub fn default_for(tier: &FindingType) -> Self {
+    pub(crate) fn default_for(tier: &FindingType) -> Self {
         match tier {
             FindingType::Verified => FindingMethod::DomVerification,
             FindingType::AstDetected => FindingMethod::Ast,
@@ -149,7 +150,7 @@ impl FindingMethod {
         FindingMethod::Reflection
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             FindingMethod::Reflection => "reflection",
             FindingMethod::DomVerification => "dom-verification",
@@ -180,7 +181,7 @@ pub enum Confidence {
 }
 
 impl Confidence {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Confidence::High => "high",
             Confidence::Low => "low",
@@ -268,7 +269,7 @@ pub struct Result {
 /// 1 MiB page × a 3000-payload catalog is ~3 GB resident before anything is
 /// rendered. In the server that vector is submitter-controlled and takes the
 /// whole daemon — every concurrent scan and every retained result — with it.
-pub const MAX_EVIDENCE_BODY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_EVIDENCE_BODY_BYTES: usize = 64 * 1024;
 
 /// Bound a response body kept as finding evidence, keeping the window around
 /// the payload rather than a blind prefix.
@@ -279,7 +280,7 @@ pub const MAX_EVIDENCE_BODY_BYTES: usize = 64 * 1024;
 /// reflection sat past the cap. Bodies within the cap — effectively all of them
 /// — are returned untouched. Only the reported line *number* degrades for
 /// oversized bodies, since it is counted within the retained window.
-pub fn bound_evidence_body(body: String, payload: &str) -> String {
+pub(crate) fn bound_evidence_body(body: String, payload: &str) -> String {
     if body.len() <= MAX_EVIDENCE_BODY_BYTES {
         return body;
     }
@@ -368,13 +369,13 @@ impl ResultBuilder {
 
     /// Override the subsystem label derived from the tier — see
     /// [`FindingMethod::default_for`].
-    pub fn detection_method(mut self, v: FindingMethod) -> Self {
+    pub(crate) fn detection_method(mut self, v: FindingMethod) -> Self {
         self.inner.detection_method = v;
         self
     }
 
     /// Record the confidence grade and the signals behind it.
-    pub fn confidence(mut self, grade: Confidence, reason: impl Into<String>) -> Self {
+    pub(crate) fn confidence(mut self, grade: Confidence, reason: impl Into<String>) -> Self {
         self.inner.confidence = Some(grade);
         self.inner.confidence_reason = reason.into();
         self
@@ -435,7 +436,7 @@ impl ResultBuilder {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SanitizedResult {
+pub(crate) struct SanitizedResult {
     #[serde(rename = "type")]
     pub result_type: FindingType,
     pub type_description: String,
@@ -475,7 +476,7 @@ pub struct SanitizedResult {
 /// Now also threaded into SARIF (run.properties + driver.properties),
 /// Markdown (as additional summary tables), and TOML (as `[meta]` table).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ScanMetadata {
+pub(crate) struct ScanMetadata {
     pub dalfox_version: String,
     pub targets: Vec<String>,
     pub scan_duration_ms: u64,
@@ -512,7 +513,11 @@ pub struct ScanMetadata {
 }
 
 impl Result {
-    pub fn to_sanitized(&self, include_request: bool, include_response: bool) -> SanitizedResult {
+    pub(crate) fn to_sanitized(
+        &self,
+        include_request: bool,
+        include_response: bool,
+    ) -> SanitizedResult {
         SanitizedResult {
             type_description: self.result_type.long_description().to_string(),
             result_type: self.result_type.clone(),
@@ -545,7 +550,7 @@ impl Result {
     }
 
     /// Convert this Result into a serde_json::Value honoring include_request/include_response flags.
-    pub fn to_json_value(
+    pub(crate) fn to_json_value(
         &self,
         include_request: bool,
         include_response: bool,
@@ -647,7 +652,11 @@ impl Result {
     }
 
     /// Serialize a slice of Result into JSON array string. Set pretty=true for pretty-printed JSON.
-    pub fn results_to_json(
+    // The plain (meta-less) arms of the format matrix. `output.rs` routes every
+    // scan through the `*_with_meta` variants, so these are kept as the
+    // complete set rather than because a caller reaches them today.
+    #[allow(dead_code)]
+    pub(crate) fn results_to_json(
         results: &[Result],
         include_request: bool,
         include_response: bool,
@@ -665,7 +674,8 @@ impl Result {
     }
 
     /// Serialize a slice of Result into JSON Lines (JSONL) string.
-    pub fn results_to_jsonl(
+    #[allow(dead_code)]
+    pub(crate) fn results_to_jsonl(
         results: &[Result],
         include_request: bool,
         include_response: bool,
@@ -687,7 +697,8 @@ impl Result {
     /// the 3-argument form omits the scan metadata envelope (equivalent to `meta=None`).
     /// Use the `_with_meta` variant to carry `ScanMetadata` (targets, duration, WAF in
     /// `target_summary`, etc.) for parity with the JSON/JSONL render path.
-    pub fn results_to_toml(
+    #[allow(dead_code)]
+    pub(crate) fn results_to_toml(
         results: &[Result],
         include_request: bool,
         include_response: bool,
@@ -696,7 +707,7 @@ impl Result {
     }
 
     /// Serialize ... with optional scan metadata (see `results_to_toml`).
-    pub fn results_to_toml_with_meta(
+    pub(crate) fn results_to_toml_with_meta(
         results: &[Result],
         include_request: bool,
         include_response: bool,
@@ -736,7 +747,7 @@ impl Result {
     }
 
     /// Serialize ... with optional scan metadata (see `results_to_markdown`).
-    pub fn results_to_markdown_with_meta(
+    pub(crate) fn results_to_markdown_with_meta(
         results: &[Result],
         include_request: bool,
         include_response: bool,
@@ -989,7 +1000,7 @@ impl Result {
     }
 
     /// Serialize ... with optional scan metadata (see `results_to_sarif`).
-    pub fn results_to_sarif_with_meta(
+    pub(crate) fn results_to_sarif_with_meta(
         results: &[Result],
         include_request: bool,
         include_response: bool,

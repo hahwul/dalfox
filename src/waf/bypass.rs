@@ -115,12 +115,12 @@ pub struct MutationStats {
 }
 
 impl MutationStats {
-    pub fn record_variant(&self, m: MutationType) {
+    pub(crate) fn record_variant(&self, m: MutationType) {
         if let Ok(mut g) = self.variants_generated.lock() {
             *g.entry(m).or_insert(0) += 1;
         }
     }
-    pub fn record_request(&self, blocked: bool) {
+    pub(crate) fn record_request(&self, blocked: bool) {
         self.bypass_requests
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if blocked {
@@ -128,7 +128,7 @@ impl MutationStats {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
-    pub fn snapshot(&self) -> MutationStatsSnapshot {
+    pub(crate) fn snapshot(&self) -> MutationStatsSnapshot {
         let variants = self
             .variants_generated
             .lock()
@@ -149,7 +149,7 @@ impl MutationStats {
 
 /// Plain-data view of `MutationStats` suitable for JSON serialization.
 #[derive(Debug, Default, Clone)]
-pub struct MutationStatsSnapshot {
+pub(crate) struct MutationStatsSnapshot {
     pub variants: std::collections::HashMap<MutationType, u64>,
     pub bypass_requests: u64,
     pub bypass_blocks: u64,
@@ -157,7 +157,7 @@ pub struct MutationStatsSnapshot {
 
 /// A bypass strategy composed of extra encoders and payload mutations.
 #[derive(Debug, Clone, Default)]
-pub struct BypassStrategy {
+pub(crate) struct BypassStrategy {
     /// Extra encoder names to add beyond user-specified ones.
     pub extra_encoders: Vec<String>,
     /// Payload mutations to apply.
@@ -167,7 +167,7 @@ pub struct BypassStrategy {
 }
 
 /// Get the optimal bypass strategy for a specific WAF type.
-pub fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
+pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
     match waf {
         WafType::Cloudflare => BypassStrategy {
             extra_encoders: vec!["unicode".into(), "4url".into(), "zwsp".into()],
@@ -443,7 +443,7 @@ fn unknown_strategy_for(hint: &str) -> BypassStrategy {
 }
 
 /// Merge bypass strategies from multiple detected WAFs into a single combined strategy.
-pub fn merge_strategies(waf_types: &[&WafType]) -> BypassStrategy {
+pub(crate) fn merge_strategies(waf_types: &[&WafType]) -> BypassStrategy {
     let mut combined = BypassStrategy::default();
     let mut seen_encoders = std::collections::HashSet::new();
     let mut seen_mutations = std::collections::HashSet::new();
@@ -481,6 +481,10 @@ pub fn merge_strategies(waf_types: &[&WafType]) -> BypassStrategy {
 ///
 /// The `max_variants_per_payload` parameter caps how many mutation variants are generated
 /// per base payload to prevent payload explosion.
+/// Untagged form of [`apply_mutations_tagged`]. Production takes the tagged
+/// path (it needs each variant's origin for telemetry); this stays as the
+/// shape the mutation tests assert against.
+#[cfg(test)]
 pub fn apply_mutations(
     payloads: &[String],
     mutations: &[MutationType],

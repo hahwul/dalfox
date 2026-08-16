@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
-pub struct RegisterRequest {
+pub(crate) struct RegisterRequest {
     #[serde(rename = "public-key")]
     pub public_key: String,
     #[serde(rename = "secret-key")]
@@ -14,7 +14,7 @@ pub struct RegisterRequest {
 }
 
 #[derive(Serialize)]
-pub struct DeregisterRequest {
+pub(crate) struct DeregisterRequest {
     #[serde(rename = "correlation-id")]
     pub correlation_id: String,
     #[serde(rename = "secret-key")]
@@ -22,7 +22,7 @@ pub struct DeregisterRequest {
 }
 
 #[derive(Deserialize, Default)]
-pub struct PollResponse {
+pub(crate) struct PollResponse {
     #[serde(default)]
     pub data: Option<Vec<String>>,
     #[serde(default)]
@@ -35,7 +35,7 @@ pub struct PollResponse {
 /// `remote-address`; the rest are best-effort. (`unique-id` is on the wire too
 /// but unused here — callbacks are de-duped per (nonce, protocol).)
 #[derive(Deserialize, Default)]
-pub struct Interaction {
+pub(crate) struct Interaction {
     #[serde(default)]
     pub protocol: Option<String>,
     #[serde(rename = "full-id", default)]

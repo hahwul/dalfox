@@ -200,7 +200,7 @@ const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
 const MAX_CONCURRENT_PREFLIGHT: usize = 32;
 
 #[derive(Clone)]
-pub struct DalfoxMcp {
+pub(crate) struct DalfoxMcp {
     jobs: Arc<StdMutex<HashMap<String, Job>>>,
     last_purge_ms: Arc<AtomicI64>,
     /// Bounds concurrent `preflight_dalfox` calls: each pins a blocking-pool
@@ -446,7 +446,7 @@ impl DalfoxMcp {
  */
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct ScanWithDalfoxParams {
+pub(crate) struct ScanWithDalfoxParams {
     /// Target URL to scan for XSS vulnerabilities. Must start with http:// or https://.
     /// Example: "https://example.com/search?q=test"
     pub target: String,
@@ -680,7 +680,7 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct GetResultsDalfoxParams {
+pub(crate) struct GetResultsDalfoxParams {
     /// The scan_id returned by scan_with_dalfox when the scan was started.
     pub scan_id: String,
 
@@ -696,7 +696,7 @@ pub struct GetResultsDalfoxParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct ListScansDalfoxParams {
+pub(crate) struct ListScansDalfoxParams {
     /// Optional status filter: "queued", "running", "done", "error", or "cancelled". Omit to list all.
     #[serde(default)]
     pub status: Option<String>,
@@ -713,20 +713,20 @@ pub struct ListScansDalfoxParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct CancelScanDalfoxParams {
+pub(crate) struct CancelScanDalfoxParams {
     /// The scan_id of the scan to cancel.
     pub scan_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct DeleteScanDalfoxParams {
+pub(crate) struct DeleteScanDalfoxParams {
     /// The scan_id of the scan to delete from memory.
     /// The scan must be in a terminal state (done, error, cancelled).
     pub scan_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct PreflightDalfoxParams {
+pub(crate) struct PreflightDalfoxParams {
     /// Target URL to analyze. Must start with http:// or https://.
     pub target: String,
 

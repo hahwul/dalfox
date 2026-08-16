@@ -2773,8 +2773,8 @@ fn collapse_redundant_reflected(
         .collect()
 }
 
-pub use xss_blind::{
-    CallbackSource, blind_scan_forms, blind_scan_forms_with, blind_scanning, blind_scanning_with,
+pub(crate) use xss_blind::{
+    CallbackSource, blind_scan_forms_with, blind_scanning, blind_scanning_with,
 };
 
 #[cfg(test)]
