@@ -29,7 +29,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 
 use rmcp::{
     ErrorData,
@@ -41,14 +40,14 @@ use rmcp::{
 use crate::{
     cmd::scan::ScanArgs,
     job::{
-        AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_DELAY_MS,
-        MAX_DISCOVERED_PARAMS, MAX_RETAINED_SCANS_MCP, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS,
-        MAX_WORKERS, cap_reflection_params, has_http_scheme, now_ms, parse_job_status,
-        purge_expired_jobs as purge_jobs_map, run_within_scan_budget, send_reachability_probe,
-        split_cookie_pairs, unreachable_error_message,
+        JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_DELAY_MS,
+        MAX_RETAINED_SCANS_MCP, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS, MAX_WORKERS,
+        cap_reflection_params, has_http_scheme, now_ms, parse_job_status,
+        purge_expired_jobs as purge_jobs_map, send_reachability_probe, split_cookie_pairs,
+        unreachable_error_message,
     },
     parameter_analysis::analyze_parameters,
-    scanning::result::{Result as ScanResult, SanitizedResult},
+    scanning::result::SanitizedResult,
     target_parser::parse_target,
 };
 
@@ -294,49 +293,10 @@ impl DalfoxMcp {
         let include_request = scan_args.include_request;
         let include_response = scan_args.include_response;
 
-        // Parse and hydrate a single target
-        let mut target = match parse_target(url) {
-            Ok(mut t) => {
-                t.method = scan_args.method.clone();
-                t.timeout = scan_args.timeout;
-                t.delay = scan_args.delay;
-                t.proxy = scan_args.proxy.clone();
-                t.insecure = scan_args.insecure.unwrap_or(true);
-                t.follow_redirects = scan_args.follow_redirects;
-                t.ignore_return = scan_args.ignore_return.clone();
-                t.workers = scan_args.workers;
-                t.user_agent = scan_args.user_agent.clone();
-                // Parse via the shared helpers so MCP matches the REST server:
-                // empty header names are rejected, and each cookie entry is
-                // `;`-split + trimmed (a bare split_once would keep whitespace
-                // and fold `a=b; c=d` into one value).
-                t.headers = scan_args
-                    .headers
-                    .iter()
-                    .filter_map(|h| crate::utils::http::parse_header_line(h))
-                    .collect();
-                // Also expose a supplied User-Agent as a header so the
-                // header-reflection probe tests it even on blanket-echo targets:
-                // user-supplied headers are always probed, whereas the common
-                // header sweep (which includes User-Agent) is suppressed when the
-                // target echoes every header. Without this, a User-Agent
-                // reflection is missed — an MCP-only false negative for identical
-                // input. Mirrors the CLI and REST server, which set both fields;
-                // like them, the scan path's `apply_headers_ua_cookies` then sends
-                // both this header entry and `target.user_agent`.
-                if let Some(ua) = scan_args.user_agent.as_deref().filter(|s| !s.is_empty()) {
-                    t.headers.push(("User-Agent".to_string(), ua.to_string()));
-                }
-                t.cookies = scan_args
-                    .cookies
-                    .iter()
-                    .flat_map(|c| split_cookie_pairs(c))
-                    .collect();
-                t.data = scan_args.data.clone();
-                t
-            }
-            Err(e) => {
-                let msg = format!("parse_target failed: {}", e);
+        // Parse and hydrate a single target (shared with the REST server).
+        let mut target = match crate::job::runner::hydrate_target(url, &scan_args) {
+            Ok(t) => t,
+            Err(msg) => {
                 Self::log("ERR", &msg);
                 // Route through the `!is_terminal()`-gated helper (as the
                 // unreachable path below and the REST server's parse-error
@@ -376,297 +336,24 @@ impl DalfoxMcp {
             return;
         }
 
-        // Per-job WAF consecutive-block counter so one scan's WAF backoff
-        // doesn't throttle an unrelated scan. The request counter is the
-        // public `progress.requests_sent` field itself — scoping it directly
-        // lets `crate::tick_request_count()` write through to the visible
-        // progress, so pollers see a live `requests_sent` value instead of 0.
-        let job_waf_consecutive = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let results_arc = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
-        // `run_scanning`'s 6th argument is the running findings tally, not a
-        // parameter counter. Older code stored this into `params_tested`,
-        // which conflated two different metrics.
-        let findings_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // The scan itself — shared verbatim with the REST server; only the
+        // warning sink differs, so the scan id is bound into it here.
+        let run = crate::job::runner::execute_scan(
+            &mut target,
+            &scan_args,
+            &progress,
+            &cancel_flag,
+            &|msg: &str| Self::log("WRN", &format!("scan_id={} {}", scan_id, msg)),
+        )
+        .await;
 
-        // Mirror the in-flight findings tally into `progress.findings_so_far`
-        // so MCP pollers see progress before the scan finishes. The atomic
-        // types differ (`AtomicUsize` inside scanning, `AtomicU64` here),
-        // hence the copying task.
-        let progress_findings = progress.findings_so_far.clone();
-        let findings_count_for_updater = findings_count.clone();
-        // RAII abort — covers the panic path too, not just the manual drop below.
-        let findings_updater = AbortOnDrop(tokio::spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                tick.tick().await;
-                progress_findings.store(
-                    findings_count_for_updater.load(std::sync::atomic::Ordering::Relaxed) as u64,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-            }
-        }));
-
-        // Captured from inside the scoped/async blocks below so the worker-panic
-        // count survives past the scan; assigned by the run_scanning call.
-        let mut scan_report = crate::scanning::ScanRunReport::default();
-        // Set from inside the scoped block below when this scan's authenticated
-        // session was gone — before it began, or by the time it ended. Carries
-        // the signal that fired, verbatim into the job's `error_message`.
-        let mut session_lost: Option<String> = None;
-        let scan_fut = crate::with_job_rate_limiter(
-            scan_args.rate_limit,
-            crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
-                crate::WAF_CONSECUTIVE_BLOCKS_JOB
-                    .scope(job_waf_consecutive.clone(), async {
-                        // Dispatch blind-XSS probes when a callback URL was
-                        // supplied. MCP exposes `blind_callback_url` in its
-                        // scan schema and wires it into ScanArgs, but the
-                        // execution path never invoked blind_scanning — so the
-                        // documented option was a silent no-op, diverging from
-                        // both the CLI and the REST server (which call this
-                        // here). run_scanning does not cover blind scanning.
-                        if let Some(callback_url) = &scan_args.blind_callback_url {
-                            crate::scanning::blind_scanning(
-                                &target,
-                                callback_url,
-                                scan_args.custom_blind_xss_payload.as_deref(),
-                            )
-                            .await;
-                        }
-
-                        // Session-loss detection (issue #1273), the MCP half.
-                        // An MCP scan carrying credentials has exactly the
-                        // CLI's exposure: the session dies mid-scan, every
-                        // later request is answered by a login page, nothing
-                        // reflects, and the tool reports zero findings —
-                        // indistinguishable from a clean target. Off, and free,
-                        // when no credentials were supplied.
-                        let monitor_session =
-                            crate::cmd::scan::session::monitoring_enabled(&scan_args, &target);
-                        let session_check_re =
-                            crate::cmd::scan::session::compile_session_check(&scan_args)
-                                .ok()
-                                .flatten();
-                        let mut session_baseline = None;
-
-                        // Initial AST DOM-XSS pass on the GET response so MCP
-                        // scans match CLI for targets where the vulnerability
-                        // lives entirely in JS (location.hash → innerHTML
-                        // etc.). MCP previously skipped this because the
-                        // scan path didn't run preflight; same divergence
-                        // hit the REST server, now fixed in both places.
-                        if !scan_args.skip_ast_analysis {
-                            let client = target.build_client_or_default();
-                            // Mirror the CLI preflight: carry the target's
-                            // headers/cookies/User-Agent (so auth/header/UA-gated
-                            // SPAs are analyzed logged-in, matching CLI findings)
-                            // and cap the body with `Range: 0-8191` so a large
-                            // response can't buffer unbounded into memory.
-                            let preflight = crate::utils::build_preflight_request(
-                                &client,
-                                &target,
-                                false,
-                                Some(8192),
-                            );
-                            // Count + rate-limit the preflight GET like the CLI
-                            // (record_outbound_request), so it isn't missing from
-                            // the job's requests_sent tally.
-                            crate::record_outbound_request().await;
-                            if let Ok(resp) = preflight.send().await {
-                                // Clone the headers before `read_body` consumes
-                                // the response: the posture needs both them and
-                                // the document (a page can declare its CSP with
-                                // `<meta http-equiv>`), so Trusted Types
-                                // awareness and the confidence grading's CSP
-                                // signal match what the CLI derives from
-                                // preflight.
-                                let resp_headers = resp.headers().clone();
-                                // Captured before `read_body` consumes the
-                                // response: under `follow_redirects` this is
-                                // where the chain actually ended, the only
-                                // landing a baseline can compare against.
-                                let resp_status = resp.status().as_u16();
-                                let resp_final_url = resp.url().clone();
-                                if let Ok(body) = crate::utils::http::read_body(resp).await {
-                                    // Authenticated-state fingerprint from this
-                                    // same response, so monitoring costs no
-                                    // extra request. `session_check_url` is the
-                                    // exception — its baseline must come from
-                                    // that endpoint, handled below.
-                                    if monitor_session && scan_args.session_check_url.is_none() {
-                                        session_baseline = Some(
-                                            crate::cmd::scan::session::baseline_from_preflight(
-                                                &target.url,
-                                                &resp_final_url,
-                                                resp_status,
-                                                &resp_headers,
-                                                &body,
-                                                session_check_re.as_ref(),
-                                            ),
-                                        );
-                                    }
-                                    let posture =
-                                    crate::scanning::ast_integration::PageSecurityPosture::from_response(
-                                        &resp_headers,
-                                        &body,
-                                    );
-                                    let ast_batch =
-                                    crate::scanning::ast_integration::run_initial_ast_dom_analysis(
-                                        &body,
-                                        target.url.as_str(),
-                                        &target.method,
-                                        posture,
-                                    );
-                                    if !ast_batch.is_empty() {
-                                        let added = crate::scanning::count_matching_results(
-                                            &ast_batch,
-                                            &scan_args.limit_result_type.to_uppercase(),
-                                        );
-                                        let mut guard = results_arc.lock().await;
-                                        guard.extend(ast_batch);
-                                        findings_count
-                                            .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
-                                    }
-                                    let ext_batch = crate::scanning::fetch_and_analyze_external_js(
-                                        &client,
-                                        &target,
-                                        &body,
-                                        scan_args.as_ref(),
-                                    )
-                                    .await;
-                                    crate::scanning::accumulate_findings(
-                                        &results_arc,
-                                        &findings_count,
-                                        ext_batch,
-                                        &scan_args.limit_result_type.to_uppercase(),
-                                    )
-                                    .await;
-                                }
-                            }
-                        }
-
-                        // Parameter discovery / mining
-                        // No response to reuse under `skip_ast_analysis`, and
-                        // `session_check_url` needs its baseline from that
-                        // endpoint anyway — pay one request, only for a scan
-                        // that actually has a session.
-                        if monitor_session && session_baseline.is_none() {
-                            session_baseline =
-                                crate::cmd::scan::session::capture_baseline(&target, &scan_args)
-                                    .await;
-                        }
-                        // Credentials already dead when the scan began: no later
-                        // probe can detect a *change* from that baseline, so it
-                        // is recorded now instead of reporting a clean run.
-                        session_lost = session_baseline
-                            .as_ref()
-                            .and_then(crate::cmd::scan::session::baseline_warning);
-
-                        analyze_parameters(&mut target, scan_args.as_ref(), None).await;
-
-                        // Bound the per-scan fan-out: a sprawling/hostile target
-                        // can expose thousands of params, and scanning spawns
-                        // O(params × payloads) workers. Truncate past the cap.
-                        let dropped = cap_reflection_params(&mut target);
-                        if dropped > 0 {
-                            Self::log(
-                                "WRN",
-                                &format!(
-                                    "scan_id={} discovered params capped to {} (dropped {})",
-                                    scan_id, MAX_DISCOVERED_PARAMS, dropped
-                                ),
-                            );
-                        }
-
-                        // Record the count of params the HTTP scan phase will
-                        // actually test (Fragment params are client-side only and
-                        // spawn no worker), so params_total matches the
-                        // per-parameter workers and estimated_completion_pct
-                        // stays honest. Mirrors the REST server.
-                        progress.params_total.store(
-                            crate::scanning::http_scannable_param_count(&target) as u32,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-
-                        scan_report = crate::scanning::run_scanning(
-                            &target,
-                            scan_args.clone(),
-                            crate::scanning::ScanRunHandles::new(
-                                results_arc.clone(),
-                                findings_count.clone(),
-                            )
-                            .with_cancel(cancel_flag.clone())
-                            // Feed the live per-parameter completion counter
-                            // so get_results_dalfox reports `params_tested`
-                            // (and estimated_completion_pct) advancing during
-                            // the scan instead of staying at 0 until done.
-                            .with_params_done(progress.params_tested.clone()),
-                        )
-                        .await;
-
-                        // The probe that catches the reported failure: a
-                        // session that survived the scan's start and died
-                        // during the injection stage. Skipped when the run was
-                        // cut short anyway (cancel / scan_timeout), where a
-                        // login-page probe only adds noise to a partial result.
-                        if session_lost.is_none()
-                            && !cancel_flag.load(std::sync::atomic::Ordering::Relaxed)
-                            && let Some(baseline) = &session_baseline
-                        {
-                            session_lost = crate::cmd::scan::session::session_lost_after_scan(
-                                &target,
-                                baseline,
-                                &scan_args,
-                            )
-                            .await;
-                        }
-                    })
-                    .await;
-            }),
-        );
-
-        // Enforce the whole-scan wall-clock budget. On expiry the cancel flag is
-        // tripped so in-flight workers wind down at their next checkpoint and
-        // the job settles as `cancelled` with partial results, mirroring a user
-        // cancel — plus an error_message below so a timeout stays distinguishable.
-        let timed_out =
-            run_within_scan_budget(scan_args.scan_timeout, &cancel_flag, scan_fut).await;
-
-        drop(findings_updater);
-
-        // Check if cancelled during scanning. Read this BEFORE rewriting
-        // `params_tested` — a cancelled scan exited early and almost
-        // certainly did not finish every discovered parameter, so promoting
-        // `params_tested` to `params_total` would lie about completion
-        // (the client would compute estimated_completion_pct = 100 even
-        // though the scan stopped at, say, 10/50 params).
-        let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
-        // A worker-task panic means a parameter's findings are incomplete;
-        // surface it as `error` (partial results still attached) so a poller
-        // can't mistake a crashed scan for a clean finish. Cancellation wins.
-        let panicked = !was_cancelled && scan_report.worker_panics > 0;
-        // Same reasoning as `panicked`: the scan ran to completion but its
-        // results cannot be trusted, so it must not settle as a clean `done`.
-        // Cancellation still wins — it is partial by design and says so.
-        let lost_session = !was_cancelled && session_lost.is_some();
-
-        if !was_cancelled && !panicked {
-            // Only a clean, complete run pins `params_tested` to `params_total`
-            // (exactly 100%). Skip on cancellation AND on a worker panic: both
-            // stop short of finishing every discovered parameter — a panicked
-            // worker never bumps the live per-param counter fed to
-            // `run_scanning` at line ~540 — so promoting to params_total would
-            // make get_results_dalfox report estimated_completion_pct = 100 for
-            // a job whose status is cancelled/error, a partial scan reading as a
-            // clean finish.
-            progress.params_tested.store(
-                progress
-                    .params_total
-                    .load(std::sync::atomic::Ordering::Relaxed),
-                std::sync::atomic::Ordering::Relaxed,
-            );
-        }
+        let results_arc = run.results.clone();
+        let timed_out = run.timed_out;
+        let was_cancelled = run.was_cancelled;
+        let panicked = run.panicked;
+        let lost_session = run.lost_session();
+        let session_lost = run.session_lost.clone();
+        let worker_panics = run.worker_panics;
 
         let sanitized = {
             let locked = results_arc.lock().await;
@@ -711,7 +398,7 @@ impl DalfoxMcp {
                 } else if panicked && j.error_message.is_none() {
                     j.error_message = Some(format!(
                         "{} scan worker task(s) panicked; results are partial",
-                        scan_report.worker_panics
+                        worker_panics
                     ));
                 } else if timed_out && j.error_message.is_none() {
                     j.error_message = Some(format!(
@@ -1840,7 +1527,9 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 t.proxy = params.proxy.clone();
                 t.insecure = params.insecure;
                 t.follow_redirects = params.follow_redirects;
-                t.user_agent = params.user_agent.clone();
+                // Normalized like the scan path (`job::runner::hydrate_target`)
+                // so MCP carries one User-Agent convention, not two.
+                t.user_agent = Some(params.user_agent.clone().unwrap_or_default());
                 // Shared parsers: reject empty header names and `;`-split +
                 // trim each cookie, matching the scan path and the REST server.
                 t.headers = params

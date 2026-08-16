@@ -64,6 +64,20 @@ pub struct Target {
 }
 
 impl Target {
+    /// The `User-Agent` to actually put on the wire, or `None` for "leave it
+    /// to the HTTP client".
+    ///
+    /// `user_agent` carries two spellings of the same thing: `None`, and the
+    /// `Some("")` sentinel that every entry point normalizes to when the
+    /// operator supplied no override (`job::runner::hydrate_target`,
+    /// `cmd::scan::input`). Reading the field directly means remembering to
+    /// empty-check, and three of the four call sites that did so forgot —
+    /// putting a literal blank `User-Agent:` on probe and blind-XSS requests,
+    /// a fingerprint no ordinary client sends. Go through here instead.
+    pub fn effective_user_agent(&self) -> Option<&str> {
+        self.user_agent.as_deref().filter(|ua| !ua.is_empty())
+    }
+
     /// Construct a `Target` for `url` with empty request fields (method `GET`,
     /// no data/headers/cookies) and scan-context fields at their parse-time
     /// defaults. `resolve_targets` overwrites timeout/delay/proxy/workers/etc.

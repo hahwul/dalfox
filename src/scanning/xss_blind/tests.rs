@@ -624,3 +624,26 @@ fn build_blind_templates_falls_back_when_file_unreadable() {
     );
     assert!(templates.iter().all(|t| t.contains("{}")));
 }
+
+/// `Some("")` is the "no UA override" sentinel every entry point sets when the
+/// operator supplied none (`job::runner::hydrate_target`, `cmd::scan::input`).
+/// `apply_headers_ua_cookies` has always empty-checked it; the blind-XSS
+/// requests were the one path that did not, so they put a literal blank
+/// `User-Agent:` on the wire — a fingerprint no ordinary client sends, on
+/// exactly the requests meant to look ordinary.
+#[tokio::test]
+async fn test_send_blind_request_omits_user_agent_for_the_no_override_sentinel() {
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/?q=seed");
+    target.user_agent = Some(String::new());
+
+    send_blind_request(&target, "q", "PAYLOAD", "query").await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 1);
+    let ua = records[0].headers.get("user-agent").map(String::as_str);
+    assert!(
+        ua != Some(""),
+        "the empty sentinel must not become a blank User-Agent header; saw {ua:?}"
+    );
+}
