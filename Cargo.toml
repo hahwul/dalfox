@@ -69,7 +69,7 @@ rand = "0.8"
 uuid = { version = "1", features = ["v4"] }
 sha2_oaep = { package = "sha2", version = "0.10" }
 clap_mangen = "0.3"
-clap_complete = "4.6.9"
+clap_complete = "4"
 
 [profile.release]
 lto = true

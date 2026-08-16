@@ -92,10 +92,32 @@ enum Commands {
 // byte budget — is identical).
 use dalfox::utils::fs::read_bounded;
 
-/// Render the top-level `dalfox` man page from the Clap command definition.
-fn print_man_page() {
+/// Hand a fully rendered artifact (man page, completion script) to stdout.
+///
+/// Rendering into a buffer first and writing it here keeps the generators off
+/// the real stdout handle: `clap_complete::generate` writes with `expect`, so
+/// pointing it at stdout turns any write failure — a full disk, a closed pipe —
+/// into a panic from inside the crate. A `Vec<u8>` cannot fail, which leaves
+/// exactly one place to report a write error, the way `dalfox man` already did.
+fn write_to_stdout(artifact: &str, bytes: &[u8]) {
     use std::io::Write;
 
+    let mut out = std::io::stdout().lock();
+    if let Err(e) = out.write_all(bytes).and_then(|()| out.flush()) {
+        // A downstream `head` closing the pipe is not a failure — the panic
+        // hook installed in `main` already treats `Broken pipe` as a clean exit
+        // for the scanning paths, and these one-shot generators get the same
+        // treatment rather than a diagnostic nobody can act on.
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            return;
+        }
+        eprintln!("dalfox: failed to write {artifact}: {e}");
+        std::process::exit(2);
+    }
+}
+
+/// Render the top-level `dalfox` man page from the Clap command definition.
+fn print_man_page() {
     let cmd = Cli::command();
     let man = clap_mangen::Man::new(cmd);
     let mut buf = Vec::new();
@@ -105,10 +127,17 @@ fn print_man_page() {
         std::process::exit(2);
     }
 
-    if let Err(e) = std::io::stdout().write_all(&buf) {
-        eprintln!("dalfox: failed to write man page: {e}");
-        std::process::exit(2);
-    }
+    write_to_stdout("man page", &buf);
+}
+
+/// Render the completion script for `shell` from the completion command tree.
+fn print_completion_script(shell: Shell) {
+    let mut cmd = completion_command();
+    let mut buf = Vec::new();
+
+    generate(shell, &mut cmd, BIN_NAME, &mut buf);
+
+    write_to_stdout("completion script", &buf);
 }
 
 /// The command tree the shell-completion scripts are generated from: `Cli`
@@ -226,21 +255,20 @@ async fn main() {
     let cli =
         Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.format(&mut Cli::command()).exit());
 
-    // Keep man-page output as pure roff by handling it before the
-    // banner/config machinery writes anything else to stdout.
-    if let Some(command) = &cli.command {
-        match command {
-            Commands::Man => {
-                print_man_page();
-                return;
-            }
-            Commands::Completion { shell } => {
-                let mut cmd = completion_command();
-                generate(*shell, &mut cmd, BIN_NAME, &mut std::io::stdout());
-                return;
-            }
-            _ => {}
+    // `man` and `completion` each write one generated artifact to stdout and
+    // nothing else — the roff has to stay pure roff, the completion script has
+    // to stay sourceable — so both are dispatched here, before the
+    // banner/config machinery gets a chance to add to that stream.
+    match &cli.command {
+        Some(Commands::Man) => {
+            print_man_page();
+            return;
         }
+        Some(Commands::Completion { shell }) => {
+            print_completion_script(*shell);
+            return;
+        }
+        _ => {}
     }
 
     // Set global debug toggle for downstream modules
