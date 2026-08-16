@@ -628,3 +628,58 @@ fn test_completion_omits_hidden_subcommands() {
         }
     }
 }
+
+/// `dalfox man` shares the completion path's stdout contract: one generated
+/// artifact and nothing else. Every packaging surface pipes it straight into
+/// `dalfox.1`, so a banner line here ships a corrupt man page — and unlike the
+/// completion scripts, it also has to stay *pure roff*.
+#[test]
+fn test_man_writes_only_roff_to_stdout() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("man")
+        .output()
+        .expect("failed to execute dalfox man");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "dalfox man should exit 0, stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "dalfox man should write nothing to stderr, got:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let page = String::from_utf8(output.stdout).expect("dalfox man emitted non-UTF-8");
+
+    // roff from the first byte: a leading banner would push the `.ie` escape
+    // off line 1 and troff would render it as text.
+    assert!(
+        page.starts_with(".ie "),
+        "dalfox man should open with roff, got: {:?}",
+        page.chars().take(40).collect::<String>()
+    );
+    assert!(
+        page.contains(".TH dalfox 1"),
+        "dalfox man should carry the title header"
+    );
+    // The hidden subcommands stay out of the man page too — `clap_mangen`
+    // filters them on its own, unlike `clap_complete`; see
+    // `completion_command()` in `src/main.rs`. As in
+    // `test_completion_omits_hidden_subcommands`, asserting the visible half
+    // against the same `dalfox\-<name>(1)` shape keeps the pattern honest.
+    for visible in ["scan", "server", "payload", "mcp", "completion"] {
+        assert!(
+            page.contains(&format!("dalfox\\-{visible}(1)")),
+            "dalfox man should document the `{visible}` subcommand"
+        );
+    }
+    for hidden in ["man", "url", "file", "pipe"] {
+        assert!(
+            !page.contains(&format!("dalfox\\-{hidden}(1)")),
+            "dalfox man should not document the hidden `{hidden}` subcommand"
+        );
+    }
+}
