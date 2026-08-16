@@ -2920,265 +2920,269 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Walk through a variable declarator
+    /// `const x = <init>` where the binding is a plain identifier.
+    ///
+    /// The bulk of declarator handling: alias tracking, source binding, taint
+    /// propagation and the Trusted Types policy bookkeeping all key off the
+    /// bound name, which the destructuring forms below do not have.
+    fn bind_declarator_identifier(&mut self, id: &BindingIdentifier<'a>, init: &Expression<'a>) {
+        let var_name = id.name.as_str();
+        self.clear_url_search_params_field_sources(var_name);
+
+        // Register summaries for function expressions assigned to variables.
+        if let Expression::FunctionExpression(func_expr) = init
+            && let Some(body) = &func_expr.body
+        {
+            self.register_function_summary(
+                var_name.to_string(),
+                self.extract_param_names(&func_expr.params),
+                &body.statements,
+            );
+        }
+        // Register summaries for arrow functions assigned to variables.
+        if let Expression::ArrowFunctionExpression(arrow_expr) = init {
+            self.register_function_summary(
+                var_name.to_string(),
+                self.extract_param_names(&arrow_expr.params),
+                &arrow_expr.body.statements,
+            );
+        }
+        // Register summaries for object literal methods assigned to variables.
+        if let Expression::ObjectExpression(obj_expr) = init {
+            self.register_object_literal_method_summaries(var_name, obj_expr);
+        }
+        // Register summaries for class expressions assigned to variables.
+        if let Expression::ClassExpression(class_expr) = init {
+            self.register_class_method_summaries_for_name(var_name, class_expr);
+        }
+        // Track class instance variables (`inst = new Renderer()`).
+        let mut assigned_instance_class = false;
+        if let Expression::NewExpression(new_expr) = init
+            && let Expression::Identifier(class_id) = &new_expr.callee
+        {
+            self.instance_classes
+                .insert(var_name.to_string(), class_id.name.to_string());
+            assigned_instance_class = true;
+        }
+        if !assigned_instance_class {
+            self.instance_classes.remove(var_name);
+        }
+        // `const r = await fetch(url)` — r holds a Response, so later
+        // `r.text()` / `r.json()` reads are tainted (issue #1024).
+        if self.awaited_fetch_var(init) {
+            self.response_object_vars.insert(var_name.to_string());
+        } else {
+            self.response_object_vars.remove(var_name);
+        }
+        // Track aliases created by `.bind()` so subsequent calls can resolve
+        // to sink functions or function summaries.
+        let mut assigned_bind_alias = false;
+        if let Expression::CallExpression(bind_call) = init
+            && let Some(alias) = self.build_bound_alias_from_bind_call(bind_call)
+        {
+            self.bound_function_aliases
+                .insert(var_name.to_string(), alias);
+            assigned_bind_alias = true;
+        }
+        if !assigned_bind_alias {
+            self.bound_function_aliases.remove(var_name);
+        }
+
+        let mut assigned_url_object_source = false;
+        if let Expression::NewExpression(new_expr) = init
+            && let Some(source) = self.url_object_source_from_new_expression(new_expr)
+        {
+            self.url_object_sources.insert(var_name.to_string(), source);
+            assigned_url_object_source = true;
+        }
+        if !assigned_url_object_source {
+            self.url_object_sources.remove(var_name);
+        }
+
+        // `let s = document.createElement('script')` — remember the
+        // variable so a later `s.text = tainted` is recognised as a
+        // sink even though `text` is a benign property on every
+        // other element kind. Also covers element lookups that
+        // statically resolve to a `<script>` element
+        // (`getElementById('script-id')`, `querySelector('script')`,
+        // `document.scripts[N]`, …).
+        if self.expr_creates_script_element(init) || self.expr_resolves_to_script_element(init) {
+            self.script_element_vars.insert(var_name.to_string());
+        } else {
+            self.script_element_vars.remove(var_name);
+        }
+
+        // `const p = trustedTypes.createPolicy(name, {...})` — track the
+        // policy so a later `p.createHTML(x)` resolves, and note the
+        // auto-applied `'default'` policy.
+        self.record_tt_policy_binding(var_name, init);
+
+        let mut assigned_url_search_params_source = false;
+        if let Expression::StaticMemberExpression(member) = init
+            && let Some(source) = self.url_search_params_source_for_member(member)
+        {
+            self.tainted_vars.insert(var_name.to_string());
+            self.var_aliases
+                .insert(var_name.to_string(), source.clone());
+            self.url_search_params_sources
+                .insert(var_name.to_string(), source);
+            assigned_url_search_params_source = true;
+        }
+        if !assigned_url_search_params_source {
+            self.url_search_params_sources.remove(var_name);
+        }
+
+        let mut assigned_url_search_params_object = false;
+        if let Expression::StaticMemberExpression(member) = init
+            && self.url_search_params_source_for_member(member).is_some()
+        {
+            self.url_search_params_objects.insert(var_name.to_string());
+            assigned_url_search_params_object = true;
+        }
+        if let Expression::NewExpression(new_expr) = init
+            && let Expression::Identifier(id) = &new_expr.callee
+            && id.name.as_str() == "URLSearchParams"
+        {
+            self.url_search_params_objects.insert(var_name.to_string());
+            assigned_url_search_params_object = true;
+        }
+        if !assigned_url_search_params_object {
+            self.url_search_params_objects.remove(var_name);
+        }
+
+        // Check if initializer is a source or tainted
+        if let Some(source_expr) = self.get_expr_string(init)
+            && self.sources.contains(source_expr.as_str())
+        {
+            self.tainted_vars.insert(var_name.to_string());
+            self.var_aliases
+                .insert(var_name.to_string(), source_expr.clone());
+        }
+
+        // Check for localStorage.getItem() and sessionStorage.getItem() calls
+        if let Expression::CallExpression(call) = init
+            && let Expression::StaticMemberExpression(member) = &call.callee
+            && let Some(callee_str) = self.get_member_string(member)
+            && (callee_str == "localStorage.getItem" || callee_str == "sessionStorage.getItem")
+        {
+            // Mark this variable as tainted
+            self.tainted_vars.insert(var_name.to_string());
+            let source = self
+                .storage_get_source(call, &callee_str)
+                .unwrap_or(callee_str);
+            self.var_aliases.insert(var_name.to_string(), source);
+        }
+
+        // Check for new URL(tainted) / new URLSearchParams(tainted)
+        if let Expression::NewExpression(new_expr) = init
+            && let Expression::Identifier(id) = &new_expr.callee
+            && (id.name.as_str() == "URL" || id.name.as_str() == "URLSearchParams")
+            && !new_expr.arguments.is_empty()
+            && let Some(arg) = new_expr.arguments.first()
+        {
+            let is_arg_tainted = match arg {
+                Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
+            };
+            if is_arg_tainted {
+                self.tainted_vars.insert(var_name.to_string());
+                let source_expr = match arg {
+                    Argument::SpreadElement(spread) => Some(&spread.argument),
+                    _ => arg.as_expression(),
+                };
+                let source = source_expr
+                    .and_then(|e| self.find_source_in_expr(e))
+                    .map_or_else(
+                        || "location.search".to_string(),
+                        |source| {
+                            if id.name.as_str() == "URLSearchParams" {
+                                self.normalize_search_param_source(&source)
+                            } else {
+                                source
+                            }
+                        },
+                    );
+                self.var_aliases
+                    .insert(var_name.to_string(), source.clone());
+                if id.name.as_str() == "URLSearchParams" {
+                    self.url_search_params_objects.insert(var_name.to_string());
+                    self.url_search_params_sources
+                        .insert(var_name.to_string(), source);
+                    if let Some(source_expr) = source_expr {
+                        self.clone_url_search_params_field_sources_from_expr(source_expr, var_name);
+                    }
+                }
+            }
+        }
+
+        // Check for taintedVar.get() calls (URLSearchParams.get, Map.get, etc.)
+        // e.g., query = urlParams.get('query') where urlParams is tainted
+        if let Expression::CallExpression(call) = init
+            && let Expression::StaticMemberExpression(member) = &call.callee
+            && member.property.name.as_str() == "get"
+        {
+            if let Some(source) = self.url_search_params_get_source(call, &member.object) {
+                self.tainted_vars.insert(var_name.to_string());
+                self.var_aliases.insert(var_name.to_string(), source);
+            } else if self.is_tainted(&member.object) {
+                // Check if the object is tainted (e.g., taintedMap.get())
+                self.tainted_vars.insert(var_name.to_string());
+                if let Some(source) = self.find_source_in_expr(&member.object) {
+                    let source = self.normalize_search_param_source(&source);
+                    self.var_aliases.insert(var_name.to_string(), source);
+                } else {
+                    self.var_aliases
+                        .insert(var_name.to_string(), "location.search".to_string());
+                }
+            }
+        }
+
+        // Check for JSON.parse(tainted) - taint propagates through JSON.parse
+        // e.g., data = JSON.parse(query) where query is tainted
+        if let Expression::CallExpression(call) = init
+            && let Expression::StaticMemberExpression(member) = &call.callee
+            && let Some(callee_str) = self.get_member_string(member)
+            && callee_str == "JSON.parse"
+            && !call.arguments.is_empty()
+        {
+            // Check if first argument is tainted
+            if let Some(arg) = call.arguments.first() {
+                let is_arg_tainted = match arg {
+                    Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                    _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
+                };
+                if is_arg_tainted {
+                    self.tainted_vars.insert(var_name.to_string());
+                    let source_expr = match arg {
+                        Argument::SpreadElement(spread) => Some(&spread.argument),
+                        _ => arg.as_expression(),
+                    };
+                    let source = source_expr
+                        .and_then(|e| self.find_source_in_expr(e))
+                        .unwrap_or_else(|| "JSON.parse".to_string());
+                    self.var_aliases.insert(var_name.to_string(), source);
+                }
+            }
+        }
+
+        // Also check if init expression is tainted (includes template literals, arrays, objects)
+        if self.is_tainted(init) {
+            self.tainted_vars.insert(var_name.to_string());
+            // Try to find a source from the init expression for better reporting
+            if !self.var_aliases.contains_key(var_name)
+                && let Some(source) = self.find_source_in_expr(init)
+            {
+                self.var_aliases.insert(var_name.to_string(), source);
+            }
+        }
+    }
+
+    /// Walk through a variable declarator, dispatching on the binding form:
+    /// a plain identifier, object destructuring, or array destructuring.
     fn walk_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         if let Some(init) = &decl.init {
             if let BindingPattern::BindingIdentifier(id) = &decl.id {
-                let var_name = id.name.as_str();
-                self.clear_url_search_params_field_sources(var_name);
-
-                // Register summaries for function expressions assigned to variables.
-                if let Expression::FunctionExpression(func_expr) = init
-                    && let Some(body) = &func_expr.body
-                {
-                    self.register_function_summary(
-                        var_name.to_string(),
-                        self.extract_param_names(&func_expr.params),
-                        &body.statements,
-                    );
-                }
-                // Register summaries for arrow functions assigned to variables.
-                if let Expression::ArrowFunctionExpression(arrow_expr) = init {
-                    self.register_function_summary(
-                        var_name.to_string(),
-                        self.extract_param_names(&arrow_expr.params),
-                        &arrow_expr.body.statements,
-                    );
-                }
-                // Register summaries for object literal methods assigned to variables.
-                if let Expression::ObjectExpression(obj_expr) = init {
-                    self.register_object_literal_method_summaries(var_name, obj_expr);
-                }
-                // Register summaries for class expressions assigned to variables.
-                if let Expression::ClassExpression(class_expr) = init {
-                    self.register_class_method_summaries_for_name(var_name, class_expr);
-                }
-                // Track class instance variables (`inst = new Renderer()`).
-                let mut assigned_instance_class = false;
-                if let Expression::NewExpression(new_expr) = init
-                    && let Expression::Identifier(class_id) = &new_expr.callee
-                {
-                    self.instance_classes
-                        .insert(var_name.to_string(), class_id.name.to_string());
-                    assigned_instance_class = true;
-                }
-                if !assigned_instance_class {
-                    self.instance_classes.remove(var_name);
-                }
-                // `const r = await fetch(url)` — r holds a Response, so later
-                // `r.text()` / `r.json()` reads are tainted (issue #1024).
-                if self.awaited_fetch_var(init) {
-                    self.response_object_vars.insert(var_name.to_string());
-                } else {
-                    self.response_object_vars.remove(var_name);
-                }
-                // Track aliases created by `.bind()` so subsequent calls can resolve
-                // to sink functions or function summaries.
-                let mut assigned_bind_alias = false;
-                if let Expression::CallExpression(bind_call) = init
-                    && let Some(alias) = self.build_bound_alias_from_bind_call(bind_call)
-                {
-                    self.bound_function_aliases
-                        .insert(var_name.to_string(), alias);
-                    assigned_bind_alias = true;
-                }
-                if !assigned_bind_alias {
-                    self.bound_function_aliases.remove(var_name);
-                }
-
-                let mut assigned_url_object_source = false;
-                if let Expression::NewExpression(new_expr) = init
-                    && let Some(source) = self.url_object_source_from_new_expression(new_expr)
-                {
-                    self.url_object_sources.insert(var_name.to_string(), source);
-                    assigned_url_object_source = true;
-                }
-                if !assigned_url_object_source {
-                    self.url_object_sources.remove(var_name);
-                }
-
-                // `let s = document.createElement('script')` — remember the
-                // variable so a later `s.text = tainted` is recognised as a
-                // sink even though `text` is a benign property on every
-                // other element kind. Also covers element lookups that
-                // statically resolve to a `<script>` element
-                // (`getElementById('script-id')`, `querySelector('script')`,
-                // `document.scripts[N]`, …).
-                if self.expr_creates_script_element(init)
-                    || self.expr_resolves_to_script_element(init)
-                {
-                    self.script_element_vars.insert(var_name.to_string());
-                } else {
-                    self.script_element_vars.remove(var_name);
-                }
-
-                // `const p = trustedTypes.createPolicy(name, {...})` — track the
-                // policy so a later `p.createHTML(x)` resolves, and note the
-                // auto-applied `'default'` policy.
-                self.record_tt_policy_binding(var_name, init);
-
-                let mut assigned_url_search_params_source = false;
-                if let Expression::StaticMemberExpression(member) = init
-                    && let Some(source) = self.url_search_params_source_for_member(member)
-                {
-                    self.tainted_vars.insert(var_name.to_string());
-                    self.var_aliases
-                        .insert(var_name.to_string(), source.clone());
-                    self.url_search_params_sources
-                        .insert(var_name.to_string(), source);
-                    assigned_url_search_params_source = true;
-                }
-                if !assigned_url_search_params_source {
-                    self.url_search_params_sources.remove(var_name);
-                }
-
-                let mut assigned_url_search_params_object = false;
-                if let Expression::StaticMemberExpression(member) = init
-                    && self.url_search_params_source_for_member(member).is_some()
-                {
-                    self.url_search_params_objects.insert(var_name.to_string());
-                    assigned_url_search_params_object = true;
-                }
-                if let Expression::NewExpression(new_expr) = init
-                    && let Expression::Identifier(id) = &new_expr.callee
-                    && id.name.as_str() == "URLSearchParams"
-                {
-                    self.url_search_params_objects.insert(var_name.to_string());
-                    assigned_url_search_params_object = true;
-                }
-                if !assigned_url_search_params_object {
-                    self.url_search_params_objects.remove(var_name);
-                }
-
-                // Check if initializer is a source or tainted
-                if let Some(source_expr) = self.get_expr_string(init)
-                    && self.sources.contains(source_expr.as_str())
-                {
-                    self.tainted_vars.insert(var_name.to_string());
-                    self.var_aliases
-                        .insert(var_name.to_string(), source_expr.clone());
-                }
-
-                // Check for localStorage.getItem() and sessionStorage.getItem() calls
-                if let Expression::CallExpression(call) = init
-                    && let Expression::StaticMemberExpression(member) = &call.callee
-                    && let Some(callee_str) = self.get_member_string(member)
-                    && (callee_str == "localStorage.getItem"
-                        || callee_str == "sessionStorage.getItem")
-                {
-                    // Mark this variable as tainted
-                    self.tainted_vars.insert(var_name.to_string());
-                    let source = self
-                        .storage_get_source(call, &callee_str)
-                        .unwrap_or(callee_str);
-                    self.var_aliases.insert(var_name.to_string(), source);
-                }
-
-                // Check for new URL(tainted) / new URLSearchParams(tainted)
-                if let Expression::NewExpression(new_expr) = init
-                    && let Expression::Identifier(id) = &new_expr.callee
-                    && (id.name.as_str() == "URL" || id.name.as_str() == "URLSearchParams")
-                    && !new_expr.arguments.is_empty()
-                    && let Some(arg) = new_expr.arguments.first()
-                {
-                    let is_arg_tainted = match arg {
-                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                        _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
-                    };
-                    if is_arg_tainted {
-                        self.tainted_vars.insert(var_name.to_string());
-                        let source_expr = match arg {
-                            Argument::SpreadElement(spread) => Some(&spread.argument),
-                            _ => arg.as_expression(),
-                        };
-                        let source = source_expr
-                            .and_then(|e| self.find_source_in_expr(e))
-                            .map_or_else(
-                                || "location.search".to_string(),
-                                |source| {
-                                    if id.name.as_str() == "URLSearchParams" {
-                                        self.normalize_search_param_source(&source)
-                                    } else {
-                                        source
-                                    }
-                                },
-                            );
-                        self.var_aliases
-                            .insert(var_name.to_string(), source.clone());
-                        if id.name.as_str() == "URLSearchParams" {
-                            self.url_search_params_objects.insert(var_name.to_string());
-                            self.url_search_params_sources
-                                .insert(var_name.to_string(), source);
-                            if let Some(source_expr) = source_expr {
-                                self.clone_url_search_params_field_sources_from_expr(
-                                    source_expr,
-                                    var_name,
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // Check for taintedVar.get() calls (URLSearchParams.get, Map.get, etc.)
-                // e.g., query = urlParams.get('query') where urlParams is tainted
-                if let Expression::CallExpression(call) = init
-                    && let Expression::StaticMemberExpression(member) = &call.callee
-                    && member.property.name.as_str() == "get"
-                {
-                    if let Some(source) = self.url_search_params_get_source(call, &member.object) {
-                        self.tainted_vars.insert(var_name.to_string());
-                        self.var_aliases.insert(var_name.to_string(), source);
-                    } else if self.is_tainted(&member.object) {
-                        // Check if the object is tainted (e.g., taintedMap.get())
-                        self.tainted_vars.insert(var_name.to_string());
-                        if let Some(source) = self.find_source_in_expr(&member.object) {
-                            let source = self.normalize_search_param_source(&source);
-                            self.var_aliases.insert(var_name.to_string(), source);
-                        } else {
-                            self.var_aliases
-                                .insert(var_name.to_string(), "location.search".to_string());
-                        }
-                    }
-                }
-
-                // Check for JSON.parse(tainted) - taint propagates through JSON.parse
-                // e.g., data = JSON.parse(query) where query is tainted
-                if let Expression::CallExpression(call) = init
-                    && let Expression::StaticMemberExpression(member) = &call.callee
-                    && let Some(callee_str) = self.get_member_string(member)
-                    && callee_str == "JSON.parse"
-                    && !call.arguments.is_empty()
-                {
-                    // Check if first argument is tainted
-                    if let Some(arg) = call.arguments.first() {
-                        let is_arg_tainted = match arg {
-                            Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                            _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
-                        };
-                        if is_arg_tainted {
-                            self.tainted_vars.insert(var_name.to_string());
-                            let source_expr = match arg {
-                                Argument::SpreadElement(spread) => Some(&spread.argument),
-                                _ => arg.as_expression(),
-                            };
-                            let source = source_expr
-                                .and_then(|e| self.find_source_in_expr(e))
-                                .unwrap_or_else(|| "JSON.parse".to_string());
-                            self.var_aliases.insert(var_name.to_string(), source);
-                        }
-                    }
-                }
-
-                // Also check if init expression is tainted (includes template literals, arrays, objects)
-                if self.is_tainted(init) {
-                    self.tainted_vars.insert(var_name.to_string());
-                    // Try to find a source from the init expression for better reporting
-                    if !self.var_aliases.contains_key(var_name)
-                        && let Some(source) = self.find_source_in_expr(init)
-                    {
-                        self.var_aliases.insert(var_name.to_string(), source);
-                    }
-                }
+                self.bind_declarator_identifier(id, init);
             }
 
             // Handle object destructuring: const { a, b } = tainted → a, b all tainted
@@ -4124,470 +4128,166 @@ impl<'a> DomXssVisitor<'a> {
         self.walk_expression(&assign.right);
     }
 
-    /// Walk through a call expression
-    fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
-        // Standalone `trustedTypes.createPolicy('default', {...})` (not bound to
-        // a variable) still registers the auto-applied default policy.
-        if let Some((name, config)) = self.tt_create_policy_config(call)
-            && name.as_deref() == Some("default")
+    /// A call whose *member method* names a sink (`el.insertAdjacentHTML(...)`, `document['write'](...)`), including the computed-property spelling.
+    fn handle_member_method_sink(&mut self, call: &CallExpression<'a>) -> bool {
+        // Also treat member method name itself as sink
+        // (e.g., el.insertAdjacentHTML, document['write'](...))
+        let member_method_name = self.get_callee_property_name(&call.callee);
+        if let Some(method_name) = member_method_name
+            && self.sinks.contains(method_name.as_str())
         {
-            let info = self.build_tt_policy_info(config);
-            self.default_tt_policy = Some(info);
-        }
-
-        // fetch().then(...) response-source chains (issue #1024) and async
-        // source chains such as `navigator.clipboard.readText().then(...)`.
-        // Drive the whole chain here so each callback body is walked with the
-        // resolved Response / tainted value bound to its parameter, then return.
-        if Self::promise_method_name(call).is_some()
-            && self.promise_chain_roots_at_untrusted_source(call)
-        {
-            self.promise_kind_of_call(call);
-            return;
-        }
-
-        // jQuery `$(tainted)` / `jQuery(tainted)` selector-to-HTML constructor
-        // (issue #1021). A string whose first non-whitespace char is `<` makes
-        // jQuery build live DOM nodes (running onerror/onload). Fire only when
-        // the argument is tainted AND not pinned into selector mode by a
-        // constant `#`/`.`/tag prefix — see `jquery_arg_forces_selector`.
-        if let Expression::Identifier(id) = &call.callee
-            && (id.name == "$" || id.name == "jQuery")
-            && let Some(arg0) = call.arguments.first()
-            && let Some(arg_expr) = arg0.as_expression()
-            && self.is_tainted(arg_expr)
-            && !self.jquery_arg_forces_selector(arg_expr)
-        {
-            let source = self.find_source_in_expr(arg_expr);
-            self.report_vulnerability_with_source(
-                call.span(),
-                "jQuery$",
-                "Tainted HTML string passed to jQuery $() constructor builds DOM nodes (selector-to-HTML)",
-                source,
-            );
-            // Walk the (tainted) argument so a nested sink inside it — e.g.
-            // `$(eval(location.hash))` — is also reported; the trailing
-            // `walk_expression(&call.callee)` only descends the `$` callee,
-            // never the call's arguments.
-            self.walk_expression(arg_expr);
-        }
-
-        if let Expression::StaticMemberExpression(member) = &call.callee
-            && member.property.name.as_str() == "set"
-            && call.arguments.len() >= 2
-        {
-            let (value_tainted, source_hint) = self.argument_taint_and_source(&call.arguments[1]);
-            if value_tainted && let Expression::Identifier(obj_id) = &member.object {
-                self.tainted_vars.insert(obj_id.name.to_string());
-                if let Some(source) = source_hint {
-                    self.var_aliases.insert(obj_id.name.to_string(), source);
+            // Special-case setAttribute to only dangerous attributes
+            if method_name == "setAttribute" && call.arguments.len() >= 2 {
+                let attr_name_lc = call
+                    .arguments
+                    .first()
+                    .and_then(|arg0| self.eval_static_string_arg(arg0))
+                    .map(|name| name.to_ascii_lowercase());
+                if let Some(name) = attr_name_lc {
+                    let dangerous = name.starts_with("on")
+                        || name == "href"
+                        || name == "xlink:href"
+                        || name == "srcdoc";
+                    if dangerous && let Some(arg1) = call.arguments.get(1) {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg1);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &format!("setAttribute:{}", name),
+                                "Tainted data assigned to dangerous attribute",
+                                source_hint,
+                            );
+                            return true;
+                        }
+                    }
                 }
-            }
-        }
-
-        // Check if this is an addEventListener call with a function argument
-        if let Expression::StaticMemberExpression(member) = &call.callee
-            && member.property.name.as_str() == "addEventListener"
-            && call.arguments.len() >= 2
-        {
-            let event_source = self.event_listener_source(&member.object, call.arguments.first());
-
-            // The second argument might be a function with event parameter
-            if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
-                // Mark the first parameter as tainted (it's the event object)
-                if let Some(param) = func.params.items.first()
-                    && let BindingPattern::BindingIdentifier(id) = &param.pattern
-                    && let Some(body) = &func.body
-                    && let Some(event_source) = event_source.as_deref()
+            // `setAttributeNS(ns, name, value)` — same dangerous-attribute
+            // filter as `setAttribute`, shifted one index for the namespace.
+            } else if method_name == "setAttributeNS" && call.arguments.len() >= 3 {
+                let attr_name_lc = call
+                    .arguments
+                    .get(1)
+                    .and_then(|arg1| self.eval_static_string_arg(arg1))
+                    .map(|name| name.to_ascii_lowercase());
+                if let Some(name) = attr_name_lc {
+                    // Namespaced attribute names arrive as `xlink:href` or a
+                    // bare local name depending on the call, so match both.
+                    let local = name.rsplit(':').next().unwrap_or(&name);
+                    let dangerous = local.starts_with("on")
+                        || local == "href"
+                        || local == "srcdoc"
+                        || name == "xlink:href";
+                    if dangerous && let Some(arg2) = call.arguments.get(2) {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg2);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &format!("setAttributeNS:{}", name),
+                                "Tainted data assigned to dangerous namespaced attribute",
+                                source_hint,
+                            );
+                            return true;
+                        }
+                    }
+                }
+            // `parseFromString(str, mime)` only builds a DOM that can carry
+            // script for HTML/XHTML/SVG MIME types. A `text/xml` /
+            // `application/json`-style parse cannot produce executable nodes,
+            // so restrict to the HTML-ish types; an unknown (non-literal) MIME
+            // still fires, to fail toward reporting.
+            } else if method_name == "parseFromString" {
+                let mime = call
+                    .arguments
+                    .get(1)
+                    .and_then(|arg1| self.eval_static_string_arg(arg1))
+                    .map(|m| m.trim().to_ascii_lowercase());
+                let html_ish = match mime.as_deref() {
+                    None => true,
+                    Some(m) => matches!(m, "text/html" | "application/xhtml+xml" | "image/svg+xml"),
+                };
+                if html_ish && let Some(arg0) = call.arguments.first() {
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg0);
+                    if tainted {
+                        self.report_vulnerability_with_source(
+                                call.span(),
+                                "parseFromString",
+                                "Tainted data parsed as HTML (executes once the nodes are adopted into the live document)",
+                                source_hint,
+                            );
+                        return true;
+                    }
+                }
+            // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
+            } else if method_name == "execCommand" && call.arguments.len() >= 3 {
+                let cmd_name_lc = call
+                    .arguments
+                    .first()
+                    .and_then(|arg0| self.eval_static_string_arg(arg0))
+                    .map(|name| name.to_ascii_lowercase());
+                if let Some(cmd) = cmd_name_lc
+                    && cmd == "inserthtml"
+                    && let Some(arg2) = call.arguments.get(2)
                 {
-                    self.walk_event_handler_body(id.name.as_str(), event_source, &body.statements);
-                    return;
-                }
-            }
-            // Also handle arrow functions
-            if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
-                && let Some(param) = arrow.params.items.first()
-                && let BindingPattern::BindingIdentifier(id) = &param.pattern
-                && let Some(event_source) = event_source.as_deref()
-            {
-                self.walk_event_handler_body(
-                    id.name.as_str(),
-                    event_source,
-                    &arrow.body.statements,
-                );
-                return;
-            }
-
-            // Handle named callback references:
-            // window.addEventListener('message', handleMessage)
-            if let Some(event_source) = event_source.as_deref()
-                && let Some(Argument::Identifier(handler_id)) = call.arguments.get(1)
-                && let Some(sink_name) = self
-                    .function_summaries
-                    .get(handler_id.name.as_str())
-                    .and_then(|summary| summary.tainted_param_sinks.get(&0))
-                    .cloned()
-            {
-                self.report_vulnerability_with_source(
-                    call.span(),
-                    &sink_name,
-                    "Tainted message event data may reach sink through callback",
-                    Some(event_source.to_string()),
-                );
-                return;
-            }
-        }
-
-        // Handle Reflect.apply(targetFn, thisArg, argsArray)
-        if let Some(callee_name) = self.get_expr_string(&call.callee)
-            && callee_name == "Reflect.apply"
-            && call.arguments.len() >= 3
-        {
-            let target_arg = call.arguments.first();
-            let target_expr = target_arg.and_then(|arg| arg.as_expression());
-            let target_alias_owned = target_arg
-                .and_then(|arg0| self.get_callable_target_alias_from_argument(arg0))
-                .cloned();
-            let mut target_summary_key =
-                target_arg.and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
-
-            if target_summary_key
-                .as_ref()
-                .and_then(|k| self.function_summaries.get(k))
-                .is_none()
-                && let Some(alias) = target_alias_owned.as_ref()
-            {
-                target_summary_key = Some(alias.target.clone());
-            }
-
-            if let Some(summary_key) = target_summary_key
-                && let Some(param_sinks) =
-                    self.function_summaries.get(&summary_key).map(|summary| {
-                        summary
-                            .tainted_param_sinks
-                            .iter()
-                            .map(|(idx, sink)| (*idx, sink.clone()))
-                            .collect::<Vec<_>>()
-                    })
-            {
-                for (idx, sink_name) in param_sinks {
-                    let (tainted, source_hint) = self.resolve_reflect_apply_param_argument_taint(
-                        call,
-                        target_alias_owned.as_ref(),
-                        idx,
-                    );
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg2);
                     if tainted {
                         self.report_vulnerability_with_source(
                             call.span(),
-                            &sink_name,
-                            "Tainted argument reaches sink through Reflect.apply",
+                            "execCommand:insertHTML",
+                            "Tainted data passed to insertHTML command",
                             source_hint,
                         );
-                        return;
+                        return true;
                     }
                 }
-            }
-
-            let mut target_sink_name =
-                target_expr.and_then(|expr| self.get_sink_name_for_callable_expr(expr));
-            if target_sink_name.is_none()
-                && let Some(alias) = target_alias_owned.as_ref()
-                && self.sinks.contains(alias.target.as_str())
+            } else if matches!(
+                method_name.as_str(),
+                "append" | "prepend" | "after" | "before"
+            ) && !Self::callee_receiver_is_jquery_chain(&call.callee)
             {
-                target_sink_name = Some(alias.target.clone());
-            }
-
-            if let Some(sink_name) = target_sink_name {
-                if let Some(target_alias) = target_alias_owned.as_ref()
-                    && self.sinks.contains(target_alias.target.as_str())
-                {
-                    for bound_arg in &target_alias.bound_args {
-                        if bound_arg.tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                &sink_name,
-                                "Tainted pre-bound argument reaches sink function via Reflect.apply",
-                                bound_arg.source.clone(),
-                            );
-                            return;
-                        }
-                    }
-                }
-
-                if let Some(arg_array) = call.arguments.get(2) {
-                    let target_method_name = target_expr
-                        .and_then(|expr| self.get_callee_property_name(expr))
-                        .or_else(|| {
-                            if self.sinks.contains(sink_name.as_str()) {
-                                Some(sink_name.clone())
-                            } else {
-                                None
-                            }
-                        });
-
-                    if target_method_name.as_deref() == Some("setAttribute") {
-                        let attr_name_lc = self
-                            .resolve_apply_static_string_at(arg_array, 0)
-                            .map(|name| name.to_ascii_lowercase());
-                        if let Some(name) = attr_name_lc {
-                            let dangerous = name.starts_with("on")
-                                || name == "href"
-                                || name == "xlink:href"
-                                || name == "srcdoc";
-                            if dangerous {
-                                let (tainted, source_hint) =
-                                    self.resolve_apply_argument_taint_at(arg_array, 1);
-                                if tainted {
-                                    self.report_vulnerability_with_source(
-                                        call.span(),
-                                        &format!("setAttribute:{name}"),
-                                        "Tainted data assigned to dangerous attribute via Reflect.apply",
-                                        source_hint,
-                                    );
-                                    return;
-                                }
-                            }
-                        }
-                    } else if target_method_name.as_deref() == Some("execCommand") {
-                        let cmd_name_lc = self
-                            .resolve_apply_static_string_at(arg_array, 0)
-                            .map(|name| name.to_ascii_lowercase());
-                        if let Some(cmd) = cmd_name_lc
-                            && cmd == "inserthtml"
-                        {
-                            let (tainted, source_hint) =
-                                self.resolve_apply_argument_taint_at(arg_array, 2);
-                            if tainted {
-                                self.report_vulnerability_with_source(
-                                    call.span(),
-                                    "execCommand:insertHTML",
-                                    "Tainted data passed to insertHTML command via Reflect.apply",
-                                    source_hint,
-                                );
-                                return;
-                            }
-                        }
-                    } else if target_method_name.as_deref() == Some("insertAdjacentHTML") {
-                        let (tainted, source_hint) =
-                            self.resolve_apply_argument_taint_at(arg_array, 1);
-                        if tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                "insertAdjacentHTML",
-                                "Tainted HTML argument passed to sink method via Reflect.apply",
-                                source_hint,
-                            );
-                            return;
-                        }
+                // FP suppression: native `Element.append / .prepend / .after
+                // / .before` insert string arguments as text nodes — they do
+                // NOT parse HTML and cannot trigger script execution. Only
+                // jQuery's same-named methods are real HTML sinks (they call
+                // `innerHTML` internally). Without a `$(...)` / `jQuery(...)`
+                // receiver chain, treat these method calls as inert.
+                //
+                // Falls through to walk the callee so taint tracking through
+                // arguments and sub-expressions still proceeds.
+            } else {
+                // Generic method sink: if any argument is tainted
+                let mut tainted_source: Option<String> = None;
+                for (idx, arg) in call.arguments.iter().enumerate() {
+                    // For insertAdjacentHTML, the second argument is HTML
+                    let consider = if method_name == "insertAdjacentHTML" {
+                        idx == 1
                     } else {
-                        let (tainted, source_hint) = self.argument_taint_and_source(arg_array);
-                        if tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                &sink_name,
-                                "Tainted data passed to sink function via Reflect.apply",
-                                source_hint,
-                            );
-                            return;
-                        }
+                        true
+                    };
+                    if !consider {
+                        continue;
+                    }
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg);
+                    if tainted {
+                        tainted_source = source_hint;
+                        break;
                     }
                 }
-            }
-        }
-
-        // Handle Reflect.construct(Function, [taintedCode])
-        if let Some(callee_name) = self.get_expr_string(&call.callee)
-            && callee_name == "Reflect.construct"
-            && call.arguments.len() >= 2
-        {
-            let target_key = call
-                .arguments
-                .first()
-                .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
-            if target_key.as_deref() == Some("Function")
-                && let Some(arg_array) = call.arguments.get(1)
-            {
-                let (tainted, source_hint) = self.resolve_apply_argument_taint_at(arg_array, 0);
-                if tainted {
+                if tainted_source.is_some() {
                     self.report_vulnerability_with_source(
                         call.span(),
-                        "Function",
-                        "Tainted data passed to Function constructor via Reflect.construct",
-                        source_hint,
+                        &method_name,
+                        "Tainted data passed to sink method",
+                        tainted_source,
                     );
-                    return;
+                    return true;
                 }
             }
         }
+        false
+    }
 
-        // Handle wrapper invocations:
-        // - sink.call(thisArg, tainted)
-        // - sink.apply(thisArg, [tainted])
-        // - helper.call(thisArg, tainted) where helper has function summary
-        if let Some(wrapper_name) = self.get_callee_property_name(&call.callee)
-            && (wrapper_name == "call" || wrapper_name == "apply")
-            && let Some(target_expr) = self.get_callee_object_expr(&call.callee)
-        {
-            let target_alias_owned = self.get_alias_for_expr(target_expr).cloned();
-            let mut target_summary_key = self.get_summary_key_for_callee_expr(target_expr);
-            if target_summary_key
-                .as_ref()
-                .and_then(|k| self.function_summaries.get(k))
-                .is_none()
-                && let Some(alias) = target_alias_owned.as_ref()
-            {
-                target_summary_key = Some(alias.target.clone());
-            }
-            if let Some(summary_key) = target_summary_key
-                && let Some(param_sinks) =
-                    self.function_summaries.get(&summary_key).map(|summary| {
-                        summary
-                            .tainted_param_sinks
-                            .iter()
-                            .map(|(idx, sink)| (*idx, sink.clone()))
-                            .collect::<Vec<_>>()
-                    })
-            {
-                for (idx, sink_name) in param_sinks {
-                    let (tainted, source_hint) = self.resolve_wrapper_param_argument_taint(
-                        call,
-                        &wrapper_name,
-                        target_alias_owned.as_ref(),
-                        idx,
-                    );
-                    if tainted {
-                        let description = if wrapper_name == "call" {
-                            "Tainted argument reaches sink through function.call wrapper"
-                        } else {
-                            "Tainted argument reaches sink through function.apply wrapper"
-                        };
-                        self.report_vulnerability_with_source(
-                            call.span(),
-                            &sink_name,
-                            description,
-                            source_hint,
-                        );
-                        return;
-                    }
-                }
-            }
-
-            let mut target_func_name = self.get_expr_string(target_expr);
-            if target_func_name
-                .as_ref()
-                .is_none_or(|name| !self.sinks.contains(name.as_str()))
-                && let Some(alias) = target_alias_owned.as_ref()
-                && self.sinks.contains(alias.target.as_str())
-            {
-                target_func_name = Some(alias.target.clone());
-            }
-
-            if let Some(target_func_name) =
-                target_func_name.filter(|name| self.sinks.contains(name.as_str()))
-            {
-                if let Some(target_alias) = target_alias_owned.as_ref()
-                    && self.sinks.contains(target_alias.target.as_str())
-                {
-                    for bound_arg in &target_alias.bound_args {
-                        if bound_arg.tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                &target_func_name,
-                                "Tainted pre-bound argument reaches sink function via wrapper",
-                                bound_arg.source.clone(),
-                            );
-                            return;
-                        }
-                    }
-                }
-
-                if wrapper_name == "call" {
-                    for arg in call.arguments.iter().skip(1) {
-                        let (tainted, source_hint) = self.argument_taint_and_source(arg);
-                        if tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                &target_func_name,
-                                "Tainted data passed to sink function via .call wrapper",
-                                source_hint,
-                            );
-                            return;
-                        }
-                    }
-                } else if let Some(arg_array) = call.arguments.get(1) {
-                    let (tainted, source_hint) = self.argument_taint_and_source(arg_array);
-                    if tainted {
-                        self.report_vulnerability_with_source(
-                            call.span(),
-                            &target_func_name,
-                            "Tainted data passed to sink function via .apply wrapper",
-                            source_hint,
-                        );
-                        return;
-                    }
-                }
-            }
-        }
-
-        // Propagate taint through common mutation methods.
-        // e.g. arr.push(location.hash); document.write(arr[0]);
-        // e.g. params.set('html', tainted); replay = new URLSearchParams(params.toString());
-        if let Some(method) = self.get_callee_property_name(&call.callee)
-            && let Some(target_obj) = self.get_callee_object_expr(&call.callee)
-            && let Expression::Identifier(id) = target_obj
-        {
-            let target = id.name.as_str();
-            let mut tainted_source: Option<String> = None;
-
-            match method.as_str() {
-                "push" | "unshift" => {
-                    for arg in &call.arguments {
-                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
-                        if is_arg_tainted {
-                            tainted_source = source_hint;
-                            break;
-                        }
-                    }
-                }
-                "splice" => {
-                    // splice(start, deleteCount, ...items): only items can introduce taint
-                    for arg in call.arguments.iter().skip(2) {
-                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
-                        if is_arg_tainted {
-                            tainted_source = source_hint;
-                            break;
-                        }
-                    }
-                }
-                "set" if self.url_search_params_objects.contains(target) => {
-                    if let Some(arg) = call.arguments.get(1) {
-                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
-                        if is_arg_tainted {
-                            tainted_source = source_hint;
-                            if let Some(param_name) = Self::extract_static_string_argument(call, 0)
-                                && let Some(source) = tainted_source.clone()
-                            {
-                                self.url_search_params_field_sources.insert(
-                                    Self::url_search_params_field_key(target, &param_name),
-                                    source,
-                                );
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-
-            if let Some(source) = tainted_source {
-                self.tainted_vars.insert(target.to_string());
-                self.var_aliases.insert(target.to_string(), source.clone());
-                if method == "set" && self.url_search_params_objects.contains(target) {
-                    self.url_search_params_sources
-                        .insert(target.to_string(), source);
-                }
-            }
-        }
-
+    /// Inter-procedural flow via the function summary, then the direct-sink case (`document.write(...)`). Kept together because the sink branch reads the callee alias the summary branch resolved.
+    fn handle_summary_and_sink_call(&mut self, call: &CallExpression<'a>) -> bool {
         // Lightweight inter-procedural flow via function summary:
         // If summary says parameter[i] reaches sink S and argument[i] is tainted,
         // report vulnerability at call site.
@@ -4666,7 +4366,7 @@ impl<'a> DomXssVisitor<'a> {
                             "Tainted pre-bound argument reaches sink function",
                             bound_arg.source.clone(),
                         );
-                        return;
+                        return true;
                     }
                 }
             }
@@ -4706,159 +4406,532 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
         }
+        false
+    }
 
-        // Also treat member method name itself as sink
-        // (e.g., el.insertAdjacentHTML, document['write'](...))
-        let member_method_name = self.get_callee_property_name(&call.callee);
-        if let Some(method_name) = member_method_name
-            && self.sinks.contains(method_name.as_str())
+    /// Taint propagation through mutating methods: a tainted argument makes the
+    /// receiver tainted. Covers `push` / `unshift` / `splice`, plus `set` on a
+    /// tracked `URLSearchParams` object.
+    fn propagate_mutation_taint(&mut self, call: &CallExpression<'a>) {
+        // Propagate taint through common mutation methods.
+        // e.g. arr.push(location.hash); document.write(arr[0]);
+        // e.g. params.set('html', tainted); replay = new URLSearchParams(params.toString());
+        if let Some(method) = self.get_callee_property_name(&call.callee)
+            && let Some(target_obj) = self.get_callee_object_expr(&call.callee)
+            && let Expression::Identifier(id) = target_obj
         {
-            // Special-case setAttribute to only dangerous attributes
-            if method_name == "setAttribute" && call.arguments.len() >= 2 {
-                let attr_name_lc = call
-                    .arguments
-                    .first()
-                    .and_then(|arg0| self.eval_static_string_arg(arg0))
-                    .map(|name| name.to_ascii_lowercase());
-                if let Some(name) = attr_name_lc {
-                    let dangerous = name.starts_with("on")
-                        || name == "href"
-                        || name == "xlink:href"
-                        || name == "srcdoc";
-                    if dangerous && let Some(arg1) = call.arguments.get(1) {
-                        let (tainted, source_hint) = self.argument_taint_and_source(arg1);
-                        if tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                &format!("setAttribute:{}", name),
-                                "Tainted data assigned to dangerous attribute",
-                                source_hint,
-                            );
-                            return;
+            let target = id.name.as_str();
+            let mut tainted_source: Option<String> = None;
+
+            match method.as_str() {
+                "push" | "unshift" => {
+                    for arg in &call.arguments {
+                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if is_arg_tainted {
+                            tainted_source = source_hint;
+                            break;
                         }
                     }
                 }
-            // `setAttributeNS(ns, name, value)` — same dangerous-attribute
-            // filter as `setAttribute`, shifted one index for the namespace.
-            } else if method_name == "setAttributeNS" && call.arguments.len() >= 3 {
-                let attr_name_lc = call
-                    .arguments
-                    .get(1)
-                    .and_then(|arg1| self.eval_static_string_arg(arg1))
-                    .map(|name| name.to_ascii_lowercase());
-                if let Some(name) = attr_name_lc {
-                    // Namespaced attribute names arrive as `xlink:href` or a
-                    // bare local name depending on the call, so match both.
-                    let local = name.rsplit(':').next().unwrap_or(&name);
-                    let dangerous = local.starts_with("on")
-                        || local == "href"
-                        || local == "srcdoc"
-                        || name == "xlink:href";
-                    if dangerous && let Some(arg2) = call.arguments.get(2) {
-                        let (tainted, source_hint) = self.argument_taint_and_source(arg2);
-                        if tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                &format!("setAttributeNS:{}", name),
-                                "Tainted data assigned to dangerous namespaced attribute",
-                                source_hint,
-                            );
-                            return;
+                "splice" => {
+                    // splice(start, deleteCount, ...items): only items can introduce taint
+                    for arg in call.arguments.iter().skip(2) {
+                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if is_arg_tainted {
+                            tainted_source = source_hint;
+                            break;
                         }
                     }
                 }
-            // `parseFromString(str, mime)` only builds a DOM that can carry
-            // script for HTML/XHTML/SVG MIME types. A `text/xml` /
-            // `application/json`-style parse cannot produce executable nodes,
-            // so restrict to the HTML-ish types; an unknown (non-literal) MIME
-            // still fires, to fail toward reporting.
-            } else if method_name == "parseFromString" {
-                let mime = call
-                    .arguments
-                    .get(1)
-                    .and_then(|arg1| self.eval_static_string_arg(arg1))
-                    .map(|m| m.trim().to_ascii_lowercase());
-                let html_ish = match mime.as_deref() {
-                    None => true,
-                    Some(m) => matches!(m, "text/html" | "application/xhtml+xml" | "image/svg+xml"),
-                };
-                if html_ish && let Some(arg0) = call.arguments.first() {
-                    let (tainted, source_hint) = self.argument_taint_and_source(arg0);
-                    if tainted {
-                        self.report_vulnerability_with_source(
-                            call.span(),
-                            "parseFromString",
-                            "Tainted data parsed as HTML (executes once the nodes are adopted into the live document)",
-                            source_hint,
-                        );
-                        return;
+                "set" if self.url_search_params_objects.contains(target) => {
+                    if let Some(arg) = call.arguments.get(1) {
+                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if is_arg_tainted {
+                            tainted_source = source_hint;
+                            if let Some(param_name) = Self::extract_static_string_argument(call, 0)
+                                && let Some(source) = tainted_source.clone()
+                            {
+                                self.url_search_params_field_sources.insert(
+                                    Self::url_search_params_field_key(target, &param_name),
+                                    source,
+                                );
+                            }
+                        }
                     }
                 }
-            // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
-            } else if method_name == "execCommand" && call.arguments.len() >= 3 {
-                let cmd_name_lc = call
-                    .arguments
-                    .first()
-                    .and_then(|arg0| self.eval_static_string_arg(arg0))
-                    .map(|name| name.to_ascii_lowercase());
-                if let Some(cmd) = cmd_name_lc
-                    && cmd == "inserthtml"
-                    && let Some(arg2) = call.arguments.get(2)
-                {
-                    let (tainted, source_hint) = self.argument_taint_and_source(arg2);
-                    if tainted {
-                        self.report_vulnerability_with_source(
-                            call.span(),
-                            "execCommand:insertHTML",
-                            "Tainted data passed to insertHTML command",
-                            source_hint,
-                        );
-                        return;
-                    }
-                }
-            } else if matches!(
-                method_name.as_str(),
-                "append" | "prepend" | "after" | "before"
-            ) && !Self::callee_receiver_is_jquery_chain(&call.callee)
-            {
-                // FP suppression: native `Element.append / .prepend / .after
-                // / .before` insert string arguments as text nodes — they do
-                // NOT parse HTML and cannot trigger script execution. Only
-                // jQuery's same-named methods are real HTML sinks (they call
-                // `innerHTML` internally). Without a `$(...)` / `jQuery(...)`
-                // receiver chain, treat these method calls as inert.
-                //
-                // Falls through to walk the callee so taint tracking through
-                // arguments and sub-expressions still proceeds.
-            } else {
-                // Generic method sink: if any argument is tainted
-                let mut tainted_source: Option<String> = None;
-                for (idx, arg) in call.arguments.iter().enumerate() {
-                    // For insertAdjacentHTML, the second argument is HTML
-                    let consider = if method_name == "insertAdjacentHTML" {
-                        idx == 1
-                    } else {
-                        true
-                    };
-                    if !consider {
-                        continue;
-                    }
-                    let (tainted, source_hint) = self.argument_taint_and_source(arg);
-                    if tainted {
-                        tainted_source = source_hint;
-                        break;
-                    }
-                }
-                if tainted_source.is_some() {
-                    self.report_vulnerability_with_source(
-                        call.span(),
-                        &method_name,
-                        "Tainted data passed to sink method",
-                        tainted_source,
-                    );
-                    return;
+                _ => {}
+            }
+
+            if let Some(source) = tainted_source {
+                self.tainted_vars.insert(target.to_string());
+                self.var_aliases.insert(target.to_string(), source.clone());
+                if method == "set" && self.url_search_params_objects.contains(target) {
+                    self.url_search_params_sources
+                        .insert(target.to_string(), source);
                 }
             }
+        }
+    }
+
+    /// `sink.call(thisArg, tainted)` / `sink.apply(thisArg, [tainted])`, and the
+    /// same two forms on a helper that carries a function summary.
+    ///
+    /// Only these two spellings — the callee's *property* must literally be
+    /// `call` or `apply`. A callee that is an alias of a sink
+    /// (`const f = eval; f(x)`) is resolved later, by the
+    /// `bound_function_aliases` / `indirect_call_sink_name` lookup inside
+    /// [`Self::handle_summary_and_sink_call`]; moving this helper past that
+    /// stage would not pick those up, it would just reorder two unrelated
+    /// checks.
+    fn handle_wrapper_invocation(&mut self, call: &CallExpression<'a>) -> bool {
+        // Handle wrapper invocations:
+        // - sink.call(thisArg, tainted)
+        // - sink.apply(thisArg, [tainted])
+        // - helper.call(thisArg, tainted) where helper has function summary
+        if let Some(wrapper_name) = self.get_callee_property_name(&call.callee)
+            && (wrapper_name == "call" || wrapper_name == "apply")
+            && let Some(target_expr) = self.get_callee_object_expr(&call.callee)
+        {
+            let target_alias_owned = self.get_alias_for_expr(target_expr).cloned();
+            let mut target_summary_key = self.get_summary_key_for_callee_expr(target_expr);
+            if target_summary_key
+                .as_ref()
+                .and_then(|k| self.function_summaries.get(k))
+                .is_none()
+                && let Some(alias) = target_alias_owned.as_ref()
+            {
+                target_summary_key = Some(alias.target.clone());
+            }
+            if let Some(summary_key) = target_summary_key
+                && let Some(param_sinks) =
+                    self.function_summaries.get(&summary_key).map(|summary| {
+                        summary
+                            .tainted_param_sinks
+                            .iter()
+                            .map(|(idx, sink)| (*idx, sink.clone()))
+                            .collect::<Vec<_>>()
+                    })
+            {
+                for (idx, sink_name) in param_sinks {
+                    let (tainted, source_hint) = self.resolve_wrapper_param_argument_taint(
+                        call,
+                        &wrapper_name,
+                        target_alias_owned.as_ref(),
+                        idx,
+                    );
+                    if tainted {
+                        let description = if wrapper_name == "call" {
+                            "Tainted argument reaches sink through function.call wrapper"
+                        } else {
+                            "Tainted argument reaches sink through function.apply wrapper"
+                        };
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            &sink_name,
+                            description,
+                            source_hint,
+                        );
+                        return true;
+                    }
+                }
+            }
+
+            let mut target_func_name = self.get_expr_string(target_expr);
+            if target_func_name
+                .as_ref()
+                .is_none_or(|name| !self.sinks.contains(name.as_str()))
+                && let Some(alias) = target_alias_owned.as_ref()
+                && self.sinks.contains(alias.target.as_str())
+            {
+                target_func_name = Some(alias.target.clone());
+            }
+
+            if let Some(target_func_name) =
+                target_func_name.filter(|name| self.sinks.contains(name.as_str()))
+            {
+                if let Some(target_alias) = target_alias_owned.as_ref()
+                    && self.sinks.contains(target_alias.target.as_str())
+                {
+                    for bound_arg in &target_alias.bound_args {
+                        if bound_arg.tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &target_func_name,
+                                "Tainted pre-bound argument reaches sink function via wrapper",
+                                bound_arg.source.clone(),
+                            );
+                            return true;
+                        }
+                    }
+                }
+
+                if wrapper_name == "call" {
+                    for arg in call.arguments.iter().skip(1) {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &target_func_name,
+                                "Tainted data passed to sink function via .call wrapper",
+                                source_hint,
+                            );
+                            return true;
+                        }
+                    }
+                } else if let Some(arg_array) = call.arguments.get(1) {
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg_array);
+                    if tainted {
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            &target_func_name,
+                            "Tainted data passed to sink function via .apply wrapper",
+                            source_hint,
+                        );
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// `Reflect.construct(Function, [taintedCode])` — the constructor form of dynamic code evaluation.
+    fn handle_reflect_construct(&mut self, call: &CallExpression<'a>) -> bool {
+        // Handle Reflect.construct(Function, [taintedCode])
+        if let Some(callee_name) = self.get_expr_string(&call.callee)
+            && callee_name == "Reflect.construct"
+            && call.arguments.len() >= 2
+        {
+            let target_key = call
+                .arguments
+                .first()
+                .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
+            if target_key.as_deref() == Some("Function")
+                && let Some(arg_array) = call.arguments.get(1)
+            {
+                let (tainted, source_hint) = self.resolve_apply_argument_taint_at(arg_array, 0);
+                if tainted {
+                    self.report_vulnerability_with_source(
+                        call.span(),
+                        "Function",
+                        "Tainted data passed to Function constructor via Reflect.construct",
+                        source_hint,
+                    );
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// `Reflect.apply(fn, thisArg, [args])` — resolve the target function and propagate taint through it as if it had been called directly.
+    fn handle_reflect_apply(&mut self, call: &CallExpression<'a>) -> bool {
+        // Handle Reflect.apply(targetFn, thisArg, argsArray)
+        if let Some(callee_name) = self.get_expr_string(&call.callee)
+            && callee_name == "Reflect.apply"
+            && call.arguments.len() >= 3
+        {
+            let target_arg = call.arguments.first();
+            let target_expr = target_arg.and_then(|arg| arg.as_expression());
+            let target_alias_owned = target_arg
+                .and_then(|arg0| self.get_callable_target_alias_from_argument(arg0))
+                .cloned();
+            let mut target_summary_key =
+                target_arg.and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
+
+            if target_summary_key
+                .as_ref()
+                .and_then(|k| self.function_summaries.get(k))
+                .is_none()
+                && let Some(alias) = target_alias_owned.as_ref()
+            {
+                target_summary_key = Some(alias.target.clone());
+            }
+
+            if let Some(summary_key) = target_summary_key
+                && let Some(param_sinks) =
+                    self.function_summaries.get(&summary_key).map(|summary| {
+                        summary
+                            .tainted_param_sinks
+                            .iter()
+                            .map(|(idx, sink)| (*idx, sink.clone()))
+                            .collect::<Vec<_>>()
+                    })
+            {
+                for (idx, sink_name) in param_sinks {
+                    let (tainted, source_hint) = self.resolve_reflect_apply_param_argument_taint(
+                        call,
+                        target_alias_owned.as_ref(),
+                        idx,
+                    );
+                    if tainted {
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            &sink_name,
+                            "Tainted argument reaches sink through Reflect.apply",
+                            source_hint,
+                        );
+                        return true;
+                    }
+                }
+            }
+
+            let mut target_sink_name =
+                target_expr.and_then(|expr| self.get_sink_name_for_callable_expr(expr));
+            if target_sink_name.is_none()
+                && let Some(alias) = target_alias_owned.as_ref()
+                && self.sinks.contains(alias.target.as_str())
+            {
+                target_sink_name = Some(alias.target.clone());
+            }
+
+            if let Some(sink_name) = target_sink_name {
+                if let Some(target_alias) = target_alias_owned.as_ref()
+                    && self.sinks.contains(target_alias.target.as_str())
+                {
+                    for bound_arg in &target_alias.bound_args {
+                        if bound_arg.tainted {
+                            self.report_vulnerability_with_source(
+                                    call.span(),
+                                    &sink_name,
+                                    "Tainted pre-bound argument reaches sink function via Reflect.apply",
+                                    bound_arg.source.clone(),
+                                );
+                            return true;
+                        }
+                    }
+                }
+
+                if let Some(arg_array) = call.arguments.get(2) {
+                    let target_method_name = target_expr
+                        .and_then(|expr| self.get_callee_property_name(expr))
+                        .or_else(|| {
+                            if self.sinks.contains(sink_name.as_str()) {
+                                Some(sink_name.clone())
+                            } else {
+                                None
+                            }
+                        });
+
+                    if target_method_name.as_deref() == Some("setAttribute") {
+                        let attr_name_lc = self
+                            .resolve_apply_static_string_at(arg_array, 0)
+                            .map(|name| name.to_ascii_lowercase());
+                        if let Some(name) = attr_name_lc {
+                            let dangerous = name.starts_with("on")
+                                || name == "href"
+                                || name == "xlink:href"
+                                || name == "srcdoc";
+                            if dangerous {
+                                let (tainted, source_hint) =
+                                    self.resolve_apply_argument_taint_at(arg_array, 1);
+                                if tainted {
+                                    self.report_vulnerability_with_source(
+                                            call.span(),
+                                            &format!("setAttribute:{name}"),
+                                            "Tainted data assigned to dangerous attribute via Reflect.apply",
+                                            source_hint,
+                                        );
+                                    return true;
+                                }
+                            }
+                        }
+                    } else if target_method_name.as_deref() == Some("execCommand") {
+                        let cmd_name_lc = self
+                            .resolve_apply_static_string_at(arg_array, 0)
+                            .map(|name| name.to_ascii_lowercase());
+                        if let Some(cmd) = cmd_name_lc
+                            && cmd == "inserthtml"
+                        {
+                            let (tainted, source_hint) =
+                                self.resolve_apply_argument_taint_at(arg_array, 2);
+                            if tainted {
+                                self.report_vulnerability_with_source(
+                                    call.span(),
+                                    "execCommand:insertHTML",
+                                    "Tainted data passed to insertHTML command via Reflect.apply",
+                                    source_hint,
+                                );
+                                return true;
+                            }
+                        }
+                    } else if target_method_name.as_deref() == Some("insertAdjacentHTML") {
+                        let (tainted, source_hint) =
+                            self.resolve_apply_argument_taint_at(arg_array, 1);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                "insertAdjacentHTML",
+                                "Tainted HTML argument passed to sink method via Reflect.apply",
+                                source_hint,
+                            );
+                            return true;
+                        }
+                    } else {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg_array);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &sink_name,
+                                "Tainted data passed to sink function via Reflect.apply",
+                                source_hint,
+                            );
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// `addEventListener('x', handler)` — walk the handler body with the event parameter bound, so `e.data`-style sources are seen.
+    fn handle_add_event_listener(&mut self, call: &CallExpression<'a>) -> bool {
+        // Check if this is an addEventListener call with a function argument
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && member.property.name.as_str() == "addEventListener"
+            && call.arguments.len() >= 2
+        {
+            let event_source = self.event_listener_source(&member.object, call.arguments.first());
+
+            // The second argument might be a function with event parameter
+            if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
+                // Mark the first parameter as tainted (it's the event object)
+                if let Some(param) = func.params.items.first()
+                    && let BindingPattern::BindingIdentifier(id) = &param.pattern
+                    && let Some(body) = &func.body
+                    && let Some(event_source) = event_source.as_deref()
+                {
+                    self.walk_event_handler_body(id.name.as_str(), event_source, &body.statements);
+                    return true;
+                }
+            }
+            // Also handle arrow functions
+            if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
+                && let Some(param) = arrow.params.items.first()
+                && let BindingPattern::BindingIdentifier(id) = &param.pattern
+                && let Some(event_source) = event_source.as_deref()
+            {
+                self.walk_event_handler_body(
+                    id.name.as_str(),
+                    event_source,
+                    &arrow.body.statements,
+                );
+                return true;
+            }
+
+            // Handle named callback references:
+            // window.addEventListener('message', handleMessage)
+            if let Some(event_source) = event_source.as_deref()
+                && let Some(Argument::Identifier(handler_id)) = call.arguments.get(1)
+                && let Some(sink_name) = self
+                    .function_summaries
+                    .get(handler_id.name.as_str())
+                    .and_then(|summary| summary.tainted_param_sinks.get(&0))
+                    .cloned()
+            {
+                self.report_vulnerability_with_source(
+                    call.span(),
+                    &sink_name,
+                    "Tainted message event data may reach sink through callback",
+                    Some(event_source.to_string()),
+                );
+                return true;
+            }
+        }
+        false
+    }
+
+    /// jQuery's `$(tainted)` / `jQuery(tainted)`: a string whose first non-whitespace char is `<` makes jQuery build live DOM nodes, running `onerror`/`onload`. Fires only when the argument is tainted and not pinned into selector mode by a constant prefix.
+    fn handle_jquery_html_constructor(&mut self, call: &CallExpression<'a>) {
+        // jQuery `$(tainted)` / `jQuery(tainted)` selector-to-HTML constructor
+        // (issue #1021). A string whose first non-whitespace char is `<` makes
+        // jQuery build live DOM nodes (running onerror/onload). Fire only when
+        // the argument is tainted AND not pinned into selector mode by a
+        // constant `#`/`.`/tag prefix — see `jquery_arg_forces_selector`.
+        if let Expression::Identifier(id) = &call.callee
+            && (id.name == "$" || id.name == "jQuery")
+            && let Some(arg0) = call.arguments.first()
+            && let Some(arg_expr) = arg0.as_expression()
+            && self.is_tainted(arg_expr)
+            && !self.jquery_arg_forces_selector(arg_expr)
+        {
+            let source = self.find_source_in_expr(arg_expr);
+            self.report_vulnerability_with_source(
+                    call.span(),
+                    "jQuery$",
+                    "Tainted HTML string passed to jQuery $() constructor builds DOM nodes (selector-to-HTML)",
+                    source,
+                );
+            // Walk the (tainted) argument so a nested sink inside it — e.g.
+            // `$(eval(location.hash))` — is also reported; the trailing
+            // `walk_expression(&call.callee)` only descends the `$` callee,
+            // never the call's arguments.
+            self.walk_expression(arg_expr);
+        }
+    }
+
+    /// Walk through a call expression
+    fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
+        // Standalone `trustedTypes.createPolicy('default', {...})` (not bound to
+        // a variable) still registers the auto-applied default policy.
+        if let Some((name, config)) = self.tt_create_policy_config(call)
+            && name.as_deref() == Some("default")
+        {
+            let info = self.build_tt_policy_info(config);
+            self.default_tt_policy = Some(info);
+        }
+
+        // fetch().then(...) response-source chains (issue #1024) and async
+        // source chains such as `navigator.clipboard.readText().then(...)`.
+        // Drive the whole chain here so each callback body is walked with the
+        // resolved Response / tainted value bound to its parameter, then return.
+        if Self::promise_method_name(call).is_some()
+            && self.promise_chain_roots_at_untrusted_source(call)
+        {
+            self.promise_kind_of_call(call);
+            return;
+        }
+
+        self.handle_jquery_html_constructor(call);
+
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && member.property.name.as_str() == "set"
+            && call.arguments.len() >= 2
+        {
+            let (value_tainted, source_hint) = self.argument_taint_and_source(&call.arguments[1]);
+            if value_tainted && let Expression::Identifier(obj_id) = &member.object {
+                self.tainted_vars.insert(obj_id.name.to_string());
+                if let Some(source) = source_hint {
+                    self.var_aliases.insert(obj_id.name.to_string(), source);
+                }
+            }
+        }
+
+        if self.handle_add_event_listener(call) {
+            return;
+        }
+
+        if self.handle_reflect_apply(call) {
+            return;
+        }
+
+        if self.handle_reflect_construct(call) {
+            return;
+        }
+
+        if self.handle_wrapper_invocation(call) {
+            return;
+        }
+
+        self.propagate_mutation_taint(call);
+
+        if self.handle_summary_and_sink_call(call) {
+            return;
+        }
+
+        if self.handle_member_method_sink(call) {
+            return;
         }
         // Walk the callee
         self.walk_expression(&call.callee);
