@@ -250,7 +250,7 @@ template = "landing"
     <h2 class="section-title">곳곳의 헌터들과 함께, 오픈소스로</h2>
     <p class="section-desc">Dalfox는 직접 쓰는 사람들의 손으로 다듬어집니다. 이슈를 열고, 풀 리퀘스트를 보내고, 커뮤니티와 페이로드를 나눠 보세요. 기여 하나하나가 다음 스캔을 더 날카롭게 만듭니다.</p>
     <div class="community-links">
-      <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">기여 가이드</a>
+      <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">기여 가이드</a>
       <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">열린 이슈 보기 →</a>
     </div>
     <p class="contributors-label">기여자 여러분 감사합니다</p>

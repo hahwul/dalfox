@@ -250,7 +250,7 @@ template = "landing"
     <h2 class="section-title">Built in the open, by hunters everywhere</h2>
     <p class="section-desc">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or trade payloads with the community. Every contribution makes the next scan sharper.</p>
     <div class="community-links">
-      <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">Contributing guide</a>
+      <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">Contributing guide</a>
       <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">Browse open issues →</a>
     </div>
     <p class="contributors-label">Thanks to our contributors</p>
