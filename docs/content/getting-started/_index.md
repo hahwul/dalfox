@@ -25,3 +25,5 @@ Dalfox is an open-source **XSS scanner and automation utility**. Give it a URL, 
 ## Where to start
 
 Start with **[Installation](./installation/)**, then work through the **[Quick Start](./quick-start/)**. After that, the [Guide](../guide/) covers deeper topics like WAF bypass and Stored XSS.
+
+Coming from Dalfox v2 (Go)? Read **[Migrating from v2](./migration/)** first — subcommands were consolidated and several flags were renamed or retired.

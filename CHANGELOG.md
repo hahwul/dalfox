@@ -5,7 +5,7 @@ All notable changes to Dalfox are recorded here. The format follows
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
-and continues to receive security backports per [SECURITY.md](./SECURITY.md).
+and continues to receive security backports per [SECURITY.md](./.github/SECURITY.md).
 
 ## 3.2.1
 
