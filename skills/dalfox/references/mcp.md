@@ -103,7 +103,9 @@ Fewer options (no `include_*`, no blind, no workers — it only does discovery).
 }
 ```
 
-`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves: they describe the `scan_with_dalfox` call you are about to size, so `estimated_total_requests` matches that scan's fan-out. Pass the same values you intend to scan with, otherwise the estimate answers a different question than the one you are asking. The estimate honours the per-parameter payload cap the scan enforces, so it never quotes volume the scan would not send.
+`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves: they describe the `scan_with_dalfox` call you are about to size, so `estimated_total_requests` matches that scan's fan-out. Pass the same values you intend to scan with, otherwise the estimate answers a different question than the one you are asking.
+
+The estimate counts both phases the scan runs per parameter — reflection and DOM verification — each truncated to the per-parameter payload cap, the same arithmetic `--dry-run` uses. Treat it as a lower bound: WAF mutation/encoder expansion and the shared CSP/tech payloads appended after the cap are not counted.
 
 Use this before expensive scans when the user is concerned about request volume.
 

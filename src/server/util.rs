@@ -93,10 +93,11 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     }
     // An unusable proxy is resolved away to "no proxy" when the scan's client is
     // built, so the scan silently went *direct* to the target instead of through
-    // the tunnel the caller asked for — and still reported `done`. Shared with
-    // MCP; see `crate::job::validate_proxy`.
+    // the tunnel the caller asked for — and still reported `done`. The
+    // normalized value is written back because that is what the client builder
+    // later resolves; see `crate::job::normalize_proxy`. Shared with MCP.
     if let Some(proxy) = &opts.proxy {
-        crate::job::validate_proxy(proxy)?;
+        opts.proxy = crate::job::normalize_proxy(proxy)?;
     }
     // `send_terminal_webhook` dials http(s) only and returns silently for
     // anything else, so a `callback_url` with another scheme was accepted with
@@ -109,13 +110,19 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     // dropped by the dispatcher's scheme test on the untrimmed one.
     if let Some(cb) = &opts.callback_url {
         let cb = cb.trim();
-        if !has_http_scheme(cb) {
+        if cb.is_empty() {
+            // Empty already meant "no webhook" and still does. Refusing it would
+            // break the routine `?callback_url=` templated-query shape without
+            // closing any silent-drop hole.
+            opts.callback_url = None;
+        } else if !has_http_scheme(cb) {
             return Err(format!(
                 "callback_url must start with http:// or https:// (got '{}')",
                 crate::utils::log::sanitize_log_message(cb)
             ));
+        } else {
+            opts.callback_url = Some(cb.to_string());
         }
-        opts.callback_url = Some(cb.to_string());
     }
     Ok(())
 }

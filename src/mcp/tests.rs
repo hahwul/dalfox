@@ -1871,7 +1871,7 @@ async fn test_scan_with_dalfox_bounds_retained_finished_scans() {
 #[tokio::test]
 async fn test_scan_with_dalfox_rejects_unusable_proxy() {
     let mcp = DalfoxMcp::new();
-    for bad in ["not a url", "http://", "   "] {
+    for bad in ["not a url", "http://"] {
         let params = ScanWithDalfoxParams {
             proxy: Some(bad.to_string()),
             ..default_scan_params("http://127.0.0.1:1/")
@@ -1893,12 +1893,54 @@ async fn test_scan_with_dalfox_rejects_unusable_proxy() {
     );
 
     // A usable proxy spelling is still accepted (the scan then fails to reach
-    // the dead proxy, which is a visible `error`, not a silent direct connect).
-    let params = ScanWithDalfoxParams {
-        proxy: Some("socks5://127.0.0.1:1080".to_string()),
-        ..default_scan_params("http://127.0.0.1:1/")
-    };
-    assert!(mcp.scan_with_dalfox(Parameters(params)).await.is_ok());
+    // the dead proxy, which is a visible `error`, not a silent direct connect),
+    // and an empty one still means "no proxy" rather than a hard rejection.
+    for ok in ["socks5://127.0.0.1:1080", "  http://127.0.0.1:8080  ", ""] {
+        let params = ScanWithDalfoxParams {
+            proxy: Some(ok.to_string()),
+            ..default_scan_params("http://127.0.0.1:1/")
+        };
+        assert!(
+            mcp.scan_with_dalfox(Parameters(params)).await.is_ok(),
+            "'{ok}' must be accepted"
+        );
+    }
+}
+
+/// `preflight_dalfox` exists to size the `scan_with_dalfox` call you are about
+/// to make, so it must not accept a `max_payloads_per_param` the scan tool will
+/// reject — that quotes an estimate for a scan that cannot be started.
+#[tokio::test]
+async fn test_preflight_dalfox_bounds_max_payloads_like_the_scan_tool() {
+    let mcp = DalfoxMcp::new();
+    let over = crate::job::MAX_PAYLOADS_PER_PARAM + 1;
+    let err = mcp
+        .preflight_dalfox(Parameters(PreflightDalfoxParams {
+            target: "http://127.0.0.1:1/".to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 1,
+            proxy: None,
+            follow_redirects: false,
+            insecure: true,
+            skip_mining: true,
+            skip_discovery: true,
+            encoders: vec!["none".to_string()],
+            max_payloads_per_param: over,
+            deep_scan: false,
+        }))
+        .await
+        .expect_err("a cap the scan tool refuses must not be accepted for sizing");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(
+        err.message.contains("max_payloads_per_param"),
+        "got: {}",
+        err.message
+    );
 }
 
 #[tokio::test]

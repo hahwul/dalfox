@@ -160,8 +160,9 @@ pub(crate) fn validate_header_list(headers: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate a caller-supplied proxy URL, rejecting anything reqwest cannot turn
-/// into a proxy.
+/// Validate and normalize a caller-supplied proxy URL, rejecting anything
+/// reqwest cannot turn into a proxy. Returns the value to store: `None` when
+/// the field was empty (which already meant "no proxy"), else the trimmed URL.
 ///
 /// This matters more than a normal input check because the failure is silent
 /// and inverts the caller's intent: `Target::build_client` resolves the proxy
@@ -171,19 +172,34 @@ pub(crate) fn validate_header_list(headers: &[String]) -> Result<(), String> {
 /// the caller asked for, sending traffic down a path they did not intend — and
 /// still settled `done`, reporting a perfectly successful scan.
 ///
-/// Shared by the REST server and MCP so both front ends refuse the same values.
-pub(crate) fn validate_proxy(proxy: &str) -> Result<(), String> {
+/// Returning the normalized string rather than just `Ok(())` is load-bearing:
+/// the caller stores what `build_client` will later resolve, and the two must
+/// be the same bytes. `str::trim` strips all Unicode whitespace while
+/// `url::Url` strips only ASCII, so validating the trimmed form and storing the
+/// raw one would let `"\u{a0}http://127.0.0.1:8080"` — an ordinary
+/// copy-paste artifact — pass the check and still resolve away to no proxy,
+/// reopening the exact hole this function exists to close.
+///
+/// An empty value is normalized to `None` rather than refused: it carries no
+/// silent-bypass risk (nothing was asked for, nothing is skipped), and query
+/// strings are routinely templated with empty optional parameters
+/// (`?proxy=&callback_url=`), which used to scan fine.
+///
+/// Shared by the REST server and MCP so both front ends treat it identically.
+pub(crate) fn normalize_proxy(proxy: &str) -> Result<Option<String>, String> {
     let trimmed = proxy.trim();
     if trimmed.is_empty() {
-        return Err("proxy must not be empty (omit the field for no proxy)".to_string());
+        return Ok(None);
     }
-    reqwest::Proxy::all(trimmed).map(|_| ()).map_err(|e| {
-        format!(
-            "invalid proxy '{}': {} (expected e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080)",
-            crate::utils::log::sanitize_log_message(trimmed),
-            e
-        )
-    })
+    reqwest::Proxy::all(trimmed)
+        .map(|_| Some(trimmed.to_string()))
+        .map_err(|e| {
+            format!(
+                "invalid proxy '{}': {} (expected e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080)",
+                crate::utils::log::sanitize_log_message(trimmed),
+                e
+            )
+        })
 }
 
 /// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],

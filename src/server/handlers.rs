@@ -1004,17 +1004,10 @@ pub(crate) async fn preflight_handler(
                             // phase sends no requests for them, so the estimate
                             // must not bill any (they stay listed as discovered).
                             0
-                        } else if let Some(ctx) = &p.injection_context {
-                            apply_cap(
-                                crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
-                                    .unwrap_or_else(|_| vec![])
-                                    .len(),
-                            )
                         } else {
-                            let html_len =
-                                crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
-                            let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
-                            apply_cap(html_len + js_len)
+                            crate::scanning::estimate_param_requests(
+                                p, &scan_args, enc_factor, &apply_cap,
+                            )
                         };
                         estimated_requests = estimated_requests.saturating_add(payload_count);
                         serde_json::json!({

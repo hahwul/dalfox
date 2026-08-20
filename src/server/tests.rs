@@ -4335,6 +4335,7 @@ async fn test_preflight_estimate_respects_the_scan_time_payload_cap() {
         ..ScanOptions::default()
     };
 
+    let cap = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP as u64;
     let capped = preflight_estimate(addr, base.clone()).await;
     let params = capped["params"].as_array().expect("params array");
     assert!(!params.is_empty(), "reflecting target must discover params");
@@ -4342,11 +4343,22 @@ async fn test_preflight_estimate_respects_the_scan_time_payload_cap() {
         let est = p["estimated_requests"]
             .as_u64()
             .expect("per-param estimate");
+        // `run_scanning` truncates the reflection set and the DOM set to `cap`
+        // each, then sends one request per payload in both — so a parameter
+        // costs at most `2 * cap`, and the estimate must not exceed that.
         assert!(
-            est <= crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP as u64,
+            est <= 2 * cap,
             "no parameter may be quoted more requests than the scan will send it \
-             (cap {}), got {est} for {p}",
-            crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP
+             (reflection + DOM, {cap} each), got {est} for {p}"
+        );
+        // ...and must not fall below one capped half either. Clamping the whole
+        // per-param figure at `cap` — i.e. counting only the reflection phase —
+        // halved the quote for exactly the sprawling parameters callers reach
+        // for preflight to size.
+        assert!(
+            est > cap,
+            "the estimate must count the DOM phase too, not just reflection: \
+             got {est} for {p} with a per-half cap of {cap}"
         );
     }
 
@@ -4381,7 +4393,7 @@ async fn test_preflight_estimate_respects_the_scan_time_payload_cap() {
 /// the boundary instead.
 #[test]
 fn test_validate_scan_options_rejects_unusable_proxy() {
-    for bad in ["not a url", "http://", "   "] {
+    for bad in ["not a url", "http://"] {
         let mut opts = ScanOptions {
             proxy: Some(bad.to_string()),
             ..ScanOptions::default()
@@ -4394,19 +4406,48 @@ fn test_validate_scan_options_rejects_unusable_proxy() {
         );
     }
     // Forms reqwest can actually use stay accepted, including the scheme-less
-    // `host:port` spelling and SOCKS.
-    for good in [
-        "http://127.0.0.1:8080",
-        "127.0.0.1:8080",
-        "socks5://127.0.0.1:1080",
+    // `host:port` spelling and SOCKS — and the *normalized* value is what gets
+    // stored, because that is the string `build_client` later feeds to
+    // `Proxy::all`. `str::trim` strips all Unicode whitespace while `url::Url`
+    // strips only ASCII, so validating the trimmed form while storing the raw
+    // one would let a NBSP-prefixed copy-paste pass the check and still resolve
+    // away to no proxy — the very hole this validation exists to close.
+    for (given, stored) in [
+        ("http://127.0.0.1:8080", "http://127.0.0.1:8080"),
+        ("127.0.0.1:8080", "127.0.0.1:8080"),
+        ("socks5://127.0.0.1:1080", "socks5://127.0.0.1:1080"),
+        ("  http://127.0.0.1:8080  ", "http://127.0.0.1:8080"),
+        ("\u{a0}http://127.0.0.1:8080", "http://127.0.0.1:8080"),
     ] {
         let mut opts = ScanOptions {
-            proxy: Some(good.to_string()),
+            proxy: Some(given.to_string()),
             ..ScanOptions::default()
         };
+        validate_scan_options(&mut opts)
+            .unwrap_or_else(|e| panic!("'{given}' is a usable proxy and must be accepted: {e}"));
+        assert_eq!(
+            opts.proxy.as_deref(),
+            Some(stored),
+            "the stored proxy must be the normalized form the client builder resolves"
+        );
         assert!(
-            validate_scan_options(&mut opts).is_ok(),
-            "'{good}' is a usable proxy and must be accepted"
+            reqwest::Proxy::all(opts.proxy.as_deref().expect("proxy")).is_ok(),
+            "whatever validation stored must survive `Proxy::all`, or the scan \
+             silently goes direct anyway"
+        );
+    }
+
+    // Empty already meant "no proxy" and still does: refusing it would break the
+    // routine `?proxy=` templated-query shape without closing any hole.
+    for empty in ["", "   "] {
+        let mut opts = ScanOptions {
+            proxy: Some(empty.to_string()),
+            ..ScanOptions::default()
+        };
+        assert!(validate_scan_options(&mut opts).is_ok());
+        assert_eq!(
+            opts.proxy, None,
+            "an empty proxy must normalize to absent, not stay an empty string"
         );
     }
 }
@@ -4417,7 +4458,7 @@ fn test_validate_scan_options_rejects_unusable_proxy() {
 /// already been thrown away at submission time.
 #[test]
 fn test_validate_scan_options_rejects_non_http_callback_url() {
-    for bad in ["file:///etc/passwd", "ftp://x/cb", "example.com/cb", ""] {
+    for bad in ["file:///etc/passwd", "ftp://x/cb", "example.com/cb"] {
         let mut opts = ScanOptions {
             callback_url: Some(bad.to_string()),
             ..ScanOptions::default()
@@ -4434,6 +4475,17 @@ fn test_validate_scan_options_rejects_non_http_callback_url() {
         ..ScanOptions::default()
     };
     assert!(validate_scan_options(&mut opts).is_ok());
+
+    // Empty already meant "no webhook" and still does — same templated-query
+    // reasoning as `proxy` above.
+    for empty in ["", "   "] {
+        let mut opts = ScanOptions {
+            callback_url: Some(empty.to_string()),
+            ..ScanOptions::default()
+        };
+        assert!(validate_scan_options(&mut opts).is_ok());
+        assert_eq!(opts.callback_url, None);
+    }
 }
 
 /// The boundary check and the dispatcher must agree on what counts as an

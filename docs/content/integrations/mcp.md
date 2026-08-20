@@ -308,7 +308,9 @@ Analyse a target **without** sending payloads. Useful for scoping before committ
 
 Returns reachability, discovered parameters, and an estimated request count.
 
-`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with; the estimate honours the per-parameter payload cap the scan enforces.
+`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with.
+
+The estimate counts both phases the scan runs per parameter — reflection and DOM verification — each truncated to the per-parameter payload cap, matching `--dry-run`. It remains a lower bound: WAF mutation/encoder expansion and the shared CSP/tech payloads appended after the cap are not counted.
 
 ## Typical agent flow
 
