@@ -154,6 +154,83 @@ pub(crate) fn validate_numeric_args(
     Ok(())
 }
 
+/// Proxy URL schemes reqwest can actually route through.
+///
+/// `reqwest::Proxy::all` accepts *any* string that parses as a URL with a host,
+/// but hyper-util's proxy matcher silently drops every scheme outside this set
+/// at request time — so an `ftp://`, `gopher://`, `socks6://`, or `file://`
+/// value passes `Proxy::all` yet sends every request DIRECT to the target.
+/// Gating on this list turns that silent scope hazard into a fast, clear
+/// rejection.
+pub(crate) const SUPPORTED_PROXY_SCHEMES: &[&str] =
+    &["http", "https", "socks4", "socks4a", "socks5", "socks5h"];
+
+/// Validate a `--proxy` value the way the scan will actually use it: non-empty,
+/// a scheme reqwest routes through, and accepted by the same
+/// `reqwest::Proxy::all` the shared client builder
+/// ([`crate::target_parser::Target::build_client`]) calls.
+///
+/// Deliberately self-contained: the returned message never echoes the value, so
+/// a proxy carrying embedded credentials (`http://user:pass@host`) can't leak
+/// into stderr/CI logs and a value with a stray newline can't forge a log line.
+/// Returns `Err(message)` on failure; `String` so the server/MCP validator
+/// ([`crate::server::util::validate_scan_options`]) can reuse it verbatim.
+pub(crate) fn validate_proxy_url(value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        // Empty (a blank config field, or `--proxy "$UNSET"` from the shell) is
+        // rejected rather than tolerated: silently running DIRECT is the exact
+        // hazard this check exists to close. Omit the flag for no proxy.
+        return Err(
+            "--proxy is empty (omit the flag entirely to scan without a proxy)".to_string(),
+        );
+    }
+    let scheme = match url::Url::parse(trimmed) {
+        Ok(u) => u.scheme().to_ascii_lowercase(),
+        Err(_) => return Err(PROXY_SHAPE_HINT.to_string()),
+    };
+    if !SUPPORTED_PROXY_SCHEMES.contains(&scheme.as_str()) {
+        return Err(format!(
+            "--proxy scheme '{scheme}' is not routable — reqwest silently drops it and would scan DIRECT; use one of: {}",
+            SUPPORTED_PROXY_SCHEMES.join(", ")
+        ));
+    }
+    // Belt-and-suspenders: reject anything `reqwest::Proxy::all` itself won't
+    // accept, so whatever passes here is exactly what the client will use.
+    if reqwest::Proxy::all(trimmed).is_err() {
+        return Err(PROXY_SHAPE_HINT.to_string());
+    }
+    Ok(())
+}
+
+const PROXY_SHAPE_HINT: &str = "--proxy is not a usable proxy URL (expected e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:9050)";
+
+/// Validate an HTTP(S) URL flag (`--sxss-url`, `--session-check-url`): non-empty,
+/// absolute, and an `http`/`https` scheme.
+///
+/// `url::Url::parse` alone accepts `mailto:`, `javascript:`, `file:` and other
+/// non-fetchable schemes, which would pass the old parse-only check and then
+/// silently degrade at request time (the value can never be fetched). Requiring
+/// an HTTP scheme closes that. `flag` names the offending flag in the message;
+/// the value is not echoed, so an operator-supplied string can't inject into the
+/// log line.
+pub(crate) fn validate_http_url(value: &str, flag: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{flag} is empty (omit the flag to leave it unset)"));
+    }
+    match url::Url::parse(trimmed) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") => Ok(()),
+        Ok(u) => Err(format!(
+            "{flag} scheme '{}' is not fetchable; use an absolute http:// or https:// URL",
+            u.scheme()
+        )),
+        Err(_) => Err(format!(
+            "{flag} is not a valid absolute http:// or https:// URL"
+        )),
+    }
+}
+
 /// Does this positional argument *look* like a URL or host rather than
 /// a file path? Used to break the "input is both a domain and a local
 /// file" tie in favour of the URL, instead of silently slurping the
@@ -266,6 +343,77 @@ mod input_shape_tests {
         assert!(!looks_like_url_input("nodot"));
         assert!(!looks_like_url_input(".."));
         assert!(!looks_like_url_input(".config"));
+    }
+
+    #[test]
+    fn proxy_url_accepts_routable_schemes() {
+        for p in [
+            "http://127.0.0.1:8080",
+            "https://proxy.corp:3128",
+            "socks5://127.0.0.1:9050",
+            "socks5h://127.0.0.1:9050",
+            "socks4://127.0.0.1:1080",
+            // Leading/trailing whitespace is trimmed, not rejected.
+            "  http://127.0.0.1:8080  ",
+        ] {
+            assert!(validate_proxy_url(p).is_ok(), "{p} should be accepted");
+        }
+    }
+
+    #[test]
+    fn proxy_url_rejects_unroutable_schemes_that_parse_fine() {
+        // These all parse as URLs and pass `reqwest::Proxy::all`, but reqwest
+        // silently drops them at request time — the DIRECT-scan hazard.
+        for p in [
+            "ftp://127.0.0.1:8080",
+            "gopher://burp:8080",
+            "socks6://127.0.0.1:1080",
+            "file:///etc/passwd",
+        ] {
+            let err = validate_proxy_url(p).unwrap_err();
+            assert!(
+                err.contains("not routable"),
+                "{p} should be rejected as unroutable, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn proxy_url_rejects_empty_and_garbage() {
+        assert!(validate_proxy_url("").unwrap_err().contains("empty"));
+        assert!(validate_proxy_url("   ").unwrap_err().contains("empty"));
+        assert!(validate_proxy_url("::not a url::").is_err());
+    }
+
+    #[test]
+    fn proxy_url_error_never_echoes_credentials() {
+        // A password in the proxy URL must not appear in the error text.
+        let err = validate_proxy_url("ftp://user:S3cr3t@host:8080").unwrap_err();
+        assert!(!err.contains("S3cr3t"), "error leaked credentials: {err}");
+    }
+
+    #[test]
+    fn http_url_accepts_absolute_http_and_https() {
+        assert!(validate_http_url("http://app.example/me", "--sxss-url").is_ok());
+        assert!(validate_http_url("https://app.example/me", "--sxss-url").is_ok());
+        assert!(validate_http_url("  https://app.example/me  ", "--sxss-url").is_ok());
+    }
+
+    #[test]
+    fn http_url_rejects_non_fetchable_schemes_and_relatives() {
+        for u in [
+            "mailto:x@y",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "/relative/path",
+            "app.example/me",
+            "",
+        ] {
+            assert!(
+                validate_http_url(u, "--sxss-url").is_err(),
+                "{u} should be rejected"
+            );
+        }
     }
 
     #[test]

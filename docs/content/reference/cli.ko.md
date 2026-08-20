@@ -146,7 +146,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--rate-limit` | `-r`, `--rl` | `0` | 모든 워커와 대상에 걸쳐 공유되는 **전역** 아웃바운드 요청 속도를 초당 요청 수로 제한합니다 (`0` = 무제한). 하나의 워커만 간격을 두는 `--delay`와 달리, `workers × concurrent targets`에서 한꺼번에 나가는 전체 요청량을 제한하므로 공유 IP / 엣지 WAF 임계값에 더 친화적입니다. |
 | `--retries` | — | `0` | HTTP 5xx 및 일시적 전송 오류(타임아웃, 연결 재설정) 시 실패한 요청을 이 횟수만큼 재시도합니다 (`0` = 끔). HTTP 429는 이 값과 무관하게 항상 재시도합니다. |
 | `--retry-delay` | — | `1000` | `--retries` 시도 사이의 지수 백오프 기본 지연(ms) (시도마다 두 배로 증가, 내부적으로 상한 적용). 429에서는 서버의 `Retry-After` 헤더가 우선합니다. |
-| `--proxy` | — | — | 프록시 URL (`http://`, `socks5://`) |
+| `--proxy` | — | — | 프록시 URL — `http(s)://` 또는 `socks4/5(h)://`만 허용; 라우팅 불가한 스킴(예: `ftp://`)은 조용히 직접 스캔하지 않고 시작 시 거부됨 |
 | `--insecure` | — | `true` | TLS/SSL 인증서 검증을 건너뜁니다 (자체 서명, 만료, 호스트명 불일치 인증서 허용). 스캐너 사용을 위해 기본적으로 켜져 있으며, 인증서 검증을 강제하려면 `--insecure=false`를 전달합니다. |
 | `--follow-redirects` | `-F` | false | 3xx 응답을 따라갑니다 |
 | `--ignore-return` | — | — | 무시할 HTTP 상태 코드 |
@@ -178,7 +178,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--skip-xss-scanning` | — | false | 페이로드 주입을 건너뜁니다 |
 | `--deep-scan` | — | false | 첫 탐지 결과 이후에도 계속 테스트합니다 |
 | `--sxss` | — | false | Stored XSS 모드를 활성화합니다 |
-| `--sxss-url` | — | — | SXSS용 조회 URL |
+| `--sxss-url` | — | — | SXSS용 조회 URL (절대 `http(s)://`); `--sxss`와 함께일 때만 사용됨 |
 | `--sxss-method` | — | `GET` | 조회 메서드 |
 | `--sxss-retries` | — | `3` | 저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수 |
 | `--max-payloads-per-param` | — | `0` | 파라미터별로 테스트하는 페이로드 수 제한 (`0`은 `--deep-scan`이 없으면 세트당 3000개의 내장 안전 상한을 적용) |

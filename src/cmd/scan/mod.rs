@@ -56,6 +56,9 @@ pub use args::{
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::log_info;
+// Shared with the server/MCP option validator so all three entry points refuse
+// the same unroutable proxy values.
+pub(crate) use validation::validate_proxy_url;
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
@@ -240,7 +243,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
     }
-    // Startup gate: numeric ranges, session-check inputs, the custom-payload
+    // Startup gate: numeric ranges, session-check inputs, the
+    // --session-check-url / --sxss-url / --proxy URL shapes, the custom-payload
     // file, and the process-wide rate limiter. Each failure it catches would
     // otherwise surface mid-scan as a result rather than a mistake.
     if let Err(outcome) = startup::prepare_and_validate(args) {

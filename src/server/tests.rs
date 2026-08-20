@@ -2276,6 +2276,35 @@ fn test_validate_scan_options_rejects_out_of_range() {
 }
 
 #[test]
+fn test_validate_scan_options_proxy() {
+    // A routable proxy is accepted, matching the CLI startup gate.
+    assert!(
+        validate_scan_options(&mut ScanOptions {
+            proxy: Some("http://127.0.0.1:8080".to_string()),
+            ..ScanOptions::default()
+        })
+        .is_ok()
+    );
+    // An unroutable scheme parses fine but reqwest drops it (job would scan
+    // DIRECT while reporting `done`), so server/MCP refuse it like the CLI.
+    assert!(
+        validate_scan_options(&mut ScanOptions {
+            proxy: Some("ftp://127.0.0.1:8080".to_string()),
+            ..ScanOptions::default()
+        })
+        .is_err()
+    );
+    // Garbage is refused too.
+    assert!(
+        validate_scan_options(&mut ScanOptions {
+            proxy: Some("::not a url::".to_string()),
+            ..ScanOptions::default()
+        })
+        .is_err()
+    );
+}
+
+#[test]
 fn test_validate_scan_options_waf_fields() {
     // waf_bypass must be one of the CLI's three modes.
     assert!(

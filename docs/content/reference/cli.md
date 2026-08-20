@@ -147,7 +147,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--rate-limit` | `-r`, `--rl` | `0` | Cap the **global** outbound request rate in requests/second, shared across every worker and target (`0` = unlimited). Unlike `--delay` (which only spaces one worker), this bounds the total in-flight burst from `workers × concurrent targets` — friendlier to shared-IP / edge WAF thresholds. |
 | `--retries` | — | `0` | Retry failed requests on HTTP 5xx and transient transport errors (timeouts, connection resets) up to this many times (`0` = off). HTTP 429 is always retried regardless. |
 | `--retry-delay` | — | `1000` | Base delay (ms) for the exponential backoff between `--retries` attempts (doubles each attempt, capped internally). A server `Retry-After` header takes precedence on 429. |
-| `--proxy` | — | — | Proxy URL (`http://`, `socks5://`) |
+| `--proxy` | — | — | Proxy URL — `http(s)://` or `socks4/5(h)://` only; an unroutable scheme (e.g. `ftp://`) is rejected up front instead of silently scanning direct |
 | `--insecure` | — | `true` | Skip TLS/SSL certificate verification (accept self-signed, expired, or hostname-mismatched certs). On by default for scanner use; pass `--insecure=false` to enforce certificate validation. |
 | `--follow-redirects` | `-F` | false | Follow 3xx responses |
 | `--ignore-return` | — | — | HTTP status codes to ignore |
@@ -179,7 +179,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--skip-xss-scanning` | — | false | Skip payload injection |
 | `--deep-scan` | — | false | Keep testing after first finding |
 | `--sxss` | — | false | Enable Stored XSS mode |
-| `--sxss-url` | — | — | Retrieval URL for SXSS |
+| `--sxss-url` | — | — | Retrieval URL for SXSS (absolute `http(s)://`); only used with `--sxss` |
 | `--sxss-method` | — | `GET` | Retrieval method |
 | `--sxss-retries` | — | `3` | Retries on the retrieval URL when fetching stored output |
 | `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `--deep-scan` is set) |
