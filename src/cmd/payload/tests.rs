@@ -57,6 +57,7 @@ fn test_curated_selector_lists_are_nonempty_and_clean() {
 #[test]
 fn test_run_payload_known_selectors_return_clean() {
     for selector in [
+        "javascript",
         "event-handlers",
         "useful-tags",
         "uri-scheme",
@@ -188,6 +189,10 @@ fn test_static_selector_counts_match_the_lists_they_describe() {
     };
 
     assert_eq!(
+        count_of("javascript"),
+        crate::payload::XSS_JAVASCRIPT_PAYLOADS.len()
+    );
+    assert_eq!(
         count_of("event-handlers"),
         crate::payload::xss_event::common_event_handler_names().len()
     );
@@ -216,8 +221,11 @@ fn test_summary_block_renders_a_line_per_static_selector() {
     let rendered = summary_block();
 
     assert!(rendered.starts_with("Summary:\n"));
+    // The canonical JavaScript payloads are now a first-class `javascript`
+    // selector, so they render through the shared static-selector loop below
+    // rather than a bespoke line.
     assert!(rendered.contains(&format!(
-        "- Canonical JavaScript payloads: {}\n",
+        "- javascript: {}\n",
         crate::payload::XSS_JAVASCRIPT_PAYLOADS.len()
     )));
     for (selector, count) in static_selector_counts() {

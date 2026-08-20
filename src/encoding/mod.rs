@@ -7,7 +7,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 /// Policy:
 /// - If encoders contains "none", return only the original payloads (deduplicated), no variants.
 /// - Otherwise, include original payload and, for each encoder present, append its variant(s).
-/// - Encoder application order is fixed to: url, html, 2url, 3url, 4url, base64
+/// - Encoder application order is fixed to: url, html, htmlpad, 2url, 3url, 4url, base64, unicode, zwsp
 /// - Results are de-duplicated while preserving the first occurrence order.
 pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String]) -> Vec<String> {
     // Dedup base first while preserving order
@@ -149,7 +149,7 @@ pub fn unicode_fullwidth_encode(payload: &str) -> String {
 
 /// HTML entity encoding with zero-padded hex codes.
 /// Bypasses WAF regex patterns that expect exactly `&#xNN;` format.
-/// Example: "<" becomes "&#x0000003c;" (with extra leading zeros)
+/// Example: "<" becomes "&#x000003c;" (7-digit zero-padded hex)
 pub fn html_entity_zero_padded_encode(payload: &str) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(payload.len() * 12);
