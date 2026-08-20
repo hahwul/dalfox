@@ -4,6 +4,7 @@ use serde::Serialize;
 use crate::cmd::scan::ScanOutcome;
 
 const KNOWN_SELECTORS: &[&str] = &[
+    "javascript",
     "event-handlers",
     "useful-tags",
     "payloadbox",
@@ -63,13 +64,13 @@ fn closest_selector(input: &str) -> Option<&'static str> {
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Manage or inspect payloads",
-    long_about = "Selectors:\n  - event-handlers: list all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: list useful HTML tag names often used in XSS contexts (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
+    long_about = "Selectors:\n  - javascript: print the canonical JavaScript execution payloads used in JS-string / script contexts (alert(1), backtick and keyword-split variants, ...)\n  - event-handlers: list all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: list useful HTML tag names often used in XSS contexts (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
 )]
 pub struct PayloadArgs {
     #[arg(
         value_name = "SELECTOR",
-        help = "Payload selector\nAvailable selectors:\n  - event-handlers\n  - useful-tags\n  - payloadbox\n  - portswigger\n  - uri-scheme\n  - special-chars\n  - functions\n  - awesome-alert\n  - dom-clobbering\n  - mxss\n  - blind\n  - all",
-        long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
+        help = "Payload selector\nAvailable selectors:\n  - javascript\n  - event-handlers\n  - useful-tags\n  - payloadbox\n  - portswigger\n  - uri-scheme\n  - special-chars\n  - functions\n  - awesome-alert\n  - dom-clobbering\n  - mxss\n  - blind\n  - all",
+        long_help = "Selector to enumerate payload resources.\nSupported selectors:\n  - javascript: print the canonical JavaScript execution payloads used in JS-string / script contexts (alert(1), backtick and keyword-split variants, ...)\n  - event-handlers: print all DOM event handler attribute names (e.g., onclick, onmouseover)\n  - useful-tags: print useful HTML tag names used for XSS payloads (e.g., script, img, svg)\n  - payloadbox: fetch and print remote XSS payloads from PayloadBox\n  - portswigger: fetch and print remote XSS payloads from PortSwigger\n  - uri-scheme: print scheme-based XSS payloads (javascript:, data:, etc.)\n  - special-chars: print special characters (and encoded variants) for context probing / breakout\n  - functions: print visibly-confirmable sinks with filter-surviving variants (alert, prompt, ...)\n  - awesome-alert: print polished alert PoCs for clean screenshots/demos (alert(document.domain), ...)\n  - dom-clobbering: print DOM clobbering payloads\n  - mxss: print mutation-XSS / sanitizer-bypass payloads\n  - blind: print blind-XSS skeletons ({} = your OOB callback URL)\n  - all: print every local selector above in one pass, each under a '# name' header (no network fetch)"
     )]
     pub selector: Option<String>,
 
@@ -252,6 +253,10 @@ impl SelectorLines {
 fn static_selector_groups() -> Vec<(&'static str, SelectorLines)> {
     vec![
         (
+            "javascript",
+            SelectorLines::Static(crate::payload::XSS_JAVASCRIPT_PAYLOADS),
+        ),
+        (
             "event-handlers",
             SelectorLines::Static(crate::payload::xss_event::common_event_handler_names()),
         ),
@@ -296,10 +301,6 @@ fn static_selector_counts() -> Vec<(&'static str, usize)> {
 /// without capturing stdout.
 fn summary_block() -> String {
     let mut out = String::from("Summary:\n");
-    out.push_str(&format!(
-        "- Canonical JavaScript payloads: {}\n",
-        crate::payload::XSS_JAVASCRIPT_PAYLOADS.len()
-    ));
     for (selector, count) in static_selector_counts() {
         out.push_str(&format!("- {}: {}\n", selector, count));
     }
@@ -310,6 +311,7 @@ fn print_summary() {
     println!("Dalfox payload");
     println!("----------------");
     println!("Provide a selector to list payloads. Examples:");
+    println!("  dalfox payload javascript");
     println!("  dalfox payload event-handlers");
     println!("  dalfox payload useful-tags");
     println!("  dalfox payload payloadbox");
@@ -413,6 +415,11 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
     };
 
     match args.selector.as_deref() {
+        Some("javascript") => print_outcome(print_lines(
+            "javascript",
+            crate::payload::XSS_JAVASCRIPT_PAYLOADS,
+            args.json,
+        )),
         Some("event-handlers") => print_outcome(print_lines(
             "event-handlers",
             crate::payload::xss_event::common_event_handler_names(),
