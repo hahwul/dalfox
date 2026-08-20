@@ -301,11 +301,16 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
   "target": "https://example.com",
   "method": "GET",
   "skip_discovery": false,
-  "skip_mining": false
+  "skip_mining": false,
+  "encoders": ["url", "html"],
+  "max_payloads_per_param": 0,
+  "deep_scan": false
 }
 ```
 
 도달 가능 여부, 발견된 파라미터, 예상 요청 수를 반환합니다.
+
+`encoders`, `max_payloads_per_param`, `deep_scan`는 그 자체로 요청을 보내지 않습니다. 뒤이어 실행할 `scan_with_dalfox` 호출을 설명하는 값이며, `estimated_total_requests`가 그 스캔의 확장 폭을 반영하도록 합니다. 실제로 스캔할 때 쓸 값을 그대로 넘기세요. 추정치는 스캔이 적용하는 파라미터당 페이로드 상한까지 함께 반영합니다.
 
 ## 일반적인 에이전트 흐름
 

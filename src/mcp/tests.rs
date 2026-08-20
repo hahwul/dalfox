@@ -878,6 +878,8 @@ async fn test_preflight_rejects_empty_target() {
         skip_mining: false,
         skip_discovery: false,
         encoders: vec!["url".to_string(), "html".to_string()],
+        max_payloads_per_param: 0,
+        deep_scan: false,
     };
     let err = mcp
         .preflight_dalfox(Parameters(params))
@@ -905,6 +907,8 @@ async fn test_preflight_rejects_non_http_target() {
         skip_mining: false,
         skip_discovery: false,
         encoders: vec!["url".to_string(), "html".to_string()],
+        max_payloads_per_param: 0,
+        deep_scan: false,
     };
     let err = mcp
         .preflight_dalfox(Parameters(params))
@@ -932,6 +936,8 @@ async fn test_preflight_unreachable_target_returns_reachable_false() {
         skip_mining: true,
         skip_discovery: true,
         encoders: vec!["url".to_string(), "html".to_string()],
+        max_payloads_per_param: 0,
+        deep_scan: false,
     };
     let resp = mcp
         .preflight_dalfox(Parameters(params))
@@ -1735,6 +1741,8 @@ async fn test_preflight_dalfox_rejects_bad_method_and_encoder() {
             skip_mining: true,
             skip_discovery: true,
             encoders: vec!["none".to_string()],
+            max_payloads_per_param: 0,
+            deep_scan: false,
         }
     }
 
@@ -1750,6 +1758,8 @@ async fn test_preflight_dalfox_rejects_bad_method_and_encoder() {
     let err = mcp
         .preflight_dalfox(Parameters(PreflightDalfoxParams {
             encoders: vec!["base-64".to_string()],
+            max_payloads_per_param: 0,
+            deep_scan: false,
             ..preflight_params("http://127.0.0.1:1/?q=a")
         }))
         .await
@@ -1792,6 +1802,8 @@ async fn test_preflight_dalfox_reports_the_normalized_method() {
             skip_mining: true,
             skip_discovery: true,
             encoders: vec!["none".to_string()],
+            max_payloads_per_param: 0,
+            deep_scan: false,
         }))
         .await
         .expect("lowercase method must be normalized, not rejected");
@@ -1842,5 +1854,81 @@ async fn test_scan_with_dalfox_bounds_retained_finished_scans() {
     assert!(
         !jobs.contains_key("old00000"),
         "the oldest finished scan is evicted"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Proxy: accepted, then silently resolved away
+//
+// `Target::build_client` resolves the proxy with `reqwest::Proxy::all(..).ok()`
+// and falls back to **no proxy** when that fails. A scan started with a typo'd
+// `proxy` therefore connected straight to the target — bypassing the intercept
+// proxy / tunnel the agent asked for, putting traffic on a path it did not
+// intend — and still settled `done`, reporting a successful scan. Both MCP
+// tools now refuse it at the boundary, matching the REST server.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_unusable_proxy() {
+    let mcp = DalfoxMcp::new();
+    for bad in ["not a url", "http://", "   "] {
+        let params = ScanWithDalfoxParams {
+            proxy: Some(bad.to_string()),
+            ..default_scan_params("http://127.0.0.1:1/")
+        };
+        let err = mcp
+            .scan_with_dalfox(Parameters(params))
+            .await
+            .expect_err("an unusable proxy must be refused, not silently dropped");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(
+            err.message.contains("proxy"),
+            "the error must name the offending option, got: {}",
+            err.message
+        );
+    }
+    assert!(
+        mcp.lock_jobs().is_empty(),
+        "a refused submission must not leave a queued job behind"
+    );
+
+    // A usable proxy spelling is still accepted (the scan then fails to reach
+    // the dead proxy, which is a visible `error`, not a silent direct connect).
+    let params = ScanWithDalfoxParams {
+        proxy: Some("socks5://127.0.0.1:1080".to_string()),
+        ..default_scan_params("http://127.0.0.1:1/")
+    };
+    assert!(mcp.scan_with_dalfox(Parameters(params)).await.is_ok());
+}
+
+#[tokio::test]
+async fn test_preflight_dalfox_rejects_unusable_proxy() {
+    let mcp = DalfoxMcp::new();
+    let err = mcp
+        .preflight_dalfox(Parameters(PreflightDalfoxParams {
+            target: "http://127.0.0.1:1/".to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 1,
+            proxy: Some("not a url".to_string()),
+            follow_redirects: false,
+            insecure: true,
+            skip_mining: true,
+            skip_discovery: true,
+            encoders: vec!["none".to_string()],
+            max_payloads_per_param: 0,
+            deep_scan: false,
+        }))
+        .await
+        .expect_err("an unusable proxy must be refused, not silently dropped");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(
+        err.message.contains("proxy"),
+        "the error must name the offending option, got: {}",
+        err.message
     );
 }

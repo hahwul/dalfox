@@ -249,6 +249,12 @@ curl http://127.0.0.1:6664/health
 건너뜁니다). 인증서 검증을 강제하려면 `"insecure": false` (또는 `GET /scan`에서
 `?insecure=false`)를 보내세요.
 
+`proxy`와 `callback_url`은 요청을 받는 시점에 검증하며, 사용할 수 없는 값이면 조용히
+버리는 대신 `400`으로 거절합니다. 사용할 수 없는 `proxy`는 그냥 "프록시 없음"으로
+해석되어 스캔이 요청한 터널을 우회한 채 대상에 **직접** 연결되고도 `done`으로
+보고되며, `http(s)` 이외 스킴의 `callback_url`은 아예 호출되지 않아 웹훅 구독자가
+영원히 기다리게 됩니다.
+
 `analyze_external_js`는 옵트인 방식입니다 (기본값 `false`). `true`로 설정하면
 프리플라이트 시점에 동일 출처의 `<script src>` 번들을 가져와 DOM XSS를 위한 AST
 분석을 수행합니다. 싱크(sink) 로직이 전부 외부 번들에 들어 있는 SPA에 유용합니다.

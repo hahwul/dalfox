@@ -574,7 +574,12 @@ pub(crate) async fn send_terminal_webhook(
     client: Option<reqwest::Client>,
 ) {
     let Some(cb_url) = callback_url else { return };
-    if !(cb_url.starts_with("http://") || cb_url.starts_with("https://")) {
+    // Same scheme test `validate_scan_options` gates submission on, so a URL it
+    // accepted can't be silently dropped here. Spelled with the shared helper
+    // rather than a literal `starts_with`: schemes are case-insensitive, so the
+    // old byte-exact prefix compare would have discarded a `HTTPS://…` callback
+    // the boundary check had just approved.
+    if !has_http_scheme(&cb_url) {
         return;
     }
     let payload = serde_json::json!({

@@ -981,20 +981,19 @@ pub(crate) async fn preflight_handler(
                 // the estimate reflects what scanning actually fans out to.
                 cap_reflection_params(&mut target);
 
-                let enc_factor = {
-                    let encs = &scan_args.encoders;
-                    if encs.iter().any(|e| e == "none") {
-                        1usize
-                    } else {
-                        let mut f = 1usize;
-                        for e in ["url", "html", "2url", "3url", "4url", "base64"] {
-                            if encs.iter().any(|x| x == e) {
-                                f += 1;
-                            }
-                        }
-                        f
-                    }
-                };
+                // Shared with the expansion itself, so an encoder the scan
+                // applies can't be missing from the estimate (the hand-rolled
+                // list here used to omit htmlpad/unicode/zwsp).
+                let enc_factor = crate::encoding::encoder_expansion_factor(&scan_args.encoders);
+                // Mirror the per-parameter payload cap the scan enforces
+                // (`run_scanning` truncates each param's payload set to it).
+                // Without this the estimate quoted a number the scan would
+                // never send — 3912 requests for a parameter capped at 3000.
+                let cap = crate::scanning::effective_payload_cap(
+                    opts.max_payloads_per_param.unwrap_or(0),
+                    opts.deep_scan.unwrap_or(false),
+                );
+                let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
                 let mut estimated_requests: usize = 0;
                 let discovered_params: Vec<serde_json::Value> = target
                     .reflection_params
@@ -1006,14 +1005,16 @@ pub(crate) async fn preflight_handler(
                             // must not bill any (they stay listed as discovered).
                             0
                         } else if let Some(ctx) = &p.injection_context {
-                            crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
-                                .unwrap_or_else(|_| vec![])
-                                .len()
+                            apply_cap(
+                                crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
+                                    .unwrap_or_else(|_| vec![])
+                                    .len(),
+                            )
                         } else {
                             let html_len =
                                 crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
                             let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
-                            html_len + js_len
+                            apply_cap(html_len + js_len)
                         };
                         estimated_requests = estimated_requests.saturating_add(payload_count);
                         serde_json::json!({

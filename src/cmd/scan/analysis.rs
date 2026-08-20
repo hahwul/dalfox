@@ -575,18 +575,9 @@ pub(crate) async fn preflight_and_analyze_target(
             && args_clone.format == "plain"
             && !args_clone.silence
         {
-            // encoder expansion factor
-            let enc_factor = if args_clone.encoders.iter().any(|e| e == "none") {
-                1
-            } else {
-                let mut f = 1;
-                for e in ["url", "html", "2url", "3url", "4url", "base64"] {
-                    if args_clone.encoders.iter().any(|x| x == e) {
-                        f += 1;
-                    }
-                }
-                f
-            };
+            // Encoder expansion factor, taken from the encoder pipeline so it
+            // can't drift from the expansion the scan actually performs.
+            let enc_factor = crate::encoding::encoder_expansion_factor(&args_clone.encoders);
             // Match the scan-time effective cap so the preflight
             // request estimate reflects the built-in safety cap.
             let cap = crate::scanning::effective_payload_cap(

@@ -4293,3 +4293,178 @@ async fn test_retention_cap_evicts_oldest_finished_scans_only() {
         "the newest finished scan survives"
     );
 }
+
+// ---------------------------------------------------------------------------
+// /preflight estimate: the per-parameter payload cap the scan actually enforces
+//
+// `run_scanning` truncates each parameter's payload set to
+// `effective_payload_cap(max_payloads_per_param, deep_scan)` — 3000 by default.
+// The REST estimate did not, so /preflight quoted a request budget the scan
+// would never spend: on a reflecting target it reported 7008 requests for a run
+// capped at 6000, and 14016 with five encoders selected. Sizing a scan is the
+// entire purpose of the endpoint, so an estimate that ignores the cap is wrong
+// in the one number callers act on. The CLI's `--dry-run` estimate has always
+// applied the cap; this brings REST (and MCP) in line.
+// ---------------------------------------------------------------------------
+
+async fn preflight_estimate(addr: SocketAddr, options: ScanOptions) -> serde_json::Value {
+    let state = make_state(None, None, false, false, "cb");
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1"),
+            options: Some(options),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    serde_json::from_str::<serde_json::Value>(&response_body_string(resp).await).expect("json")
+        ["data"]
+        .clone()
+}
+
+#[tokio::test]
+async fn test_preflight_estimate_respects_the_scan_time_payload_cap() {
+    let addr = start_reflecting_target_server().await;
+    let base = ScanOptions {
+        timeout: Some(5),
+        skip_mining: Some(true),
+        ..ScanOptions::default()
+    };
+
+    let capped = preflight_estimate(addr, base.clone()).await;
+    let params = capped["params"].as_array().expect("params array");
+    assert!(!params.is_empty(), "reflecting target must discover params");
+    for p in params {
+        let est = p["estimated_requests"]
+            .as_u64()
+            .expect("per-param estimate");
+        assert!(
+            est <= crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP as u64,
+            "no parameter may be quoted more requests than the scan will send it \
+             (cap {}), got {est} for {p}",
+            crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP
+        );
+    }
+
+    // The cap is the *scan's* cap, not a hardcoded ceiling on the estimate:
+    // raising `max_payloads_per_param` must raise the quote with it, otherwise
+    // this test would also pass against an estimate that simply clamps.
+    let raised = preflight_estimate(
+        addr,
+        ScanOptions {
+            max_payloads_per_param: Some(100_000),
+            ..base
+        },
+    )
+    .await;
+    assert!(
+        raised["estimated_total_requests"].as_u64().expect("total")
+            > capped["estimated_total_requests"].as_u64().expect("total"),
+        "lifting the per-param cap must raise the estimate: capped={} raised={}",
+        capped["estimated_total_requests"],
+        raised["estimated_total_requests"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// validate_scan_options: options that were accepted and then silently dropped
+// ---------------------------------------------------------------------------
+
+/// `Target::build_client` resolves the proxy with `Proxy::all(..).ok()` and
+/// falls back to **no proxy** when that fails. A scan submitted with a typo'd
+/// `proxy` therefore connected straight to the target — bypassing the intercept
+/// proxy / tunnel the caller asked for — and still settled `done`. Refuse it at
+/// the boundary instead.
+#[test]
+fn test_validate_scan_options_rejects_unusable_proxy() {
+    for bad in ["not a url", "http://", "   "] {
+        let mut opts = ScanOptions {
+            proxy: Some(bad.to_string()),
+            ..ScanOptions::default()
+        };
+        let err = validate_scan_options(&mut opts)
+            .expect_err("an unusable proxy must be refused, not silently dropped");
+        assert!(
+            err.contains("proxy"),
+            "the 400 must name the offending option, got: {err}"
+        );
+    }
+    // Forms reqwest can actually use stay accepted, including the scheme-less
+    // `host:port` spelling and SOCKS.
+    for good in [
+        "http://127.0.0.1:8080",
+        "127.0.0.1:8080",
+        "socks5://127.0.0.1:1080",
+    ] {
+        let mut opts = ScanOptions {
+            proxy: Some(good.to_string()),
+            ..ScanOptions::default()
+        };
+        assert!(
+            validate_scan_options(&mut opts).is_ok(),
+            "'{good}' is a usable proxy and must be accepted"
+        );
+    }
+}
+
+/// `send_terminal_webhook` dials http(s) only and returns silently otherwise,
+/// so a `callback_url` with any other scheme was accepted with `200 OK` and
+/// then discarded — the subscriber waited forever for a callback that had
+/// already been thrown away at submission time.
+#[test]
+fn test_validate_scan_options_rejects_non_http_callback_url() {
+    for bad in ["file:///etc/passwd", "ftp://x/cb", "example.com/cb", ""] {
+        let mut opts = ScanOptions {
+            callback_url: Some(bad.to_string()),
+            ..ScanOptions::default()
+        };
+        let err = validate_scan_options(&mut opts)
+            .expect_err("a callback_url the webhook can never dial must be refused");
+        assert!(
+            err.contains("callback_url"),
+            "the 400 must name the offending option, got: {err}"
+        );
+    }
+    let mut opts = ScanOptions {
+        callback_url: Some("https://hooks.example/cb".to_string()),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut opts).is_ok());
+}
+
+/// The boundary check and the dispatcher must agree on what counts as an
+/// http(s) callback, or validation just moves the silent drop one step later.
+/// URI schemes are case-insensitive and `validate_scan_options` compares them
+/// that way; the dispatcher's test has to as well, and the value it dials has
+/// to be the normalized one validation approved.
+#[test]
+fn test_callback_url_validation_and_dispatch_agree_on_the_scheme() {
+    for accepted in [
+        "https://hooks.example/cb",
+        "HTTPS://hooks.example/cb",
+        "  http://hooks.example/cb  ",
+    ] {
+        let mut opts = ScanOptions {
+            callback_url: Some(accepted.to_string()),
+            ..ScanOptions::default()
+        };
+        validate_scan_options(&mut opts)
+            .unwrap_or_else(|e| panic!("'{accepted}' must be accepted, got: {e}"));
+        let stored = opts.callback_url.expect("callback_url survives validation");
+        assert_eq!(
+            stored,
+            accepted.trim(),
+            "the stored callback_url must be the normalized (trimmed) form the \
+             dispatcher will dial"
+        );
+        assert!(
+            has_http_scheme(&stored),
+            "'{stored}' passed validation, so the dispatcher's scheme test must \
+             accept it too — otherwise the webhook is silently dropped"
+        );
+    }
+}

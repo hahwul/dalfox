@@ -67,3 +67,75 @@ fn test_expand_single_payload() {
     assert!(out.contains(&triple_url_encode("<")));
     assert!(out.contains(&base64_encode("<")));
 }
+
+// ---------------------------------------------------------------------------
+// `encoder_expansion_factor` — the multiplier every request-count estimate
+// (`--dry-run`, the debug preflight estimate, REST `/preflight`, MCP
+// `preflight_dalfox`) uses to size a scan before running it.
+//
+// All four call sites used to re-derive it from a hand-written literal list
+// that had silently drifted out of step with the expansion below: it named only
+// url/html/2url/3url/4url/base64, so `htmlpad`, `unicode` and `zwsp` — all
+// accepted by `--encoders` and all genuinely expanded — contributed nothing to
+// the estimate. A caller asking for them was quoted a request budget well under
+// what the scan would actually send. These tests pin the helper to the real
+// expansion so the two can't drift again.
+// ---------------------------------------------------------------------------
+
+/// The factor is not an independent guess: it must equal the width the real
+/// expansion produces. Uses a base payload whose variants are all distinct
+/// under every encoder, so nothing is de-duplicated away and the row width is
+/// exactly `1 + active encoders`.
+#[test]
+fn test_encoder_expansion_factor_matches_the_real_expansion() {
+    let bases = vec!["<a href=\"x\">".to_string()];
+    for encs in [
+        vec![],
+        vec!["url".to_string()],
+        vec!["url".to_string(), "html".to_string()],
+        // The three the old hand-rolled list forgot.
+        vec!["htmlpad".to_string()],
+        vec!["unicode".to_string()],
+        vec!["zwsp".to_string()],
+        vec!["url".to_string(), "html".to_string(), "htmlpad".to_string()],
+        crate::cmd::scan::ENCODER_VALUES
+            .iter()
+            .filter(|e| **e != "none")
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+    ] {
+        let expanded = apply_encoders_to_payloads(&bases, &encs);
+        assert_eq!(
+            encoder_expansion_factor(&encs),
+            expanded.len(),
+            "factor must match the expansion width for encoders {encs:?} (expanded: {expanded:?})"
+        );
+    }
+}
+
+/// Every value `--encoders` accepts (bar `none`) must add to the factor.
+/// Asserting the total against `ENCODER_VALUES` is what catches a newly
+/// supported encoder being wired into the expansion but not the estimate.
+#[test]
+fn test_encoder_expansion_factor_counts_every_supported_encoder() {
+    let all: Vec<String> = crate::cmd::scan::ENCODER_VALUES
+        .iter()
+        .filter(|e| **e != "none")
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(
+        encoder_expansion_factor(&all),
+        all.len() + 1,
+        "every non-`none` encoder must contribute one variant on top of the original"
+    );
+    // `none` wins outright: only the originals are sent, whatever else is listed.
+    assert_eq!(
+        encoder_expansion_factor(&["none".to_string(), "url".to_string()]),
+        1
+    );
+    // An unrecognised name contributes nothing (validation rejects it earlier).
+    assert_eq!(
+        encoder_expansion_factor(&["url".to_string(), "urlencode".to_string()]),
+        2
+    );
+}

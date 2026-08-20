@@ -299,11 +299,16 @@ Analyse a target **without** sending payloads. Useful for scoping before committ
   "target": "https://example.com",
   "method": "GET",
   "skip_discovery": false,
-  "skip_mining": false
+  "skip_mining": false,
+  "encoders": ["url", "html"],
+  "max_payloads_per_param": 0,
+  "deep_scan": false
 }
 ```
 
 Returns reachability, discovered parameters, and an estimated request count.
+
+`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with; the estimate honours the per-parameter payload cap the scan enforces.
 
 ## Typical agent flow
 

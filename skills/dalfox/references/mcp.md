@@ -80,12 +80,12 @@ Terminal jobs auto-purge after 1 hour.
 
 ## preflight_dalfox — Parameters
 
-Fewer options (no encoders, no `include_*`, no blind, no deep scan, no workers — it only does discovery).
+Fewer options (no `include_*`, no blind, no workers — it only does discovery).
 
 ```json
 {
   "target": "...",
-  "param": [...],
+  "param": [...],                    // accepted for symmetry, NOT applied
   "method": "GET",
   "data": "...",
   "headers": [...],
@@ -94,10 +94,16 @@ Fewer options (no encoders, no `include_*`, no blind, no deep scan, no workers �
   "timeout": 10,
   "proxy": "...",
   "follow_redirects": false,
+  "insecure": true,
   "skip_mining": false,
-  "skip_discovery": false
+  "skip_discovery": false,
+  "encoders": ["url", "html"],       // sizing only — see below
+  "max_payloads_per_param": 0,       // sizing only
+  "deep_scan": false                 // sizing only
 }
 ```
+
+`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves: they describe the `scan_with_dalfox` call you are about to size, so `estimated_total_requests` matches that scan's fan-out. Pass the same values you intend to scan with, otherwise the estimate answers a different question than the one you are asking. The estimate honours the per-parameter payload cap the scan enforces, so it never quotes volume the scan would not send.
 
 Use this before expensive scans when the user is concerned about request volume.
 

@@ -160,6 +160,32 @@ pub(crate) fn validate_header_list(headers: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate a caller-supplied proxy URL, rejecting anything reqwest cannot turn
+/// into a proxy.
+///
+/// This matters more than a normal input check because the failure is silent
+/// and inverts the caller's intent: `Target::build_client` resolves the proxy
+/// with `reqwest::Proxy::all(..).ok()` and falls back to *no proxy* when that
+/// fails. A submitted scan whose `proxy` was a typo therefore connected
+/// **directly** to the target — bypassing the intercept proxy / SOCKS tunnel
+/// the caller asked for, sending traffic down a path they did not intend — and
+/// still settled `done`, reporting a perfectly successful scan.
+///
+/// Shared by the REST server and MCP so both front ends refuse the same values.
+pub(crate) fn validate_proxy(proxy: &str) -> Result<(), String> {
+    let trimmed = proxy.trim();
+    if trimmed.is_empty() {
+        return Err("proxy must not be empty (omit the field for no proxy)".to_string());
+    }
+    reqwest::Proxy::all(trimmed).map(|_| ()).map_err(|e| {
+        format!(
+            "invalid proxy '{}': {} (expected e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080)",
+            crate::utils::log::sanitize_log_message(trimmed),
+            e
+        )
+    })
+}
+
 /// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],
 /// returning how many were dropped (0 if already under the cap). Shared by the
 /// REST server, MCP, and both preflight paths so every async front-end bounds

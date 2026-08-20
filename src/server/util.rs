@@ -91,6 +91,32 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     if let Some(headers) = &opts.header {
         crate::job::validate_header_list(headers)?;
     }
+    // An unusable proxy is resolved away to "no proxy" when the scan's client is
+    // built, so the scan silently went *direct* to the target instead of through
+    // the tunnel the caller asked for — and still reported `done`. Shared with
+    // MCP; see `crate::job::validate_proxy`.
+    if let Some(proxy) = &opts.proxy {
+        crate::job::validate_proxy(proxy)?;
+    }
+    // `send_terminal_webhook` dials http(s) only and returns silently for
+    // anything else, so a `callback_url` with another scheme was accepted with
+    // `200 OK` and then never fired — leaving the subscriber waiting forever for
+    // a callback that was discarded at submission time.
+    //
+    // Normalizing (trim) rather than only checking is load-bearing: the stored
+    // `callback_url` is what the dispatcher later dials, so a value with
+    // surrounding whitespace would pass a check on the trimmed form and then be
+    // dropped by the dispatcher's scheme test on the untrimmed one.
+    if let Some(cb) = &opts.callback_url {
+        let cb = cb.trim();
+        if !has_http_scheme(cb) {
+            return Err(format!(
+                "callback_url must start with http:// or https:// (got '{}')",
+                crate::utils::log::sanitize_log_message(cb)
+            ));
+        }
+        opts.callback_url = Some(cb.to_string());
+    }
     Ok(())
 }
 
