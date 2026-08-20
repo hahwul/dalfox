@@ -784,11 +784,25 @@ pub(crate) struct PreflightDalfoxParams {
     pub skip_discovery: bool,
 
     /// Encoding strategies the subsequent scan will apply to payloads
-    /// (url, html, base64, 2url, 3url, 4url, none). Used only to make the
-    /// estimated_total_requests reflect that scan's fan-out; the default
-    /// matches scan_with_dalfox. Default: ["url", "html"]
+    /// (url, html, htmlpad, base64, 2url, 3url, 4url, unicode, zwsp, none).
+    /// Used only to make the estimated_total_requests reflect that scan's
+    /// fan-out; the default matches scan_with_dalfox. Default: ["url", "html"]
     #[serde(default = "default_encoders")]
     pub encoders: Vec<String>,
+
+    /// The `max_payloads_per_param` the subsequent scan will use. Like
+    /// `encoders`, this only shapes estimated_total_requests — preflight sends
+    /// no payloads. 0 (the default) means the built-in per-parameter safety
+    /// cap applies, which is what the estimate then reflects.
+    #[serde(default)]
+    pub max_payloads_per_param: usize,
+
+    /// Whether the subsequent scan will run with deep_scan. Only shapes
+    /// estimated_total_requests: deep_scan lifts the built-in per-parameter
+    /// payload safety cap, so the estimate is correspondingly larger.
+    /// Default: false
+    #[serde(default)]
+    pub deep_scan: bool,
 }
 
 /* ---------------------------
@@ -898,6 +912,17 @@ browser execution; only detection_method=oob observes a real browser."
         if let Err(e) = crate::job::validate_header_list(&headers) {
             return Err(ErrorData::invalid_params(e, None));
         }
+        // An unusable proxy is resolved away to "no proxy" when the scan's
+        // client is built, so the scan silently went *direct* to the target
+        // instead of through the tunnel the caller asked for, and still
+        // reported `done`. The normalized value is what flows into ScanArgs,
+        // because that is what the client builder later resolves. Same check
+        // the REST server runs.
+        let proxy = match proxy.as_deref().map(crate::job::normalize_proxy) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => return Err(ErrorData::invalid_params(e, None)),
+            None => None,
+        };
         if workers == 0 || workers > MAX_WORKERS {
             return Err(ErrorData::invalid_params(
                 format!(
@@ -1519,12 +1544,33 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             .map_err(|e| ErrorData::invalid_params(e, None))?;
         crate::job::validate_header_list(&params.headers)
             .map_err(|e| ErrorData::invalid_params(e, None))?;
+        // Same silent-fallback hazard as the scan tool: an unusable proxy would
+        // make the reachability probe go direct and report the target reachable
+        // through a path the caller never asked for.
+        let proxy = match params.proxy.as_deref().map(crate::job::normalize_proxy) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => return Err(ErrorData::invalid_params(e, None)),
+            None => None,
+        };
+        // Bound it the same way `scan_with_dalfox` does. Preflight exists to
+        // size the scan you are about to run, so accepting a value the scan
+        // tool will reject would quote an estimate for a scan that cannot be
+        // started.
+        if params.max_payloads_per_param > MAX_PAYLOADS_PER_PARAM_MCP {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "max_payloads_per_param must be between 0 and {} (got {})",
+                    MAX_PAYLOADS_PER_PARAM_MCP, params.max_payloads_per_param
+                ),
+                None,
+            ));
+        }
 
         let mut target = match parse_target(&target_url) {
             Ok(mut t) => {
                 t.method = method.clone();
                 t.timeout = params.timeout;
-                t.proxy = params.proxy.clone();
+                t.proxy = proxy.clone();
                 t.insecure = params.insecure;
                 t.follow_redirects = params.follow_redirects;
                 // Normalized like the scan path (`job::runner::hydrate_target`)
@@ -1566,7 +1612,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             cookies: params.cookies.clone(),
             user_agent: params.user_agent.clone(),
             timeout: params.timeout,
-            proxy: params.proxy.clone(),
+            proxy: proxy.clone(),
             insecure: params.insecure,
             follow_redirects: params.follow_redirects,
             skip_mining: params.skip_mining,
@@ -1595,6 +1641,10 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 ));
             }
         };
+        // Copied out before the blocking closure so it captures plain values
+        // rather than borrowing `params`.
+        let max_payloads_per_param = params.max_payloads_per_param;
+        let deep_scan = params.deep_scan;
         let target_url_for_err = target_url.clone();
         // Kept in the async-fn scope (not moved into the blocking closure) so
         // the outer JoinError branch below can still name the target when the
@@ -1627,18 +1677,16 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                     // so the estimate reflects what scanning actually fans out to.
                     cap_reflection_params(&mut target);
 
-                    // Estimate request count (encoder expansion factor)
-                    let enc_factor = if scan_args.encoders.iter().any(|e| e == "none") {
-                        1usize
-                    } else {
-                        let mut f = 1usize;
-                        for e in ["url", "html", "2url", "3url", "4url", "base64"] {
-                            if scan_args.encoders.iter().any(|x| x == e) {
-                                f += 1;
-                            }
-                        }
-                        f
-                    };
+                    // Estimate request count. The expansion factor comes from
+                    // the encoder pipeline itself so it can't drift from what
+                    // the scan applies (the hand-rolled list here used to omit
+                    // htmlpad/unicode/zwsp), and the per-parameter payload cap
+                    // `run_scanning` enforces is mirrored so the estimate never
+                    // quotes a volume the scan would not send.
+                    let enc_factor = crate::encoding::encoder_expansion_factor(&scan_args.encoders);
+                    let cap =
+                        crate::scanning::effective_payload_cap(max_payloads_per_param, deep_scan);
+                    let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
                     let mut estimated_requests: usize = 0;
                     let discovered_params: Vec<serde_json::Value> = target
                         .reflection_params
@@ -1650,17 +1698,15 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                                 // estimate must not bill any (still listed as
                                 // discovered). Mirrors the REST /preflight.
                                 0
-                            } else if let Some(ctx) = &p.injection_context {
-                                crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
-                                    .unwrap_or_else(|_| vec![])
-                                    .len()
                             } else {
-                                let html_len = crate::payload::get_dynamic_xss_html_payloads()
-                                    .len()
-                                    * enc_factor;
-                                let js_len =
-                                    crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
-                                html_len + js_len
+                                // Shared with the REST endpoint and the CLI's
+                                // --dry-run estimate so the three can't quote
+                                // different numbers for the same target —
+                                // including the DOM half of the fan-out, which
+                                // this estimate used to omit entirely.
+                                crate::scanning::estimate_param_requests(
+                                    p, &scan_args, enc_factor, &apply_cap,
+                                )
                             };
                             estimated_requests = estimated_requests.saturating_add(payload_count);
                             serde_json::json!({

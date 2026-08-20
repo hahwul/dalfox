@@ -460,6 +460,46 @@ pub(crate) fn effective_payload_cap(max_payloads: usize, deep_scan: bool) -> usi
     }
 }
 
+/// Requests one parameter will cost the scan, mirroring `run_scanning`'s own
+/// fan-out: it builds a reflection payload set and a DOM payload set, truncates
+/// **each** to the effective per-parameter cap, and then sends one request per
+/// payload in both (`total_tasks += reflection.len() + dom.len()`).
+///
+/// The DOM half used to be missing here, so `/preflight` quoted roughly half the
+/// requests the scan would send — on the one number the endpoint exists to
+/// produce. `cmd::scan::analysis` already estimated it this way for `--dry-run`;
+/// this brings the REST and MCP endpoints onto the same arithmetic.
+///
+/// Still a lower bound: WAF mutation/encoder expansion and the shared CSP/tech
+/// payloads appended after the cap are not counted, matching the CLI's caveat.
+pub(crate) fn estimate_param_requests(
+    p: &Param,
+    scan_args: &ScanArgs,
+    enc_factor: usize,
+    apply_cap: &dyn Fn(usize) -> usize,
+) -> usize {
+    let refl_len = if let Some(ctx) = &p.injection_context {
+        crate::scanning::xss_common::get_dynamic_payloads(ctx, scan_args)
+            .unwrap_or_else(|_| vec![])
+            .len()
+    } else {
+        let html_len = crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
+        let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
+        html_len + js_len
+    };
+    let dom_len = match &p.injection_context {
+        // A JS-context param gets no DOM-verification pass.
+        Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => 0,
+        Some(ctx) => crate::scanning::xss_common::generate_dynamic_payloads(ctx).len() * enc_factor,
+        None => {
+            (crate::payload::get_dynamic_xss_html_payloads().len()
+                + crate::payload::get_dynamic_xss_attribute_payloads().len())
+                * enc_factor
+        }
+    };
+    apply_cap(refl_len).saturating_add(apply_cap(dom_len))
+}
+
 pub(crate) fn get_dom_payloads(
     param: &Param,
     args: &ScanArgs,

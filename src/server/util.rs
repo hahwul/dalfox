@@ -78,14 +78,6 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     if let Some(name) = opts.force_waf.as_deref() {
         crate::cmd::scan::parse_force_waf_arg(name)?;
     }
-    // Reuse the CLI's proxy validator: `opts.proxy` flows straight into
-    // `ScanArgs.proxy` and is resolved with `reqwest::Proxy::all(..).ok()`, so a
-    // value reqwest can't route (a typo, or an `ftp://`/`socks6://` scheme that
-    // parses but is silently dropped) makes the job scan DIRECT while reporting
-    // `done`. Refuse it here so server + MCP behave like the CLI startup gate.
-    if let Some(p) = opts.proxy.as_deref() {
-        crate::cmd::scan::validate_proxy_url(p)?;
-    }
     if let Some(c) = opts.waf_min_confidence
         && !(0.0..=1.0).contains(&c)
     {
@@ -98,6 +90,39 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     // MCP so both front ends refuse the same inputs.
     if let Some(headers) = &opts.header {
         crate::job::validate_header_list(headers)?;
+    }
+    // An unusable proxy is resolved away to "no proxy" when the scan's client is
+    // built, so the scan silently went *direct* to the target instead of through
+    // the tunnel the caller asked for — and still reported `done`. The
+    // normalized value is written back because that is what the client builder
+    // later resolves; see `crate::job::normalize_proxy`. Shared with MCP.
+    if let Some(proxy) = &opts.proxy {
+        opts.proxy = crate::job::normalize_proxy(proxy)?;
+    }
+    // `send_terminal_webhook` dials http(s) only and returns silently for
+    // anything else, so a `callback_url` with another scheme was accepted with
+    // `200 OK` and then never fired — leaving the subscriber waiting forever for
+    // a callback that was discarded at submission time.
+    //
+    // Normalizing (trim) rather than only checking is load-bearing: the stored
+    // `callback_url` is what the dispatcher later dials, so a value with
+    // surrounding whitespace would pass a check on the trimmed form and then be
+    // dropped by the dispatcher's scheme test on the untrimmed one.
+    if let Some(cb) = &opts.callback_url {
+        let cb = cb.trim();
+        if cb.is_empty() {
+            // Empty already meant "no webhook" and still does. Refusing it would
+            // break the routine `?callback_url=` templated-query shape without
+            // closing any silent-drop hole.
+            opts.callback_url = None;
+        } else if !has_http_scheme(cb) {
+            return Err(format!(
+                "callback_url must start with http:// or https:// (got '{}')",
+                crate::utils::log::sanitize_log_message(cb)
+            ));
+        } else {
+            opts.callback_url = Some(cb.to_string());
+        }
     }
     Ok(())
 }

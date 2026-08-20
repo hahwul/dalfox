@@ -250,6 +250,13 @@ outdated / known-vulnerable JS libraries as informational `[I]` findings
 the CLI scanner default); send `"insecure": false` (or `?insecure=false` on
 `GET /scan`) to enforce certificate validation.
 
+`proxy` and `callback_url` are validated at submission and rejected with `400`
+when unusable, rather than being accepted and then silently discarded. An
+unusable `proxy` would otherwise resolve away to *no proxy*, so the scan would
+connect **directly** to the target — bypassing the tunnel you asked for — and
+still report `done`; a `callback_url` with a scheme other than `http(s)` would
+never be dialed, leaving your webhook subscriber waiting forever.
+
 `analyze_external_js` is opt-in (default `false`): set it `true` to fetch
 same-origin `<script src>` bundles at preflight time and AST-analyze them for
 DOM XSS. Useful for SPAs whose sink logic lives entirely in external bundles.

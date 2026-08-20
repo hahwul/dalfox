@@ -2765,3 +2765,107 @@ fn url_attr_reflection_in_a_normal_href_is_still_recognised() {
         "a marker in body text is not URL-attr-only"
     );
 }
+
+// ---------------------------------------------------------------------------
+// estimate_param_requests — the shared preflight/dry-run request estimator
+//
+// `run_scanning` fans a parameter out into a reflection payload set AND a DOM
+// payload set, truncates each to the effective cap, and sends one request per
+// payload in both. The REST `/preflight` endpoint and the MCP `preflight_dalfox`
+// tool used to count only the reflection half, so they quoted roughly half the
+// real volume — on the one number those surfaces exist to produce. All three
+// estimates now call this, so it is worth pinning each branch directly rather
+// than only through a live-target preflight (which never reaches the
+// no-context and JS-context arms).
+// ---------------------------------------------------------------------------
+
+fn param_with_context(ctx: Option<InjectionContext>) -> Param {
+    Param {
+        name: "q".to_string(),
+        value: "seed".to_string(),
+        location: Location::Query,
+        injection_context: ctx,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    }
+}
+
+#[test]
+fn test_estimate_param_requests_counts_both_scan_phases() {
+    let args = default_scan_args();
+    let uncapped = |n: usize| n;
+
+    // HTML / Attribute / AttributeUrl / Css and the unknown-context fallback all
+    // run both phases, so each must be billed strictly more than its reflection
+    // half alone — that difference is exactly what the old estimate dropped.
+    for ctx in [
+        None,
+        Some(InjectionContext::Html(None)),
+        Some(InjectionContext::Attribute(None)),
+        Some(InjectionContext::AttributeUrl(None)),
+        Some(InjectionContext::Css(None)),
+    ] {
+        let p = param_with_context(ctx.clone());
+        let refl_only = match &p.injection_context {
+            Some(c) => crate::scanning::xss_common::get_dynamic_payloads(c, &args)
+                .expect("reflection payloads")
+                .len(),
+            None => {
+                crate::payload::get_dynamic_xss_html_payloads().len()
+                    + crate::payload::XSS_JAVASCRIPT_PAYLOADS.len()
+            }
+        };
+        let total = estimate_param_requests(&p, &args, 1, &uncapped);
+        assert!(
+            total > refl_only,
+            "context {ctx:?} runs a DOM phase too, so the estimate must exceed \
+             the reflection-only count ({refl_only}), got {total}"
+        );
+    }
+
+    // A JS-context param gets no DOM-verification pass, so it is billed for the
+    // reflection set alone — the one branch where the two agree.
+    let js = param_with_context(Some(InjectionContext::Javascript(None)));
+    let js_refl = crate::scanning::xss_common::get_dynamic_payloads(
+        js.injection_context.as_ref().expect("js context"),
+        &args,
+    )
+    .expect("reflection payloads")
+    .len();
+    assert_eq!(estimate_param_requests(&js, &args, 1, &uncapped), js_refl);
+}
+
+#[test]
+fn test_estimate_param_requests_caps_each_phase_separately() {
+    let args = default_scan_args();
+    // `run_scanning` truncates the reflection set and the DOM set to `cap`
+    // *each*, so a two-phase parameter costs up to `2 * cap` — not `cap`.
+    // Clamping the combined figure at `cap` is what halved the quote.
+    let cap = 5usize;
+    let apply_cap = move |n: usize| n.min(cap);
+    let html = param_with_context(Some(InjectionContext::Html(None)));
+    assert_eq!(
+        estimate_param_requests(&html, &args, 1, &apply_cap),
+        2 * cap,
+        "both phases generate well over {cap} payloads, so each is capped at \
+         {cap} and the parameter costs {}",
+        2 * cap
+    );
+
+    // A JS-context param has no DOM phase, so it stops at one cap.
+    let js = param_with_context(Some(InjectionContext::Javascript(None)));
+    assert_eq!(estimate_param_requests(&js, &args, 1, &apply_cap), cap);
+
+    // `cap == 0` is the --deep-scan spelling of "unlimited" and must not zero
+    // the estimate.
+    let unlimited = |n: usize| n;
+    assert!(estimate_param_requests(&html, &args, 1, &unlimited) > 2 * cap);
+}

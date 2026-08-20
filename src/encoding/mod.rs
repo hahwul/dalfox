@@ -3,6 +3,39 @@ pub mod pre_encoding;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 
+/// Encoders applied to every base payload, in the fixed order the expansion
+/// emits them. Also the single source of truth for
+/// [`encoder_expansion_factor`], so a newly supported encoder can't be added
+/// to the expansion while the request-count estimate keeps ignoring it.
+const EXPANSION_ORDER: [&str; 9] = [
+    "url", "html", "htmlpad", "2url", "3url", "4url", "base64", "unicode", "zwsp",
+];
+
+/// How many payloads [`apply_encoders_to_payloads`] produces per distinct base
+/// payload: the original plus one variant per recognised encoder, or exactly
+/// `1` when `"none"` is selected.
+///
+/// This is the multiplier every request-count estimate needs (`--dry-run`, the
+/// debug preflight estimate, the REST `/preflight` endpoint and the MCP
+/// `preflight_dalfox` tool). All four used to re-derive it from a hand-written
+/// literal list that had drifted out of step with the expansion above: it
+/// omitted `htmlpad`, `unicode` and `zwsp`, so a caller asking for any of them
+/// was quoted an `estimated_total_requests` well below what the scan would
+/// actually send — on an estimate whose entire purpose is sizing scan impact.
+///
+/// The count is an upper bound per base payload: variants that collide with the
+/// original (or with each other) are de-duplicated away by the expansion, e.g.
+/// a payload with nothing to percent-encode.
+pub fn encoder_expansion_factor(encoders: &[String]) -> usize {
+    if encoders.iter().any(|e| e == "none") {
+        return 1;
+    }
+    1 + EXPANSION_ORDER
+        .iter()
+        .filter(|e| encoders.iter().any(|x| x == *e))
+        .count()
+}
+
 /// Apply encoder policy to a list of base payloads and return expanded, de-duplicated variants.
 /// Policy:
 /// - If encoders contains "none", return only the original payloads (deduplicated), no variants.
@@ -28,13 +61,8 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
     let encoder_set: std::collections::HashSet<&str> =
         encoders.iter().map(String::as_str).collect();
 
-    // Expansion order
-    let prio = [
-        "url", "html", "htmlpad", "2url", "3url", "4url", "base64", "unicode", "zwsp",
-    ];
-
     // Pre-calculate active encoders using set lookup
-    let active_encoders: Vec<&str> = prio
+    let active_encoders: Vec<&str> = EXPANSION_ORDER
         .iter()
         .filter(|&&e| encoder_set.contains(e))
         .copied()

@@ -24,18 +24,10 @@ pub(crate) async fn render_dry_run(
     for group in host_groups.values() {
         for target in group {
             let param_count = target.reflection_params.len();
-            // Estimate request count per target using encoder expansion
-            let enc_factor = if args.encoders.iter().any(|e| e == "none") {
-                1usize
-            } else {
-                let mut f = 1usize;
-                for e in ["url", "html", "2url", "3url", "4url", "base64"] {
-                    if args.encoders.iter().any(|x| x == e) {
-                        f += 1;
-                    }
-                }
-                f
-            };
+            // Estimate request count per target using encoder expansion. The
+            // factor comes from the encoder pipeline so it can't drift from the
+            // expansion the scan actually performs.
+            let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
             // Mirror the scan-time effective cap (built-in safety cap unless
             // --deep-scan / explicit --max-payloads-per-param). This is a
             // LOWER-BOUND estimate: it counts the capped base reflection set only,

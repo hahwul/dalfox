@@ -575,18 +575,9 @@ pub(crate) async fn preflight_and_analyze_target(
             && args_clone.format == "plain"
             && !args_clone.silence
         {
-            // encoder expansion factor
-            let enc_factor = if args_clone.encoders.iter().any(|e| e == "none") {
-                1
-            } else {
-                let mut f = 1;
-                for e in ["url", "html", "2url", "3url", "4url", "base64"] {
-                    if args_clone.encoders.iter().any(|x| x == e) {
-                        f += 1;
-                    }
-                }
-                f
-            };
+            // Encoder expansion factor, taken from the encoder pipeline so it
+            // can't drift from the expansion the scan actually performs.
+            let enc_factor = crate::encoding::encoder_expansion_factor(&args_clone.encoders);
             // Match the scan-time effective cap so the preflight
             // request estimate reflects the built-in safety cap.
             let cap = crate::scanning::effective_payload_cap(
@@ -596,38 +587,19 @@ pub(crate) async fn preflight_and_analyze_target(
             let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
             let mut total: usize = 0;
             for p in &target.reflection_params {
-                let refl_len = if let Some(ctx) = &p.injection_context {
-                    crate::scanning::xss_common::get_dynamic_payloads(ctx, &args_clone)
-                        .unwrap_or_else(|_| vec![])
-                        .len()
-                } else {
-                    // Fallback estimate: HTML dynamic payloads + JS payloads (with encoders), excluding remote payloads
-                    let html_base_len = crate::payload::get_dynamic_xss_html_payloads().len();
-                    let html_len = html_base_len * enc_factor;
-                    let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
-                    html_len + js_len
-                };
-                let dom_len = match &p.injection_context {
-                    Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => 0,
-                    Some(ctx) => {
-                        // Use locally generated payloads and apply encoder factor; exclude remote payloads
-                        let base = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
-                        base.len() * enc_factor
-                    }
-                    None => {
-                        // Unknown context: use HTML + Attribute payloads without remote, apply encoder factor
-                        let html = crate::payload::get_dynamic_xss_html_payloads();
-                        let attr = crate::payload::get_dynamic_xss_attribute_payloads();
-                        (html.len() + attr.len()) * enc_factor
-                    }
-                };
                 // Scan loop is additive (one reflection request + one DOM request
-                // per payload), not cartesian. Mirrors the `total_tasks` calculation
-                // in src/scanning/mod.rs that drives the progress bar / ETA.
-                // WAF mutation/encoder expansion isn't reflected here yet, so this
-                // remains a lower bound.
-                total =
-                    total.saturating_add(apply_cap(refl_len).saturating_add(apply_cap(dom_len)));
+                // per payload), not cartesian, and each half is capped
+                // separately — mirrored by the shared estimator, which the REST
+                // `/preflight` endpoint and the MCP preflight tool also use so
+                // the three can't quote different numbers for the same target.
+                // WAF mutation/encoder expansion isn't reflected there yet, so
+                // this remains a lower bound.
+                total = total.saturating_add(crate::scanning::estimate_param_requests(
+                    p,
+                    &args_clone,
+                    enc_factor,
+                    &apply_cap,
+                ));
             }
             if args_clone.format == "plain" && !args_clone.silence {
                 crate::dbg_log!("{} test cases (reqs) estimated", total);

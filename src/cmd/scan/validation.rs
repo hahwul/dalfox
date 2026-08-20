@@ -165,45 +165,57 @@ pub(crate) fn validate_numeric_args(
 pub(crate) const SUPPORTED_PROXY_SCHEMES: &[&str] =
     &["http", "https", "socks4", "socks4a", "socks5", "socks5h"];
 
-/// Validate a `--proxy` value the way the scan will actually use it: non-empty,
-/// a scheme reqwest routes through, and accepted by the same
-/// `reqwest::Proxy::all` the shared client builder
-/// ([`crate::target_parser::Target::build_client`]) calls.
+/// Shape + routability check for a proxy URL that is already trimmed and
+/// non-empty. Shared by the CLI (`validate_proxy_url`, empty is an error) and
+/// the REST/MCP normalizer (`normalize_proxy`, empty means "no proxy").
 ///
-/// Deliberately self-contained: the returned message never echoes the value, so
-/// a proxy carrying embedded credentials (`http://user:pass@host`) can't leak
-/// into stderr/CI logs and a value with a stray newline can't forge a log line.
-/// Returns `Err(message)` on failure; `String` so the server/MCP validator
-/// ([`crate::server::util::validate_scan_options`]) can reuse it verbatim.
-pub(crate) fn validate_proxy_url(value: &str) -> Result<(), String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        // Empty (a blank config field, or `--proxy "$UNSET"` from the shell) is
-        // rejected rather than tolerated: silently running DIRECT is the exact
-        // hazard this check exists to close. Omit the flag for no proxy.
-        return Err(
-            "--proxy is empty (omit the flag entirely to scan without a proxy)".to_string(),
-        );
-    }
-    let scheme = match url::Url::parse(trimmed) {
+/// `name` is the option as the caller knows it (`--proxy` on the CLI, `proxy`
+/// on REST/MCP) so the message names the field without echoing the value —
+/// a proxy carrying embedded credentials (`http://user:pass@host`) must not
+/// leak into stderr/CI logs, and a value with a stray newline must not forge
+/// a log line.
+pub(crate) fn check_routable_proxy(value: &str, name: &str) -> Result<(), String> {
+    let scheme = match url::Url::parse(value) {
         Ok(u) => u.scheme().to_ascii_lowercase(),
-        Err(_) => return Err(PROXY_SHAPE_HINT.to_string()),
+        Err(_) => return Err(proxy_shape_hint(name)),
     };
     if !SUPPORTED_PROXY_SCHEMES.contains(&scheme.as_str()) {
         return Err(format!(
-            "--proxy scheme '{scheme}' is not routable — reqwest silently drops it and would scan DIRECT; use one of: {}",
+            "{name} scheme '{scheme}' is not routable — reqwest silently drops it and would scan DIRECT; use one of: {}",
             SUPPORTED_PROXY_SCHEMES.join(", ")
         ));
     }
     // Belt-and-suspenders: reject anything `reqwest::Proxy::all` itself won't
     // accept, so whatever passes here is exactly what the client will use.
-    if reqwest::Proxy::all(trimmed).is_err() {
-        return Err(PROXY_SHAPE_HINT.to_string());
+    if reqwest::Proxy::all(value).is_err() {
+        return Err(proxy_shape_hint(name));
     }
     Ok(())
 }
 
-const PROXY_SHAPE_HINT: &str = "--proxy is not a usable proxy URL (expected e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:9050)";
+fn proxy_shape_hint(name: &str) -> String {
+    format!(
+        "{name} is not a usable proxy URL (expected e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:9050)"
+    )
+}
+
+/// Validate a `--proxy` value the way the scan will actually use it: non-empty,
+/// a scheme reqwest routes through, and accepted by the same
+/// `reqwest::Proxy::all` the shared client builder
+/// ([`crate::target_parser::Target::build_client`]) calls.
+///
+/// Empty is an error here because a blank CLI flag / config field is how the
+/// operator asked for a proxy and would otherwise scan DIRECT. REST/MCP treat
+/// empty as absent instead — see [`crate::job::normalize_proxy`].
+pub(crate) fn validate_proxy_url(value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(
+            "--proxy is empty (omit the flag entirely to scan without a proxy)".to_string(),
+        );
+    }
+    check_routable_proxy(trimmed, "--proxy")
+}
 
 /// Validate an HTTP(S) URL flag (`--sxss-url`, `--session-check-url`): non-empty,
 /// absolute, and an `http`/`https` scheme.
