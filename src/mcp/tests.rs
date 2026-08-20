@@ -1974,3 +1974,148 @@ async fn test_preflight_dalfox_rejects_unusable_proxy() {
         err.message
     );
 }
+
+/// The strongest statement of what the proxy fix buys: point preflight at a
+/// **live** target through a proxy that is not listening. If the proxy is
+/// honoured the probe fails and the tool reports `reachable: false`; if it were
+/// silently resolved away — the old behaviour — the probe would reach the target
+/// directly and report `reachable: true`, i.e. an answer about a network path
+/// the caller never asked about.
+#[tokio::test]
+async fn test_preflight_dalfox_honours_the_proxy_instead_of_going_direct() {
+    use axum::{Router, response::Html, routing::any};
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    async fn ok() -> Html<&'static str> {
+        Html("<html><body>ok</body></html>")
+    }
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind preflight listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route("/{*rest}", any(ok));
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    // A port nothing is listening on: bound, read, then released.
+    let dead = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind throwaway listener");
+    let dead_addr: SocketAddr = dead.local_addr().expect("dead addr");
+    drop(dead);
+
+    let mcp = DalfoxMcp::new();
+    let res = mcp
+        .preflight_dalfox(Parameters(PreflightDalfoxParams {
+            target: format!("http://{addr}/page?q=a"),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 5,
+            proxy: Some(format!("http://{dead_addr}")),
+            follow_redirects: false,
+            insecure: true,
+            skip_mining: true,
+            skip_discovery: true,
+            encoders: vec!["none".to_string()],
+            max_payloads_per_param: 0,
+            deep_scan: false,
+        }))
+        .await
+        .expect("a well-formed proxy must be accepted");
+
+    let parsed = parse_result_json(&res);
+    assert_eq!(
+        parsed["reachable"],
+        serde_json::json!(false),
+        "the probe must go through the configured (dead) proxy, not around it: {parsed}"
+    );
+}
+
+/// Exercises the estimate path on a target that actually reflects, so the shared
+/// `estimate_param_requests` runs on the MCP side too, and pins the per-param
+/// figures against the total the tool reports.
+#[tokio::test]
+async fn test_preflight_dalfox_estimate_sums_the_per_param_figures() {
+    use axum::{Router, extract::Query as AxQuery, response::Html, routing::any};
+    use std::collections::HashMap as StdMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    async fn reflect(AxQuery(q): AxQuery<StdMap<String, String>>) -> Html<String> {
+        let mut body = String::from("<html><body>");
+        for (k, v) in &q {
+            body.push_str(&format!("<div>{k}={v}</div>"));
+        }
+        body.push_str("</body></html>");
+        Html(body)
+    }
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind reflecting listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route("/{*rest}", any(reflect));
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mcp = DalfoxMcp::new();
+    let res = mcp
+        .preflight_dalfox(Parameters(PreflightDalfoxParams {
+            target: format!("http://{addr}/page?q=a"),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 5,
+            proxy: None,
+            follow_redirects: false,
+            insecure: true,
+            skip_mining: true,
+            skip_discovery: false,
+            encoders: vec!["url".to_string(), "html".to_string()],
+            max_payloads_per_param: 0,
+            deep_scan: false,
+        }))
+        .await
+        .expect("reachable target must preflight");
+
+    let parsed = parse_result_json(&res);
+    assert_eq!(parsed["reachable"], serde_json::json!(true));
+    let params = parsed["params"].as_array().expect("params array");
+    assert!(
+        !params.is_empty(),
+        "reflecting target must discover a param"
+    );
+
+    let cap = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP as u64;
+    let summed: u64 = params
+        .iter()
+        .map(|p| p["estimated_requests"].as_u64().unwrap_or(0))
+        .sum();
+    assert_eq!(
+        parsed["estimated_total_requests"].as_u64().expect("total"),
+        summed,
+        "the total must be the sum of the per-param estimates: {parsed}"
+    );
+    for p in params {
+        let est = p["estimated_requests"]
+            .as_u64()
+            .expect("per-param estimate");
+        // Reflection and DOM are capped separately, so a scannable param costs
+        // more than one cap and at most two. Counting only reflection (the old
+        // behaviour) lands at or below `cap` and fails the lower bound.
+        assert!(
+            est > cap && est <= 2 * cap,
+            "expected a two-phase estimate in ({cap}, {}], got {est} for {p}",
+            2 * cap
+        );
+    }
+}
