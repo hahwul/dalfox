@@ -220,6 +220,11 @@ fn validate_numeric_args_rejects_waf_min_confidence_out_of_range() {
     assert!(validate_numeric_args(&args).is_err());
 }
 
+// Note: the `--proxy` / `--sxss-url` / `--session-check-url` shape validation
+// is unit-tested directly against the pure validators in `validation.rs`
+// (`validate_proxy_url` / `validate_http_url`), which avoids driving the
+// global rate limiter that `prepare_and_validate` installs.
+
 #[test]
 fn test_allowed_content_types() {
     assert!(is_allowed_content_type("text/html"));
