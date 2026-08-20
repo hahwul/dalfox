@@ -4422,7 +4422,14 @@ async fn test_preflight_estimate_respects_the_scan_time_payload_cap() {
 /// the boundary instead.
 #[test]
 fn test_validate_scan_options_rejects_unusable_proxy() {
-    for bad in ["not a url", "http://"] {
+    for bad in [
+        "not a url",
+        "http://",
+        // Parses and passes `Proxy::all`, then hyper-util drops it and the
+        // scan would go DIRECT — the same hole the CLI startup gate closes.
+        "ftp://127.0.0.1:8080",
+        "socks6://127.0.0.1:1080",
+    ] {
         let mut opts = ScanOptions {
             proxy: Some(bad.to_string()),
             ..ScanOptions::default()
@@ -4434,16 +4441,15 @@ fn test_validate_scan_options_rejects_unusable_proxy() {
             "the 400 must name the offending option, got: {err}"
         );
     }
-    // Forms reqwest can actually use stay accepted, including the scheme-less
-    // `host:port` spelling and SOCKS — and the *normalized* value is what gets
-    // stored, because that is the string `build_client` later feeds to
-    // `Proxy::all`. `str::trim` strips all Unicode whitespace while `url::Url`
-    // strips only ASCII, so validating the trimmed form while storing the raw
-    // one would let a NBSP-prefixed copy-paste pass the check and still resolve
-    // away to no proxy — the very hole this validation exists to close.
+    // Forms the CLI also accepts stay accepted, and the *normalized* value is
+    // what gets stored, because that is the string `build_client` later feeds
+    // to `Proxy::all`. `str::trim` strips all Unicode whitespace while
+    // `url::Url` strips only ASCII, so validating the trimmed form while
+    // storing the raw one would let a NBSP-prefixed copy-paste pass the check
+    // and still resolve away to no proxy — the very hole this write-back
+    // exists to close.
     for (given, stored) in [
         ("http://127.0.0.1:8080", "http://127.0.0.1:8080"),
-        ("127.0.0.1:8080", "127.0.0.1:8080"),
         ("socks5://127.0.0.1:1080", "socks5://127.0.0.1:1080"),
         ("  http://127.0.0.1:8080  ", "http://127.0.0.1:8080"),
         ("\u{a0}http://127.0.0.1:8080", "http://127.0.0.1:8080"),

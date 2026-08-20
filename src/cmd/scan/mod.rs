@@ -56,9 +56,10 @@ pub use args::{
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::log_info;
-// Shared with the server/MCP option validator so all three entry points refuse
-// the same unroutable proxy values.
-pub(crate) use validation::validate_proxy_url;
+// Shared with `job::normalize_proxy` so REST/MCP refuse the same unroutable
+// proxy values the CLI startup gate does. The CLI wrapper that also rejects
+// empty lives in `validation::validate_proxy_url`.
+pub(crate) use validation::check_routable_proxy;
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 

@@ -78,14 +78,6 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     if let Some(name) = opts.force_waf.as_deref() {
         crate::cmd::scan::parse_force_waf_arg(name)?;
     }
-    // Reuse the CLI's proxy validator: `opts.proxy` flows straight into
-    // `ScanArgs.proxy` and is resolved with `reqwest::Proxy::all(..).ok()`, so a
-    // value reqwest can't route (a typo, or an `ftp://`/`socks6://` scheme that
-    // parses but is silently dropped) makes the job scan DIRECT while reporting
-    // `done`. Refuse it here so server + MCP behave like the CLI startup gate.
-    if let Some(p) = opts.proxy.as_deref() {
-        crate::cmd::scan::validate_proxy_url(p)?;
-    }
     if let Some(c) = opts.waf_min_confidence
         && !(0.0..=1.0).contains(&c)
     {

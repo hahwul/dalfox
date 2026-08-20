@@ -161,8 +161,10 @@ pub(crate) fn validate_header_list(headers: &[String]) -> Result<(), String> {
 }
 
 /// Validate and normalize a caller-supplied proxy URL, rejecting anything
-/// reqwest cannot turn into a proxy. Returns the value to store: `None` when
-/// the field was empty (which already meant "no proxy"), else the trimmed URL.
+/// reqwest cannot actually route through (unparseable, or a scheme like
+/// `ftp://` / `socks6://` that `Proxy::all` accepts then silently drops).
+/// Returns the value to store: `None` when the field was empty (which already
+/// meant "no proxy"), else the trimmed URL.
 ///
 /// This matters more than a normal input check because the failure is silent
 /// and inverts the caller's intent: `Target::build_client` resolves the proxy
@@ -191,15 +193,13 @@ pub(crate) fn normalize_proxy(proxy: &str) -> Result<Option<String>, String> {
     if trimmed.is_empty() {
         return Ok(None);
     }
-    reqwest::Proxy::all(trimmed)
-        .map(|_| Some(trimmed.to_string()))
-        .map_err(|e| {
-            format!(
-                "invalid proxy '{}': {} (expected e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080)",
-                crate::utils::log::sanitize_log_message(trimmed),
-                e
-            )
-        })
+    // Same scheme + `Proxy::all` gate the CLI uses. `reqwest::Proxy::all`
+    // accepts any URL-with-host, including `ftp://` / `socks6://`, which
+    // hyper-util then silently drops — the scan would go DIRECT. Empty was
+    // already handled above: on REST/MCP it means "no proxy", which is the
+    // opposite of the CLI (`--proxy ""` is an operator mistake).
+    crate::cmd::scan::check_routable_proxy(trimmed, "proxy")?;
+    Ok(Some(trimmed.to_string()))
 }
 
 /// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],

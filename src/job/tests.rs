@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn test_normalize_proxy_empty_is_absent_unroutable_is_error() {
+    // REST/MCP treat empty as "no proxy" (templated `?proxy=`). The CLI's
+    // `validate_proxy_url` rejects empty instead — that split is deliberate.
+    assert_eq!(normalize_proxy("").unwrap(), None);
+    assert_eq!(normalize_proxy("   ").unwrap(), None);
+
+    assert_eq!(
+        normalize_proxy("  http://127.0.0.1:8080  ")
+            .unwrap()
+            .as_deref(),
+        Some("http://127.0.0.1:8080")
+    );
+    assert_eq!(
+        normalize_proxy("\u{a0}socks5://127.0.0.1:1080")
+            .unwrap()
+            .as_deref(),
+        Some("socks5://127.0.0.1:1080")
+    );
+
+    // `ftp://` parses and passes `Proxy::all` but is not routed — must not
+    // survive as a stored proxy, or the scan goes DIRECT.
+    let err = normalize_proxy("ftp://127.0.0.1:8080").unwrap_err();
+    assert!(
+        err.contains("not routable"),
+        "unroutable scheme must be named, got: {err}"
+    );
+    assert!(
+        !err.contains("S3cr3t"),
+        "must not echo a proxy that could carry credentials"
+    );
+    let secret_err = normalize_proxy("ftp://user:S3cr3t@host:8080").unwrap_err();
+    assert!(
+        !secret_err.contains("S3cr3t"),
+        "error leaked credentials: {secret_err}"
+    );
+}
+
+#[test]
 fn test_has_http_scheme() {
     // Accepts http/https, case-insensitively, after trimming.
     for ok in [

@@ -1871,7 +1871,7 @@ async fn test_scan_with_dalfox_bounds_retained_finished_scans() {
 #[tokio::test]
 async fn test_scan_with_dalfox_rejects_unusable_proxy() {
     let mcp = DalfoxMcp::new();
-    for bad in ["not a url", "http://"] {
+    for bad in ["not a url", "http://", "ftp://127.0.0.1:8080"] {
         let params = ScanWithDalfoxParams {
             proxy: Some(bad.to_string()),
             ..default_scan_params("http://127.0.0.1:1/")
@@ -1956,7 +1956,7 @@ async fn test_preflight_dalfox_rejects_unusable_proxy() {
             cookies: vec![],
             user_agent: None,
             timeout: 1,
-            proxy: Some("not a url".to_string()),
+            proxy: Some("ftp://127.0.0.1:8080".to_string()),
             follow_redirects: false,
             insecure: true,
             skip_mining: true,
