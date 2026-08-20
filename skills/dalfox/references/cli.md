@@ -79,7 +79,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--retry-delay` | 1000 ms | Base delay for the `--retries` exponential backoff |
 | `--insecure[=bool]` | true | TLS posture. Default skips certificate validation (scanner-friendly); `--insecure=false` enforces validation |
 | `-F, --follow-redirects` | false | |
-| `--proxy` | — | `http://...` or `socks5://...` |
+| `--proxy` | — | `http(s)://` or `socks4/5(h)://` only; unroutable schemes rejected up front |
 | `--ignore-return` | (none) | Comma-separated status codes to drop before analysis (e.g. `302,403,404`) |
 | `--workers` | 50 | Concurrent workers |
 | `--max-concurrent-targets` | 50 | For file/pipe input |
@@ -114,7 +114,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | Flag | Notes |
 |------|-------|
 | `--sxss` | Enable stored XSS mode |
-| `--sxss-url` | Where to look for the stored reflection (auto-detect if omitted) |
+| `--sxss-url` | Where to look for the stored reflection, absolute `http(s)://` (auto-detect if omitted); only used with `--sxss` |
 | `--sxss-method` | GET/POST for the check |
 | `--sxss-retries` | 3 (increase for slow propagation) |
 

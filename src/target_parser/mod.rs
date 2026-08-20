@@ -126,7 +126,18 @@ impl Target {
     /// checks, blind callbacks, etc.) now share a pooled connection set.
     pub(crate) fn build_client_or_default(&self) -> Client {
         self.build_client().unwrap_or_else(|e| {
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            // The default client carries no proxy, no `insecure` posture, and
+            // no timeout. Dropping the proxy silently is the one fallback that
+            // is a scope hazard rather than a mild degradation — the operator
+            // asked for their traffic to go through a proxy and it would go
+            // DIRECT — so warn unconditionally in that case (not just under
+            // --debug), even though `--proxy` is now validated up front and this
+            // path is only reachable on a rarer, non-proxy build failure.
+            if self.proxy.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+                eprintln!(
+                    "[warn] HTTP client build failed ({e}); the configured proxy is NOT in effect and requests will go direct"
+                );
+            } else if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                 eprintln!("[warn] failed to build client: {}, using default", e);
             }
             Client::new()

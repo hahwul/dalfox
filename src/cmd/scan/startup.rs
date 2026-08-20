@@ -9,24 +9,27 @@ use std::fs;
 
 use super::args::ScanArgs;
 use super::logging::log_warn;
-use super::validation::validate_numeric_args;
+use super::validation::{validate_http_url, validate_numeric_args, validate_proxy_url};
 use super::{ScanOutcome, emit_error, session};
 
 /// Everything that must hold — and be installed — before the first request
-/// goes out: numeric ranges, the session-check inputs, and the custom-payload
-/// file, plus the process-wide rate limiter.
+/// goes out: numeric ranges, the session-check inputs, the `--session-check-url`
+/// / `--sxss-url` / `--proxy` URL shapes, and the custom-payload file, plus the
+/// process-wide rate limiter.
 ///
 /// These are grouped because they share one property: each failure they catch
 /// is otherwise discovered *mid-scan*, where it reads as a result rather than a
 /// mistake. An unreadable `--custom-payload` under `--only-custom-payload`
 /// sends zero attack payloads and prints `0 XSS`, which is exactly what a CI
 /// gate treats as a clean target; a bad `--session-check` regex only fires when
-/// a probe does, potentially an hour in.
+/// a probe does, potentially an hour in; a `--proxy` reqwest can't route sends
+/// the whole scan DIRECT with nothing said.
 ///
 /// `Err` carries the outcome `run_scan` returns; the error text has already
-/// been emitted. Warnings (additive-mode payload problems) are emitted here and
-/// do not stop the scan. The order of the checks is load-bearing for what
-/// reaches stderr first, so it is preserved exactly as it ran inline.
+/// been emitted. Warnings (additive-mode payload problems, an inert `--sxss-url`)
+/// are emitted here and do not stop the scan. The order of the checks is
+/// load-bearing for what reaches stderr first, so it is preserved exactly as it
+/// ran inline.
 pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOutcome> {
     // Validate numeric args up front so misconfigurations (workers: 0,
     // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
@@ -68,15 +71,49 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
         );
         return Err(ScanOutcome::Error);
     }
-    if let Some(u) = &args.session_check_url
-        && url::Url::parse(u).is_err()
-    {
-        emit_error(
-            &args.format,
-            crate::cmd::error_codes::PARSE_ERROR,
-            &format!("--session-check-url is not a valid absolute URL: {u}"),
+
+    // `--session-check-url` and `--sxss-url` are each consulted only when a
+    // probe / stored-XSS re-check fires — potentially an hour in — and are
+    // parsed there with `url::Url::parse(..).ok()`, so a relative, malformed,
+    // or non-http value drops out silently: the check the operator asked for
+    // never runs. `--proxy` is likewise resolved by the shared client builder
+    // with `reqwest::Proxy::all(..).ok()`, so a value reqwest can't route (a
+    // typo, or a scheme like `ftp://`/`socks6://` that parses but is silently
+    // dropped) sends every request DIRECT to the target — for a pentester
+    // routing through Burp/ZAP the attack traffic then leaks outside the
+    // intended path and never appears in the intercepting proxy. Validate all
+    // three up front with the same parsers the scan uses, so a mistake fails
+    // fast with a clear message instead of quietly changing what the scan does.
+    // The validators return self-contained messages (the operator-supplied
+    // value is never echoed), so a proxy password can't leak and a value with
+    // an embedded newline can't forge a log line.
+    for checked in [
+        args.session_check_url
+            .as_deref()
+            .map(|u| validate_http_url(u, "--session-check-url")),
+        args.sxss_url
+            .as_deref()
+            .map(|u| validate_http_url(u, "--sxss-url")),
+        args.proxy.as_deref().map(validate_proxy_url),
+    ] {
+        if let Some(Err(msg)) = checked {
+            emit_error(&args.format, crate::cmd::error_codes::PARSE_ERROR, &msg);
+            return Err(ScanOutcome::Error);
+        }
+    }
+
+    // `--sxss-url` is read only when `--sxss` is set (see
+    // `check_reflection`/`check_dom_verification`, both gated on `if args.sxss`).
+    // Supplying the check URL without enabling stored-XSS mode — the single most
+    // common way it's misconfigured, since the docs pair the two — otherwise
+    // does nothing at all and reports a clean scan. Warn rather than error: it
+    // may be a config template that toggles `--sxss` separately, but the
+    // operator should hear that the URL is inert.
+    if args.sxss_url.is_some() && !args.sxss {
+        log_warn(
+            args,
+            "--sxss-url has no effect without --sxss (stored-XSS mode is off); add --sxss to use it",
         );
-        return Err(ScanOutcome::Error);
     }
 
     // `--only-custom-payload` with no `--custom-payload` at all is the same
