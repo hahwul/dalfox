@@ -281,7 +281,7 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
                 format!("<IMG src=x onerror=alert(1) ClAss={}>", class_marker),
                 format!("<SVG onload=alert(1) ClAss={}>", class_marker),
                 format!("<SVG/onload=alert(1) id={}>", id_marker),
-                format!("<SCRIPT>alert(1)</SCRIPT>"),
+                "<SCRIPT>alert(1)</SCRIPT>".to_string(),
             ];
             match delimiter_type {
                 Some(DelimiterType::SingleQuote) => {
