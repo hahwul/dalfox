@@ -469,22 +469,47 @@ orphans = (rest_mapped + mcp_params).uniq
   .reject { |p| config_key_set.includes?(p) || flag_by_long.has_key?(p.tr("_", "-")) }
 report.check_empty("every REST/MCP option maps to a CLI flag or config key", orphans, MAX_LIST)
 
-# The MCP schema hard-codes a few defaults as literals (schemars renders them
-# into the published tool schema); they must still equal the CLI's.
+# The MCP schema renders each `default_*()` into the published tool schema, so
+# whatever those functions return must equal the CLI's default. A function may
+# either name the shared constant -- in which case drift is impossible and we
+# only resolve the constant to confirm it still matches clap -- or spell the
+# value as a literal, which some must (see `default_waf_min_confidence`: casting
+# the f32 constant renders as 0.30000001192092896 in the schema). Both forms are
+# accepted; a literal that has drifted from the CLI is not.
 mcp_default_drift = [] of String
-if m = mcp_src.match(/fn default_waf_min_confidence\(\) -> f64 \{\s*([0-9.]+)\s*\}/m)
-  want = scalars["DEFAULT_WAF_MIN_CONFIDENCE"]?
-  mcp_default_drift << "waf_min_confidence: MCP #{m[1]} != DEFAULT_WAF_MIN_CONFIDENCE #{want}" if want && m[1].to_f? != want.to_f?
+
+# Each function may either name the shared constant -- drift is impossible then,
+# so we only resolve it to confirm it still matches clap -- or spell the value as
+# a literal.
+mcp_const_ref = ->(fn_name : String, ret : String) : String? {
+  mcp_src.match(Regex.new("fn #{fn_name}\\(\\) -> #{ret} \\{\\s*(?:crate::)?cmd::scan::([A-Z0-9_]+)")).try &.[](1)
+}
+
+cli_waf_min = scalars["DEFAULT_WAF_MIN_CONFIDENCE"]?
+if const_name = mcp_const_ref.call("default_waf_min_confidence", "f64")
+  mcp_default_drift << "default_waf_min_confidence(): names #{const_name}, which is not a CLI constant" unless scalars[const_name]?
+elsif m = mcp_src.match(/fn default_waf_min_confidence\(\) -> f64 \{\s*([0-9.]+)\s*\}/m)
+  if cli_waf_min && m[1].to_f? != cli_waf_min.to_f?
+    mcp_default_drift << "waf_min_confidence: MCP #{m[1]} != DEFAULT_WAF_MIN_CONFIDENCE #{cli_waf_min}"
+  end
 else
   mcp_default_drift << "default_waf_min_confidence(): not found in #{MCP_RS}"
 end
-if m = mcp_src.match(/fn default_waf_bypass\(\) -> String \{\s*"([a-z]+)"/m)
-  cli_default = flag_by_long["waf-bypass"]?.try(&.default.join(" "))
-  mcp_default_drift << "waf_bypass: MCP #{m[1].inspect} != clap #{cli_default.inspect}" if cli_default && m[1] != cli_default
+
+cli_waf_bypass = flag_by_long["waf-bypass"]?.try(&.default.join(" "))
+if const_name = mcp_const_ref.call("default_waf_bypass", "String")
+  if want = scalars[const_name]?
+    mcp_default_drift << "waf_bypass: #{const_name} #{want.inspect} != clap #{cli_waf_bypass.inspect}" if cli_waf_bypass && want != cli_waf_bypass
+  else
+    mcp_default_drift << "default_waf_bypass(): names #{const_name}, which is not a CLI constant"
+  end
+elsif m = mcp_src.match(/fn default_waf_bypass\(\) -> String \{\s*"([a-z]+)"/m)
+  mcp_default_drift << "waf_bypass: MCP #{m[1].inspect} != clap #{cli_waf_bypass.inspect}" if cli_waf_bypass && m[1] != cli_waf_bypass
 else
   mcp_default_drift << "default_waf_bypass(): not found in #{MCP_RS}"
 end
-report.check_empty("MCP literal defaults == CLI defaults", mcp_default_drift, MAX_LIST)
+
+report.check_empty("MCP defaults == CLI defaults", mcp_default_drift, MAX_LIST)
 
 # ---------------------------------------------------------------------------
 # 4. Agent surfaces: skills/ and the published .well-known copy.
