@@ -8,22 +8,7 @@ fn make_url(u: &str) -> Url {
 #[test]
 fn test_query_injection_replace() {
     let base = make_url("https://example.com/path?a=1&b=2");
-    let param = Param {
-        name: "a".into(),
-        value: "1".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("a", "1", Location::Query);
     let out = build_injected_url(&base, &param, "PAY");
     assert!(out.contains("a=PAY"));
     assert!(out.contains("b=2"));
@@ -32,22 +17,7 @@ fn test_query_injection_replace() {
 #[test]
 fn test_query_injection_append() {
     let base = make_url("https://example.com/path");
-    let param = Param {
-        name: "q".into(),
-        value: "".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "", Location::Query);
     let out = build_injected_url(&base, &param, "X");
     assert!(out.contains("q=X"));
 }
@@ -55,22 +25,7 @@ fn test_query_injection_append() {
 #[test]
 fn test_query_injection_preserves_existing_percent_encoding() {
     let base = make_url("https://example.com/path?q=seed");
-    let param = Param {
-        name: "q".into(),
-        value: "seed".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "seed", Location::Query);
     let out = build_injected_url(&base, &param, "%3Cimg%20src=x%3E");
     assert!(out.contains("q=%3Cimg%20src%3Dx%3E"));
     assert!(!out.contains("%253Cimg"));
@@ -79,22 +34,7 @@ fn test_query_injection_preserves_existing_percent_encoding() {
 #[test]
 fn test_query_injection_encodes_raw_spaces_without_plus() {
     let base = make_url("https://example.com/path?q=seed");
-    let param = Param {
-        name: "q".into(),
-        value: "seed".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "seed", Location::Query);
     let out = build_injected_url(&base, &param, "PAY LOAD");
     assert!(out.contains("q=PAY%20LOAD"));
 }
@@ -102,22 +42,7 @@ fn test_query_injection_encodes_raw_spaces_without_plus() {
 #[test]
 fn test_path_injection_basic() {
     let base = make_url("https://example.com/a/b/c");
-    let param = Param {
-        name: "path_segment_1".into(),
-        value: "b".into(),
-        location: Location::Path,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("path_segment_1", "b", Location::Path);
     let out = build_injected_url(&base, &param, "PAY LOAD");
     // space should be %20
     assert!(out.contains("/a/PAY%20LOAD/c"));
@@ -132,22 +57,7 @@ fn test_path_injection_basic() {
 #[test]
 fn test_path_injection_encodes_url_structural_characters() {
     let base = make_url("https://example.com/a/b/c");
-    let param = Param {
-        name: "path_segment_1".into(),
-        value: "b".into(),
-        location: Location::Path,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("path_segment_1", "b", Location::Path);
     let out = build_injected_url(&base, &param, "x#y?z%w\nq\tr\ns");
     assert!(
         out.contains("%23") && out.contains("%3F") && out.contains("%25"),
@@ -172,22 +82,7 @@ fn test_path_injection_encodes_url_structural_characters() {
 #[test]
 fn test_path_injection_encodes_carriage_return() {
     let base = make_url("https://example.com/a/b");
-    let param = Param {
-        name: "path_segment_1".into(),
-        value: "b".into(),
-        location: Location::Path,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("path_segment_1", "b", Location::Path);
     let out = build_injected_url(&base, &param, "a\rb");
     assert!(
         out.contains("%0D"),
@@ -199,22 +94,7 @@ fn test_path_injection_encodes_carriage_return() {
 #[test]
 fn test_path_injection_index_out_of_bounds() {
     let base = make_url("https://example.com/a");
-    let param = Param {
-        name: "path_segment_5".into(),
-        value: "".into(),
-        location: Location::Path,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("path_segment_5", "", Location::Path);
     let out = build_injected_url(&base, &param, "X");
     assert_eq!(out, "https://example.com/a");
 }
@@ -222,22 +102,7 @@ fn test_path_injection_index_out_of_bounds() {
 #[test]
 fn test_non_target_location_passthrough() {
     let base = make_url("https://example.com/x?y=1");
-    let param = Param {
-        name: "headerX".into(),
-        value: "".into(),
-        location: Location::Header,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("headerX", "", Location::Header);
     let out = build_injected_url(&base, &param, "IGNORED");
     assert_eq!(out, base.as_str());
 }
@@ -245,22 +110,7 @@ fn test_non_target_location_passthrough() {
 #[test]
 fn test_fragment_injection_spa_route() {
     let base = make_url("http://example.com/#/redir?url=foo");
-    let param = Param {
-        name: "url".into(),
-        value: "foo".into(),
-        location: Location::Fragment,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("url", "foo", Location::Fragment);
     let out = build_injected_url(&base, &param, "javascript:alert()");
     assert_eq!(out, "http://example.com/#/redir?url=javascript:alert()");
 }
@@ -268,22 +118,7 @@ fn test_fragment_injection_spa_route() {
 #[test]
 fn test_fragment_injection_simple_kv() {
     let base = make_url("http://example.com/#key=val&other=123");
-    let param = Param {
-        name: "key".into(),
-        value: "val".into(),
-        location: Location::Fragment,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("key", "val", Location::Fragment);
     let out = build_injected_url(&base, &param, "PAYLOAD");
     assert_eq!(out, "http://example.com/#key=PAYLOAD&other=123");
 }
@@ -291,22 +126,7 @@ fn test_fragment_injection_simple_kv() {
 #[test]
 fn test_fragment_injection_append_when_absent() {
     let base = make_url("http://example.com/#/path?existing=1");
-    let param = Param {
-        name: "newparam".into(),
-        value: "".into(),
-        location: Location::Fragment,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("newparam", "", Location::Fragment);
     let out = build_injected_url(&base, &param, "INJECTED");
     assert_eq!(
         out,
@@ -317,22 +137,7 @@ fn test_fragment_injection_append_when_absent() {
 #[test]
 fn test_fragment_injection_no_existing_fragment() {
     let base = make_url("http://example.com/page");
-    let param = Param {
-        name: "url".into(),
-        value: "".into(),
-        location: Location::Fragment,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("url", "", Location::Fragment);
     let out = build_injected_url(&base, &param, "PAY");
     assert_eq!(out, "http://example.com/page#url=PAY");
 }
@@ -340,22 +145,7 @@ fn test_fragment_injection_no_existing_fragment() {
 #[test]
 fn test_fragment_injection_multiple_params() {
     let base = make_url("http://example.com/#/app?a=1&b=2&c=3");
-    let param = Param {
-        name: "b".into(),
-        value: "2".into(),
-        location: Location::Fragment,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("b", "2", Location::Fragment);
     let out = build_injected_url(&base, &param, "XSS");
     assert_eq!(out, "http://example.com/#/app?a=1&b=XSS&c=3");
 }
@@ -365,22 +155,7 @@ fn test_fragment_injection_multiple_params() {
 #[test]
 fn test_hpp_last_position() {
     let base = make_url("https://example.com/path?q=safe&b=2");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     let out = build_hpp_url(&base, &param, "<script>", HppPosition::Last).unwrap();
     assert!(out.contains("q=safe&q=%3Cscript%3E"));
     assert!(out.contains("b=2"));
@@ -389,22 +164,7 @@ fn test_hpp_last_position() {
 #[test]
 fn test_hpp_first_position() {
     let base = make_url("https://example.com/path?q=safe&b=2");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     let out = build_hpp_url(&base, &param, "<script>", HppPosition::First).unwrap();
     assert!(out.contains("q=%3Cscript%3E&q=safe"));
     assert!(out.contains("b=2"));
@@ -413,22 +173,7 @@ fn test_hpp_first_position() {
 #[test]
 fn test_hpp_both_position() {
     let base = make_url("https://example.com/path?q=safe");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     let out = build_hpp_url(&base, &param, "PAYLOAD", HppPosition::Both).unwrap();
     assert!(out.contains("q=PAYLOAD&q=PAYLOAD"));
 }
@@ -436,44 +181,14 @@ fn test_hpp_both_position() {
 #[test]
 fn test_hpp_non_query_returns_none() {
     let base = make_url("https://example.com/path");
-    let param = Param {
-        name: "path_segment_0".into(),
-        value: "path".into(),
-        location: Location::Path,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("path_segment_0", "path", Location::Path);
     assert!(build_hpp_url(&base, &param, "PAYLOAD", HppPosition::Last).is_none());
 }
 
 #[test]
 fn test_hpp_absent_param_appended() {
     let base = make_url("https://example.com/path?other=1");
-    let param = Param {
-        name: "q".into(),
-        value: "".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "", Location::Query);
     let out = build_hpp_url(&base, &param, "XSS", HppPosition::Last).unwrap();
     assert!(out.contains("other=1"));
     assert!(out.contains("q=&q=XSS"));
@@ -487,22 +202,7 @@ fn test_hpp_absent_param_appended() {
 #[test]
 fn test_hpp_absent_param_appended_first_position() {
     let base = make_url("https://example.com/path?other=1");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     let out = build_hpp_url(&base, &param, "XSS", HppPosition::First).unwrap();
     assert_eq!(out, "https://example.com/path?other=1&q=XSS&q=safe");
 }
@@ -510,22 +210,7 @@ fn test_hpp_absent_param_appended_first_position() {
 #[test]
 fn test_hpp_absent_param_appended_both_position() {
     let base = make_url("https://example.com/path?other=1");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     let out = build_hpp_url(&base, &param, "XSS", HppPosition::Both).unwrap();
     assert_eq!(out, "https://example.com/path?other=1&q=XSS&q=XSS");
 }
@@ -536,22 +221,7 @@ fn test_hpp_absent_param_appended_both_position() {
 #[test]
 fn test_hpp_absent_param_appended_on_bare_url_has_no_leading_amp() {
     let base = make_url("https://example.com/path");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     for (position, expected) in [
         (HppPosition::Last, "https://example.com/path?q=safe&q=XSS"),
         (HppPosition::First, "https://example.com/path?q=XSS&q=safe"),
@@ -565,22 +235,7 @@ fn test_hpp_absent_param_appended_on_bare_url_has_no_leading_amp() {
 #[test]
 fn test_hpp_preserves_fragment() {
     let base = make_url("https://example.com/path?q=safe#frag");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     let out = build_hpp_url(&base, &param, "PAY", HppPosition::Last).unwrap();
     assert!(out.ends_with("#frag"));
 }
@@ -588,22 +243,7 @@ fn test_hpp_preserves_fragment() {
 #[test]
 fn test_build_hpp_urls_returns_3_variants() {
     let base = make_url("https://example.com/?q=safe");
-    let param = Param {
-        name: "q".into(),
-        value: "safe".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q", "safe", Location::Query);
     let variants = build_hpp_urls(&base, &param, "XSS");
     assert_eq!(variants.len(), 3);
     assert_eq!(variants[0].1, HppPosition::Last);
@@ -617,20 +257,9 @@ fn test_build_hpp_urls_returns_3_variants() {
 fn effective_query_base_uses_form_action_for_query_params() {
     let target = make_url("https://example.com/page");
     let mut param = Param {
-        name: "xss".into(),
-        value: "".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
         form_action_url: Some("https://example.com/app.php".to_string()),
         form_origin_url: Some("https://example.com/page".to_string()),
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("xss", "", Location::Query)
     };
     let base = effective_query_base(&target, &param);
     assert_eq!(base.as_str(), "https://example.com/app.php");
@@ -683,22 +312,7 @@ fn body_location_method_preserves_body_capable_verbs() {
 
 #[test]
 fn effective_method_body_locations_respect_query_method() {
-    let mut param = Param {
-        name: "q".into(),
-        value: "".into(),
-        location: Location::Body,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let mut param = Param::new("q", "", Location::Body);
     for loc in [Location::Body, Location::JsonBody, Location::MultipartBody] {
         param.location = loc;
         assert_eq!(effective_method("QUERY", &param), "QUERY");
@@ -715,20 +329,9 @@ fn form_discovered_body_params_always_post_even_on_query_target() {
     // HTML forms submit as POST regardless of how the page was loaded
     // (QUERY/PUT/…). Without this, -X QUERY would mis-verb form fields.
     let mut param = Param {
-        name: "comment".into(),
-        value: "".into(),
-        location: Location::Body,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
         form_action_url: Some("https://example.com/submit".to_string()),
         form_origin_url: Some("https://example.com/page".to_string()),
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("comment", "", Location::Body)
     };
     for loc in [Location::Body, Location::JsonBody, Location::MultipartBody] {
         param.location = loc;
@@ -745,20 +348,8 @@ fn form_discovered_body_params_always_post_even_on_query_target() {
 fn effective_query_base_uses_form_action_for_body_locations() {
     let target = make_url("https://example.com/page");
     let mut param = Param {
-        name: "xss".into(),
-        value: "".into(),
-        location: Location::Body,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
         form_action_url: Some("https://example.com/app.php".to_string()),
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("xss", "", Location::Body)
     };
     // Body / JsonBody / MultipartBody params point at the form's action URL,
     // so the displayed PoC matches the POST that was actually sent (not the
@@ -776,20 +367,8 @@ fn effective_query_base_uses_form_action_for_body_locations() {
 fn effective_query_base_ignores_form_action_for_header_fragment() {
     let target = make_url("https://example.com/page");
     let mut param = Param {
-        name: "xss".into(),
-        value: "".into(),
-        location: Location::Header,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
         form_action_url: Some("https://example.com/app.php".to_string()),
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("xss", "", Location::Header)
     };
     for loc in [Location::Header, Location::Fragment] {
         param.location = loc;
@@ -806,20 +385,8 @@ fn effective_query_base_preserves_existing_query_on_action() {
     // its own query params. Injecting our target field must keep them.
     let target = make_url("https://example.com/page");
     let param = Param {
-        name: "xss".into(),
-        value: "".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
         form_action_url: Some("https://example.com/app.php?ref=login".to_string()),
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("xss", "", Location::Query)
     };
     let base = effective_query_base(&target, &param);
     let out = build_injected_url(&base, &param, "PAY");
@@ -835,20 +402,8 @@ fn effective_query_base_preserves_existing_query_on_action() {
 fn effective_query_base_falls_back_when_action_unparseable() {
     let target = make_url("https://example.com/page");
     let param = Param {
-        name: "xss".into(),
-        value: "".into(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
         form_action_url: Some("::not a url::".to_string()),
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("xss", "", Location::Query)
     };
     assert_eq!(
         effective_query_base(&target, &param).as_str(),
@@ -1122,22 +677,7 @@ fn cookie_target(cookies: &[(&str, &str)]) -> Target {
 
 /// Minimal `Param` for the cookie-injection tests above.
 fn make_param(location: Location, name: &str) -> Param {
-    Param {
-        name: name.into(),
-        value: "".into(),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name, "", location)
 }
 
 /// `build_injected_url` reassembles the query/fragment by hand rather than

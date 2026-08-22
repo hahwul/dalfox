@@ -71,22 +71,7 @@ fn test_target_parsing_with_multiple_query_params() {
 /// Test parameter analysis structures and their properties
 #[test]
 fn test_param_structure_query_location() {
-    let param = Param {
-        name: "id".to_string(),
-        value: "123".to_string(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("id".to_string(), "123".to_string(), Location::Query);
 
     assert_eq!(param.name, "id");
     assert_eq!(param.value, "123");
@@ -96,20 +81,10 @@ fn test_param_structure_query_location() {
 #[test]
 fn test_param_structure_with_injection_context() {
     let param = Param {
-        name: "search".to_string(),
-        value: "test".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
         valid_specials: Some(vec!['<', '>', '"']),
         invalid_specials: Some(vec!['\'', '`']),
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("search".to_string(), "test".to_string(), Location::Query)
     };
 
     assert_eq!(param.injection_context, Some(InjectionContext::Html(None)));
@@ -121,22 +96,10 @@ fn test_param_structure_with_injection_context() {
 #[test]
 fn test_param_structure_javascript_context() {
     let param = Param {
-        name: "callback".to_string(),
-        value: "func".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Javascript(Some(
             DelimiterType::SingleQuote,
         ))),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("callback".to_string(), "func".to_string(), Location::Query)
     };
 
     match &param.injection_context {
@@ -150,22 +113,10 @@ fn test_param_structure_javascript_context() {
 #[test]
 fn test_param_structure_attribute_context() {
     let param = Param {
-        name: "attr".to_string(),
-        value: "value".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Attribute(Some(
             DelimiterType::DoubleQuote,
         ))),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("attr".to_string(), "value".to_string(), Location::Query)
     };
 
     match &param.injection_context {
@@ -238,20 +189,10 @@ fn test_target_default_configuration() {
 #[test]
 fn test_param_serialization() {
     let param = Param {
-        name: "test".to_string(),
-        value: "value".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
         valid_specials: Some(vec!['<', '>']),
         invalid_specials: Some(vec!['\'']),
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("test".to_string(), "value".to_string(), Location::Query)
     };
 
     // Test serialization
@@ -322,20 +263,9 @@ fn test_special_chars_classification() {
     let invalid_chars = vec!['`', '{', '}'];
 
     let param = Param {
-        name: "input".to_string(),
-        value: "test".to_string(),
-        location: Location::Query,
-        injection_context: None,
         valid_specials: Some(valid_chars.clone()),
         invalid_specials: Some(invalid_chars.clone()),
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("input".to_string(), "test".to_string(), Location::Query)
     };
 
     assert!(param.valid_specials.as_ref().unwrap().contains(&'<'));
@@ -347,54 +277,17 @@ fn test_special_chars_classification() {
 #[test]
 fn test_multiple_parameters() {
     let params = [
+        Param::new("id".to_string(), "1".to_string(), Location::Query),
         Param {
-            name: "id".to_string(),
-            value: "1".to_string(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
-        Param {
-            name: "name".to_string(),
-            value: "test".to_string(),
-            location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
             valid_specials: Some(vec!['<', '>']),
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("name".to_string(), "test".to_string(), Location::Query)
         },
-        Param {
-            name: "X-Custom".to_string(),
-            value: "header".to_string(),
-            location: Location::Header,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
+        Param::new(
+            "X-Custom".to_string(),
+            "header".to_string(),
+            Location::Header,
+        ),
     ];
 
     assert_eq!(params.len(), 3);

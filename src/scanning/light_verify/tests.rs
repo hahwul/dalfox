@@ -28,22 +28,7 @@ struct TestState {
 }
 
 fn make_param(loc: Location, name: &str) -> Param {
-    Param {
-        name: name.to_string(),
-        value: "seed".to_string(),
-        location: loc,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name.to_string(), "seed".to_string(), loc)
 }
 
 fn make_target(addr: SocketAddr, path: &str, method: Option<&str>, data: Option<&str>) -> Target {

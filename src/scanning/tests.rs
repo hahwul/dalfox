@@ -374,20 +374,8 @@ fn test_http_scannable_param_count_excludes_fragment() {
 // Mock function for XSS scanning tests (similar to parameter analysis mocks)
 fn mock_add_reflection_param(target: &mut Target, name: &str, location: Location) {
     target.reflection_params.push(Param {
-        name: name.to_string(),
-        value: "mock_value".to_string(),
-        location,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new(name.to_string(), "mock_value".to_string(), location)
     });
 }
 
@@ -409,20 +397,8 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
 #[test]
 fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
     let param = Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Javascript(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
     };
     let args = default_scan_args();
     let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -439,20 +415,8 @@ fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
 #[test]
 fn test_get_dom_payloads_html_context_includes_encoded_variants() {
     let param = Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
     };
     let args = default_scan_args();
     let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -464,22 +428,7 @@ fn test_get_dom_payloads_html_context_includes_encoded_variants() {
 
 #[test]
 fn test_get_dom_payloads_unknown_context_falls_back_even_with_only_custom() {
-    let param = Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q".to_string(), "seed".to_string(), Location::Query);
     let mut args = default_scan_args();
     args.only_custom_payload = true;
     args.custom_payload = None;
@@ -515,22 +464,7 @@ fn test_interleave_payload_families_round_robins_and_preserves_order() {
 /// the interleave and sat thousands of payloads past the budget).
 #[test]
 fn test_get_dom_payloads_unknown_context_samples_every_evidence_family_in_budget_window() {
-    let param = Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q".to_string(), "seed".to_string(), Location::Query);
     let mut args = default_scan_args();
     // `none` keeps the base interleaved order (no encoder expansion) so the
     // assertion is about catalog ordering, independent of encoder fan-out.
@@ -844,22 +778,7 @@ fn test_build_request_text_query_contains_headers_and_cookies() {
     target.headers = vec![("X-Test".to_string(), "1".to_string())];
     target.cookies = vec![("sid".to_string(), "abc".to_string())];
 
-    let param = Param {
-        name: "q".to_string(),
-        value: "".to_string(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q".to_string(), "".to_string(), Location::Query);
 
     let request = build_request_text(&target, &param, "PAYLOAD");
     assert!(request.contains("GET /search?a=1&q=PAYLOAD HTTP/1.1"));
@@ -873,22 +792,11 @@ fn test_build_request_text_path_segment_injection() {
     let mut target = parse_target("https://example.com/a/b/c").unwrap();
     target.method = "GET".to_string();
 
-    let param = Param {
-        name: "path_segment_1".to_string(),
-        value: "b".to_string(),
-        location: Location::Path,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new(
+        "path_segment_1".to_string(),
+        "b".to_string(),
+        Location::Path,
+    );
 
     let request = build_request_text(&target, &param, "hello world");
     assert!(request.contains("GET /a/hello%20world/c HTTP/1.1"));
@@ -905,22 +813,7 @@ fn test_build_request_text_json_body_empty_value_reserializes() {
     target.method = "POST".to_string();
     target.data = Some("not-json-at-all".to_string());
 
-    let param = Param {
-        name: "q".to_string(),
-        value: String::new(),
-        location: Location::JsonBody,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q".to_string(), String::new(), Location::JsonBody);
 
     let request = build_request_text(&target, &param, "PAYLOAD");
     assert!(
@@ -1117,20 +1010,12 @@ async fn test_xss_scanning_post_body() {
 async fn test_run_scanning_with_reflection_params() {
     let mut target = parse_target("https://example.com").unwrap();
     target.reflection_params.push(Param {
-        name: "test_param".to_string(),
-        value: "test_value".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new(
+            "test_param".to_string(),
+            "test_value".to_string(),
+            Location::Query,
+        )
     });
 
     let args = crate::cmd::scan::ScanArgs {
@@ -1199,20 +1084,8 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
     // invalid given the comment-side stripping). The test exercises the
     // V-upgrade path with a pre-populated reflection param.
     target.reflection_params.push(Param {
-        name: "query".to_string(),
-        value: "a".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("query".to_string(), "a".to_string(), Location::Query)
     });
 
     let args = Arc::new(integration_scan_args(false));
@@ -1314,24 +1187,12 @@ async fn test_run_scanning_dom_phase_early_exits_on_inert_echo() {
     let url = format!("http://{}/?query=a", addr);
     let mut target = parse_target(&url).expect("parse_target");
     target.reflection_params.clear();
-    target.reflection_params.push(Param {
-        name: "query".to_string(),
-        value: "a".to_string(),
-        location: Location::Query,
-        // Unknown context → the full HTML+attribute+… DOM payload catalog
-        // (thousands of payloads once encoder-expanded).
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    });
+    // `Param::new` leaves `injection_context` unset: unknown context → the full
+    // HTML+attribute+… DOM payload catalog (thousands of payloads once
+    // encoder-expanded).
+    target
+        .reflection_params
+        .push(Param::new("query", "a", Location::Query));
 
     let results = Arc::new(Mutex::new(Vec::new()));
     run_scanning(
@@ -1405,22 +1266,11 @@ async fn test_run_scanning_dom_phase_preserves_recall_on_executable_echo() {
     let url = format!("http://{}/?query=a", addr);
     let mut target = parse_target(&url).expect("parse_target");
     target.reflection_params.clear();
-    target.reflection_params.push(Param {
-        name: "query".to_string(),
-        value: "a".to_string(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    });
+    target.reflection_params.push(Param::new(
+        "query".to_string(),
+        "a".to_string(),
+        Location::Query,
+    ));
 
     let results = Arc::new(Mutex::new(Vec::new()));
     run_scanning(
@@ -1500,22 +1350,11 @@ async fn test_run_scanning_dom_phase_inert_echo_count_is_cumulative() {
     let url = format!("http://{}/?query=a", addr);
     let mut target = parse_target(&url).expect("parse_target");
     target.reflection_params.clear();
-    target.reflection_params.push(Param {
-        name: "query".to_string(),
-        value: "a".to_string(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    });
+    target.reflection_params.push(Param::new(
+        "query".to_string(),
+        "a".to_string(),
+        Location::Query,
+    ));
 
     let results = Arc::new(Mutex::new(Vec::new()));
     run_scanning(
@@ -1565,20 +1404,8 @@ async fn test_run_scanning_increments_params_done_counter() {
     target.reflection_params.clear();
     for name in ["a", "b", "c"] {
         target.reflection_params.push(Param {
-            name: name.to_string(),
-            value: "1".to_string(),
-            location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new(name.to_string(), "1".to_string(), Location::Query)
         });
     }
 
@@ -1959,22 +1786,7 @@ use crate::target_parser::Target;
 /// Minimal `Param` for request-text tests (all the discovery-derived metadata
 /// fields left at their `None` defaults).
 fn req_param(name: &str, value: &str, location: Location) -> Param {
-    Param {
-        name: name.to_string(),
-        value: value.to_string(),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name.to_string(), value.to_string(), location)
 }
 
 fn target_for(url: &str) -> Target {
@@ -2559,20 +2371,8 @@ async fn test_run_scanning_hpp_phase_reports_duplicated_param_bypass() {
     let url = format!("http://{}/?q=safe", addr);
     let mut target = parse_target(&url).expect("parse_target");
     target.reflection_params.push(Param {
-        name: "q".to_string(),
-        value: "safe".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("q".to_string(), "safe".to_string(), Location::Query)
     });
 
     let mut args = integration_scan_args(false);
@@ -2660,20 +2460,8 @@ async fn test_run_scanning_without_hpp_flag_reports_no_hpp_finding() {
     let url = format!("http://{}/?q=safe", addr);
     let mut target = parse_target(&url).expect("parse_target");
     target.reflection_params.push(Param {
-        name: "q".to_string(),
-        value: "safe".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("q".to_string(), "safe".to_string(), Location::Query)
     });
 
     let args = Arc::new(integration_scan_args(false));
@@ -2781,20 +2569,8 @@ fn url_attr_reflection_in_a_normal_href_is_still_recognised() {
 
 fn param_with_context(ctx: Option<InjectionContext>) -> Param {
     Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Query,
         injection_context: ctx,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
     }
 }
 

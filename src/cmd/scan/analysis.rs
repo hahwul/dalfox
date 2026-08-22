@@ -390,22 +390,7 @@ pub(crate) async fn preflight_and_analyze_target(
         // Check URL query params
         for (k, v) in target.url.query_pairs() {
             if v.contains(marker.as_str()) {
-                marker_params.push(Param {
-                    name: k.to_string(),
-                    value: v.to_string(),
-                    location: Location::Query,
-                    injection_context: None,
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: None,
-                });
+                marker_params.push(Param::new(k.to_string(), v.to_string(), Location::Query));
             }
         }
 
@@ -417,22 +402,11 @@ pub(crate) async fn preflight_and_analyze_target(
                         if let Some(s) = v.as_str()
                             && s.contains(marker.as_str())
                         {
-                            marker_params.push(Param {
-                                name: k.clone(),
-                                value: s.to_string(),
-                                location: Location::JsonBody,
-                                injection_context: None,
-                                valid_specials: None,
-                                invalid_specials: None,
-                                pre_encoding: None,
-                                pre_encoding_pipeline: None,
-                                wire_name: None,
-                                form_action_url: None,
-                                form_origin_url: None,
-                                framework_sink: None,
-                                escaped_specials: None,
-                                js_breakout: None,
-                            });
+                            marker_params.push(Param::new(
+                                k.clone(),
+                                s.to_string(),
+                                Location::JsonBody,
+                            ));
                         }
                     }
                 }
@@ -441,22 +415,11 @@ pub(crate) async fn preflight_and_analyze_target(
                     if let Some((k, v)) = pair.split_once('=')
                         && v.contains(marker.as_str())
                     {
-                        marker_params.push(Param {
-                            name: k.to_string(),
-                            value: v.to_string(),
-                            location: Location::Body,
-                            injection_context: None,
-                            valid_specials: None,
-                            invalid_specials: None,
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
-                            form_action_url: None,
-                            form_origin_url: None,
-                            framework_sink: None,
-                            escaped_specials: None,
-                            js_breakout: None,
-                        });
+                        marker_params.push(Param::new(
+                            k.to_string(),
+                            v.to_string(),
+                            Location::Body,
+                        ));
                     }
                 }
             }
@@ -465,44 +428,14 @@ pub(crate) async fn preflight_and_analyze_target(
         // Check headers
         for (k, v) in &target.headers {
             if v.contains(marker.as_str()) {
-                marker_params.push(Param {
-                    name: k.clone(),
-                    value: v.clone(),
-                    location: Location::Header,
-                    injection_context: None,
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: None,
-                });
+                marker_params.push(Param::new(k.clone(), v.clone(), Location::Header));
             }
         }
 
         // Check cookies
         for (k, v) in &target.cookies {
             if v.contains(marker.as_str()) {
-                marker_params.push(Param {
-                    name: k.clone(),
-                    value: v.clone(),
-                    location: Location::Header,
-                    injection_context: None,
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: None,
-                });
+                marker_params.push(Param::new(k.clone(), v.clone(), Location::Header));
             }
         }
 
