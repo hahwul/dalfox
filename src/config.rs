@@ -153,6 +153,72 @@ pub struct ScanConfig {
     pub debug: Option<bool>,
 }
 
+/// Apply one config-file value to a `ScanArgs` field unless the operator
+/// already settled it on the command line.
+///
+/// Each arm names the sentinel that means "the operator said nothing" for that
+/// field's shape. Only [`apply_cfg!(explicit …)`](apply_cfg) needs
+/// [`ExplicitArgs`](crate::cmd::scan::ExplicitArgs); the others read a value the
+/// command line cannot forge — `Option::None`, an empty `Vec`, a `false` flag
+/// whose default is `false`.
+///
+/// Both `explicit` arms derive the `was_explicit` id from the *assigned* field
+/// with `stringify!`, so a guard can no longer name a different flag than the
+/// one it protects (`!args.was_explicit("poc_type")` in front of
+/// `args.format = …` was a real hazard, previously caught only by a test that
+/// re-parsed this function's source text).
+macro_rules! apply_cfg {
+    // A `--flag` whose default is `false`: still `false` means untouched.
+    (flag $($cfg:ident).+ => $($arg:ident).+) => {
+        if let Some(v) = $($cfg).+
+            && !$($arg).+
+        {
+            $($arg).+ = v;
+        }
+    };
+    // An `Option` field: `None` means untouched. `Copy` value.
+    (opt $($cfg:ident).+ => $($arg:ident).+) => {
+        if let Some(v) = $($cfg).+
+            && $($arg).+.is_none()
+        {
+            $($arg).+ = Some(v);
+        }
+    };
+    // An `Option` field holding a value that must be cloned.
+    (opt_clone $($cfg:ident).+ => $($arg:ident).+) => {
+        if let Some(v) = &$($cfg).+
+            && $($arg).+.is_none()
+        {
+            $($arg).+ = Some(v.clone());
+        }
+    };
+    // A `Vec` field: empty means untouched.
+    (vec $($cfg:ident).+ => $($arg:ident).+) => {
+        if let Some(v) = &$($cfg).+
+            && $($arg).+.is_empty()
+        {
+            $($arg).+ = v.clone();
+        }
+    };
+    // A field whose value cannot carry its own "untouched" sentinel, so the
+    // answer comes from clap's `ValueSource`. `Copy` value.
+    (explicit $($cfg:ident).+ => $args:ident.$field:ident) => {
+        if let Some(v) = $($cfg).+
+            && !$args.was_explicit(stringify!($field))
+        {
+            $args.$field = v;
+        }
+    };
+    // Same, for a value that must be cloned.
+    (explicit_clone $($cfg:ident).+ => $args:ident.$field:ident) => {
+        if let Some(v) = &$($cfg).+
+            && !$args.was_explicit(stringify!($field))
+        {
+            $args.$field = v.clone();
+        }
+    };
+}
+
 impl Config {
     /// Overlay config-file values onto `args`, filling only what the operator
     /// left alone. Implements `CLI flag > config file > built-in default`.
@@ -176,98 +242,26 @@ impl Config {
     pub(crate) fn apply_to_scan_args_if_default(&self, args: &mut crate::cmd::scan::ScanArgs) {
         if let Some(scan) = &self.scan {
             // INPUT
-            if let Some(v) = &scan.input_type
-                && !args.was_explicit("input_type")
-            {
-                args.input_type = v.clone();
-            }
-            if let Some(v) = &scan.state_file
-                && args.state_file.is_none()
-            {
-                args.state_file = Some(v.clone());
-            }
-            if let Some(v) = &scan.dedup_urls
-                && args.dedup_urls.is_none()
-            {
-                args.dedup_urls = Some(v.clone());
-            }
+            apply_cfg!(explicit_clone scan.input_type => args.input_type);
+            apply_cfg!(opt_clone scan.state_file => args.state_file);
+            apply_cfg!(opt_clone scan.dedup_urls => args.dedup_urls);
 
             // OUTPUT
-            if let Some(v) = &scan.format
-                && !args.was_explicit("format")
-            {
-                args.format = v.clone();
-            }
-            if let Some(v) = &scan.output
-                && args.output.is_none()
-            {
-                args.output = Some(v.clone());
-            }
-            if let Some(v) = scan.include_request
-                && !args.include_request
-            {
-                args.include_request = v;
-            }
-            if let Some(v) = scan.include_response
-                && !args.include_response
-            {
-                args.include_response = v;
-            }
-            if let Some(v) = scan.include_all
-                && !args.include_all
-            {
-                args.include_all = v;
-            }
-            if let Some(v) = scan.silence
-                && !args.silence
-            {
-                args.silence = v;
-            }
-            if let Some(v) = scan.dry_run
-                && !args.dry_run
-            {
-                args.dry_run = v;
-            }
-            if let Some(v) = scan.stream_findings
-                && !args.stream_findings
-            {
-                args.stream_findings = v;
-            }
-            if let Some(v) = &scan.poc_type
-                && !args.was_explicit("poc_type")
-            {
-                args.poc_type = v.clone();
-            }
-            if let Some(v) = scan.limit
-                && args.limit.is_none()
-            {
-                args.limit = Some(v);
-            }
-            if let Some(v) = &scan.limit_result_type
-                && !args.was_explicit("limit_result_type")
-            {
-                args.limit_result_type = v.clone();
-            }
-            if let Some(v) = &scan.only_poc
-                && args.only_poc.is_empty()
-            {
-                args.only_poc = v.clone();
-            }
-            if let Some(v) = &scan.baseline
-                && args.baseline.is_none()
-            {
-                args.baseline = Some(v.clone());
-            }
-            if let Some(v) = &scan.baseline_mode
-                && args.baseline_mode_arg.is_none()
-            {
-                args.baseline_mode_arg = Some(v.clone());
-            }
-            if let Some(v) = scan.no_color
-                && !args.no_color
-            {
-                args.no_color = v;
-            }
+            apply_cfg!(explicit_clone scan.format => args.format);
+            apply_cfg!(opt_clone scan.output => args.output);
+            apply_cfg!(flag scan.include_request => args.include_request);
+            apply_cfg!(flag scan.include_response => args.include_response);
+            apply_cfg!(flag scan.include_all => args.include_all);
+            apply_cfg!(flag scan.silence => args.silence);
+            apply_cfg!(flag scan.dry_run => args.dry_run);
+            apply_cfg!(flag scan.stream_findings => args.stream_findings);
+            apply_cfg!(explicit_clone scan.poc_type => args.poc_type);
+            apply_cfg!(opt scan.limit => args.limit);
+            apply_cfg!(explicit_clone scan.limit_result_type => args.limit_result_type);
+            apply_cfg!(vec scan.only_poc => args.only_poc);
+            apply_cfg!(opt_clone scan.baseline => args.baseline);
+            apply_cfg!(opt_clone scan.baseline_mode => args.baseline_mode_arg);
+            apply_cfg!(flag scan.no_color => args.no_color);
             // Map debug conservatively: only set when CLI didn't enable it (global false)
             if let Some(v) = scan.debug
                 && !crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
@@ -276,358 +270,94 @@ impl Config {
             }
 
             // TARGETS
-            if let Some(v) = &scan.param
-                && args.param.is_empty()
-            {
-                args.param = v.clone();
-            }
-            if let Some(v) = &scan.data
-                && args.data.is_none()
-            {
-                args.data = Some(v.clone());
-            }
-            if let Some(v) = &scan.headers
-                && args.headers.is_empty()
-            {
-                args.headers = v.clone();
-            }
-            if let Some(v) = &scan.cookies
-                && args.cookies.is_empty()
-            {
-                args.cookies = v.clone();
-            }
-            if let Some(v) = &scan.method
-                && !args.was_explicit("method")
-            {
-                args.method = v.clone();
-            }
-            if let Some(v) = &scan.user_agent
-                && args.user_agent.is_none()
-            {
-                args.user_agent = Some(v.clone());
-            }
+            apply_cfg!(vec scan.param => args.param);
+            apply_cfg!(opt_clone scan.data => args.data);
+            apply_cfg!(vec scan.headers => args.headers);
+            apply_cfg!(vec scan.cookies => args.cookies);
+            apply_cfg!(explicit_clone scan.method => args.method);
+            apply_cfg!(opt_clone scan.user_agent => args.user_agent);
             // PARAMETER DISCOVERY (default mapping)
-            if let Some(v) = scan.skip_reflection_path
-                && !args.skip_reflection_path
-            {
-                args.skip_reflection_path = v;
-            }
-            if let Some(v) = &scan.cookie_from_raw
-                && args.cookie_from_raw.is_none()
-            {
-                args.cookie_from_raw = Some(v.clone());
-            }
+            apply_cfg!(flag scan.skip_reflection_path => args.skip_reflection_path);
+            apply_cfg!(opt_clone scan.cookie_from_raw => args.cookie_from_raw);
 
             // SESSION (if_default)
-            if let Some(v) = &scan.session_check
-                && args.session_check.is_none()
-            {
-                args.session_check = Some(v.clone());
-            }
-            if let Some(v) = &scan.session_check_url
-                && args.session_check_url.is_none()
-            {
-                args.session_check_url = Some(v.clone());
-            }
-            if let Some(v) = &scan.on_session_loss
-                && args.on_session_loss_arg.is_none()
-            {
-                args.on_session_loss_arg = Some(v.clone());
-            }
+            apply_cfg!(opt_clone scan.session_check => args.session_check);
+            apply_cfg!(opt_clone scan.session_check_url => args.session_check_url);
+            apply_cfg!(opt_clone scan.on_session_loss => args.on_session_loss_arg);
 
             // SCOPE (if_default)
-            if let Some(v) = &scan.include_url
-                && args.include_url.is_empty()
-            {
-                args.include_url = v.clone();
-            }
-            if let Some(v) = &scan.exclude_url
-                && args.exclude_url.is_empty()
-            {
-                args.exclude_url = v.clone();
-            }
-            if let Some(v) = &scan.ignore_param
-                && args.ignore_param.is_empty()
-            {
-                args.ignore_param = v.clone();
-            }
-            if let Some(v) = &scan.out_of_scope
-                && args.out_of_scope.is_empty()
-            {
-                args.out_of_scope = v.clone();
-            }
-            if let Some(v) = &scan.out_of_scope_file
-                && args.out_of_scope_file.is_none()
-            {
-                args.out_of_scope_file = Some(v.clone());
-            }
+            apply_cfg!(vec scan.include_url => args.include_url);
+            apply_cfg!(vec scan.exclude_url => args.exclude_url);
+            apply_cfg!(vec scan.ignore_param => args.ignore_param);
+            apply_cfg!(vec scan.out_of_scope => args.out_of_scope);
+            apply_cfg!(opt_clone scan.out_of_scope_file => args.out_of_scope_file);
 
             // PARAMETER DISCOVERY
-            if let Some(v) = scan.only_discovery
-                && !args.only_discovery
-            {
-                args.only_discovery = v;
-            }
-            if let Some(v) = scan.skip_discovery
-                && !args.skip_discovery
-            {
-                args.skip_discovery = v;
-            }
-            if let Some(v) = scan.skip_reflection_header
-                && !args.skip_reflection_header
-            {
-                args.skip_reflection_header = v;
-            }
-            if let Some(v) = scan.skip_reflection_cookie
-                && !args.skip_reflection_cookie
-            {
-                args.skip_reflection_cookie = v;
-            }
+            apply_cfg!(flag scan.only_discovery => args.only_discovery);
+            apply_cfg!(flag scan.skip_discovery => args.skip_discovery);
+            apply_cfg!(flag scan.skip_reflection_header => args.skip_reflection_header);
+            apply_cfg!(flag scan.skip_reflection_cookie => args.skip_reflection_cookie);
 
             // PARAMETER MINING
-            if let Some(v) = &scan.mining_dict_word
-                && args.mining_dict_word.is_none()
-            {
-                args.mining_dict_word = Some(v.clone());
-            }
-            if let Some(v) = &scan.remote_wordlists
-                && args.remote_wordlists.is_empty()
-            {
-                args.remote_wordlists = v.clone();
-            }
-            if let Some(v) = scan.skip_mining
-                && !args.skip_mining
-            {
-                args.skip_mining = v;
-            }
-            if let Some(v) = scan.skip_mining_dict
-                && !args.skip_mining_dict
-            {
-                args.skip_mining_dict = v;
-            }
-            if let Some(v) = scan.skip_mining_dom
-                && !args.skip_mining_dom
-            {
-                args.skip_mining_dom = v;
-            }
+            apply_cfg!(opt_clone scan.mining_dict_word => args.mining_dict_word);
+            apply_cfg!(vec scan.remote_wordlists => args.remote_wordlists);
+            apply_cfg!(flag scan.skip_mining => args.skip_mining);
+            apply_cfg!(flag scan.skip_mining_dict => args.skip_mining_dict);
+            apply_cfg!(flag scan.skip_mining_dom => args.skip_mining_dom);
 
             // NETWORK
-            if let Some(v) = scan.timeout
-                && !args.was_explicit("timeout")
-            {
-                args.timeout = v;
-            }
-            if let Some(v) = scan.scan_timeout
-                && !args.was_explicit("scan_timeout")
-            {
-                args.scan_timeout = v;
-            }
-            if let Some(v) = scan.delay
-                && !args.was_explicit("delay")
-            {
-                args.delay = v;
-            }
-            if let Some(v) = scan.rate_limit
-                && !args.was_explicit("rate_limit")
-            {
-                args.rate_limit = v;
-            }
-            if let Some(v) = scan.retries
-                && !args.was_explicit("retries")
-            {
-                args.retries = v;
-            }
-            if let Some(v) = scan.retry_delay
-                && !args.was_explicit("retry_delay")
-            {
-                args.retry_delay = v;
-            }
-            if let Some(v) = &scan.proxy
-                && args.proxy.is_none()
-            {
-                args.proxy = Some(v.clone());
-            }
+            apply_cfg!(explicit scan.timeout => args.timeout);
+            apply_cfg!(explicit scan.scan_timeout => args.scan_timeout);
+            apply_cfg!(explicit scan.delay => args.delay);
+            apply_cfg!(explicit scan.rate_limit => args.rate_limit);
+            apply_cfg!(explicit scan.retries => args.retries);
+            apply_cfg!(explicit scan.retry_delay => args.retry_delay);
+            apply_cfg!(opt_clone scan.proxy => args.proxy);
             // `insecure` is `None` unless the user passed `--insecure[=…]`, so
             // config only applies when the flag was left off. An explicit CLI
             // value — `--insecure=true` *or* `--insecure=false` — is `Some(_)`
             // and therefore always wins over the config file, in either
             // direction. (A plain `bool` couldn't express this: it can't tell
             // an explicit `--insecure=true` apart from the default.)
-            if let Some(v) = scan.insecure
-                && args.insecure.is_none()
-            {
-                args.insecure = Some(v);
-            }
-            if let Some(v) = scan.follow_redirects
-                && !args.follow_redirects
-            {
-                args.follow_redirects = v;
-            }
-            if let Some(v) = &scan.ignore_return
-                && args.ignore_return.is_empty()
-            {
-                args.ignore_return = v.clone();
-            }
+            apply_cfg!(opt scan.insecure => args.insecure);
+            apply_cfg!(flag scan.follow_redirects => args.follow_redirects);
+            apply_cfg!(vec scan.ignore_return => args.ignore_return);
 
             // ENGINE
-            if let Some(v) = scan.workers
-                && !args.was_explicit("workers")
-            {
-                args.workers = v;
-            }
-            if let Some(v) = scan.max_concurrent_targets
-                && !args.was_explicit("max_concurrent_targets")
-            {
-                args.max_concurrent_targets = v;
-            }
-            if let Some(v) = scan.max_targets_per_host
-                && !args.was_explicit("max_targets_per_host")
-            {
-                args.max_targets_per_host = v;
-            }
+            apply_cfg!(explicit scan.workers => args.workers);
+            apply_cfg!(explicit scan.max_concurrent_targets => args.max_concurrent_targets);
+            apply_cfg!(explicit scan.max_targets_per_host => args.max_targets_per_host);
 
             // XSS SCANNING
-            if let Some(v) = &scan.encoders
-                && !args.was_explicit("encoders")
-            {
-                args.encoders = v.clone();
-            }
-            if let Some(v) = &scan.remote_payloads
-                && args.remote_payloads.is_empty()
-            {
-                args.remote_payloads = v.clone();
-            }
-            if let Some(v) = &scan.custom_blind_xss_payload
-                && args.custom_blind_xss_payload.is_none()
-            {
-                args.custom_blind_xss_payload = Some(v.clone());
-            }
-            if let Some(v) = &scan.blind_callback_url
-                && args.blind_callback_url.is_none()
-            {
-                args.blind_callback_url = Some(v.clone());
-            }
-            if let Some(v) = &scan.blind_oob
-                && args.oob.blind_oob.is_none()
-            {
-                args.oob.blind_oob = Some(v.clone());
-            }
-            if let Some(v) = &scan.blind_oob_secret
-                && args.oob.blind_oob_secret.is_none()
-            {
-                args.oob.blind_oob_secret = Some(v.clone());
-            }
-            if let Some(v) = scan.blind_oob_wait
-                && args.oob.blind_oob_wait.is_none()
-            {
-                args.oob.blind_oob_wait = Some(v);
-            }
-            if let Some(v) = &scan.custom_payload
-                && args.custom_payload.is_none()
-            {
-                args.custom_payload = Some(v.clone());
-            }
-            if let Some(v) = scan.only_custom_payload
-                && !args.only_custom_payload
-            {
-                args.only_custom_payload = v;
-            }
-            if let Some(v) = &scan.inject_marker
-                && args.inject_marker.is_none()
-            {
-                args.inject_marker = Some(v.clone());
-            }
-            if let Some(v) = &scan.custom_alert_value
-                && !args.was_explicit("custom_alert_value")
-            {
-                args.custom_alert_value = v.clone();
-            }
-            if let Some(v) = &scan.custom_alert_type
-                && !args.was_explicit("custom_alert_type")
-            {
-                args.custom_alert_type = v.clone();
-            }
-            if let Some(v) = scan.skip_xss_scanning
-                && !args.skip_xss_scanning
-            {
-                args.skip_xss_scanning = v;
-            }
-            if let Some(v) = scan.max_payloads_per_param
-                && !args.was_explicit("max_payloads_per_param")
-            {
-                args.max_payloads_per_param = v;
-            }
-            if let Some(v) = scan.deep_scan
-                && !args.deep_scan
-            {
-                args.deep_scan = v;
-            }
-            if let Some(v) = scan.sxss
-                && !args.sxss
-            {
-                args.sxss = v;
-            }
-            if let Some(v) = &scan.sxss_url
-                && args.sxss_url.is_none()
-            {
-                args.sxss_url = Some(v.clone());
-            }
-            if let Some(v) = &scan.sxss_method
-                && !args.was_explicit("sxss_method")
-            {
-                args.sxss_method = v.clone();
-            }
-            if let Some(v) = scan.sxss_retries
-                && !args.was_explicit("sxss_retries")
-            {
-                args.sxss_retries = v;
-            }
-            if let Some(v) = scan.skip_ast_analysis
-                && !args.skip_ast_analysis
-            {
-                args.skip_ast_analysis = v;
-            }
-            if let Some(v) = scan.analyze_external_js
-                && !args.analyze_external_js
-            {
-                args.analyze_external_js = v;
-            }
-            if let Some(v) = scan.detect_outdated_libs
-                && !args.detect_outdated_libs
-            {
-                args.detect_outdated_libs = v;
-            }
-            if let Some(v) = scan.hpp
-                && !args.hpp
-            {
-                args.hpp = v;
-            }
+            apply_cfg!(explicit_clone scan.encoders => args.encoders);
+            apply_cfg!(vec scan.remote_payloads => args.remote_payloads);
+            apply_cfg!(opt_clone scan.custom_blind_xss_payload => args.custom_blind_xss_payload);
+            apply_cfg!(opt_clone scan.blind_callback_url => args.blind_callback_url);
+            apply_cfg!(opt_clone scan.blind_oob => args.oob.blind_oob);
+            apply_cfg!(opt_clone scan.blind_oob_secret => args.oob.blind_oob_secret);
+            apply_cfg!(opt scan.blind_oob_wait => args.oob.blind_oob_wait);
+            apply_cfg!(opt_clone scan.custom_payload => args.custom_payload);
+            apply_cfg!(flag scan.only_custom_payload => args.only_custom_payload);
+            apply_cfg!(opt_clone scan.inject_marker => args.inject_marker);
+            apply_cfg!(explicit_clone scan.custom_alert_value => args.custom_alert_value);
+            apply_cfg!(explicit_clone scan.custom_alert_type => args.custom_alert_type);
+            apply_cfg!(flag scan.skip_xss_scanning => args.skip_xss_scanning);
+            apply_cfg!(explicit scan.max_payloads_per_param => args.max_payloads_per_param);
+            apply_cfg!(flag scan.deep_scan => args.deep_scan);
+            apply_cfg!(flag scan.sxss => args.sxss);
+            apply_cfg!(opt_clone scan.sxss_url => args.sxss_url);
+            apply_cfg!(explicit_clone scan.sxss_method => args.sxss_method);
+            apply_cfg!(explicit scan.sxss_retries => args.sxss_retries);
+            apply_cfg!(flag scan.skip_ast_analysis => args.skip_ast_analysis);
+            apply_cfg!(flag scan.analyze_external_js => args.analyze_external_js);
+            apply_cfg!(flag scan.detect_outdated_libs => args.detect_outdated_libs);
+            apply_cfg!(flag scan.hpp => args.hpp);
             // WAF
-            if let Some(v) = &scan.waf_bypass
-                && !args.was_explicit("waf_bypass")
-            {
-                args.waf_bypass = v.clone();
-            }
-            if let Some(v) = scan.skip_waf_probe
-                && !args.skip_waf_probe
-            {
-                args.skip_waf_probe = v;
-            }
-            if let Some(v) = &scan.force_waf
-                && args.force_waf.is_none()
-            {
-                args.force_waf = Some(v.clone());
-            }
-            if let Some(v) = scan.waf_evasion
-                && !args.waf_evasion
-            {
-                args.waf_evasion = v;
-            }
-            if let Some(v) = scan.waf_min_confidence
-                && !args.was_explicit("waf_min_confidence")
-            {
-                args.waf_min_confidence = v;
-            }
+            apply_cfg!(explicit_clone scan.waf_bypass => args.waf_bypass);
+            apply_cfg!(flag scan.skip_waf_probe => args.skip_waf_probe);
+            apply_cfg!(opt_clone scan.force_waf => args.force_waf);
+            apply_cfg!(flag scan.waf_evasion => args.waf_evasion);
+            apply_cfg!(explicit scan.waf_min_confidence => args.waf_min_confidence);
         }
     }
 
