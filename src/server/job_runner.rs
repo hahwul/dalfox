@@ -3,6 +3,7 @@
 //! hosts `hydrate_preflight_target`, shared with the preflight handler.
 
 use super::*;
+use crate::job::spec::ScanRequestSpec;
 
 /// Spawn `run_scan_job` on the blocking pool with full panic / runtime-build
 /// isolation. Without this wrapper, a panic inside the spawned task — or a
@@ -264,96 +265,30 @@ pub(crate) async fn run_scan_job(
     // Built once behind an `Arc` so the scan future and `run_scanning` share it
     // by refcount bump instead of deep-cloning this ~70-field struct (mirrors
     // the MCP path, which already uses `Arc<ScanArgs>`).
-    let args = Arc::new(ScanArgs {
-        detect_outdated_libs: opts.detect_outdated_libs.unwrap_or(false),
-        // Each REST job scans exactly one caller-supplied URL, with method,
-        // headers, cookies, and body provided as explicit request fields — the
-        // same fidelity a single HAR entry carries. The multi-target input
-        // shapes (`file`, `pipe`, `raw-http`, `har`) are CLI-only because they
-        // fan one input out into many targets, which the one-job-one-URL model
-        // here doesn't express; callers replay a HAR by POSTing /scan per entry.
-        input_type: "url".to_string(),
-        format: "json".to_string(),
-        include_request,
-        include_response,
-        silence: true,
-
-        param: opts.param.clone().unwrap_or_default(),
-        data: opts.data.clone(),
-        headers: opts.header.clone().unwrap_or_default(),
-        cookies: {
-            let mut v = vec![];
-            if let Some(c) = &opts.cookie
-                && !c.trim().is_empty()
-            {
-                v.push(c.clone());
-            }
-            v
-        },
-        method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
-        user_agent: opts.user_agent.clone(),
-        no_color: true,
-        skip_discovery: opts.skip_discovery.unwrap_or(false),
-        skip_mining: opts.skip_mining.unwrap_or(false),
-        skip_mining_dict: opts.skip_mining.unwrap_or(false),
-        skip_mining_dom: opts.skip_mining.unwrap_or(false),
-
-        timeout: opts
-            .timeout
-            .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS),
-        // Whole-scan wall-clock budget: the request's own value, capped by the
-        // server-wide `--scan-timeout` when set. Enforced below by wrapping the
-        // scan future, since `run_scanning` itself doesn't honor this field
-        // (the CLI applies the same budget in its scan loop, not in scanning).
-        scan_timeout: effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
-        delay: opts.delay.unwrap_or(0),
-        proxy: opts.proxy.clone(),
-        // Pass the request's choice through verbatim (None => unspecified);
-        // the effective value defaults to insecure (true) when the Target's
-        // client is built, matching the CLI scan path.
-        insecure: opts.insecure,
-        follow_redirects: opts.follow_redirects.unwrap_or(false),
-
-        workers: opts.worker.unwrap_or(50),
-
-        encoders: opts
-            .encoders
-            .clone()
-            .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]),
-        blind_callback_url: opts.blind.clone(),
-        max_payloads_per_param: opts.max_payloads_per_param.unwrap_or(0),
-        deep_scan: opts.deep_scan.unwrap_or(false),
-        skip_ast_analysis: opts.skip_ast_analysis.unwrap_or(false),
-        analyze_external_js: opts.analyze_external_js.unwrap_or(false),
-        waf_bypass: opts
-            .waf_bypass
-            .clone()
-            .unwrap_or_else(|| "auto".to_string()),
-        skip_waf_probe: opts.skip_waf_probe.unwrap_or(false),
-        // Normalize to the canonical (lowercased) WAF name like the CLI/MCP do;
-        // `validate_scan_options` already rejected unknown names before queuing,
-        // so the fallback is defensive only.
-        force_waf: opts
-            .force_waf
-            .as_deref()
-            .map(|s| crate::cmd::scan::parse_force_waf_arg(s).unwrap_or_else(|_| s.to_string())),
-        waf_evasion: opts.waf_evasion.unwrap_or(false),
-        // Per-scan outbound request rate (RPS), capped by the server-wide
-        // `--rate-limit`. Honored in `run_scanning`'s workers now that they
-        // re-enter the per-job rate-limiter scope (see crate::with_job_scopes).
-        rate_limit: effective_rate_limit(opts.rate_limit, state.rate_limit),
-        waf_min_confidence: opts
-            .waf_min_confidence
-            .unwrap_or(crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE),
-        remote_payloads: opts.remote_payloads.clone().unwrap_or_default(),
-        remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
-
-        targets: vec![url.clone()],
-        // Everything else stays at its CLI default. Notably `oob`: OOB/OAST
-        // blind XSS is CLI-only for now, because the server runs its own scan
-        // loop and would need the poller lifecycle wired separately.
-        ..Default::default()
-    });
+    //
+    // The mapping from request to `ScanArgs` lives in `job::spec` so this path
+    // and MCP's cannot drift; only the two server-wide ceilings and the WAF
+    // name normalization are applied here, because they need `state`.
+    let args = Arc::new(
+        ScanRequestSpec::from_rest_options(
+            url.clone(),
+            &opts,
+            include_request,
+            include_response,
+            // Capped by the server-wide `--scan-timeout` when set. Enforced
+            // below by wrapping the scan future.
+            effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
+            // Capped by the server-wide `--rate-limit` when set.
+            effective_rate_limit(opts.rate_limit, state.rate_limit),
+            // Normalize to the canonical (lowercased) WAF name like the CLI/MCP
+            // do; `validate_scan_options` already rejected unknown names before
+            // queuing, so the fallback is defensive only.
+            opts.force_waf.as_deref().map(|s| {
+                crate::cmd::scan::parse_force_waf_arg(s).unwrap_or_else(|_| s.to_string())
+            }),
+        )
+        .into_scan_args(),
+    );
 
     // Initialize remote resources if requested (honor timeout/proxy).
     // A failure here is not cosmetic: the scan proceeds without the payload or

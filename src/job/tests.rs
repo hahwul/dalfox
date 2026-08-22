@@ -336,3 +336,135 @@ fn enforce_retention_cap_zero_disables_the_cap() {
 
     assert_eq!(jobs.len(), 4);
 }
+
+// ---------------------------------------------------------------------------
+// job::spec — the shared REST/MCP request → ScanArgs mapping
+// ---------------------------------------------------------------------------
+
+use crate::job::spec::ScanRequestSpec;
+
+/// The surface policy every agent-facing scan gets regardless of what the
+/// caller asked for. Previously written out twice (once in `job_runner`, once
+/// in the MCP tool) and drifted; pin it once.
+#[test]
+fn into_scan_args_applies_the_fixed_surface_policy() {
+    let args = ScanRequestSpec {
+        target: "http://example.com/?q=1".to_string(),
+        skip_mining: true,
+        ..Default::default()
+    }
+    .into_scan_args();
+
+    assert_eq!(args.input_type, "url");
+    assert_eq!(args.targets, vec!["http://example.com/?q=1".to_string()]);
+    assert_eq!(args.format, "json");
+    assert!(args.silence, "job output is serialized, never printed");
+    assert!(args.no_color, "diagnostics must not carry ANSI into JSON");
+    // One request-level switch drives all three mining stages.
+    assert!(args.skip_mining && args.skip_mining_dict && args.skip_mining_dom);
+    assert!(
+        args.oob.blind_oob.is_none(),
+        "OOB/OAST blind XSS stays CLI-only on these surfaces"
+    );
+}
+
+/// A REST request that names nothing must land on the CLI's own defaults. The
+/// REST path used to spell them as literals (`50`, `"GET"`, `["url", "html"]`),
+/// so changing a `DEFAULT_*` moved the CLI and MCP but silently left the server
+/// behind.
+#[test]
+fn rest_defaults_track_the_cli_constants() {
+    let opts = crate::server::types::ScanOptions::default();
+    let spec = ScanRequestSpec::from_rest_options(
+        "http://example.com".to_string(),
+        &opts,
+        false,
+        false,
+        0,
+        0,
+        None,
+    );
+
+    assert_eq!(spec.workers, crate::cmd::scan::DEFAULT_WORKERS);
+    assert_eq!(spec.method, crate::cmd::scan::DEFAULT_METHOD);
+    assert_eq!(spec.timeout, crate::cmd::scan::DEFAULT_TIMEOUT_SECS);
+    assert_eq!(spec.waf_bypass, crate::cmd::scan::DEFAULT_WAF_BYPASS);
+    assert_eq!(
+        spec.waf_min_confidence,
+        crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE
+    );
+    assert_eq!(spec.encoders, crate::cmd::scan::DEFAULT_ENCODERS);
+    assert_eq!(
+        spec.insecure, None,
+        "an unspecified `insecure` stays unspecified; the Target decides"
+    );
+}
+
+/// The two front-ends describe the same scan in two request shapes. Given
+/// equivalent input they must produce byte-identical `ScanArgs` — that equality
+/// is the whole reason the mapping was pulled into one place.
+#[test]
+fn rest_and_mcp_requests_agree_on_scan_args() {
+    let mcp_params: crate::mcp::ScanWithDalfoxParams =
+        serde_json::from_str(r#"{"target":"http://example.com/?q=1"}"#)
+            .expect("minimal MCP scan request deserializes");
+
+    // The MCP tool schema fills its own defaults via serde; the REST body
+    // leaves everything `None` and resolves defaults on the way into the spec.
+    let rest = ScanRequestSpec::from_rest_options(
+        "http://example.com/?q=1".to_string(),
+        &crate::server::types::ScanOptions::default(),
+        false,
+        false,
+        0,
+        0,
+        None,
+    )
+    .into_scan_args();
+
+    let mcp = ScanRequestSpec {
+        target: "http://example.com/?q=1".to_string(),
+        param: mcp_params.param,
+        data: mcp_params.data,
+        headers: mcp_params.headers,
+        cookies: mcp_params.cookies,
+        method: mcp_params.method,
+        user_agent: mcp_params.user_agent,
+        encoders: mcp_params.encoders,
+        timeout: mcp_params.timeout,
+        scan_timeout: mcp_params.scan_timeout,
+        delay: mcp_params.delay,
+        follow_redirects: mcp_params.follow_redirects,
+        // The only deliberate divergence: MCP's schema always yields a concrete
+        // bool, and its default (`true`) is the same posture the REST path
+        // reaches by leaving the choice to the Target. Normalize it here so the
+        // rest of the comparison is meaningful.
+        insecure: None,
+        proxy: mcp_params.proxy,
+        include_request: mcp_params.include_request,
+        include_response: mcp_params.include_response,
+        skip_mining: mcp_params.skip_mining,
+        skip_discovery: mcp_params.skip_discovery,
+        deep_scan: mcp_params.deep_scan,
+        skip_ast_analysis: mcp_params.skip_ast_analysis,
+        analyze_external_js: mcp_params.analyze_external_js,
+        detect_outdated_libs: mcp_params.detect_outdated_libs,
+        blind_callback_url: mcp_params.blind_callback_url,
+        workers: mcp_params.workers,
+        rate_limit: mcp_params.rate_limit,
+        waf_bypass: mcp_params.waf_bypass,
+        skip_waf_probe: mcp_params.skip_waf_probe,
+        force_waf: mcp_params.force_waf,
+        waf_evasion: mcp_params.waf_evasion,
+        waf_min_confidence: mcp_params.waf_min_confidence as f32,
+        remote_payloads: mcp_params.remote_payloads,
+        remote_wordlists: mcp_params.remote_wordlists,
+        max_payloads_per_param: mcp_params.max_payloads_per_param,
+    }
+    .into_scan_args();
+
+    assert_eq!(
+        rest, mcp,
+        "a default REST scan and a default MCP scan must run identically"
+    );
+}

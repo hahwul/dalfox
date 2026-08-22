@@ -98,6 +98,9 @@ pub const ENCODER_VALUES: &[&str] = &[
 ];
 pub const CUSTOM_ALERT_TYPE_VALUES: &[&str] = &["none", "str"];
 pub const WAF_BYPASS_VALUES: &[&str] = &["auto", "force", "off"];
+/// Default `--waf-bypass` mode. Named so the CLI, the REST server, and the
+/// MCP tool schema cannot drift onto different defaults.
+pub const DEFAULT_WAF_BYPASS: &str = "auto";
 pub const DEDUP_URLS_VALUES: &[&str] = &["exact", "signature", "off"];
 /// Default for `--dedup-urls`: collapse only byte-identical `url|method`
 /// pairs, i.e. the historical behavior. `signature` additionally collapses
@@ -769,7 +772,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "WAF")]
     /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (detect-only; no payload mutations). Default: auto
-    #[arg(long, default_value = "auto", value_parser = clap::builder::PossibleValuesParser::new(WAF_BYPASS_VALUES.iter().copied()))]
+    #[arg(long, default_value = DEFAULT_WAF_BYPASS, value_parser = clap::builder::PossibleValuesParser::new(WAF_BYPASS_VALUES.iter().copied()))]
     pub waf_bypass: String,
 
     #[clap(help_heading = "WAF")]
@@ -922,7 +925,7 @@ impl Default for ScanArgs {
             analyze_external_js: false,
             hpp: false,
             detect_outdated_libs: false,
-            waf_bypass: "auto".to_string(),
+            waf_bypass: DEFAULT_WAF_BYPASS.to_string(),
             skip_waf_probe: false,
             force_waf: None,
             waf_evasion: false,
