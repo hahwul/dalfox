@@ -825,22 +825,7 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
 
 /// Minimal `Param` with sensible defaults; only `name`/`location` vary per test.
 fn make_param(name: &str, location: Location) -> Param {
-    Param {
-        name: name.to_string(),
-        value: "v".to_string(),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name.to_string(), "v".to_string(), location)
 }
 
 /// A `Target` carrying the given discovered reflection params.

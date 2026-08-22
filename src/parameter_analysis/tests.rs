@@ -8,20 +8,12 @@ use tokio::sync::Semaphore;
 fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
     // Simulate adding a reflection param
     _target.reflection_params.push(Param {
-        name: "test_param".to_string(),
-        value: "test_value".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new(
+            "test_param".to_string(),
+            "test_value".to_string(),
+            Location::Query,
+        )
     });
 }
 
@@ -88,20 +80,8 @@ fn test_probe_body_params_mock() {
 
     // Mock body param reflection
     target.reflection_params.push(Param {
-        name: "key1".to_string(),
-        value: "dalfox".to_string(),
-        location: Location::Body,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("key1".to_string(), "dalfox".to_string(), Location::Body)
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -117,20 +97,8 @@ fn test_check_header_discovery_mock() {
 
     // Mock header discovery
     target.reflection_params.push(Param {
-        name: "X-Test".to_string(),
-        value: "dalfox".to_string(),
-        location: Location::Header,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("X-Test".to_string(), "dalfox".to_string(), Location::Header)
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -146,20 +114,13 @@ fn test_check_cookie_discovery_mock() {
 
     // Mock cookie discovery
     target.reflection_params.push(Param {
-        name: "session".to_string(),
-        value: "dalfox".to_string(),
-        location: Location::Header, // Cookies are sent in Header
+        // Cookies are sent in Header
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new(
+            "session".to_string(),
+            "dalfox".to_string(),
+            Location::Header,
+        )
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -276,68 +237,20 @@ fn test_filter_params_by_name_and_type() {
 
     let params = vec![
         Param {
-            name: "sort".to_string(),
-            value: "asc".to_string(),
-            location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("sort".to_string(), "asc".to_string(), Location::Query)
         },
         Param {
-            name: "sort".to_string(),
-            value: "asc".to_string(),
-            location: Location::Body,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("sort".to_string(), "asc".to_string(), Location::Body)
         },
         Param {
-            name: "id".to_string(),
-            value: "123".to_string(),
-            location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("id".to_string(), "123".to_string(), Location::Query)
         },
         Param {
-            name: "session".to_string(),
-            value: "abc".to_string(),
-            location: Location::Header,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("session".to_string(), "abc".to_string(), Location::Header)
         },
     ];
 
@@ -372,52 +285,16 @@ fn test_filter_params_multiple_filters() {
 
     let params = vec![
         Param {
-            name: "sort".to_string(),
-            value: "asc".to_string(),
-            location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("sort".to_string(), "asc".to_string(), Location::Query)
         },
         Param {
-            name: "id".to_string(),
-            value: "123".to_string(),
-            location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("id".to_string(), "123".to_string(), Location::Query)
         },
         Param {
-            name: "session".to_string(),
-            value: "abc".to_string(),
-            location: Location::Header,
             injection_context: Some(InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("session".to_string(), "abc".to_string(), Location::Header)
         },
     ];
 
@@ -436,20 +313,8 @@ fn test_filter_params_multiple_filters() {
 fn test_filter_params_empty_filters() {
     let target = parse_target("https://example.com").unwrap();
     let params = vec![Param {
-        name: "sort".to_string(),
-        value: "asc".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("sort".to_string(), "asc".to_string(), Location::Query)
     }];
 
     // Empty filters should return all params
@@ -461,20 +326,8 @@ fn test_filter_params_empty_filters() {
 fn test_filter_params_invalid_filter_format() {
     let target = parse_target("https://example.com").unwrap();
     let params = vec![Param {
-        name: "sort".to_string(),
-        value: "asc".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("sort".to_string(), "asc".to_string(), Location::Query)
     }];
 
     // Invalid filter format (too many colons) should be treated as name only
@@ -484,22 +337,7 @@ fn test_filter_params_invalid_filter_format() {
 }
 
 fn bare_param(name: &str, location: Location) -> Param {
-    Param {
-        name: name.to_string(),
-        value: String::new(),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name.to_string(), String::new(), location)
 }
 
 #[test]
@@ -843,22 +681,7 @@ fn probe_target() -> crate::target_parser::Target {
 }
 
 fn probe_param(name: &str, location: Location) -> Param {
-    Param {
-        name: name.to_string(),
-        value: "v".to_string(),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name.to_string(), "v".to_string(), location)
 }
 
 #[test]
@@ -1368,22 +1191,7 @@ async fn active_probe_path_falls_back_to_per_char_when_batched_breaks_routing() 
 #[test]
 fn test_param_type_label_covers_every_location() {
     fn param_at(name: &str, location: Location) -> Param {
-        Param {
-            name: name.to_string(),
-            value: String::new(),
-            location,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        }
+        Param::new(name.to_string(), String::new(), location)
     }
 
     let mut target = parse_target("https://example.com").unwrap();
@@ -1474,20 +1282,8 @@ fn test_encoded_variants_maps_every_known_special() {
 fn test_effective_wire_name() {
     // wire_name set: returns the parent HTTP param key, not `name`.
     let nested = Param {
-        name: "child".to_string(),
-        value: String::new(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
         wire_name: Some("parent".to_string()),
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("child".to_string(), String::new(), Location::Query)
     };
     assert_eq!(nested.effective_wire_name(), "parent");
 
@@ -1713,22 +1509,7 @@ fn probe_test_target(cookies: &[(&str, &str)]) -> Target {
 }
 
 fn probe_test_param(location: Location, name: &str) -> Param {
-    Param {
-        name: name.into(),
-        value: "".into(),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name, "", location)
 }
 
 #[test]

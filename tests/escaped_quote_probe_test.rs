@@ -29,22 +29,10 @@ async fn escaping_handler(Query(p): Query<HashMap<String, String>>) -> Html<Stri
 
 fn js_dq_param() -> Param {
     Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Javascript(Some(
             DelimiterType::DoubleQuote,
         ))),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
     }
 }
 

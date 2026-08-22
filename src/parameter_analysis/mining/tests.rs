@@ -612,20 +612,10 @@ fn test_make_any_param_fills_classification_and_context() {
 #[test]
 fn test_make_any_param_inherits_mined_sample_metadata() {
     let mined = Param {
-        name: "mined_word".into(),
-        value: "MINEDVALUE".into(),
-        location: Location::Query,
         injection_context: Some(InjectionContext::Html(None)),
         valid_specials: Some(vec!['<', '>']),
         invalid_specials: Some(vec!['"']),
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new("mined_word", "MINEDVALUE", Location::Query)
     };
     let p = make_any_param(Location::Query, None, Some(&mined));
     assert_eq!(p.name, "any");
@@ -641,22 +631,7 @@ fn test_make_any_param_inherits_mined_sample_metadata() {
 }
 
 fn bare_param(name: &str, location: Location) -> Param {
-    Param {
-        name: name.into(),
-        value: format!("{name}_value"),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new(name, format!("{name}_value"), location)
 }
 
 fn names_at(params: &[Param], location: Location) -> Vec<&str> {
@@ -1318,22 +1293,11 @@ async fn test_dom_mining_collapse_preserves_non_query_params() {
     let target = parse_target(&format!("http://{}:{}/echo-all", addr.ip(), addr.port()))
         .expect("parse target");
     let args = default_scan_args();
-    let reflection_params = Arc::new(Mutex::new(vec![Param {
-        name: "body_field".to_string(),
-        value: "v".to_string(),
-        location: Location::Body,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }]));
+    let reflection_params = Arc::new(Mutex::new(vec![Param::new(
+        "body_field".to_string(),
+        "v".to_string(),
+        Location::Body,
+    )]));
     let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
 
     probe_response_id_params(&target, &args, reflection_params.clone(), semaphore, None).await;

@@ -152,20 +152,12 @@ fn make_any_param(
     mined_sample: Option<&Param>,
 ) -> Param {
     let mut param = Param {
-        name: "any".to_string(),
-        value: crate::scanning::markers::bracketed_marker().to_string(),
-        location,
         injection_context: Some(InjectionContext::Html(None)),
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
+        ..Param::new(
+            "any".to_string(),
+            crate::scanning::markers::bracketed_marker().to_string(),
+            location,
+        )
     };
     if let Some(text) = response_text {
         let (valid, invalid) = crate::parameter_analysis::classify_special_chars(text);
@@ -840,24 +832,16 @@ pub async fn probe_dictionary_params(
                             st.record_reflection();
                             if !st.collapsed {
                                 discovered = Some(Param {
-                                    name: param_name.clone(),
-                                    value: crate::scanning::markers::bracketed_marker().to_string(),
-                                    location: crate::parameter_analysis::Location::Query,
                                     injection_context: Some(
                                         crate::parameter_analysis::InjectionContext::AttributeUrl(
                                             None,
                                         ),
                                     ),
-                                    valid_specials: None,
-                                    invalid_specials: None,
-                                    pre_encoding: None,
-                                    pre_encoding_pipeline: None,
-                                    wire_name: None,
-                                    form_action_url: None,
-                                    form_origin_url: None,
-                                    framework_sink: None,
-                                    escaped_specials: None,
-                                    js_breakout: None,
+                                    ..Param::new(
+                                        param_name.clone(),
+                                        crate::scanning::markers::bracketed_marker().to_string(),
+                                        crate::parameter_analysis::Location::Query,
+                                    )
                                 });
                                 if !silence {
                                     eprintln!(
@@ -886,21 +870,16 @@ pub async fn probe_dictionary_params(
                                     let (valid, invalid) =
                                         crate::parameter_analysis::classify_special_chars(&text);
                                     discovered = Some(Param {
-                                        name: param_name.clone(),
-                                        value: crate::scanning::markers::bracketed_marker()
-                                            .to_string(),
-                                        location: crate::parameter_analysis::Location::Query,
                                         injection_context: Some(context),
                                         valid_specials: Some(valid),
                                         invalid_specials: Some(invalid),
-                                        pre_encoding: None,
-                                        pre_encoding_pipeline: None,
-                                        wire_name: None,
-                                        form_action_url: None,
-                                        form_origin_url: None,
-                                        framework_sink: None,
-                                        escaped_specials: None,
                                         js_breakout: detect_js_breakout(&text),
+                                        ..Param::new(
+                                            param_name.clone(),
+                                            crate::scanning::markers::bracketed_marker()
+                                                .to_string(),
+                                            crate::parameter_analysis::Location::Query,
+                                        )
                                     });
                                     if !silence {
                                         eprintln!(
@@ -1073,20 +1052,15 @@ pub async fn probe_body_params(
                                 let (valid, invalid) =
                                     crate::parameter_analysis::classify_special_chars(&text);
                                 discovered = Some(Param {
-                                    name: param_name_cloned.clone(),
-                                    value: crate::scanning::markers::bracketed_marker().to_string(),
-                                    location: Location::Body,
                                     injection_context: Some(context),
                                     valid_specials: Some(valid),
                                     invalid_specials: Some(invalid),
-                                    pre_encoding: None,
-                                    pre_encoding_pipeline: None,
-                                    wire_name: None,
-                                    form_action_url: None,
-                                    form_origin_url: None,
-                                    framework_sink: None,
-                                    escaped_specials: None,
                                     js_breakout: detect_js_breakout(&text),
+                                    ..Param::new(
+                                        param_name_cloned.clone(),
+                                        crate::scanning::markers::bracketed_marker().to_string(),
+                                        Location::Body,
+                                    )
                                 });
                                 if !silence {
                                     eprintln!(
@@ -1323,21 +1297,16 @@ pub async fn probe_response_id_params(
                                         crate::parameter_analysis::classify_special_chars(&text);
                                     // Store discovered Param for return (batched later)
                                     discovered = Some(Param {
-                                        name: param.clone(),
-                                        value: crate::scanning::markers::bracketed_marker()
-                                            .to_string(),
-                                        location: crate::parameter_analysis::Location::Query,
                                         injection_context: Some(context),
                                         valid_specials: Some(valid),
                                         invalid_specials: Some(invalid),
-                                        pre_encoding: None,
-                                        pre_encoding_pipeline: None,
-                                        wire_name: None,
-                                        form_action_url: None,
-                                        form_origin_url: None,
-                                        framework_sink: None,
-                                        escaped_specials: None,
                                         js_breakout: detect_js_breakout(&text),
+                                        ..Param::new(
+                                            param.clone(),
+                                            crate::scanning::markers::bracketed_marker()
+                                                .to_string(),
+                                            crate::parameter_analysis::Location::Query,
+                                        )
                                     });
                                     if !silence {
                                         eprintln!(
@@ -1530,20 +1499,15 @@ pub async fn probe_json_body_params(
                             let (valid, invalid) =
                                 crate::parameter_analysis::classify_special_chars(&text);
                             discovered = Some(Param {
-                                name: param_name_cloned.clone(),
-                                value: crate::scanning::markers::bracketed_marker().to_string(),
-                                location: Location::JsonBody,
                                 injection_context: Some(context),
                                 valid_specials: Some(valid),
                                 invalid_specials: Some(invalid),
-                                pre_encoding: None,
-                                pre_encoding_pipeline: None,
-                                wire_name: None,
-                                form_action_url: None,
-                                form_origin_url: None,
-                                framework_sink: None,
-                                escaped_specials: None,
                                 js_breakout: detect_js_breakout(&text),
+                                ..Param::new(
+                                    param_name_cloned.clone(),
+                                    crate::scanning::markers::bracketed_marker().to_string(),
+                                    Location::JsonBody,
+                                )
                             });
                             if !silence {
                                 eprintln!(
@@ -1701,20 +1665,11 @@ pub async fn probe_multipart_params(
                         eprintln!("Discovered multipart field: {}", field_name);
                     }
                     discovered = Some(Param {
-                        name: field_name,
-                        value: marker.to_string(),
-                        location: Location::MultipartBody,
                         injection_context: Some(context),
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
-                        form_action_url: None,
-                        form_origin_url: None,
-                        framework_sink: None,
-                        escaped_specials: None,
                         js_breakout: detect_js_breakout(&text),
+                        ..Param::new(field_name, marker.to_string(), Location::MultipartBody)
                     });
                 }
                 drop(permit);

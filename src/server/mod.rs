@@ -50,7 +50,7 @@ mod cors;
 mod handlers;
 mod job_runner;
 mod response;
-mod types;
+pub(crate) mod types;
 mod util;
 
 pub use types::ServerArgs;

@@ -723,15 +723,22 @@ fn test_config_cannot_override_a_cli_value_that_equals_the_default() {
 }
 
 /// `was_explicit` takes a clap argument id as a *string*, and nothing in the
-/// type system ties those literals to `ScanArgs`. A renamed field — or an
+/// type system ties that id to `ScanArgs`. A renamed field — or an
 /// `#[arg(id = "…")]` — would make the lookup miss forever and silently
 /// reinstate the exact bug this mechanism exists to prevent: a config-file
 /// value would start winning over a typed flag again, with every existing test
 /// still green (they insert the same literals by hand).
 ///
-/// So this reads the ids straight out of `config.rs` and checks each one
-/// against clap's real argument list. It cannot drift, because both sides are
-/// derived rather than restated.
+/// So this reads the guarded fields straight out of `config.rs` and checks each
+/// one against clap's real argument list. It cannot drift, because both sides
+/// are derived rather than restated.
+///
+/// This used to also check that each guard named the same field its block
+/// assigned — `!args.was_explicit("poc_type")` in front of `args.format = …`
+/// names a real argument and passes the check above while handing `--format`
+/// straight back to the config file. `apply_cfg!` now derives the id from the
+/// assigned field with `stringify!`, so that mismatch is unrepresentable and
+/// the check is gone rather than untested.
 #[test]
 fn every_was_explicit_id_is_a_real_clap_argument() {
     use clap::{CommandFactory, Parser};
@@ -752,93 +759,45 @@ fn every_was_explicit_id_is_a_real_clap_argument() {
         "sanity: the clap argument list should not be empty/renamed wholesale"
     );
 
-    // Pull `was_explicit("…")` literals out of the precedence function itself.
-    // Scoped to the function *body* so the rule's own doc comment above it —
-    // which spells out `was_explicit("<field>")` as an example — is not read as
-    // a real guard.
+    // Every `apply_cfg!(explicit …)` / `apply_cfg!(explicit_clone …)` in the
+    // precedence table, by the `args.<field>` it assigns — which is also the id
+    // the expansion passes to `was_explicit`. The other arms read a sentinel the
+    // command line cannot forge (`None`, an empty `Vec`, a `false` flag), so
+    // they never consult `ExplicitArgs` and are not this test's business.
     let src = include_str!("../config.rs");
-    let body = {
-        let start = src
-            // Anchored on the name alone: the visibility keyword in front of it
-            // is not part of what this test is about, and pinning `pub fn` made
-            // the guard fail the moment the item was narrowed to `pub(crate)`.
-            .find("fn apply_to_scan_args_if_default")
-            .expect("precedence function must be present");
-        let rest = &src[start..];
-        let end = rest
-            .find("\n    /// Normalize and validate")
-            .expect("precedence function must be followed by normalize_and_validate");
-        &rest[..end]
-    };
-
-    let mut queried: Vec<&str> = Vec::new();
-    for tail in body.split("was_explicit(\"").skip(1) {
-        queried.push(
-            tail.split('"')
-                .next()
-                .expect("literal must be terminated by a closing quote"),
-        );
+    let mut guarded: Vec<&str> = Vec::new();
+    for tail in src.split("apply_cfg!(explicit").skip(1) {
+        // Skip the macro's own arm definitions and doc comment, which spell
+        // `apply_cfg!(explicit …)` without a concrete field.
+        let Some((_, target)) = tail.split_once("=> args.") else {
+            continue;
+        };
+        let field = target
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .next()
+            .expect("an assignment target follows `=> args.`");
+        if !field.is_empty() {
+            guarded.push(field);
+        }
     }
 
     assert!(
-        queried.len() >= 20,
+        guarded.len() >= 20,
         "expected the precedence guards to be found in config.rs, got {} — \
-         the extractor is looking for `was_explicit(\"…\")`",
-        queried.len()
+         the extractor is looking for `apply_cfg!(explicit… => args.<field>)`",
+        guarded.len()
     );
 
-    let unknown: Vec<&str> = queried
+    let unknown: Vec<&str> = guarded
         .iter()
         .copied()
         .filter(|id| !valid.contains(*id))
         .collect();
     assert!(
         unknown.is_empty(),
-        "config.rs asks was_explicit() about ids clap does not define: {unknown:?} — \
-         these always return false, so a config file would silently override the flag"
-    );
-
-    // Existing is not enough: `!args.was_explicit("poc_type")` guarding an
-    // assignment to `args.format` names a real argument and passes every test
-    // above, while handing `--format` straight back to the config file. So each
-    // guard is also checked against the field its own block assigns.
-    //
-    // `if let Some(` opens each block, so splitting on it yields one guard plus
-    // one assignment per chunk.
-    let mut pairs: Vec<(&str, &str)> = Vec::new();
-    for chunk in body.split("if let Some(") {
-        let Some(after_guard) = chunk.split_once("was_explicit(\"") else {
-            continue;
-        };
-        let id = after_guard
-            .1
-            .split('"')
-            .next()
-            .expect("literal must be terminated");
-        // First `args.<field> =` after the guard is that block's assignment.
-        let assigned = after_guard
-            .1
-            .split_once("args.")
-            .and_then(|(_, t)| t.split(|c: char| !c.is_alphanumeric() && c != '_').next())
-            .unwrap_or("<none>");
-        pairs.push((id, assigned));
-    }
-
-    assert_eq!(
-        pairs.len(),
-        queried.len(),
-        "the block-splitting extractor found {} guards but the literal scan found {} — \
-         the two disagree, so one of them is no longer reading the code correctly",
-        pairs.len(),
-        queried.len()
-    );
-
-    let mismatched: Vec<&(&str, &str)> = pairs.iter().filter(|(id, f)| id != f).collect();
-    assert!(
-        mismatched.is_empty(),
-        "was_explicit() guards that do not match the field their block assigns: \
-         {mismatched:?} (read as (guard_id, assigned_field)) — the guarded flag is \
-         still config-overridable"
+        "config.rs guards fields clap does not define as arguments: {unknown:?} — \
+         `was_explicit` always returns false for those, so a config file would \
+         silently override the flag"
     );
 }
 

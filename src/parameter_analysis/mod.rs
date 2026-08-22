@@ -163,6 +163,41 @@ pub struct Param {
 }
 
 impl Param {
+    /// A parameter with the three identifying fields set and every optional
+    /// analysis field unset.
+    ///
+    /// The optional fields are filled in progressively by discovery, mining,
+    /// and the probe stages; almost no call site knows more than one or two of
+    /// them. Spelling out the other ten `None`s at each of the ~140
+    /// construction sites made every new field an N-site edit (and dragged
+    /// patch coverage down for a mechanical change). Set what you know and let
+    /// struct update syntax supply the rest:
+    ///
+    /// ```ignore
+    /// Param {
+    ///     injection_context: Some(ctx),
+    ///     ..Param::new(name, value, Location::Query)
+    /// }
+    /// ```
+    pub fn new(name: impl Into<String>, value: impl Into<String>, location: Location) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+            location,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+            escaped_specials: None,
+            js_breakout: None,
+        }
+    }
+
     /// HTTP-level parameter name (parent param when this is a nested-field
     /// virtual param, otherwise `name`).
     pub(crate) fn effective_wire_name(&self) -> &str {
@@ -416,22 +451,11 @@ async fn send_probe_request_for_param(
         Location::Fragment => {
             let inject_url_str = crate::scanning::url_inject::build_injected_url(
                 &url_original,
-                &crate::parameter_analysis::Param {
-                    name: param_name.clone(),
-                    value: String::new(),
-                    location: Location::Fragment,
-                    injection_context: None,
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
-                    js_breakout: None,
-                },
+                &crate::parameter_analysis::Param::new(
+                    param_name.clone(),
+                    String::new(),
+                    Location::Fragment,
+                ),
                 payload,
             );
             let frag_url =
@@ -1352,22 +1376,7 @@ fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: 
 }
 
 fn push_synthesized_param(params: &mut Vec<Param>, name: &str, location: Location) {
-    params.push(Param {
-        name: name.to_string(),
-        value: String::new(),
-        location,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    });
+    params.push(Param::new(name.to_string(), String::new(), location));
 }
 
 /// Infer a wire location for a bare `-p name` when discovery did not seed it.

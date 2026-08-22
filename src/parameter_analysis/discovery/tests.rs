@@ -575,22 +575,11 @@ async fn test_check_path_discovery_skips_existing_segment() {
         t
     };
 
-    let reflection_params = Arc::new(Mutex::new(vec![Param {
-        name: "path_segment_0".to_string(),
-        value: "only".to_string(),
-        location: Location::Path,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }]));
+    let reflection_params = Arc::new(Mutex::new(vec![Param::new(
+        "path_segment_0".to_string(),
+        "only".to_string(),
+        Location::Path,
+    )]));
 
     let semaphore = Arc::new(Semaphore::new(1));
 
@@ -644,36 +633,16 @@ async fn test_check_discovery_skips_path_when_flag_set() {
 fn test_dedupe_collapses_same_name_location_pair() {
     let mut params = vec![
         Param {
-            name: "query".to_string(),
-            value: "v".to_string(),
-            location: Location::Query,
-            injection_context: None,
             valid_specials: Some(vec!['<', '>']),
             invalid_specials: Some(vec!['"', '\'']),
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("query".to_string(), "v".to_string(), Location::Query)
         },
         Param {
-            name: "query".to_string(),
-            value: String::new(),
-            location: Location::Query,
             injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
             valid_specials: Some(vec!['<', '/']),
             invalid_specials: Some(vec!['"']),
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
             form_action_url: Some("https://x/y".to_string()),
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
+            ..Param::new("query".to_string(), String::new(), Location::Query)
         },
     ];
     dedupe_reflection_params(&mut params);
@@ -696,38 +665,8 @@ fn test_dedupe_collapses_same_name_location_pair() {
 #[test]
 fn test_dedupe_keeps_different_locations_distinct() {
     let mut params = vec![
-        Param {
-            name: "q".to_string(),
-            value: String::new(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
-        Param {
-            name: "q".to_string(),
-            value: String::new(),
-            location: Location::Body,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
+        Param::new("q".to_string(), String::new(), Location::Query),
+        Param::new("q".to_string(), String::new(), Location::Body),
     ];
     dedupe_reflection_params(&mut params);
     assert_eq!(params.len(), 2);
@@ -736,38 +675,8 @@ fn test_dedupe_keeps_different_locations_distinct() {
 #[test]
 fn test_dedupe_is_noop_for_unique_entries() {
     let mut params = vec![
-        Param {
-            name: "a".to_string(),
-            value: String::new(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
-        Param {
-            name: "b".to_string(),
-            value: String::new(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
+        Param::new("a".to_string(), String::new(), Location::Query),
+        Param::new("b".to_string(), String::new(), Location::Query),
     ];
     let before = params.clone();
     dedupe_reflection_params(&mut params);
@@ -784,37 +693,15 @@ fn test_dedupe_fills_remaining_metadata_from_duplicate() {
     // carry-over branches plus the `None`-base arm of the char-set merge
     // helpers (the existing dedupe tests only cover Some+Some).
     let mut params = vec![
+        Param::new("p".to_string(), "v".to_string(), Location::Query),
         Param {
-            name: "p".to_string(),
-            value: "v".to_string(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        },
-        Param {
-            name: "p".to_string(),
-            value: String::new(),
-            location: Location::Query,
-            injection_context: None,
             valid_specials: Some(vec!['<', '>']),
             invalid_specials: Some(vec!['"']),
             pre_encoding: Some("url".to_string()),
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
             form_origin_url: Some("https://origin/form".to_string()),
             framework_sink: Some("v-html".to_string()),
-            escaped_specials: None,
             js_breakout: Some("';alert(1)//".to_string()),
+            ..Param::new("p".to_string(), String::new(), Location::Query)
         },
     ];
     dedupe_reflection_params(&mut params);
@@ -839,36 +726,20 @@ fn test_dedupe_keeps_canonical_metadata_over_duplicate() {
     // gate against a future regression that blindly overwrites.
     let mut params = vec![
         Param {
-            name: "p".to_string(),
-            value: "v".to_string(),
-            location: Location::Query,
             injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
-            valid_specials: None,
-            invalid_specials: None,
             pre_encoding: Some("base-enc".to_string()),
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
             form_origin_url: Some("https://base/form".to_string()),
             framework_sink: Some("ng-bind-html".to_string()),
-            escaped_specials: None,
             js_breakout: Some("base-breakout".to_string()),
+            ..Param::new("p".to_string(), "v".to_string(), Location::Query)
         },
         Param {
-            name: "p".to_string(),
-            value: String::new(),
-            location: Location::Query,
             injection_context: Some(crate::parameter_analysis::InjectionContext::Attribute(None)),
-            valid_specials: None,
-            invalid_specials: None,
             pre_encoding: Some("dup-enc".to_string()),
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
             form_origin_url: Some("https://dup/form".to_string()),
             framework_sink: Some("v-html".to_string()),
-            escaped_specials: None,
             js_breakout: Some("dup-breakout".to_string()),
+            ..Param::new("p".to_string(), String::new(), Location::Query)
         },
     ];
     dedupe_reflection_params(&mut params);

@@ -43,8 +43,8 @@ use crate::{
         JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_DELAY_MS,
         MAX_RETAINED_SCANS_MCP, MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS, MAX_WORKERS,
         cap_reflection_params, has_http_scheme, now_ms, parse_job_status,
-        purge_expired_jobs as purge_jobs_map, send_reachability_probe, split_cookie_pairs,
-        unreachable_error_message,
+        purge_expired_jobs as purge_jobs_map, send_reachability_probe, spec::ScanRequestSpec,
+        split_cookie_pairs, unreachable_error_message,
     },
     parameter_analysis::analyze_parameters,
     scanning::result::SanitizedResult,
@@ -650,7 +650,7 @@ fn default_method() -> String {
     crate::cmd::scan::DEFAULT_METHOD.to_string()
 }
 fn default_waf_bypass() -> String {
-    "auto".to_string()
+    crate::cmd::scan::DEFAULT_WAF_BYPASS.to_string()
 }
 // Deliberately a literal, not `DEFAULT_WAF_MIN_CONFIDENCE as f64`: widening an
 // f32 value preserves *its* rounding error at f64 precision, so the cast
@@ -1060,66 +1060,48 @@ browser execution; only detection_method=oob observes a real browser."
         // `cookie_from_raw` flag (which reads cookies from a server-side
         // request file) is intentionally not honoured on the MCP path —
         // see the comment on `ScanWithDalfoxParams::cookies` for the reason.
-        let scan_args = Arc::new(ScanArgs {
-            detect_outdated_libs,
-            // One MCP scan call targets exactly one URL, with method/headers/
-            // cookies/data supplied as explicit fields — the same per-request
-            // fidelity a single HAR entry carries. The fan-out input shapes
-            // (`file`, `pipe`, `raw-http`, `har`) stay CLI-only because they
-            // expand one input into many targets, which this single-target tool
-            // doesn't model; an agent replays a HAR by calling the tool per entry.
-            input_type: "url".to_string(),
-            format: "json".to_string(),
-            targets: vec![target.clone()],
-            param,
-            data,
-            headers,
-            cookies,
-            method,
-            user_agent,
-            skip_mining,
-            skip_mining_dict: skip_mining,
-            skip_mining_dom: skip_mining,
-            skip_discovery,
-            timeout,
-            // Whole-scan wall-clock budget; 0 = unbounded. Enforced in
-            // `run_job` by wrapping the scan future (run_scanning doesn't honor
-            // this field — the CLI applies the same budget in its scan loop).
-            scan_timeout,
-            delay,
-            proxy,
-            // params.insecure is a concrete bool (default true via serde); record
-            // it as an explicit choice so it flows through unchanged.
-            insecure: Some(insecure),
-            follow_redirects,
-            include_request,
-            include_response,
-            silence: true,
-            // Match the REST server: scan output is silenced and serialized as
-            // JSON, so strip ANSI from any diagnostic the pipeline emits.
-            no_color: true,
-            workers,
-            encoders,
-            blind_callback_url,
-            max_payloads_per_param,
-            deep_scan,
-            skip_ast_analysis,
-            analyze_external_js,
-            waf_bypass,
-            skip_waf_probe,
-            force_waf,
-            waf_evasion,
-            // Per-call request-rate cap, now honored across all worker tasks
-            // (see crate::with_job_scopes). 0 = unlimited.
-            rate_limit,
-            waf_min_confidence: waf_min_confidence as f32,
-            remote_payloads,
-            remote_wordlists,
-            // Everything else stays at its CLI default. Notably `oob`: OOB/OAST
-            // blind XSS is CLI-only for now, because the MCP path runs its own
-            // scan loop and would need the poller lifecycle wired separately.
-            ..Default::default()
-        });
+        // The mapping from request to `ScanArgs` lives in `job::spec` so this
+        // path and the REST server's cannot drift.
+        let scan_args = Arc::new(
+            ScanRequestSpec {
+                target: target.clone(),
+                param,
+                data,
+                headers,
+                cookies,
+                method,
+                user_agent,
+                encoders,
+                timeout,
+                scan_timeout,
+                delay,
+                follow_redirects,
+                // `params.insecure` is a concrete bool (default true via serde);
+                // record it as an explicit choice so it flows through unchanged.
+                insecure: Some(insecure),
+                proxy,
+                include_request,
+                include_response,
+                skip_mining,
+                skip_discovery,
+                deep_scan,
+                skip_ast_analysis,
+                analyze_external_js,
+                detect_outdated_libs,
+                blind_callback_url,
+                workers,
+                rate_limit,
+                waf_bypass,
+                skip_waf_probe,
+                force_waf,
+                waf_evasion,
+                waf_min_confidence: waf_min_confidence as f32,
+                remote_payloads,
+                remote_wordlists,
+                max_payloads_per_param,
+            }
+            .into_scan_args(),
+        );
 
         // Load any requested remote payload/wordlist providers into the global
         // registries before the scan reads them. Mirrors the REST server and

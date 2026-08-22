@@ -19,22 +19,7 @@ struct TestState {
 }
 
 fn make_param() -> Param {
-    Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Query,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    }
+    Param::new("q".to_string(), "seed".to_string(), Location::Query)
 }
 
 fn default_scan_args() -> crate::cmd::scan::ScanArgs {
@@ -499,22 +484,7 @@ async fn test_check_dom_verification_injects_header_params() {
     let addr = start_mock_server("stored").await;
     let target = parse_target(&format!("http://{}:{}/dom/header", addr.ip(), addr.port()))
         .expect("valid target");
-    let param = Param {
-        name: "X-Test".to_string(),
-        value: "seed".to_string(),
-        location: Location::Header,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("X-Test".to_string(), "seed".to_string(), Location::Header);
     let args = default_scan_args();
 
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
@@ -534,22 +504,7 @@ async fn test_check_dom_verification_injects_cookie_params() {
     target
         .cookies
         .push(("session".to_string(), "seed".to_string()));
-    let param = Param {
-        name: "session".to_string(),
-        value: "seed".to_string(),
-        location: Location::Header,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("session".to_string(), "seed".to_string(), Location::Header);
     let args = default_scan_args();
 
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
@@ -571,22 +526,7 @@ async fn test_check_dom_verification_injects_form_body_params() {
         .expect("valid target");
     target.method = "POST".to_string();
     target.data = Some("q=seed".to_string());
-    let param = Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::Body,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q".to_string(), "seed".to_string(), Location::Body);
     let args = default_scan_args();
 
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
@@ -609,22 +549,7 @@ async fn test_check_dom_verification_injects_json_body_params() {
     .expect("valid target");
     target.method = "POST".to_string();
     target.data = Some("{\"q\":\"seed\"}".to_string());
-    let param = Param {
-        name: "q".to_string(),
-        value: "seed".to_string(),
-        location: Location::JsonBody,
-        injection_context: None,
-        valid_specials: None,
-        invalid_specials: None,
-        pre_encoding: None,
-        pre_encoding_pipeline: None,
-        wire_name: None,
-        form_action_url: None,
-        form_origin_url: None,
-        framework_sink: None,
-        escaped_specials: None,
-        js_breakout: None,
-    };
+    let param = Param::new("q".to_string(), "seed".to_string(), Location::JsonBody);
     let args = default_scan_args();
 
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;

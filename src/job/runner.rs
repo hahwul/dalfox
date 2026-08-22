@@ -9,9 +9,12 @@
 //!
 //! What genuinely differs between the two stays with them: how a job record is
 //! claimed and stored (the REST server holds jobs behind a `tokio::sync::Mutex`,
-//! MCP behind a `std::sync::Mutex`), how options become a `ScanArgs`, and the
-//! REST-only completion webhook. Everything from "hydrate the target" to
-//! "the scan finished and here is what it left behind" lives here.
+//! MCP behind a `std::sync::Mutex`), and the REST-only completion webhook.
+//! Everything from "hydrate the target" to "the scan finished and here is what
+//! it left behind" lives here. Turning a request into `ScanArgs` used to be on
+//! that "differs" list and drifted the same way; it now lives in
+//! [`super::spec`], leaving each surface only the mapping out of its own
+//! request type.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

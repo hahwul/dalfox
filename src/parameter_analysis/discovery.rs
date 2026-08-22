@@ -280,22 +280,7 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
         {
             continue;
         }
-        params.push(Param {
-            name: key,
-            value,
-            location: Location::Fragment,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        });
+        params.push(Param::new(key, value, Location::Fragment));
     }
 }
 
@@ -341,22 +326,7 @@ pub async fn check_query_discovery(
 
     // Check existing query params for reflection
     for (name, value) in target.url.query_pairs() {
-        let tmp_param = Param {
-            name: name.to_string(),
-            value: String::new(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        };
+        let tmp_param = Param::new(name.to_string(), String::new(), Location::Query);
         let url_str = build_injected_url(&target.url, &tmp_param, test_value);
         // `build_injected_url` reassembles the query by hand, so a pathological
         // param name/value in the *target's own* URL can yield a string the URL
@@ -410,22 +380,10 @@ pub async fn check_query_discovery(
                         // Redirect context: marker reflected in Location header.
                         // Use Attribute context since the value is placed in a URI attribute.
                         discovered = Some(Param {
-                            name,
-                            value,
-                            location: crate::parameter_analysis::Location::Query,
                             injection_context: Some(
                                 crate::parameter_analysis::InjectionContext::AttributeUrl(None),
                             ),
-                            valid_specials: None,
-                            invalid_specials: None,
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
-                            form_action_url: None,
-                            form_origin_url: None,
-                            framework_sink: None,
-                            escaped_specials: None,
-                            js_breakout: None,
+                            ..Param::new(name, value, crate::parameter_analysis::Location::Query)
                         });
                     } else if let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
@@ -437,20 +395,12 @@ pub async fn check_query_discovery(
                         )
                         .map(ToString::to_string);
                         discovered = Some(Param {
-                            name,
-                            value,
-                            location: crate::parameter_analysis::Location::Query,
                             injection_context: Some(detect_injection_context(&text)),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
-                            form_action_url: None,
-                            form_origin_url: None,
                             framework_sink,
-                            escaped_specials: None,
                             js_breakout: detect_js_breakout(&text),
+                            ..Param::new(name, value, crate::parameter_analysis::Location::Query)
                         });
                     }
                 }
@@ -511,20 +461,14 @@ pub async fn check_query_discovery(
                 // without adaptive filtering that would incorrectly block payloads.
                 discovered_names.insert(name.clone());
                 batch.push(Param {
-                    name: name.clone(),
-                    value: value.to_string(),
-                    location: crate::parameter_analysis::Location::Query,
                     injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: None,
-                    invalid_specials: None,
                     pre_encoding: Some(enc_name.to_string()),
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
                     js_breakout: detect_js_breakout(&text),
+                    ..Param::new(
+                        name.clone(),
+                        value.to_string(),
+                        crate::parameter_analysis::Location::Query,
+                    )
                 });
                 break; // Found working encoding, no need to try more
             }
@@ -591,20 +535,15 @@ pub async fn check_query_discovery(
             {
                 discovered_names.insert(display_name.clone());
                 batch.push(Param {
-                    name: display_name,
-                    value: nf.original_value.clone(),
-                    location: crate::parameter_analysis::Location::Query,
                     injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
                     pre_encoding_pipeline: Some(nf.pipeline.clone()),
                     wire_name: Some(name.clone()),
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
                     js_breakout: detect_js_breakout(&text),
+                    ..Param::new(
+                        display_name,
+                        nf.original_value.clone(),
+                        crate::parameter_analysis::Location::Query,
+                    )
                 });
             }
             if target.delay > 0 {
@@ -623,22 +562,7 @@ pub async fn check_query_discovery(
             if discovered_names.contains(&name) {
                 continue;
             }
-            let tmp_param = Param {
-                name: name.clone(),
-                value: String::new(),
-                location: Location::Query,
-                injection_context: None,
-                valid_specials: None,
-                invalid_specials: None,
-                pre_encoding: None,
-                pre_encoding_pipeline: None,
-                wire_name: None,
-                form_action_url: None,
-                form_origin_url: None,
-                framework_sink: None,
-                escaped_specials: None,
-                js_breakout: None,
-            };
+            let tmp_param = Param::new(name.clone(), String::new(), Location::Query);
             let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
             let Ok(url) = url::Url::parse(&url_str) else {
                 if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
@@ -658,28 +582,21 @@ pub async fn check_query_discovery(
             {
                 discovered_names.insert(name.clone());
                 batch.push(Param {
-                    name: name.clone(),
-                    value: value.to_string(),
-                    location: crate::parameter_analysis::Location::Query,
                     injection_context: Some(
                         crate::parameter_analysis::mining::detect_injection_context_with_marker(
                             &text,
                             numeric_marker,
                         ),
                     ),
-                    valid_specials: None,
-                    invalid_specials: None,
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    framework_sink: None,
-                    escaped_specials: None,
                     js_breakout: crate::parameter_analysis::mining::detect_js_breakout_with_marker(
                         &text,
                         numeric_marker,
                     ),
+                    ..Param::new(
+                        name.clone(),
+                        value.to_string(),
+                        crate::parameter_analysis::Location::Query,
+                    )
                 });
             }
             if target.delay > 0 {
@@ -705,20 +622,15 @@ pub async fn check_query_discovery(
         {
             let (valid, invalid) = classify_special_chars(&text);
             batch.push(Param {
-                name: "__dalfox_key_inject__".to_string(),
-                value: String::new(),
-                location: crate::parameter_analysis::Location::Query,
                 injection_context: Some(detect_injection_context(&text)),
                 valid_specials: Some(valid),
                 invalid_specials: Some(invalid),
-                pre_encoding: None,
-                pre_encoding_pipeline: None,
-                wire_name: None,
-                form_action_url: None,
-                form_origin_url: None,
-                framework_sink: None,
-                escaped_specials: None,
                 js_breakout: detect_js_breakout(&text),
+                ..Param::new(
+                    "__dalfox_key_inject__".to_string(),
+                    String::new(),
+                    crate::parameter_analysis::Location::Query,
+                )
             });
         }
         if target.delay > 0 {
@@ -884,20 +796,16 @@ pub async fn check_header_discovery(
                     )
                     .map(ToString::to_string);
                     discovered = Some(Param {
-                        name: header_name,
-                        value: header_value,
-                        location: crate::parameter_analysis::Location::Header,
                         injection_context: Some(detect_injection_context(&text)),
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
-                        form_action_url: None,
-                        form_origin_url: None,
                         framework_sink,
-                        escaped_specials: None,
                         js_breakout: detect_js_breakout(&text),
+                        ..Param::new(
+                            header_name,
+                            header_value,
+                            crate::parameter_analysis::Location::Header,
+                        )
                     });
                 }
                 if delay > 0 {
@@ -1076,20 +984,15 @@ pub async fn check_path_discovery(
                         if exploitable_context && bracket_survives {
                             let (valid, invalid) = classify_special_chars(&text);
                             discovered = Some(Param {
-                                name: param_name,
-                                value: original_value,
-                                location: crate::parameter_analysis::Location::Path,
                                 injection_context: Some(detect_injection_context(&text)),
                                 valid_specials: Some(valid),
                                 invalid_specials: Some(invalid),
-                                pre_encoding: None,
-                                pre_encoding_pipeline: None,
-                                wire_name: None,
-                                form_action_url: None,
-                                form_origin_url: None,
-                                framework_sink: None,
-                                escaped_specials: None,
                                 js_breakout: detect_js_breakout(&text),
+                                ..Param::new(
+                                    param_name,
+                                    original_value,
+                                    crate::parameter_analysis::Location::Path,
+                                )
                             });
                         }
                     }
@@ -1190,20 +1093,15 @@ pub async fn check_cookie_discovery(
                 {
                     let (valid, invalid) = classify_special_chars(&text);
                     discovered = Some(Param {
-                        name: cookie_name,
-                        value: cookie_value,
-                        location: crate::parameter_analysis::Location::Header,
                         injection_context: Some(detect_injection_context(&text)),
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
-                        form_action_url: None,
-                        form_origin_url: None,
-                        framework_sink: None,
-                        escaped_specials: None,
                         js_breakout: detect_js_breakout(&text),
+                        ..Param::new(
+                            cookie_name,
+                            cookie_value,
+                            crate::parameter_analysis::Location::Header,
+                        )
                     });
                 }
                 if delay > 0 {
@@ -1380,20 +1278,17 @@ pub async fn check_form_discovery(
                 {
                     let (valid, invalid) = classify_special_chars(&text);
                     batch.push(Param {
-                        name: field_name.clone(),
-                        value: field_value.clone(),
-                        location: crate::parameter_analysis::Location::MultipartBody,
                         injection_context: Some(detect_injection_context(&text)),
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
-                        framework_sink: None,
-                        escaped_specials: None,
                         js_breakout: detect_js_breakout(&text),
+                        ..Param::new(
+                            field_name.clone(),
+                            field_value.clone(),
+                            crate::parameter_analysis::Location::MultipartBody,
+                        )
                     });
                 }
                 if target.delay > 0 {
@@ -1454,20 +1349,17 @@ pub async fn check_form_discovery(
                 {
                     let (valid, invalid) = classify_special_chars(&text);
                     batch.push(Param {
-                        name: field_name.clone(),
-                        value: field_value.clone(),
-                        location: crate::parameter_analysis::Location::Body,
                         injection_context: Some(detect_injection_context(&text)),
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
-                        framework_sink: None,
-                        escaped_specials: None,
                         js_breakout: detect_js_breakout(&text),
+                        ..Param::new(
+                            field_name.clone(),
+                            field_value.clone(),
+                            crate::parameter_analysis::Location::Body,
+                        )
                     });
                 }
                 if target.delay > 0 {
@@ -1500,20 +1392,17 @@ pub async fn check_form_discovery(
                 {
                     let (valid, invalid) = classify_special_chars(&text);
                     batch.push(Param {
-                        name: field_name.clone(),
-                        value: field_value.clone(),
-                        location: crate::parameter_analysis::Location::Query,
                         injection_context: Some(detect_injection_context(&text)),
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
-                        framework_sink: None,
-                        escaped_specials: None,
                         js_breakout: detect_js_breakout(&text),
+                        ..Param::new(
+                            field_name.clone(),
+                            field_value.clone(),
+                            crate::parameter_analysis::Location::Query,
+                        )
                     });
                 }
                 if target.delay > 0 {
@@ -1547,20 +1436,17 @@ pub async fn check_form_discovery(
                 let (valid, invalid) = classify_special_chars(&text);
                 for (field_name, field_value) in &fields {
                     batch.push(Param {
-                        name: field_name.clone(),
-                        value: field_value.clone(),
-                        location: crate::parameter_analysis::Location::JsonBody,
                         injection_context: Some(detect_injection_context(&text)),
                         valid_specials: Some(valid.clone()),
                         invalid_specials: Some(invalid.clone()),
-                        pre_encoding: None,
-                        pre_encoding_pipeline: None,
-                        wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
-                        framework_sink: None,
-                        escaped_specials: None,
                         js_breakout: detect_js_breakout(&text),
+                        ..Param::new(
+                            field_name.clone(),
+                            field_value.clone(),
+                            crate::parameter_analysis::Location::JsonBody,
+                        )
                     });
                 }
             }
@@ -1631,20 +1517,17 @@ pub async fn check_form_discovery(
                     {
                         let (valid, invalid) = classify_special_chars(&text);
                         batch.push(Param {
-                            name: key.clone(),
-                            value: "a".to_string(),
-                            location: crate::parameter_analysis::Location::JsonBody,
                             injection_context: Some(detect_injection_context(&text)),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
-                            framework_sink: None,
-                            escaped_specials: None,
                             js_breakout: detect_js_breakout(&text),
+                            ..Param::new(
+                                key.clone(),
+                                "a".to_string(),
+                                crate::parameter_analysis::Location::JsonBody,
+                            )
                         });
                     }
                     if target.delay > 0 {
@@ -1707,20 +1590,17 @@ pub async fn check_form_discovery(
                     {
                         let (valid, invalid) = classify_special_chars(&text);
                         batch.push(Param {
-                            name: field_name.clone(),
-                            value: field_value.clone(),
-                            location: crate::parameter_analysis::Location::JsonBody,
                             injection_context: Some(detect_injection_context(&text)),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
-                            framework_sink: None,
-                            escaped_specials: None,
                             js_breakout: detect_js_breakout(&text),
+                            ..Param::new(
+                                field_name.clone(),
+                                field_value.clone(),
+                                crate::parameter_analysis::Location::JsonBody,
+                            )
                         });
                     }
                     if target.delay > 0 {

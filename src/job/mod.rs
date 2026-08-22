@@ -18,6 +18,7 @@ use crate::scanning::result::SanitizedResult;
 use crate::target_parser::Target;
 
 pub(crate) mod runner;
+pub(crate) mod spec;
 
 /// Status of an asynchronous scan job (used by both REST server and MCP).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
