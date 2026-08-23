@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2.85.13
+        uses: taiki-e/install-action@v2.86.4
         with:
           tool: cargo-llvm-cov
       - name: Generate code coverage
