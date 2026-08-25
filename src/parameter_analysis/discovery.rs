@@ -17,9 +17,7 @@
 //! Respects `--skip-discovery`, `--skip-reflection-header`, etc.
 
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::{
-    Location, Param, classify_special_chars, detect_injection_context, detect_js_breakout,
-};
+use crate::parameter_analysis::{Location, Param, ReflectionAnalysis};
 use crate::scanning::url_inject::build_injected_url;
 use crate::target_parser::Target;
 use std::sync::{Arc, OnceLock};
@@ -388,20 +386,11 @@ pub async fn check_query_discovery(
                     } else if let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
                     {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
-                            &text,
-                            crate::scanning::markers::bracketed_marker(),
-                        )
-                        .map(ToString::to_string);
-                        discovered = Some(Param {
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                            framework_sink,
-                            js_breakout: detect_js_breakout(&text),
-                            ..Param::new(name, value, crate::parameter_analysis::Location::Query)
-                        });
+                        discovered = Some(
+                            Param::new(name, value, crate::parameter_analysis::Location::Query)
+                                .with_reflection_analysis(&text)
+                                .with_framework_sink(&text),
+                        );
                     }
                 }
                 if delay > 0 {
@@ -460,16 +449,17 @@ pub async fn check_query_discovery(
                 // and leaving specials as None ensures all payload types are tried
                 // without adaptive filtering that would incorrectly block payloads.
                 discovered_names.insert(name.clone());
-                batch.push(Param {
-                    injection_context: Some(detect_injection_context(&text)),
-                    pre_encoding: Some(enc_name.to_string()),
-                    js_breakout: detect_js_breakout(&text),
-                    ..Param::new(
-                        name.clone(),
-                        value.to_string(),
-                        crate::parameter_analysis::Location::Query,
-                    )
-                });
+                batch.push(
+                    Param {
+                        pre_encoding: Some(enc_name.to_string()),
+                        ..Param::new(
+                            name.clone(),
+                            value.to_string(),
+                            crate::parameter_analysis::Location::Query,
+                        )
+                    }
+                    .with_reflection_context(&text),
+                );
                 break; // Found working encoding, no need to try more
             }
             if target.delay > 0 {
@@ -534,17 +524,18 @@ pub async fn check_query_discovery(
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 discovered_names.insert(display_name.clone());
-                batch.push(Param {
-                    injection_context: Some(detect_injection_context(&text)),
-                    pre_encoding_pipeline: Some(nf.pipeline.clone()),
-                    wire_name: Some(name.clone()),
-                    js_breakout: detect_js_breakout(&text),
-                    ..Param::new(
-                        display_name,
-                        nf.original_value.clone(),
-                        crate::parameter_analysis::Location::Query,
-                    )
-                });
+                batch.push(
+                    Param {
+                        pre_encoding_pipeline: Some(nf.pipeline.clone()),
+                        wire_name: Some(name.clone()),
+                        ..Param::new(
+                            display_name,
+                            nf.original_value.clone(),
+                            crate::parameter_analysis::Location::Query,
+                        )
+                    }
+                    .with_reflection_context(&text),
+                );
             }
             if target.delay > 0 {
                 sleep(Duration::from_millis(target.delay)).await;
@@ -620,18 +611,14 @@ pub async fn check_query_discovery(
             && let Ok(text) = crate::utils::http::read_body(resp).await
             && crate::scanning::markers::classify_probe_reflection(&text).detected()
         {
-            let (valid, invalid) = classify_special_chars(&text);
-            batch.push(Param {
-                injection_context: Some(detect_injection_context(&text)),
-                valid_specials: Some(valid),
-                invalid_specials: Some(invalid),
-                js_breakout: detect_js_breakout(&text),
-                ..Param::new(
+            batch.push(
+                Param::new(
                     "__dalfox_key_inject__".to_string(),
                     String::new(),
                     crate::parameter_analysis::Location::Query,
                 )
-            });
+                .with_reflection_analysis(&text),
+            );
         }
         if target.delay > 0 {
             sleep(Duration::from_millis(target.delay)).await;
@@ -789,24 +776,15 @@ pub async fn check_header_discovery(
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
-                        &text,
-                        crate::scanning::markers::bracketed_marker(),
-                    )
-                    .map(ToString::to_string);
-                    discovered = Some(Param {
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                        framework_sink,
-                        js_breakout: detect_js_breakout(&text),
-                        ..Param::new(
+                    discovered = Some(
+                        Param::new(
                             header_name,
                             header_value,
                             crate::parameter_analysis::Location::Header,
                         )
-                    });
+                        .with_reflection_analysis(&text)
+                        .with_framework_sink(&text),
+                    );
                 }
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
@@ -982,18 +960,14 @@ pub async fn check_path_discovery(
                                 true
                             };
                         if exploitable_context && bracket_survives {
-                            let (valid, invalid) = classify_special_chars(&text);
-                            discovered = Some(Param {
-                                injection_context: Some(detect_injection_context(&text)),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
-                                js_breakout: detect_js_breakout(&text),
-                                ..Param::new(
+                            discovered = Some(
+                                Param::new(
                                     param_name,
                                     original_value,
                                     crate::parameter_analysis::Location::Path,
                                 )
-                            });
+                                .with_reflection_analysis(&text),
+                            );
                         }
                     }
                 }
@@ -1091,18 +1065,14 @@ pub async fn check_cookie_discovery(
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    discovered = Some(Param {
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                        js_breakout: detect_js_breakout(&text),
-                        ..Param::new(
+                    discovered = Some(
+                        Param::new(
                             cookie_name,
                             cookie_value,
                             crate::parameter_analysis::Location::Header,
                         )
-                    });
+                        .with_reflection_analysis(&text),
+                    );
                 }
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
@@ -1276,20 +1246,18 @@ pub async fn check_form_discovery(
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    batch.push(Param {
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                        form_action_url: Some(form_url.to_string()),
-                        form_origin_url: Some(target.url.to_string()),
-                        js_breakout: detect_js_breakout(&text),
-                        ..Param::new(
-                            field_name.clone(),
-                            field_value.clone(),
-                            crate::parameter_analysis::Location::MultipartBody,
-                        )
-                    });
+                    batch.push(
+                        Param {
+                            form_action_url: Some(form_url.to_string()),
+                            form_origin_url: Some(target.url.to_string()),
+                            ..Param::new(
+                                field_name.clone(),
+                                field_value.clone(),
+                                crate::parameter_analysis::Location::MultipartBody,
+                            )
+                        }
+                        .with_reflection_analysis(&text),
+                    );
                 }
                 if target.delay > 0 {
                     sleep(Duration::from_millis(target.delay)).await;
@@ -1347,20 +1315,18 @@ pub async fn check_form_discovery(
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    batch.push(Param {
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                        form_action_url: Some(form_url.to_string()),
-                        form_origin_url: Some(target.url.to_string()),
-                        js_breakout: detect_js_breakout(&text),
-                        ..Param::new(
-                            field_name.clone(),
-                            field_value.clone(),
-                            crate::parameter_analysis::Location::Body,
-                        )
-                    });
+                    batch.push(
+                        Param {
+                            form_action_url: Some(form_url.to_string()),
+                            form_origin_url: Some(target.url.to_string()),
+                            ..Param::new(
+                                field_name.clone(),
+                                field_value.clone(),
+                                crate::parameter_analysis::Location::Body,
+                            )
+                        }
+                        .with_reflection_analysis(&text),
+                    );
                 }
                 if target.delay > 0 {
                     sleep(Duration::from_millis(target.delay)).await;
@@ -1390,20 +1356,18 @@ pub async fn check_form_discovery(
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    batch.push(Param {
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                        form_action_url: Some(form_url.to_string()),
-                        form_origin_url: Some(target.url.to_string()),
-                        js_breakout: detect_js_breakout(&text),
-                        ..Param::new(
-                            field_name.clone(),
-                            field_value.clone(),
-                            crate::parameter_analysis::Location::Query,
-                        )
-                    });
+                    batch.push(
+                        Param {
+                            form_action_url: Some(form_url.to_string()),
+                            form_origin_url: Some(target.url.to_string()),
+                            ..Param::new(
+                                field_name.clone(),
+                                field_value.clone(),
+                                crate::parameter_analysis::Location::Query,
+                            )
+                        }
+                        .with_reflection_analysis(&text),
+                    );
                 }
                 if target.delay > 0 {
                     sleep(Duration::from_millis(target.delay)).await;
@@ -1433,21 +1397,20 @@ pub async fn check_form_discovery(
                 && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
-                let (valid, invalid) = classify_special_chars(&text);
+                let analysis = ReflectionAnalysis::of(&text);
                 for (field_name, field_value) in &fields {
-                    batch.push(Param {
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid.clone()),
-                        invalid_specials: Some(invalid.clone()),
-                        form_action_url: Some(form_url.to_string()),
-                        form_origin_url: Some(target.url.to_string()),
-                        js_breakout: detect_js_breakout(&text),
-                        ..Param::new(
-                            field_name.clone(),
-                            field_value.clone(),
-                            crate::parameter_analysis::Location::JsonBody,
-                        )
-                    });
+                    batch.push(
+                        Param {
+                            form_action_url: Some(form_url.to_string()),
+                            form_origin_url: Some(target.url.to_string()),
+                            ..Param::new(
+                                field_name.clone(),
+                                field_value.clone(),
+                                crate::parameter_analysis::Location::JsonBody,
+                            )
+                        }
+                        .with_analysis(&analysis),
+                    );
                 }
             }
         }
@@ -1515,20 +1478,18 @@ pub async fn check_form_discovery(
                         && let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
                     {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        batch.push(Param {
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                            form_action_url: Some(target.url.to_string()),
-                            form_origin_url: Some(target.url.to_string()),
-                            js_breakout: detect_js_breakout(&text),
-                            ..Param::new(
-                                key.clone(),
-                                "a".to_string(),
-                                crate::parameter_analysis::Location::JsonBody,
-                            )
-                        });
+                        batch.push(
+                            Param {
+                                form_action_url: Some(target.url.to_string()),
+                                form_origin_url: Some(target.url.to_string()),
+                                ..Param::new(
+                                    key.clone(),
+                                    "a".to_string(),
+                                    crate::parameter_analysis::Location::JsonBody,
+                                )
+                            }
+                            .with_reflection_analysis(&text),
+                        );
                     }
                     if target.delay > 0 {
                         sleep(Duration::from_millis(target.delay)).await;
@@ -1588,20 +1549,18 @@ pub async fn check_form_discovery(
                         && let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
                     {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        batch.push(Param {
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                            form_action_url: Some(target.url.to_string()),
-                            form_origin_url: Some(target.url.to_string()),
-                            js_breakout: detect_js_breakout(&text),
-                            ..Param::new(
-                                field_name.clone(),
-                                field_value.clone(),
-                                crate::parameter_analysis::Location::JsonBody,
-                            )
-                        });
+                        batch.push(
+                            Param {
+                                form_action_url: Some(target.url.to_string()),
+                                form_origin_url: Some(target.url.to_string()),
+                                ..Param::new(
+                                    field_name.clone(),
+                                    field_value.clone(),
+                                    crate::parameter_analysis::Location::JsonBody,
+                                )
+                            }
+                            .with_reflection_analysis(&text),
+                        );
                     }
                     if target.delay > 0 {
                         sleep(Duration::from_millis(target.delay)).await;

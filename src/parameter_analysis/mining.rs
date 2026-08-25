@@ -160,11 +160,7 @@ fn make_any_param(
         )
     };
     if let Some(text) = response_text {
-        let (valid, invalid) = crate::parameter_analysis::classify_special_chars(text);
-        param.injection_context = Some(detect_injection_context(text));
-        param.valid_specials = Some(valid);
-        param.invalid_specials = Some(invalid);
-        param.js_breakout = detect_js_breakout(text);
+        param = param.with_reflection_analysis(text);
     } else if let Some(sample) = mined_sample {
         param.value = sample.value.clone();
         param.injection_context = sample.injection_context.clone();
@@ -866,21 +862,15 @@ pub async fn probe_dictionary_params(
                             {
                                 st.record_reflection();
                                 if !st.collapsed {
-                                    let context = detect_injection_context(&text);
-                                    let (valid, invalid) =
-                                        crate::parameter_analysis::classify_special_chars(&text);
-                                    discovered = Some(Param {
-                                        injection_context: Some(context),
-                                        valid_specials: Some(valid),
-                                        invalid_specials: Some(invalid),
-                                        js_breakout: detect_js_breakout(&text),
-                                        ..Param::new(
+                                    discovered = Some(
+                                        Param::new(
                                             param_name.clone(),
                                             crate::scanning::markers::bracketed_marker()
                                                 .to_string(),
                                             crate::parameter_analysis::Location::Query,
                                         )
-                                    });
+                                        .with_reflection_analysis(&text),
+                                    );
                                     if !silence {
                                         eprintln!(
                                             "Discovered parameter: {} (EWMA {:.2}, {}/{})",
@@ -1048,20 +1038,14 @@ pub async fn probe_body_params(
                         if crate::scanning::markers::classify_probe_reflection(&text).detected() {
                             st.record_reflection();
                             if !st.collapsed {
-                                let context = detect_injection_context(&text);
-                                let (valid, invalid) =
-                                    crate::parameter_analysis::classify_special_chars(&text);
-                                discovered = Some(Param {
-                                    injection_context: Some(context),
-                                    valid_specials: Some(valid),
-                                    invalid_specials: Some(invalid),
-                                    js_breakout: detect_js_breakout(&text),
-                                    ..Param::new(
+                                discovered = Some(
+                                    Param::new(
                                         param_name_cloned.clone(),
                                         crate::scanning::markers::bracketed_marker().to_string(),
                                         Location::Body,
                                     )
-                                });
+                                    .with_reflection_analysis(&text),
+                                );
                                 if !silence {
                                     eprintln!(
                                         "Discovered body param: {} (EWMA {:.2}, {}/{})",
@@ -1292,22 +1276,16 @@ pub async fn probe_response_id_params(
                             {
                                 st.record_reflection();
                                 if !st.collapsed {
-                                    let context = detect_injection_context(&text);
-                                    let (valid, invalid) =
-                                        crate::parameter_analysis::classify_special_chars(&text);
                                     // Store discovered Param for return (batched later)
-                                    discovered = Some(Param {
-                                        injection_context: Some(context),
-                                        valid_specials: Some(valid),
-                                        invalid_specials: Some(invalid),
-                                        js_breakout: detect_js_breakout(&text),
-                                        ..Param::new(
+                                    discovered = Some(
+                                        Param::new(
                                             param.clone(),
                                             crate::scanning::markers::bracketed_marker()
                                                 .to_string(),
                                             crate::parameter_analysis::Location::Query,
                                         )
-                                    });
+                                        .with_reflection_analysis(&text),
+                                    );
                                     if !silence {
                                         eprintln!(
                                             "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
@@ -1495,20 +1473,14 @@ pub async fn probe_json_body_params(
                     if crate::scanning::markers::classify_probe_reflection(&text).detected() {
                         st.record_reflection();
                         if !st.collapsed {
-                            let context = detect_injection_context(&text);
-                            let (valid, invalid) =
-                                crate::parameter_analysis::classify_special_chars(&text);
-                            discovered = Some(Param {
-                                injection_context: Some(context),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
-                                js_breakout: detect_js_breakout(&text),
-                                ..Param::new(
+                            discovered = Some(
+                                Param::new(
                                     param_name_cloned.clone(),
                                     crate::scanning::markers::bracketed_marker().to_string(),
                                     Location::JsonBody,
                                 )
-                            });
+                                .with_reflection_analysis(&text),
+                            );
                             if !silence {
                                 eprintln!(
                                     "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
@@ -1659,18 +1631,13 @@ pub async fn probe_multipart_params(
                     && let Ok(text) = crate::utils::http::read_body(r).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
-                    let context = detect_injection_context(&text);
-                    let (valid, invalid) = crate::parameter_analysis::classify_special_chars(&text);
                     if !silence {
                         eprintln!("Discovered multipart field: {}", field_name);
                     }
-                    discovered = Some(Param {
-                        injection_context: Some(context),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                        js_breakout: detect_js_breakout(&text),
-                        ..Param::new(field_name, marker.to_string(), Location::MultipartBody)
-                    });
+                    discovered = Some(
+                        Param::new(field_name, marker.to_string(), Location::MultipartBody)
+                            .with_reflection_analysis(&text),
+                    );
                 }
                 drop(permit);
                 discovered

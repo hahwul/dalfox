@@ -1610,3 +1610,137 @@ async fn active_probe_omits_user_agent_for_the_no_override_sentinel() {
         "the empty sentinel must not become a blank User-Agent header; saw {uas:?}"
     );
 }
+
+// --- Reflection-analysis builders -----------------------------------------
+//
+// Every discovery and mining probe funnels through these three methods, so the
+// contract they pin is "which fields does a reflecting probe fill in" — the
+// question each of the ~19 former hand-written copies answered on its own.
+
+/// A body that reflects the marker inside a nested inline-`<script>` literal,
+/// so all four analysis fields come back populated — `js_breakout` in
+/// particular, which stays `None` for a reflection in plain HTML and would
+/// make an equality assertion against it vacuous.
+fn script_reflection_body() -> String {
+    format!(
+        r#"<html><body><script>render({{ opts: [ "{marker}" ] }})</script></body></html>"#,
+        marker = crate::scanning::markers::bracketed_marker()
+    )
+}
+
+/// A body that reflects the marker inside a Vue `v-html` attribute — an
+/// innerHTML-style framework sink. The marker must not appear anywhere else:
+/// `detect_framework_html_sink` bails to `None` as soon as one occurrence
+/// lives outside a recognised attribute.
+fn framework_sink_body() -> String {
+    format!(
+        r#"<html><body><div v-html="{marker}"></div></body></html>"#,
+        marker = crate::scanning::markers::bracketed_marker()
+    )
+}
+
+#[test]
+fn with_reflection_analysis_fills_every_probe_derived_field() {
+    let body = script_reflection_body();
+    let p = Param::new("q", "v", Location::Query).with_reflection_analysis(&body);
+
+    // The four fields every probe derives from the body it reflected in. Each
+    // must actually carry a value here, or the equality checks below would
+    // pass just as happily against a method that sets nothing.
+    let (valid, invalid) = classify_special_chars(&body);
+    assert!(!valid.is_empty(), "fixture must exercise valid specials");
+    assert!(
+        !invalid.is_empty(),
+        "fixture must exercise invalid specials"
+    );
+    assert_eq!(p.injection_context, Some(detect_injection_context(&body)));
+    assert_eq!(p.valid_specials, Some(valid));
+    assert_eq!(p.invalid_specials, Some(invalid));
+    assert_eq!(
+        p.js_breakout,
+        Some("\"]})".to_string()),
+        "js_breakout must carry the observed closer"
+    );
+
+    // Nothing else moves: the identifying fields and every stage-specific
+    // field stay exactly as the caller left them.
+    assert_eq!(p.name, "q");
+    assert_eq!(p.value, "v");
+    assert_eq!(p.location, Location::Query);
+    assert_eq!(p.framework_sink, None, "framework sink is opt-in");
+    assert_eq!(p.pre_encoding, None);
+    assert_eq!(p.pre_encoding_pipeline, None);
+    assert_eq!(p.wire_name, None);
+    assert_eq!(p.form_action_url, None);
+    assert_eq!(p.form_origin_url, None);
+    assert_eq!(p.escaped_specials, None);
+}
+
+#[test]
+fn with_reflection_analysis_preserves_caller_set_fields() {
+    let p = Param {
+        form_action_url: Some("http://h/post".to_string()),
+        form_origin_url: Some("http://h/".to_string()),
+        wire_name: Some("qs".to_string()),
+        ..Param::new("field", "value", Location::Body)
+    }
+    .with_reflection_analysis(&script_reflection_body());
+
+    assert_eq!(p.form_action_url.as_deref(), Some("http://h/post"));
+    assert_eq!(p.form_origin_url.as_deref(), Some("http://h/"));
+    assert_eq!(p.wire_name.as_deref(), Some("qs"));
+    assert!(p.valid_specials.is_some());
+}
+
+#[test]
+fn with_reflection_context_leaves_the_special_split_unset() {
+    // The pre-encoded query probes rely on this: a `None` split tells payload
+    // synthesis to try every type instead of adaptively dropping the ones a
+    // raw-reflection probe ruled out. Setting them here would silently narrow
+    // base64/nested-pipeline payload coverage.
+    let body = script_reflection_body();
+    let p = Param::new("q", "v", Location::Query).with_reflection_context(&body);
+
+    assert_eq!(p.injection_context, Some(detect_injection_context(&body)));
+    assert_eq!(p.js_breakout, Some("\"]})".to_string()));
+    assert_eq!(p.valid_specials, None, "special split must stay unset");
+    assert_eq!(p.invalid_specials, None, "special split must stay unset");
+}
+
+#[test]
+fn with_framework_sink_records_the_innerhtml_sink() {
+    let p = Param::new("q", "v", Location::Query).with_framework_sink(&framework_sink_body());
+    assert_eq!(p.framework_sink.as_deref(), Some("v-html"));
+
+    // A body with no framework attribute leaves it unset rather than guessing.
+    let q = Param::new("q", "v", Location::Query).with_framework_sink(&script_reflection_body());
+    assert_eq!(q.framework_sink, None);
+}
+
+#[test]
+fn one_analysis_applies_identically_to_many_params() {
+    // The JSON-form probe posts every field in one request and attributes the
+    // same body to each field, so `with_analysis` must be indistinguishable
+    // from calling `with_reflection_analysis` per param — only cheaper.
+    let body = script_reflection_body();
+    let analysis = ReflectionAnalysis::of(&body);
+
+    for name in ["a", "b", "c"] {
+        let shared = Param::new(name, "v", Location::JsonBody).with_analysis(&analysis);
+        let per_param = Param::new(name, "v", Location::JsonBody).with_reflection_analysis(&body);
+        assert_eq!(
+            shared.injection_context, per_param.injection_context,
+            "{name}"
+        );
+        assert_eq!(shared.valid_specials, per_param.valid_specials, "{name}");
+        assert_eq!(
+            shared.invalid_specials, per_param.invalid_specials,
+            "{name}"
+        );
+        assert_eq!(shared.js_breakout, per_param.js_breakout, "{name}");
+        assert!(
+            shared.js_breakout.is_some(),
+            "fixture must exercise js_breakout"
+        );
+    }
+}
