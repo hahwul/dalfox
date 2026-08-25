@@ -198,10 +198,98 @@ impl Param {
         }
     }
 
+    /// Fill in the analysis fields every reflection probe derives from the
+    /// response body its marker came back in: the injection context, the naive
+    /// special-character split, and the observed JS breakout closer.
+    ///
+    /// Discovery and mining probe more than a dozen injection points — query,
+    /// header, cookie, path, form (GET / POST / multipart / JSON) and the four
+    /// mining wordlist fan-outs — and every one of them reached those four
+    /// assignments by hand, which made each new analysis field a ~19-site
+    /// mechanical edit. Chain this onto the literal instead, so a site spells
+    /// out only the fields that are specific to it:
+    ///
+    /// ```ignore
+    /// Param {
+    ///     form_action_url: Some(form_url.to_string()),
+    ///     ..Param::new(name, value, Location::Body)
+    /// }
+    /// .with_reflection_analysis(&text)
+    /// ```
+    ///
+    /// This scans `body` once per call. When one body feeds several params,
+    /// compute a [`ReflectionAnalysis`] up front and apply it with
+    /// [`Param::with_analysis`] instead.
+    pub(crate) fn with_reflection_analysis(self, body: &str) -> Self {
+        self.with_analysis(&ReflectionAnalysis::of(body))
+    }
+
+    /// [`Param::with_reflection_analysis`] against an analysis already computed
+    /// for the body in hand.
+    pub(crate) fn with_analysis(mut self, analysis: &ReflectionAnalysis) -> Self {
+        self.injection_context = Some(analysis.injection_context.clone());
+        self.valid_specials = Some(analysis.valid_specials.clone());
+        self.invalid_specials = Some(analysis.invalid_specials.clone());
+        self.js_breakout = analysis.js_breakout.clone();
+        self
+    }
+
+    /// The context half of [`Param::with_reflection_analysis`], leaving
+    /// `valid_specials`/`invalid_specials` unset.
+    ///
+    /// The pre-encoded query probes (base64 / nested pipeline) skip the
+    /// special-character split on purpose: the encoding already carries the
+    /// payload past HTTP-level filtering, and leaving the split `None` tells
+    /// synthesis to try every payload type rather than adaptively dropping the
+    /// ones a raw-reflection probe would have ruled out.
+    pub(crate) fn with_reflection_context(mut self, body: &str) -> Self {
+        self.injection_context = Some(detect_injection_context(body));
+        self.js_breakout = detect_js_breakout(body);
+        self
+    }
+
+    /// Record the framework innerHTML-style sink the marker landed inside, if
+    /// any (see [`Param::framework_sink`]).
+    ///
+    /// Only the query and header discovery stages probe for this today; the
+    /// remaining stages leave `framework_sink` unset.
+    pub(crate) fn with_framework_sink(mut self, body: &str) -> Self {
+        self.framework_sink =
+            detect_framework_html_sink(body, crate::scanning::markers::bracketed_marker())
+                .map(ToString::to_string);
+        self
+    }
+
     /// HTTP-level parameter name (parent param when this is a nested-field
     /// virtual param, otherwise `name`).
     pub(crate) fn effective_wire_name(&self) -> &str {
         self.wire_name.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// What a reflecting response body says about the injection point it reflected
+/// in, computed once for that body and applied to one or more `Param`s.
+///
+/// See [`Param::with_reflection_analysis`] for the one-shot form; reach for
+/// this type only when a single response yields several params (the JSON-form
+/// probe posts every field at once and attributes the same body to each).
+pub(crate) struct ReflectionAnalysis {
+    injection_context: InjectionContext,
+    valid_specials: Vec<char>,
+    invalid_specials: Vec<char>,
+    js_breakout: Option<String>,
+}
+
+impl ReflectionAnalysis {
+    /// Analyze a response body that already contains the reflection marker.
+    pub(crate) fn of(body: &str) -> Self {
+        let (valid_specials, invalid_specials) = classify_special_chars(body);
+        Self {
+            injection_context: detect_injection_context(body),
+            valid_specials,
+            invalid_specials,
+            js_breakout: detect_js_breakout(body),
+        }
     }
 }
 
