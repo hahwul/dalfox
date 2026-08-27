@@ -145,6 +145,7 @@ Print a payload family without running a scan:
 
 | Selector | Description | Example |
 |----------|-------------|---------|
+| `javascript` | Print the canonical JavaScript execution payloads used in JS-string / script contexts (`alert(1)`, backtick and keyword-split variants, ...) | `dalfox payload javascript` |
 | `event-handlers` | List all DOM event handler attribute names (e.g., `onclick`, `onmouseover`) | `dalfox payload event-handlers` |
 | `useful-tags` | List useful HTML tag names often used in XSS contexts (e.g., `script`, `img`, `svg`) | `dalfox payload useful-tags` |
 | `payloadbox` | Fetch and print remote XSS payloads from PayloadBox | `dalfox payload payloadbox` |
@@ -159,6 +160,7 @@ Print a payload family without running a scan:
 | `all` | Print every local selector above in one pass, each under a `# name` header (remote selectors excluded — no network fetch) | `dalfox payload all` |
 
 ```bash
+dalfox payload javascript      # alert(1), alert`1`, prompt(1), ...
 dalfox payload event-handlers  # onerror, onmouseover, ...
 dalfox payload useful-tags     # svg, img, script, ...
 dalfox payload uri-scheme      # javascript:, data:

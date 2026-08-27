@@ -83,7 +83,7 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
-| `--param` | `-p` | — | 분석할 파라미터; `name:location` 형식 지원 (위치: `query`, `body`, `json`, `cookie`, `header`) |
+| `--param` | `-p` | — | 분석할 파라미터; `name:location` 형식 지원 (위치: `query`, `body`, `json`, `multipart`, `cookie`, `header`) |
 | `--data` | `-d` | — | 요청 본문 |
 | `--headers` | `-H` | — | 추가 HTTP 헤더 (반복 지정 가능) |
 | `--cookies` | — | — | 쿠키 (반복 지정 가능) |
@@ -218,9 +218,11 @@ dalfox server [FLAGS]
 | `--callback-param-name` | — | `callback` | JSONP 콜백 파라미터 |
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS 메서드 |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS 헤더 |
-| `--rate-limit` | — | `0` | 전역 아웃바운드 요청 속도를 제한합니다 (초당 요청 수, `0` = 무제한) |
-| `--scan-timeout` | — | `0` | 스캔 단계의 대상별 실제 경과 시간 하드 상한(초) |
-| `--max-concurrent-scans` | — | `100` | 동시 스캔 수 제한 (`0` = 무제한) |
+| `--rate-limit` | — | `0` | **스캔마다** 적용되는 서버 전역 아웃바운드 요청 속도 상한 (초당 요청 수, `0` = 무제한). 제출된 스캔은 더 낮게 요청할 수는 있어도 이 값을 넘을 수는 없습니다 |
+| `--scan-timeout` | — | `0` | **스캔마다** 적용되는 서버 전역 전체 실행 시간 상한(초, `0` = 무제한). 제출된 스캔은 더 짧게 요청할 수는 있어도 이 값을 넘을 수는 없습니다 |
+| `--max-concurrent-scans` | — | `100` | 동시(큐 대기 + 실행 중) 스캔 수 제한. 초과하면 새 제출은 `503`을 받습니다 (`0` = 무제한) |
+| `--allowed-hosts` | — | — | 요청 `Host` 헤더에서 추가로 허용할 호스트명. 바인딩 호스트, `localhost`, IP 리터럴은 기본 허용입니다. 리버스 프록시가 공개 호스트명을 전달할 때 필요합니다 |
+| `--max-retained-scans` | — | `1000` | 메모리에 보관하는 *종료된* 스캔 수 상한. 초과하면 가장 오래된 것부터 제거됩니다 (`0` = 무제한). 큐에 있거나 실행 중인 스캔은 제거되지 않습니다 |
 | `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 `413` 응답 |
 
 엔드포인트는 [REST API Server](../../integrations/server/)를 참조하세요.
@@ -232,13 +234,16 @@ dalfox server [FLAGS]
 페이로드 컬렉션을 나열하거나 가져옵니다.
 
 ```bash
-dalfox payload <SELECTOR>
+dalfox payload <SELECTOR> [--json]
 ```
+
+선택한 페이로드를 한 줄에 하나씩이 아니라 JSON 배열로 출력하려면 `--json`을 쓰세요.
 
 선택자:
 
 | 선택자 | 출력 내용 |
 |----------|----------------|
+| `javascript` | JS 문자열 / 스크립트 컨텍스트에서 쓰이는 표준 JavaScript 실행 페이로드(`alert(1)`, 백틱 및 키워드 분할 변형 등) |
 | `event-handlers` | DOM 이벤트 핸들러 속성 이름 |
 | `useful-tags` | 유용한 HTML 태그 |
 | `uri-scheme` | `javascript:`/`data:` URL 페이로드 |

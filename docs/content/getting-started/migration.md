@@ -17,7 +17,7 @@ v3 unifies the scan subcommands behind a single entrypoint.
 | :--- | :--- | :--- |
 | `dalfox url [url]` | `dalfox scan [url]` | Or just `dalfox [url]` — `scan` is the default subcommand |
 | `dalfox file [file]` | `dalfox scan [file]` | Input type is auto-detected |
-| `dalfox pipe` | `dalfox scan -` or `cat targets \| dalfox scan` | Piped input is read from `stdin` natively |
+| `dalfox pipe` | `cat targets \| dalfox scan` (or `dalfox scan --input-type pipe`) | Piped input is read from `stdin` natively |
 | `dalfox sxss [url]` | `dalfox scan [url] --sxss` | Stored XSS is a scan option now — see [Stored XSS](../../guide/stored-xss/) |
 
 {{ alert(type="info", body="So existing scripts keep working, the legacy url, file and pipe subcommands survive as hidden aliases. sxss did not: stored-XSS scanning moved onto the scan subcommand as the --sxss flag.") }}

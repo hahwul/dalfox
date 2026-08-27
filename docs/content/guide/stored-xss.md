@@ -33,7 +33,9 @@ Pick the page the stored value **reads** from. Examples:
 | `PATCH /profile` | `GET /u/myself` |
 | `POST /support/ticket` | `GET /admin/tickets` (if you have admin access) |
 
-If you omit `--sxss-url`, Dalfox tries to auto-detect it from the response headers (e.g., a `Location` redirect after a POST).
+If you omit `--sxss-url`, Dalfox falls back to the form-discovery context: the page the form was
+found on, then the form's `action` endpoint, then the injection target itself. Set it explicitly
+whenever the stored value is rendered somewhere those three don't cover.
 
 ## Retrieval method
 

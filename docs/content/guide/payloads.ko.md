@@ -121,6 +121,7 @@ dalfox https://target.app --remote-payloads portswigger,payloadbox
 
 | 셀렉터 | 설명 | 예시 |
 |--------|------|------|
+| `javascript` | JS 문자열 / 스크립트 컨텍스트에서 쓰이는 표준 JavaScript 실행 페이로드를 출력합니다 (`alert(1)`, 백틱 및 키워드 분할 변형 등) | `dalfox payload javascript` |
 | `event-handlers` | 모든 DOM 이벤트 핸들러 속성 이름을 나열합니다 (예: `onclick`, `onmouseover`) | `dalfox payload event-handlers` |
 | `useful-tags` | XSS 컨텍스트에서 자주 사용되는 유용한 HTML 태그 이름을 나열합니다 (예: `script`, `img`, `svg`) | `dalfox payload useful-tags` |
 | `payloadbox` | PayloadBox에서 원격 XSS 페이로드를 가져와 출력합니다 | `dalfox payload payloadbox` |
@@ -135,6 +136,7 @@ dalfox https://target.app --remote-payloads portswigger,payloadbox
 | `all` | 위의 모든 로컬 셀렉터를 한 번에, 각 그룹 앞에 `# name` 헤더를 붙여 출력합니다 (원격 셀렉터 제외 — 네트워크 요청 없음) | `dalfox payload all` |
 
 ```bash
+dalfox payload javascript      # alert(1), alert`1`, prompt(1), ...
 dalfox payload event-handlers  # onerror, onmouseover, ...
 dalfox payload useful-tags     # svg, img, script, ...
 dalfox payload uri-scheme      # javascript:, data:

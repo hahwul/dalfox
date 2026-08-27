@@ -72,7 +72,7 @@ dalfox https://target.app --waf-bypass off
 dalfox https://target.app --skip-waf-probe
 ```
 
-헤더 기반 수동 탐지는 여전히 사용하지만, 도발성 요청은 보내지 않습니다. 대상이 불안정하고 프로브에 rate limit을 소모하고 싶지 않을 때 사용하세요.
+헤더 기반 패시브 탐지는 여전히 사용하지만, 도발성 요청은 보내지 않습니다. 대상이 불안정하고 프로브에 rate limit을 소모하고 싶지 않을 때 사용하세요.
 
 ### 회피 스로틀
 
@@ -100,7 +100,7 @@ dalfox https://target.app --rate-limit 15 --waf-evasion
 dalfox https://target.app --waf-min-confidence 0.7
 ```
 
-기본값은 `0.3`입니다(`Server: Google Frontend` 같은 약하거나 일반적인 매치를 억제합니다). `--waf-min-confidence 0.0`을 넘기면 모든 매치를 유지하며, 잡음이 많은 수동 탐지가 Dalfox를 잘못된 회피 전략으로 몰고 간다고 의심될 때는 값을 높이세요.
+기본값은 `0.3`입니다(`Server: Google Frontend` 같은 약하거나 일반적인 매치를 억제합니다). `--waf-min-confidence 0.0`을 넘기면 모든 매치를 유지하며, 잡음이 많은 패시브 탐지가 Dalfox를 잘못된 회피 전략으로 몰고 간다고 의심될 때는 값을 높이세요.
 
 ## 변형 전술 (내부 동작)
 
@@ -146,9 +146,9 @@ dalfox https://target.app -e url,base64
 
 중복을 자동으로 제거하고 순서를 보존합니다.
 
-## Rate 제한 & 백오프
+## 요청 속도 제한과 백오프
 
-Dalfox는 연속된 WAF 차단을 추적하고 영구 차단을 피하기 위해 지수적 슬립으로 자동 백오프합니다. 취약한 대상에 대해서는 `--delay`(요청당 밀리초)와 더 작은 `--workers`로 도울 수 있습니다.
+Dalfox는 연속된 WAF 차단을 추적하고 영구 차단을 피하기 위해 지수적 슬립으로 자동 백오프합니다. 불안정한 대상에 대해서는 `--delay`(요청당 밀리초)와 더 작은 `--workers`로 도울 수 있습니다.
 
 ```bash
 dalfox https://target.app --delay 500 --workers 10

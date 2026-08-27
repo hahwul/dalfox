@@ -18,7 +18,7 @@ dalfox https://xss-game.appspot.com/level1/frame?query=test
 The first argument is the target. Dalfox auto-detects that it's a URL and runs the `scan` subcommand implicitly. You'll see:
 
 - A banner with the version.
-- `INFO` lines as Dalfox discovers parameters and probes contexts.
+- `INF` lines as Dalfox discovers parameters and probes contexts.
 - `[V]` (vulnerable) and `[R]` (reflected) lines for each finding, with the exact payload that worked.
 
 ## 2. Scan from a file

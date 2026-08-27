@@ -127,7 +127,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
         </div>
         <h3>파라미터 인텔리전스</h3>
-        <p>마이닝, 정적 분석, BAV 테스트, 컨텍스트 인식 문자셋 프로빙으로 모든 파라미터에 완전한 공격 프로파일을 만듭니다.</p>
+        <p>마이닝, 정적 분석, 구조적 사전 인코딩 탐지, 컨텍스트 인식 문자셋 프로빙으로 모든 파라미터에 완전한 공격 프로파일을 만듭니다.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
@@ -205,7 +205,7 @@ template = "landing"
           <p>stdin으로 대상을 읽어 Dalfox를 크롤러나 정찰 파이프라인에 곧장 연결합니다.</p>
         </div>
         <div class="mode-panel" data-mode="sxss">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss-url https://app/feed</code></div>
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
           <p>한 엔드포인트에서 주입하고, 페이로드가 다른 곳에서 실행되는지 확인합니다. 저장형 XSS를 처음부터 끝까지 검증합니다.</p>
         </div>
         <div class="mode-panel" data-mode="server">
