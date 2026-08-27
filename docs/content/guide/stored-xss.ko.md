@@ -33,7 +33,7 @@ Dalfox는 다음을 수행합니다.
 | `PATCH /profile` | `GET /u/myself` |
 | `POST /support/ticket` | `GET /admin/tickets` (관리자 권한이 있는 경우) |
 
-`--sxss-url`을 생략하면, Dalfox는 응답 헤더(예: POST 이후의 `Location` 리다이렉트)에서 자동으로 감지하려고 시도합니다.
+`--sxss-url`을 생략하면, Dalfox는 폼 탐색 컨텍스트를 차례로 사용합니다. 폼이 발견된 페이지, 그다음 폼의 `action` 엔드포인트, 마지막으로 주입 대상 자신입니다. 저장된 값이 이 세 곳이 아닌 다른 곳에 렌더링된다면 `--sxss-url`을 직접 지정하세요.
 
 ## 조회 메서드
 

@@ -17,7 +17,7 @@ v3는 스캔 관련 서브커맨드를 하나의 진입점으로 모았습니다
 | :--- | :--- | :--- |
 | `dalfox url [url]` | `dalfox scan [url]` | `dalfox [url]`만 써도 됩니다 — `scan`이 기본 서브커맨드입니다 |
 | `dalfox file [file]` | `dalfox scan [file]` | 입력 종류는 자동으로 판별합니다 |
-| `dalfox pipe` | `dalfox scan -` 또는 `cat targets \| dalfox scan` | 파이프 입력은 `stdin`에서 그대로 읽습니다 |
+| `dalfox pipe` | `cat targets \| dalfox scan` (또는 `dalfox scan --input-type pipe`) | 파이프 입력은 `stdin`에서 그대로 읽습니다 |
 | `dalfox sxss [url]` | `dalfox scan [url] --sxss` | 저장형 XSS는 이제 스캔 옵션입니다 — [저장형 XSS](../../guide/stored-xss/) 참고 |
 
 {{ alert(type="info", body="기존 스크립트가 계속 동작하도록 legacy url, file, pipe 서브커맨드는 숨겨진 별칭으로 남아 있습니다. sxss는 예외입니다. 저장형 XSS 스캔은 scan 서브커맨드의 --sxss 플래그로 옮겨졌습니다.") }}

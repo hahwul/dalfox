@@ -127,7 +127,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
         </div>
         <h3>Parameter intelligence</h3>
-        <p>Mining, static analysis, BAV testing, and context-aware charset probing give every parameter a full attack profile.</p>
+        <p>Mining, static analysis, structural pre-encoding detection, and context-aware charset probing give every parameter a full attack profile.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
@@ -205,7 +205,7 @@ template = "landing"
           <p>Read targets from stdin so Dalfox drops straight into your crawler or recon pipeline.</p>
         </div>
         <div class="mode-panel" data-mode="sxss">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss-url https://app/feed</code></div>
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
           <p>Inject on one endpoint, then confirm the payload fires on another. Stored XSS, verified end to end.</p>
         </div>
         <div class="mode-panel" data-mode="server">

@@ -83,7 +83,7 @@ See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for th
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--param` | `-p` | — | Parameter to analyse; supports `name:location` (locations: `query`, `body`, `json`, `cookie`, `header`) |
+| `--param` | `-p` | — | Parameter to analyse; supports `name:location` (locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`) |
 | `--data` | `-d` | — | Request body |
 | `--headers` | `-H` | — | Extra HTTP header (repeatable) |
 | `--cookies` | — | — | Cookie (repeatable) |
@@ -219,9 +219,11 @@ dalfox server [FLAGS]
 | `--callback-param-name` | — | `callback` | JSONP callback param |
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS methods |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS headers |
-| `--rate-limit` | — | `0` | Cap the global outbound request rate (requests/sec, `0` = unlimited) |
-| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage, in seconds |
-| `--max-concurrent-scans` | — | `100` | Limit on simultaneous scans (`0` = unlimited) |
+| `--rate-limit` | — | `0` | Server-wide cap on **each** scan's outbound request rate (requests/sec, `0` = unlimited). A submitted scan may ask for less, never more |
+| `--scan-timeout` | — | `0` | Server-wide cap on **each** scan's total wall-clock runtime, in seconds (`0` = unbounded). A submitted scan may ask for less, never more |
+| `--max-concurrent-scans` | — | `100` | Limit on simultaneous (queued + running) scans; further submissions get `503` (`0` = unlimited) |
+| `--allowed-hosts` | — | — | Extra hostnames accepted in the request `Host` header, on top of the bind host, `localhost`, and any IP literal. Needed behind a reverse proxy that forwards a public hostname |
+| `--max-retained-scans` | — | `1000` | Cap on *finished* scans kept in memory; the oldest are dropped once exceeded (`0` = unlimited). Queued and running scans are never dropped |
 | `--max-body-bytes` | — | `1048576` | Maximum accepted request body size (bytes) for `POST /scan` and `/preflight`; oversized bodies get `413` |
 
 See [REST API Server](../../integrations/server/) for endpoints.
@@ -242,6 +244,7 @@ Selectors:
 
 | Selector | What it prints |
 |----------|----------------|
+| `javascript` | Canonical JavaScript execution payloads for JS-string / script contexts (`alert(1)`, backtick and keyword-split variants, ...) |
 | `event-handlers` | DOM event handler attribute names |
 | `useful-tags` | Useful HTML tags |
 | `uri-scheme` | `javascript:`/`data:` URL payloads |
