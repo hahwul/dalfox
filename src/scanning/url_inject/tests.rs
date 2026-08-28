@@ -23,6 +23,54 @@ fn test_query_injection_append() {
 }
 
 #[test]
+fn test_query_injection_on_fragmented_url_reaches_server() {
+    // A target URL with a fragment (and no real query) must still get the
+    // injected pair into the *query*, not the fragment. Regression: the prefix
+    // was cut at the first '?' anywhere in the serialized URL, which for these
+    // shapes is absent or lives inside the fragment, so the pair landed in the
+    // re-emitted fragment and the server saw no query at all.
+    for base_str in [
+        "https://example.com/a/b#section",         // fragment, no '?' in it
+        "https://example.com/a/b#x?y=z",           // fragment containing a '?'
+        "https://example.com/search#/route?tab=1", // SPA hash router
+    ] {
+        let base = make_url(base_str);
+        let param = Param::new("q", "", Location::Query);
+        let out = build_injected_url(&base, &param, "PAY");
+        let parsed = Url::parse(&out).expect("parseable");
+        assert_eq!(
+            parsed.query(),
+            Some("q=PAY"),
+            "payload must reach the server as a query for base {base_str:?}, got {out:?}"
+        );
+    }
+}
+
+#[test]
+fn test_query_injection_with_query_and_fragment_appends_to_query() {
+    // Control: a real query present means the '?' split is already correct, and
+    // the fragment must be preserved untouched at the end.
+    let base = make_url("https://example.com/a/b?c=d#frag");
+    let param = Param::new("q", "", Location::Query);
+    let out = build_injected_url(&base, &param, "PAY");
+    let parsed = Url::parse(&out).expect("parseable");
+    assert_eq!(parsed.query(), Some("c=d&q=PAY"));
+    assert_eq!(parsed.fragment(), Some("frag"));
+}
+
+#[test]
+fn test_hpp_url_on_fragmented_url_reaches_server() {
+    // Same defect in the HPP builder: the duplicated pairs must land in the
+    // query even when the base URL carries a fragment.
+    let base = make_url("https://example.com/a/b#section");
+    let param = Param::new("q", "safe", Location::Query);
+    let out = build_hpp_url(&base, &param, "PAY", HppPosition::Last).expect("query location");
+    let parsed = Url::parse(&out).expect("parseable");
+    assert_eq!(parsed.query(), Some("q=safe&q=PAY"));
+    assert_eq!(parsed.fragment(), Some("section"));
+}
+
+#[test]
 fn test_query_injection_preserves_existing_percent_encoding() {
     let base = make_url("https://example.com/path?q=seed");
     let param = Param::new("q", "seed", Location::Query);
