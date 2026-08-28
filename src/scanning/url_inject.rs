@@ -162,11 +162,19 @@ pub(crate) fn build_injected_url(base: &url::Url, param: &Param, injected: &str)
         Location::Query => {
             // Build the URL string directly without cloning Url or allocating Vec
             let base_str = base.as_str();
-            // Find prefix before query (scheme + authority + path)
-            let prefix = if let Some(q_pos) = base_str.find('?') {
-                &base_str[..q_pos]
-            } else {
-                base_str
+            // Prefix = scheme + authority + path, i.e. everything before the
+            // query ('?') or fragment ('#'), whichever comes first. A real
+            // query separator always precedes the fragment, so this lands on
+            // the query when there is one and on the fragment otherwise. A bare
+            // `find('?')` instead splits on the first '?' *anywhere*, which for
+            // a fragmented URL with no query (`…#section`, or a hash-router
+            // `…#/route?tab=1`) is either absent or sits inside the fragment —
+            // both leave the fragment in the prefix, so the injected pair is
+            // appended into the re-emitted fragment and the server, which never
+            // receives the fragment, sees no query at all.
+            let prefix = match base_str.find(['?', '#']) {
+                Some(cut) => &base_str[..cut],
+                None => base_str,
             };
             // Preserve fragment
             let fragment = base.fragment();
@@ -372,10 +380,13 @@ pub(crate) fn build_hpp_url(
     }
 
     let base_str = base.as_str();
-    let prefix = if let Some(q_pos) = base_str.find('?') {
-        &base_str[..q_pos]
-    } else {
-        base_str
+    // Cut before the query or fragment, whichever comes first — the fragment is
+    // re-appended below, so a bare `find('?')` (which can match a '?' inside a
+    // fragment, or miss entirely on `…#section`) would strand the HPP pairs in
+    // the fragment. See the matching note in `build_injected_url`'s Query arm.
+    let prefix = match base_str.find(['?', '#']) {
+        Some(cut) => &base_str[..cut],
+        None => base_str,
     };
     let fragment = base.fragment();
 
