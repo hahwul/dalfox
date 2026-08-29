@@ -13,6 +13,10 @@ jobs:
   build:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # The default is the 6-hour job limit. A test that wedges (the windows leg
+    # has done exactly that) then burns six runner-hours before anyone sees a
+    # red check; the whole matrix normally finishes in under six minutes.
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -25,6 +29,7 @@ jobs:
         run: cargo test --verbose
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - name: Install latest stable
@@ -38,6 +43,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
   coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

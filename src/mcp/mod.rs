@@ -51,42 +51,41 @@ use crate::{
     target_parser::parse_target,
 };
 
-thread_local! {
-    /// Per-blocking-thread current_thread runtime. Built lazily on first use
-    /// and reused for the lifetime of the worker thread, so the second scan
-    /// scheduled onto the same blocking-pool slot doesn't pay
-    /// `Builder::new_current_thread().build()` again.
-    static SCAN_RUNTIME: std::cell::RefCell<Option<tokio::runtime::Runtime>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// Run `f` on a current_thread runtime cached in thread-local storage and
-/// return its result. The closure receives a borrow of the runtime so
-/// callers can issue `block_on`. Returns `None` if runtime construction
-/// fails — extremely rare; `tag` is logged to identify the call site.
-fn run_on_thread_runtime<F, R>(tag: &str, f: F) -> Option<R>
+/// Run `f` on a current_thread runtime and return its result. The closure
+/// receives a borrow of the runtime so callers can issue `block_on`. Returns
+/// `None` if runtime construction fails — extremely rare; `tag` is logged to
+/// identify the call site.
+///
+/// The runtime is a plain local, built and dropped inside the caller's
+/// `spawn_blocking` closure, and it has to stay that way. Caching it in a
+/// `thread_local!` — which this did, to save the ~ms of `Builder::build()` on
+/// the second scan scheduled onto the same blocking-pool slot — deadlocks the
+/// whole process on Windows. Windows runs TLS destructors from
+/// `ntdll!LdrShutdownThread`, with the loader lock held; dropping a runtime
+/// there joins that runtime's own blocking threads (hyper resolves DNS on
+/// `spawn_blocking`, so they exist), and those threads cannot finish exiting
+/// without the same lock. Every thread that tries to exit afterwards parks in
+/// `LdrpDrainWorkQueue` and the process wedges — `cargo test` on the Windows
+/// CI leg stopped dead after 501 of 2308 tests and burned the 6-hour job limit.
+/// The REST server's `spawn_scan_task` has always built the runtime as a local;
+/// this matches it.
+fn run_on_scan_runtime<F, R>(tag: &str, f: F) -> Option<R>
 where
     F: FnOnce(&tokio::runtime::Runtime) -> R,
 {
-    SCAN_RUNTIME.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if slot.is_none() {
-            match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => *slot = Some(rt),
-                Err(e) => {
-                    DalfoxMcp::log(
-                        "ERR",
-                        &format!("runtime build failed for tag={}: {}", tag, e),
-                    );
-                    return None;
-                }
-            }
+    match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => Some(f(&rt)),
+        Err(e) => {
+            DalfoxMcp::log(
+                "ERR",
+                &format!("runtime build failed for tag={}: {}", tag, e),
+            );
+            None
         }
-        slot.as_ref().map(f)
-    })
+    }
 }
 
 /// Transition a non-terminal job into `Error` with the supplied message.
@@ -1134,8 +1133,8 @@ browser execution; only detection_method=oob observes a real browser."
         // scans on the same thread skip the rebuild (saves ~ms of setup).
         //
         // Two failure modes used to leak the job into Queued forever:
-        // 1) `run_on_thread_runtime` returns None when the cached runtime
-        //    can't be built — `run_job` then never runs.
+        // 1) `run_on_scan_runtime` returns None when the scan runtime can't
+        //    be built — `run_job` then never runs.
         // 2) A panic inside `run_job` (parameter analysis, scanning, etc.)
         //    bubbles out of the spawn_blocking task and is dropped because
         //    the JoinHandle isn't awaited.
@@ -1150,7 +1149,7 @@ browser execution; only detection_method=oob observes a real browser."
             let jobs_for_recovery = handler.jobs.clone();
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let ran = run_on_thread_runtime(&sid_for_log, |rt| {
+                let ran = run_on_scan_runtime(&sid_for_log, |rt| {
                     rt.block_on(handler.run_job(sid, scan_args));
                 });
                 if ran.is_none() {
@@ -1636,7 +1635,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
         let result = tokio::task::spawn_blocking(move || {
             let _preflight_permit = preflight_permit;
             let target_url_for_err_inner = target_url_for_err.clone();
-            run_on_thread_runtime(&target_url_for_err_inner, |rt| {
+            run_on_scan_runtime(&target_url_for_err_inner, |rt| {
                 rt.block_on(async {
                     // Reachability check: send a probe via the target's fully-hydrated
                     // HTTP stack so proxy, custom headers, cookies, User-Agent, method,
