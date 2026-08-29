@@ -32,6 +32,33 @@ jobs:
           toolchain: ${{ steps.msrv.outputs.version }}
       - name: Build at MSRV (locked deps)
         run: cargo +${{ steps.msrv.outputs.version }} build --locked --all-targets
+  msrv-windows:
+    name: MSRV on Windows (tests)
+    runs-on: windows-latest
+    # The `msrv` job above only *builds*, and only on Linux, so it cannot see a
+    # defect that needs an older toolchain and Windows at the same time. One
+    # did: a tokio runtime cached in a `thread_local!` deadlocked thread exit
+    # inside the Windows loader lock, wedging `cargo test` on Rust 1.97.1 while
+    # 1.98.0 ran clean. ci.yml's windows leg uses whatever Rust the runner
+    # image happens to ship, so it went green the moment the image fleet
+    # rolled forward -- with the defect still in the tree. Pinning the declared
+    # MSRV here keeps that combination covered no matter what the image ships.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read MSRV from Cargo.toml
+        id: msrv
+        shell: bash
+        run: |
+          rv=$(grep -m1 '^rust-version' Cargo.toml | sed 's/.*=//; s/[" ]//g')
+          echo "version=$rv" >> "$GITHUB_OUTPUT"
+          echo "Declared MSRV: $rv"
+      - name: Install pinned MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - name: Run tests at MSRV (locked deps)
+        run: cargo +${{ steps.msrv.outputs.version }} test --locked
   ignored-tests:
     name: Ignored / functional tests
     runs-on: ubuntu-latest
