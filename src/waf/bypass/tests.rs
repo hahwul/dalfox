@@ -910,3 +910,68 @@ fn scheme_and_multislash_wired_into_regex_wafs() {
     assert!(crs.contains(&MutationType::SchemeBreak));
     assert!(crs.contains(&MutationType::EntityScheme));
 }
+
+/// Every mutation slices the payload at offsets it derives from byte scans
+/// (`find_first_tag_attr_break`, `find_sink_call`, `find_executable_scheme`,
+/// …). Those offsets must always land on a UTF-8 char boundary, or the
+/// `&payload[..idx]` splices panic and take down the whole scan — and the
+/// payload here is attacker-influenced (`--custom-payload`, remote payload
+/// providers). This walks a multibyte char through every byte position of a
+/// set of realistic payload skeletons and asserts no mutation ever panics.
+#[test]
+fn mutations_never_panic_on_multibyte_payloads() {
+    const MUTATIONS: &[MutationType] = &[
+        MutationType::HtmlCommentSplit,
+        MutationType::WhitespaceMutation,
+        MutationType::JsCommentSplit,
+        MutationType::BacktickParens,
+        MutationType::ConstructorChain,
+        MutationType::UnicodeJsEscape,
+        MutationType::MixedHtmlEntities,
+        MutationType::CaseAlternation,
+        MutationType::SlashSeparator,
+        MutationType::HtmlEntityParens,
+        MutationType::SvgAnimateExec,
+        MutationType::ExoticWhitespace,
+        MutationType::KeywordEntityEncode,
+        MutationType::MultiSlash,
+        MutationType::SchemeBreak,
+        MutationType::EntityScheme,
+    ];
+    // Skeletons that each hit a different mutation's scan/slice logic.
+    const BASES: &[&str] = &[
+        "<script>alert(1)</script>",
+        "<svg onload=alert(1)>",
+        "<svg/onload=alert(1)>",
+        "<img src=x onerror=alert(1)>",
+        "javascript:alert(1)",
+        "<a href=javascript:alert(1)>x</a>",
+        "vbscript:msgbox(1)",
+        "alert('XSS')",
+        "\"><script>confirm(document.domain)</script>",
+        "<body onload=prompt(1)>",
+        "<details ontoggle=alert`1`>",
+    ];
+    // Multibyte inserts: 2-, 3-, and 4-byte chars plus a combining mark and a
+    // zero-width joiner — the classic non-boundary landmines.
+    const INSERTS: &[&str] = &["é", "中", "🎯", "\u{0301}", "\u{200b}", "\u{feff}"];
+
+    for base in BASES {
+        for ins in INSERTS {
+            for pos in 0..=base.len() {
+                if !base.is_char_boundary(pos) {
+                    continue;
+                }
+                let mut payload = String::with_capacity(base.len() + ins.len());
+                payload.push_str(&base[..pos]);
+                payload.push_str(ins);
+                payload.push_str(&base[pos..]);
+                for m in MUTATIONS {
+                    // A panic here fails the test with the offending
+                    // (mutation, payload) pair.
+                    let _ = apply_single_mutation(&payload, m);
+                }
+            }
+        }
+    }
+}
