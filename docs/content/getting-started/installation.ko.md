@@ -50,12 +50,47 @@ nix run github:hahwul/dalfox -- scan https://example.com
 
 # 프로필에 설치
 nix profile install github:hahwul/dalfox
-
-# Dalfox가 준비된 개발 셸로 진입
-nix develop github:hahwul/dalfox
 ```
 
-Dalfox는 nixpkgs에 등록되어 있습니다. 최신 릴리스는 먼저 `unstable`에 올라옵니다.
+Dalfox는 nixpkgs에 등록되어 있습니다. 최신 릴리스는 먼저 `unstable`에 올라오므로, 릴리스 사이 기간에는 위 flake 쪽이 `nixpkgs`보다 앞서 있습니다.
+
+flake가 지원하는 시스템은 `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`입니다. nixpkgs `unstable`이 `x86_64-darwin`을 제외했기 때문에 Intel macOS는 빠져 있으니, 아래의 `macos-x86_64` 릴리스 아카이브를 쓰세요.
+
+이 flake가 고정한 nixpkgs 대신 사용자의 `nixpkgs`로 Dalfox를 빌드하려면 오버레이를 쓰세요. 시스템 flake에서는 이렇게 선언합니다.
+
+```nix
+# flake.nix
+{
+  inputs.dalfox.url = "github:hahwul/dalfox";
+
+  outputs = { self, nixpkgs, dalfox, ... }@inputs: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit inputs; };
+      modules = [ ./configuration.nix ];
+    };
+  };
+}
+```
+
+그리고 `inputs`를 전달받는 모듈에서 적용합니다.
+
+```nix
+# configuration.nix
+{ pkgs, inputs, ... }:
+{
+  nixpkgs.overlays = [ inputs.dalfox.overlays.default ];
+  environment.systemPackages = [ pkgs.dalfox ];
+}
+```
+
+flake는 Dalfox 자체를 개발할 때 쓰는 셸도 제공합니다. Rust 툴체인과 [`just`](https://github.com/casey/just), 테스트 하네스가 필요로 하는 Crystal 런타임이 들어 있고 `dalfox` 바이너리는 포함하지 않습니다.
+
+```bash
+git clone https://github.com/hahwul/dalfox && cd dalfox
+nix develop
+```
+
+[direnv](https://direnv.net)를 설치했다면 저장소의 `.envrc` 덕분에 `direnv allow` 한 번으로 같은 셸이 자동으로 활성화됩니다.
 
 ## Cargo (crates.io)
 

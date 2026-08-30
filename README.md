@@ -67,11 +67,13 @@ nix run github:hahwul/dalfox -- scan https://example.com
 # Install
 nix profile install github:hahwul/dalfox
 
-# Development environment
-nix develop github:hahwul/dalfox
+# Development environment for hacking on Dalfox itself
+git clone https://github.com/hahwul/dalfox && cd dalfox && nix develop
 ```
 
-See [Installation guide](https://dalfox.hahwul.com/getting-started/installation/) for details.
+The flake also exposes `overlays.default`, so NixOS and home-manager users can build Dalfox
+against their own `nixpkgs`. See the [Installation guide](https://dalfox.hahwul.com/getting-started/installation/)
+for that module snippet and the rest of the details.
 
 Prebuilt binaries (including statically-linked musl variants for Linux) are available on the [GitHub Releases](https://github.com/hahwul/dalfox/releases) page.
 

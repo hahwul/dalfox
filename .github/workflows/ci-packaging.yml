@@ -14,6 +14,8 @@ on:
       - "**/*.rs"
       - aur/PKGBUILD
       - snap/snapcraft.yaml
+      - flake.nix
+      - flake.lock
       - .github/workflows/ci-packaging.yml
   pull_request:
     branches: [main]
@@ -23,6 +25,8 @@ on:
       - "**/*.rs"
       - aur/PKGBUILD
       - snap/snapcraft.yaml
+      - flake.nix
+      - flake.lock
       - .github/workflows/ci-packaging.yml
   workflow_dispatch:
 env:
@@ -81,3 +85,53 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build snap
         uses: snapcore/action-build@v1
+
+  nix:
+    name: Nix flake build
+    runs-on: ubuntu-latest
+    # The flake is the only packaging path nothing else exercises: it pins its
+    # own toolchain via rust-overlay, so it can silently fall behind
+    # `rust-version` in Cargo.toml and stay broken until a user reports it
+    # (which is exactly what happened between #1158 and now). Evaluating and
+    # building it here turns that into a red check.
+    #
+    # Like the sibling jobs, this is an uncached full source build, hence the
+    # timeout. The first two steps are the same gates as `just nix-check` /
+    # `just nix-build` — keep the three in sync when you change one.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Check every flake output evaluates
+        run: nix flake check --no-build --all-systems
+      - name: Check the overlay instantiates
+        # `nix flake check` only verifies that overlays.default is a lambda —
+        # it never applies it. The overlay is the documented NixOS install
+        # path and it builds against the *consumer's* rustPlatform, so it is a
+        # different derivation from packages.default and needs its own check.
+        run: |
+          nix eval --raw --impure --expr '
+            let
+              flake = builtins.getFlake (toString ./.);
+              pkgs = import flake.inputs.nixpkgs {
+                system = builtins.currentSystem;
+                overlays = [ flake.overlays.default ];
+              };
+            in
+            pkgs.dalfox.drvPath
+          '
+      - name: Build the package
+        run: nix build .#default --print-build-logs
+      - name: Smoke test the binary
+        run: ./result/bin/dalfox --version
+      - name: Assert the generated artifacts are installed
+        # postInstall renders these from the freshly built binary; a silent
+        # regression there is exactly the class the .deb guard catches too.
+        run: |
+          test -f result/share/man/man1/dalfox.1.gz
+          test -f result/share/bash-completion/completions/dalfox.bash
+          test -f result/share/zsh/site-functions/_dalfox
+          test -f result/share/fish/vendor_completions.d/dalfox.fish

@@ -1,13 +1,16 @@
 # Bumps the dalfox version across every file that hardcodes it
-# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml, aur/PKGBUILD,
+# (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, aur/PKGBUILD,
 # docs/data/dalfox.json, docs/content/getting-started/installation.md).
 # Prompts for the new version interactively and prints a per-file checkmark.
+#
+# flake.nix is deliberately absent: it reads the version out of Cargo.toml at
+# evaluation time (`builtins.fromTOML`), so it cannot drift and has nothing to
+# bump.
 #
 # Pre-release suffixes are allowed (e.g. 3.0.0-dev.1, 3.1.0-rc.1).
 
 CARGO_TOML   = "Cargo.toml"
 CARGO_LOCK   = "Cargo.lock"
-FLAKE_NIX    = "flake.nix"
 SNAP_YAML    = "snap/snapcraft.yaml"
 AUR_PKGBUILD = "aur/PKGBUILD"
 DOCS_DATA    = "docs/data/dalfox.json"
@@ -28,14 +31,6 @@ end
 def cargo_lock_version : String?
   content = File.read(CARGO_LOCK)
   match = content.match(/name\s*=\s*"dalfox"\s*\nversion\s*=\s*"([^"]+)"/)
-  match ? match[1] : nil
-rescue
-  nil
-end
-
-def flake_version : String?
-  content = File.read(FLAKE_NIX)
-  match = content.match(/version\s*=\s*"([^"]+)"\s*;/)
   match ? match[1] : nil
 rescue
   nil
@@ -99,17 +94,6 @@ def update_cargo_lock(new_version : String) : Bool
   )
   return false if updated == content
   File.write(CARGO_LOCK, updated)
-  true
-rescue ex
-  puts "  error: #{ex.message}"
-  false
-end
-
-def update_flake(new_version : String) : Bool
-  content = File.read(FLAKE_NIX)
-  updated = content.sub(/(version\s*=\s*")[^"]+("\s*;)/, "\\1#{new_version}\\2")
-  return false if updated == content
-  File.write(FLAKE_NIX, updated)
   true
 rescue ex
   puts "  error: #{ex.message}"
@@ -188,7 +172,6 @@ end
 
 cargo_v   = cargo_toml_version
 lock_v    = cargo_lock_version
-flake_v   = flake_version
 snap_v    = snap_version
 aur_v     = aur_version
 docs_v    = docs_data_version
@@ -197,14 +180,13 @@ install_v = install_doc_version
 puts "Current versions:"
 puts "  #{CARGO_TOML.ljust(46)} #{cargo_v || "Not found"}"
 puts "  #{CARGO_LOCK.ljust(46)} #{lock_v || "Not found"}"
-puts "  #{FLAKE_NIX.ljust(46)} #{flake_v || "Not found"}"
 puts "  #{SNAP_YAML.ljust(46)} #{snap_v || "Not found"}"
 puts "  #{AUR_PKGBUILD.ljust(46)} #{aur_v || "Not found"}"
 puts "  #{DOCS_DATA.ljust(46)} #{docs_v || "Not found"}"
 puts "  #{INSTALL_DOC.ljust(46)} #{install_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, flake_v, snap_v, aur_v, docs_v, install_v].compact
+versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v].compact
 unique = versions.uniq
 
 if unique.size > 1
@@ -212,7 +194,7 @@ if unique.size > 1
   puts
 end
 
-current = cargo_v || lock_v || flake_v || snap_v || aur_v || docs_v || install_v || "unknown"
+current = cargo_v || lock_v || snap_v || aur_v || docs_v || install_v || "unknown"
 puts "Current: #{current}"
 print "New version (Enter to cancel): "
 input = gets
@@ -242,7 +224,6 @@ total = 0
 [
   {CARGO_TOML, ->{ update_cargo_toml(new_version) }, !cargo_v.nil?},
   {CARGO_LOCK, ->{ update_cargo_lock(new_version) }, !lock_v.nil?},
-  {FLAKE_NIX, ->{ update_flake(new_version) }, !flake_v.nil?},
   {SNAP_YAML, ->{ update_snap(new_version) }, !snap_v.nil?},
   {AUR_PKGBUILD, ->{ update_aur(new_version) }, !aur_v.nil?},
   {DOCS_DATA, ->{ update_docs_data(new_version) }, !docs_v.nil?},

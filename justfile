@@ -21,18 +21,33 @@ build:
 dev:
     cargo build
 
-# Render the roff man page into target/ for local preview (never committed —
-# packaging generates it from the freshly built binary at release time).
+# Never committed — packaging generates it from the freshly built binary at
+# release time. (`just --list` shows only the last comment line, so the
+# one-line summary goes last.)
+# Render the roff man page into target/ for local preview.
 [group('build')]
 man:
     mkdir -p target/man
     cargo run --quiet -- man > target/man/dalfox.1
     @echo "wrote target/man/dalfox.1 — preview with: man target/man/dalfox.1"
 
+# The flake pins its own Rust toolchain through rust-overlay, so a stale lock
+# silently falls behind Cargo.toml's `rust-version` and breaks `nix build`.
 # Update Nix flake lock.
 [group('build')]
 nix-update:
     nix flake update
+
+# Build the Nix package the way `nix build github:hahwul/dalfox` does.
+[group('build')]
+nix-build:
+    nix build .#default --print-build-logs
+    ./result/bin/dalfox --version
+
+# Evaluate every flake output for every supported system (fast, no build).
+[group('build')]
+nix-check:
+    nix flake check --no-build --all-systems
 
 # Serve docs site locally.
 [group('documents')]
