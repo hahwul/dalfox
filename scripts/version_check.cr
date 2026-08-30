@@ -1,11 +1,14 @@
 # Reports the version string declared in each file dalfox keeps in lockstep
-# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml, aur/PKGBUILD,
+# (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, aur/PKGBUILD,
 # docs/data/dalfox.json, docs/content/getting-started/installation.md).
 # Exits non-zero when they disagree so it can gate a release.
+#
+# flake.nix is deliberately absent: it reads the version out of Cargo.toml at
+# evaluation time (`builtins.fromTOML`), so it cannot drift and has nothing to
+# bump.
 
 CARGO_TOML  = "Cargo.toml"
 CARGO_LOCK  = "Cargo.lock"
-FLAKE_NIX   = "flake.nix"
 SNAP_YAML   = "snap/snapcraft.yaml"
 AUR_PKGBUILD = "aur/PKGBUILD"
 DOCS_DATA   = "docs/data/dalfox.json"
@@ -26,16 +29,6 @@ end
 def cargo_lock_version : String?
   content = File.read(CARGO_LOCK)
   match = content.match(/name\s*=\s*"dalfox"\s*\nversion\s*=\s*"([^"]+)"/)
-  match ? match[1] : nil
-rescue
-  nil
-end
-
-# flake.nix: any `version = "X";` (the file only has one such line for
-# the dalfox derivation).
-def flake_version : String?
-  content = File.read(FLAKE_NIX)
-  match = content.match(/version\s*=\s*"([^"]+)"\s*;/)
   match ? match[1] : nil
 rescue
   nil
@@ -84,7 +77,6 @@ end
 
 cargo_v   = cargo_toml_version
 lock_v    = cargo_lock_version
-flake_v   = flake_version
 snap_v    = snap_version
 aur_v     = aur_version
 docs_v    = docs_data_version
@@ -92,14 +84,13 @@ install_v = install_doc_version
 
 puts "#{CARGO_TOML.ljust(46)} #{cargo_v || "Not found"}"
 puts "#{CARGO_LOCK.ljust(46)} #{lock_v || "Not found"}"
-puts "#{FLAKE_NIX.ljust(46)} #{flake_v || "Not found"}"
 puts "#{SNAP_YAML.ljust(46)} #{snap_v || "Not found"}"
 puts "#{AUR_PKGBUILD.ljust(46)} #{aur_v || "Not found"}"
 puts "#{DOCS_DATA.ljust(46)} #{docs_v || "Not found"}"
 puts "#{INSTALL_DOC.ljust(46)} #{install_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, flake_v, snap_v, aur_v, docs_v, install_v].compact
+versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v].compact
 
 if versions.empty?
   puts "No versions found!"

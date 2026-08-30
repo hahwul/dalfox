@@ -215,10 +215,11 @@ Handy task aliases (from `justfile`):
 - `just test_all` — `cargo test -- --include-ignored`
 - `just dev` (alias `just d`) — debug build
 - `just build` (alias `just b`) — release build
-- `just version-check` (alias `just vc`) / `just version-update` (alias `just vu`) — keep version in lockstep across `Cargo.toml`, `Cargo.lock`, `flake.nix`, snap
+- `just version-check` (alias `just vc`) / `just version-update` (alias `just vu`) — keep version in lockstep across `Cargo.toml`, `Cargo.lock`, snap, AUR and the docs (`flake.nix` reads it from `Cargo.toml`, so it is not in the list)
 - `just docs-serve` (alias `just ds`) — serve the docs site locally via hwaro
 - `just docs-dependencies` — install docs tooling (hwaro) on macOS
-- `just nix-update` — update the Nix flake lockfile
+- `just nix-update` — update the Nix flake lockfile (the flake pins its own Rust toolchain, so a stale lock breaks `nix build`)
+- `just nix-check` / `just nix-build` — evaluate every flake output, or build the package the way `nix build github:hahwul/dalfox` does
 
 When behavior changes, add or update tests near the touched module plus one higher-level test when the change crosses module boundaries.
 

@@ -50,12 +50,47 @@ nix run github:hahwul/dalfox -- scan https://example.com
 
 # Install into your profile
 nix profile install github:hahwul/dalfox
-
-# Drop into a dev shell with Dalfox available
-nix develop github:hahwul/dalfox
 ```
 
-Dalfox lives in nixpkgs. The newest releases land in `unstable` first.
+Dalfox lives in nixpkgs. The newest releases land in `unstable` first, so the flake above is ahead of `nixpkgs` between releases.
+
+The flake builds for `x86_64-linux`, `aarch64-linux` and `aarch64-darwin`. Intel macOS is not among them because nixpkgs `unstable` dropped `x86_64-darwin` — use the `macos-x86_64` release archive below instead.
+
+To build Dalfox against your own `nixpkgs` instead of the one this flake pins, use the overlay. In your system flake:
+
+```nix
+# flake.nix
+{
+  inputs.dalfox.url = "github:hahwul/dalfox";
+
+  outputs = { self, nixpkgs, dalfox, ... }@inputs: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit inputs; };
+      modules = [ ./configuration.nix ];
+    };
+  };
+}
+```
+
+Then, in a module that receives `inputs`:
+
+```nix
+# configuration.nix
+{ pkgs, inputs, ... }:
+{
+  nixpkgs.overlays = [ inputs.dalfox.overlays.default ];
+  environment.systemPackages = [ pkgs.dalfox ];
+}
+```
+
+The flake also exposes a development shell for working on Dalfox itself — the Rust toolchain, [`just`](https://github.com/casey/just) and the Crystal runtime the test harnesses need, but not the `dalfox` binary:
+
+```bash
+git clone https://github.com/hahwul/dalfox && cd dalfox
+nix develop
+```
+
+With [direnv](https://direnv.net) installed, `direnv allow` picks the same shell up automatically from the repo's `.envrc`.
 
 ## Cargo (from crates.io)
 
