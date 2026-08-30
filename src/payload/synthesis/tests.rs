@@ -162,6 +162,54 @@ fn attribute_context_survives_angle_stripping() {
 }
 
 #[test]
+fn attribute_context_survives_space_stripping() {
+    // A server that strips literal spaces from the reflection collapses the
+    // space-separated stay-in-tag shapes into one merged attribute. The
+    // slash-separated mirror survives it. This is not gated on a filter result
+    // (space is not a probed special), so synthesize with NO blocked chars —
+    // exactly what a real scan passes — and require the space-free mirror to be
+    // present regardless.
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
+    let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
+    assert!(!payloads.is_empty());
+    let slash_handler = payloads
+        .iter()
+        .find(|p| {
+            !p.contains(' ')
+                && p.contains('/')
+                && (p.contains("onmouseover=") || p.contains("onfocus="))
+                && p.contains("id=")
+        })
+        .expect("a space-free slash-separated handler+id payload must be emitted");
+
+    // Shape alone is not proof: verify the payload actually *breaks out* by
+    // parsing the reflection the way the scanner does. Drop the space-free
+    // payload into a double-quoted attribute (the injection context) — after a
+    // server strips spaces this is byte-for-byte what comes back — and confirm
+    // the tokenizer yields an element that carries BOTH the id marker and an
+    // `on*` handler holding the sink. An unquoted-value slash injection (where
+    // `/` is appended, not a separator) would fail this and land the marker as
+    // inert text instead.
+    let id = crate::scanning::markers::id_marker();
+    let reflected = format!("<div class=\"{slash_handler}\">");
+    let doc = scraper::Html::parse_document(&reflected);
+    let sel = scraper::Selector::parse(&format!("#{id}")).unwrap();
+    let marker_el = doc
+        .select(&sel)
+        .next()
+        .expect("id marker must parse as a real element id after breakout");
+    let has_handler = marker_el
+        .value()
+        .attrs()
+        .any(|(name, val)| name.len() >= 3 && name.starts_with("on") && val.contains("alert"));
+    assert!(
+        has_handler,
+        "marker element must carry a surviving on* handler, got attrs {:?} from {reflected}",
+        marker_el.value().attrs().collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn paren_blocked_falls_back_to_backtick_call() {
     // With `(`/`)` stripped, the only surviving execution primitive is the
     // tagged-template call `alert`1``.
