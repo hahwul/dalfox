@@ -80,7 +80,7 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install cross-compilation tools
         if: matrix.use_cross == true
-        uses: taiki-e/install-action@v2.86.4
+        uses: taiki-e/install-action@v2.87.0
         with:
           tool: cross
       - name: Install musl tools
