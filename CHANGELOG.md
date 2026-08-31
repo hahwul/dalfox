@@ -7,6 +7,17 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./.github/SECURITY.md).
 
+## 3.2.2
+
+Request-construction / input-validation hardening, new WAF fingerprints, and shell-completion + man-page packaging.
+
+* Hardened request building and input validation: header-value checks, raw-HTTP `//`-target Host hijack, duplicate `Content-Type`, HAR empty cookies, query injection leaking into the URL fragment, and fail-fast on unroutable `--proxy` / non-http `--sxss-url` / failed `--cookie-from-raw` ([#1404](https://github.com/hahwul/dalfox/pull/1404), [#1396](https://github.com/hahwul/dalfox/pull/1396), [#1389](https://github.com/hahwul/dalfox/pull/1389), [#1384](https://github.com/hahwul/dalfox/pull/1384)).
+* MCP no longer caches the scan runtime in thread-local storage (fixes a Windows hang), and two stray panics no longer abort a whole scan ([#1398](https://github.com/hahwul/dalfox/pull/1398), [#1367](https://github.com/hahwul/dalfox/pull/1367)).
+* Server / MCP stop discarding `proxy` / `callback_url` and report a correct preflight estimate; config files no longer override explicitly typed CLI flags ([#1388](https://github.com/hahwul/dalfox/pull/1388), [#1372](https://github.com/hahwul/dalfox/pull/1372)).
+* New WAF fingerprints: Wallarm, NAXSI, SafeLine ([#1364](https://github.com/hahwul/dalfox/pull/1364)).
+* `dalfox completion` for shell completions and a generated man page, both installed by the packages ([#1374](https://github.com/hahwul/dalfox/pull/1374), [#1365](https://github.com/hahwul/dalfox/pull/1365), [#1380](https://github.com/hahwul/dalfox/pull/1380)).
+* `dalfox payload`: a `javascript` selector and slash-separated attribute breakouts for space-stripping filters ([#1386](https://github.com/hahwul/dalfox/pull/1386), [#1402](https://github.com/hahwul/dalfox/pull/1402)).
+
 ## 3.2.1
 
 A false-positive / recall fix on framework error pages, stability hardening, and `dalfox payload` improvements.
