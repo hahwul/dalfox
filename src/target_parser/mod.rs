@@ -480,7 +480,22 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
             "http"
         };
         let base = format!("{}://{}", scheme, host);
-        Url::parse(&base)?.join(uri)?
+        // An origin-form request-target is an absolute path on `host`, so it is
+        // appended to `base` textually rather than joined. `Url::join` treats a
+        // `//…`-prefixed target as an RFC 3986 network-path reference and parses
+        // its first segment as a *new authority* — so `GET //evil.com/admin`
+        // with `Host: internal.local` would silently retarget the scan at
+        // `http://evil.com/admin`, dropping the Host header entirely. Such
+        // double-slash paths turn up in real proxy captures (buggy client-side
+        // URL joins). Concatenating keeps the authority pinned to `host`, and
+        // still normalizes dot-segments and percent-encodes exactly as `join`
+        // did for the ordinary single-slash case. Non-path forms (`*`,
+        // authority-form) don't start with `/`, so they fall back to `join`.
+        if uri.starts_with('/') {
+            Url::parse(&format!("{}{}", base, uri))?
+        } else {
+            Url::parse(&base)?.join(uri)?
+        }
     };
 
     Ok(Target {

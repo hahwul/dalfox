@@ -143,7 +143,6 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
         let mut headers: Vec<(String, String)> = Vec::new();
         let mut cookies: Vec<(String, String)> = Vec::new();
         let mut user_agent: Option<String> = None;
-        let mut saw_cookie_header = false;
 
         for h in &req.headers {
             let name = h.name.trim();
@@ -153,7 +152,6 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
                 continue;
             }
             if name.eq_ignore_ascii_case("cookie") {
-                saw_cookie_header = true;
                 for kv in h.value.split(';') {
                     if let Some((k, v)) = kv.trim().split_once('=') {
                         let k = k.trim();
@@ -178,10 +176,15 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
             headers.push((name.to_string(), h.value.clone()));
         }
 
-        // The structured `cookies` array is a fallback for captures that record
-        // cookies but no `Cookie` header; when a header was present it already
-        // populated `cookies`, so don't double-count.
-        if !saw_cookie_header && !req.cookies.is_empty() {
+        // The structured `cookies` array is a fallback for captures that carry
+        // no usable `Cookie` header. Gate on whether the header path actually
+        // produced cookies, not on whether a `Cookie` header merely existed: a
+        // redacting/normalising exporter can emit an empty (or all-invalid)
+        // `Cookie` header alongside a populated `cookies[]`, and keying on the
+        // header's presence would then discard the real cookies and scan the
+        // capture logged-out. When the header did yield cookies this stays
+        // non-empty, so the fallback still can't double-count.
+        if cookies.is_empty() && !req.cookies.is_empty() {
             cookies = req
                 .cookies
                 .iter()

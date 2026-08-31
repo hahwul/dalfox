@@ -91,6 +91,16 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     if let Some(headers) = &opts.header {
         crate::job::validate_header_list(headers)?;
     }
+    // `user_agent` and `cookie` become header values too (User-Agent / Cookie),
+    // and the same reqwest builder-failure that `validate_header_list` guards
+    // against makes a live target look unreachable. Checked here so both front
+    // ends reject a control byte in either at submission rather than mid-scan.
+    if let Some(ua) = opts.user_agent.as_deref().filter(|s| !s.is_empty()) {
+        crate::job::validate_header_value("user_agent", ua)?;
+    }
+    if let Some(cookie) = opts.cookie.as_deref().filter(|s| !s.is_empty()) {
+        crate::job::validate_header_value("cookie", cookie)?;
+    }
     // An unusable proxy is resolved away to "no proxy" when the scan's client is
     // built, so the scan silently went *direct* to the target instead of through
     // the tunnel the caller asked for — and still reported `done`. The

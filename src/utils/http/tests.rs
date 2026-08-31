@@ -644,3 +644,70 @@ fn test_headers_declare_nosniff() {
     headers.insert("x-content-type-options", HeaderValue::from_static("sniff"));
     assert!(!headers_declare_nosniff(&headers));
 }
+
+// ---- build_body_request_base: captured Content-Type suppression ----
+
+#[test]
+fn build_body_request_base_drops_inherited_content_type() {
+    // A body injector/probe sets the injected body's Content-Type itself, and
+    // reqwest appends. A Content-Type inherited from an imported (raw-http/HAR)
+    // target's headers must be dropped here so it can't survive as a duplicate
+    // first value the server frames the body with. Every "build a new body in
+    // format X" sender (the url_inject injectors and the discovery/mining body
+    // probes) routes through this helper to avoid that class of drift.
+    let mut target = parse_target("https://example.com/path").unwrap();
+    target.headers = vec![
+        (
+            "Content-Type".to_string(),
+            "multipart/form-data; boundary=----OLD".to_string(),
+        ),
+        ("X-Keep".to_string(), "1".to_string()),
+    ];
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let req = build_body_request_base(
+        &client,
+        &target,
+        reqwest::Method::POST,
+        target.url.clone(),
+        Some("a=b".to_string()),
+    )
+    .build()
+    .expect("request should build");
+
+    assert!(
+        req.headers().get(reqwest::header::CONTENT_TYPE).is_none(),
+        "the inherited Content-Type must be dropped so the caller's is the only one"
+    );
+    assert_eq!(
+        req.headers().get("X-Keep").and_then(|v| v.to_str().ok()),
+        Some("1"),
+        "unrelated inherited headers must be preserved"
+    );
+}
+
+#[test]
+fn build_request_keeps_inherited_content_type() {
+    // The plain builder (query/path/header injection re-sends the original body
+    // verbatim) must NOT drop the captured Content-Type — only the body-format
+    // senders do.
+    let mut target = parse_target("https://example.com/path").unwrap();
+    target.headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let req = build_request(
+        &client,
+        &target,
+        reqwest::Method::POST,
+        target.url.clone(),
+        target.data.clone(),
+    )
+    .build()
+    .expect("request should build");
+    assert_eq!(
+        req.headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/json"),
+    );
+}

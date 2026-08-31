@@ -673,6 +673,90 @@ fn test_build_inject_request_multipart_keeps_generated_boundary() {
     );
 }
 
+/// An imported (raw-http/HAR) target carries its captured `Content-Type` in
+/// `target.headers`. reqwest *appends* headers, so a body injector that also
+/// sets a `Content-Type` would send two — and a server frames the body with the
+/// first (captured) one. Every body-injection path must therefore emit exactly
+/// one `Content-Type`, its own.
+#[test]
+fn test_body_injection_drops_captured_content_type_urlencoded() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let mut target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    // Simulate a raw-http/HAR import that captured a JSON Content-Type.
+    target.headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+    let param = make_param(Location::Body, "q");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    let cts: Vec<_> = req
+        .headers()
+        .get_all(reqwest::header::CONTENT_TYPE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert_eq!(
+        cts,
+        vec!["application/x-www-form-urlencoded"],
+        "exactly one Content-Type, the injector's, must be on the wire"
+    );
+}
+
+#[test]
+fn test_body_injection_drops_captured_content_type_json() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let mut target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    target.headers = vec![(
+        "content-type".to_string(),
+        "text/plain; charset=utf-8".to_string(),
+    )];
+    let param = make_param(Location::JsonBody, "q");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    let cts: Vec<_> = req
+        .headers()
+        .get_all(reqwest::header::CONTENT_TYPE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert_eq!(cts, vec!["application/json"]);
+}
+
+/// The worst case: a captured `multipart/form-data; boundary=OLD` left beside
+/// reqwest's boundary-carrying one makes the server frame the body with the
+/// stale boundary and see zero parts. Only reqwest's may survive.
+#[test]
+fn test_multipart_injection_drops_captured_multipart_content_type() {
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let mut target = crate::target_parser::parse_target("http://example.test/").expect("target");
+    target.headers = vec![(
+        "Content-Type".to_string(),
+        "multipart/form-data; boundary=----OLD".to_string(),
+    )];
+    let param = make_param(Location::MultipartBody, "q");
+    let req = build_inject_request(&client, &target, &param, "PAYLOAD")
+        .build()
+        .expect("request builds");
+
+    let cts: Vec<_> = req
+        .headers()
+        .get_all(reqwest::header::CONTENT_TYPE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert_eq!(cts.len(), 1, "exactly one Content-Type, got: {cts:?}");
+    assert!(
+        cts[0].starts_with("multipart/form-data; boundary=") && !cts[0].contains("----OLD"),
+        "only reqwest's generated boundary may survive, got: {}",
+        cts[0]
+    );
+}
+
 /// A cookie param routes to the `Cookie` header, not a same-named header —
 /// the dispatcher must keep delegating `Header` to `build_header_request`.
 #[test]

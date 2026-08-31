@@ -1013,7 +1013,7 @@ pub async fn probe_body_params(
                         .await
                         .expect("acquire semaphore permit");
                     let m = parsed_method;
-                    let base = crate::utils::build_request(
+                    let base = crate::utils::build_body_request_base(
                         &client_clone,
                         &target_clone,
                         m,
@@ -1451,7 +1451,7 @@ pub async fn probe_json_body_params(
                     )
                 });
 
-                let base = crate::utils::build_request(
+                let base = crate::utils::build_body_request_base(
                     &client_clone,
                     &target_clone,
                     parsed_method,
@@ -1621,9 +1621,14 @@ pub async fn probe_multipart_params(
 
                 let method =
                     crate::scanning::url_inject::body_location_method(&target_clone.method);
-                let request =
-                    crate::utils::build_request(&client_clone, &target_clone, method, url, None)
-                        .multipart(form);
+                let request = crate::utils::build_body_request_base(
+                    &client_clone,
+                    &target_clone,
+                    method,
+                    url,
+                    None,
+                )
+                .multipart(form);
                 crate::record_outbound_request().await;
 
                 let mut discovered: Option<Param> = None;

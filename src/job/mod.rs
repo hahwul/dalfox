@@ -161,6 +161,28 @@ pub(crate) fn validate_header_list(headers: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Reject a `User-Agent` or cookie value reqwest cannot put on the wire.
+///
+/// Same rationale as [`validate_header_list`]: both a supplied `user_agent`
+/// (pushed on as a `User-Agent` header by `hydrate_target` / the reachability
+/// probe) and each cookie value (composed into the `Cookie` header) become
+/// header values, and a control byte in one fails reqwest on the *builder* for
+/// every request in the job — so the reachability probe fails and the scan
+/// settles `unreachable` / `CONNECTION_FAILED`, blaming a live target for what
+/// is really malformed input. Validating here turns that into a precise 400 at
+/// submission. `HeaderValue::try_from(&str)` is exactly what reqwest's
+/// `.header()` applies, so obs-text stays legal (a UTF-8 UA passes).
+pub(crate) fn validate_header_value(field: &str, value: &str) -> Result<(), String> {
+    if reqwest::header::HeaderValue::try_from(value).is_err() {
+        return Err(format!(
+            "invalid {} value '{}'",
+            field,
+            crate::utils::log::sanitize_log_message(value)
+        ));
+    }
+    Ok(())
+}
+
 /// Validate and normalize a caller-supplied proxy URL, rejecting anything
 /// reqwest cannot actually route through (unparseable, or a scheme like
 /// `ftp://` / `socks6://` that `Proxy::all` accepts then silently drops).

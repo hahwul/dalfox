@@ -784,7 +784,17 @@ async fn window_overflow_probe(
         return None;
     }
 
-    let batched_chars: String = SPECIAL_PROBE_CHARS.iter().collect();
+    // Use the transport-aware probe set, not raw `SPECIAL_PROBE_CHARS`: for a
+    // cookie param the latter still contains `;`, which ends the cookie value
+    // on the wire and truncates the probe before the CLOSE marker — so
+    // `extract_reflected_segment` finds nothing and this window probe returns
+    // `None` even when the special chars *would* reflect past the window. That
+    // silently disabled window-limited-WAF detection for every cookie param,
+    // the exact inconsistency `probe_chars_for` exists to prevent on the normal
+    // path. `;` is folded back into `invalid` centrally via
+    // `transport_invalid_chars`, so dropping it here loses no classification.
+    let probe_chars = probe_chars_for(target, param);
+    let batched_chars: String = probe_chars.iter().collect();
     let probe = format!(
         "{}{}{}{}",
         crate::encoding::pre_encoding::waf_window_pad(),
@@ -800,7 +810,7 @@ async fn window_overflow_probe(
     let segment = resp.as_deref().and_then(extract_reflected_segment)?;
     let mut valid = Vec::new();
     let mut invalid = Vec::new();
-    for &c in SPECIAL_PROBE_CHARS {
+    for &c in &probe_chars {
         if char_reflected_in_segment(segment, c) {
             valid.push(c);
         } else {
