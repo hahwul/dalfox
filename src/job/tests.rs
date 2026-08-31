@@ -468,3 +468,15 @@ fn rest_and_mcp_requests_agree_on_scan_args() {
         "a default REST scan and a default MCP scan must run identically"
     );
 }
+
+#[test]
+fn validate_header_value_matches_reqwest_builder_semantics() {
+    // What reqwest's `.header()` accepts for a &str value, this must accept —
+    // and reject the control bytes that fail the builder. Obs-text (a UTF-8
+    // User-Agent) is legal; CR/LF/NUL are not.
+    assert!(validate_header_value("user_agent", "Mozilla/5.0 (caf\u{e9})").is_ok());
+    assert!(validate_header_value("cookie", "sid=abc; theme=dark").is_ok());
+    assert!(validate_header_value("user_agent", "Mozilla\r\nX: 1").is_err());
+    assert!(validate_header_value("user_agent", "Mozilla\nX: 1").is_err());
+    assert!(validate_header_value("cookie", "sid=a\0b").is_err());
+}

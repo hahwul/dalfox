@@ -907,9 +907,21 @@ browser execution; only detection_method=oob observes a real browser."
         }
         // Same shared check the REST server runs: a malformed header makes
         // reqwest fail on the builder for every request in the job, which
-        // surfaces as the *target* being reported unreachable.
+        // surfaces as the *target* being reported unreachable. `user_agent` and
+        // each cookie value become header values too, so they fail the builder
+        // the same way and get the same submission-time check.
         if let Err(e) = crate::job::validate_header_list(&headers) {
             return Err(ErrorData::invalid_params(e, None));
+        }
+        if let Some(ua) = user_agent.as_deref().filter(|s| !s.is_empty())
+            && let Err(e) = crate::job::validate_header_value("user_agent", ua)
+        {
+            return Err(ErrorData::invalid_params(e, None));
+        }
+        for cookie in &cookies {
+            if let Err(e) = crate::job::validate_header_value("cookie", cookie) {
+                return Err(ErrorData::invalid_params(e, None));
+            }
         }
         // An unusable proxy is resolved away to "no proxy" when the scan's
         // client is built, so the scan silently went *direct* to the target
@@ -1525,6 +1537,14 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             .map_err(|e| ErrorData::invalid_params(e, None))?;
         crate::job::validate_header_list(&params.headers)
             .map_err(|e| ErrorData::invalid_params(e, None))?;
+        if let Some(ua) = params.user_agent.as_deref().filter(|s| !s.is_empty()) {
+            crate::job::validate_header_value("user_agent", ua)
+                .map_err(|e| ErrorData::invalid_params(e, None))?;
+        }
+        for cookie in &params.cookies {
+            crate::job::validate_header_value("cookie", cookie)
+                .map_err(|e| ErrorData::invalid_params(e, None))?;
+        }
         // Same silent-fallback hazard as the scan tool: an unusable proxy would
         // make the reachability probe go direct and report the target reachable
         // through a path the caller never asked for.

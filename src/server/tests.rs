@@ -2231,6 +2231,46 @@ fn test_validate_scan_options_rejects_malformed_headers() {
 }
 
 #[test]
+fn test_validate_scan_options_rejects_malformed_user_agent_and_cookie() {
+    // `user_agent` and `cookie` also become header values on the wire, so a
+    // control byte in either fails reqwest's builder for every request — the
+    // same "live target reported unreachable" failure the header check exists
+    // to prevent. They were previously unvalidated.
+    let mut bad_ua = ScanOptions {
+        user_agent: Some("Mozilla/5.0\r\nX-Injected: 1".to_string()),
+        ..ScanOptions::default()
+    };
+    assert!(
+        validate_scan_options(&mut bad_ua).is_err(),
+        "a CRLF in user_agent must be rejected"
+    );
+
+    let mut bad_cookie = ScanOptions {
+        cookie: Some("sid=abc\ndef".to_string()),
+        ..ScanOptions::default()
+    };
+    assert!(
+        validate_scan_options(&mut bad_cookie).is_err(),
+        "a newline in a cookie value must be rejected"
+    );
+
+    // A UTF-8 User-Agent and an ordinary cookie still pass; an empty
+    // user_agent (the "no override" sentinel) must not be rejected.
+    let mut ok = ScanOptions {
+        user_agent: Some("Mozilla/5.0 (caf\u{e9})".to_string()),
+        cookie: Some("sid=abc; theme=dark".to_string()),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut ok).is_ok());
+
+    let mut empty_ua = ScanOptions {
+        user_agent: Some(String::new()),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut empty_ua).is_ok());
+}
+
+#[test]
 fn test_validate_scan_options_rejects_out_of_range() {
     let mut bad_timeout = ScanOptions {
         timeout: Some(0),

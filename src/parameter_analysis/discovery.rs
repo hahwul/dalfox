@@ -1233,7 +1233,7 @@ pub async fn check_form_discovery(
                         form = form.text(n.clone(), v.clone());
                     }
                 }
-                let rb = crate::utils::build_request(
+                let rb = crate::utils::build_body_request_base(
                     &client,
                     target,
                     reqwest::Method::POST,
@@ -1301,8 +1301,13 @@ pub async fn check_form_discovery(
                     },
                 );
                 let m = reqwest::Method::POST;
-                let rb =
-                    crate::utils::build_request(&client, target, m, form_url.clone(), Some(body));
+                let rb = crate::utils::build_body_request_base(
+                    &client,
+                    target,
+                    m,
+                    form_url.clone(),
+                    Some(body),
+                );
                 let rb = crate::utils::apply_header_overrides(
                     rb,
                     &[(
@@ -1386,8 +1391,13 @@ pub async fn check_form_discovery(
                 serde_json::Value::Object(map).to_string()
             };
             let m = reqwest::Method::POST;
-            let rb =
-                crate::utils::build_request(&client, target, m, form_url.clone(), Some(json_body));
+            let rb = crate::utils::build_body_request_base(
+                &client,
+                target,
+                m,
+                form_url.clone(),
+                Some(json_body),
+            );
             let rb = crate::utils::apply_header_overrides(
                 rb,
                 &[("Content-Type".to_string(), "application/json".to_string())],
@@ -1462,7 +1472,7 @@ pub async fn check_form_discovery(
                     }
                     let json_body = serde_json::Value::Object(map).to_string();
                     let m = reqwest::Method::POST;
-                    let rb = crate::utils::build_request(
+                    let rb = crate::utils::build_body_request_base(
                         &client,
                         target,
                         m,
@@ -1533,7 +1543,7 @@ pub async fn check_form_discovery(
                     }
                     let json_body = serde_json::Value::Object(map).to_string();
                     let m = reqwest::Method::POST;
-                    let rb = crate::utils::build_request(
+                    let rb = crate::utils::build_body_request_base(
                         &client,
                         target,
                         m,

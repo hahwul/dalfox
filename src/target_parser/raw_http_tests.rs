@@ -49,6 +49,40 @@ fn test_parse_raw_http_origin_form() {
 }
 
 #[test]
+fn test_parse_raw_http_origin_form_double_slash_keeps_host() {
+    // A `//…`-prefixed origin-form request-target (routine in real proxy
+    // captures from buggy client-side URL joins) must stay a path on the
+    // Host, not be parsed as a network-path reference whose first segment
+    // becomes a new authority. `Url::join` would have retargeted this at
+    // `http://api/v1/users`, dropping the Host header.
+    let raw = "GET //api/v1/users HTTP/1.1\r\nHost: internal.local\r\n\r\n";
+    let t = parse_raw_http_request(raw).expect("should parse double-slash origin-form");
+    assert_eq!(t.url.host_str(), Some("internal.local"));
+    assert_eq!(t.url.as_str(), "http://internal.local//api/v1/users");
+}
+
+#[test]
+fn test_parse_raw_http_origin_form_double_slash_no_host_hijack() {
+    // The security-relevant shape: a `//evil.com/…` target must not move the
+    // scan off the `Host`-named server.
+    let raw = "GET //evil.com/admin HTTP/1.1\r\nHost: internal.local\r\n\r\n";
+    let t = parse_raw_http_request(raw).expect("should parse");
+    assert_eq!(
+        t.url.host_str(),
+        Some("internal.local"),
+        "the Host header must win over a `//host`-shaped request-target"
+    );
+}
+
+#[test]
+fn test_parse_raw_http_origin_form_normalizes_dot_segments() {
+    // The concat path must still normalize `..`/`.` like `Url::join` did.
+    let raw = "GET /a/../b?x=1 HTTP/1.1\r\nHost: h.local\r\n\r\n";
+    let t = parse_raw_http_request(raw).expect("should parse");
+    assert_eq!(t.url.as_str(), "http://h.local/b?x=1");
+}
+
+#[test]
 fn test_parse_raw_http_https_host_port() {
     let raw = "GET /p HTTP/1.1\r\nHost: secure.example.com:443\r\n\r\n";
     let t = parse_raw_http_request(raw).expect("should infer https from :443");

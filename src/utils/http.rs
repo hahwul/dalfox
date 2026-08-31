@@ -86,9 +86,29 @@ pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
 /// If `cookie_header` is Some, attach it. Otherwise, if no Cookie header exists in headers,
 /// auto-attach from target.cookies (when non-empty).
 pub(crate) fn apply_headers_ua_cookies(
+    rb: RequestBuilder,
+    target: &Target,
+    cookie_header: Option<String>,
+) -> RequestBuilder {
+    apply_headers_ua_cookies_inner(rb, target, cookie_header, false)
+}
+
+/// Same as [`apply_headers_ua_cookies`], but with `suppress_content_type`.
+///
+/// A body injector generates a *new* body in a chosen wire format and then sets
+/// the matching `Content-Type` itself. reqwest's `.header()` / `.multipart()`
+/// *append*, so a `Content-Type` copied from an imported (raw-http/HAR) target's
+/// `target.headers` would remain the **first** value alongside the injector's —
+/// and a server frames the body with the first `Content-Type`, so it parses the
+/// injected body under the stale captured type (worst case: a captured
+/// multipart boundary makes every multipart injection frame zero parts and test
+/// nothing). Suppressing the inherited value here lets the injector's be the
+/// only one on the wire.
+fn apply_headers_ua_cookies_inner(
     mut rb: RequestBuilder,
     target: &Target,
     cookie_header: Option<String>,
+    suppress_content_type: bool,
 ) -> RequestBuilder {
     // Apply user provided headers first. Skip `Accept-Encoding`: setting it
     // manually disables reqwest's transparent decompression, so the body comes
@@ -97,6 +117,9 @@ pub(crate) fn apply_headers_ua_cookies(
     // decompression on, mirroring the HAR import path's `is_skippable_har_header`.
     for (k, v) in &target.headers {
         if k.eq_ignore_ascii_case("accept-encoding") {
+            continue;
+        }
+        if suppress_content_type && k.eq_ignore_ascii_case("content-type") {
             continue;
         }
         rb = rb.header(k, v);
@@ -139,6 +162,28 @@ pub(crate) fn build_request(
 ) -> RequestBuilder {
     let rb = client.request(method, url);
     let rb = apply_headers_ua_cookies(rb, target, None);
+    if let Some(b) = body { rb.body(b) } else { rb }
+}
+
+/// Build a RequestBuilder for a body injector, dropping any `Content-Type`
+/// inherited from `target.headers`.
+///
+/// The caller sets the injected body's `Content-Type` itself (via
+/// `apply_header_overrides` or reqwest's `.multipart()`); reqwest appends rather
+/// than replaces, so a captured `Content-Type` from an imported target would
+/// otherwise survive as a duplicate first value the server acts on. See
+/// [`apply_headers_ua_cookies_inner`]. Query/Path injectors keep using
+/// [`build_request`], which preserves the captured `Content-Type` since they
+/// re-send the original body verbatim.
+pub(crate) fn build_body_request_base(
+    client: &Client,
+    target: &Target,
+    method: Method,
+    url: Url,
+    body: Option<String>,
+) -> RequestBuilder {
+    let rb = client.request(method, url);
+    let rb = apply_headers_ua_cookies_inner(rb, target, None, true);
     if let Some(b) = body { rb.body(b) } else { rb }
 }
 

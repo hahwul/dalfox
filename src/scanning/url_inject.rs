@@ -711,7 +711,7 @@ pub(crate) fn build_body_request(
     let parsed_url = resolve_form_action_url(param, target);
     let body = Some(urlencoded_body(target.data.as_deref(), &param.name, value));
     let method = body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_request(client, target, method, parsed_url, body);
+    let base = crate::utils::build_body_request_base(client, target, method, parsed_url, body);
     crate::utils::apply_header_overrides(
         base,
         &[(
@@ -736,7 +736,7 @@ pub(crate) fn build_json_body_request(
         value,
     ));
     let method = body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_request(client, target, method, parsed_url, body);
+    let base = crate::utils::build_body_request_base(client, target, method, parsed_url, body);
     crate::utils::apply_header_overrides(
         base,
         &[("Content-Type".to_string(), "application/json".to_string())],
@@ -745,6 +745,10 @@ pub(crate) fn build_json_body_request(
 
 /// `multipart/form-data` body injection. No explicit `Content-Type` override:
 /// reqwest derives it from the form, and it must carry the generated boundary.
+/// `build_body_request_base` drops any `Content-Type` inherited from an imported
+/// target so reqwest's boundary-carrying one is the only value on the wire — a
+/// leftover captured `multipart/...; boundary=OLD` would be the first header the
+/// server frames the body with, seeing zero parts.
 pub(crate) fn build_multipart_request(
     client: &Client,
     target: &Target,
@@ -754,7 +758,7 @@ pub(crate) fn build_multipart_request(
     let parsed_url = resolve_form_action_url(param, target);
     let form = multipart_form(target.data.as_deref(), &param.name, value);
     let method = body_location_method_for_param(&target.method, param);
-    crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
+    crate::utils::build_body_request_base(client, target, method, parsed_url, None).multipart(form)
 }
 
 /// Query / Path injection: the payload goes into the URL and the target's own

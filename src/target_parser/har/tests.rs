@@ -139,6 +139,43 @@ fn falls_back_to_cookies_array_without_cookie_header() {
 }
 
 #[test]
+fn falls_back_to_cookies_array_when_cookie_header_is_empty() {
+    // A redacting/normalising exporter can emit an empty `Cookie` header
+    // alongside a populated structured `cookies[]`. Keying the fallback on
+    // the header's mere presence discarded the real cookies and scanned the
+    // capture logged-out; the fallback must fire whenever the header path
+    // produced no usable cookie.
+    let har = r#"{"log":{"entries":[{"request":{
+            "method":"GET","url":"https://example.com/",
+            "headers":[{"name":"Cookie","value":""}],
+            "cookies":[{"name":"session","value":"abc"}]
+        }}]}}"#;
+    let targets = parse_har(har).unwrap();
+    assert_eq!(targets[0].cookies.len(), 1);
+    assert_eq!(
+        targets[0].cookies[0],
+        ("session".to_string(), "abc".to_string())
+    );
+}
+
+#[test]
+fn cookie_header_wins_over_structured_array_no_double_count() {
+    // When the Cookie header yields cookies, the structured array must not be
+    // merged on top (no duplicates).
+    let har = r#"{"log":{"entries":[{"request":{
+            "method":"GET","url":"https://example.com/",
+            "headers":[{"name":"Cookie","value":"sid=fromheader"}],
+            "cookies":[{"name":"sid","value":"fromarray"},{"name":"extra","value":"x"}]
+        }}]}}"#;
+    let targets = parse_har(har).unwrap();
+    assert_eq!(targets[0].cookies.len(), 1);
+    assert_eq!(
+        targets[0].cookies[0],
+        ("sid".to_string(), "fromheader".to_string())
+    );
+}
+
+#[test]
 fn trims_whitespace_in_cookies_array_values() {
     // Values from the structured `cookies` fallback must be trimmed the same
     // way the Cookie-header path trims them, so a HAR exporter that pads the
