@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "dalfox"
-version = "3.2.1"
+version = "3.2.2"
 dependencies = [
  "aes",
  "axum",
