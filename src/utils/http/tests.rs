@@ -711,3 +711,62 @@ fn build_request_keeps_inherited_content_type() {
         Some("application/json"),
     );
 }
+
+#[tokio::test]
+async fn send_counted_counts_a_request_that_never_answers() {
+    // Scoped to the per-job task-local so the assertion is isolated from the
+    // process-wide counter the rest of the suite shares.
+    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let c = counter.clone();
+    crate::REQUEST_FAILURE_COUNT_JOB
+        .scope(counter.clone(), async move {
+            // Bind then drop a listener: the port is closed, but was definitely
+            // free, so a connection there cannot succeed.
+            let dead_listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("bind dead listener");
+            let dead_port = dead_listener.local_addr().expect("dead addr").port();
+            drop(dead_listener);
+
+            // Explicit: reqwest resolves the rustls provider when a `Client`
+            // is built, and this test must not depend on some earlier test in
+            // the binary having installed it first.
+            crate::ensure_crypto_provider();
+            let client = reqwest::Client::new();
+            let dead = format!("http://127.0.0.1:{dead_port}/");
+            assert!(
+                send_counted(client.get(&dead)).await.is_err(),
+                "a closed port must not answer"
+            );
+            assert_eq!(
+                c.load(std::sync::atomic::Ordering::Relaxed),
+                1,
+                "a request that never reached the target must be counted"
+            );
+
+            // A request that does answer must not be counted.
+            let live_listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("bind live listener");
+            let live_addr = live_listener.local_addr().expect("live addr");
+            tokio::spawn(async move {
+                if let Ok((mut sock, _)) = live_listener.accept().await {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = sock
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
+                        .await;
+                    let _ = sock.shutdown().await;
+                }
+            });
+            let live = format!("http://{live_addr}/");
+            assert!(send_counted(client.get(&live)).await.is_ok());
+            assert_eq!(
+                c.load(std::sync::atomic::Ordering::Relaxed),
+                1,
+                "a successful request must not bump the failure counter"
+            );
+        })
+        .await;
+}
