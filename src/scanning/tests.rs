@@ -217,6 +217,36 @@ fn test_collapse_keeps_r_when_no_v_for_that_param() {
     assert_eq!(after.len(), 2, "no V to cover, keep R findings");
 }
 
+/// A `q` in the query string and a `q` in the request body are different
+/// injection points (see `found_param_key`), so proving the body one
+/// exploitable must not delete the query one's evidence.
+#[test]
+fn test_collapse_keeps_r_when_the_v_is_at_a_different_wire_location() {
+    let mut verified_body = make_typed_param_result(FindingType::Verified, "q", "inHTML");
+    verified_body.location = "Body".to_string();
+    let mut reflected_query = make_typed_param_result(FindingType::Reflected, "q", "inHTML");
+    reflected_query.location = "Query".to_string();
+
+    let after = collapse_redundant_reflected(
+        vec![verified_body, reflected_query],
+        "https://example.com/?x=1",
+    );
+    assert_eq!(
+        after.len(),
+        2,
+        "the query-string reflection is a separate injection point from the \
+         verified body parameter and must survive the collapse"
+    );
+
+    // Same location: the R really is the weaker evidence for the same finding.
+    let mut verified = make_typed_param_result(FindingType::Verified, "q", "inHTML");
+    verified.location = "Query".to_string();
+    let mut reflected = make_typed_param_result(FindingType::Reflected, "q", "inHTML");
+    reflected.location = "Query".to_string();
+    let after = collapse_redundant_reflected(vec![verified, reflected], "https://example.com/?x=1");
+    assert_eq!(after.len(), 1);
+}
+
 #[test]
 fn test_collapse_keeps_r_for_different_param_or_inject_type() {
     let results = vec![
@@ -2644,4 +2674,381 @@ fn test_estimate_param_requests_caps_each_phase_separately() {
     // the estimate.
     let unlimited = |n: usize| n;
     assert!(estimate_param_requests(&html, &args, 1, &unlimited) > 2 * cap);
+}
+
+// ---------------------------------------------------------------------------
+// Scan-core defect regressions (A1)
+// ---------------------------------------------------------------------------
+
+/// Bind an axum app on an ephemeral loopback port and return its base address.
+async fn spawn_regression_app(app: axum::Router) -> std::net::SocketAddr {
+    use std::net::Ipv4Addr;
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
+/// `FoundParams` used to be keyed by parameter *name* alone, so the first wire
+/// slot to produce a finding suppressed every sibling slot with the same name:
+/// the reflection/DOM phases short-circuited and the dispatch loop skipped the
+/// sibling's worker outright.
+///
+/// Here `q` names two genuinely independent injection points on one request —
+/// `?q=` in the query string and `q` in the urlencoded POST body — and the mock
+/// reflects **both** raw. Both are exploitable, so both must be reported;
+/// before the fix whichever worker won the race silenced the other and the scan
+/// reported exactly one finding (a false negative on a real vulnerability).
+#[tokio::test]
+async fn test_run_scanning_reports_same_name_query_and_body_params_separately() {
+    use axum::{Router, extract::Query, response::Html, routing::post};
+    use std::collections::HashMap;
+
+    async fn handler(Query(q): Query<HashMap<String, String>>, body: String) -> Html<String> {
+        let from_query = q.get("q").cloned().unwrap_or_default();
+        let from_body = url::form_urlencoded::parse(body.as_bytes())
+            .find(|(k, _)| k == "q")
+            .map(|(_, v)| v.to_string())
+            .unwrap_or_default();
+        Html(format!(
+            "<html><body><div id=q>{}</div><div id=b>{}</div></body></html>",
+            from_query, from_body
+        ))
+    }
+
+    let addr = spawn_regression_app(Router::new().route("/", post(handler))).await;
+
+    let url = format!("http://{}/?q=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.method = "POST".to_string();
+    target.data = Some("q=b".to_string());
+    target.workers = 4;
+    target.reflection_params = vec![
+        Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+        },
+        Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new("q".to_string(), "b".to_string(), Location::Body)
+        },
+    ];
+
+    let args = Arc::new(integration_scan_args(false));
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let guard = results.lock().await;
+    let locations: Vec<&str> = guard
+        .iter()
+        .filter(|r| r.param == "q")
+        .map(|r| r.location.as_str())
+        .collect();
+    assert!(
+        locations.contains(&"Query"),
+        "the vulnerable query-string `q` must be reported; got {:?}",
+        locations
+    );
+    assert!(
+        locations.contains(&"Body"),
+        "the vulnerable body `q` is a different injection point and must be \
+         reported too; got {:?}",
+        locations
+    );
+}
+
+/// Cancellation used to be honoured only inside the reflection and DOM payload
+/// loops. Every parameter's worker is spawned up front, so on a cancelled scan
+/// the workers still queued behind the concurrency semaphore each went on to
+/// fire the Stage-0 probe and then the whole `--hpp` phase — thousands of
+/// requests at a target the operator had already asked us to stop hitting.
+///
+/// The mock flips the cancel flag once it has served a handful of requests and
+/// counts everything it receives afterwards. `--hpp` is on and duplicate-
+/// parameter requests are answered without a reflection, so the HPP phase runs
+/// its full `payloads x positions` fan-out when it is not stopped.
+#[tokio::test]
+async fn test_run_scanning_cancel_stops_probe_and_hpp_requests() {
+    use axum::{Router, extract::RawQuery, extract::State, response::Html, routing::get};
+    use std::sync::atomic::AtomicBool;
+
+    #[derive(Clone)]
+    struct AppState {
+        requests: Arc<AtomicUsize>,
+        cancel: Arc<AtomicBool>,
+    }
+
+    /// Requests served before the scan is cancelled.
+    const CANCEL_AFTER: usize = 6;
+
+    async fn handler(State(st): State<AppState>, RawQuery(q): RawQuery) -> Html<String> {
+        let n = st.requests.fetch_add(1, Ordering::SeqCst) + 1;
+        if n >= CANCEL_AFTER {
+            st.cancel.store(true, Ordering::SeqCst);
+        }
+        let raw = q.unwrap_or_default();
+        let pairs: Vec<(String, String)> = url::form_urlencoded::parse(raw.as_bytes())
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        // HPP probes send the same name twice. Answer those without echoing
+        // anything so the HPP phase never short-circuits on a first hit and
+        // instead spends its full per-parameter budget.
+        let mut names: Vec<&str> = pairs.iter().map(|(k, _)| k.as_str()).collect();
+        names.sort_unstable();
+        let deduped = {
+            let mut d = names.clone();
+            d.dedup();
+            d.len()
+        };
+        if deduped != names.len() {
+            return Html("<html><body>no</body></html>".to_string());
+        }
+        let echoed: String = pairs.iter().map(|(_, v)| v.as_str()).collect();
+        Html(format!("<html><body><div>{}</div></body></html>", echoed))
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let state = AppState {
+        requests: requests.clone(),
+        cancel: cancel.clone(),
+    };
+    let addr = spawn_regression_app(
+        Router::new()
+            .route("/", get(handler))
+            .with_state(state.clone()),
+    )
+    .await;
+
+    // 40 parameters, 2 workers: 38 of them are queued behind the semaphore when
+    // the cancel flag flips, which is exactly the population the fix protects.
+    const PARAMS: usize = 40;
+    let query: String = (0..PARAMS)
+        .map(|i| format!("p{}=a", i))
+        .collect::<Vec<_>>()
+        .join("&");
+    let url = format!("http://{}/?{}", addr, query);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.workers = 2;
+    target.reflection_params = (0..PARAMS)
+        .map(|i| Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new(format!("p{}", i), "a".to_string(), Location::Query)
+        })
+        .collect();
+
+    let mut raw_args = integration_scan_args(false);
+    raw_args.hpp = true;
+    // One reflection payload per param keeps the *pre*-cancel traffic tiny; the
+    // HPP subset is taken from this same list, so the post-cancel fan-out this
+    // test measures stays attributable to the probe + HPP phases.
+    raw_args.max_payloads_per_param = 1;
+    let args = Arc::new(raw_args);
+
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))).with_cancel(cancel),
+    )
+    .await;
+
+    let total = requests.load(Ordering::SeqCst);
+    // Before the fix each of the ~38 queued workers still ran a probe and the
+    // full HPP fan-out after cancellation, which lands in the hundreds. The
+    // small allowance covers the two workers that were already mid-flight.
+    assert!(
+        total < 60,
+        "a cancelled scan must stop issuing requests; the queued workers sent \
+         {} requests in total (cancel fired at request {})",
+        total,
+        CANCEL_AFTER
+    );
+}
+
+/// The `--sxss` branch of `fetch_injection_response_with_client` used to return
+/// candidate bodies without applying any of the response gates the normal
+/// reflection branch applies. An `application/json` echo is inert — a browser
+/// renders it as data, never as markup — so the plain path suppresses it, while
+/// `--sxss` reported it as a stored-XSS reflection.
+///
+/// The HTML half of the test is the control: it proves the mock is otherwise
+/// detectable, so an empty result on the JSON half means "gated", not
+/// "nothing reached the scanner".
+#[tokio::test]
+async fn test_sxss_applies_the_same_response_gates_as_the_normal_path() {
+    use axum::http::header;
+    use axum::{Router, extract::Query, response::IntoResponse, routing::get};
+    use std::collections::HashMap;
+
+    async fn json_echo(Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let v = q.get("q").cloned().unwrap_or_default();
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            format!("{{\"q\":\"{}\"}}", v),
+        )
+    }
+    async fn html_echo(Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let v = q.get("q").cloned().unwrap_or_default();
+        (
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            format!("<html><body><div>{}</div></body></html>", v),
+        )
+    }
+
+    let addr = spawn_regression_app(
+        Router::new()
+            .route("/json", get(json_echo))
+            .route("/html", get(html_echo)),
+    )
+    .await;
+
+    async fn scan_path(addr: std::net::SocketAddr, path: &str) -> usize {
+        let url = format!("http://{}{}?q=a", addr, path);
+        let mut target = parse_target(&url).expect("parse_target");
+        target.workers = 2;
+        target.reflection_params = vec![Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+        }];
+
+        let mut raw_args = integration_scan_args(false);
+        raw_args.sxss = true;
+        raw_args.max_payloads_per_param = 8;
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(raw_args),
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        results.lock().await.len()
+    }
+
+    assert!(
+        scan_path(addr, "/html").await > 0,
+        "control: an HTML echo must still be reported under --sxss"
+    );
+    assert_eq!(
+        scan_path(addr, "/json").await,
+        0,
+        "an application/json echo is inert markup-wise; --sxss must apply the \
+         same inert-content-type gate the plain reflection path applies"
+    );
+}
+
+/// `PhaseFlow::Abort` (a global `--limit` reached mid-phase) used to `return`
+/// out of the per-parameter worker *before* `flush_results`, silently
+/// discarding every finding that worker had already confirmed and batched.
+///
+/// The scan below has two vulnerable parameters and `--limit 1`. `victim`
+/// reflects entity-escaped, so it records an `R` on its first reflection
+/// payload and then grinds through the (never-verifying) DOM payload set;
+/// `trigger` reflects raw and is held back by the mock until `victim` has
+/// confirmed its finding, at which point it verifies and flushes, tripping the
+/// limit while `victim` is still mid-DOM-phase. `victim`'s already-confirmed
+/// finding must survive that: `--limit` is a stop condition, not an instruction
+/// to destroy evidence, and the report truncates to the limit on its own
+/// (`cmd::scan::output`), so flushing here cannot overshoot the cap.
+#[tokio::test]
+async fn test_run_scanning_limit_abort_keeps_already_confirmed_findings() {
+    use axum::{Router, extract::Query, extract::State, response::Html, routing::get};
+    use std::collections::HashMap;
+
+    #[derive(Clone)]
+    struct AppState {
+        victim_requests: Arc<AtomicUsize>,
+    }
+
+    /// `victim` requests to wait for before letting `trigger` verify. High
+    /// enough that `victim` has certainly recorded its `R` and moved on to the
+    /// (never-verifying) DOM payload set, so the limit trips while its worker
+    /// is mid-loop with a batched finding.
+    const VICTIM_REQUESTS_BEFORE_TRIGGER: usize = 60;
+
+    fn escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    }
+
+    async fn handler(
+        State(st): State<AppState>,
+        Query(q): Query<HashMap<String, String>>,
+    ) -> Html<String> {
+        let victim = q.get("victim").cloned().unwrap_or_default();
+        let trigger = q.get("trigger").cloned().unwrap_or_default();
+        if trigger != "b" {
+            // A `trigger` injection: hold it until `victim` has gone past its
+            // reflection phase (probe + first payload) and into the DOM phase,
+            // so the limit trips while `victim` still has a batched finding.
+            while st.victim_requests.load(Ordering::SeqCst) < VICTIM_REQUESTS_BEFORE_TRIGGER {
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+        } else {
+            st.victim_requests.fetch_add(1, Ordering::SeqCst);
+        }
+        Html(format!(
+            "<html><body><div id=v>{}</div><div id=t>{}</div></body></html>",
+            escape(&victim),
+            trigger
+        ))
+    }
+
+    let addr = spawn_regression_app(Router::new().route("/", get(handler)).with_state(AppState {
+        victim_requests: Arc::new(AtomicUsize::new(0)),
+    }))
+    .await;
+
+    let url = format!("http://{}/?victim=a&trigger=b", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.workers = 2;
+    target.reflection_params = vec![
+        Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new("victim".to_string(), "a".to_string(), Location::Query)
+        },
+        Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new("trigger".to_string(), "b".to_string(), Location::Query)
+        },
+    ];
+
+    let mut raw_args = integration_scan_args(false);
+    raw_args.limit = Some(1);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(raw_args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let guard = results.lock().await;
+    let params: Vec<(String, String)> = guard
+        .iter()
+        .map(|r| (r.param.clone(), r.result_type.short().to_string()))
+        .collect();
+    assert!(
+        params.iter().any(|(p, _)| p == "trigger"),
+        "sanity: the limit-tripping finding must be present; got {:?}",
+        params
+    );
+    assert!(
+        params.iter().any(|(p, _)| p == "victim"),
+        "a finding confirmed before the --limit stop must not be discarded by \
+         the abort path; got {:?}",
+        params
+    );
 }

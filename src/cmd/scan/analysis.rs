@@ -285,76 +285,67 @@ pub(crate) async fn preflight_and_analyze_target(
     )
     .await?;
 
-    // Pretty start log per target (plain only)
+    // Pretty start log per target (plain only). Multi-target runs deliberately
+    // render a single overall progress line instead of this per-target block,
+    // so the whole block is gated on `total_targets_copy == 1`.
     if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
-        if total_targets_copy > 1 {
-            let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(target.url.as_ref()));
-            let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            crate::cprintln!(
-                "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {} start scan to {}",
-                ts,
-                sid,
-                target.url
-            );
-        } else {
-            let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            crate::cprintln!(
-                "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m start scan to {}",
-                ts,
-                target.url
-            );
-            if __preflight_csp_present {
-                crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m CSP: enabled", ts);
-                if let Some((hn, hv)) = &__preflight_csp_header {
+        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+        crate::cprintln!(
+            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m start scan to {}",
+            ts,
+            target.url
+        );
+        if __preflight_csp_present {
+            crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m CSP: enabled", ts);
+            if let Some((hn, hv)) = &__preflight_csp_header {
+                crate::cprintln!(
+                    "  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m",
+                    hn,
+                    hv
+                );
+            }
+        }
+        // Log WAF detection
+        if let Some(ref waf_info) = target.waf_info {
+            for fp in &waf_info.detected {
+                crate::cprintln!(
+                    "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m {} detected (confidence: {:.0}%, evidence: {})",
+                    ts,
+                    fp.waf_type,
+                    fp.confidence * 100.0,
+                    fp.evidence
+                );
+            }
+            if args_clone.waf_bypass != "off" {
+                let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
+                let strategy = crate::waf::bypass::merge_strategies(&waf_types);
+                if !strategy.extra_encoders.is_empty() {
                     crate::cprintln!(
-                        "  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m",
-                        hn,
-                        hv
+                        "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass encoders: {}\x1b[0m",
+                        strategy.extra_encoders.join(", ")
+                    );
+                }
+                if !strategy.mutations.is_empty() {
+                    crate::cprintln!(
+                        "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass mutations: {} types\x1b[0m",
+                        strategy.mutations.len()
                     );
                 }
             }
-            // Log WAF detection
-            if let Some(ref waf_info) = target.waf_info {
-                for fp in &waf_info.detected {
-                    crate::cprintln!(
-                        "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m {} detected (confidence: {:.0}%, evidence: {})",
-                        ts,
-                        fp.waf_type,
-                        fp.confidence * 100.0,
-                        fp.evidence
-                    );
-                }
-                if args_clone.waf_bypass != "off" {
-                    let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
-                    let strategy = crate::waf::bypass::merge_strategies(&waf_types);
-                    if !strategy.extra_encoders.is_empty() {
-                        crate::cprintln!(
-                            "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass encoders: {}\x1b[0m",
-                            strategy.extra_encoders.join(", ")
-                        );
-                    }
-                    if !strategy.mutations.is_empty() {
-                        crate::cprintln!(
-                            "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass mutations: {} types\x1b[0m",
-                            strategy.mutations.len()
-                        );
-                    }
-                }
-            }
-            // Log detected technologies
-            if let Some(ref tech_info) = target.tech_info {
-                let tech_names: Vec<String> = tech_info
-                    .detected
-                    .iter()
-                    .map(|d| format!("{}", d.tech))
-                    .collect();
-                if !tech_names.is_empty() {
-                    crate::cprintln!(
-                        "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m tech: {}",
-                        ts,
-                        tech_names.join(", ")
-                    );
-                }
+        }
+        // Log detected technologies
+        if let Some(ref tech_info) = target.tech_info {
+            let tech_names: Vec<String> = tech_info
+                .detected
+                .iter()
+                .map(|d| format!("{}", d.tech))
+                .collect();
+            if !tech_names.is_empty() {
+                crate::cprintln!(
+                    "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m tech: {}",
+                    ts,
+                    tech_names.join(", ")
+                );
             }
         }
     }
@@ -362,19 +353,14 @@ pub(crate) async fn preflight_and_analyze_target(
     // Silence parameter analysis logs and progress; show spinner for single-target runs.
     // When multi_pb_clone is active, analyze_parameters renders its own indicatif
     // spinner via that MultiProgress — skip the stdout spinner so we don't double up.
-    let current = analyze_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
+    analyze_idx_clone.fetch_add(1, Ordering::Relaxed);
+    // Single-target only: multi-target runs render the overall progress bar
+    // instead, so there is no `[n/total]` variant of this label to build.
     let __analyze_spinner = if total_targets_copy == 1 && multi_pb_clone.is_none() {
         start_spinner(
             spinner_allowed,
             !args_clone.silence,
-            if total_targets_copy > 1 {
-                format!(
-                    "[{}/{}] analyzing: {}",
-                    current, total_targets_copy, target.url
-                )
-            } else {
-                format!("analyzing: {}", target.url)
-            },
+            format!("analyzing: {}", target.url),
         )
     } else {
         None
@@ -470,21 +456,11 @@ pub(crate) async fn preflight_and_analyze_target(
     if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
         let n = target.reflection_params.len();
         let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-        if total_targets_copy > 1 {
-            let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(target.url.as_ref()));
-            crate::cprintln!(
-                "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {} found reflected \x1b[33m{}\x1b[0m params",
-                ts,
-                sid,
-                n
-            );
-        } else {
-            crate::cprintln!(
-                "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m found reflected \x1b[33m{}\x1b[0m params",
-                ts,
-                n
-            );
-        }
+        crate::cprintln!(
+            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m found reflected \x1b[33m{}\x1b[0m params",
+            ts,
+            n
+        );
         for (i, p) in target.reflection_params.iter().enumerate() {
             let bullet = if i + 1 == n { "└──" } else { "├──" };
             let valid = p
@@ -594,18 +570,15 @@ async fn run_target_preflight(
     // and the initial-response AST DOM analysis under `--deep-scan`,
     // making the "more thorough" mode strictly weaker.
     {
-        let current = preflight_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
-        // Print an ephemeral spinner and auto-clear when finished
-        let label = if total_targets_copy > 1 {
-            format!(
-                "[{}/{}] preflight: {}",
-                current, total_targets_copy, target.url
-            )
-        } else {
-            format!("preflight: {}", target.url)
-        };
+        preflight_idx_clone.fetch_add(1, Ordering::Relaxed);
+        // Print an ephemeral spinner and auto-clear when finished. Single-target
+        // only, for the same reason as the analysis spinner above.
         let __preflight_spinner = if total_targets_copy == 1 {
-            start_spinner(spinner_allowed, !args_clone.silence, label)
+            start_spinner(
+                spinner_allowed,
+                !args_clone.silence,
+                format!("preflight: {}", target.url),
+            )
         } else {
             None
         };

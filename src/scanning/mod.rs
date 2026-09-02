@@ -163,9 +163,36 @@ pub(crate) fn count_matching_results(
         .count()
 }
 
+/// Per-target "a finding already landed for this injection point" sets, keyed
+/// by [`found_param_key`].
 struct FoundParams {
     reflection: HashSet<String>,
     dom: HashSet<String>,
+}
+
+/// Identity of a parameter *slot* for the [`FoundParams`] sets.
+///
+/// Keyed on the wire location and the wire-level name, not just the display
+/// name: the same name routinely names two independent injection points on one
+/// request — `?q=` in the query string *and* `q` in the POST body, or a `q`
+/// cookie — and a finding at one says nothing about the other. Keying on
+/// `Param::name` alone let the first slot that produced a finding suppress
+/// every sibling slot: the reflection/DOM phases short-circuited and the
+/// dispatch loop skipped the sibling's worker outright, so a vulnerable body
+/// parameter was silently never reported (false negative).
+///
+/// `wire_name` is part of the key so nested-field synthetic params
+/// (`qs[move_url]`, whose wire name is the parent `qs`) stay distinct from one
+/// another exactly as they were under the old name-only key.
+fn found_param_key(param: &Param) -> String {
+    // `\u{1}` separator: not producible by a URL/header parameter name, so
+    // concatenation cannot alias two different slots onto one key.
+    format!(
+        "{:?}\u{1}{}\u{1}{}",
+        param.location,
+        param.name,
+        param.effective_wire_name()
+    )
 }
 
 /// Label written to `Result.inject_type` for findings produced by the scan
@@ -1542,7 +1569,7 @@ fn log_waf_block_stats(target: &Target) {
 }
 
 /// Collapse this target's R findings that are already proven by one of its
-/// own V findings on the same `(param, inject_type)`, adjusting
+/// own V findings on the same `(param, location, inject_type)`, adjusting
 /// `findings_count` for any dropped duplicates. Multiple per-param payload
 /// variants typically surface the same logical issue twice — keep the
 /// strongest evidence and drop weaker R duplicates. See
@@ -1573,12 +1600,22 @@ async fn collapse_target_results(
     }
 }
 
-/// Outcome of a per-parameter scan phase. `Abort` mirrors the pre-refactor
-/// `return` out of the worker task: a global `--limit` was reached mid-phase,
-/// so the worker stops immediately and drops any results batched so far (the
-/// limit is already hit and the scan is winding down). A `break`-style early
-/// exit (cancellation) instead yields `Continue`, so later phases run their
-/// own cancellation checks and the batched results are still flushed.
+/// Outcome of a per-parameter scan phase. `Abort` means a global `--limit` was
+/// reached mid-phase, so the worker stops immediately without running the
+/// remaining phases. A `break`-style early exit (cancellation) instead yields
+/// `Continue`, so later phases run their own cancellation checks.
+///
+/// Either way the caller flushes whatever the worker already batched. The
+/// pre-refactor `return` discarded that batch instead, on the reasoning that
+/// "the limit is already hit, the scan is winding down" — but `--limit` is a
+/// *stop condition*, not an instruction to destroy evidence already confirmed
+/// against the target, and the worker that aborts is rarely the one that
+/// reached the cap. The discard is observable whenever the surviving tally
+/// falls back under the limit before rendering, which `collapse_target_results`
+/// does routinely (it decrements `findings_count` for every `R` a `V` covers):
+/// the report then has room for the findings the abort threw away. Flushing
+/// cannot overshoot the cap either, because `--limit` truncation is applied
+/// once more at render time (`cmd::scan::output`).
 enum PhaseFlow {
     Continue,
     Abort,
@@ -1808,6 +1845,15 @@ impl ScanWorkerCtx {
 
         let mut state = ParamScanState::default();
 
+        // Every parameter's worker is spawned up front (the dispatch loop only
+        // gates *spawning* on cancellation), so on a cancelled scan the workers
+        // still queued behind this semaphore would each go on to fire the Stage-0
+        // probe and the HPP phase — thousands of requests at a target the user
+        // already asked us to stop hitting. Bail before the first request.
+        if self.cancelled() {
+            return;
+        }
+
         // Stage 0: fast probe to avoid large payload blasts on non-reflective
         // params (also runs one-shot AST DOM analysis on the probe response).
         let probe_reflected = self.probe_param(&param, &mut state).await;
@@ -1834,9 +1880,11 @@ impl ScanWorkerCtx {
             .run_reflection_phase(&param, reflection_payloads, &mut state)
             .await
         {
+            self.flush_results(&mut state.local_results).await;
             return;
         }
         if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await {
+            self.flush_results(&mut state.local_results).await;
             return;
         }
         self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
@@ -1860,6 +1908,9 @@ impl ScanWorkerCtx {
         let mut probe_reflected = false;
         let mut probe_response_text: Option<String> = None;
         for pp in probe_payloads {
+            if self.cancelled() {
+                break;
+            }
             let (kind, response_text) = check_reflection_with_response_tracked(
                 Some(client),
                 &self.target,
@@ -1911,8 +1962,9 @@ impl ScanWorkerCtx {
         }
 
         // If probe found no reflection, try a numeric-only probe to detect
-        // letter-stripping filters (e.g., /[a-zA-Z]/ removal).
-        if !probe_reflected {
+        // letter-stripping filters (e.g., /[a-zA-Z]/ removal). Skipped once the
+        // scan is cancelled — it is a second HTTP request per parameter.
+        if !probe_reflected && !self.cancelled() {
             let numeric_probe = crate::scanning::check_reflection::NUMERIC_PROBE_MARKER;
             let (kind, _) = check_reflection_with_response_tracked(
                 Some(client),
@@ -1976,7 +2028,7 @@ impl ScanWorkerCtx {
                     .read()
                     .await
                     .reflection
-                    .contains(&param.name);
+                    .contains(&found_param_key(param));
                 if already {
                     state.reflection_found_locally = true;
                     (None, None)
@@ -2067,7 +2119,7 @@ impl ScanWorkerCtx {
                 if body_is_javascript && dom_evidence_kind.is_none() {
                     if !self.args.deep_scan {
                         let mut found = self.found_params.write().await;
-                        found.reflection.insert(param.name.clone());
+                        found.reflection.insert(found_param_key(param));
                         state.reflection_found_locally = true;
                     }
                     continue;
@@ -2077,8 +2129,9 @@ impl ScanWorkerCtx {
                     true
                 } else {
                     let mut found = self.found_params.write().await;
-                    if !found.reflection.contains(&param.name) {
-                        found.reflection.insert(param.name.clone());
+                    let key = found_param_key(param);
+                    if !found.reflection.contains(&key) {
+                        found.reflection.insert(key);
                         state.reflection_found_locally = true;
                         true
                     } else {
@@ -2139,7 +2192,7 @@ impl ScanWorkerCtx {
                             // Mark dom_found so we skip redundant DOM verification
                             {
                                 let mut found = self.found_params.write().await;
-                                found.dom.insert(param.name.clone());
+                                found.dom.insert(found_param_key(param));
                             }
                             state.dom_found_locally = true;
                             let evidence_label = kind.label();
@@ -2261,7 +2314,12 @@ impl ScanWorkerCtx {
             let already_dom_found = if state.dom_found_locally {
                 true
             } else {
-                let is_found = self.found_params.read().await.dom.contains(&param.name);
+                let is_found = self
+                    .found_params
+                    .read()
+                    .await
+                    .dom
+                    .contains(&found_param_key(param));
                 if is_found {
                     state.dom_found_locally = true;
                 }
@@ -2294,8 +2352,9 @@ impl ScanWorkerCtx {
                     true
                 } else {
                     let mut found = self.found_params.write().await;
-                    if !found.dom.contains(&param.name) {
-                        found.dom.insert(param.name.clone());
+                    let key = found_param_key(param);
+                    if !found.dom.contains(&key) {
+                        found.dom.insert(key);
                         state.dom_found_locally = true;
                         true
                     } else {
@@ -2422,10 +2481,18 @@ impl ScanWorkerCtx {
         let hpp_positions = [HppPosition::Last, HppPosition::First, HppPosition::Both];
 
         'hpp_outer: for hpp_payload in &hpp_payloads {
-            if self.limit_reached() {
+            // Cancellation is checked here *and* in the inner position loop:
+            // this phase runs after the reflection/DOM phases have already
+            // broken out on cancel, and without its own check a cancelled
+            // `--hpp` scan kept firing up to `payloads x positions` requests
+            // per parameter after the user stopped it.
+            if self.limit_reached() || self.cancelled() {
                 break;
             }
             for &position in &hpp_positions {
+                if self.cancelled() {
+                    break 'hpp_outer;
+                }
                 if let Some(hpp_url) = build_hpp_url(&self.target.url, param, hpp_payload, position)
                 {
                     let (kind, response_text) =
@@ -2695,8 +2762,9 @@ pub async fn run_scanning(
             break;
         }
         let already_found = {
+            let key = found_param_key(&param_clone);
             let fp = found_params.read().await;
-            fp.reflection.contains(&param_clone.name) || fp.dom.contains(&param_clone.name)
+            fp.reflection.contains(&key) || fp.dom.contains(&key)
         };
         if already_found && !args.deep_scan {
             // Skip further testing for this param if reflection or DOM XSS
@@ -2762,8 +2830,8 @@ pub async fn run_scanning(
     log_waf_block_stats(target);
 
     // Collapse this target's R findings that are already proven by one of
-    // its own V findings on the same (param, inject_type), scoped to the
-    // current target so other targets' findings are never affected.
+    // its own V findings on the same (param, location, inject_type), scoped
+    // to the current target so other targets' findings are never affected.
     collapse_target_results(&results, &findings_count, &limit_result_type, target).await;
 
     if let Some(pb) = pb {
@@ -2781,24 +2849,32 @@ pub async fn run_scanning(
 }
 
 /// Drop Reflected findings on the *current target* that are already covered
-/// by a Verified finding on the same `(param, inject_type)` for that same
-/// target. Verified and AST findings are preserved.
+/// by a Verified finding on the same `(param, location, inject_type)` for
+/// that same target. Verified and AST findings are preserved.
 ///
 /// Scope is critical: this runs at the end of each target's scan against
 /// the shared cross-target results vector. Without scoping, a V finding on
 /// one target would silently drop every later R finding on different
 /// targets that share the same reflection shape (param + inject_type) —
 /// which on benchmarks like xssmaze is the common case.
+///
+/// `location` is part of the key for the same reason it is part of
+/// [`found_param_key`]: a `q` in the query string and a `q` in the request
+/// body are different injection points, so proving one exploitable says
+/// nothing about the other and must not delete the other's evidence.
 fn collapse_redundant_reflected(
     results: Vec<crate::scanning::result::Result>,
     target_url: &str,
 ) -> Vec<crate::scanning::result::Result> {
     use std::collections::HashSet;
     let belongs = |data: &str| crate::utils::finding_belongs_to_target(target_url, data);
-    let verified_keys: HashSet<(String, String)> = results
+    let key = |r: &crate::scanning::result::Result| {
+        (r.param.clone(), r.location.clone(), r.inject_type.clone())
+    };
+    let verified_keys: HashSet<(String, String, String)> = results
         .iter()
         .filter(|r| r.result_type == FindingType::Verified && belongs(&r.data))
-        .map(|r| (r.param.clone(), r.inject_type.clone()))
+        .map(key)
         .collect();
     if verified_keys.is_empty() {
         return results;
@@ -2808,7 +2884,7 @@ fn collapse_redundant_reflected(
         .filter(|r| {
             !(r.result_type == FindingType::Reflected
                 && belongs(&r.data)
-                && verified_keys.contains(&(r.param.clone(), r.inject_type.clone())))
+                && verified_keys.contains(&key(r)))
         })
         .collect()
 }
