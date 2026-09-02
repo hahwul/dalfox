@@ -5267,3 +5267,88 @@ async fn test_options_preflights_are_source_gated() {
         Some("https://ui.example")
     );
 }
+
+/// The startup warnings are the only signal an operator gets for four
+/// misconfigurations that all fail silently at runtime: a log file the previous
+/// version left world-readable, an origin pattern that could not compile (its
+/// web UI just starts getting 403s), an API key short enough to guess, and a
+/// cross-site gate switched off by `--allowed-origins '*'`. They run once, at
+/// boot, on a path no other test reaches — so drive `run_server` far enough to
+/// emit them and read them back out of the log file they must reach.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_run_server_warns_about_misconfiguration_before_serving() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Occupy a port so `run_server` returns right after the warnings.
+    let guard = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind guard listener");
+    let addr = guard.local_addr().expect("guard addr");
+
+    // `api_key` splits the warnings into two runs: the short-key warning needs
+    // a key, and the gate warning only fires when there is none.
+    let boot = async |api_key: Option<&str>, label: &str| -> String {
+        // Pre-create the log file world-readable, the way an in-place upgrade
+        // from a version without `open_log_file` leaves it.
+        let path = temp_log_path(label);
+        std::fs::write(&path, "").expect("seed log file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("seed log file mode");
+
+        let err = run_server(ServerArgs {
+            port: addr.port(),
+            host: Ipv4Addr::LOCALHOST.to_string(),
+            api_key: api_key.map(str::to_string),
+            log_file: Some(path.to_string_lossy().into_owned()),
+            rate_limit: None,
+            scan_timeout: None,
+            max_concurrent_scans: 100,
+            allowed_hosts: None,
+            max_retained_scans: 1000,
+            max_body_bytes: 1_048_576,
+            allowed_origins: Some("*,regex:https://(unclosed,regex:".to_string()),
+            jsonp: false,
+            callback_param_name: "callback".to_string(),
+            cors_allow_methods: None,
+            cors_allow_headers: None,
+        })
+        .await;
+        assert!(err.is_err(), "the occupied port must still surface");
+
+        let logged = std::fs::read_to_string(&path).expect("read back the log file");
+        let _ = std::fs::remove_file(&path);
+        logged
+    };
+
+    let with_key = boot(Some("short-key"), "startup-warnings-keyed").await;
+    assert!(
+        with_key.contains("--api-key is shorter than the recommended"),
+        "nothing rate-limits a wrong key, so a short one has to be called out, \
+         got:\n{with_key}"
+    );
+    assert!(
+        !with_key.contains("9 characters"),
+        "the exact key length is what constant_time_eq confines to a timing \
+         difference; it must not become a durable record, got:\n{with_key}"
+    );
+    assert!(
+        with_key.contains("unclosed") && with_key.contains("empty allowed-origins regex"),
+        "a dropped pattern fails closed, so the report has to reach --log-file \
+         rather than a bare stderr line, got:\n{with_key}"
+    );
+    assert!(
+        with_key.contains("is mode 644"),
+        "an upgraded-in-place log file keeps its old mode, which is the case \
+         `open_log_file` cannot fix on its own, got:\n{with_key}"
+    );
+
+    let no_key = boot(None, "startup-warnings-open").await;
+    assert!(
+        no_key.contains("--allowed-origins '*' is enabled with NO API key"),
+        "'*' switches the cross-site gate off exactly like --jsonp and must be \
+         flagged the same way, got:\n{no_key}"
+    );
+
+    drop(guard);
+}
