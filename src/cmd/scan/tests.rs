@@ -1276,7 +1276,10 @@ async fn render_results_to_file(
         &state,
         &urls,
         std::time::Duration::from_millis(7),
-        42,
+        crate::cmd::scan::output::RequestTally {
+            sent: 42,
+            failed: 0,
+        },
         false,
         None,
     )
@@ -1284,6 +1287,109 @@ async fn render_results_to_file(
     let content = std::fs::read_to_string(&path).expect("output file written");
     let _ = std::fs::remove_file(&path);
     content
+}
+
+/// Like `render_results_to_file`, but the caller picks the request tally so a
+/// test can describe a run that lost part of its traffic.
+async fn render_results_to_file_with_tally(
+    mut args: ScanArgs,
+    results: Vec<ScanResult>,
+    urls: Vec<String>,
+    tag: &str,
+    requests: crate::cmd::scan::output::RequestTally,
+) -> String {
+    let path = temp_out_path(tag);
+    args.output = Some(path.clone());
+    let state = make_scan_state(results);
+    let _ = render_results(
+        &args,
+        &state,
+        &urls,
+        std::time::Duration::from_millis(7),
+        requests,
+        false,
+        None,
+    )
+    .await;
+    let content = std::fs::read_to_string(&path).expect("output file written");
+    let _ = std::fs::remove_file(&path);
+    content
+}
+
+#[tokio::test]
+async fn test_a_run_that_lost_most_of_its_requests_is_not_a_clean_bill_of_health() {
+    // A target that resets or drops injection requests still answers the
+    // reachability probe, so every per-target status stays `clean` and a zero
+    // finding count reads as a verdict. The transport failures have to reach
+    // the envelope, or the run is indistinguishable from a genuinely clean one.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file_with_tally(
+        args,
+        vec![],
+        urls,
+        "lost_requests",
+        crate::cmd::scan::output::RequestTally {
+            sent: 170,
+            failed: 148,
+        },
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(v["meta"]["findings_count"], 0);
+    assert_eq!(v["meta"]["failed_requests"], 148);
+    assert_eq!(
+        v["meta"]["incomplete"], true,
+        "a run that lost 148 of 170 requests must not report a trustworthy clean, got {}",
+        v["meta"]
+    );
+}
+
+#[tokio::test]
+async fn test_a_healthy_run_is_not_marked_incomplete() {
+    // The control: no failures must never flip the flag, or it means nothing.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file_with_tally(
+        args,
+        vec![],
+        urls,
+        "healthy_run",
+        crate::cmd::scan::output::RequestTally {
+            sent: 170,
+            failed: 0,
+        },
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(v["meta"]["failed_requests"], 0);
+    assert_eq!(v["meta"]["incomplete"], false);
+}
+
+#[tokio::test]
+async fn test_a_handful_of_lost_requests_does_not_flip_incomplete() {
+    // Below the ratio the count is still reported — a consumer that wants a
+    // stricter bar has the number — but the flag stays clear so it keeps
+    // meaning something on a long run over a real network.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file_with_tally(
+        args,
+        vec![],
+        urls,
+        "few_lost_requests",
+        crate::cmd::scan::output::RequestTally {
+            sent: 1000,
+            failed: 3,
+        },
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(v["meta"]["failed_requests"], 3);
+    assert_eq!(v["meta"]["incomplete"], false);
 }
 
 #[tokio::test]
@@ -1551,7 +1657,10 @@ async fn test_render_results_baseline_filter_suppresses_known_findings() {
         &state,
         &["https://example.com/s".to_string()],
         std::time::Duration::from_millis(7),
-        42,
+        crate::cmd::scan::output::RequestTally {
+            sent: 42,
+            failed: 0,
+        },
         false,
         Some(&bl),
     )
@@ -1594,7 +1703,10 @@ async fn test_render_results_baseline_annotate_marks_every_finding() {
         &state,
         &["https://example.com/s".to_string()],
         std::time::Duration::from_millis(7),
-        42,
+        crate::cmd::scan::output::RequestTally {
+            sent: 42,
+            failed: 0,
+        },
         false,
         Some(&bl),
     )
@@ -1631,7 +1743,10 @@ async fn test_render_results_baseline_meta_survives_toml_and_markdown() {
             &state,
             &["https://example.com/s".to_string()],
             std::time::Duration::from_millis(7),
-            42,
+            crate::cmd::scan::output::RequestTally {
+                sent: 42,
+                failed: 0,
+            },
             false,
             Some(&bl),
         )
@@ -1672,7 +1787,10 @@ async fn test_render_results_baseline_counts_match_the_only_poc_filtered_set() {
         &state,
         &["https://example.com/s".to_string()],
         std::time::Duration::from_millis(7),
-        42,
+        crate::cmd::scan::output::RequestTally {
+            sent: 42,
+            failed: 0,
+        },
         false,
         Some(&bl),
     )
@@ -1704,7 +1822,10 @@ async fn test_render_results_disabled_baseline_reports_itself() {
         &state,
         &["https://example.com".to_string()],
         std::time::Duration::from_millis(7),
-        42,
+        crate::cmd::scan::output::RequestTally {
+            sent: 42,
+            failed: 0,
+        },
         false,
         Some(&bl),
     )
@@ -1837,7 +1958,7 @@ async fn test_render_results_includes_waf_summary() {
         &state,
         std::slice::from_ref(&url),
         std::time::Duration::from_millis(1),
-        3,
+        crate::cmd::scan::output::RequestTally { sent: 3, failed: 0 },
         false,
         None,
     )
@@ -1868,7 +1989,7 @@ async fn test_render_results_stdout_path_returns_results() {
         &state,
         &["https://example.com".to_string()],
         std::time::Duration::from_millis(1),
-        1,
+        crate::cmd::scan::output::RequestTally { sent: 1, failed: 0 },
         true, // stream_findings_enabled → skip per-finding re-render
         None,
     )
@@ -1897,7 +2018,7 @@ async fn test_render_results_reports_output_write_failure() {
         &state,
         &["https://example.com".to_string()],
         std::time::Duration::from_millis(1),
-        1,
+        crate::cmd::scan::output::RequestTally { sent: 1, failed: 0 },
         true,
         None,
     )

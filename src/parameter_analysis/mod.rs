@@ -614,7 +614,9 @@ async fn send_probe_request_for_param(
     }
 
     crate::record_outbound_request().await;
-    let resp = request_builder.send().await.ok()?;
+    let resp = crate::utils::http::send_counted(request_builder)
+        .await
+        .ok()?;
     if !ignore_return.is_empty() && ignore_return.contains(&resp.status().as_u16()) {
         return None;
     }
@@ -1177,7 +1179,7 @@ pub async fn active_probe_param(
             };
             let request_builder = client.request(target.parse_method(), url);
             crate::record_outbound_request().await;
-            if let Ok(resp) = request_builder.send().await
+            if let Ok(resp) = crate::utils::http::send_counted(request_builder).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
                 && text.contains(&raw_marker)
             {

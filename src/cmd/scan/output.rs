@@ -379,12 +379,42 @@ pub(super) fn apply_baseline(
     Some(block)
 }
 
+/// How many outbound requests this run made, and how many of them never got a
+/// response. Passed as one value rather than two adjacent `u64` parameters,
+/// which are trivially transposable at a call site.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RequestTally {
+    pub sent: u64,
+    pub failed: u64,
+}
+
+impl RequestTally {
+    /// Share of attempted requests that never produced a response, 0.0 when
+    /// nothing was sent.
+    fn failure_ratio(&self) -> f64 {
+        if self.sent == 0 {
+            return 0.0;
+        }
+        self.failed as f64 / self.sent as f64
+    }
+}
+
+/// A run that lost at least this share of its requests is reported
+/// `incomplete`. A scan never gets a perfect network, so a handful of resets on
+/// a long run is noise and flipping the flag on a single failure would devalue
+/// it. Losing a tenth of everything attempted is not noise: at that rate the
+/// payloads that were never delivered outnumber most targets' whole payload
+/// catalogue, and "no findings" stops meaning "nothing to find". The raw
+/// `failed_requests` count is always reported regardless, so a consumer that
+/// wants a stricter bar has the number.
+const INCOMPLETE_FAILURE_RATIO: f64 = 0.10;
+
 pub(crate) async fn render_results(
     args: &ScanArgs,
     state: &ScanState,
     all_target_urls: &[String],
     scan_elapsed: std::time::Duration,
-    total_requests: u64,
+    requests: RequestTally,
     stream_findings_enabled: bool,
     baseline: Option<&Baseline>,
 ) -> (Vec<Result>, bool) {
@@ -546,12 +576,18 @@ pub(crate) async fn render_results(
         summary
     };
 
-    // One field for "don't trust this run": true when any target's session
-    // died. Read straight off the summary we just built so the flag and the
-    // per-target statuses can't disagree.
-    let scan_incomplete = target_summary
+    // One field for "don't trust this run": a target's session died, or a
+    // significant share of this run's requests never reached the target. The
+    // session half is read straight off the summary we just built so the flag
+    // and the per-target statuses can't disagree; the transport half covers the
+    // case the summary cannot see — a target that resets or drops injection
+    // requests answers the reachability probe fine, so every per-target status
+    // stays `clean` while most payloads were never actually delivered.
+    let session_died = target_summary
         .iter()
         .any(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST);
+    let lost_too_many_requests = requests.failure_ratio() >= INCOMPLETE_FAILURE_RATIO;
+    let scan_incomplete = session_died || lost_too_many_requests;
 
     // One envelope, built once and rendered by every format. Previously the
     // `json` and `jsonl` arms each inlined their own copy of this object next
@@ -561,7 +597,8 @@ pub(crate) async fn render_results(
         dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
         targets: args.targets.clone(),
         scan_duration_ms: scan_elapsed.as_millis() as u64,
-        total_requests,
+        total_requests: requests.sent,
+        failed_requests: requests.failed,
         findings_count: display_results.len(),
         // Moved, not cloned: on a mass-URL run this vector holds one JSON
         // object per target, and nothing below needs a second copy.
@@ -633,17 +670,32 @@ pub(crate) async fn render_results(
         // A finding count printed after a session died is a half-truth — say
         // so on the same screen, next to the number the operator will quote.
         // The per-target detail already went to stderr as it happened.
-        if scan_incomplete {
-            let lost = scan_meta
-                .target_summary
-                .iter()
-                .filter(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST)
-                .count();
+        let lost = scan_meta
+            .target_summary
+            .iter()
+            .filter(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST)
+            .count();
+        if lost > 0 {
             log_warn(
                 args,
                 &format!(
                     "INCOMPLETE: \x1b[33m{}\x1b[0m target(s) had no usable session — those results are not a clean bill of health",
                     lost
+                ),
+            );
+        }
+        // The transport half. A target that resets or drops injection requests
+        // answers the reachability probe fine, so every per-target status stays
+        // `clean` and the finding count reads as a verdict. Say what actually
+        // happened next to the number the operator will quote.
+        if lost_too_many_requests {
+            log_warn(
+                args,
+                &format!(
+                    "INCOMPLETE: \x1b[33m{}\x1b[0m of {} requests never reached the target ({:.0}%) — payloads that were not delivered were not tested, so this is not a clean bill of health",
+                    requests.failed,
+                    requests.sent,
+                    requests.failure_ratio() * 100.0
                 ),
             );
         }

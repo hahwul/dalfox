@@ -595,13 +595,16 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Output results: dedupe, --only-poc filter, --limit, per-target summary,
     // and format-specific rendering to stdout or --output file.
     let scan_elapsed = __dalfox_scan_start.elapsed();
-    let total_requests = crate::REQUEST_COUNT.load(Ordering::Relaxed);
+    let requests = output::RequestTally {
+        sent: crate::REQUEST_COUNT.load(Ordering::Relaxed),
+        failed: crate::REQUEST_FAILURE_COUNT.load(Ordering::Relaxed),
+    };
     let (final_results, output_write_failed) = output::render_results(
         args,
         &state,
         &all_target_urls,
         scan_elapsed,
-        total_requests,
+        requests,
         stream_findings_enabled,
         baseline.as_ref(),
     )

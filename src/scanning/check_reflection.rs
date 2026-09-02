@@ -1976,7 +1976,14 @@ async fn fetch_injection_response_with_client(
                     crate::utils::build_request(client, target, method, sxss_url.clone(), None);
 
                 crate::record_outbound_request().await;
-                if let Ok(resp) = check_request.send().await
+                // This path sends directly (no `send_with_retry`), so count its
+                // transport failures here — a retrieval URL that never answers
+                // means the stored payload was never actually checked.
+                let sent = check_request.send().await;
+                if sent.is_err() {
+                    crate::tick_request_failure();
+                }
+                if let Ok(resp) = sent
                     && let Some(body) = gated_body(resp, param, payload, args).await
                 {
                     if classify_reflection(&body.text, payload).is_some() {

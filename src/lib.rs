@@ -83,6 +83,10 @@ pub use std::sync::atomic::AtomicU64;
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 pub static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
+/// Outbound requests that never produced a response — connection reset,
+/// refused, timed out, TLS failure — counted *after* `send_with_retry` has
+/// exhausted its budget. See [`tick_request_failure`].
+pub static REQUEST_FAILURE_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static WAF_BLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
 pub(crate) static WAF_CONSECUTIVE_BLOCKS: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
@@ -122,6 +126,12 @@ tokio::task_local! {
     /// `tick_request_count` which bumps both the global counter and this
     /// task-local when it is bound.
     pub(crate) static REQUEST_COUNT_JOB: std::sync::Arc<AtomicU64>;
+
+    /// Per-scan failed-request counter, the sibling of [`REQUEST_COUNT_JOB`].
+    /// Bound alongside it so a daemon's concurrent jobs don't inherit each
+    /// other's transport failures — the same process-global trap the remote
+    /// payload cache had.
+    pub(crate) static REQUEST_FAILURE_COUNT_JOB: std::sync::Arc<AtomicU64>;
 
     /// Per-scan consecutive-WAF-block counter. Bound by MCP and REST runners
     /// so concurrent scans don't trigger each other's adaptive backoff.
@@ -175,6 +185,7 @@ where
 #[derive(Clone, Default)]
 pub struct JobScopes {
     requests: Option<std::sync::Arc<AtomicU64>>,
+    request_failures: Option<std::sync::Arc<AtomicU64>>,
     waf: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
     limiter: Option<std::sync::Arc<utils::rate_limit::RateLimiter>>,
 }
@@ -185,6 +196,9 @@ impl JobScopes {
     pub(crate) fn capture() -> Self {
         Self {
             requests: REQUEST_COUNT_JOB.try_with(std::sync::Arc::clone).ok(),
+            request_failures: REQUEST_FAILURE_COUNT_JOB
+                .try_with(std::sync::Arc::clone)
+                .ok(),
             waf: WAF_CONSECUTIVE_BLOCKS_JOB
                 .try_with(std::sync::Arc::clone)
                 .ok(),
@@ -194,7 +208,10 @@ impl JobScopes {
 
     /// True when no per-job scope was captured (the CLI path).
     pub(crate) fn is_empty(&self) -> bool {
-        self.requests.is_none() && self.waf.is_none() && self.limiter.is_none()
+        self.requests.is_none()
+            && self.request_failures.is_none()
+            && self.waf.is_none()
+            && self.limiter.is_none()
     }
 }
 
@@ -220,6 +237,9 @@ where
     }
     if let Some(waf) = scopes.waf {
         f = Box::pin(WAF_CONSECUTIVE_BLOCKS_JOB.scope(waf, f));
+    }
+    if let Some(failures) = scopes.request_failures {
+        f = Box::pin(REQUEST_FAILURE_COUNT_JOB.scope(failures, f));
     }
     if let Some(requests) = scopes.requests {
         f = Box::pin(REQUEST_COUNT_JOB.scope(requests, f));
@@ -265,6 +285,23 @@ pub async fn record_outbound_request() {
 pub(crate) fn tick_request_count() {
     REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _ = REQUEST_COUNT_JOB.try_with(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+}
+
+/// Record an outbound request that never produced a response.
+///
+/// A transport error in the injection phase means a payload was *sent but never
+/// tested*. Every send site swallowed those (`if let Ok(resp) = …`), and nothing
+/// counted them, so a target that drops or resets injection requests produced a
+/// scan indistinguishable from a genuinely clean one: `status: clean`,
+/// `incomplete: false`, exit 0, with a plausible `total_requests`.
+///
+/// Mirrors [`tick_request_count`]: always bumps the process-wide counter, and
+/// additionally the task-local one when a per-job scope is bound.
+#[inline]
+pub(crate) fn tick_request_failure() {
+    REQUEST_FAILURE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _ = REQUEST_FAILURE_COUNT_JOB
+        .try_with(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
 }
 
 /// Record a WAF-block response (403/406/429/503 on an injection request).

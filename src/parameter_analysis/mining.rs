@@ -94,7 +94,7 @@ async fn pre_collapse_query_probe(client: &reqwest::Client, target: &Target) -> 
             target.data.clone(),
         );
         crate::record_outbound_request().await;
-        let resp = req.send().await.ok()?;
+        let resp = crate::utils::http::send_counted(req).await.ok()?;
         let location_has_marker = resp.status().is_redirection()
             && resp
                 .headers()
@@ -793,7 +793,7 @@ pub async fn probe_dictionary_params(
                     );
 
                     crate::record_outbound_request().await;
-                    let resp = request.send().await;
+                    let resp = crate::utils::http::send_counted(request).await;
 
                     let mut discovered: Option<Param> = None;
                     if let Ok(r) = resp {
@@ -1038,7 +1038,7 @@ pub async fn probe_body_params(
                     let request = crate::utils::apply_header_overrides(base, &overrides);
 
                     crate::record_outbound_request().await;
-                    let resp = request.send().await;
+                    let resp = crate::utils::http::send_counted(request).await;
 
                     let mut discovered: Option<Param> = None;
                     if let Ok(r) = resp
@@ -1141,7 +1141,7 @@ pub async fn probe_response_id_params(
     );
 
     crate::record_outbound_request().await;
-    let __resp = base_request.send().await;
+    let __resp = crate::utils::http::send_counted(base_request).await;
     if let Ok(resp) = __resp
         && !resp.status().is_server_error()
         && let Ok(text) = crate::utils::http::read_body(resp).await
@@ -1266,7 +1266,7 @@ pub async fn probe_response_id_params(
                     // Prepare optional discovered Param container for batched return
                     let mut discovered: Option<Param> = None;
                     crate::record_outbound_request().await;
-                    let __resp = request.send().await;
+                    let __resp = crate::utils::http::send_counted(request).await;
                     if let Ok(resp) = __resp {
                         // Skip 5xx error responses — debug pages often reflect params
                         if resp.status().is_server_error() {
@@ -1475,7 +1475,7 @@ pub async fn probe_json_body_params(
                 let request = crate::utils::apply_header_overrides(base, &overrides);
 
                 crate::record_outbound_request().await;
-                let resp = request.send().await;
+                let resp = crate::utils::http::send_counted(request).await;
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
@@ -1645,7 +1645,7 @@ pub async fn probe_multipart_params(
                 crate::record_outbound_request().await;
 
                 let mut discovered: Option<Param> = None;
-                if let Ok(r) = request.send().await
+                if let Ok(r) = crate::utils::http::send_counted(request).await
                     && let Ok(text) = crate::utils::http::read_body(r).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {

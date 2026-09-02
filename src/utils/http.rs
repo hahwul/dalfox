@@ -621,6 +621,25 @@ pub(crate) fn decide_retry(
 /// Returns the final response or transport error after success or after the
 /// applicable retry budget is exhausted. If the request body was streamed
 /// (not clonable) the first response/error is returned without retrying.
+/// Send a request, counting a transport failure if it never answers.
+///
+/// The discovery and mining stages send directly rather than through
+/// [`send_with_retry`], and every one of those call sites drops the `Err`
+/// (`if let Ok(resp) = …`, `.ok()?`). A parameter whose probe was reset is
+/// then indistinguishable from a parameter that does not reflect — so a target
+/// that drops requests yields an empty finding list that reads as a verdict.
+/// Counting here keeps `failed_requests` aligned with the `total_requests`
+/// these stages already tick via `record_outbound_request`.
+pub async fn send_counted(
+    request_builder: RequestBuilder,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let result = request_builder.send().await;
+    if result.is_err() {
+        crate::tick_request_failure();
+    }
+    result
+}
+
 pub async fn send_with_retry(
     request_builder: RequestBuilder,
     max_transient_retries: u32,
@@ -665,10 +684,22 @@ pub async fn send_with_retry(
             base_delay_ms,
             retry_after,
         ) {
-            RetryDecision::Stop => return result,
+            RetryDecision::Stop => {
+                // The retry budget is spent. A request that never produced a
+                // response means whatever it carried was never actually tested,
+                // and every caller drops the `Err` — so count it here, once,
+                // where the give-up decision is made.
+                if result.is_err() {
+                    crate::tick_request_failure();
+                }
+                return result;
+            }
             RetryDecision::Sleep { ms, rate_limited } => {
                 let Some(rb) = next_rb else {
                     // Body was streamed; can't replay the request.
+                    if result.is_err() {
+                        crate::tick_request_failure();
+                    }
                     return result;
                 };
                 if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {

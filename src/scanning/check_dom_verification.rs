@@ -896,7 +896,14 @@ async fn verify_sxss_dom(
                 crate::utils::build_request(client, target, method, sxss_url.clone(), None);
 
             crate::record_outbound_request().await;
-            if let Ok(resp) = check_request.send().await {
+            // Direct send (no `send_with_retry`): count the transport failure
+            // here so a retrieval URL that never answers is not silently read
+            // as "the payload isn't there".
+            let sent = check_request.send().await;
+            if sent.is_err() {
+                crate::tick_request_failure();
+            }
+            if let Ok(resp) = sent {
                 let headers = resp.headers().clone();
                 let ct = headers
                     .get(reqwest::header::CONTENT_TYPE)

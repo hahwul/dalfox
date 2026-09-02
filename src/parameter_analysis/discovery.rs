@@ -359,7 +359,7 @@ pub async fn check_query_discovery(
                     crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
                 crate::record_outbound_request().await;
                 let mut discovered: Option<Param> = None;
-                if let Ok(resp) = request.send().await {
+                if let Ok(resp) = crate::utils::http::send_counted(request).await {
                     // Check for redirect reflection: if the response is a 3xx redirect,
                     // the Location header may contain the reflected marker value.
                     let is_redirect = resp.status().is_redirection();
@@ -440,7 +440,7 @@ pub async fn check_query_discovery(
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
-            if let Ok(resp) = request.send().await
+            if let Ok(resp) = crate::utils::http::send_counted(request).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
@@ -519,7 +519,7 @@ pub async fn check_query_discovery(
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
-            if let Ok(resp) = request.send().await
+            if let Ok(resp) = crate::utils::http::send_counted(request).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
@@ -567,7 +567,7 @@ pub async fn check_query_discovery(
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
-            if let Ok(resp) = request.send().await
+            if let Ok(resp) = crate::utils::http::send_counted(request).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
                 && text.contains(numeric_marker)
             {
@@ -607,7 +607,7 @@ pub async fn check_query_discovery(
         let m = target.parse_method();
         let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
         crate::record_outbound_request().await;
-        if let Ok(resp) = request.send().await
+        if let Ok(resp) = crate::utils::http::send_counted(request).await
             && let Ok(text) = crate::utils::http::read_body(resp).await
             && crate::scanning::markers::classify_probe_reflection(&text).detected()
         {
@@ -679,7 +679,7 @@ async fn detect_blanket_header_echo(target: &Target) -> bool {
     let overrides = vec![(guard_name, test_value.to_string())];
     let request = crate::utils::apply_header_overrides(base, &overrides);
     crate::record_outbound_request().await;
-    match request.send().await {
+    match crate::utils::http::send_counted(request).await {
         Ok(resp) => match crate::utils::http::read_body(resp).await {
             Ok(text) => crate::scanning::markers::classify_probe_reflection(&text).detected(),
             Err(_) => false,
@@ -772,7 +772,7 @@ pub async fn check_header_discovery(
                 let request = crate::utils::apply_header_overrides(base, &overrides);
                 crate::record_outbound_request().await;
                 let mut discovered: Option<Param> = None;
-                if let Ok(resp) = request.send().await
+                if let Ok(resp) = crate::utils::http::send_counted(request).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
@@ -895,7 +895,7 @@ pub async fn check_path_discovery(
 
                 crate::record_outbound_request().await;
                 let mut discovered: Option<Param> = None;
-                if let Ok(resp) = request.send().await {
+                if let Ok(resp) = crate::utils::http::send_counted(request).await {
                     // Pair discovery with the scan-time `should_suppress_path_*`
                     // policy so we don't pay payload-set requests for path
                     // segments the scanner would later throw away. Concretely:
@@ -949,7 +949,7 @@ pub async fn check_path_discovery(
                                     data.clone(),
                                 );
                                 crate::record_outbound_request().await;
-                                match probe.send().await {
+                                match crate::utils::http::send_counted(probe).await {
                                     Ok(r) => match crate::utils::http::read_body(r).await {
                                         Ok(t) => t.contains(&needle),
                                         Err(_) => false,
@@ -1061,7 +1061,7 @@ pub async fn check_cookie_discovery(
                 );
                 crate::record_outbound_request().await;
                 let mut discovered: Option<Param> = None;
-                if let Ok(resp) = request.send().await
+                if let Ok(resp) = crate::utils::http::send_counted(request).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
@@ -1117,7 +1117,7 @@ pub async fn check_form_discovery(
     let method = reqwest::Method::GET;
     let request = crate::utils::build_request(&client, target, method, target.url.clone(), None);
     crate::record_outbound_request().await;
-    let html = match request.send().await {
+    let html = match crate::utils::http::send_counted(request).await {
         Ok(resp) => match crate::utils::http::read_body(resp).await {
             Ok(text) => text,
             Err(_) => return,
@@ -1242,7 +1242,7 @@ pub async fn check_form_discovery(
                 )
                 .multipart(form);
                 crate::record_outbound_request().await;
-                if let Ok(resp) = rb.send().await
+                if let Ok(resp) = crate::utils::http::send_counted(rb).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
@@ -1316,7 +1316,7 @@ pub async fn check_form_discovery(
                     )],
                 );
                 crate::record_outbound_request().await;
-                if let Ok(resp) = rb.send().await
+                if let Ok(resp) = crate::utils::http::send_counted(rb).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
@@ -1357,7 +1357,7 @@ pub async fn check_form_discovery(
                 let m = reqwest::Method::GET;
                 let rb = crate::utils::build_request(&client, target, m, test_url.clone(), None);
                 crate::record_outbound_request().await;
-                if let Ok(resp) = rb.send().await
+                if let Ok(resp) = crate::utils::http::send_counted(rb).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
@@ -1403,7 +1403,7 @@ pub async fn check_form_discovery(
                 &[("Content-Type".to_string(), "application/json".to_string())],
             );
             crate::record_outbound_request().await;
-            if let Ok(resp) = rb.send().await
+            if let Ok(resp) = crate::utils::http::send_counted(rb).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
@@ -1484,7 +1484,7 @@ pub async fn check_form_discovery(
                         &[("Content-Type".to_string(), "application/json".to_string())],
                     );
                     crate::record_outbound_request().await;
-                    if let Ok(resp) = rb.send().await
+                    if let Ok(resp) = crate::utils::http::send_counted(rb).await
                         && let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
                     {
@@ -1555,7 +1555,7 @@ pub async fn check_form_discovery(
                         &[("Content-Type".to_string(), "application/json".to_string())],
                     );
                     crate::record_outbound_request().await;
-                    if let Ok(resp) = rb.send().await
+                    if let Ok(resp) = crate::utils::http::send_counted(rb).await
                         && let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
                     {
