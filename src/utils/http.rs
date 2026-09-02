@@ -393,23 +393,33 @@ pub(crate) fn content_type_is_inert_data(ct: &str) -> bool {
 /// sniffable — and therefore only exploitable — when the server has *not* sent
 /// `X-Content-Type-Options: nosniff`.
 ///
-/// The plain-content-type version cannot make this call: its exclusion of
-/// `text/plain` is justified by "browsers content-sniff it as HTML when nosniff
-/// is absent", but it only receives the content-type string and so can never
-/// observe that nosniff is present. That gap reported a `[V]` for a
-/// `text/plain; charset=utf-8` + `nosniff` response echoing a payload — a
-/// document no browser will ever HTML-parse.
+/// The plain-content-type version cannot add `text/plain` on its own, because
+/// that list is also consulted where the caller has no headers to inspect.
 ///
-/// Only `text/plain` is added. An absent or empty content-type is deliberately
-/// still treated as live: `nosniff` constrains MIME *checking* for scripts and
-/// styles, and a navigation to a typeless response is still sniffed, so the
-/// same reasoning does not carry over.
-pub(crate) fn content_type_is_inert_data_with_nosniff(ct: &str, nosniff: bool) -> bool {
+/// `nosniff` is *not* what makes `text/plain` inert. Per the MIME Sniffing
+/// standard, sniffing can only produce `text/html` when the supplied type is
+/// absent or one of `unknown/unknown` / `application/unknown` / `*/*`. A
+/// supplied `text/plain` either trips the check-for-apache-bug flag — whose
+/// "text or binary" rules yield only `text/plain` or
+/// `application/octet-stream` — or is returned unchanged. There is no path
+/// from a supplied `text/plain` to an HTML parse, with or without the header.
+///
+/// Confirmed against real Chrome (headless, `--dump-dom`) serving the same
+/// `<h1 id=marker>` + `<script>` body five ways: `text/html` parsed it;
+/// `text/plain`, `text/plain; charset=utf-8`,
+/// `text/plain; charset=windows-1252`, and `text/plain` + `nosniff` all did
+/// not. XSSMaze's three `text/plain` endpoints are all `exploitable: false`
+/// controls, and `realworld-level6` — which reflects markup raw — says the
+/// same thing in its own metadata: "no modern browser sniffs [it] into HTML,
+/// so it never parses; reporting no XSS here is the correct result". Before
+/// this, dalfox reported `[V] High` on it.
+///
+/// An absent or empty content-type is deliberately still treated as live: that
+/// is exactly the case the standard *does* sniff, so the same reasoning does
+/// not carry over.
+pub(crate) fn content_type_is_inert_data_with_nosniff(ct: &str, _nosniff: bool) -> bool {
     if content_type_is_inert_data(ct) {
         return true;
-    }
-    if !nosniff {
-        return false;
     }
     matches!(content_type_primary(ct).as_deref(), Some("text/plain"))
 }
