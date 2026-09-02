@@ -744,24 +744,23 @@ async fn send_counted_counts_a_request_that_never_answers() {
                 "a request that never reached the target must be counted"
             );
 
-            // A request that does answer must not be counted.
+            // A request that does answer must not be counted. Served by axum
+            // rather than a hand-rolled socket: a raw one-shot responder races
+            // the client's connection handling differently across platforms
+            // (it failed on Windows).
             let live_listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
                 .await
                 .expect("bind live listener");
             let live_addr = live_listener.local_addr().expect("live addr");
             tokio::spawn(async move {
-                if let Ok((mut sock, _)) = live_listener.accept().await {
-                    use tokio::io::AsyncWriteExt;
-                    let _ = sock
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                        )
-                        .await;
-                    let _ = sock.shutdown().await;
-                }
+                let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" }));
+                let _ = axum::serve(live_listener, app).await;
             });
             let live = format!("http://{live_addr}/");
-            assert!(send_counted(client.get(&live)).await.is_ok());
+            assert!(
+                send_counted(client.get(&live)).await.is_ok(),
+                "the live server must answer"
+            );
             assert_eq!(
                 c.load(std::sync::atomic::Ordering::Relaxed),
                 1,
