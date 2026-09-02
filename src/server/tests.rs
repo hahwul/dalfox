@@ -136,6 +136,24 @@ async fn target_reflect_handler(Query(q): Query<Map<String, String>>) -> impl In
     )
 }
 
+/// A server that accepts the connection and then never answers. Used to stand
+/// in for a remote payload provider that trickles or hangs.
+async fn start_stalling_server() -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind stalling listener");
+    let addr = listener.local_addr().expect("stalling local addr");
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((sock, _)) = listener.accept().await {
+            // Hold the socket open without writing a response.
+            held.push(sock);
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
 async fn start_reflecting_target_server() -> SocketAddr {
     let app = Router::new()
         .route("/", any(target_reflect_handler))
@@ -1542,6 +1560,68 @@ async fn test_run_scan_job_scan_timeout_marks_cancelled_with_partial_results() {
         "partial results vector should be attached even on timeout"
     );
     assert!(job.finished_at_ms.is_some());
+}
+
+#[tokio::test]
+async fn test_scan_timeout_bounds_a_slow_remote_payload_fetch() {
+    // `scan_timeout` is a promise about the whole job. Both front ends used to
+    // fetch `remote_payloads` / `remote_wordlists` *before*
+    // `run_within_scan_budget`, so a provider that trickles bytes stretched the
+    // job past the bound the caller set. Each request is capped by `--timeout`,
+    // but N provider URLs are not, and the caller asked for a job-level bound.
+    //
+    // A provider that never answers, a 1s budget, and a generous outer guard:
+    // the job must come back inside the budget, not inside the outer guard.
+    let stall = start_stalling_server().await;
+    let target = start_reflecting_target_server().await;
+    crate::payload::register_payload_provider(
+        "stall-test-provider",
+        vec![format!("http://{}/never", stall)],
+    );
+    let state = make_state(None, None, false, false, "callback");
+    let id = "remote-fetch-budget".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+
+    let opts = ScanOptions {
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(1),
+        skip_mining: Some(true),
+        // The discriminating pair: a long per-request timeout (which is all
+        // that used to bound the fetch) and a short job budget. Before the fix
+        // the job ran for ~`timeout`; after it, the budget trips first.
+        timeout: Some(20),
+        scan_timeout: Some(1),
+        remote_payloads: Some(vec!["stall-test-provider".to_string()]),
+        ..ScanOptions::default()
+    };
+
+    let started = std::time::Instant::now();
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/?q=test", target),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(run.is_ok(), "the job must settle, not hang on the provider");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "job took {:?} — the remote fetch ran outside the scan budget \
+         (it was bounded only by the 20s per-request timeout)",
+        started.elapsed()
+    );
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job should remain");
+    assert!(job.finished_at_ms.is_some(), "the job must settle");
 }
 
 #[tokio::test]

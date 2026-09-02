@@ -285,33 +285,6 @@ impl DalfoxMcp {
             }
         };
 
-        // Load any requested remote payload/wordlist providers into the caches
-        // before the scan reads them. Mirrors the REST server (`run_scan_job`)
-        // and the CLI; without this the `remote_payloads`/`remote_wordlists`
-        // fields would be silently inert on the MCP path. It runs *here*, inside
-        // the spawned worker, rather than in the tool call — see the note at the
-        // spawn site in `scan_with_dalfox`.
-        //
-        // A failure is logged rather than swallowed: the scan otherwise runs
-        // without the list the caller asked for and still reports success,
-        // which an agent reads as "scanned, found nothing".
-        if (!scan_args.remote_payloads.is_empty() || !scan_args.remote_wordlists.is_empty())
-            && let Err(e) = crate::utils::init_remote_resources_with_options(
-                &scan_args.remote_payloads,
-                &scan_args.remote_wordlists,
-                Some(scan_args.timeout),
-                scan_args.proxy.clone(),
-            )
-            .await
-        {
-            Self::log(
-                "WRN",
-                &format!(
-                    "scan_id={scan_id} remote resource fetch failed ({e}); scanning without the requested remote lists"
-                ),
-            );
-        }
-
         let url = scan_args
             .targets
             .first()
