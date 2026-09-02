@@ -1016,23 +1016,65 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     }
     buf.push_str(" HTTP/1.1\r\nHost: ");
     buf.push_str(url.host_str().unwrap_or(""));
+    // `Host` is host *and port*. Dropping it made every PoC against a
+    // non-default port replay to :80/:443 — a different service, or nothing.
+    // `Url::port()` is already `None` for the scheme's default port, which is
+    // exactly when the Host header should omit it.
+    if let Some(port) = url.port() {
+        buf.push(':');
+        buf.push_str(&port.to_string());
+    }
+
+    // A `Location::Header` param is injected into the request itself, not the
+    // URL — as a header of its own name, or, when the name is one of the
+    // target's cookies, into `Cookie` (see `url_inject::build_header_request`,
+    // which this must mirror or the PoC does not reproduce what was sent).
+    let header_param = matches!(param.location, Location::Header);
+    let cookie_param = header_param && crate::scanning::url_inject::param_is_cookie(target, param);
+    let injected_header = header_param && !cookie_param;
 
     let has_ct_header = target
         .headers
         .iter()
         .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
     for (k, v) in &target.headers {
+        // The wire path applies the injected header as an *override*, so a
+        // same-named original must not also be emitted.
+        if injected_header && k.eq_ignore_ascii_case(&param.name) {
+            continue;
+        }
         buf.push_str("\r\n");
         buf.push_str(k);
         buf.push_str(": ");
         buf.push_str(v);
+    }
+    if injected_header {
+        buf.push_str("\r\n");
+        buf.push_str(&param.name);
+        buf.push_str(": ");
+        buf.push_str(payload);
     }
     if !has_ct_header && let Some(ct) = content_type {
         buf.push_str("\r\nContent-Type: ");
         buf.push_str(ct);
     }
 
-    if !target.cookies.is_empty() {
+    // Cookies. For a cookie param the injected value is written first and the
+    // target's other cookies follow, matching `build_header_request` — those
+    // neighbours often carry the session state the sink needs to render at all.
+    if cookie_param {
+        buf.push_str("\r\nCookie: ");
+        buf.push_str(&param.name);
+        buf.push('=');
+        buf.push_str(payload);
+        if let Some(rest) =
+            crate::utils::compose_cookie_header_excluding(&target.cookies, Some(&param.name))
+            && !rest.is_empty()
+        {
+            buf.push_str("; ");
+            buf.push_str(&rest);
+        }
+    } else if !target.cookies.is_empty() {
         buf.push_str("\r\nCookie: ");
         for (i, (k, v)) in target.cookies.iter().enumerate() {
             if i > 0 {
