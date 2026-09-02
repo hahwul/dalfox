@@ -1744,3 +1744,48 @@ fn one_analysis_applies_identically_to_many_params() {
         );
     }
 }
+
+/// A server that case-normalizes the reflection (Rails-style `titleize`,
+/// `upcase`, `downcase` template filters) still echoes every special character
+/// raw. Matching the probe markers case-sensitively made
+/// `extract_reflected_segment` return `None`, which `active_probe_param` reads
+/// as "the whole probe was filtered" and classifies every `SPECIAL_PROBE_CHARS`
+/// entry as invalid — muting the entire angle/quote-bearing payload set for a
+/// completely unfiltered sink (xssmaze `/casemanip/level2`, `/casemanip/level3`,
+/// `/casemanip/level6`, `/obfuscation/level2`).
+#[test]
+fn test_extract_reflected_segment_matches_case_folded_markers() {
+    let open = crate::scanning::markers::open_marker();
+    let close = crate::scanning::markers::close_marker();
+
+    // Whole reflection upper-cased.
+    let upper = format!(
+        "<html><body>{}{}{}</body></html>",
+        open.to_ascii_uppercase(),
+        "'\"<>();",
+        close.to_ascii_uppercase()
+    );
+    assert_eq!(
+        extract_reflected_segment(&upper),
+        Some("'\"<>();"),
+        "an upper-cased marker must still bound the reflected segment"
+    );
+
+    // First letter capitalized only (`titleize`-style filters).
+    let mut titled_open = open.to_string();
+    titled_open.replace_range(..1, &open[..1].to_ascii_uppercase());
+    let titled = format!(
+        "<html><body>{}{}{}</body></html>",
+        titled_open, "'<>", close
+    );
+    assert_eq!(extract_reflected_segment(&titled), Some("'<>"));
+}
+
+/// Case-folded markers must also count as "the probe came back", so the
+/// window-overflow probe is not spent on a server that reflected fine.
+#[test]
+fn test_body_has_probe_marker_is_case_insensitive() {
+    let open = crate::scanning::markers::open_marker();
+    assert!(body_has_probe_marker(&open.to_ascii_uppercase()));
+    assert!(!body_has_probe_marker("nothing reflected here"));
+}

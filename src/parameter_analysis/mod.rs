@@ -350,14 +350,44 @@ pub(crate) fn encoded_variants(c: char) -> Vec<&'static str> {
     }
 }
 
-/// Extract segment between first open marker and subsequent close marker
+/// Byte offset of the first ASCII-case-insensitive occurrence of `needle` in
+/// `haystack`, or `None`.
+///
+/// Markers are `dlx`/`xld` plus 8 hex digits, so case-folding them cannot
+/// collide with anything else in a response — while a server that
+/// case-normalizes reflected input (title-case, `upcase`, `downcase`) breaks an
+/// exact-case `find` and makes the marker look filtered.
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
+    if n.is_empty() {
+        return Some(0);
+    }
+    if h.len() < n.len() {
+        return None;
+    }
+    h.windows(n.len()).position(|w| w.eq_ignore_ascii_case(n))
+}
+
+/// Whether `body` carries either probe marker, matched case-insensitively.
+fn body_has_probe_marker(body: &str) -> bool {
+    contains_ascii_ci(body, crate::scanning::markers::open_marker())
+        || contains_ascii_ci(body, crate::scanning::markers::close_marker())
+}
+
+/// Extract segment between first open marker and subsequent close marker.
+///
+/// Marker matching is ASCII-case-insensitive: a server that case-normalizes the
+/// reflection (`"Dlx1234abcd'\"<>…"` from a title-casing template filter) still
+/// reflects every special character raw, and an exact-case `find` would miss the
+/// segment and hand the caller the "all specials filtered" verdict — muting the
+/// entire angle/quote-bearing payload set for a completely unfiltered sink.
 fn extract_reflected_segment(body: &str) -> Option<&str> {
     let open = crate::scanning::markers::open_marker();
     let close = crate::scanning::markers::close_marker();
-    let start = body.find(open)?;
+    let start = find_ascii_ci(body, open)?;
     let after = start + open.len();
     let rest = &body[after..];
-    let end_rel = rest.find(close)?;
+    let end_rel = find_ascii_ci(rest, close)?;
     Some(&rest[..end_rel])
 }
 
@@ -952,10 +982,9 @@ pub async fn active_probe_param(
             // reflection), and a block page that echoes the payload (e.g. a
             // reflected-block-page WAF) carries the markers too — neither is a
             // size-limited inspection window, so skip the probe for them.
-            let genuine_block = batched_response.as_deref().is_none_or(|body| {
-                !body.contains(crate::scanning::markers::open_marker())
-                    && !body.contains(crate::scanning::markers::close_marker())
-            });
+            let genuine_block = batched_response
+                .as_deref()
+                .is_none_or(|body| !body_has_probe_marker(body));
             let window = if genuine_block {
                 // One window-overflow probe: re-send the batched probe behind a
                 // benign filler prefix. If the markers + specials now reflect,

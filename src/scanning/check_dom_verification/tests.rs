@@ -1843,3 +1843,106 @@ fn test_1183_inline_breakout_on_hidden_input_not_evidence() {
         "an inline breakout on a hidden input never fires"
     );
 }
+
+// ── Bare attribute-injection payloads whose handler is swallowed ───────────
+//
+// An attribute-injection payload forms no element of its own, so the #1118
+// gate (which parses the payload) finds nothing to inspect. When the payload
+// lands inside a *quoted* attribute value the server already wrote, the
+// injected `on*=` is absorbed into that value while a later `id=`/`class=`
+// still tokenizes into a real attribute — the marker rides a live element
+// that executes nothing. Observed against xssmaze `/inlinestyle/level2`,
+// `/multicontext/level2`, `/multireflect/level2`, `/partial-encode/level1`,
+// `/data-attribute/level2`, `/tagattrmix/level6`.
+
+/// The reported shape: the payload's `onmouseover` is swallowed by the
+/// pre-existing double-quoted `style` value; only `id=` escapes as a real
+/// attribute, so the `<p>` carries the marker but no handler.
+#[test]
+fn test_bare_attr_handler_swallowed_by_quoted_value_not_evidence() {
+    let marker = crate::scanning::markers::id_marker();
+    let payload = format!("'/onmouseover=\"alert(1)\"/id=\"{}\"/x='", marker);
+    let body = format!(
+        "<html><body><p style=\"background-image: url('{}')\">text</p></body></html>",
+        payload
+    );
+    assert!(
+        !has_marker_evidence(&payload, &body),
+        "the payload's handler was absorbed into the style value; the marker alone is not evidence"
+    );
+    assert_eq!(
+        classify_dom_evidence(&payload, &body),
+        None,
+        "the reported FP must classify as no DOM evidence (downgrades V -> R)"
+    );
+}
+
+/// The `<a href="…">` variant of the same shape (xssmaze
+/// `/multicontext/level2`): `href` eats the handler, `id=` survives.
+#[test]
+fn test_bare_attr_handler_swallowed_by_href_value_not_evidence() {
+    let marker = crate::scanning::markers::id_marker();
+    let payload = format!("x/onmouseover=\"alert(1)\"/id=\"{}\"/", marker);
+    let body = format!(
+        "<html><body><a href=\"{}\">Click</a></body></html>",
+        payload
+    );
+    assert_eq!(classify_dom_evidence(&payload, &body), None);
+}
+
+/// FN guard: the same family of payload with a handler that *does* survive
+/// alongside the marker stays DOM-verified.
+#[test]
+fn test_bare_attr_handler_surviving_is_still_evidence() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\" onmouseover=alert(1) class={} x=\"", marker);
+    let body = format!(
+        "<html><body><input type=\"text\" value=\"{}\" class=\"form-control\"></body></html>",
+        payload
+    );
+    assert!(
+        has_marker_evidence(&payload, &body),
+        "handler and marker both survive on the input; this is genuine DOM evidence"
+    );
+}
+
+/// FN guard: a bare attribute payload carrying no handler sink at all (a
+/// structural `id=`-only marker) keeps presence-only evidence.
+#[test]
+fn test_bare_attr_without_handler_keeps_presence_only_evidence() {
+    let marker = crate::scanning::markers::id_marker();
+    let payload = format!("\" id={} x=\"", marker);
+    let body = format!(
+        "<html><body><div title=\"{}\">x</div></body></html>",
+        payload
+    );
+    assert!(
+        has_marker_evidence(&payload, &body),
+        "a marker with no handler sink is a structural marker and keeps presence-only evidence"
+    );
+}
+
+/// FN guard: a tag-forming payload is untouched by the new branch — it keeps
+/// going through the #1118 element parse, which already requires co-survival.
+#[test]
+fn test_tag_forming_payload_unaffected_by_bare_attr_gate() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\"><svg onload=alert(1) class={}>", marker);
+    let body = format!(
+        "<html><body><svg onload=\"alert(1)\" class=\"{}\"></svg></body></html>",
+        marker
+    );
+    assert!(has_marker_evidence(&payload, &body));
+}
+
+/// Unit guard for the textual handler detector: `on` inside a longer word is
+/// not an event-handler attribute.
+#[test]
+fn test_payload_has_handler_sink_text_ignores_embedded_on() {
+    assert!(!payload_has_handler_sink_text("button=alert(1)"));
+    assert!(!payload_has_handler_sink_text("\" id=dlx x=\""));
+    assert!(payload_has_handler_sink_text(
+        "\" onmouseover=alert(1) x=\""
+    ));
+    assert!(payload_has_handler_sink_text("'/onfocus=\"alert(1)\"/x='"));
+}
