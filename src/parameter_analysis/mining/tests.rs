@@ -1362,3 +1362,80 @@ fn test_detect_js_breakout_still_works_behind_a_large_inline_script() {
     let body = format!("<script>{filler}foo(\"{marker}\");</script>");
     assert_eq!(detect_js_breakout(&body).as_deref(), Some("\")"));
 }
+
+#[tokio::test]
+async fn test_probe_body_params_mines_a_name_already_discovered_in_the_query() {
+    // The ordinary `dalfox scan '…?q=x' -d 'q=y'` shape. Stage 1 discovery has
+    // already put a *query* `q` in `reflection_params`; the body `q` is a
+    // different wire slot and must still be mined. Keying the skip on the name
+    // alone meant it never was — so a vulnerable body parameter was not merely
+    // unreported, it was never probed.
+    let addr = start_body_reflect_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/b", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.data = Some("q=y".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(vec![Param::new(
+        "q".to_string(),
+        "x".to_string(),
+        Location::Query,
+    )]));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "q" && p.location == Location::Body),
+        "body slot `q` was not mined because the query `q` shadowed it, got {:?}",
+        params
+            .iter()
+            .map(|p| (p.name.clone(), format!("{:?}", p.location)))
+            .collect::<Vec<_>>()
+    );
+    // The pre-existing query param must survive untouched.
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "q" && p.location == Location::Query),
+        "the pre-existing query param was dropped, got {:?}",
+        params
+            .iter()
+            .map(|p| (p.name.clone(), format!("{:?}", p.location)))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_probe_json_body_params_mines_a_name_already_discovered_in_the_query() {
+    // Same shape for the JSON body stage.
+    let addr = start_json_reflect_server().await;
+    let mut target =
+        parse_target(&format!("http://{}:{}/j", addr.ip(), addr.port())).expect("parse target");
+    target.method = "POST".to_string();
+    target.data = Some("{\"q\":\"y\"}".to_string());
+    let mut args = default_scan_args();
+    args.data = Some("{\"q\":\"y\"}".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(vec![Param::new(
+        "q".to_string(),
+        "x".to_string(),
+        Location::Query,
+    )]));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_json_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "q" && p.location == Location::JsonBody),
+        "JSON body slot `q` was shadowed by the query `q`, got {:?}",
+        params
+            .iter()
+            .map(|p| (p.name.clone(), format!("{:?}", p.location)))
+            .collect::<Vec<_>>()
+    );
+}
