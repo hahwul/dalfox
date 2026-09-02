@@ -22,8 +22,15 @@ const DEFAULT_TIMEOUT_SECS: u64 = 15;
 /// `remote_payloads` / `remote_wordlists` verbatim), so the number of distinct
 /// *sets* a long-lived daemon can be asked to remember is unbounded — including
 /// sets naming providers that do not exist, which cache an empty list without
-/// ever touching the network. Past this many entries new sets simply are not
-/// cached: they refetch each time, which is slower but never wrong.
+/// ever touching the network. A real deployment uses a handful of sets, so this
+/// bound is only ever reached by someone spraying names.
+///
+/// Reaching it is reported to the caller as a fetch failure rather than
+/// silently leaving the entry uncached: the getters are keyed, so an uncached
+/// set reads back as "no remote list" and the scan would otherwise run without
+/// what it asked for and still report success. The callers already turn that
+/// error into the operator-facing "scanning without the requested remote lists"
+/// warning, which is exactly what happens.
 const MAX_CACHED_PROVIDER_SETS: usize = 64;
 
 /// A process-wide cache of fetched remote lists, keyed by provider set.
@@ -41,14 +48,17 @@ const MAX_CACHED_PROVIDER_SETS: usize = 64;
 ///
 /// Keying by the provider set fixes both: an entry can only ever be read back
 /// by a job that asked for exactly the same providers.
-struct ProviderCache(OnceLock<Mutex<HashMap<Vec<String>, Arc<Vec<String>>>>>);
+struct ProviderCache(OnceLock<Mutex<CachedLists>>);
+
+/// Fetched lists indexed by the normalized provider set that produced them.
+type CachedLists = HashMap<Vec<String>, Arc<Vec<String>>>;
 
 impl ProviderCache {
     const fn new() -> Self {
         Self(OnceLock::new())
     }
 
-    fn map(&self) -> &Mutex<HashMap<Vec<String>, Arc<Vec<String>>>> {
+    fn map(&self) -> &Mutex<CachedLists> {
         self.0.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
@@ -57,14 +67,17 @@ impl ProviderCache {
         m.get(key).cloned()
     }
 
-    fn store(&self, key: Vec<String>, lines: Vec<String>) {
+    /// Cache `lines` under `key`. Returns `false` when the cache is full and
+    /// this is a new set — never evicting a live entry, which a job mid-scan
+    /// may still be reading.
+    #[must_use]
+    fn store(&self, key: Vec<String>, lines: Vec<String>) -> bool {
         let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
-        // Never evict a live entry to make room — a job mid-scan may still read
-        // it. Refusing the new one degrades to "refetch next time" instead.
         if m.len() >= MAX_CACHED_PROVIDER_SETS && !m.contains_key(&key) {
-            return;
+            return false;
         }
         m.insert(key, Arc::new(lines));
+        true
     }
 
     fn is_empty(&self) -> bool {
@@ -85,18 +98,33 @@ impl ProviderCache {
     }
 }
 
+/// Error returned when a fetch succeeded but the cache had no room for it. The
+/// callers already render this as "scanning without the requested remote
+/// lists", which is what the keyed getters will now report for this set.
+fn cache_full_error(kind: &str) -> Box<dyn std::error::Error> {
+    format!(
+        "remote {kind} cache is full ({MAX_CACHED_PROVIDER_SETS} distinct provider sets); \
+         this set was fetched but not cached"
+    )
+    .into()
+}
+
 /// Normalize a caller-supplied provider list into a cache key: each name
-/// trimmed and lowercased (matching how [`collect_payload_provider_urls`] looks
-/// them up), blanks dropped, then deduplicated and sorted so `["Burp","assetnote"]`
-/// and `["assetnote"," burp ","burp"]` name the same entry. A `Vec<String>` key
-/// rather than a joined string, so a provider name containing the separator
-/// cannot collide with a two-provider set.
+/// lowercased, then deduplicated and sorted, so `["Burp","assetnote"]` and
+/// `["assetnote","burp","burp"]` name the same entry. Both normalizations are
+/// safe because the fetched list is order-independent — `collect_*_provider_urls`
+/// dedupes URLs and the result is sorted before caching.
+///
+/// The lowercasing is exactly what `collect_*_provider_urls` applies when it
+/// looks a name up in the registry, and nothing more: a key normalization the
+/// lookup does not share (trimming, say) would let two provider lists that
+/// resolve to *different* URL sets share one cache entry — `[" burp "]` misses
+/// the registry and caches an empty list, which `["burp"]` would then read back.
+///
+/// A `Vec<String>` key rather than a joined string, so a provider name
+/// containing the separator cannot collide with a two-provider set.
 fn provider_cache_key(providers: &[String]) -> Vec<String> {
-    let mut names: Vec<String> = providers
-        .iter()
-        .map(|p| p.trim().to_ascii_lowercase())
-        .filter(|p| !p.is_empty())
-        .collect();
+    let mut names: Vec<String> = providers.iter().map(|p| p.to_ascii_lowercase()).collect();
     names.sort();
     names.dedup();
     names
@@ -199,7 +227,8 @@ pub async fn init_remote_payloads_with(
 
     let urls = collect_payload_provider_urls(providers);
     if urls.is_empty() {
-        REMOTE_PAYLOADS.store(key, Vec::new());
+        // No recognized providers: cache an empty list for *this* set only.
+        let _ = REMOTE_PAYLOADS.store(key, Vec::new());
         return Ok(());
     }
 
@@ -218,7 +247,9 @@ pub async fn init_remote_payloads_with(
         return Err("remote payload fetch returned no usable entries".into());
     }
 
-    REMOTE_PAYLOADS.store(key, dedup_sorted);
+    if !REMOTE_PAYLOADS.store(key, dedup_sorted) {
+        return Err(cache_full_error("payload"));
+    }
     Ok(())
 }
 
@@ -235,7 +266,8 @@ pub async fn init_remote_wordlists_with(
 
     let urls = collect_wordlist_provider_urls(providers);
     if urls.is_empty() {
-        REMOTE_WORDS.store(key, Vec::new());
+        // No recognized providers: cache an empty list for *this* set only.
+        let _ = REMOTE_WORDS.store(key, Vec::new());
         return Ok(());
     }
 
@@ -254,7 +286,9 @@ pub async fn init_remote_wordlists_with(
         return Err("remote wordlist fetch returned no usable entries".into());
     }
 
-    REMOTE_WORDS.store(key, dedup_sorted);
+    if !REMOTE_WORDS.store(key, dedup_sorted) {
+        return Err(cache_full_error("wordlist"));
+    }
     Ok(())
 }
 
@@ -271,7 +305,7 @@ pub async fn init_remote_payloads(providers: &[String]) -> Result<(), Box<dyn st
     let urls = collect_payload_provider_urls(providers);
     if urls.is_empty() {
         // No recognized providers – cache an empty list for *this* set only
-        REMOTE_PAYLOADS.store(key, Vec::new());
+        let _ = REMOTE_PAYLOADS.store(key, Vec::new());
         return Ok(());
     }
 
@@ -294,7 +328,9 @@ pub async fn init_remote_payloads(providers: &[String]) -> Result<(), Box<dyn st
         return Err("remote payload fetch returned no usable entries".into());
     }
 
-    REMOTE_PAYLOADS.store(key, dedup_sorted);
+    if !REMOTE_PAYLOADS.store(key, dedup_sorted) {
+        return Err(cache_full_error("payload"));
+    }
     Ok(())
 }
 
@@ -331,7 +367,7 @@ pub async fn init_remote_wordlists(providers: &[String]) -> Result<(), Box<dyn s
     let urls = collect_wordlist_provider_urls(providers);
     if urls.is_empty() {
         // No recognized providers – cache an empty list for *this* set only
-        REMOTE_WORDS.store(key, Vec::new());
+        let _ = REMOTE_WORDS.store(key, Vec::new());
         return Ok(());
     }
 
@@ -354,7 +390,9 @@ pub async fn init_remote_wordlists(providers: &[String]) -> Result<(), Box<dyn s
         return Err("remote wordlist fetch returned no usable entries".into());
     }
 
-    REMOTE_WORDS.store(key, dedup_sorted);
+    if !REMOTE_WORDS.store(key, dedup_sorted) {
+        return Err(cache_full_error("wordlist"));
+    }
     Ok(())
 }
 

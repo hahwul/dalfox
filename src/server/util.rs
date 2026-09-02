@@ -231,10 +231,11 @@ pub(crate) fn parse_opt_bool_query(params: &HashMap<String, String>, key: &str) 
 /// jobs-lock, or return `None` when the server is already at its
 /// `max_concurrent_scans` capacity (`0` = unlimited). Counting active
 /// (non-terminal) jobs and inserting under the *same* lock keeps the check
-/// race-free. Returns the reserved scan_id on success. Shared by POST and GET
-/// /scan so both paths enforce the cap and build the queued job identically.
-/// Returns the reserved scan_id together with the worker lease the caller must
-/// move into the scan task (see [`crate::job::Job::is_evictable`]).
+/// race-free. Shared by POST and GET /scan so both paths enforce the cap and
+/// build the queued job identically.
+///
+/// On success returns the reserved scan_id together with the worker lease the
+/// caller must move into the scan task (see [`crate::job::Job::is_evictable`]).
 pub(crate) async fn try_admit_and_queue(
     state: &AppState,
     url: &str,

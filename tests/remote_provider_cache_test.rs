@@ -90,18 +90,36 @@ async fn test_remote_payload_cache_is_keyed_by_provider_set() {
         "a job asking for provider B must not be served provider A's payloads"
     );
 
-    // The key is order- and case-insensitive and dedupes, so the same set
+    // The key is case-insensitive, order-insensitive and dedupes — exactly the
+    // normalizations the registry lookup itself applies — so the same set
     // spelled differently hits the same entry rather than refetching.
-    let b_spelled_differently = vec![
-        " CACHE-KEY-B ".to_string(),
-        "cache-key-b".to_string(),
-        String::new(),
-    ];
+    let b_spelled_differently = vec!["CACHE-KEY-B".to_string(), "cache-key-b".to_string()];
     assert_eq!(
         get_remote_payloads_for(&b_spelled_differently)
             .expect("normalized key hits the same entry")
             .as_ref(),
         &vec!["beta-payload".to_string()],
+    );
+
+    // A key normalization the *lookup* does not share would be a new bug: a
+    // name the registry cannot resolve must get its own (empty) entry rather
+    // than aliasing onto the trimmed one's fetched list.
+    let untrimmed = vec![" cache-key-a ".to_string()];
+    init_remote_payloads_with(&untrimmed, fetch_opts())
+        .await
+        .expect("unresolvable name caches an empty list");
+    assert!(
+        get_remote_payloads_for(&untrimmed)
+            .expect("untrimmed set cached")
+            .is_empty(),
+        "a name the registry cannot resolve must not alias onto another entry"
+    );
+    assert_eq!(
+        get_remote_payloads_for(&a)
+            .expect("provider A still cached")
+            .as_ref(),
+        &vec!["alpha-payload".to_string()],
+        "and it must not clobber the entry it looks similar to"
     );
 
     let _ = tokio::time::timeout(Duration::from_secs(2), handle_a).await;
