@@ -1,3 +1,11 @@
 * linguist-vendored
 *.rs linguist-vendored=false
 *.cr linguist-vendored=false
+
+# The published agent skill and its discovery index are digest-verified: the
+# `sha256` in index.json is taken over the file as served, which is LF. A CRLF
+# checkout on Windows would otherwise let a contributor commit CRLF and break
+# that digest for every client that checks it.
+skills/dalfox/SKILL.md text eol=lf
+docs/static/.well-known/agent-skills/dalfox/SKILL.md text eol=lf
+docs/static/.well-known/agent-skills/index.json text eol=lf

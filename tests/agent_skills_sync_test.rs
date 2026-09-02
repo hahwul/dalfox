@@ -23,10 +23,33 @@ const SOURCE: &str = "skills/dalfox/SKILL.md";
 const PUBLISHED: &str = "docs/static/.well-known/agent-skills/dalfox/SKILL.md";
 const INDEX: &str = "docs/static/.well-known/agent-skills/index.json";
 
+/// Read a repo file with line endings normalized to LF.
+///
+/// The digest in `index.json` is taken over the file *as served*, which is LF.
+/// A Windows checkout can materialize CRLF (`.gitattributes` now pins these
+/// three paths, but a pre-existing clone or a zip download still can), and
+/// hashing those bytes would fail against a digest that is perfectly correct.
+/// Normalizing here keeps the test about drift rather than about checkout
+/// settings.
+fn read_lf(rel: &str) -> Vec<u8> {
+    let raw = std::fs::read(repo_path(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+    let mut out = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'\r' && raw.get(i + 1) == Some(&b'\n') {
+            i += 1;
+            continue;
+        }
+        out.push(raw[i]);
+        i += 1;
+    }
+    out
+}
+
 #[test]
 fn published_skill_is_byte_identical_to_the_source() {
-    let source = std::fs::read(repo_path(SOURCE)).expect("read skills/dalfox/SKILL.md");
-    let published = std::fs::read(repo_path(PUBLISHED)).expect("read the .well-known copy");
+    let source = read_lf(SOURCE);
+    let published = read_lf(PUBLISHED);
     assert_eq!(
         source, published,
         "{SOURCE} and {PUBLISHED} have drifted — the docs site would serve \
@@ -37,7 +60,7 @@ fn published_skill_is_byte_identical_to_the_source() {
 
 #[test]
 fn index_digest_matches_the_published_skill() {
-    let published = std::fs::read(repo_path(PUBLISHED)).expect("read the .well-known copy");
+    let published = read_lf(PUBLISHED);
     let mut hasher = Sha256::new();
     hasher.update(&published);
     let actual = format!("sha256:{}", hex::encode(hasher.finalize()));
