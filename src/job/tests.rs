@@ -322,6 +322,107 @@ fn enforce_retention_cap_never_evicts_active_jobs() {
     assert!(!jobs.contains_key("done"));
 }
 
+// ---------------------------------------------------------------------------
+// Worker leases: a cancelled job is stamped terminal while its worker drains
+// ---------------------------------------------------------------------------
+//
+// `cancel_scan_handler` sets `status = Cancelled` and `finished_at_ms` the
+// moment the user asks, so `is_terminal()` is true while the worker is still
+// running — it has partial results to store, a status to reconcile and (REST) a
+// terminal webhook to fire. Retention used to evict on `is_terminal()` alone,
+// so a burst of new submissions could collect that entry out from under the
+// worker: `jobs.get_mut(&id)` then returns None, the results are dropped, the
+// webhook never fires, and a GET on the caller's scan_id 404s.
+
+#[test]
+fn cancelled_job_with_a_live_worker_is_not_evictable() {
+    let mut job = Job::new_queued("http://a".to_string());
+    let lease = job.issue_worker_lease();
+
+    // What DELETE /scan/{id} does to a running job.
+    job.status = JobStatus::Cancelled;
+    job.finished_at_ms = Some(now_ms());
+
+    assert!(
+        job.is_terminal(),
+        "cancel stamps the terminal state at once"
+    );
+    assert!(job.worker_alive(), "but the worker is still draining");
+    assert!(
+        !job.is_evictable(),
+        "retention must not collect a job a worker is still writing to"
+    );
+
+    // Worker finishes (or panics): the lease drops and the entry is collectable.
+    drop(lease);
+    assert!(!job.worker_alive());
+    assert!(job.is_evictable());
+}
+
+#[test]
+fn enforce_retention_cap_never_evicts_a_draining_job() {
+    let mut jobs: HashMap<String, Job> = HashMap::new();
+
+    let mut draining = Job::new_queued("http://draining".to_string());
+    let _lease = draining.issue_worker_lease();
+    draining.status = JobStatus::Cancelled;
+    // Oldest by finished_at, so it is the *first* candidate the cap would take.
+    draining.finished_at_ms = Some(1_000);
+    jobs.insert("draining".to_string(), draining);
+
+    let mut settled = Job::new_queued("http://settled".to_string());
+    settled.status = JobStatus::Done;
+    settled.finished_at_ms = Some(2_000);
+    jobs.insert("settled".to_string(), settled);
+
+    enforce_retention_cap(&mut jobs, 1);
+
+    assert!(
+        jobs.contains_key("draining"),
+        "a cancelled-but-draining job must survive the retention cap"
+    );
+    assert!(
+        !jobs.contains_key("settled"),
+        "the settled job is the one that should have been evicted"
+    );
+}
+
+#[test]
+fn purge_expired_jobs_keeps_a_draining_job_past_its_ttl() {
+    let mut jobs: HashMap<String, Job> = HashMap::new();
+    let mut draining = Job::new_queued("http://draining".to_string());
+    let _lease = draining.issue_worker_lease();
+    draining.status = JobStatus::Cancelled;
+    draining.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+    jobs.insert("draining".to_string(), draining);
+
+    purge_expired_jobs(&mut jobs, JOB_RETENTION_SECS);
+
+    assert!(
+        jobs.contains_key("draining"),
+        "the retention TTL must not collect an entry a worker still owns"
+    );
+
+    // Same job once the worker is gone: now it is past its TTL and collectable.
+    jobs.get_mut("draining")
+        .expect("still present")
+        .worker_lease = None;
+    purge_expired_jobs(&mut jobs, JOB_RETENTION_SECS);
+    assert!(jobs.is_empty(), "an expired settled job is still purged");
+}
+
+#[test]
+fn a_job_with_no_worker_is_evictable_as_soon_as_it_is_terminal() {
+    // Jobs staged by hand (tests, and any future path that records a terminal
+    // job without spawning a worker) carry no lease, so the lease check must
+    // not turn into "never evict anything".
+    let mut job = Job::new_queued("http://a".to_string());
+    job.status = JobStatus::Done;
+    job.finished_at_ms = Some(now_ms());
+    assert!(!job.worker_alive());
+    assert!(job.is_evictable());
+}
+
 #[test]
 fn enforce_retention_cap_zero_disables_the_cap() {
     let mut jobs: HashMap<String, Job> = HashMap::new();

@@ -11,6 +11,13 @@ use crate::job::spec::ScanRequestSpec;
 /// `JoinHandle` and leaves the job pinned in `Queued`/`Running` forever.
 /// `purge_expired_jobs` only collects terminal jobs, so the orphan also
 /// leaks the job slot indefinitely.
+///
+/// `lease` is the job's liveness handle: it is moved into the spawned task and
+/// dropped when the task ends (including on panic), which is what tells job
+/// retention this entry is finally safe to evict. Without it, cancelling a scan
+/// — which stamps the terminal state immediately while the worker drains —
+/// makes the job look collectable, and an eviction in that window drops the
+/// partial results and the terminal webhook on the floor.
 pub(crate) fn spawn_scan_task(
     state: AppState,
     job_id: String,
@@ -18,8 +25,11 @@ pub(crate) fn spawn_scan_task(
     opts: ScanOptions,
     include_request: bool,
     include_response: bool,
+    lease: WorkerLease,
 ) {
     tokio::task::spawn_blocking(move || {
+        // Held for the whole task; dropping it releases the job to retention.
+        let _lease = lease;
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -543,6 +553,14 @@ pub(crate) async fn send_terminal_webhook(
     }
 }
 
+/// Worker count `/preflight` runs discovery/mining at when the request does not
+/// ask for one. Deliberately *not* [`crate::cmd::scan::DEFAULT_WORKERS`] (50):
+/// preflight has always fanned out at ten (`parse_target`'s default, matched by
+/// the hardcoded `workers: 10` in `ScanArgs::for_preflight`), and honoring an
+/// explicit `worker` must not also quintuple the load every existing caller
+/// puts on a target.
+pub(crate) const PREFLIGHT_DEFAULT_WORKERS: usize = 10;
+
 /// Build a hydrated Target from the preflight request options.
 pub(crate) fn hydrate_preflight_target(
     target_url: &str,
@@ -552,6 +570,17 @@ pub(crate) fn hydrate_preflight_target(
     let mut t = parse_target(target_url).map_err(|e| format!("parse_target failed: {}", e))?;
     t.method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
     t.timeout = timeout_secs;
+    // Pacing and concurrency are read off the *target*, not off `ScanArgs`:
+    // `analyze_parameters` sizes its semaphores from `target.workers` and every
+    // discovery/mining probe sleeps `target.delay` afterwards. Leaving both at
+    // `parse_target`'s defaults meant `/preflight` accepted `delay` and
+    // `worker` (they are the same `ScanOptions` `/scan` validates) and then
+    // discarded them — so the one per-request pacing control a caller has was
+    // silently removed on this route, while the CLI's preflight honors `--delay`
+    // because it runs against a target hydrated from the same args
+    // (`cmd::scan::input` sets `target.delay`).
+    t.delay = opts.delay.unwrap_or(crate::cmd::scan::DEFAULT_DELAY_MS);
+    t.workers = opts.worker.unwrap_or(PREFLIGHT_DEFAULT_WORKERS);
     t.user_agent = opts.user_agent.clone();
     t.proxy = opts.proxy.clone();
     t.insecure = opts.insecure.unwrap_or(true);

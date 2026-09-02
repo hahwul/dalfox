@@ -3316,6 +3316,32 @@ fn test_hydrate_preflight_target_insecure_default_and_override() {
     assert!(!t.insecure, "insecure=false must propagate to the target");
 }
 
+/// `/preflight` sends real discovery/mining traffic, and `analyze_parameters`
+/// reads its pacing off the **target** (`target.delay` between probes,
+/// `target.workers` for the semaphore) — not off `ScanArgs`. Both used to be
+/// left at `parse_target`'s defaults, so the very options `/preflight`
+/// validates (`delay`, `worker`) were accepted and then discarded.
+#[test]
+fn test_hydrate_preflight_target_carries_delay_and_workers() {
+    let mut opts = ScanOptions::default();
+    let t = hydrate_preflight_target("https://example.com", &opts, 10).expect("hydrate default");
+    assert_eq!(
+        t.delay,
+        crate::cmd::scan::DEFAULT_DELAY_MS,
+        "no delay requested -> the scanner default"
+    );
+    assert_eq!(
+        t.workers, PREFLIGHT_DEFAULT_WORKERS,
+        "no worker count requested -> preflight's long-standing default"
+    );
+
+    opts.delay = Some(250);
+    opts.worker = Some(3);
+    let t = hydrate_preflight_target("https://example.com", &opts, 10).expect("hydrate paced");
+    assert_eq!(t.delay, 250, "delay must reach the discovery stage");
+    assert_eq!(t.workers, 3, "worker must reach the discovery stage");
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // job_runner.rs — analyze_external_js: Some(true) exercises the new
 // fetch_and_analyze_external_js call added in run_scan_job.
@@ -3951,6 +3977,152 @@ async fn test_preflight_handler_success_reports_params_and_consistent_estimate()
     assert!(summed > 0, "a scannable param must bill a nonzero estimate");
 }
 
+// ---- /preflight pacing: rate_limit, delay and worker are not cosmetic ----
+//
+// Preflight is a *network* operation — discovery and mining probe the target
+// dozens of times — but it used to run flat out: no limiter was bound around
+// `analyze_parameters`, and `hydrate_preflight_target` left `delay`/`workers`
+// at `parse_target`'s defaults. So the operator's `--rate-limit` (documented as
+// applying to every submitted scan) and the caller's own pacing options were
+// both silently void on this route.
+
+/// A reflecting target that counts every request it serves.
+async fn start_counting_reflecting_target_server()
+-> (SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let handler = {
+        let hits = hits.clone();
+        move |Query(q): Query<Map<String, String>>| {
+            let hits = hits.clone();
+            async move {
+                hits.fetch_add(1, AtomicOrdering::SeqCst);
+                let mut body = String::from("<html><body>");
+                for (k, v) in &q {
+                    body.push_str(&format!("<div>{k}={v}</div>"));
+                }
+                body.push_str("</body></html>");
+                (
+                    StatusCode::OK,
+                    [("content-type", "text/html; charset=utf-8")],
+                    body,
+                )
+            }
+        }
+    };
+    let app = Router::new()
+        .route("/", any(handler.clone()))
+        .route("/{*rest}", any(handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind counting target listener");
+    let addr = listener.local_addr().expect("counting target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    // These two tests assert on *timing*, so a target that is not accepting yet
+    // would both zero the request count and shorten the measured window. Wait
+    // for a real connection instead of a fixed sleep. Connecting sends no
+    // request, so `hits` is untouched.
+    for _ in 0..200 {
+        if tokio::net::TcpStream::connect(addr).await.is_ok() {
+            return (addr, hits);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("counting target server never accepted a connection");
+}
+
+/// The server-wide `--rate-limit` must bound `/preflight` traffic the way it
+/// bounds `/scan` traffic. Before the fix this exact call sent ~20 requests in
+/// under 100 ms with `state.rate_limit = Some(20)` set.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_preflight_honors_server_wide_rate_limit() {
+    const RATE: u64 = 20; // requests/second -> 50 ms apart
+    let (addr, hits) = start_counting_reflecting_target_server().await;
+    let mut state = make_state(None, None, false, false, "cb");
+    state.rate_limit = Some(RATE as u32);
+
+    let started = std::time::Instant::now();
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1&z=2"),
+            options: Some(ScanOptions {
+                timeout: Some(5),
+                skip_mining: Some(true),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    let elapsed = started.elapsed();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let sent = hits.load(std::sync::atomic::Ordering::SeqCst) as u64;
+    assert!(
+        sent >= 8,
+        "preflight must actually probe the target for the pacing bound to mean \
+         anything (sent {sent})"
+    );
+    // GCRA with a burst of one admits the first request immediately and spaces
+    // the rest by 1/RATE. Allow generous slack (60% of the theoretical floor)
+    // so this asserts "throttled" rather than an exact schedule.
+    let floor_ms = (sent - 1) * 1000 / RATE * 6 / 10;
+    assert!(
+        elapsed.as_millis() as u64 >= floor_ms,
+        "server-wide rate_limit={RATE} must throttle /preflight: {sent} requests \
+         in {}ms, expected at least {floor_ms}ms",
+        elapsed.as_millis()
+    );
+}
+
+/// `delay` and `worker` reach `analyze_parameters` through the target, so a
+/// single worker with a per-probe delay must serialize preflight's discovery
+/// traffic. Both options were previously dropped on the floor.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_preflight_honors_delay_and_worker_options() {
+    const DELAY_MS: u64 = 60;
+    let (addr, hits) = start_counting_reflecting_target_server().await;
+    let state = make_state(None, None, false, false, "cb");
+
+    let started = std::time::Instant::now();
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1&z=2"),
+            options: Some(ScanOptions {
+                timeout: Some(5),
+                skip_mining: Some(true),
+                delay: Some(DELAY_MS),
+                worker: Some(1),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    let elapsed = started.elapsed();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let sent = hits.load(std::sync::atomic::Ordering::SeqCst) as u64;
+    assert!(sent >= 8, "preflight must probe the target (sent {sent})");
+    // One worker sleeping DELAY_MS after each probe: not every send is inside a
+    // delayed loop, so hold the bound to half the sends.
+    let floor_ms = sent / 2 * DELAY_MS;
+    assert!(
+        elapsed.as_millis() as u64 >= floor_ms,
+        "delay={DELAY_MS}ms with worker=1 must pace /preflight: {sent} requests \
+         in {}ms, expected at least {floor_ms}ms",
+        elapsed.as_millis()
+    );
+}
+
 /// `encoders: ["none"]` collapses the encoder fan-out factor to 1, so the
 /// estimate must come out strictly lower than the multi-encoder default. This
 /// is the one knob in the request that changes the arithmetic rather than the
@@ -4324,6 +4496,129 @@ async fn test_untrusted_host_is_refused_but_ip_literals_and_localhost_pass() {
     }
 }
 
+/// End-to-end: a scan cancelled while it is still draining must survive the
+/// retention cap, and the worker must still find its entry to write results
+/// into.
+///
+/// `cancel_scan_handler` stamps `status = Cancelled` and `finished_at_ms`
+/// immediately, so `is_terminal()` is true while the worker keeps running.
+/// Retention used to evict on that alone: a few new submissions in that window
+/// removed the entry, and the worker's `jobs.get_mut(&id)` then came back
+/// `None` — partial results dropped, terminal webhook never fired, and a GET on
+/// the scan_id the client is holding 404s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_cancelled_but_draining_scan_survives_the_retention_cap() {
+    let addr = start_slow_reflecting_target_server().await;
+    let mut state = make_state(None, None, false, false, "cb");
+    // Aggressive cap: any further admission wants to evict something.
+    state.max_retained_scans = 1;
+
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1"),
+            options: Some(ScanOptions {
+                timeout: Some(5),
+                skip_mining: Some(true),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&response_body_string(resp).await).expect("json");
+    let scan_id = parsed["data"]["scan_id"]
+        .as_str()
+        .expect("scan_id")
+        .to_string();
+
+    // Wait for the worker to claim the job.
+    for _ in 0..200 {
+        {
+            let jobs = state.jobs.lock().await;
+            if jobs.get(&scan_id).map(|j| j.status.clone()) == Some(JobStatus::Running) {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    {
+        let jobs = state.jobs.lock().await;
+        assert_eq!(
+            jobs.get(&scan_id).map(|j| j.status.clone()),
+            Some(JobStatus::Running),
+            "the scan must be running before we cancel it"
+        );
+    }
+
+    let resp = cancel_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Path(scan_id.clone()),
+        Query(Map::new()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The window this test is about: terminal on paper, worker still running.
+    {
+        let jobs = state.jobs.lock().await;
+        let job = jobs.get(&scan_id).expect("job still present after cancel");
+        assert!(
+            job.is_terminal(),
+            "cancel stamps the terminal state at once"
+        );
+        assert!(
+            job.worker_alive(),
+            "the slow target guarantees the worker is still draining here"
+        );
+    }
+
+    // Three more admissions, each of which runs enforce_retention_cap against a
+    // cap of 1. Leases are held so these stay active and are never themselves
+    // candidates — the cancelled job is the only one the old code could take.
+    let mut _leases = Vec::new();
+    for i in 0..3 {
+        let (_id, lease) =
+            try_admit_and_queue(&state, &format!("http://example.com/filler{i}"), None)
+                .await
+                .expect("admission succeeds");
+        _leases.push(lease);
+    }
+
+    {
+        let jobs = state.jobs.lock().await;
+        assert!(
+            jobs.contains_key(&scan_id),
+            "a cancelled scan whose worker is still draining must not be evicted"
+        );
+    }
+
+    // And the worker still has somewhere to put what it collected.
+    for _ in 0..400 {
+        {
+            let jobs = state.jobs.lock().await;
+            let job = jobs
+                .get(&scan_id)
+                .expect("job must remain until it settles");
+            if !job.worker_alive() {
+                assert!(
+                    job.results.is_some(),
+                    "the draining worker must have written its results back"
+                );
+                return;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("cancelled scan never settled");
+}
+
 #[tokio::test]
 async fn test_retention_cap_evicts_oldest_finished_scans_only() {
     let mut state = make_state(None, None, false, false, "callback");
@@ -4342,7 +4637,7 @@ async fn test_retention_cap_evicts_oldest_finished_scans_only() {
         jobs.insert("running".to_string(), running);
     }
 
-    let id = try_admit_and_queue(&state, "http://example.com/new", None)
+    let (id, _lease) = try_admit_and_queue(&state, "http://example.com/new", None)
         .await
         .expect("admission succeeds");
 

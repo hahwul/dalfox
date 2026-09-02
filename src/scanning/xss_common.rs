@@ -514,15 +514,17 @@ pub(crate) fn get_dynamic_payloads(
     }
 
     // Include remote payloads, but only for a scan that actually asked for
-    // them. The cache behind `get_remote_payloads` is a process-global
-    // `OnceLock`, which is fine for the one-scan-per-process CLI and wrong for
-    // the long-lived server/MCP daemon: reading it unconditionally meant a job
-    // that requested **no** remote payloads still got whatever list some
-    // earlier job had fetched appended to every parameter's catalog — thousands
-    // of requests the submitter never asked for, against a target they had
-    // scoped deliberately.
+    // them, and only the list fetched for *this* scan's provider set. The cache
+    // is process-global, which is fine for the one-scan-per-process CLI and
+    // wrong for the long-lived server/MCP daemon: reading it unconditionally
+    // meant a job that requested **no** remote payloads still got whatever list
+    // some earlier job had fetched appended to every parameter's catalog —
+    // thousands of requests the submitter never asked for, against a target
+    // they had scoped deliberately. Keying the lookup by provider set closes
+    // the other half: a job asking for provider B no longer gets provider A's
+    // payloads just because A's job ran first.
     if !args.remote_payloads.is_empty()
-        && let Some(remotes) = crate::payload::get_remote_payloads()
+        && let Some(remotes) = crate::payload::get_remote_payloads_for(&args.remote_payloads)
         && !remotes.is_empty()
     {
         base_payloads.extend(remotes.iter().cloned());

@@ -83,8 +83,8 @@ pub(crate) async fn start_scan_handler(
     // same-target resubmission in the same nanosecond can't clobber an
     // in-flight job (see make_scan_id's nonce), and so the concurrency cap is
     // checked race-free against the live job count. 503 when at capacity.
-    let id = match try_admit_and_queue(&state, &url, callback_url).await {
-        Some(id) => id,
+    let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
+        Some(admitted) => admitted,
         None => {
             let resp = at_capacity_response(&state);
             return make_api_response(
@@ -105,6 +105,7 @@ pub(crate) async fn start_scan_handler(
         opts,
         include_request,
         include_response,
+        lease,
     );
 
     let resp = ApiResponse::<serde_json::Value> {
@@ -493,8 +494,8 @@ pub(crate) async fn get_scan_handler(
     let callback_url = opts.callback_url.clone();
     // Reserve a unique scan_id and enforce the concurrency cap under one lock
     // (see POST /scan). 503 when at capacity.
-    let id = match try_admit_and_queue(&state, &url, callback_url).await {
-        Some(id) => id,
+    let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
+        Some(admitted) => admitted,
         None => {
             let resp = at_capacity_response(&state);
             return make_api_response(
@@ -516,6 +517,7 @@ pub(crate) async fn get_scan_handler(
         opts,
         include_request,
         include_response,
+        lease,
     );
 
     let resp = ApiResponse::<serde_json::Value> {
@@ -901,6 +903,18 @@ pub(crate) async fn preflight_handler(
         .timeout
         .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS);
 
+    // Preflight is not a dry run in network terms: discovery and mining send
+    // real requests to the target (20+ against a two-parameter URL). Those
+    // sends go through `crate::record_outbound_request`, which acquires from
+    // whichever rate limiter is in scope — and nothing bound one here, so this
+    // route ran flat out. That silently voided both the caller's `rate_limit`
+    // *and* the operator's server-wide `--rate-limit`, which is documented as
+    // applying to "every submitted scan": a client refused a fast scan could
+    // simply hammer the same target through `/preflight`. Resolve it through
+    // the same `effective_rate_limit` ceiling the scan path uses so the
+    // operator's cap wins over the request's value.
+    let preflight_rate = effective_rate_limit(opts.rate_limit, state.rate_limit);
+
     // Bound concurrent preflights: each one pins a blocking-pool thread for the
     // full request timeout against an attacker-controlled target, so an
     // unthrottled burst could exhaust the blocking pool and stall every scan.
@@ -935,7 +949,12 @@ pub(crate) async fn preflight_handler(
                 .enable_all()
                 .build()
                 .map_err(|e| PreflightError::RuntimeUnavailable(e.to_string()))?;
-            rt.block_on(async {
+            // Everything that touches the network runs inside the per-job
+            // limiter scope (`RATE_LIMITER_JOB`), which is what
+            // `record_outbound_request` looks for. `with_job_rate_limiter` is a
+            // plain await when the effective rate is 0 (unlimited), so the
+            // default path pays nothing.
+            rt.block_on(crate::with_job_rate_limiter(preflight_rate, async {
                 let mut target = hydrate_preflight_target(&target_url, &opts, timeout_secs)
                     .map_err(PreflightError::BadUrl)?;
 
@@ -1026,7 +1045,7 @@ pub(crate) async fn preflight_handler(
                     "estimated_total_requests": estimated_requests,
                     "params": discovered_params,
                 }))
-            })
+            }))
         })
         .await
         .unwrap_or(Err(PreflightError::TaskPanicked));
