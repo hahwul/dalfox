@@ -284,20 +284,23 @@ async fn main() {
         &cli.command,
         Some(Commands::Payload(args)) if args.selector.is_some()
     );
-    let is_machine_format = {
-        let scan_format = match &cli.command {
-            Some(Commands::Scan(args)) => Some(args.format.as_str()),
-            _ => None,
-        };
-        // Also check raw args for the default-scan path (no subcommand)
-        let raw_format = __args
-            .windows(2)
-            .find(|w| w[0] == "--format" || w[0] == "-f")
-            .map(|w| w[1].as_str());
-        scan_format
-            .or(raw_format)
-            .is_some_and(dalfox::cmd::scan::format_is_machine)
+    // Read `--format` from the parsed args of *every* scan-bearing subcommand.
+    // All four flatten a `ScanArgs`, so the value is already there; only `scan`
+    // used to be consulted, and the compat subcommands fell back to a raw-argv
+    // `["--format", "json"]` window scan. That window only ever matched the
+    // space-separated spelling, so `dalfox url -u URL --format=json` (and
+    // `-f=json`, and `-fjson`) prepended the ASCII banner to the JSON document
+    // on stdout while `-f json` came out clean. The no-subcommand path needs no
+    // fallback: the root `Cli` declares no `--format`/`-f` at all, so
+    // `dalfox URL -f json` is a clap parse error, not a scan.
+    let cli_scan_format = match &cli.command {
+        Some(Commands::Scan(args)) => Some(args.format.as_str()),
+        Some(Commands::Url(args)) => Some(args.scan_args.format.as_str()),
+        Some(Commands::File(args)) => Some(args.scan_args.format.as_str()),
+        Some(Commands::Pipe(args)) => Some(args.scan_args.format.as_str()),
+        _ => None,
     };
+    let is_machine_format = cli_scan_format.is_some_and(dalfox::cmd::scan::format_is_machine);
     // Banner emission is deferred until after the config file has been
     // loaded (further down) so a `silence = true` in the config file
     // suppresses it the same way the `--silence` CLI flag does.
@@ -418,13 +421,27 @@ async fn main() {
     // explicit-`--config` path only — the implicit default-path init
     // (`load_or_init`, `cli.config == None`) stays quiet on purpose so a
     // first-time user isn't nagged about their bootstrapped config.
+    //
+    // The write itself is best-effort (`let _ = std::fs::write(..)`), so the
+    // notice checks the path instead of assuming success: `--config` pointing
+    // into a directory that does not exist, or one the process cannot write,
+    // used to report "created it with a default template" for a file that was
+    // never written — sending the operator to look at a path with nothing in
+    // it. Report what actually happened on disk.
     if let (Some(cfg_path), Ok(lr)) = (&cli.config, &config_load)
         && lr.created
     {
-        eprintln!(
-            "Notice: --config {} did not exist — created it with a default template and ran with built-in defaults (check the path if you meant to load an existing config)",
-            cfg_path
-        );
+        if lr.path.exists() {
+            eprintln!(
+                "Notice: --config {} did not exist — created it with a default template and ran with built-in defaults (check the path if you meant to load an existing config)",
+                cfg_path
+            );
+        } else {
+            eprintln!(
+                "Warning: --config {} did not exist and could not be created — ran with built-in defaults (check the path if you meant to load an existing config)",
+                cfg_path
+            );
+        }
     }
 
     // Config values are deserialized straight into `Config` and never pass
@@ -515,11 +532,19 @@ async fn main() {
                 outcome = cmd::payload::run_payload(args);
             }
             Commands::Mcp => {
-                // Run MCP stdio server (no banner already)
-                if let Err(e) = mcp::run_mcp_server().await {
-                    eprintln!("MCP server error: {e}");
-                }
-                outcome = ScanOutcome::Clean;
+                // Run MCP stdio server (no banner already). A failed handshake
+                // or transport error has to reach the exit code: an MCP host or
+                // a supervisor (systemd, a process manager, `dalfox mcp || …`)
+                // reads status, not stderr, and a hard-coded `Clean` made "the
+                // server never came up" indistinguishable from a clean
+                // shutdown.
+                outcome = match mcp::run_mcp_server().await {
+                    Ok(()) => ScanOutcome::Clean,
+                    Err(e) => {
+                        eprintln!("MCP server error: {e}");
+                        ScanOutcome::Error
+                    }
+                };
             }
 
             Commands::Completion { .. } => unreachable!(),

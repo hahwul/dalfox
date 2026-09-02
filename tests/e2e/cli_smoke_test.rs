@@ -683,3 +683,207 @@ fn test_man_writes_only_roff_to_stdout() {
         );
     }
 }
+
+/// `█` is unique to the ASCII-art banner; its absence is how these tests assert
+/// stdout stayed a clean machine-readable document.
+const BANNER_GLYPH: char = '█';
+
+/// A target that is rejected without any network round trip, so the machine
+/// document is produced instantly and deterministically.
+const UNREACHABLE_TARGET: &str = "http://127.0.0.1:1/?q=1";
+
+/// Flags that keep a run to target resolution + one reachability probe.
+const NO_SCAN_FLAGS: [&str; 3] = ["--skip-xss-scanning", "--skip-discovery", "--skip-mining"];
+
+/// Every scan-bearing subcommand flattens a `ScanArgs`, so `--format` has to be
+/// read from *its* parsed args. Only `scan` was consulted; `url` / `file` /
+/// `pipe` fell back to a raw-argv scan for the literal two-token
+/// `["--format", "json"]` window, which no `--format=json` / `-f=json` /
+/// `-fjson` spelling ever matches. The banner was then prepended to the JSON /
+/// SARIF / TOML document on stdout — the exact breakage
+/// `test_config_set_machine_format_suppresses_banner_on_stdout` guards for the
+/// config path.
+#[test]
+fn test_machine_format_suppresses_banner_for_every_subcommand_and_spelling() {
+    let list = std::env::temp_dir().join(format!("dalfox-fmt-list-{}.txt", std::process::id()));
+    std::fs::write(&list, format!("{UNREACHABLE_TARGET}\n")).expect("write target list");
+    let list_path = list.to_str().expect("utf8 path").to_string();
+
+    // (subcommand args, format flag spelling) — the space-separated form is the
+    // control that always worked.
+    let subcommands: [Vec<String>; 4] = [
+        vec!["scan".into(), UNREACHABLE_TARGET.into()],
+        vec!["url".into(), "-u".into(), UNREACHABLE_TARGET.into()],
+        vec!["file".into(), list_path.clone()],
+        vec!["pipe".into()],
+    ];
+    let spellings: [Vec<&str>; 4] = [
+        vec!["--format", "json"],
+        vec!["--format=json"],
+        vec!["-f", "json"],
+        vec!["-fjson"],
+    ];
+
+    for sub in &subcommands {
+        for spelling in &spellings {
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_dalfox"));
+            cmd.args(sub)
+                .args(spelling)
+                .args(NO_SCAN_FLAGS)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = cmd.spawn().expect("failed to execute dalfox");
+            {
+                let stdin = child.stdin.as_mut().expect("child stdin should be piped");
+                let _ = stdin.write_all(format!("{UNREACHABLE_TARGET}\n").as_bytes());
+            }
+            let output = child.wait_with_output().expect("failed waiting for dalfox");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let label = format!("{} {}", sub.join(" "), spelling.join(" "));
+
+            assert!(
+                !stdout.contains(BANNER_GLYPH),
+                "`dalfox {label}` leaked the banner into the JSON document; stdout was:\n{stdout}"
+            );
+            serde_json::from_str::<serde_json::Value>(stdout.trim())
+                .unwrap_or_else(|e| panic!("`dalfox {label}` stdout is not JSON ({e}):\n{stdout}"));
+        }
+    }
+
+    let _ = std::fs::remove_file(&list);
+}
+
+/// `-H`, `--user-agent` and `--cookies` all end up as HTTP header values, and
+/// both ways they can be wrong used to be silent on the CLI:
+///
+///  * a spec with no `:` (`-H 'Authorization Bearer …'`) was dropped by a
+///    `filter_map`, so the scan ran unauthenticated and reported clean;
+///  * a byte reqwest cannot put in a header failed the request *builder*, so a
+///    live target came back `CONNECTION_FAILED` — the scanner blaming the target
+///    for the operator's input.
+///
+/// REST and MCP have refused both at submission since #1404 through the shared
+/// `job::validate_header_list` / `validate_header_value`; this pins the CLI to
+/// the same answer.
+#[test]
+fn test_malformed_header_inputs_are_refused_before_the_scan() {
+    for (flag, value, needle) in [
+        ("-H", "Authorization Bearer TOKEN", "--headers"),
+        ("-H", ": novalue", "--headers"),
+        ("-H", "X-Bad: va\nlue", "--headers"),
+        ("--user-agent", "Bad\nUA", "--user-agent"),
+        ("--cookies", "a=b\nc", "--cookies"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .args(["scan", UNREACHABLE_TARGET])
+            .args(NO_SCAN_FLAGS)
+            .args([flag, value])
+            .stdin(Stdio::null())
+            .output()
+            .expect("failed to execute dalfox");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "`{flag} {value:?}` should be rejected as a configuration error; stderr:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(needle),
+            "the error should name `{needle}`; stderr was:\n{stderr}"
+        );
+    }
+}
+
+/// Control for the check above: a well-formed header set still runs.
+#[test]
+fn test_wellformed_header_inputs_are_accepted() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["scan", UNREACHABLE_TARGET])
+        .args(NO_SCAN_FLAGS)
+        .args([
+            "-H",
+            "Authorization: Bearer TOKEN",
+            "-H",
+            "X-Empty:",
+            "--user-agent",
+            "Dalfox/3 (테스트)",
+            "--cookies",
+            "a=1; b=2",
+            "--format",
+            "json",
+            "-S",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to execute dalfox");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("--headers") && !stderr.contains("--user-agent"),
+        "valid header inputs must not be rejected; stderr:\n{stderr}"
+    );
+    serde_json::from_str::<serde_json::Value>(stdout.trim())
+        .unwrap_or_else(|e| panic!("expected a JSON document ({e}):\n{stdout}"));
+}
+
+/// A URL list written on Windows starts with a UTF-8 BOM. `str::trim` leaves
+/// U+FEFF alone, so the *first* target used to reach the parser as
+/// `\u{feff}http://host/…`, get re-prefixed to `http://http//host/…`, and fail
+/// DNS — while every later line scanned fine and the run still exited 0.
+#[test]
+fn test_bom_prefixed_target_list_scans_the_first_target() {
+    let list = std::env::temp_dir().join(format!("dalfox-bom-list-{}.txt", std::process::id()));
+    std::fs::write(&list, "\u{feff}http://127.0.0.1:1/?q=1\r\n").expect("write BOM target list");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["scan", "-i", "file", list.to_str().expect("utf8 path")])
+        .args(NO_SCAN_FLAGS)
+        .args(["--format", "json", "-S"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to execute dalfox");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let _ = std::fs::remove_file(&list);
+
+    let doc: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("expected JSON ({e}):\n{stdout}"));
+    let targets: Vec<&str> = doc["meta"]["target_summary"]
+        .as_array()
+        .expect("target_summary array")
+        .iter()
+        .map(|t| t["target"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        targets,
+        vec!["http://127.0.0.1:1/?q=1"],
+        "a leading BOM must not mangle the first target; stdout was:\n{stdout}"
+    );
+}
+
+/// `dalfox mcp` used to hard-code a clean exit, so a supervisor or MCP host
+/// could not tell "the stdio server never came up" from "it shut down cleanly".
+/// With stdin closed the handshake cannot complete, which is the cheapest
+/// deterministic form of that failure.
+#[test]
+fn test_mcp_startup_failure_exits_nonzero() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .arg("mcp")
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to execute dalfox mcp");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("MCP server error"),
+        "a failed MCP start should say so on stderr, got:\n{stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a failed MCP start must not exit 0; stderr:\n{stderr}"
+    );
+}

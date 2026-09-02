@@ -754,3 +754,125 @@ async fn explicit_dedup_urls_flag_beats_an_unset_default() {
     ]);
     assert_eq!(args.dedup_urls.as_deref(), Some("exact"));
 }
+
+// ── target-list line shape (`target_list_lines`) ────────────────────
+
+#[test]
+fn target_list_lines_skips_blanks_and_comments() {
+    let content = "https://a.example/\n\n   \n# a comment\n  https://b.example/  \n";
+    assert_eq!(
+        target_list_lines(content).collect::<Vec<_>>(),
+        vec!["https://a.example/", "https://b.example/"]
+    );
+}
+
+#[test]
+fn target_list_lines_strips_a_leading_utf8_bom() {
+    // `str::trim` leaves U+FEFF alone (it is not `White_Space`), so without an
+    // explicit strip the first entry reaches the target parser as
+    // `\u{feff}https://…` — a string with no parseable scheme.
+    let content = "\u{feff}https://a.example/\nhttps://b.example/\n";
+    assert_eq!(
+        target_list_lines(content).collect::<Vec<_>>(),
+        vec!["https://a.example/", "https://b.example/"]
+    );
+}
+
+#[tokio::test]
+async fn file_mode_ignores_a_leading_utf8_bom_in_the_list() {
+    // A URL list saved by Notepad / Excel / PowerShell `Out-File` starts with a
+    // BOM. It used to corrupt the *first* target only: the byte defeated the
+    // scheme check, the fallback re-prefixed the whole string, and dalfox
+    // scanned `http://http//a.example/…`. Every later line was fine, so the run
+    // still exited 0 and the operator never heard that the first target was
+    // never reached.
+    let p = tmp_file(
+        "bom-list",
+        "\u{feff}https://a.example/?q=1\r\nhttps://b.example/?q=2\r\n",
+    );
+    let args = args_from(&["-i", "file", "-S", p.to_str().unwrap()]);
+    let targets = resolve(&args).await.expect("resolves");
+    let _ = std::fs::remove_file(&p);
+
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].url.as_str(), "https://a.example/?q=1");
+    assert_eq!(targets[1].url.as_str(), "https://b.example/?q=2");
+}
+
+// ── `-X/--method` against a target that carries its own method ──────
+
+/// Like [`args_from`], but also records which flags the operator actually
+/// typed, the way `main.rs` does from clap's `ArgMatches`. Needed by anything
+/// that reads [`ScanArgs::was_explicit`]: the plain derive parse leaves
+/// `explicit` empty (it is an `#[arg(skip)]` field), so a test built with
+/// `args_from` can never tell an explicit flag from its default.
+fn args_from_explicit(argv: &[&str]) -> ScanArgs {
+    use clap::{CommandFactory, FromArgMatches};
+    let mut full = Vec::with_capacity(argv.len() + 1);
+    full.push("dalfox");
+    full.extend_from_slice(argv);
+    let matches = TestCli::command()
+        .try_get_matches_from(full)
+        .expect("test args should parse");
+    let mut args = TestCli::from_arg_matches(&matches)
+        .expect("test args should map")
+        .scan;
+    args.explicit = crate::cmd::scan::ExplicitArgs::from_matches(&matches);
+    args
+}
+
+#[tokio::test]
+async fn explicit_get_overrides_a_captured_raw_http_method() {
+    // `-X GET` is the one method a `ScanArgs` also holds by default, so the old
+    // `args.method != DEFAULT_METHOD` guard read it as "the operator said
+    // nothing" and kept replaying the captured POST — writing to an endpoint the
+    // operator explicitly asked to only read.
+    let raw = "POST /login HTTP/1.1\r\nHost: raw.example\r\n\r\nu=a";
+    let args = args_from_explicit(&["-i", "raw-http", "-S", "-X", "GET", raw]);
+    let targets = resolve(&args).await.expect("raw http resolves");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].method, "GET");
+}
+
+#[tokio::test]
+async fn explicit_get_overrides_a_method_embedded_in_the_target_line() {
+    let args = args_from_explicit(&[
+        "-i",
+        "url",
+        "-S",
+        "-X",
+        "GET",
+        "POST https://example.com/?q=1",
+    ]);
+    let targets = resolve(&args).await.expect("resolves");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].method, "GET");
+}
+
+#[tokio::test]
+async fn absent_method_flag_keeps_a_captured_raw_http_method() {
+    // The other half of the contract: without `-X`, an imported request keeps
+    // the method it was captured with.
+    let raw = "POST /login HTTP/1.1\r\nHost: raw.example\r\n\r\nu=a";
+    let args = args_from_explicit(&["-i", "raw-http", "-S", raw]);
+    let targets = resolve(&args).await.expect("raw http resolves");
+    assert_eq!(targets[0].method, "POST");
+}
+
+#[tokio::test]
+async fn non_cli_scan_args_still_override_with_a_non_default_method() {
+    // Server / MCP build `ScanArgs` directly, so `explicit` is empty there. The
+    // `!= DEFAULT_METHOD` half of the guard is what keeps their `method: "PUT"`
+    // applying, and must not regress.
+    let raw = "POST /login HTTP/1.1\r\nHost: raw.example\r\n\r\nu=a";
+    let args = ScanArgs {
+        input_type: "raw-http".to_string(),
+        method: "PUT".to_string(),
+        silence: true,
+        targets: vec![raw.to_string()],
+        ..Default::default()
+    };
+    assert!(args.explicit.is_empty());
+    let targets = resolve(&args).await.expect("raw http resolves");
+    assert_eq!(targets[0].method, "PUT");
+}

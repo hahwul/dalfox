@@ -66,6 +66,27 @@ const MAX_TARGET_LIST_BYTES: u64 = crate::utils::fs::MAX_FILE_READ_BYTES;
 // the budget can still be forced with `--input-type har`.
 const SNIFF_PREFIX_BYTES: u64 = 8 * 1024;
 
+/// The target lines of a URL list, in the shape every input path shares: a
+/// leading UTF-8 BOM is dropped, each line is trimmed, and blank lines and `#`
+/// comments are skipped (the nuclei / ffuf / httpx convention).
+///
+/// The BOM is why this is one helper rather than the four near-identical loops
+/// it replaces. `str::trim` does not remove U+FEFF — it is not `White_Space` —
+/// so a list written by Notepad, Excel, or PowerShell's `Out-File` (all of which
+/// emit a BOM by default) handed its **first** line to the target parser as
+/// `\u{feff}http://host/…`. That has no parseable scheme, the fallback
+/// re-prefixed the whole string, and dalfox scanned `http://http//host/…`: a
+/// bogus host, a DNS failure recorded as `skipped`, and — as long as any later
+/// line resolved — exit code 0. The one target the operator put first was
+/// silently never scanned.
+pub(crate) fn target_list_lines(content: &str) -> impl Iterator<Item = &str> {
+    content
+        .trim_start_matches('\u{feff}')
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
 pub(crate) async fn resolve_targets(
     args: &ScanArgs,
 ) -> std::result::Result<ResolvedTargets, ScanOutcome> {
@@ -117,12 +138,9 @@ pub(crate) async fn resolve_targets(
             ) {
                 Ok(crate::utils::fs::StdinRead::Data(buffer)) => {
                     let mut stdin_count = 0;
-                    for line in buffer.lines() {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                            target_strings.push(trimmed.to_string());
-                            stdin_count += 1;
-                        }
+                    for line in target_list_lines(&buffer) {
+                        target_strings.push(line.to_string());
+                        stdin_count += 1;
                     }
                     if stdin_count > 0 && !args.targets.is_empty() && !args.silence {
                         eprintln!(
@@ -200,18 +218,10 @@ pub(crate) async fn resolve_targets(
                         target_strings.push(target.clone());
                         continue;
                     }
-                    for line in content.lines() {
-                        let line = line.trim();
-                        // Industry-standard target-list shape: skip
-                        // blank lines *and* `#` comments (nuclei, ffuf,
-                        // httpx all behave this way). Previously a
-                        // commented line would be sent to parse_target
-                        // and surface as a confusing "empty host"
-                        // error.
-                        if !line.is_empty() && !line.starts_with('#') {
-                            target_strings.push(line.to_string());
-                        }
-                    }
+                    // Industry-standard target-list shape (blank lines and
+                    // `#` comments skipped, leading BOM dropped) — see
+                    // `target_list_lines`.
+                    target_strings.extend(target_list_lines(&content).map(ToString::to_string));
                 }
                 Some(Err(e)) => {
                     // The file exists but `read_bounded` refused it
@@ -259,13 +269,9 @@ pub(crate) async fn resolve_targets(
                         MAX_TARGET_LIST_BYTES,
                         "target list",
                     ) {
-                        Ok(content) => collected.extend(
-                            content
-                                .lines()
-                                .map(str::trim)
-                                .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                                .map(ToString::to_string),
-                        ),
+                        Ok(content) => {
+                            collected.extend(target_list_lines(&content).map(ToString::to_string))
+                        }
                         Err(e) => {
                             if !args.silence {
                                 emit_error(
@@ -319,15 +325,10 @@ pub(crate) async fn resolve_targets(
                         }
                     }
                 };
-                for line in buffer.lines() {
-                    let trimmed = line.trim();
-                    // Same comment-skipping convention as the auto/file paths
-                    // above so `cat targets.txt | dalfox` and `dalfox scan
-                    // targets.txt` behave identically.
-                    if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                        piped_targets.push(trimmed.to_string());
-                    }
-                }
+                // Same line shape as the auto/file paths above (shared helper)
+                // so `cat targets.txt | dalfox` and `dalfox scan targets.txt`
+                // behave identically.
+                piped_targets.extend(target_list_lines(&buffer).map(ToString::to_string));
                 if !args.targets.is_empty() {
                     let before_merge = piped_targets.len();
                     for target in &args.targets {
@@ -481,9 +482,10 @@ pub(crate) async fn resolve_targets(
                             Some((name.to_string(), value.to_string()))
                         })
                         .collect();
-                    // Only override method if explicitly provided via CLI (not the default)
-                    if args.method != DEFAULT_METHOD {
-                        target.method = args.method.clone();
+                    // Only override the method the target carries when the
+                    // operator actually asked for one. See `method_override`.
+                    if let Some(m) = method_override(args) {
+                        target.method = m.to_string();
                     }
                     // An empty `--user-agent ""` must not become a literal
                     // `User-Agent:` header on every request (the server/MCP path
@@ -870,6 +872,27 @@ fn load_request_source(
     }
 }
 
+/// The HTTP method to force onto a target that already carries one of its own —
+/// a `POST https://host/` target line, a raw-HTTP request file, a HAR entry —
+/// or `None` to leave the imported method alone.
+///
+/// The guard used to be `args.method != DEFAULT_METHOD`, which is the
+/// value-comparison anti-pattern `Config::apply_to_scan_args_if_default`
+/// documents: it cannot tell "the operator said nothing" from "the operator
+/// typed the value that happens to be the default". So `-X GET` — the one
+/// method a `ScanArgs` also holds by default — was silently discarded, and
+/// `dalfox scan -i raw-http captured.req -X GET` kept replaying the captured
+/// `POST`. For a scanner that means writing to an endpoint the operator
+/// explicitly asked to only read.
+///
+/// `was_explicit` answers it for the command line; the `!= DEFAULT_METHOD` half
+/// is kept so a config-file `method` (which never passes through clap, so it is
+/// never "explicit") and the server / MCP runners — which build `ScanArgs`
+/// directly with an empty `ExplicitArgs` — behave exactly as before.
+fn method_override(args: &ScanArgs) -> Option<&str> {
+    (args.was_explicit("method") || args.method != DEFAULT_METHOD).then_some(args.method.as_str())
+}
+
 /// Apply CLI overrides to a Target parsed from a request-bearing source
 /// (`raw-http` or `har`). Request-content fields (method, body, headers,
 /// cookies, User-Agent) are only touched when the user explicitly set the
@@ -878,8 +901,8 @@ fn load_request_source(
 /// already carries its own. Network/runtime fields are always taken from the
 /// args. This is the shared override path for both raw-HTTP and HAR inputs.
 fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
-    if args.method != DEFAULT_METHOD {
-        target.method = args.method.clone();
+    if let Some(m) = method_override(args) {
+        target.method = m.to_string();
     }
     if let Some(d) = &args.data {
         target.data = Some(d.clone());
