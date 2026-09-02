@@ -243,7 +243,7 @@ pub(crate) async fn try_admit_and_queue(
 ) -> Option<(String, WorkerLease)> {
     let mut jobs = state.jobs.lock().await;
     if state.max_concurrent_scans > 0
-        && jobs.values().filter(|j| !j.is_terminal()).count() >= state.max_concurrent_scans
+        && jobs.values().filter(|j| j.occupies_capacity()).count() >= state.max_concurrent_scans
     {
         return None;
     }
