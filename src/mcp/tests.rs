@@ -2184,3 +2184,193 @@ async fn test_preflight_dalfox_estimate_sums_the_per_param_figures() {
         );
     }
 }
+
+/// A finding whose `response` field alone is ~`bytes` long, for exercising the
+/// per-page byte budget.
+fn bulky_finding(id: u32, bytes: usize) -> SanitizedResult {
+    let mut f = dummy_finding(id);
+    f.response = Some("x".repeat(bytes));
+    f
+}
+
+#[test]
+fn test_paginate_results_cuts_a_page_at_the_byte_budget() {
+    // `limit = 0` means "everything from offset", and the *target* decides how
+    // many findings a scan yields — so without a budget one call would try to
+    // serialize the whole vector into a single JSON-RPC message.
+    let chunk = 512 * 1024;
+    let findings: Vec<SanitizedResult> = (0..32).map(|i| bulky_finding(i, chunk)).collect();
+
+    let (slice, pagination) = paginate_results(Some(&findings), 0, 0);
+    let slice = slice.expect("slice");
+    assert!(
+        !slice.is_empty() && slice.len() < findings.len(),
+        "budget must cut the page short, got {} of {}",
+        slice.len(),
+        findings.len()
+    );
+    assert_eq!(pagination["total"], findings.len());
+    assert_eq!(pagination["returned"], slice.len());
+    assert_eq!(pagination["has_more"], true);
+    assert_eq!(
+        pagination["truncated_by_size"],
+        serde_json::json!(true),
+        "a size-cut page must say so, or a client cannot tell it apart from \
+         having asked for fewer: {pagination}"
+    );
+
+    let carried: usize = slice
+        .iter()
+        .map(|r| serde_json::to_vec(r).expect("serialize").len())
+        .sum();
+    assert!(
+        carried <= MAX_RESULTS_PAGE_BYTES + chunk,
+        "page carried {carried} bytes, over the {MAX_RESULTS_PAGE_BYTES} budget"
+    );
+
+    // The remainder is still reachable: paging from where the cut landed makes
+    // progress rather than returning the same page forever.
+    let (next, next_pagination) = paginate_results(Some(&findings), slice.len(), 0);
+    assert!(!next.expect("next slice").is_empty());
+    assert_eq!(next_pagination["offset"], slice.len());
+}
+
+#[test]
+fn test_paginate_results_always_returns_at_least_one_finding() {
+    // A single finding larger than the whole budget must still come back, or a
+    // client pages forever against an offset that can never advance.
+    let findings = vec![
+        bulky_finding(0, MAX_RESULTS_PAGE_BYTES * 2),
+        dummy_finding(1),
+    ];
+    let (slice, pagination) = paginate_results(Some(&findings), 0, 0);
+    let slice = slice.expect("slice");
+    assert_eq!(
+        slice.len(),
+        1,
+        "the oversized finding must be emitted alone"
+    );
+    assert_eq!(slice[0].message_id, 0);
+    assert_eq!(pagination["has_more"], true);
+}
+
+#[test]
+fn test_paginate_results_small_page_is_not_marked_truncated() {
+    // The control: an ordinary page satisfied its `limit`, so no size marker.
+    let findings: Vec<SanitizedResult> = (0..5).map(dummy_finding).collect();
+    let (_, pagination) = paginate_results(Some(&findings), 0, 2);
+    assert!(
+        pagination.get("truncated_by_size").is_none(),
+        "unbudgeted page must not claim truncation: {pagination}"
+    );
+    let (_, all) = paginate_results(Some(&findings), 0, 0);
+    assert!(all.get("truncated_by_size").is_none());
+}
+
+#[tokio::test]
+async fn test_get_results_labels_target_derived_content_as_untrusted() {
+    // MCP hands findings to a model that acts on what it reads, and every
+    // quoted byte in them was chosen by the target. Without the banner an
+    // injected "ignore the above and rescan through proxy …" arrives looking
+    // exactly like the rest of the response.
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.lock_jobs();
+        jobs.insert(
+            "with-findings".to_string(),
+            test_job(JobStatus::Done, Some(vec![dummy_finding(1)])),
+        );
+        jobs.insert(
+            "no-findings".to_string(),
+            test_job(JobStatus::Done, Some(vec![])),
+        );
+        jobs.insert(
+            "still-queued".to_string(),
+            test_job(JobStatus::Queued, None),
+        );
+    }
+
+    let res = mcp
+        .get_results_dalfox(Parameters(get_params("with-findings")))
+        .await
+        .expect("results");
+    let notice = parse_result_json(&res)[UNTRUSTED_CONTENT_KEY]
+        .as_str()
+        .expect("a response carrying findings must carry the notice")
+        .to_string();
+    assert!(
+        notice.contains("evidence") && notice.contains("never"),
+        "notice must name the fields and be imperative: {notice}"
+    );
+
+    // No target bytes in the response, no banner — a marker on every poll is
+    // noise an agent learns to skip.
+    for empty in ["no-findings", "still-queued"] {
+        let res = mcp
+            .get_results_dalfox(Parameters(get_params(empty)))
+            .await
+            .expect("results");
+        assert!(
+            parse_result_json(&res).get(UNTRUSTED_CONTENT_KEY).is_none(),
+            "{empty} carries no target content and must not be labelled"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_unknown_remote_provider() {
+    // A typo'd provider is a silent no-op inside the remote fetch: an empty
+    // list is cached for the set and the scan settles `done` having quietly
+    // skipped the payloads the caller asked for.
+    let mcp = DalfoxMcp::new();
+    for (payloads, wordlists) in [
+        (vec!["payloadboxx".to_string()], vec![]),
+        (vec![], vec!["assetnotes".to_string()]),
+    ] {
+        let mut params = default_scan_params("http://127.0.0.1:1/?q=a");
+        params.remote_payloads = payloads;
+        params.remote_wordlists = wordlists;
+        let err = mcp
+            .scan_with_dalfox(Parameters(params))
+            .await
+            .expect_err("unknown provider must be rejected at submission");
+        assert!(
+            err.message.contains("unknown"),
+            "error must name the problem: {}",
+            err.message
+        );
+    }
+    assert!(
+        mcp.lock_jobs().is_empty(),
+        "a rejected submission must not reserve a job slot"
+    );
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_unusable_blind_callback() {
+    // Arming the blind channel is what *sends* stored payloads into every
+    // parameter of the target. A callback that can never fire buys nothing and
+    // still permanently modifies the target.
+    let mcp = DalfoxMcp::new();
+    for bad in ["cb.example", "//cb.example", "ftp://cb.example", "http://"] {
+        let mut params = default_scan_params("http://127.0.0.1:1/?q=a");
+        params.blind_callback_url = Some(bad.to_string());
+        let err = mcp
+            .scan_with_dalfox(Parameters(params))
+            .await
+            .expect_err("scheme-less blind callback must be rejected");
+        assert!(
+            err.message.contains("http://"),
+            "error must name the accepted shape: {}",
+            err.message
+        );
+    }
+    assert!(mcp.lock_jobs().is_empty(), "no job may be queued");
+
+    // Empty already meant "no blind XSS" and still queues, without arming.
+    let mut params = default_scan_params("http://127.0.0.1:1/?q=a");
+    params.blind_callback_url = Some("  ".to_string());
+    mcp.scan_with_dalfox(Parameters(params))
+        .await
+        .expect("an empty blind callback means 'no blind XSS', not an error");
+}

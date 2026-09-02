@@ -22,6 +22,13 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     if let Some(encs) = &opts.encoders {
         crate::job::validate_encoders(encs)?;
     }
+    // Same silent-coverage-loss hazard as an unknown encoder: an unrecognized
+    // provider name caches an empty list and the scan runs on the built-in
+    // catalog alone, then settles `done`. Shared with MCP.
+    crate::job::validate_remote_providers(
+        opts.remote_payloads.as_deref().unwrap_or(&[]),
+        opts.remote_wordlists.as_deref().unwrap_or(&[]),
+    )?;
     if let Some(t) = opts.timeout
         && (t == 0 || t > MAX_TIMEOUT_SECS)
     {
@@ -108,6 +115,17 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     // later resolves; see `crate::job::normalize_proxy`. Shared with MCP.
     if let Some(proxy) = &opts.proxy {
         opts.proxy = crate::job::normalize_proxy(proxy)?;
+    }
+    // `blind` arms stored blind-XSS injection, which writes `<script src=…>`
+    // payloads into every parameter of the target and leaves them there. A
+    // value that can never receive a callback (empty, or not an absolute
+    // http(s) URL with a host) still armed it, so the job modified the target
+    // permanently for nothing
+    // and reported `done`. Empty normalizes to "no blind XSS" — which is what
+    // it already meant — and the trimmed value is written back because that is
+    // the string interpolated into the payload. Shared with MCP.
+    if let Some(blind) = &opts.blind {
+        opts.blind = crate::job::normalize_blind_callback(blind, "blind")?;
     }
     // `send_terminal_webhook` dials http(s) only and returns silently for
     // anything else, so a `callback_url` with another scheme was accepted with
