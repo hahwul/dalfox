@@ -290,8 +290,23 @@ pub fn parse_target_with_method(s: &str) -> Result<Target, Box<dyn std::error::E
 }
 
 /// Detect if the provided text looks like a raw HTTP request (starts with METHOD SP URI SP HTTP/x.y)
+/// Drop a leading UTF-8 BOM.
+///
+/// `str::trim_start` leaves U+FEFF in place — it is not `White_Space` — so
+/// every text entry point that inspects the first bytes has to remove it
+/// explicitly, or a file saved by Notepad, Excel or PowerShell parses wrong.
+fn strip_bom(s: &str) -> &str {
+    s.strip_prefix('\u{feff}').unwrap_or(s)
+}
+
 pub fn is_raw_http_request(s: &str) -> bool {
-    let first = s.lines().next().unwrap_or("").trim_start();
+    // Strip a UTF-8 BOM before looking at the method: `str::trim_start` does not
+    // remove U+FEFF (it is not `White_Space`), and Notepad / Excel /
+    // PowerShell's `Out-File` all write one. Without this the method reads as
+    // `\u{feff}GET`, detection fails, and the request file is handed to the
+    // URL-list path — which tries to parse `Host: example.com:8080` as a URL
+    // and aborts the run. `is_har_content` already strips it.
+    let first = strip_bom(s).lines().next().unwrap_or("").trim_start();
     let mut it = first.split_whitespace();
     if let Some(method) = it.next()
         && is_known_http_method(method)
@@ -403,7 +418,10 @@ fn raw_http_body(raw: &str) -> Option<&str> {
 /// - Cookies collected from Cookie header
 /// - Body captured after the first blank line
 pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::Error>> {
-    let mut lines = raw.lines();
+    // Same BOM strip as `is_raw_http_request`. Forcing `-i raw-http` on a
+    // BOM-prefixed file used to parse the method as `\u{feff}GET` — accepted
+    // silently here, then rejected by every request built from it.
+    let mut lines = strip_bom(raw).lines();
 
     // 1) Request line
     let request_line = lines.next().ok_or("empty raw http request")?.trim();

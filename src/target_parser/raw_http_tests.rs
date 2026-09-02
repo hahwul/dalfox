@@ -289,3 +289,37 @@ fn raw_http_drops_headers_reqwest_cannot_send() {
     assert!(!t.headers.iter().any(|(k, _)| k == "X Foo"));
     assert!(!t.headers.iter().any(|(k, _)| k == "X-Ctl"));
 }
+
+#[test]
+fn raw_http_detection_survives_a_utf8_bom() {
+    // `str::trim_start` does not remove U+FEFF, so a request file saved by
+    // Notepad / Excel / PowerShell's `Out-File` failed detection and was then
+    // handed to the URL-list path, which tried to parse `Host: …:3031` as a URL
+    // and aborted the whole run. `is_har_content` already stripped it.
+    let raw = "\u{feff}GET /x?q=1 HTTP/1.1\r\nHost: example.com:8080\r\n\r\n";
+    assert!(
+        is_raw_http_request(raw),
+        "a BOM must not defeat raw-http detection"
+    );
+    // Control: the same content without a BOM was always detected.
+    assert!(is_raw_http_request(
+        "GET /x?q=1 HTTP/1.1\r\nHost: example.com:8080\r\n\r\n"
+    ));
+    // Control: a BOM must not make a URL list look like a request.
+    assert!(!is_raw_http_request("\u{feff}https://example.com/?q=1\n"));
+}
+
+#[test]
+fn raw_http_parse_does_not_carry_a_bom_into_the_method() {
+    // Worse than the detection miss: forcing `-i raw-http` on the same file
+    // parsed the method as `\u{feff}GET`, which was accepted silently here and
+    // then rejected by every request built from the target.
+    let t = parse_raw_http_request("\u{feff}GET /x?q=1 HTTP/1.1\r\nHost: example.com:8080\r\n\r\n")
+        .expect("should parse");
+    assert_eq!(t.method, "GET", "the BOM leaked into the method");
+    assert_eq!(
+        t.url.host_str(),
+        Some("example.com"),
+        "host must still come from the Host header"
+    );
+}
