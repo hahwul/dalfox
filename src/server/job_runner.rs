@@ -532,12 +532,10 @@ pub(crate) async fn send_terminal_webhook(
 }
 
 /// Worker count `/preflight` runs discovery/mining at when the request does not
-/// ask for one. Deliberately *not* [`crate::cmd::scan::DEFAULT_WORKERS`] (50):
-/// preflight has always fanned out at ten (`parse_target`'s default, matched by
-/// the hardcoded `workers: 10` in `ScanArgs::for_preflight`), and honoring an
-/// explicit `worker` must not also quintuple the load every existing caller
-/// puts on a target.
-pub(crate) const PREFLIGHT_DEFAULT_WORKERS: usize = 10;
+/// ask for one. Re-exported from `cmd::scan` so this and
+/// [`crate::cmd::scan::ScanArgs::for_preflight`] cannot disagree — they were two
+/// independent `10` literals before.
+pub(crate) use crate::cmd::scan::PREFLIGHT_DEFAULT_WORKERS;
 
 /// Build a hydrated Target from the preflight request options.
 pub(crate) fn hydrate_preflight_target(

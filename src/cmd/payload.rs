@@ -307,6 +307,29 @@ fn summary_block() -> String {
     out
 }
 
+/// `--json` form of [`print_summary`]: the same per-selector counts the prose
+/// block reports, as a document a caller can parse.
+fn print_summary_json() -> bool {
+    let counts: serde_json::Map<String, serde_json::Value> = static_selector_counts()
+        .into_iter()
+        .map(|(selector, count)| (selector.to_string(), serde_json::json!(count)))
+        .collect();
+    let doc = serde_json::json!({
+        "selectors": counts.keys().cloned().collect::<Vec<_>>(),
+        "counts": counts,
+    });
+    match serde_json::to_string_pretty(&doc) {
+        Ok(text) => {
+            println!("{text}");
+            true
+        }
+        Err(e) => {
+            eprintln!("Error rendering payload summary: {e}");
+            false
+        }
+    }
+}
+
 fn print_summary() {
     println!("Dalfox payload");
     println!("----------------");
@@ -491,9 +514,16 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             ScanOutcome::Error
         }
         None => {
-            // Provide a small, helpful summary rather than a no-op.
-            print_summary();
-            ScanOutcome::Clean
+            // Provide a small, helpful summary rather than a no-op — but honor
+            // `--json`. Printing the prose block under `--json` made the flag a
+            // silent no-op on this one path, so a script that always passes it
+            // got a page of tips where it expected a document to parse.
+            if args.json {
+                print_outcome(print_summary_json())
+            } else {
+                print_summary();
+                ScanOutcome::Clean
+            }
         }
     }
 }

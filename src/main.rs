@@ -277,12 +277,15 @@ async fn main() {
     // document format (see `format_is_machine` — everything but `plain`) to
     // keep stdout parseable.
     let is_mcp = matches!(cli.command, Some(Commands::Mcp));
-    // Suppress banner when `payload <selector>` is invoked: the selector path
-    // emits one-line-per-item output that users routinely pipe into grep/jq.
-    // The argless `payload` summary stays human-readable and keeps the banner.
-    let is_payload_selector = matches!(
+    // Suppress banner for `payload` whenever its stdout is meant to be parsed:
+    // a selector emits one-line-per-item output users pipe into grep/jq, and
+    // `--json` emits a document. The argless *prose* summary stays
+    // human-readable and keeps the banner. Missing the `--json` half left the
+    // ASCII banner prepended to the summary document, so `dalfox payload --json`
+    // could not be parsed at all.
+    let is_payload_machine_output = matches!(
         &cli.command,
-        Some(Commands::Payload(args)) if args.selector.is_some()
+        Some(Commands::Payload(args)) if args.selector.is_some() || args.json
     );
     // Read `--format` from the parsed args of *every* scan-bearing subcommand.
     // All four flatten a `ScanArgs`, so the value is already there; only `scan`
@@ -494,13 +497,29 @@ async fn main() {
         .map(dalfox::cmd::scan::format_is_machine)
         .unwrap_or(false);
     let effective_silence = cli.silence || scan_silence || config_silence;
+    // A config-file `no_color` must decolour the banner the same way the CLI
+    // flag does. `color_enabled` is computed from raw argv before `Cli::parse()`
+    // (the banner has to be ready for `-h`), so it cannot see the config file;
+    // fold it in here, the same way `config_silence` and `config_machine_format`
+    // are folded above. Everything after the banner was already correct —
+    // `run_scan` sets the global `NO_COLOR` from the merged args.
+    let config_no_color = config_load
+        .as_ref()
+        .ok()
+        .and_then(|r| r.config.scan.as_ref())
+        .and_then(|s| s.no_color)
+        .unwrap_or(false);
+    let banner_color = color_enabled && !config_no_color;
+    if config_no_color {
+        dalfox::NO_COLOR.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     if !is_mcp
         && !is_machine_format
         && !config_machine_format
         && !effective_silence
-        && !is_payload_selector
+        && !is_payload_machine_output
     {
-        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+        utils::print_banner_once(env!("CARGO_PKG_VERSION"), banner_color);
     }
 
     // Exit codes:
