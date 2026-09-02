@@ -255,6 +255,83 @@ fn payload_marker_element_carries_sink(payload: &str) -> bool {
     false
 }
 
+/// Whether `payload` can open an HTML tag of its own — a `<` followed by a
+/// tag-name start, a closing tag, or a markup declaration — in either its raw
+/// or its entity-decoded form.
+///
+/// Payloads that *cannot* are pure attribute-injection fragments
+/// (`" onmouseover=alert(1) class=… x="`): everything they contribute lands on
+/// a tag the server already wrote, so whether the handler survives depends
+/// entirely on the surrounding markup and can only be answered against the
+/// response.
+fn payload_opens_tag(payload: &str) -> bool {
+    fn opens(text: &str) -> bool {
+        text.as_bytes()
+            .windows(2)
+            .any(|w| w[0] == b'<' && (w[1].is_ascii_alphabetic() || w[1] == b'/' || w[1] == b'!'))
+    }
+    opens(payload) || opens(&decode_html_entities(payload))
+}
+
+/// Whether `payload` contains an `on<event>=` attribute whose value carries a
+/// JavaScript sink call.
+///
+/// Deliberately textual: the shapes this exists for
+/// (`'/onmouseover="{JS}"/id="{ID}"/x='`, `" onmouseover={JS} class={CLASS} x="`)
+/// form no element on their own, so an HTML fragment parse yields nothing to
+/// inspect. Only the attribute *name* is matched structurally (`on` + letters,
+/// not preceded by an identifier character, followed by optional whitespace and
+/// `=`); the sink test then runs over the remainder of the payload, which is
+/// where the handler value lives.
+fn payload_has_handler_sink_text(payload: &str) -> bool {
+    let bytes = payload.as_bytes();
+    for i in 0..bytes.len() {
+        if !(bytes[i] | 0x20).eq(&b'o') || i + 2 >= bytes.len() {
+            continue;
+        }
+        if !(bytes[i + 1] | 0x20).eq(&b'n') {
+            continue;
+        }
+        // `on` must start an attribute name, not sit inside a longer word
+        // (`button`, `session`, …).
+        if i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'-')) {
+            continue;
+        }
+        let mut end = i + 2;
+        while end < bytes.len() && bytes[end].is_ascii_alphabetic() {
+            end += 1;
+        }
+        if end == i + 2 {
+            continue; // bare `on`, no event name
+        }
+        let mut eq = end;
+        while eq < bytes.len() && bytes[eq].is_ascii_whitespace() {
+            eq += 1;
+        }
+        if eq >= bytes.len() || bytes[eq] != b'=' {
+            continue;
+        }
+        if value_carries_js_sink(&payload[eq + 1..]) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether `payload` is a bare attribute-injection fragment that attaches an
+/// `on*` handler sink: it opens no tag of its own, yet carries a handler whose
+/// value is a JS sink.
+///
+/// These payloads slip past [`payload_marker_element_carries_sink`] because
+/// parsing them as an HTML fragment yields a text node and no element at all.
+/// Their marker and their handler are always emitted onto the *same* injected
+/// attribute run (see the `ATTR_*` templates in `payload::synthesis`), so if the
+/// response shows the marker on an element that carries no surviving handler,
+/// the handler was swallowed by the surrounding markup and nothing executes.
+fn payload_is_bare_attribute_handler_injection(payload: &str) -> bool {
+    !payload_opens_tag(payload) && payload_has_handler_sink_text(payload)
+}
+
 /// Whether at least one element carrying one of the payload's markers also
 /// carries a surviving JS sink. Used to gate the marker-evidence path for
 /// payloads whose marker element's own attributes/body ARE the exploit.
@@ -398,6 +475,18 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     // evidence. Structural markers (base-href, DOM-clobbering containers) carry
     // no such sink on the marker element and keep presence-only evidence.
     if payload_marker_element_carries_sink(payload) {
+        return marker_element_carries_surviving_sink(payload, document);
+    }
+
+    // Same requirement for the attribute-injection shapes that form no element
+    // of their own, so the parse above finds nothing to inspect. When such a
+    // payload lands inside a *quoted* attribute value the server already wrote
+    // (`style="… url('HERE')"`, `content="Looking for HERE"`), the injected
+    // `on*=` is swallowed by that value while a later `id=`/`class=` still
+    // tokenizes into a real attribute — leaving the marker on a live element
+    // that executes nothing. Require the handler to have survived alongside the
+    // marker before calling that DOM-verified.
+    if payload_is_bare_attribute_handler_injection(payload) {
         return marker_element_carries_surviving_sink(payload, document);
     }
 
