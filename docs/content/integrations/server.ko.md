@@ -20,19 +20,33 @@ dalfox server
 dalfox server \
   --port 6664 \
   --host 0.0.0.0 \
-  --api-key "change-me" \
+  --api-key "8f2b1c6d4a9e7053b8c1f4d2e6a09b73" \
   --log-file /var/log/dalfox.log
 ```
+
+`--log-file`은 제출된 모든 대상 URL을 기록하고, 그런 URL에는 대개 그 대상을 스캔할 이유가
+된 자격증명이 들어 있습니다. 그래서 로그 파일을 새로 만들 때는 `0600`으로 생성합니다.
+이미 있는 파일의 권한은 그대로 두며, 그룹/기타 사용자가 읽을 수 있으면 기동 시 경고합니다
+— 구버전에서 그대로 업그레이드하면 이 상태가 됩니다. 파일 권한을 넓히지 말고 로그 수집기의
+uid를 맞추세요.
 
 ### 인증
 
 `--api-key`를 설정했거나 `DALFOX_API_KEY`를 export 했다면, 모든 요청에 다음이 들어가야 합니다:
 
 ```
-X-API-KEY: change-me
+X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73
 ```
 
 API 키를 설정하지 않으면 서버는 인증 없는 요청도 받습니다. 그럴 때는 `127.0.0.1`에 바인딩하세요.
+
+틀린 키에 대한 제한이나 잠금이 없으므로, 포트에 접근할 수 있는 공격자와 유효한 키 사이를
+가로막는 것은 키 길이뿐입니다. 최소 24자의 무작위 문자열을 사용하세요 — 그보다 짧으면
+서버가 기동 시 경고합니다:
+
+```bash
+export DALFOX_API_KEY="$(openssl rand -hex 16)"
+```
 
 ### 브라우저 요청
 
@@ -78,6 +92,17 @@ dalfox server \
 
 `*`는 와일드카드로 허용됩니다. 정규식은 `regex:^https://.*\.example\.com$` 형태로 지원됩니다.
 
+두 형태 모두 `Origin` **전체**와 매칭되므로, 패턴을 부분 문자열로 포함하는 더 긴 호스트가
+통과할 수 없습니다 — `regex:https://app\.example\.com`은 `https://app.example.com.evil.com`과
+매칭되지 않습니다. 앵커(`^`, `$`)를 직접 써도 됩니다. 중복일 뿐 문제가 되지는 않습니다.
+반대로, 대상 오리진에 포트가 붙는다면 패턴도 포트를 포함해야 합니다
+(`regex:https://app\.example\.com(:8443)?`). 정확히 일치하는 항목은 대소문자를 구분하지
+않고 비교합니다.
+
+`--allowed-origins '*'`는 모든 오리진을 허용한다는 뜻이며, `--jsonp`와 마찬가지로
+크로스사이트 게이트를 꺼 버립니다. 둘 중 하나라도 API 키 없이 켜면 서버가 기동 시
+경고합니다.
+
 ### JSONP
 
 커스텀 헤더를 설정할 수 없는 브라우저 클라이언트를 위해:
@@ -110,7 +135,7 @@ JSONP는 `<script src>` 로드로 전달되는데, 스크립트 로드에는 검
 
 ```bash
 curl -X POST http://127.0.0.1:6664/scan \
-  -H "X-API-KEY: change-me" \
+  -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" \
   -H "Content-Type: application/json" \
   -d '{
     "target": "https://target.app?q=test",
@@ -141,7 +166,7 @@ curl -X POST http://127.0.0.1:6664/scan \
 ### 상태 폴링
 
 ```bash
-curl -H "X-API-KEY: change-me" http://127.0.0.1:6664/scan/9f2c…
+curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
 응답 (실행 중):
@@ -171,20 +196,20 @@ curl -H "X-API-KEY: change-me" http://127.0.0.1:6664/scan/9f2c…
 ### 스캔 목록 조회
 
 ```bash
-curl -H "X-API-KEY: change-me" 'http://127.0.0.1:6664/scans?status=running'
+curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/scans?status=running'
 ```
 
 ### 스캔 취소
 
 ```bash
-curl -X DELETE -H "X-API-KEY: change-me" http://127.0.0.1:6664/scan/9f2c…
+curl -X DELETE -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
 ### 프리플라이트 (공격 없음)
 
 ```bash
 curl -X POST http://127.0.0.1:6664/preflight \
-  -H "X-API-KEY: change-me" \
+  -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" \
   -H "Content-Type: application/json" \
   -d '{"target":"https://target.app"}'
 ```
@@ -343,7 +368,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/local/bin/dalfox server --port 6664 --host 127.0.0.1 --log-file /var/log/dalfox.log
-Environment=DALFOX_API_KEY=change-me
+Environment=DALFOX_API_KEY=8f2b1c6d4a9e7053b8c1f4d2e6a09b73
 Restart=on-failure
 User=dalfox
 

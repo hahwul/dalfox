@@ -11,8 +11,8 @@ Runs an async HTTP API (axum) that exposes the same scanning engine.
 | `-p, --port` | 6664 | Listen port |
 | `-H, --host` | 127.0.0.1 | Bind address (use 0.0.0.0 carefully) |
 | `--api-key` | (none) | Required value for `X-API-KEY` header (or `DALFOX_API_KEY` env) |
-| `--log-file` | (none) | Plain-text log file (no ANSI) |
-| `--allowed-origins` | (none) | Comma-separated. Supports `*`, exact origins, `regex:<pattern>` |
+| `--log-file` | (none) | Plain-text log file (no ANSI). Created `0600` on Unix; an existing file keeps its mode and is warned about if group/other-readable |
+| `--allowed-origins` | (none) | Comma-separated. Supports `*`, exact origins (case-insensitive), `regex:<pattern>`. Patterns match the whole `Origin` (anchored), so a longer host that merely contains one is refused — and a pattern must cover the port. `*` switches the cross-site gate off, like `--jsonp` |
 | `--jsonp` | false | Enable JSONP (wraps responses in callback function) |
 | `--callback-param-name` | `callback` | JSONP callback query parameter |
 | `--cors-allow-methods` | GET,POST,... | |
@@ -35,9 +35,9 @@ Jobs are in-memory only. Same `queued / running / done / error / cancelled` life
 
 **Webhook/SSRF**: `callback_url` (and the scan target itself) are dialed server-side with no host filtering — loopback/link-local/private hosts are reachable. Set `--api-key` and restrict egress on untrusted binds. `--jsonp` exposes GET endpoints cross-origin (bypasses the CORS allow-list); enable deliberately.
 
-**Authentication**: when `--api-key` is set, every mutating endpoint requires the key. Read endpoints can be open or also protected depending on deployment choice.
+**Authentication**: when `--api-key` is set, every endpoint requires it in `X-API-KEY` except `GET /health` and the `OPTIONS` CORS preflights — a browser attaches no key to a preflight. Reads (`GET /scan/{id}`, `/scans`) are included. `/health` and the preflights stay key-free but are still subject to the cross-site/`Host` gate. There is no per-caller identity: any caller holding the key can read or cancel any scan. Nothing rate-limits a wrong key, so use at least 24 random characters (the server warns below that).
 
-**JSONP**: only works for GET endpoints and requires the callback parameter. The server is strict about the callback name to avoid XSS in the JSONP wrapper itself.
+**JSONP**: only works for GET endpoints and requires the callback parameter. The server is strict about the callback name to avoid XSS in the JSONP wrapper itself. Every response with a body carries `X-Content-Type-Options: nosniff` and `Cache-Control: no-store` (the bodyless `OPTIONS` 204s do not).
 
 Use the server when:
 - You want a long-lived scan service for a team / pipeline

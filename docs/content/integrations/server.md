@@ -20,19 +20,34 @@ Common options:
 dalfox server \
   --port 6664 \
   --host 0.0.0.0 \
-  --api-key "change-me" \
+  --api-key "8f2b1c6d4a9e7053b8c1f4d2e6a09b73" \
   --log-file /var/log/dalfox.log
 ```
+
+`--log-file` records every submitted target URL, which routinely carries the
+credential that made the target worth scanning, so a new log file is created
+mode `0600`. An existing file keeps whatever permissions it already has — the
+server warns at startup if it is readable by group or other, which is what an
+in-place upgrade from an older version leaves behind. Adjust your log shipper's
+uid rather than widening the file.
 
 ### Authentication
 
 If `--api-key` is set (or `DALFOX_API_KEY` is exported), every request must include:
 
 ```
-X-API-KEY: change-me
+X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73
 ```
 
 If you don't set an API key, the server accepts unauthenticated requests; bind to `127.0.0.1` in that case.
+
+Nothing throttles or locks out a wrong key, so its length is the only thing
+standing between an attacker who can reach the port and a valid key. Use at
+least 24 random characters — the server warns at startup for anything shorter:
+
+```bash
+export DALFOX_API_KEY="$(openssl rand -hex 16)"
+```
 
 ### Browser requests
 
@@ -79,6 +94,18 @@ dalfox server \
 
 `*` is accepted as a wildcard. Regex is supported via `regex:^https://.*\.example\.com$`.
 
+Both forms are matched against the **whole** `Origin`, so a pattern can never
+accept a longer host that merely contains it — `regex:https://app\.example\.com`
+does not match `https://app.example.com.evil.com`. Writing the anchors yourself
+is still fine; they are redundant, not wrong. The flip side is that a pattern
+has to cover the port when the origins it describes carry one
+(`regex:https://app\.example\.com(:8443)?`). Exact entries are compared
+case-insensitively.
+
+`--allowed-origins '*'` means every origin is allowed, which switches the
+cross-site gate off the same way `--jsonp` does. The server warns at startup
+when either is combined with no API key.
+
 ### JSONP
 
 For browser clients that can't set custom headers:
@@ -111,7 +138,7 @@ server prints a startup warning when `--jsonp` is enabled without an API key.
 
 ```bash
 curl -X POST http://127.0.0.1:6664/scan \
-  -H "X-API-KEY: change-me" \
+  -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" \
   -H "Content-Type: application/json" \
   -d '{
     "target": "https://target.app?q=test",
@@ -142,7 +169,7 @@ Response:
 ### Poll status
 
 ```bash
-curl -H "X-API-KEY: change-me" http://127.0.0.1:6664/scan/9f2c…
+curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
 Response (while running):
@@ -172,20 +199,20 @@ When complete, `status` becomes `done` and `results` is populated.
 ### List scans
 
 ```bash
-curl -H "X-API-KEY: change-me" 'http://127.0.0.1:6664/scans?status=running'
+curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/scans?status=running'
 ```
 
 ### Cancel a scan
 
 ```bash
-curl -X DELETE -H "X-API-KEY: change-me" http://127.0.0.1:6664/scan/9f2c…
+curl -X DELETE -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
 ### Preflight (no attack)
 
 ```bash
 curl -X POST http://127.0.0.1:6664/preflight \
-  -H "X-API-KEY: change-me" \
+  -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" \
   -H "Content-Type: application/json" \
   -d '{"target":"https://target.app"}'
 ```
@@ -351,7 +378,7 @@ After=network.target
 
 [Service]
 ExecStart=/usr/local/bin/dalfox server --port 6664 --host 127.0.0.1 --log-file /var/log/dalfox.log
-Environment=DALFOX_API_KEY=change-me
+Environment=DALFOX_API_KEY=8f2b1c6d4a9e7053b8c1f4d2e6a09b73
 Restart=on-failure
 User=dalfox
 
