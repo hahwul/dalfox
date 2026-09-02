@@ -648,7 +648,8 @@ fn synthesis_closes_catalog_coverage_gaps() {
 fn synthesis_is_fast_and_bounded() {
     // Performance guard: synthesis runs once per parameter inside the scan loop,
     // so it must be cheap. 20k calls across a mix of contexts/filters should be
-    // far under a second even in debug; we assert a generous ceiling to stay
+    // well under a second even in debug on an idle machine; we assert a
+    // deliberately loose ceiling (see below) to stay
     // non-flaky in CI while still catching pathological regressions.
     let contexts = [
         InjectionContext::Html(None),
@@ -680,8 +681,18 @@ fn synthesis_is_fast_and_bounded() {
         elapsed,
         elapsed.as_nanos() as f64 / calls as f64
     );
+    // A blowup canary, not a performance gate. The real boundedness contract
+    // is the deterministic `out.len() <= MAX_SYNTHESIZED` asserted on every
+    // call above; this only has to notice a per-call regression of the kind
+    // that turns 20k calls into minutes.
+    //
+    // The bound therefore belongs far above the noise floor, not just above the
+    // idle figure. Measured on this workload: ~0.3s idle, 2.75s on a machine at
+    // load 34 — and 7.7-9.4s at load 120, which turned the old 5s ceiling red
+    // during a run where nothing about synthesis had changed. A test that fails
+    // because the machine is busy teaches people to ignore it.
     assert!(
-        elapsed.as_secs() < 5,
+        elapsed.as_secs() < 60,
         "synthesis unexpectedly slow: {:?} for {} calls",
         elapsed,
         calls
