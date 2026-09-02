@@ -3149,3 +3149,88 @@ async fn test_sxss_path_injection_drops_url_echo_only_reflections() {
         "an empty response body carries no evidence"
     );
 }
+
+#[test]
+fn test_build_request_text_host_carries_a_non_default_port() {
+    // `Host` is host *and* port. Dropping it replayed every PoC against a
+    // non-default port to :80/:443 — a different service, or nothing at all.
+    let target = parse_target("http://127.0.0.1:3031/x?q=1").unwrap();
+    let param = Param::new("q".to_string(), "1".to_string(), Location::Query);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert!(
+        request.contains("Host: 127.0.0.1:3031"),
+        "port missing from Host, got:\n{request}"
+    );
+}
+
+#[test]
+fn test_build_request_text_omits_the_schemes_default_port() {
+    // The flip side: :443 on https is implicit and must not be spelled out.
+    let target = parse_target("https://example.com/x?q=1").unwrap();
+    let param = Param::new("q".to_string(), "1".to_string(), Location::Query);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert!(request.contains("Host: example.com\r\n"));
+    assert!(!request.contains("example.com:443"));
+}
+
+#[test]
+fn test_build_request_text_injects_a_header_param() {
+    // A `Location::Header` param is injected into the request, not the URL.
+    // Emitting only the target's original headers left the payload nowhere in
+    // the PoC, so it reproduced nothing.
+    let mut target = parse_target("http://127.0.0.1:3031/h").unwrap();
+    target.method = "GET".to_string();
+    target.headers = vec![("X-Keep".to_string(), "1".to_string())];
+
+    let param = Param::new("Referer".to_string(), String::new(), Location::Header);
+    let request = build_request_text(&target, &param, "<svg onload=alert(1)>");
+    assert!(
+        request.contains("Referer: <svg onload=alert(1)>"),
+        "injected header missing, got:\n{request}"
+    );
+    assert!(request.contains("X-Keep: 1"), "original header dropped");
+}
+
+#[test]
+fn test_build_request_text_header_param_overrides_a_same_named_original() {
+    // The wire path applies the injected header via `apply_header_overrides`,
+    // which replaces. Emitting both would show a request that was never sent.
+    let mut target = parse_target("http://127.0.0.1:3031/h").unwrap();
+    target.headers = vec![("Referer".to_string(), "https://original/".to_string())];
+
+    let param = Param::new("Referer".to_string(), String::new(), Location::Header);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert!(request.contains("Referer: PAYLOAD"));
+    assert!(
+        !request.contains("https://original/"),
+        "the overridden original was emitted too, got:\n{request}"
+    );
+}
+
+#[test]
+fn test_build_request_text_cookie_param_goes_into_the_cookie_header() {
+    // Per-cookie discovery files cookies as `Location::Header` named after the
+    // cookie. `build_header_request` routes those into `Cookie` — injected
+    // first, the target's other cookies preserved after it. Emitting
+    // `sid: <payload>` instead would be a header the application never reads.
+    let mut target = parse_target("http://127.0.0.1:3031/c").unwrap();
+    target.cookies = vec![
+        ("sid".to_string(), "abc".to_string()),
+        ("theme".to_string(), "dark".to_string()),
+    ];
+
+    let param = Param::new("sid".to_string(), "abc".to_string(), Location::Header);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert!(
+        request.contains("Cookie: sid=PAYLOAD"),
+        "cookie param not injected into Cookie, got:\n{request}"
+    );
+    assert!(
+        request.contains("theme=dark"),
+        "neighbouring cookies dropped — they often carry the session the sink needs, got:\n{request}"
+    );
+    assert!(
+        !request.contains("\r\nsid: PAYLOAD"),
+        "cookie emitted as a header of its own name, got:\n{request}"
+    );
+}
