@@ -326,6 +326,25 @@ pub(crate) fn is_skippable_request_header(name: &str) -> bool {
     SKIP.iter().any(|s| name.eq_ignore_ascii_case(s))
 }
 
+/// Whether a header imported verbatim from a raw HTTP request or a HAR capture
+/// can actually be put on an HTTP/1.1 wire.
+///
+/// reqwest validates header names/values lazily — a bad one is accepted by
+/// `RequestBuilder::header()` and only rejected at `send()`. Since the imported
+/// headers are attached to *every* request for the target, a single unsendable
+/// header (an empty name, an HTTP/2 pseudo-header like `:authority` that survives
+/// a copy-as-curl / HTTP/2 capture, a name containing a space, or a value
+/// carrying a control byte such as NUL) fails the reachability probe and every
+/// scan request — so a live target is silently reported unreachable and nothing
+/// is tested. Such headers can't be sent on HTTP/1.1 anyway, so drop them at
+/// import (the caller logs the drop) rather than poisoning the whole scan.
+///
+/// Shared by [`parse_raw_http_request`] and the HAR import path so both agree.
+pub(crate) fn is_forwardable_header(name: &str, value: &str) -> bool {
+    use reqwest::header::{HeaderName, HeaderValue};
+    HeaderName::try_from(name).is_ok() && HeaderValue::from_str(value).is_ok()
+}
+
 /// The body of a raw HTTP request: everything after the blank line that ends
 /// the header block, byte-for-byte apart from one optional trailing newline.
 /// `None` when there is no separator or nothing follows it.
@@ -451,7 +470,23 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
                 // recomputes them from the injected body — a stale value
                 // truncates it) and hop-by-hop/`Accept-Encoding` headers, the
                 // same set the HAR import path strips.
-                headers_vec.push((name_trim, value_trim));
+                //
+                // Also drop any header reqwest can't put on the wire — an empty
+                // name (`: value`), an HTTP/2 pseudo-header (`:authority: …`,
+                // which the origin-form request line carries instead and which
+                // a copy-as-curl / HTTP/2 capture routinely includes), a
+                // space-bearing name, or a control byte in the value. Forwarded
+                // verbatim, one of these fails the reachability probe and every
+                // scan request, so the live target is silently reported
+                // unreachable. Mirrors the HAR import path.
+                if is_forwardable_header(&name_trim, &value_trim) {
+                    headers_vec.push((name_trim, value_trim));
+                } else {
+                    crate::dbg_log!(
+                        "dropping unsendable raw-http header {:?} (name/value rejected by HTTP/1.1)",
+                        name_trim
+                    );
+                }
             }
         }
     }

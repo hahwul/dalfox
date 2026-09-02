@@ -296,3 +296,32 @@ fn uppercases_method() {
     let targets = parse_har(har).unwrap();
     assert_eq!(targets[0].method, "POST");
 }
+
+#[test]
+fn drops_headers_reqwest_cannot_send() {
+    // A HAR whose capture carries a name with a space and a value with a NUL
+    // control byte (` `). reqwest rejects both at send(), so forwarding
+    // them fails every request for the target and the live host is reported
+    // unreachable. They must be dropped at import while the valid header
+    // survives. (The `:`-pseudo-header / empty-name cases are covered by
+    // `lifts_user_agent_and_drops_managed_headers`.)
+    let har = r#"{"log":{"entries":[{"request":{
+            "method":"GET","url":"https://example.com/",
+            "headers":[
+                {"name":"X Foo","value":"bar"},
+                {"name":"X-Ctl","value":"a\u0000b"},
+                {"name":"X-Good","value":"ok"}
+            ]
+        }}]}}"#;
+    let targets = parse_har(har).unwrap();
+    let t = &targets[0];
+    for (k, v) in &t.headers {
+        assert!(
+            super::super::is_forwardable_header(k, v),
+            "unsendable header survived HAR import: {k:?}={v:?}"
+        );
+    }
+    assert!(t.headers.iter().any(|(k, v)| k == "X-Good" && v == "ok"));
+    assert!(!t.headers.iter().any(|(k, _)| k == "X Foo"));
+    assert!(!t.headers.iter().any(|(k, _)| k == "X-Ctl"));
+}

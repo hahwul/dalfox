@@ -237,3 +237,55 @@ fn raw_http_does_not_retain_original_cookie_header() {
     assert!(t.cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
     assert!(t.cookies.iter().any(|(k, v)| k == "a" && v == "b"));
 }
+
+#[test]
+fn raw_http_drops_http2_pseudo_headers_and_keeps_the_rest() {
+    // A copy-as-curl / HTTP/2 capture pasted into a raw-request file carries
+    // `:authority: …` pseudo-headers. `split_once(':')` yields an EMPTY name
+    // for them, which reqwest rejects at send() — poisoning every request for
+    // the target (reachability probe included) so a live host is silently
+    // reported unreachable. They must be dropped at import (as the HAR path
+    // already does), while ordinary headers still survive.
+    let raw = "GET /x HTTP/1.1\r\n:authority: example.com\r\n:scheme: https\r\nHost: example.com\r\nX-Real: keep\r\n\r\n";
+    let t = parse_raw_http_request(raw).expect("should parse");
+    for (k, v) in &t.headers {
+        assert!(
+            is_forwardable_header(k, v),
+            "unsendable header survived import: {:?}={:?} (all headers: {:?})",
+            k,
+            v,
+            t.headers
+        );
+    }
+    assert!(
+        !t.headers
+            .iter()
+            .any(|(k, _)| k.is_empty() || k.starts_with(':')),
+        "pseudo/empty-name header retained, got {:?}",
+        t.headers
+    );
+    assert!(
+        t.headers.iter().any(|(k, v)| k == "X-Real" && v == "keep"),
+        "ordinary header was lost, got {:?}",
+        t.headers
+    );
+}
+
+#[test]
+fn raw_http_drops_headers_reqwest_cannot_send() {
+    // A space in the name and a NUL in the value are both unsendable. Forwarded
+    // verbatim they fail every request; drop them, keep the good one.
+    let raw = "GET /x HTTP/1.1\r\nHost: h\r\nX Foo: bar\r\nX-Ctl: a\u{0}b\r\nX-Good: ok\r\n\r\n";
+    let t = parse_raw_http_request(raw).expect("should parse");
+    for (k, v) in &t.headers {
+        assert!(
+            is_forwardable_header(k, v),
+            "unsendable header survived import: {:?}={:?}",
+            k,
+            v
+        );
+    }
+    assert!(t.headers.iter().any(|(k, v)| k == "X-Good" && v == "ok"));
+    assert!(!t.headers.iter().any(|(k, _)| k == "X Foo"));
+    assert!(!t.headers.iter().any(|(k, _)| k == "X-Ctl"));
+}
