@@ -643,7 +643,10 @@ pub async fn probe_dictionary_params(
         {
             eprintln!("Error initializing remote wordlists: {}", e);
         }
-        if let Some(words) = crate::payload::get_remote_words()
+        // Keyed by this scan's provider set: the cache is process-global, so a
+        // provider-less lookup in the server/MCP daemon could return whatever
+        // wordlist an earlier job with different providers had fetched.
+        if let Some(words) = crate::payload::get_remote_words_for(&args.remote_wordlists)
             && !words.is_empty()
         {
             params = words.as_ref().clone();
