@@ -1053,7 +1053,7 @@ browser execution; only detection_method=oob observes a real browser."
         // blocking pool without bound.
         let (scan_id, worker_lease) = {
             let mut jobs = self.lock_jobs();
-            let active = jobs.values().filter(|j| !j.is_terminal()).count();
+            let active = jobs.values().filter(|j| j.occupies_capacity()).count();
             if active >= MAX_ACTIVE_SCANS_MCP {
                 // Transient capacity shedding, not a malformed request: signal it
                 // with internal_error (-32603) so it matches the preflight path

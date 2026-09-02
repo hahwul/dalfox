@@ -404,6 +404,23 @@ impl Job {
         self.is_terminal() && !self.worker_alive()
     }
 
+    /// Whether this job still occupies a concurrency slot.
+    ///
+    /// Not the same question as `!is_terminal()`. `cancel_scan_handler` stamps
+    /// a terminal status the moment the user asks, but the worker keeps running
+    /// until it notices the flag — still holding a blocking-pool thread and
+    /// still sending requests. Counting only non-terminal jobs let a client
+    /// submit-then-cancel in a loop and keep an unbounded number of workers
+    /// alive against `--max-concurrent-scans` of 1, because every one of them
+    /// had already stopped counting.
+    ///
+    /// The slot is released when the worker's [`WorkerLease`] drops, which is
+    /// the same signal [`Job::is_evictable`] uses — so admission and retention
+    /// agree on what "still running" means.
+    pub(crate) fn occupies_capacity(&self) -> bool {
+        !self.is_terminal() || self.worker_alive()
+    }
+
     /// Total elapsed ms from `started_at_ms` to `finished_at_ms` (or now, for
     /// still-running jobs). `None` if the scan never started.
     pub(crate) fn duration_ms(&self) -> Option<i64> {

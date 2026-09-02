@@ -581,3 +581,56 @@ fn validate_header_value_matches_reqwest_builder_semantics() {
     assert!(validate_header_value("user_agent", "Mozilla\nX: 1").is_err());
     assert!(validate_header_value("cookie", "sid=a\0b").is_err());
 }
+
+#[test]
+fn a_cancelled_job_keeps_its_capacity_slot_until_the_worker_stops() {
+    // `!is_terminal()` is not the same question as "is a worker running".
+    // Cancel stamps the terminal status immediately, but the worker keeps a
+    // blocking-pool thread and keeps sending requests until it notices. If the
+    // slot is released at that moment, a submit-then-cancel loop keeps an
+    // unbounded number of workers alive against a cap of 1.
+    let mut job = Job::new_queued("http://a".to_string());
+    let lease = job.issue_worker_lease();
+    assert!(job.occupies_capacity(), "a queued job holds a slot");
+
+    job.status = JobStatus::Cancelled;
+    job.finished_at_ms = Some(now_ms());
+    assert!(
+        job.is_terminal(),
+        "cancel stamps the terminal state at once"
+    );
+    assert!(
+        job.occupies_capacity(),
+        "the worker is still running — the slot is not free yet"
+    );
+
+    drop(lease);
+    assert!(
+        !job.occupies_capacity(),
+        "once the worker's lease drops the slot is free"
+    );
+}
+
+#[test]
+fn a_finished_job_without_a_worker_holds_no_slot() {
+    // The control: ordinary completion must still free the slot, or the cap
+    // would never let anything through after the first N scans.
+    let mut job = Job::new_queued("http://a".to_string());
+    let lease = job.issue_worker_lease();
+    job.status = JobStatus::Done;
+    job.finished_at_ms = Some(now_ms());
+    drop(lease);
+    assert!(!job.occupies_capacity());
+    assert!(job.is_evictable());
+}
+
+#[test]
+fn a_job_that_never_got_a_worker_holds_no_slot_once_terminal() {
+    // A job rejected or errored before any task was spawned has no lease at
+    // all; `occupies_capacity` must not treat the absent lease as "alive".
+    let mut job = Job::new_queued("http://a".to_string());
+    assert!(job.occupies_capacity(), "queued and not yet terminal");
+    job.status = JobStatus::Error;
+    job.finished_at_ms = Some(now_ms());
+    assert!(!job.occupies_capacity());
+}
