@@ -173,6 +173,20 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
             if is_skippable_har_header(name) {
                 continue;
             }
+            // Drop any header reqwest can't put on an HTTP/1.1 wire (a
+            // space-bearing name, a control byte in the value, …). Forwarded
+            // verbatim it would fail the reachability probe and every scan
+            // request, silently marking a live target unreachable. The
+            // `:`-pseudo-header and empty-name cases are already handled above;
+            // this closes the remaining name/value-validity gap and keeps the
+            // raw-HTTP and HAR import paths in step.
+            if !super::is_forwardable_header(name, &h.value) {
+                crate::dbg_log!(
+                    "dropping unsendable HAR header {:?} (name/value rejected by HTTP/1.1)",
+                    name
+                );
+                continue;
+            }
             headers.push((name.to_string(), h.value.clone()));
         }
 
