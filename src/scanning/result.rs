@@ -481,6 +481,14 @@ pub(crate) struct ScanMetadata {
     pub targets: Vec<String>,
     pub scan_duration_ms: u64,
     pub total_requests: u64,
+    /// Outbound requests that never produced a response (connection reset,
+    /// refused, timed out) after their retry budget was spent. Reported
+    /// alongside `total_requests` because a payload that never reached the
+    /// target was never tested: a scan that sent 176 requests and lost 160 of
+    /// them is not the same scan as one that sent 176 and got 176 answers,
+    /// even though both can finish with zero findings.
+    #[serde(default)]
+    pub failed_requests: u64,
     pub findings_count: usize,
     pub target_summary: Vec<serde_json::Value>,
     /// Target-dedup mode in effect (`exact`, `signature`, or `off`).
@@ -503,8 +511,9 @@ pub(crate) struct ScanMetadata {
     /// a resumed run from a scan that mostly found nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumed: Option<serde_json::Value>,
-    /// At least one target was not fully tested — today that means its
-    /// authenticated session died mid-scan (see `error_codes::SESSION_LOST`).
+    /// At least one target was not fully tested: its authenticated session
+    /// died mid-scan (see `error_codes::SESSION_LOST`), or a significant share
+    /// of this run's requests never reached the target at all.
     /// Hoisted out of `target_summary` so a consumer can answer "are these
     /// results trustworthy?" with one field read instead of a scan over every
     /// entry's status. `false` on a normal run.
@@ -632,6 +641,7 @@ impl Result {
             "targets": &meta.targets,
             "scan_duration_ms": meta.scan_duration_ms,
             "total_requests": meta.total_requests,
+            "failed_requests": meta.failed_requests,
             "findings_count": meta.findings_count,
             "incomplete": meta.incomplete,
             "target_summary": &meta.target_summary,
@@ -772,6 +782,9 @@ impl Result {
             );
             let _ = writeln!(out, "| **Scan Duration** | {} ms |", m.scan_duration_ms);
             let _ = writeln!(out, "| **Total Requests** | {} |", m.total_requests);
+            if m.failed_requests > 0 {
+                let _ = writeln!(out, "| **Failed Requests** | {} |", m.failed_requests);
+            }
             let _ = writeln!(out, "| **Findings Count** | {} |", m.findings_count);
             // Only shown when dedup actually dropped something: a collapsed
             // input list must be visible in the report, but the common
