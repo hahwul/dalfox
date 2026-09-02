@@ -239,7 +239,11 @@ fn payload_marker_element_carries_sink(payload: &str) -> bool {
         } else {
             format!("{candidate}>")
         };
-        let frag = scraper::Html::parse_fragment(&normalized);
+        // Bounded: html5ever is O(depth^2) and this runs once per payload, so a
+        // single pathological entry in a `--custom-payload` file or a fetched
+        // `--remote-payloads` list would stall the scan. See
+        // `utils::html::parse_fragment_bounded`.
+        let frag = crate::utils::html::parse_fragment_bounded(&normalized);
         let sel = super::selectors::universal();
         let hit = frag.select(sel).any(|node| {
             let is_marker = element_class_has(node, class_marker)

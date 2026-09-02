@@ -1946,3 +1946,31 @@ fn test_payload_has_handler_sink_text_ignores_embedded_on() {
     ));
     assert!(payload_has_handler_sink_text("'/onfocus=\"alert(1)\"/x='"));
 }
+
+#[test]
+fn deeply_nested_payload_does_not_stall_the_sink_check() {
+    // This gate parses once per payload, so one pathological entry in a
+    // `--custom-payload` file or a fetched `--remote-payloads` list stalls the
+    // whole scan: html5ever's tree building is O(depth^2). Measured on this
+    // shape in debug — 15.2 s unbounded vs 11 ms through the nesting guard.
+    //
+    // A wall-clock assertion is the only way to pin the call site: both parsers
+    // return the same answer for realistic payloads, which is precisely why the
+    // swap is safe. The bound is set far from both figures (≈270x the bounded
+    // time, ≈5x under the unbounded one) so it can only fail if the guard is
+    // gone, not because the machine is busy.
+    let depth = 20_000;
+    let payload = format!(
+        "{}<svg onload=alert(1) class={}>{}",
+        "<div>".repeat(depth),
+        crate::scanning::markers::class_marker(),
+        "</div>".repeat(depth)
+    );
+    let start = std::time::Instant::now();
+    let _ = payload_marker_element_carries_sink(&payload);
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 3,
+        "nesting guard is not applied to the payload parse: took {elapsed:?}"
+    );
+}
