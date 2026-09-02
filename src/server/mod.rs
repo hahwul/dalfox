@@ -63,13 +63,21 @@ pub(crate) use response::*;
 pub(crate) use types::*;
 pub(crate) use util::*;
 
-pub async fn run_server(args: ServerArgs) {
+/// Run the REST API server until it shuts down gracefully.
+///
+/// Returns `Err` when the server never came up (an unparseable bind address, a
+/// port already in use) or when `axum::serve` itself failed. A supervisor —
+/// systemd, a container runtime, `dalfox server || alert` — reads the exit
+/// status, not stderr, so a failed start that exits 0 is indistinguishable from
+/// a clean shutdown.
+pub async fn run_server(args: ServerArgs) -> Result<(), String> {
     let addr_str = format!("{}:{}", args.host, args.port);
     let addr: SocketAddr = match addr_str.parse() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("Invalid bind address {}: {}", addr_str, e);
-            return;
+            let msg = format!("Invalid bind address {}: {}", addr_str, e);
+            eprintln!("{}", msg);
+            return Err(msg);
         }
     };
 
@@ -158,8 +166,9 @@ pub async fn run_server(args: ServerArgs) {
             .append(true)
             .open(path)
     {
-        eprintln!("Cannot open --log-file {}: {}", path, e);
-        return;
+        let msg = format!("Cannot open --log-file {}: {}", path, e);
+        eprintln!("{}", msg);
+        return Err(msg);
     }
 
     let state = AppState {
@@ -202,12 +211,6 @@ pub async fn run_server(args: ServerArgs) {
         // body over the limit is rejected with 413 before handler code runs.
         .layer(axum::extract::DefaultBodyLimit::max(args.max_body_bytes))
         .with_state(state.clone());
-
-    log(
-        &state,
-        "SERVER",
-        &format!("listening on http://{}", addr_str),
-    );
 
     // Loud warning for the most dangerous misconfiguration: a network-reachable
     // bind with auth disabled. The API scans any submitted URL and POSTs results
@@ -253,14 +256,19 @@ pub async fn run_server(args: ServerArgs) {
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            log(
-                &state,
-                "ERR",
-                &format!("Failed to bind {}: {}", addr_str, e),
-            );
-            return;
+            let msg = format!("Failed to bind {}: {}", addr_str, e);
+            log(&state, "ERR", &msg);
+            return Err(msg);
         }
     };
+    // Announced only now: this line is the operator's "it came up" signal, and
+    // logging it before the bind made the last line before a bind error claim
+    // success.
+    log(
+        &state,
+        "SERVER",
+        &format!("listening on http://{}", addr_str),
+    );
     // Graceful shutdown on SIGINT / SIGTERM. axum drains in-flight
     // requests before returning; previously the server ignored Ctrl-C
     // outright and required SIGKILL, leaking any in-flight scans and
@@ -294,8 +302,11 @@ pub async fn run_server(args: ServerArgs) {
         .with_graceful_shutdown(shutdown_signal)
         .await
     {
-        log(&state, "ERR", &format!("server error: {}", e));
+        let msg = format!("server error: {}", e);
+        log(&state, "ERR", &msg);
+        return Err(msg);
     }
+    Ok(())
 }
 
 #[cfg(test)]

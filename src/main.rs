@@ -525,8 +525,14 @@ async fn main() {
                 outcome = cmd::scan::run_scan(&args).await;
             }
             Commands::Server(args) => {
-                server::run_server(args).await;
-                outcome = ScanOutcome::Clean;
+                // A server that never bound — or whose `axum::serve` failed —
+                // has to reach the exit code. A supervisor reads status, not
+                // stderr, so the hard-coded `Clean` made "the port was already
+                // in use" indistinguishable from a clean shutdown.
+                outcome = match server::run_server(args).await {
+                    Ok(()) => ScanOutcome::Clean,
+                    Err(_) => ScanOutcome::Error,
+                };
             }
             Commands::Payload(args) => {
                 outcome = cmd::payload::run_payload(args);
