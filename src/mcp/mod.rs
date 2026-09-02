@@ -285,6 +285,33 @@ impl DalfoxMcp {
             }
         };
 
+        // Load any requested remote payload/wordlist providers into the caches
+        // before the scan reads them. Mirrors the REST server (`run_scan_job`)
+        // and the CLI; without this the `remote_payloads`/`remote_wordlists`
+        // fields would be silently inert on the MCP path. It runs *here*, inside
+        // the spawned worker, rather than in the tool call — see the note at the
+        // spawn site in `scan_with_dalfox`.
+        //
+        // A failure is logged rather than swallowed: the scan otherwise runs
+        // without the list the caller asked for and still reports success,
+        // which an agent reads as "scanned, found nothing".
+        if (!scan_args.remote_payloads.is_empty() || !scan_args.remote_wordlists.is_empty())
+            && let Err(e) = crate::utils::init_remote_resources_with_options(
+                &scan_args.remote_payloads,
+                &scan_args.remote_wordlists,
+                Some(scan_args.timeout),
+                scan_args.proxy.clone(),
+            )
+            .await
+        {
+            Self::log(
+                "WRN",
+                &format!(
+                    "scan_id={scan_id} remote resource fetch failed ({e}); scanning without the requested remote lists"
+                ),
+            );
+        }
+
         let url = scan_args
             .targets
             .first()
@@ -1024,7 +1051,7 @@ browser execution; only detection_method=oob observes a real browser."
         // MCP has no config surface, so the bound is a constant; submissions
         // past it are rejected so an agent loop can't grow the job map /
         // blocking pool without bound.
-        let scan_id = {
+        let (scan_id, worker_lease) = {
             let mut jobs = self.lock_jobs();
             let active = jobs.values().filter(|j| !j.is_terminal()).count();
             if active >= MAX_ACTIVE_SCANS_MCP {
@@ -1042,13 +1069,18 @@ browser execution; only detection_method=oob observes a real browser."
                 ));
             }
             let id = crate::utils::make_unique_scan_id(&target, |id| jobs.contains_key(id));
-            jobs.insert(id.clone(), Job::new_queued(target.clone()));
+            let mut job = Job::new_queued(target.clone());
+            // Liveness handle for the worker spawned below. Moved into that
+            // task so retention cannot collect this entry while the worker is
+            // still draining — see `Job::is_evictable`.
+            let lease = job.issue_worker_lease();
+            jobs.insert(id.clone(), job);
             // Bound retained *finished* scans too: the check above counts only
             // active jobs, so an agent running many quick scans would otherwise
             // hold every result (raw response bodies included, when
             // include_response was set) until the retention TTL expires.
             crate::job::enforce_retention_cap(&mut jobs, MAX_RETAINED_SCANS_MCP);
-            id
+            (id, lease)
         };
 
         Self::log(
@@ -1114,29 +1146,17 @@ browser execution; only detection_method=oob observes a real browser."
             .into_scan_args(),
         );
 
-        // Load any requested remote payload/wordlist providers into the global
-        // registries before the scan reads them. Mirrors the REST server and
-        // CLI; without this the `remote_payloads`/`remote_wordlists` fields
-        // would be silently inert on the MCP path.
-        // A failure is logged rather than swallowed: the scan otherwise runs
-        // without the list the caller asked for and still reports success,
-        // which an agent reads as "scanned, found nothing".
-        if (!scan_args.remote_payloads.is_empty() || !scan_args.remote_wordlists.is_empty())
-            && let Err(e) = crate::utils::init_remote_resources_with_options(
-                &scan_args.remote_payloads,
-                &scan_args.remote_wordlists,
-                Some(scan_args.timeout),
-                scan_args.proxy.clone(),
-            )
-            .await
-        {
-            Self::log(
-                "WRN",
-                &format!(
-                    "remote resource fetch failed ({e}); scanning without the requested remote lists"
-                ),
-            );
-        }
+        // The remote payload/wordlist fetch used to happen right here, before
+        // the job was handed to a worker. That put a network `.await` — up to
+        // the request timeout against a caller-named host — between "the job is
+        // in the map, counting against MAX_ACTIVE_SCANS_MCP" and "a worker owns
+        // it". An MCP tool call cancelled in that window drops this future, so
+        // the worker is never spawned and the job stays `queued` forever:
+        // nothing moves it to a terminal state, `purge_expired_jobs` only
+        // collects terminal jobs, and the capacity slot is gone for the life of
+        // the process. The REST server never had this hole because it spawns
+        // first and fetches inside the task; the fetch now lives in `run_job`
+        // for the same reason.
 
         // Run the scan on tokio's managed blocking-threadpool. We still need a
         // current_thread runtime inside because analyze_parameters and the
@@ -1156,6 +1176,9 @@ browser execution; only detection_method=oob observes a real browser."
         let handler = self.clone();
         let sid = scan_id.clone();
         tokio::task::spawn_blocking(move || {
+            // Held for the whole task; dropping it releases the job to
+            // retention (see `spawn_scan_task` on the REST side).
+            let _lease = worker_lease;
             let sid_for_log = sid.clone();
             let sid_for_recovery = sid.clone();
             let jobs_for_recovery = handler.jobs.clone();

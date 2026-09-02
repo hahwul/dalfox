@@ -330,7 +330,21 @@ pub(crate) struct Job {
     pub started_at_ms: Option<i64>,
     /// Unix ms when the scan reached a terminal state (done/error/cancelled).
     pub finished_at_ms: Option<i64>,
+    /// Liveness handle for the worker that owns this job, if one was spawned.
+    ///
+    /// Held as a `Weak` so the job record never keeps the worker's side alive
+    /// and cloning a `Job` for an outbound response does not look like another
+    /// worker. `strong_count() > 0` means the worker task is still running, and
+    /// therefore may still write results, a final status, or a webhook into
+    /// this entry. See [`Job::is_evictable`].
+    pub worker_lease: Option<std::sync::Weak<()>>,
 }
+
+/// The worker's half of a job's liveness handle: an `Arc` moved into the
+/// spawned task. Dropping it — on completion, on panic, or because the task was
+/// never polled — is what makes [`Job::worker_alive`] go false, so there is no
+/// "clear the flag" path to forget on an error branch.
+pub(crate) type WorkerLease = Arc<()>;
 
 impl Job {
     /// Construct a freshly-queued Job for `target_url`, with timestamps and
@@ -347,7 +361,25 @@ impl Job {
             queued_at_ms: now_ms(),
             started_at_ms: None,
             finished_at_ms: None,
+            worker_lease: None,
         }
+    }
+
+    /// Mint the liveness handle for the worker about to run this job and record
+    /// its `Weak` side on the job. The returned [`WorkerLease`] must be moved
+    /// into the spawned task; retention will not evict this entry until it
+    /// drops.
+    pub(crate) fn issue_worker_lease(&mut self) -> WorkerLease {
+        let lease: WorkerLease = Arc::new(());
+        self.worker_lease = Some(Arc::downgrade(&lease));
+        lease
+    }
+
+    /// True while the worker spawned for this job is still running.
+    pub(crate) fn worker_alive(&self) -> bool {
+        self.worker_lease
+            .as_ref()
+            .is_some_and(|w| w.strong_count() > 0)
     }
 
     pub(crate) fn is_terminal(&self) -> bool {
@@ -355,6 +387,21 @@ impl Job {
             self.status,
             JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
         )
+    }
+
+    /// Terminal **and** nobody is still writing to it.
+    ///
+    /// `is_terminal` alone is not a safe eviction test: cancelling stamps
+    /// `status = Cancelled` and `finished_at_ms` the moment the user asks, but
+    /// the worker keeps draining — it still has partial results to store, a
+    /// final status to reconcile, and (REST) a terminal webhook to fire. Evict
+    /// the entry in that window and `jobs.get_mut(&id)` comes back `None`: the
+    /// results are dropped on the floor, the webhook never fires, and a `GET`
+    /// on the scan_id the client is holding 404s. Automatic retention therefore
+    /// waits for the lease; an explicit `DELETE ?purge=1` still wins, because
+    /// that is the caller asking for exactly this.
+    pub(crate) fn is_evictable(&self) -> bool {
+        self.is_terminal() && !self.worker_alive()
     }
 
     /// Total elapsed ms from `started_at_ms` to `finished_at_ms` (or now, for
@@ -368,9 +415,17 @@ impl Job {
 /// seconds ago. The caller is expected to hold the jobs map's lock.
 pub(crate) fn purge_expired_jobs(jobs: &mut HashMap<String, Job>, retention_secs: i64) {
     let cutoff = now_ms() - retention_secs * 1000;
-    jobs.retain(|_, job| match job.finished_at_ms {
-        Some(finished) => finished >= cutoff,
-        None => true,
+    jobs.retain(|_, job| {
+        // A cancelled job is stamped terminal (status + finished_at_ms) the
+        // moment the user asks, while its worker keeps draining. Retention must
+        // not collect it out from under that worker — see `Job::is_evictable`.
+        if job.worker_alive() {
+            return true;
+        }
+        match job.finished_at_ms {
+            Some(finished) => finished >= cutoff,
+            None => true,
+        }
     });
 }
 
@@ -384,17 +439,19 @@ pub(crate) fn purge_expired_jobs(jobs: &mut HashMap<String, Job>, retention_secs
 /// with nothing bounding the total. This is the bound. Callers apply it while
 /// admitting a new scan, since that is where the jobs lock is already held.
 ///
-/// Only terminal jobs are evicted: a queued/running job still has a worker
+/// Only *settled* jobs are evicted: a queued/running job still has a worker
 /// writing to it, and dropping its entry would strand that worker and lose the
-/// caller's scan_id. If every job is active, the map simply stays over the cap
-/// until they settle.
+/// caller's scan_id. Terminal-but-draining jobs (a cancel stamps the terminal
+/// state immediately while the worker winds down) are held back the same way —
+/// see [`Job::is_evictable`]. If every job is active, the map simply stays over
+/// the cap until they settle.
 pub(crate) fn enforce_retention_cap(jobs: &mut HashMap<String, Job>, cap: usize) {
     if cap == 0 || jobs.len() <= cap {
         return;
     }
     let mut finished: Vec<(String, i64)> = jobs
         .iter()
-        .filter(|(_, job)| job.is_terminal())
+        .filter(|(_, job)| job.is_evictable())
         .map(|(id, job)| (id.clone(), job.finished_at_ms.unwrap_or(job.queued_at_ms)))
         .collect();
     // Oldest first, then by id so two jobs finishing in the same millisecond

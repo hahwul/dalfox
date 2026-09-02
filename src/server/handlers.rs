@@ -83,8 +83,8 @@ pub(crate) async fn start_scan_handler(
     // same-target resubmission in the same nanosecond can't clobber an
     // in-flight job (see make_scan_id's nonce), and so the concurrency cap is
     // checked race-free against the live job count. 503 when at capacity.
-    let id = match try_admit_and_queue(&state, &url, callback_url).await {
-        Some(id) => id,
+    let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
+        Some(admitted) => admitted,
         None => {
             let resp = at_capacity_response(&state);
             return make_api_response(
@@ -105,6 +105,7 @@ pub(crate) async fn start_scan_handler(
         opts,
         include_request,
         include_response,
+        lease,
     );
 
     let resp = ApiResponse::<serde_json::Value> {
@@ -493,8 +494,8 @@ pub(crate) async fn get_scan_handler(
     let callback_url = opts.callback_url.clone();
     // Reserve a unique scan_id and enforce the concurrency cap under one lock
     // (see POST /scan). 503 when at capacity.
-    let id = match try_admit_and_queue(&state, &url, callback_url).await {
-        Some(id) => id,
+    let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
+        Some(admitted) => admitted,
         None => {
             let resp = at_capacity_response(&state);
             return make_api_response(
@@ -516,6 +517,7 @@ pub(crate) async fn get_scan_handler(
         opts,
         include_request,
         include_response,
+        lease,
     );
 
     let resp = ApiResponse::<serde_json::Value> {

@@ -4496,6 +4496,124 @@ async fn test_untrusted_host_is_refused_but_ip_literals_and_localhost_pass() {
     }
 }
 
+/// End-to-end: a scan cancelled while it is still draining must survive the
+/// retention cap, and the worker must still find its entry to write results
+/// into.
+///
+/// `cancel_scan_handler` stamps `status = Cancelled` and `finished_at_ms`
+/// immediately, so `is_terminal()` is true while the worker keeps running.
+/// Retention used to evict on that alone: a few new submissions in that window
+/// removed the entry, and the worker's `jobs.get_mut(&id)` then came back
+/// `None` — partial results dropped, terminal webhook never fired, and a GET on
+/// the scan_id the client is holding 404s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_cancelled_but_draining_scan_survives_the_retention_cap() {
+    let addr = start_slow_reflecting_target_server().await;
+    let mut state = make_state(None, None, false, false, "cb");
+    // Aggressive cap: any further admission wants to evict something.
+    state.max_retained_scans = 1;
+
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1"),
+            options: Some(ScanOptions {
+                timeout: Some(5),
+                skip_mining: Some(true),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&response_body_string(resp).await).expect("json");
+    let scan_id = parsed["data"]["scan_id"]
+        .as_str()
+        .expect("scan_id")
+        .to_string();
+
+    // Wait for the worker to claim the job.
+    for _ in 0..200 {
+        {
+            let jobs = state.jobs.lock().await;
+            if jobs.get(&scan_id).map(|j| j.status.clone()) == Some(JobStatus::Running) {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    {
+        let jobs = state.jobs.lock().await;
+        assert_eq!(
+            jobs.get(&scan_id).map(|j| j.status.clone()),
+            Some(JobStatus::Running),
+            "the scan must be running before we cancel it"
+        );
+    }
+
+    let resp = cancel_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Path(scan_id.clone()),
+        Query(Map::new()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The window this test is about: terminal on paper, worker still running.
+    {
+        let jobs = state.jobs.lock().await;
+        let job = jobs.get(&scan_id).expect("job still present after cancel");
+        assert!(job.is_terminal(), "cancel stamps the terminal state at once");
+        assert!(
+            job.worker_alive(),
+            "the slow target guarantees the worker is still draining here"
+        );
+    }
+
+    // Three more admissions, each of which runs enforce_retention_cap against a
+    // cap of 1. Leases are held so these stay active and are never themselves
+    // candidates — the cancelled job is the only one the old code could take.
+    let mut _leases = Vec::new();
+    for i in 0..3 {
+        let (_id, lease) =
+            try_admit_and_queue(&state, &format!("http://example.com/filler{i}"), None)
+                .await
+                .expect("admission succeeds");
+        _leases.push(lease);
+    }
+
+    {
+        let jobs = state.jobs.lock().await;
+        assert!(
+            jobs.contains_key(&scan_id),
+            "a cancelled scan whose worker is still draining must not be evicted"
+        );
+    }
+
+    // And the worker still has somewhere to put what it collected.
+    for _ in 0..400 {
+        {
+            let jobs = state.jobs.lock().await;
+            let job = jobs.get(&scan_id).expect("job must remain until it settles");
+            if !job.worker_alive() {
+                assert!(
+                    job.results.is_some(),
+                    "the draining worker must have written its results back"
+                );
+                return;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("cancelled scan never settled");
+}
+
 #[tokio::test]
 async fn test_retention_cap_evicts_oldest_finished_scans_only() {
     let mut state = make_state(None, None, false, false, "callback");
@@ -4514,7 +4632,7 @@ async fn test_retention_cap_evicts_oldest_finished_scans_only() {
         jobs.insert("running".to_string(), running);
     }
 
-    let id = try_admit_and_queue(&state, "http://example.com/new", None)
+    let (id, _lease) = try_admit_and_queue(&state, "http://example.com/new", None)
         .await
         .expect("admission succeeds");
 

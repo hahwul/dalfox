@@ -233,11 +233,13 @@ pub(crate) fn parse_opt_bool_query(params: &HashMap<String, String>, key: &str) 
 /// (non-terminal) jobs and inserting under the *same* lock keeps the check
 /// race-free. Returns the reserved scan_id on success. Shared by POST and GET
 /// /scan so both paths enforce the cap and build the queued job identically.
+/// Returns the reserved scan_id together with the worker lease the caller must
+/// move into the scan task (see [`crate::job::Job::is_evictable`]).
 pub(crate) async fn try_admit_and_queue(
     state: &AppState,
     url: &str,
     callback_url: Option<String>,
-) -> Option<String> {
+) -> Option<(String, WorkerLease)> {
     let mut jobs = state.jobs.lock().await;
     if state.max_concurrent_scans > 0
         && jobs.values().filter(|j| !j.is_terminal()).count() >= state.max_concurrent_scans
@@ -245,28 +247,17 @@ pub(crate) async fn try_admit_and_queue(
         return None;
     }
     let id = crate::utils::make_unique_scan_id(url, |id| jobs.contains_key(id));
-    jobs.insert(
-        id.clone(),
-        Job {
-            status: JobStatus::Queued,
-            results: None,
-            callback_url,
-            progress: JobProgress::default(),
-            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            error_message: None,
-            target_url: url.to_string(),
-            queued_at_ms: now_ms(),
-            started_at_ms: None,
-            finished_at_ms: None,
-        },
-    );
+    let mut job = Job::new_queued(url.to_string());
+    job.callback_url = callback_url;
+    let lease = job.issue_worker_lease();
+    jobs.insert(id.clone(), job);
     // Bound retained finished scans. The admission cap above counts only active
     // jobs, so without this the map grows with every quick scan until the
     // retention TTL expires. Applied after the insert so the steady state is
     // exactly `max_retained_scans`; the job just added is non-terminal and so
     // is never a candidate for eviction.
     enforce_retention_cap(&mut jobs, state.max_retained_scans);
-    Some(id)
+    Some((id, lease))
 }
 
 /// Build the standard 503 "at capacity" response body for a rejected admission.

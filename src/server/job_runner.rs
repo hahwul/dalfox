@@ -11,6 +11,13 @@ use crate::job::spec::ScanRequestSpec;
 /// `JoinHandle` and leaves the job pinned in `Queued`/`Running` forever.
 /// `purge_expired_jobs` only collects terminal jobs, so the orphan also
 /// leaks the job slot indefinitely.
+///
+/// `lease` is the job's liveness handle: it is moved into the spawned task and
+/// dropped when the task ends (including on panic), which is what tells job
+/// retention this entry is finally safe to evict. Without it, cancelling a scan
+/// — which stamps the terminal state immediately while the worker drains —
+/// makes the job look collectable, and an eviction in that window drops the
+/// partial results and the terminal webhook on the floor.
 pub(crate) fn spawn_scan_task(
     state: AppState,
     job_id: String,
@@ -18,8 +25,11 @@ pub(crate) fn spawn_scan_task(
     opts: ScanOptions,
     include_request: bool,
     include_response: bool,
+    lease: WorkerLease,
 ) {
     tokio::task::spawn_blocking(move || {
+        // Held for the whole task; dropping it releases the job to retention.
+        let _lease = lease;
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
