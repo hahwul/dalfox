@@ -3052,3 +3052,100 @@ async fn test_run_scanning_limit_abort_keeps_already_confirmed_findings() {
         params
     );
 }
+
+/// The other half of the `--sxss` gate parity: the Path-injection drops.
+///
+/// A path segment echoed back by an error page is only a finding when it lands
+/// somewhere a browser parses as markup. Pure URL echo — a canonical `<link>`,
+/// `<a href>` breadcrumbs — is noise, and the plain reflection path drops it via
+/// `should_suppress_path_reflection_with_body`. The `--sxss` branch never ran
+/// that check, so stored runs reported every 404 that prints the requested URI.
+#[tokio::test]
+async fn test_sxss_path_injection_drops_url_echo_only_reflections() {
+    use axum::extract::Path as AxumPath;
+    use axum::http::{StatusCode, header};
+    use axum::{Router, response::IntoResponse, routing::get};
+
+    /// 404 that echoes the requested path *only* inside a canonical link.
+    async fn url_echo(AxumPath(rest): AxumPath<String>) -> impl IntoResponse {
+        (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            format!(
+                "<html><head><link rel=\"canonical\" href=\"/{}\"></head><body>Not found</body></html>",
+                rest
+            ),
+        )
+    }
+
+    /// 404 that renders the requested path into the document body — genuine
+    /// error-page XSS, and it must survive the gate.
+    async fn body_echo(AxumPath(rest): AxumPath<String>) -> impl IntoResponse {
+        (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            format!("<html><body><table><td>{}</td></table></body></html>", rest),
+        )
+    }
+
+    /// An empty body carries no evidence at all.
+    async fn empty() -> impl IntoResponse {
+        (
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            String::new(),
+        )
+    }
+
+    let addr = spawn_regression_app(
+        Router::new()
+            .route("/url-echo/{*rest}", get(url_echo))
+            .route("/body-echo/{*rest}", get(body_echo))
+            .route("/empty/{*rest}", get(empty)),
+    )
+    .await;
+
+    async fn scan_path(addr: std::net::SocketAddr, prefix: &str) -> usize {
+        let url = format!("http://{}/{}/seg", addr, prefix);
+        let mut target = parse_target(&url).expect("parse_target");
+        target.workers = 2;
+        // `Location::Path` params are addressed by segment index (see
+        // `url_inject`); index 1 is the `seg` component.
+        target.reflection_params = vec![Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new(
+                "path_segment_1".to_string(),
+                "seg".to_string(),
+                Location::Path,
+            )
+        }];
+
+        let mut raw_args = integration_scan_args(false);
+        raw_args.sxss = true;
+        raw_args.max_payloads_per_param = 8;
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(raw_args),
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        results.lock().await.len()
+    }
+
+    assert!(
+        scan_path(addr, "body-echo").await > 0,
+        "control: a 404 that renders the path segment into the document body is \
+         real error-page XSS and must still be reported under --sxss"
+    );
+    assert_eq!(
+        scan_path(addr, "url-echo").await,
+        0,
+        "a path segment echoed only inside a canonical <link> is URL noise; \
+         --sxss must apply the same body-level Path gate the plain path applies"
+    );
+    assert_eq!(
+        scan_path(addr, "empty").await,
+        0,
+        "an empty response body carries no evidence"
+    );
+}
