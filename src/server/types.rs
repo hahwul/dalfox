@@ -19,7 +19,11 @@ pub struct ServerArgs {
     #[arg(long = "api-key")]
     pub api_key: Option<String>,
 
-    /// Path to a log file to also write logs (plain text, no ANSI colors)
+    /// Path to a log file to also write logs (plain text, no ANSI colors).
+    /// Created mode 0600 on Unix — the log records every submitted target URL,
+    /// which routinely carries the credential that made it worth scanning. An
+    /// existing file keeps its current permissions; the server warns at startup
+    /// if it is readable by group or other.
     #[clap(help_heading = "SERVER")]
     #[arg(long = "log-file")]
     pub log_file: Option<String>,
@@ -73,14 +77,16 @@ pub struct ServerArgs {
     pub max_body_bytes: usize,
 
     /// Comma-separated list of allowed origins for CORS. Supports:
-    /// - "*" (match all)
-    /// - exact origins (http://localhost:3000)
+    /// - "*" (match all; also switches the cross-site gate off)
+    /// - exact origins (http://localhost:3000), compared case-insensitively
     /// - "regex:<pattern>" for regex
+    ///
+    /// Both pattern forms are anchored to the whole `Origin`.
     #[clap(help_heading = "CORS")]
     #[arg(
         long = "allowed-origins",
-        help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all)\n  - exact origins (http://localhost:3000)\n  - \"regex:<pattern>\" for regex",
-        long_help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all)\n  - exact origins (http://localhost:3000)\n  - \"regex:<pattern>\" for regex"
+        help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all, and switches the cross-site gate off)\n  - exact origins (http://localhost:3000), compared case-insensitively\n  - \"regex:<pattern>\" for regex\nPatterns match the whole Origin, so they must cover the port too.",
+        long_help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all, and switches the cross-site gate off)\n  - exact origins (http://localhost:3000), compared case-insensitively\n  - \"regex:<pattern>\" for regex\n\nBoth pattern forms are anchored to the whole Origin, so a longer host that\nmerely contains one is refused — and a pattern must cover the port when the\norigins it describes carry one (https://app.example.com:8443)."
     )]
     pub allowed_origins: Option<String>,
 

@@ -5014,3 +5014,341 @@ fn test_callback_url_validation_and_dispatch_agree_on_the_scheme() {
         );
     }
 }
+
+/// Build the state a real `run_server` would from an `--allowed-origins`
+/// value, so the gate is exercised through the same compilation path the
+/// binary uses rather than through hand-placed regexes.
+fn state_from_allowed_origins(spec: &str) -> AppState {
+    let rules = compile_allowed_origins(Some(spec));
+    let mut state = make_state(None, None, false, false, "callback");
+    state.allowed_origins = rules.origins;
+    state.allowed_origin_regexes = rules.regexes;
+    state.allow_all_origins = rules.allow_all;
+    state
+}
+
+/// `regex:` patterns must match the **whole** `Origin`.
+///
+/// `Regex::is_match` searches anywhere in the subject, so an unanchored
+/// `https://app\.example\.com` was also a substring of
+/// `https://app.example.com.evil.com` — a host anyone can register. That is
+/// not a CORS-header-only problem: `origin_allowed` is what the cross-site
+/// gate consults, so the attacker's page got a pass through it and could
+/// drive the whole API (launch scans, read results) from the operator's
+/// browser — the one boundary `auth.rs` exists to hold.
+#[test]
+fn test_allowed_origins_regex_is_anchored_to_the_whole_origin() {
+    let state = state_from_allowed_origins(r"regex:https://app\.example\.com");
+
+    assert!(
+        origin_allowed(&state, "https://app.example.com"),
+        "the origin the operator described must still be allowed"
+    );
+    // The reachable forgery: an `Origin` is `scheme://host[:port]`, so the only
+    // way an attacker gets the pattern to appear inside one is to register a
+    // host that extends it.
+    for forged in [
+        "https://app.example.com.evil.com",
+        "https://app.example.com.evil.com:8443",
+    ] {
+        assert!(
+            !origin_allowed(&state, forged),
+            "'{forged}' merely contains the pattern; matching it hands an \
+             attacker-registered host a pass through the cross-site gate"
+        );
+    }
+
+    // The gate itself, not just the matcher, must refuse it.
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "Origin",
+        HeaderValue::from_static("https://app.example.com.evil.com"),
+    );
+    let denied = check_request_source(&state, &headers)
+        .expect_err("a suffix-forged origin must not pass the cross-site gate");
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+}
+
+/// Anchoring must not break the patterns operators already write: an
+/// explicitly anchored pattern keeps working (the added anchors assert the
+/// same positions), and a top-level alternation must be wrapped rather than
+/// split — `^a|b$` would accept anything ending in `b`.
+#[test]
+fn test_anchoring_preserves_explicit_anchors_and_alternation() {
+    let already = state_from_allowed_origins(r"regex:^https://.*\.example\.com$");
+    assert!(origin_allowed(&already, "https://api.example.com"));
+    assert!(!origin_allowed(
+        &already,
+        "https://api.example.com.evil.com"
+    ));
+
+    let alt = state_from_allowed_origins(r"regex:https://a\.test|https://b\.test");
+    assert!(origin_allowed(&alt, "https://a.test"));
+    assert!(origin_allowed(&alt, "https://b.test"));
+    assert!(
+        !origin_allowed(&alt, "https://evil.test/https://b.test"),
+        "the alternation must be anchored as a whole, not just its last branch"
+    );
+}
+
+#[test]
+fn test_compile_allowed_origins_handles_star_wildcards_and_bad_patterns() {
+    let star = compile_allowed_origins(Some("*, https://app.example.com"));
+    assert!(star.allow_all);
+
+    let wild = state_from_allowed_origins("https://*.corp.local");
+    assert!(origin_allowed(&wild, "https://ui.corp.local"));
+    assert!(
+        !origin_allowed(&wild, "https://ui.corp.local.evil.com"),
+        "the wildcard form has always been anchored and must stay that way"
+    );
+
+    // An uncompilable pattern is dropped, which fails closed: nothing matches
+    // it rather than everything.
+    let broken = compile_allowed_origins(Some("regex:https://(unclosed"));
+    assert!(broken.regexes.is_empty());
+    assert!(!broken.allow_all);
+
+    // No flag at all leaves the exact list unset, which `build_cors_headers`
+    // reads as "emit no CORS headers".
+    assert!(compile_allowed_origins(None).origins.is_none());
+}
+
+/// Findings — including full request/response bodies when the submitter asked
+/// for them — are authorized by a header no cache keys on, so every response
+/// has to opt out of storage explicitly.
+#[tokio::test]
+async fn test_api_responses_are_never_cacheable() {
+    let state = make_state(Some("k"), None, false, false, "callback");
+    let resp = ApiResponse::<serde_json::Value> {
+        code: 200,
+        msg: "ok".to_string(),
+        data: None,
+    };
+    let (_, headers, _) = make_api_response(
+        &state,
+        &HeaderMap::new(),
+        &Map::new(),
+        StatusCode::OK,
+        &resp,
+    );
+    assert_eq!(
+        headers.get("Cache-Control").and_then(|v| v.to_str().ok()),
+        Some("no-store"),
+        "a shared cache or the browser disk cache must not retain scan results"
+    );
+}
+
+/// The log records every submitted target URL verbatim, and a scan target
+/// routinely carries the credential that made it worth scanning. Creating the
+/// file `0644` published all of it to every local account on the host.
+#[cfg(unix)]
+#[test]
+fn test_log_file_is_created_private_to_the_owner() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = temp_log_path("perms");
+    let _ = std::fs::remove_file(&path);
+    let state = AppState {
+        log_file: Some(path.to_string_lossy().into_owned()),
+        ..make_state(None, None, false, false, "callback")
+    };
+    log(
+        &state,
+        "JOB",
+        "queued id=x url=https://example.com/?token=secret",
+    );
+
+    let mode = std::fs::metadata(&path)
+        .expect("the log file must exist after a log line")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "the log file must not be readable by other local accounts, got {mode:o}"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Scheme and host are case-insensitive per RFC 6454, and `check_host` already
+/// treats the sibling `Host` value that way. A byte-exact compare turned an
+/// allow-list entry with any capitalization into a silently dead rule: the
+/// browser sends the lowercased origin, so the operator's own web UI got a 403
+/// with nothing pointing at the cause.
+#[test]
+fn test_exact_origin_entries_are_matched_case_insensitively() {
+    let state = state_from_allowed_origins("https://App.Corp.Local");
+    assert!(origin_allowed(&state, "https://app.corp.local"));
+    assert!(origin_allowed(&state, "https://APP.CORP.LOCAL"));
+    assert!(!origin_allowed(&state, "https://other.corp.local"));
+}
+
+/// `regex:` with nothing after it anchors to `^(?:)$`, which matches the empty
+/// string — so a stray prefix left while editing the list would admit a request
+/// carrying an empty `Origin`, and admitting it skips the `Sec-Fetch-Site`
+/// fallback entirely.
+#[test]
+fn test_empty_regex_entry_is_rejected_rather_than_matching_an_empty_origin() {
+    let rules = compile_allowed_origins(Some("regex:"));
+    assert!(rules.regexes.is_empty());
+    assert_eq!(rules.rejected.len(), 1, "the operator must be told");
+
+    let state = state_from_allowed_origins("regex:");
+    assert!(!origin_allowed(&state, ""));
+}
+
+/// A dropped pattern fails closed, so the only way an operator learns why their
+/// web UI started getting 403s is this report — which has to reach `--log-file`,
+/// not just stderr.
+#[test]
+fn test_uncompilable_origin_patterns_are_reported_for_logging() {
+    let rules = compile_allowed_origins(Some("regex:https://(unclosed, https://ok.example"));
+    assert!(rules.regexes.is_empty());
+    assert_eq!(rules.rejected.len(), 1);
+    assert!(
+        rules.rejected[0].contains("unclosed"),
+        "the report must name the offending entry, got {:?}",
+        rules.rejected
+    );
+}
+
+/// `check_cross_site` returns `Ok` for `allow_all_origins` before it looks at
+/// anything, exactly as it does for `jsonp_enabled` — so `--allowed-origins '*'`
+/// switches the gate off just as completely and has to be flagged the same way.
+#[test]
+fn test_wildcard_star_disables_the_cross_site_gate_like_jsonp() {
+    let state = state_from_allowed_origins("*");
+    assert!(state.allow_all_origins);
+
+    let mut headers = HeaderMap::new();
+    headers.insert("Origin", HeaderValue::from_static("https://evil.example"));
+    headers.insert("Sec-Fetch-Site", HeaderValue::from_static("cross-site"));
+    assert!(
+        check_request_source(&state, &headers).is_ok(),
+        "'*' is an explicit opt-out of the gate; the startup warning is what \
+         makes that visible to the operator"
+    );
+}
+
+/// The CORS preflights answer before any handler auth, so without the source
+/// gate they hand a page the operator visits — or a rebound `Host` — a 204 that
+/// confirms a dalfox server is listening, which is the fingerprint `/health`'s
+/// own gate exists to deny.
+#[tokio::test]
+async fn test_options_preflights_are_source_gated() {
+    let state = make_state(None, Some(vec!["https://ui.example"]), false, false, "cb");
+
+    let mut rebound = HeaderMap::new();
+    rebound.insert("Host", HeaderValue::from_static("evil.example"));
+    let resp = options_scan_handler(State(state.clone()), rebound)
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    let mut cross = HeaderMap::new();
+    cross.insert("Origin", HeaderValue::from_static("https://evil.example"));
+    let resp = super::options_result_handler(State(state.clone()), cross, Path("id".to_string()))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // The configured web UI's own preflight still gets its 204 + ACAO.
+    let mut allowed = HeaderMap::new();
+    allowed.insert("Origin", HeaderValue::from_static("https://ui.example"));
+    let resp = options_scan_handler(State(state), allowed)
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        resp.headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok()),
+        Some("https://ui.example")
+    );
+}
+
+/// The startup warnings are the only signal an operator gets for four
+/// misconfigurations that all fail silently at runtime: a log file the previous
+/// version left world-readable, an origin pattern that could not compile (its
+/// web UI just starts getting 403s), an API key short enough to guess, and a
+/// cross-site gate switched off by `--allowed-origins '*'`. They run once, at
+/// boot, on a path no other test reaches — so drive `run_server` far enough to
+/// emit them and read them back out of the log file they must reach.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_run_server_warns_about_misconfiguration_before_serving() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Occupy a port so `run_server` returns right after the warnings.
+    let guard = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind guard listener");
+    let addr = guard.local_addr().expect("guard addr");
+
+    // `api_key` splits the warnings into two runs: the short-key warning needs
+    // a key, and the gate warning only fires when there is none.
+    let boot = async |api_key: Option<&str>, label: &str| -> String {
+        // Pre-create the log file world-readable, the way an in-place upgrade
+        // from a version without `open_log_file` leaves it.
+        let path = temp_log_path(label);
+        std::fs::write(&path, "").expect("seed log file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("seed log file mode");
+
+        let err = run_server(ServerArgs {
+            port: addr.port(),
+            host: Ipv4Addr::LOCALHOST.to_string(),
+            api_key: api_key.map(str::to_string),
+            log_file: Some(path.to_string_lossy().into_owned()),
+            rate_limit: None,
+            scan_timeout: None,
+            max_concurrent_scans: 100,
+            allowed_hosts: None,
+            max_retained_scans: 1000,
+            max_body_bytes: 1_048_576,
+            allowed_origins: Some("*,regex:https://(unclosed,regex:".to_string()),
+            jsonp: false,
+            callback_param_name: "callback".to_string(),
+            cors_allow_methods: None,
+            cors_allow_headers: None,
+        })
+        .await;
+        assert!(err.is_err(), "the occupied port must still surface");
+
+        let logged = std::fs::read_to_string(&path).expect("read back the log file");
+        let _ = std::fs::remove_file(&path);
+        logged
+    };
+
+    let with_key = boot(Some("short-key"), "startup-warnings-keyed").await;
+    assert!(
+        with_key.contains("--api-key is shorter than the recommended"),
+        "nothing rate-limits a wrong key, so a short one has to be called out, \
+         got:\n{with_key}"
+    );
+    assert!(
+        !with_key.contains("9 characters"),
+        "the exact key length is what constant_time_eq confines to a timing \
+         difference; it must not become a durable record, got:\n{with_key}"
+    );
+    assert!(
+        with_key.contains("unclosed") && with_key.contains("empty allowed-origins regex"),
+        "a dropped pattern fails closed, so the report has to reach --log-file \
+         rather than a bare stderr line, got:\n{with_key}"
+    );
+    assert!(
+        with_key.contains("is mode 644"),
+        "an upgraded-in-place log file keeps its old mode, which is the case \
+         `open_log_file` cannot fix on its own, got:\n{with_key}"
+    );
+
+    let no_key = boot(None, "startup-warnings-open").await;
+    assert!(
+        no_key.contains("--allowed-origins '*' is enabled with NO API key"),
+        "'*' switches the cross-site gate off exactly like --jsonp and must be \
+         flagged the same way, got:\n{no_key}"
+    );
+
+    drop(guard);
+}

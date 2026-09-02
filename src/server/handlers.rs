@@ -244,10 +244,21 @@ pub(crate) async fn get_result_handler(
     }
 }
 
+/// CORS preflight. No API key is checked — a browser never attaches one to a
+/// preflight — but the source gate still applies, for the same reason
+/// `/health` carries it: without it a page the operator visits can use a 204
+/// to fingerprint a dalfox server on their machine, and a rebound `Host` gets
+/// an answer here that it is refused everywhere else. A genuine preflight from
+/// an allowed origin passes on the `Origin` branch; one from a disallowed
+/// origin is refused instead of getting a 204 with no `Access-Control-Allow-Origin`,
+/// which fails the browser's preflight either way.
 pub(crate) async fn options_scan_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    if let Err(denied) = check_request_source(&state, &headers) {
+        return (denied.status(), HeaderMap::new());
+    }
     let cors = build_cors_headers(&state, &headers);
     (StatusCode::NO_CONTENT, cors)
 }
@@ -576,11 +587,16 @@ pub(crate) async fn health_handler(
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
 
+/// CORS preflight for the id-bearing routes. Source-gated exactly like
+/// [`options_scan_handler`].
 pub(crate) async fn options_result_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(_id): Path<String>,
 ) -> impl IntoResponse {
+    if let Err(denied) = check_request_source(&state, &headers) {
+        return (denied.status(), HeaderMap::new());
+    }
     let cors = build_cors_headers(&state, &headers);
     (StatusCode::NO_CONTENT, cors)
 }

@@ -63,6 +63,12 @@ pub(crate) use response::*;
 pub(crate) use types::*;
 pub(crate) use util::*;
 
+/// Shortest `--api-key` the server will not warn about. The API-key check has
+/// no throttle or lockout, so key length is the entire cost of a brute-force
+/// attempt; 24 random characters is comfortably past what an attacker can walk
+/// over a network.
+const MIN_RECOMMENDED_API_KEY_LEN: usize = 24;
+
 /// Run the REST API server until it shuts down gracefully.
 ///
 /// Returns `Err` when the server never came up (an unparseable bind address, a
@@ -89,43 +95,10 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         api_key = Some(v);
     }
 
-    // Parse allowed origins, build regex list and wildcard flag
-    let allowed_origins_vec = args.allowed_origins.as_ref().map(|s| {
-        s.split(',')
-            .map(|x| x.trim().to_string())
-            .filter(|x| !x.is_empty())
-            .collect::<Vec<_>>()
-    });
-
-    let mut allowed_origin_regexes = Vec::new();
-    let mut allow_all_origins = false;
-    if let Some(list) = &allowed_origins_vec {
-        for item in list {
-            if item == "*" {
-                allow_all_origins = true;
-            } else if let Some(pat) = item.strip_prefix("regex:") {
-                match regex::Regex::new(pat) {
-                    Ok(re) => allowed_origin_regexes.push(re),
-                    Err(e) => eprintln!(
-                        "[WRN] ignoring invalid allowed-origins regex '{}': {}",
-                        pat, e
-                    ),
-                }
-            } else if item.contains('*') {
-                // Convert simple wildcard to regex
-                let mut pattern = regex::escape(item);
-                pattern = pattern.replace("\\*", ".*");
-                let anchored = format!("^{}$", pattern);
-                match regex::Regex::new(&anchored) {
-                    Ok(re) => allowed_origin_regexes.push(re),
-                    Err(e) => eprintln!(
-                        "[WRN] ignoring invalid allowed-origins wildcard '{}': {}",
-                        item, e
-                    ),
-                }
-            }
-        }
-    }
+    // Parse allowed origins into the exact list, the compiled (anchored)
+    // patterns, and the `*` opt-in. See `cors::compile_allowed_origins`.
+    let origin_rules = compile_allowed_origins(args.allowed_origins.as_deref());
+    let origin_rejections = origin_rules.rejected;
 
     let allow_methods = args
         .cors_allow_methods
@@ -161,10 +134,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
     // for. Creating it up front also means the file exists immediately, so
     // `tail -F` works from before the first request.
     if let Some(path) = &args.log_file
-        && let Err(e) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        && let Err(e) = open_log_file(path)
     {
         let msg = format!("Cannot open --log-file {}: {}", path, e);
         eprintln!("{}", msg);
@@ -175,9 +145,9 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         api_key,
         jobs: Arc::new(Mutex::new(HashMap::new())),
         log_file: args.log_file.clone(),
-        allowed_origins: allowed_origins_vec,
-        allowed_origin_regexes,
-        allow_all_origins,
+        allowed_origins: origin_rules.origins,
+        allowed_origin_regexes: origin_rules.regexes,
+        allow_all_origins: origin_rules.allow_all,
         allow_methods,
         allow_headers,
         jsonp_enabled: args.jsonp,
@@ -239,18 +209,95 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         );
     }
 
-    // JSONP is served to `<script src>` loads, which carry no Origin to check,
-    // so turning it on necessarily switches off the cross-site gate (see
-    // `auth::check_cross_site`). Combined with no API key, that means any page
-    // the operator visits can both launch scans and read their results.
-    if state.jsonp_enabled && auth_disabled {
+    // A short key is not a boundary. Nothing here throttles or locks out a
+    // wrong `X-API-KEY`, so the only cost of a guess is one request — an
+    // attacker who can reach the port walks a small keyspace at line rate.
+    // Warn rather than refuse: the key may be a deployment-generated value the
+    // operator cannot lengthen, and refusing to start would be worse than
+    // running with a weak one they were told about.
+    //
+    // Counted in characters, matching what the message and the docs promise —
+    // `len()` would let a 12-character non-ASCII key past a byte comparison.
+    // The exact count stays out of the message: `constant_time_eq` deliberately
+    // confines key length to a timing difference, and this line is written to
+    // stdout and to `--log-file`, where it would become a durable one.
+    if !auth_disabled
+        && let Some(key) = state.api_key.as_deref()
+        && key.chars().count() < MIN_RECOMMENDED_API_KEY_LEN
+    {
         log(
             &state,
             "WRN",
-            "--jsonp is enabled with NO API key — any website the operator visits can \
-             launch scans through this API and read the results cross-origin. Set \
-             --api-key (or DALFOX_API_KEY), or drop --jsonp.",
+            &format!(
+                "--api-key is shorter than the recommended {} characters — nothing \
+                 rate-limits a wrong key, so a short one is guessable at line rate.",
+                MIN_RECOMMENDED_API_KEY_LEN
+            ),
         );
+    }
+
+    // Two flags switch the cross-site gate off outright — `check_cross_site`
+    // returns `Ok` for `jsonp_enabled || allow_all_origins` before it looks at
+    // anything. JSONP is served to `<script src>` loads, which carry no Origin
+    // to validate; `--allowed-origins '*'` says every origin is allowed, which
+    // is the same statement spelled differently. Combined with no API key,
+    // either one means any page the operator visits can launch scans through
+    // this API and read the results.
+    let gate_disabled_by = match (state.jsonp_enabled, state.allow_all_origins) {
+        (true, true) => Some("--jsonp and --allowed-origins '*' are"),
+        (true, false) => Some("--jsonp is"),
+        (false, true) => Some("--allowed-origins '*' is"),
+        (false, false) => None,
+    };
+    if let Some(flags) = gate_disabled_by
+        && auth_disabled
+    {
+        log(
+            &state,
+            "WRN",
+            &format!(
+                "{} enabled with NO API key — the cross-site gate is off, so any website \
+                 the operator visits can launch scans through this API and read the \
+                 results. Set --api-key (or DALFOX_API_KEY), or name the specific web UI \
+                 with --allowed-origins.",
+                flags
+            ),
+        );
+    }
+
+    // An origin pattern that could not be compiled is dropped, which fails
+    // closed: the web UI it described starts getting 403s from the cross-site
+    // gate. Reported here rather than at compile time so it lands in
+    // `--log-file` alongside the other startup warnings — under systemd a bare
+    // stderr line is exactly what nobody reads.
+    for rejection in &origin_rejections {
+        log(&state, "WRN", &format!("ignoring {}", rejection));
+    }
+
+    // `open_log_file` creates the file 0600, but the mode only applies at
+    // creation — a server upgraded in place keeps the world-readable file the
+    // previous version made, and every target URL in it (with whatever token
+    // made the target worth scanning) stays readable by every local account.
+    // Chmod-ing a file the operator may deliberately have opened up to a log
+    // group would be worse than saying so.
+    #[cfg(unix)]
+    if let Some(path) = &state.log_file {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mode = meta.permissions().mode() & 0o777;
+            if mode & 0o077 != 0 {
+                log(
+                    &state,
+                    "WRN",
+                    &format!(
+                        "--log-file {} is mode {:o} — it records every submitted target \
+                         URL, so any local account can read them. New log files are \
+                         created 0600; run `chmod 600 {}` on this one.",
+                        path, mode, path
+                    ),
+                );
+            }
+        }
     }
 
     let listener = match tokio::net::TcpListener::bind(addr).await {

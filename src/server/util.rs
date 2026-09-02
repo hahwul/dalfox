@@ -273,6 +273,25 @@ pub(crate) fn at_capacity_response(state: &AppState) -> ApiResponse<serde_json::
     }
 }
 
+/// Open (creating if needed) the `--log-file` for appending.
+///
+/// On Unix the file is created `0600`. The log records target URLs verbatim,
+/// and a scan target routinely carries the credential that made it worth
+/// scanning — a session id, a signed URL, an `?api_key=` — so the default
+/// `0644` published every submitted URL to every local account on the host.
+/// The mode only applies at creation, so an existing file keeps whatever
+/// permissions the operator gave it.
+pub(crate) fn open_log_file(path: &str) -> std::io::Result<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)
+}
+
 /// Emit a structured server log line — gray `{ts}` + colored `{level}` token +
 /// message — to stdout and, when `--log-file` is set, append it to that file.
 /// The message is run through [`sanitize_log_message`](crate::utils::log::sanitize_log_message)
@@ -295,13 +314,9 @@ pub(crate) fn log(state: &AppState, level: &str, message: &str) {
 
     if let Some(path) = &state.log_file {
         let line = format!("[{}] [{}] {}\n", ts, lvl, message);
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .and_then(|mut f| {
-                use std::io::Write;
-                f.write_all(line.as_bytes())
-            });
+        let _ = open_log_file(path).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(line.as_bytes())
+        });
     }
 }

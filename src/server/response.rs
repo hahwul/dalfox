@@ -100,5 +100,17 @@ pub(crate) fn make_api_response<T: Serialize>(
         "X-Content-Type-Options",
         "nosniff".parse().expect("static nosniff header"),
     );
+    // Every response with a body is per-caller and sensitive: `GET /scan/{id}`
+    // and `/scans` return findings — including full request/response bodies
+    // when the submitter asked for them — and all of it is gated on a header
+    // (`X-API-KEY`) that no cache keys on. Without an explicit directive a
+    // shared cache or a reverse proxy may store a 200 under heuristic freshness
+    // and replay it to a caller who never presented the key, and the browser
+    // disk cache keeps a JSONP result around for whoever reads the profile
+    // next. `no-store` is the only directive that keeps it out of both.
+    cors.insert(
+        "Cache-Control",
+        "no-store".parse().expect("static cache-control header"),
+    );
     (status, cors, body)
 }
