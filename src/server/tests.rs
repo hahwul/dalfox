@@ -903,14 +903,12 @@ async fn test_get_scan_handler_success_parses_query_options_and_jsonp() {
     params.insert("user_agent".to_string(), "Dalfox-Test-UA".to_string());
     params.insert("include_request".to_string(), "true".to_string());
     params.insert("include_response".to_string(), "true".to_string());
-    params.insert(
-        "remote_payloads".to_string(),
-        "unknown-provider".to_string(),
-    );
-    params.insert(
-        "remote_wordlists".to_string(),
-        "unknown-provider".to_string(),
-    );
+    // No `remote_payloads` / `remote_wordlists` here. They used to carry
+    // `unknown-provider`, which resolved to zero URLs and so touched no
+    // network; unknown names are now a 400 in their own right (see
+    // `test_validate_scan_options_rejects_unknown_remote_provider`), and
+    // naming a *real* provider instead would have this handler test fetch a
+    // live list over the wire.
     params.insert("detect_outdated_libs".to_string(), "true".to_string());
 
     let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
@@ -5351,4 +5349,79 @@ async fn test_run_server_warns_about_misconfiguration_before_serving() {
     );
 
     drop(guard);
+}
+
+#[test]
+fn test_validate_scan_options_rejects_unknown_remote_provider() {
+    // Same silent-coverage-loss class as an unknown encoder: the name resolves
+    // to zero URLs, an empty list is cached for that provider set, and the scan
+    // settles `done` having quietly skipped what the caller asked for. Shared
+    // with MCP via `job::validate_remote_providers`.
+    let mut ok = ScanOptions {
+        remote_payloads: Some(vec!["portswigger".to_string()]),
+        remote_wordlists: Some(vec!["burp".to_string()]),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut ok).is_ok());
+
+    let mut bad_payloads = ScanOptions {
+        remote_payloads: Some(vec!["payloadboxx".to_string()]),
+        ..ScanOptions::default()
+    };
+    let err = validate_scan_options(&mut bad_payloads)
+        .expect_err("unknown payload provider must be rejected");
+    assert!(err.contains("remote_payloads"), "got: {err}");
+    assert!(err.contains("payloadboxx"), "got: {err}");
+
+    let mut bad_wordlists = ScanOptions {
+        remote_wordlists: Some(vec!["assetnotes".to_string()]),
+        ..ScanOptions::default()
+    };
+    let err = validate_scan_options(&mut bad_wordlists)
+        .expect_err("unknown wordlist provider must be rejected");
+    assert!(err.contains("remote_wordlists"), "got: {err}");
+}
+
+#[test]
+fn test_validate_scan_options_rejects_unusable_blind_callback() {
+    // `blind` arms stored blind-XSS injection: `<script src=…>` payloads are
+    // written into every parameter of the target and stay there. A value that
+    // can never receive a callback must not arm it — the job would modify the
+    // target permanently, for nothing, and still report `done`.
+    for bad in [
+        "cb.example",
+        "//cb.example",
+        "ftp://cb.example/x",
+        "http://",
+        "https://a b",
+    ] {
+        let mut opts = ScanOptions {
+            blind: Some(bad.to_string()),
+            ..ScanOptions::default()
+        };
+        let err = validate_scan_options(&mut opts).expect_err(&format!("{bad} must be rejected"));
+        assert!(
+            err.contains("blind") && err.contains("http"),
+            "error must name the REST field (`blind`, not `blind_callback_url`) \
+             and the accepted shape: {err}"
+        );
+    }
+
+    // Empty already meant "no blind XSS" and normalizes to absent rather than
+    // arming injection with an unusable callback.
+    let mut empty = ScanOptions {
+        blind: Some("   ".to_string()),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut empty).is_ok());
+    assert_eq!(empty.blind, None, "empty blind must normalize to absent");
+
+    // The stored value is what gets interpolated into the payload, so it must
+    // be the trimmed form.
+    let mut padded = ScanOptions {
+        blind: Some("  https://cb.example/x  ".to_string()),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&mut padded).is_ok());
+    assert_eq!(padded.blind.as_deref(), Some("https://cb.example/x"));
 }

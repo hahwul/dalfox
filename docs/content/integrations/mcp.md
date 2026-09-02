@@ -80,6 +80,16 @@ otherwise match nothing and quietly shrink the scan's payload coverage.
 uppercased for you (`"post"` → `"POST"`). Sending an unsupported verb is an
 error rather than a scan that puts the wrong method on the wire.
 
+`blind_callback_url` must be empty (meaning "no blind XSS") or start with
+`http://` / `https://`. Setting it arms *stored* blind-XSS injection —
+`<script src=...>` payloads are written into every query, body, header and
+cookie parameter and stay in the target — so a value that could never receive
+a callback is rejected outright rather than leaving those payloads behind for
+nothing. `remote_payloads` / `remote_wordlists` are likewise checked against
+the registered providers, because an unrecognized name would silently fetch
+nothing and let the scan report `done` with the payload coverage the caller
+asked for quietly missing.
+
 `insecure` controls TLS certificate validation (default `true`, scanner-friendly):
 set it `false` to enforce certificate validation and reject self-signed or
 expired certs. Mirrors the `--insecure` CLI flag.
@@ -243,6 +253,26 @@ Response (done):
 }
 ```
 
+Every response carrying findings also carries an `_untrusted_content_notice`,
+serialized as the first key so an agent reads the warning before the content it
+warns about. The `evidence`, `response`, `request`, `payload`, `param`,
+`location` and `message_str` fields quote bytes the scan target chose, and the
+target is the thing being tested — so an agent must read them as data to report
+on, never as instructions. A scanned page can embed text shaped like a directive addressed
+to the model, and acting on it would let the target pick the `target`, `proxy`,
+`blind_callback_url` or `include_*` of the next call. `preflight_dalfox`
+attaches the same notice when it discovered parameters, since the `name` of each
+discovered parameter is lifted out of the target's own markup.
+
+`offset` and `limit` page through large result sets, and `pagination` reports
+`{total, offset, limit, returned, has_more}`. A page is additionally capped at
+4 MiB of findings: the target decides how many findings a scan produces, and
+each one can carry 64 KiB of `evidence` plus 64 KiB of `response`. When the
+budget cuts a page short, `pagination` adds `truncated_by_size: true` and
+`max_page_bytes` — fewer findings came back than `limit` asked for, and the
+rest are still there at the next `offset`. A single finding larger than the
+budget is emitted alone rather than dropped, so paging always advances.
+
 `progress.estimated_completion_pct` and `params_tested` advance live as each
 discovered parameter finishes (they no longer sit at 0 until the scan ends), so
 they are usable for pacing polls — honor `suggested_poll_interval_ms`.
@@ -324,6 +354,8 @@ Because every tool is async, the agent stays responsive; no long-running tool ca
 ## Authorization & safety
 
 The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
+
+**Findings are untrusted input to your agent.** Unlike the CLI and the REST API, MCP hands scan output to a model that acts on what it reads, and every quoted byte in a finding was chosen by the target. Dalfox labels those responses with `_untrusted_content_notice`, but the label is a reminder, not a sandbox — keep the scope decision (which target, which proxy, which callback) with the operator, and never let it be changed by something the scanner read off a page.
 
 ## Troubleshooting
 

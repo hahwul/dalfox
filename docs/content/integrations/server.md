@@ -311,7 +311,16 @@ in `[0.0, 1.0]` (default `0.3`); fingerprints below it are discarded.
 `method` and `encoders` are validated against the same value sets the CLI
 accepts. `method` is uppercased for you (`"post"` → `"POST"`), and an
 unsupported verb or an unknown encoder name is rejected with `400` rather than
-silently producing a scan that sends the wrong verb or skips encodings.
+silently producing a scan that sends the wrong verb or skips encodings. `remote_payloads` and
+`remote_wordlists` are checked the same way: an unregistered provider name
+fetches nothing and would leave the scan reporting `done` with the payload
+coverage you asked for quietly missing.
+
+`blind` must be empty (meaning "no blind XSS") or start with `http://` /
+`https://`. Setting it arms *stored* blind-XSS injection — `<script src=...>`
+payloads are written into every query, body, header and cookie parameter and
+stay in the target — so a value that could never receive a callback is rejected
+with `400` rather than leaving those payloads behind for nothing.
 
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached

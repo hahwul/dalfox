@@ -225,6 +225,129 @@ pub(crate) fn normalize_proxy(proxy: &str) -> Result<Option<String>, String> {
     Ok(Some(trimmed.to_string()))
 }
 
+/// Validate and normalize a caller-supplied blind-XSS callback URL, rejecting
+/// anything that can never receive a callback. Returns the value to store:
+/// `None` when the field was empty, else the trimmed URL.
+///
+/// This is not cosmetic, because arming the channel is what *sends* the
+/// payloads. `job::runner::execute_scan` starts blind injection on
+/// `blind_callback_url.is_some()` alone, and blind payloads are **stored**
+/// attack payloads: `"'><script src={}></script>` is written into every query,
+/// body, header and cookie parameter of the target and persists there. With an
+/// empty or scheme-less value the template renders as `<script src=>` — traffic
+/// that permanently modifies the target and cannot possibly call back, on a job
+/// that still settles `done`. Same silent-uselessness class already closed for
+/// [`normalize_proxy`] and the REST `callback_url`.
+///
+/// Normalizing (trim) rather than only checking is load-bearing for the same
+/// reason as `normalize_proxy`: the stored string is what gets interpolated
+/// into the payload, so validating a trimmed form and storing the raw one would
+/// still emit `<script src= https://cb/ >`.
+///
+/// An empty value is accepted as `None` rather than refused: it already meant
+/// "no blind XSS", and query strings are routinely templated with empty
+/// optional parameters (`?proxy=&blind=`).
+///
+/// Shared by the REST server and MCP so both front ends treat it identically.
+/// `field` names the offending field in the message, because the two surfaces
+/// spell it differently — REST's query parameter is `blind`, MCP's tool
+/// argument is `blind_callback_url` — the same way `check_routable_proxy` and
+/// `validate_header_value` take theirs.
+pub(crate) fn normalize_blind_callback(value: &str, field: &str) -> Result<Option<String>, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    // Parsed, not prefix-tested. `has_http_scheme` only looks at the first
+    // seven bytes, so a hostless `http://` (or `https://a b`) would pass and
+    // render as `<script src=http://>`: the stored payloads still land in every
+    // parameter of the target and the callback still cannot fire, which is
+    // precisely what this function exists to refuse. `url::Url` rejects a
+    // special scheme with no host (`EmptyHost`) and an invalid host character,
+    // the same parse `cmd::scan::validation::validate_http_url` uses for
+    // `--sxss-url` / `--session-check-url`.
+    let parsed = url::Url::parse(trimmed).map_err(|_| {
+        format!(
+            "{field} is not a valid absolute http:// or https:// URL (got '{}')",
+            crate::utils::log::sanitize_log_message(trimmed)
+        )
+    })?;
+    // Belt-and-suspenders on top of the parse. `Url::parse` already rejects a
+    // hostless special scheme (`http://` → `EmptyHost`), so this cannot fire
+    // for the schemes accepted below — but `has_host()` alone would not say
+    // that, since a special scheme always reports *a* host, and the check costs
+    // nothing next to the payloads a false accept would leave in the target.
+    let has_real_host = parsed.host_str().is_some_and(|h| !h.is_empty());
+    if !matches!(parsed.scheme(), "http" | "https") || !has_real_host {
+        return Err(format!(
+            "{field} must be an absolute http:// or https:// URL with a host (got '{}')",
+            crate::utils::log::sanitize_log_message(trimmed)
+        ));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
+/// Reject a remote payload/wordlist provider name that is not in the registry.
+///
+/// Same rationale as [`validate_encoders`]: an unrecognized name is a silent
+/// no-op inside `init_remote_*`, which caches an empty list for that provider
+/// set and returns `Ok`. The scan then runs with the built-in catalog only —
+/// missing exactly the payloads or wordlist the caller asked for — and still
+/// reports `done` with whatever it found, which a caller cannot tell apart from
+/// a genuinely clean target. The CLI already warns about this at startup
+/// (`cmd::scan::startup::init_remote_providers`); REST and MCP bypass that path
+/// entirely, so they check here instead and fail the submission outright.
+///
+/// The known set is read from the live registry (not a literal) so a provider
+/// added via `register_payload_provider` / `register_wordlist_provider` is
+/// accepted, and so the error can list what is actually available.
+pub(crate) fn validate_remote_providers(
+    payloads: &[String],
+    wordlists: &[String],
+) -> Result<(), String> {
+    // `known` is a closure, not a `Vec`: naming no providers is the common case
+    // by far, and each registry lookup seeds the defaults, takes a global lock
+    // and clones its key set. Nothing should pay for that on every submission.
+    fn check(
+        field: &str,
+        requested: &[String],
+        known: impl FnOnce() -> Vec<String>,
+    ) -> Result<(), String> {
+        if requested.is_empty() {
+            return Ok(());
+        }
+        let mut known = known();
+        // Registry iteration order is a HashMap's; sort before the set is built
+        // so the error message lists providers in a stable order.
+        known.sort();
+        // Registry keys are already lowercased on insert, which is the same
+        // normalization `collect_*_provider_urls` applies on lookup.
+        let set: std::collections::HashSet<&str> = known.iter().map(String::as_str).collect();
+        for p in requested {
+            if !set.contains(p.to_ascii_lowercase().as_str()) {
+                return Err(format!(
+                    "unknown {} provider '{}' (expected one of: {})",
+                    field,
+                    crate::utils::log::sanitize_log_message(p),
+                    known.join(", ")
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    check(
+        "remote_payloads",
+        payloads,
+        crate::payload::list_payload_providers,
+    )?;
+    check(
+        "remote_wordlists",
+        wordlists,
+        crate::payload::list_wordlist_providers,
+    )
+}
+
 /// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],
 /// returning how many were dropped (0 if already under the cap). Shared by the
 /// REST server, MCP, and both preflight paths so every async front-end bounds

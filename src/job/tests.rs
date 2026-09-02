@@ -634,3 +634,123 @@ fn a_job_that_never_got_a_worker_holds_no_slot_once_terminal() {
     job.finished_at_ms = Some(now_ms());
     assert!(!job.occupies_capacity());
 }
+
+#[test]
+fn test_normalize_blind_callback_empty_is_absent_scheme_is_required() {
+    // Empty already meant "no blind XSS" on REST/MCP (templated `?blind=`),
+    // and refusing it would break that shape without closing any hole.
+    assert_eq!(normalize_blind_callback("", "blind").unwrap(), None);
+    assert_eq!(normalize_blind_callback("   ", "blind").unwrap(), None);
+
+    // Trimmed, because the stored string is interpolated straight into
+    // `<script src={}>` — storing the raw form would emit `src= https://cb/ `.
+    assert_eq!(
+        normalize_blind_callback("  https://cb.example/x  ", "blind")
+            .unwrap()
+            .as_deref(),
+        Some("https://cb.example/x")
+    );
+    // URI schemes are case-insensitive, same as `has_http_scheme` accepts.
+    assert_eq!(
+        normalize_blind_callback("HTTP://cb.example/x", "blind")
+            .unwrap()
+            .as_deref(),
+        Some("HTTP://cb.example/x")
+    );
+
+    // A value that renders as `<script src=...>` but can never call back: the
+    // stored payloads permanently modify the target and buy nothing. A prefix
+    // test on `http://` would let the hostless forms through, which is why this
+    // parses the URL instead.
+    for bad in [
+        "cb.example/x",
+        "//cb.example/x",
+        "ftp://cb.example/x",
+        "http://",
+        "https://",
+        "https://a b",
+        "javascript:alert(1)",
+    ] {
+        let err =
+            normalize_blind_callback(bad, "blind").expect_err(&format!("{bad} must be rejected"));
+        assert!(
+            err.contains("blind") && err.contains("http"),
+            "error must name the field and the accepted shape, got: {err}"
+        );
+    }
+
+    // Shapes that *can* receive a callback stay accepted — including
+    // `http:///x`, which the URL parser reads as host `x`, not as a hostless
+    // URL.
+    for ok in [
+        "http:///x",
+        "http://[::1]:8080/x",
+        "https://user:p@cb.example/x",
+        "http://127.0.0.1:9000/cb?id=1",
+    ] {
+        assert_eq!(
+            normalize_blind_callback(ok, "blind").unwrap().as_deref(),
+            Some(ok),
+            "{ok} must survive verbatim"
+        );
+    }
+
+    // The field name is the caller's, because REST spells it `blind` and MCP
+    // spells it `blind_callback_url`.
+    let err = normalize_blind_callback("nope", "blind_callback_url").unwrap_err();
+    assert!(err.contains("blind_callback_url"), "got: {err}");
+}
+
+#[test]
+fn test_normalize_blind_callback_error_cannot_forge_a_log_line() {
+    // The rejected value is echoed back and lands in server/MCP logs, so a
+    // CR/LF in it must not be able to forge a `[ts] [LVL] ...` line.
+    let err = normalize_blind_callback("cb\r\n[2020-01-01] [ERR] forged", "blind").unwrap_err();
+    assert!(
+        !err.contains('\n') && !err.contains('\r'),
+        "raw CRLF in: {err}"
+    );
+}
+
+#[test]
+fn test_validate_remote_providers_accepts_known_and_rejects_unknown() {
+    // Known names pass, case-insensitively (the registry lowercases on insert,
+    // which is the same normalization `collect_*_provider_urls` applies).
+    validate_remote_providers(&["portswigger".to_string()], &["burp".to_string()])
+        .expect("built-in providers must be accepted");
+    validate_remote_providers(&["PortSwigger".to_string()], &["BURP".to_string()])
+        .expect("provider names are case-insensitive");
+    // Empty lists are the common case and must not error.
+    validate_remote_providers(&[], &[]).expect("no providers requested");
+
+    // A typo used to cache an empty list and let the scan settle `done` with
+    // silently reduced payload coverage.
+    let err = validate_remote_providers(&["payloadboxx".to_string()], &[])
+        .expect_err("unknown payload provider must be rejected");
+    assert!(
+        err.contains("remote_payloads"),
+        "field must be named: {err}"
+    );
+    assert!(err.contains("payloadboxx"), "offender must be named: {err}");
+    assert!(
+        err.contains("payloadbox"),
+        "the known set must be listed so the caller can fix the typo: {err}"
+    );
+
+    let err = validate_remote_providers(&[], &["assetnotes".to_string()])
+        .expect_err("unknown wordlist provider must be rejected");
+    assert!(
+        err.contains("remote_wordlists"),
+        "field must be named: {err}"
+    );
+}
+
+#[test]
+fn test_validate_remote_providers_error_cannot_forge_a_log_line() {
+    let err = validate_remote_providers(&["a\r\n[2020-01-01] [ERR] forged".to_string()], &[])
+        .expect_err("unknown provider must be rejected");
+    assert!(
+        !err.contains('\n') && !err.contains('\r'),
+        "raw CRLF in: {err}"
+    );
+}
