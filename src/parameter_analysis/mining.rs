@@ -749,12 +749,15 @@ pub async fn probe_dictionary_params(
                     break 'outer;
                 }
             }
-            // Skip if already discovered
+            // Skip only when this *slot* was already discovered. Matching on
+            // the name alone let a param found at another wire location (a
+            // query `q`, a header `q`) suppress mining of the same name here,
+            // so the slot was never probed at all. See `param_slot_key`.
             let exists = reflection_params
                 .lock()
                 .await
                 .iter()
-                .any(|p| p.name == *param);
+                .any(|p| p.name == *param && p.location == Location::Query);
             if exists {
                 continue;
             }
@@ -973,12 +976,17 @@ pub async fn probe_body_params(
                     break;
                 }
             }
-            // Skip already discovered params
+            // Skip already discovered params — but only at *this* wire slot.
+            // Keying on the name alone meant an ordinary
+            // `dalfox scan '…?q=x' -d 'q=y'` never mined the body `q` at all,
+            // because Stage 1 had already discovered the query `q`: a
+            // vulnerable body parameter was not just unreported, it was never
+            // probed. See `param_slot_key`.
             let exists = reflection_params
                 .lock()
                 .await
                 .iter()
-                .any(|p| p.name == param_name);
+                .any(|p| p.name == param_name && p.location == Location::Body);
             if exists {
                 continue;
             }
@@ -1217,11 +1225,12 @@ pub async fn probe_response_id_params(
                     break;
                 }
             }
+            // Slot-scoped, not name-scoped: see `param_slot_key`.
             let existing = reflection_params
                 .lock()
                 .await
                 .iter()
-                .any(|p| p.name == param);
+                .any(|p| p.name == param && p.location == Location::Query);
             if existing {
                 continue;
             }
@@ -1397,12 +1406,13 @@ pub async fn probe_json_body_params(
                 break;
             }
         }
-        // Skip if already discovered
+        // Slot-scoped, not name-scoped: a query or form `q` must not suppress
+        // mining of the JSON body's `q`. See `param_slot_key`.
         let exists = reflection_params
             .lock()
             .await
             .iter()
-            .any(|p| p.name == param_name);
+            .any(|p| p.name == param_name && p.location == Location::JsonBody);
         if exists {
             continue;
         }
