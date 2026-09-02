@@ -311,3 +311,33 @@ fn test_default_load_or_init_prefers_toml_over_json() {
         "toml config should be preferred over json when both exist"
     );
 }
+
+#[test]
+fn test_uncreatable_config_path_warns_instead_of_claiming_creation() {
+    // The scaffold write is best-effort (`let _ = std::fs::write(..)`), so the
+    // notice has to describe what actually landed on disk. A `--config` path
+    // whose parent is a regular file cannot be created on any platform, and it
+    // used to still report "created it with a default template" — sending the
+    // operator to inspect a path with nothing at it.
+    let dir = unique_temp_dir("cfg-uncreatable");
+    let blocker = dir.join("not-a-directory");
+    std::fs::write(&blocker, b"x").expect("write blocking regular file");
+    let config_path = blocker.join("config.toml");
+
+    let output = run_payload_with_config(&config_path);
+    assert!(
+        output.status.success(),
+        "an uncreatable config path should still run on built-in defaults"
+    );
+    assert!(!config_path.exists(), "nothing should have been created");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not be created"),
+        "a failed scaffold must say so; stderr was:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("created it with a default template"),
+        "a failed scaffold must not claim the file was created; stderr was:\n{stderr}"
+    );
+}

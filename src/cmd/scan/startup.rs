@@ -30,6 +30,40 @@ use super::{ScanOutcome, emit_error, session};
 /// are emitted here and do not stop the scan. The order of the checks is
 /// load-bearing for what reaches stderr first, so it is preserved exactly as it
 /// ran inline.
+/// Refuse `-H/--headers`, `--user-agent` and `--cookies` values that cannot do
+/// what the operator asked. All three end up as HTTP header values, and both
+/// ways they can be wrong used to be silent on the CLI:
+///
+/// * a spec with no `:` (`-H 'Authorization Bearer eyJ…'` — one missing
+///   keystroke) or with an empty name is dropped by the `filter_map` in
+///   [`super::input::resolve_targets`], so the scan runs *unauthenticated*
+///   against a protected endpoint, finds nothing, and exits clean. That is the
+///   same false all-clear `--proxy` and `--custom-payload` are already gated
+///   against here.
+/// * a byte reqwest cannot put in a header (a pasted CR/LF, a NUL) fails the
+///   request *builder* for every request in the run, so the reachability probe
+///   fails and a live target is reported `CONNECTION_FAILED` — the scanner
+///   blaming the target for the operator's input.
+///
+/// REST and MCP have refused both at submission since #1404, through these
+/// exact helpers (`server::util::validate_scan_options`, the MCP tools); the
+/// CLI was the front end that never got the gate. Sharing the validators keeps
+/// the three surfaces refusing the same inputs. The helpers build and sanitize
+/// the message themselves, so a credential-bearing value cannot leak into a log
+/// or forge a line in it; only the flag name is added here.
+fn validate_header_inputs(args: &ScanArgs) -> Result<(), String> {
+    crate::job::validate_header_list(&args.headers).map_err(|e| format!("--headers: {e}"))?;
+    // An empty `--user-agent ""` means "no override" (see `resolve_targets`),
+    // not an empty header — the same exemption the REST/MCP validator makes.
+    if let Some(ua) = args.user_agent.as_deref().filter(|s| !s.is_empty()) {
+        crate::job::validate_header_value("--user-agent", ua)?;
+    }
+    for cookie in args.cookies.iter().filter(|c| !c.is_empty()) {
+        crate::job::validate_header_value("--cookies", cookie)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOutcome> {
     // Validate numeric args up front so misconfigurations (workers: 0,
     // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
@@ -38,6 +72,17 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
         if !args.silence {
             emit_error(&args.format, code, &msg);
         }
+        return Err(ScanOutcome::Error);
+    }
+
+    // Header-shaped inputs, refused before the first request rather than
+    // discovered as a scan result. See [`validate_header_inputs`].
+    if let Err(msg) = validate_header_inputs(args) {
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            &msg,
+        );
         return Err(ScanOutcome::Error);
     }
 
