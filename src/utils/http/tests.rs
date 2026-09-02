@@ -568,22 +568,37 @@ async fn test_read_body_capped_handles_utf8_split_at_cap() {
 
 #[test]
 fn test_content_type_is_inert_data_with_nosniff_covers_text_plain() {
-    // `text/plain` is excluded from the plain deny-list because a browser
-    // sniffs it as HTML — but only when the server has *not* said not to.
-    // With `nosniff` present the body can never be markup, so a reflection in
-    // it is not exploitable. This is the FP the replay corpus caught: a
-    // `text/plain; charset=utf-8` + `nosniff` response echoing a payload was
-    // reported `[V]`.
+    // `text/plain` stays out of the plain deny-list (that list is consulted
+    // where the caller has no headers), but it is inert here whether or not the
+    // server sent `nosniff`. Per the MIME Sniffing standard a *supplied*
+    // `text/plain` can never become `text/html`: sniffing to HTML requires an
+    // absent or `unknown`/`*/*` type. Confirmed against real Chrome — the same
+    // `<h1 id=marker>` + `<script>` body was HTML-parsed as `text/html` and not
+    // parsed under any `text/plain` spelling, with or without the header.
     assert!(!content_type_is_inert_data("text/plain"));
-    assert!(!content_type_is_inert_data_with_nosniff(
-        "text/plain",
-        false
-    ));
-    assert!(content_type_is_inert_data_with_nosniff("text/plain", true));
-    assert!(content_type_is_inert_data_with_nosniff(
-        "text/plain; charset=utf-8",
-        true
-    ));
+    for nosniff in [true, false] {
+        for ct in [
+            "text/plain",
+            "text/plain; charset=utf-8",
+            "text/plain; charset=windows-1252",
+            "TEXT/PLAIN",
+        ] {
+            assert!(
+                content_type_is_inert_data_with_nosniff(ct, nosniff),
+                "{ct} must be inert (nosniff={nosniff}) — no browser HTML-parses a supplied text/plain"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_a_typeless_response_is_still_treated_as_live() {
+    // The carve-out: an absent or empty content-type is exactly the case the
+    // standard *does* sniff, and sniffing an unknown type can produce
+    // `text/html`. Widening `text/plain` must not widen this.
+    for nosniff in [true, false] {
+        assert!(!content_type_is_inert_data_with_nosniff("", nosniff));
+    }
 }
 
 #[test]

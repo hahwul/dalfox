@@ -2451,9 +2451,13 @@ mod injection_response_gates {
     }
 
     #[test]
-    fn text_plain_is_inert_only_with_nosniff() {
+    fn text_plain_is_inert_with_or_without_nosniff() {
+        // `nosniff` is not what makes `text/plain` inert: a *supplied*
+        // `text/plain` can never be sniffed into `text/html` (see
+        // `content_type_is_inert_data_with_nosniff`). Both spellings must
+        // suppress.
         let args = default_scan_args();
-        assert!(!injection_response_suppressed(
+        assert!(injection_response_suppressed(
             200,
             &ct("text/plain"),
             &param(Location::Query),
@@ -2465,6 +2469,13 @@ mod injection_response_gates {
                 ("content-type", "text/plain"),
                 ("x-content-type-options", "nosniff"),
             ]),
+            &param(Location::Query),
+            &args
+        ));
+        // The carve-out stays: a typeless response IS sniffed, so it stays live.
+        assert!(!injection_response_suppressed(
+            200,
+            &headers(&[]),
             &param(Location::Query),
             &args
         ));
