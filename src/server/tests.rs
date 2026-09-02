@@ -1898,7 +1898,7 @@ async fn test_get_scan_handler_success_plain_json_defaults() {
 
 #[tokio::test]
 async fn test_run_server_returns_on_invalid_bind_address() {
-    run_server(ServerArgs {
+    let err = run_server(ServerArgs {
         port: 6664,
         host: "not a valid host".to_string(),
         api_key: None,
@@ -1916,6 +1916,11 @@ async fn test_run_server_returns_on_invalid_bind_address() {
         cors_allow_headers: None,
     })
     .await;
+    assert!(
+        err.is_err(),
+        "an unparseable bind address must be reported to the caller so `main` \
+         can exit non-zero; a supervisor reads status, not stderr"
+    );
 }
 
 #[tokio::test]
@@ -1925,7 +1930,7 @@ async fn test_run_server_returns_on_bind_failure_after_state_build() {
         .expect("bind guard listener");
     let guard_addr = guard_listener.local_addr().expect("guard addr");
 
-    run_server(ServerArgs {
+    let err = run_server(ServerArgs {
         port: guard_addr.port(),
         host: Ipv4Addr::LOCALHOST.to_string(),
         api_key: Some("server-key".to_string()),
@@ -1945,8 +1950,47 @@ async fn test_run_server_returns_on_bind_failure_after_state_build() {
         cors_allow_headers: Some("Content-Type,X-API-KEY".to_string()),
     })
     .await;
+    let msg = err.expect_err("a port already in use must not report success");
+    assert!(
+        msg.contains("Failed to bind"),
+        "the error must name the bind failure, got {msg:?}"
+    );
 
     drop(guard_listener);
+}
+
+#[tokio::test]
+async fn test_run_server_reports_an_unwritable_log_file() {
+    // `--log-file` is proven writable before serving; that failure has to reach
+    // the exit code too, not just stderr.
+    let dir = std::env::temp_dir().join("dalfox-nonexistent-dir-for-log-file-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("server.log");
+
+    let err = run_server(ServerArgs {
+        port: 6665,
+        host: Ipv4Addr::LOCALHOST.to_string(),
+        api_key: None,
+        log_file: Some(path.to_string_lossy().into_owned()),
+        rate_limit: None,
+        scan_timeout: None,
+        max_concurrent_scans: 100,
+        allowed_hosts: None,
+        max_retained_scans: 1000,
+        max_body_bytes: 1_048_576,
+        allowed_origins: None,
+        jsonp: false,
+        callback_param_name: "callback".to_string(),
+        cors_allow_methods: None,
+        cors_allow_headers: None,
+    })
+    .await;
+
+    let msg = err.expect_err("an unopenable --log-file must not report success");
+    assert!(
+        msg.contains("Cannot open --log-file"),
+        "the error must name the log-file failure, got {msg:?}"
+    );
 }
 
 // ---- Tests for new endpoints: cancel, list, preflight ----
