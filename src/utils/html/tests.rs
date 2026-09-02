@@ -347,3 +347,36 @@ fn unmatched_end_tags_stay_linear_with_a_deep_stack() {
         start.elapsed()
     );
 }
+
+#[test]
+fn parse_fragment_bounded_caps_nesting_like_the_document_variant() {
+    // html5ever's tree building is O(depth^2); the guard is what keeps a
+    // pathological fragment from stalling the caller. Asserted on node count
+    // rather than elapsed time so the check is deterministic on any machine.
+    let deep = format!(
+        "{}<b>x</b>{}",
+        "<div>".repeat(20_000),
+        "</div>".repeat(20_000)
+    );
+    let bounded = parse_fragment_bounded(&deep);
+    let unbounded_nodes = 20_000 + 4;
+    let bounded_nodes = bounded.tree.values().count();
+    assert!(
+        bounded_nodes < unbounded_nodes / 10,
+        "nesting was not bounded: {bounded_nodes} nodes"
+    );
+}
+
+#[test]
+fn parse_fragment_bounded_leaves_ordinary_fragments_intact() {
+    // The control: the guard must not disturb a realistic payload-sized
+    // fragment, or it would change what the DOM-verification gate sees.
+    let frag = "<svg onload=alert(1) class=dlxdeadbeef>";
+    let bounded = parse_fragment_bounded(frag);
+    let plain = scraper::Html::parse_fragment(frag);
+    assert_eq!(
+        bounded.tree.values().count(),
+        plain.tree.values().count(),
+        "an ordinary fragment must parse identically"
+    );
+}

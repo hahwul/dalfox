@@ -322,5 +322,25 @@ pub(crate) fn parse_document_bounded(html: &str) -> scraper::Html {
     scraper::Html::parse_document(&bound_html_nesting(html))
 }
 
+/// `scraper::Html::parse_fragment` with the same nesting guard.
+///
+/// html5ever's tree building is O(depth^2), so an unbounded parse of a deeply
+/// nested fragment is a denial of service against the scanner itself. Measured
+/// on `<div>`*N + a sink element + `</div>`*N:
+///
+/// ```text
+/// depth  1000:  46 ms unbounded,  12 ms bounded
+/// depth  5000: 995 ms unbounded,  11 ms bounded
+/// depth 20000:  15.2 s unbounded, 11 ms bounded
+/// ```
+///
+/// Payload text is not "trusted input" just because dalfox usually generates
+/// it: `--custom-payload` is a file, and `--remote-payloads` fetches a list
+/// from a third party. One pathological entry in either is enough, because the
+/// callers parse *per payload*.
+pub(crate) fn parse_fragment_bounded(html: &str) -> scraper::Html {
+    scraper::Html::parse_fragment(&bound_html_nesting(html))
+}
+
 #[cfg(test)]
 mod tests;
