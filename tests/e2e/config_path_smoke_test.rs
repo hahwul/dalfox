@@ -341,3 +341,45 @@ fn test_uncreatable_config_path_warns_instead_of_claiming_creation() {
         "a failed scaffold must not claim the file was created; stderr was:\n{stderr}"
     );
 }
+
+#[test]
+fn test_payload_json_emits_a_parseable_document_without_the_banner() {
+    // `dalfox payload --json` with no selector printed the prose summary *and*
+    // the ASCII banner: the flag was a silent no-op on that path, and stdout
+    // could not be parsed at all. A selector already suppressed the banner;
+    // `--json` did not.
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["payload", "--json"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run dalfox payload --json");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        !stdout.contains(BANNER_MARK),
+        "payload --json must suppress the banner; stdout was:\n{stdout}"
+    );
+    let doc: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("payload --json must emit a JSON document");
+    assert!(
+        doc["selectors"].as_array().is_some_and(|a| !a.is_empty()),
+        "the summary document must list the selectors; got {doc}"
+    );
+    assert!(
+        doc["counts"]["javascript"].as_u64().is_some_and(|n| n > 0),
+        "the summary document must carry the per-selector counts; got {doc}"
+    );
+}
+
+#[test]
+fn test_payload_without_json_keeps_the_human_summary() {
+    // The control: the prose form is the default and must not change.
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["payload"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run dalfox payload");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Provide a selector to list payloads"));
+    assert!(serde_json::from_str::<serde_json::Value>(stdout.trim()).is_err());
+}

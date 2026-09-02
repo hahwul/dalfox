@@ -114,6 +114,15 @@ pub use super::session::{DEFAULT_ON_SESSION_LOSS, ON_SESSION_LOSS_VALUES};
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
 pub const DEFAULT_WORKERS: usize = 50;
+
+/// Worker count preflight analysis runs at when the caller does not ask for one.
+///
+/// Deliberately *not* [`DEFAULT_WORKERS`]: preflight has always fanned out at
+/// ten, and honoring an explicit `worker` must not also quintuple the load every
+/// existing caller puts on a target. Lives next to [`ScanArgs::for_preflight`]
+/// and is re-used by the server's preflight target hydration, so the two cannot
+/// drift — they were two independent literals before.
+pub const PREFLIGHT_DEFAULT_WORKERS: usize = 10;
 pub const DEFAULT_MAX_CONCURRENT_TARGETS: usize = 50;
 pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
 /// Built-in per-parameter payload safety cap, applied when the operator did
@@ -1113,7 +1122,7 @@ impl ScanArgs {
             silence: true,
             dry_run: true,
             no_color: true,
-            workers: 10,
+            workers: PREFLIGHT_DEFAULT_WORKERS,
             max_concurrent_targets: 1,
             max_targets_per_host: 1,
             encoders: opts.encoders,
