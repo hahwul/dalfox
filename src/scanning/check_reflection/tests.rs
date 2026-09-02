@@ -2370,3 +2370,154 @@ fn url_attr_backwalk_verdicts_are_unchanged_for_normal_markup() {
         "the same bytes in body text are not"
     );
 }
+
+/// `injection_response_suppressed` is the single copy of the status/header gates
+/// that the normal reflection branch and the `--sxss` branch both run. The
+/// `--sxss` branch previously had no gates at all, so these cases pin the shared
+/// contract directly rather than only through one branch's integration test.
+mod injection_response_gates {
+    use super::*;
+    use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                reqwest::header::HeaderName::from_bytes(k.as_bytes()).expect("header name"),
+                HeaderValue::from_str(v).expect("header value"),
+            );
+        }
+        h
+    }
+
+    fn param(location: Location) -> Param {
+        Param::new("q", "seed", location)
+    }
+
+    fn ct(value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(CONTENT_TYPE, HeaderValue::from_str(value).expect("value"));
+        h
+    }
+
+    #[test]
+    fn ignore_return_suppresses_whatever_the_body_says() {
+        let mut args = default_scan_args();
+        args.ignore_return = vec![404];
+        assert!(injection_response_suppressed(
+            404,
+            &ct("text/html"),
+            &param(Location::Query),
+            &args
+        ));
+        // A status the operator did not exclude still goes through.
+        assert!(!injection_response_suppressed(
+            200,
+            &ct("text/html"),
+            &param(Location::Query),
+            &args
+        ));
+    }
+
+    #[test]
+    fn inert_data_content_types_are_suppressed_for_non_path_locations() {
+        let args = default_scan_args();
+        for location in [Location::Query, Location::Body, Location::Header] {
+            assert!(
+                injection_response_suppressed(
+                    200,
+                    &ct("application/json"),
+                    &param(location.clone()),
+                    &args
+                ),
+                "a JSON body renders as data, never markup ({:?})",
+                location
+            );
+        }
+        assert!(!injection_response_suppressed(
+            200,
+            &ct("text/html; charset=utf-8"),
+            &param(Location::Query),
+            &args
+        ));
+        // JSONP stays detectable — `application/javascript` is deliberately not
+        // treated as inert data.
+        assert!(!injection_response_suppressed(
+            200,
+            &ct("application/javascript"),
+            &param(Location::Query),
+            &args
+        ));
+    }
+
+    #[test]
+    fn text_plain_is_inert_only_with_nosniff() {
+        let args = default_scan_args();
+        assert!(!injection_response_suppressed(
+            200,
+            &ct("text/plain"),
+            &param(Location::Query),
+            &args
+        ));
+        assert!(injection_response_suppressed(
+            200,
+            &headers(&[
+                ("content-type", "text/plain"),
+                ("x-content-type-options", "nosniff"),
+            ]),
+            &param(Location::Query),
+            &args
+        ));
+    }
+
+    #[test]
+    fn redirects_skip_the_inert_check_so_the_location_header_is_still_read() {
+        let args = default_scan_args();
+        // The body content-type describes the (usually empty) redirect body, not
+        // the redirect target, so it must not veto the caller's Location check.
+        assert!(!injection_response_suppressed(
+            302,
+            &ct("application/json"),
+            &param(Location::Query),
+            &args
+        ));
+    }
+
+    #[test]
+    fn path_injection_drops_redirects_and_non_markup_bodies() {
+        let args = default_scan_args();
+        let path = param(Location::Path);
+        assert!(injection_response_suppressed(
+            302,
+            &ct("text/html"),
+            &path,
+            &args
+        ));
+        assert!(injection_response_suppressed(
+            200,
+            &ct("application/json"),
+            &path,
+            &args
+        ));
+        assert!(!injection_response_suppressed(
+            200,
+            &ct("text/html; charset=utf-8"),
+            &path,
+            &args
+        ));
+        // A generated SVG executes inline scripts on top-level navigation.
+        assert!(!injection_response_suppressed(
+            200,
+            &ct("image/svg+xml"),
+            &path,
+            &args
+        ));
+        // No content-type at all: nothing to judge, let the body checks decide.
+        assert!(!injection_response_suppressed(
+            200,
+            &HeaderMap::new(),
+            &path,
+            &args
+        ));
+    }
+}
