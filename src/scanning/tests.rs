@@ -3234,3 +3234,84 @@ fn test_build_request_text_cookie_param_goes_into_the_cookie_header() {
         "cookie emitted as a header of its own name, got:\n{request}"
     );
 }
+
+#[test]
+fn test_build_request_text_cookie_param_replaces_a_captured_cookie_header() {
+    // A cookie param is sent through `build_request_with_cookie`, whose
+    // composed value *replaces* any Cookie captured into `target.headers`.
+    // Emitting the captured one too showed two Cookie lines that never went out
+    // together, and put them in the opposite order to the wire.
+    let mut target = parse_target("http://127.0.0.1:3031/c").unwrap();
+    target.headers = vec![("Cookie".to_string(), "sid=abc".to_string())];
+    target.cookies = vec![("sid".to_string(), "abc".to_string())];
+
+    let param = Param::new("sid".to_string(), "abc".to_string(), Location::Header);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert_eq!(
+        request.matches("Cookie: ").count(),
+        1,
+        "exactly one Cookie line, got:\n{request}"
+    );
+    assert!(request.contains("Cookie: sid=PAYLOAD"), "got:\n{request}");
+}
+
+#[test]
+fn test_build_request_text_does_not_emit_a_second_cookie_line() {
+    // `apply_headers_ua_cookies` auto-attaches `target.cookies` only when the
+    // target has no Cookie header of its own. The PoC must mirror that instead
+    // of printing both.
+    let mut target = parse_target("http://127.0.0.1:3031/q").unwrap();
+    target.headers = vec![("Cookie".to_string(), "sid=abc".to_string())];
+    target.cookies = vec![("sid".to_string(), "abc".to_string())];
+
+    let param = Param::new("q".to_string(), String::new(), Location::Query);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert_eq!(
+        request.matches("Cookie: ").count(),
+        1,
+        "the captured Cookie header was duplicated by the auto-attach, got:\n{request}"
+    );
+}
+
+#[test]
+fn test_build_request_text_body_param_shows_the_injectors_content_type() {
+    // `build_body_request_base` drops a captured Content-Type so the injector's
+    // is the only one on the wire. Showing the captured one instead described a
+    // request that frames the body in a format it is not written in.
+    let mut target = parse_target("http://127.0.0.1:3031/p").unwrap();
+    target.method = "POST".to_string();
+    target.headers = vec![(
+        "Content-Type".to_string(),
+        "multipart/form-data; boundary=----OLD".to_string(),
+    )];
+    target.data = Some("q=1".to_string());
+
+    let param = Param::new("q".to_string(), "1".to_string(), Location::Body);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert!(
+        request.contains("Content-Type: application/x-www-form-urlencoded"),
+        "got:\n{request}"
+    );
+    assert!(
+        !request.contains("boundary=----OLD"),
+        "the dropped captured Content-Type was emitted, got:\n{request}"
+    );
+    assert_eq!(request.matches("Content-Type: ").count(), 1);
+}
+
+#[test]
+fn test_build_request_text_query_param_keeps_the_captured_content_type() {
+    // Query/Path injectors re-send the original body verbatim through
+    // `build_request`, which preserves the captured Content-Type.
+    let mut target = parse_target("http://127.0.0.1:3031/p").unwrap();
+    target.method = "POST".to_string();
+    target.headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+    target.data = Some("{\"a\":1}".to_string());
+
+    let param = Param::new("q".to_string(), String::new(), Location::Query);
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert!(
+        request.contains("Content-Type: application/json"),
+        "got:\n{request}"
+    );
+}

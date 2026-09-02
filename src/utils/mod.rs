@@ -47,10 +47,9 @@ pub(crate) use scan_id::{make_scan_id, make_unique_scan_id, short_scan_id};
 // Re-export http helpers at `crate::utils::*`
 pub(crate) use http::{
     apply_header_overrides, build_body_request_base, build_preflight_request, build_request,
-    build_request_with_cookie, compose_cookie_header_excluding,
-    content_type_is_inert_data_with_nosniff, content_type_primary, headers_declare_nosniff,
-    is_htmlish_content_type, is_javascript_content_type, is_xss_scannable_content_type,
-    send_with_retry,
+    build_request_with_cookie, compose_cookie_header_excluding, content_type_is_never_markup,
+    content_type_primary, is_htmlish_content_type, is_javascript_content_type,
+    is_xss_scannable_content_type, send_with_retry,
 };
 
 // Re-export remote payload/wordlist getters at `crate::utils::*`

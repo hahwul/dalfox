@@ -1766,26 +1766,26 @@ fn injection_response_suppressed(
     // Path has its own stricter markup-only gate just below; JSONP
     // (`application/javascript`) is intentionally NOT treated as inert
     // here (see `content_type_is_inert_data`), preserving those
-    // detections. `text/plain` is inert only when the response also
-    // sends `X-Content-Type-Options: nosniff` — without it a browser
-    // sniffs the body as HTML, with it the body can never be markup.
+    // detections. A *supplied* `text/plain` is inert regardless of
+    // `X-Content-Type-Options` — MIME sniffing has no path from it to an
+    // HTML parse, so the header is not part of this decision (see
+    // `content_type_is_never_markup`).
     //
     // Skip redirects: a 3xx carries the reflection in its `Location`
     // header, and the body content-type describes the (usually empty)
     // redirect body, not the redirect target — so it says nothing about
     // whether the Location reflection is exploitable. Let those fall
     // through to the Location-header check in the caller.
-    if !matches!(param.location, Location::Path) && !(300..400).contains(&status_code) {
-        let nosniff = crate::utils::headers_declare_nosniff(headers);
-        if crate::utils::content_type_is_inert_data_with_nosniff(content_type, nosniff) {
-            crate::dbg_log!(
-                "suppressing reflection on inert-data content-type (param={}, content-type={}, nosniff={})",
-                param.name,
-                content_type,
-                nosniff
-            );
-            return true;
-        }
+    if !matches!(param.location, Location::Path)
+        && !(300..400).contains(&status_code)
+        && crate::utils::content_type_is_never_markup(content_type)
+    {
+        crate::dbg_log!(
+            "suppressing reflection on inert-data content-type (param={}, content-type={})",
+            param.name,
+            content_type
+        );
+        return true;
     }
 
     // Hard suppressions for Path that don't need to read the body:

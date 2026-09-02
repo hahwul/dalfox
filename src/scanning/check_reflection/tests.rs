@@ -2454,7 +2454,7 @@ mod injection_response_gates {
     fn text_plain_is_inert_with_or_without_nosniff() {
         // `nosniff` is not what makes `text/plain` inert: a *supplied*
         // `text/plain` can never be sniffed into `text/html` (see
-        // `content_type_is_inert_data_with_nosniff`). Both spellings must
+        // `content_type_is_never_markup`). Both spellings must
         // suppress.
         let args = default_scan_args();
         assert!(injection_response_suppressed(

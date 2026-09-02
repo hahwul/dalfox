@@ -397,6 +397,18 @@ impl RequestTally {
         }
         self.failed as f64 / self.sent as f64
     }
+
+    /// Whether transport losses were heavy enough to call the run `incomplete`.
+    ///
+    /// The ratio alone is not enough: it is scale-free, and a scan of a single
+    /// parameter sends fewer than a dozen requests, so *one* transient reset
+    /// already clears 10% and flips a field that consumers read as a trust
+    /// signal. Requiring a floor on the absolute count too keeps the flag
+    /// meaningful on short runs while still catching a small run that lost
+    /// nearly everything (5 sent, 5 failed is 5 failures, not noise).
+    fn is_incomplete(&self) -> bool {
+        self.failed >= INCOMPLETE_MIN_FAILURES && self.failure_ratio() >= INCOMPLETE_FAILURE_RATIO
+    }
 }
 
 /// A run that lost at least this share of its requests is reported
@@ -408,6 +420,11 @@ impl RequestTally {
 /// `failed_requests` count is always reported regardless, so a consumer that
 /// wants a stricter bar has the number.
 const INCOMPLETE_FAILURE_RATIO: f64 = 0.10;
+
+/// Absolute floor that pairs with [`INCOMPLETE_FAILURE_RATIO`]; see
+/// [`RequestTally::is_incomplete`]. Two lost requests can be one flaky hop, so
+/// the flag needs a third before it claims the run was not really scanned.
+const INCOMPLETE_MIN_FAILURES: u64 = 3;
 
 pub(crate) async fn render_results(
     args: &ScanArgs,
@@ -586,7 +603,7 @@ pub(crate) async fn render_results(
     let session_died = target_summary
         .iter()
         .any(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST);
-    let lost_too_many_requests = requests.failure_ratio() >= INCOMPLETE_FAILURE_RATIO;
+    let lost_too_many_requests = requests.is_incomplete();
     let scan_incomplete = session_died || lost_too_many_requests;
 
     // One envelope, built once and rendered by every format. Previously the

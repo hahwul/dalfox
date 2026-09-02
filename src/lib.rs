@@ -128,9 +128,10 @@ tokio::task_local! {
     pub(crate) static REQUEST_COUNT_JOB: std::sync::Arc<AtomicU64>;
 
     /// Per-scan failed-request counter, the sibling of [`REQUEST_COUNT_JOB`].
-    /// Bound alongside it so a daemon's concurrent jobs don't inherit each
-    /// other's transport failures — the same process-global trap the remote
-    /// payload cache had.
+    /// Bound alongside it by `job::runner` (to `progress.requests_failed`) so a
+    /// daemon's concurrent jobs don't inherit each other's transport failures —
+    /// the same process-global trap the remote payload cache had. Callers use
+    /// `tick_request_failure`, which bumps the global tally as well.
     pub(crate) static REQUEST_FAILURE_COUNT_JOB: std::sync::Arc<AtomicU64>;
 
     /// Per-scan consecutive-WAF-block counter. Bound by MCP and REST runners
@@ -336,13 +337,64 @@ pub(crate) fn reset_waf_consecutive() {
 #[cfg(test)]
 mod job_scope_tests {
     //! Regression tests for [`JobScopes`] / [`with_job_scopes`]: the per-job
-    //! task-local scopes (`requests_sent`, WAF backoff) that `run_scanning`'s
+    //! task-local scopes (`requests_sent`, `requests_failed`, WAF backoff) that
+    //! `run_scanning`'s
     //! `tokio::spawn`'d workers must re-enter. Assertions are on per-job
     //! counters (fresh `Arc`s), never the process-wide globals, so they don't
     //! flake under parallel test runs that also bump those globals.
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+    #[tokio::test]
+    async fn with_job_scopes_rebinds_the_failure_counter_across_spawn() {
+        // `job::runner` binds this alongside `REQUEST_COUNT_JOB`. Nothing did
+        // for a while, which made `capture()` always yield `None` here and left
+        // every job's transport failures landing only on the process-global
+        // tally — the cross-job leak this scope exists to prevent.
+        let job_failures = Arc::new(AtomicU64::new(0));
+        REQUEST_FAILURE_COUNT_JOB
+            .scope(job_failures.clone(), async {
+                let scopes = JobScopes::capture();
+                assert!(
+                    !scopes.is_empty(),
+                    "a bound failure scope must be captured, not dropped"
+                );
+                tokio::spawn(with_job_scopes(scopes, async {
+                    tick_request_failure();
+                    tick_request_failure();
+                }))
+                .await
+                .unwrap();
+            })
+            .await;
+        assert_eq!(
+            job_failures.load(Ordering::Relaxed),
+            2,
+            "failures raised in a spawned worker must reach the job's own counter"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_jobs_do_not_inherit_each_others_transport_failures() {
+        let job_a = Arc::new(AtomicU64::new(0));
+        let job_b = Arc::new(AtomicU64::new(0));
+
+        REQUEST_FAILURE_COUNT_JOB
+            .scope(job_a.clone(), async {
+                tick_request_failure();
+            })
+            .await;
+        REQUEST_FAILURE_COUNT_JOB
+            .scope(job_b.clone(), async {
+                tick_request_failure();
+                tick_request_failure();
+            })
+            .await;
+
+        assert_eq!(job_a.load(Ordering::Relaxed), 1);
+        assert_eq!(job_b.load(Ordering::Relaxed), 2);
+    }
 
     #[tokio::test]
     async fn with_job_scopes_rebinds_request_counter_across_spawn() {

@@ -117,11 +117,14 @@ pub(crate) async fn execute_scan(
     // Per-job WAF consecutive-block counter so one scan's WAF backoff doesn't
     // throttle an unrelated scan.
     //
-    // For the request counter, we scope `progress.requests_sent` directly
-    // instead of a private local atomic — every `crate::tick_request_count()`
-    // call then writes through to the publicly visible progress field, so
-    // GET /scan/{id} returns a live `requests_sent` value during the scan
-    // instead of `0` until completion.
+    // For the request counters, we scope `progress.requests_sent` /
+    // `progress.requests_failed` directly instead of private local atomics —
+    // every `crate::tick_request_count()` / `crate::tick_request_failure()`
+    // call then writes through to the publicly visible progress fields, so
+    // GET /scan/{id} returns live values during the scan instead of `0` until
+    // completion. Scoping the failure counter is also what keeps a daemon's
+    // concurrent jobs from inheriting each other's transport failures: without
+    // it `tick_request_failure` only reaches the process-global tally.
     let job_waf_consecutive = Arc::new(std::sync::atomic::AtomicU32::new(0));
     // `run_scanning`'s 6th argument is the running findings tally, not a
     // parameter counter (see scanning/mod.rs:findings_count). Older code
@@ -158,6 +161,7 @@ pub(crate) async fn execute_scan(
     let scan_fut = crate::with_job_rate_limiter(
         args.rate_limit,
         crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
+        crate::REQUEST_FAILURE_COUNT_JOB.scope(progress.requests_failed.clone(), async {
             crate::WAF_CONSECUTIVE_BLOCKS_JOB
                 .scope(job_waf_consecutive.clone(), async {
                     // Remote payload / wordlist fetch. Inside the budget on
@@ -379,6 +383,8 @@ pub(crate) async fn execute_scan(
                     }
                 })
                 .await;
+        })
+        .await;
         }),
     );
 

@@ -197,6 +197,10 @@ pub(crate) async fn get_result_handler(
                         .progress
                         .requests_sent
                         .load(std::sync::atomic::Ordering::Relaxed),
+                    requests_failed: j
+                        .progress
+                        .requests_failed
+                        .load(std::sync::atomic::Ordering::Relaxed),
                     findings_so_far: j
                         .progress
                         .findings_so_far
