@@ -160,6 +160,31 @@ pub(crate) async fn execute_scan(
         crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
             crate::WAF_CONSECUTIVE_BLOCKS_JOB
                 .scope(job_waf_consecutive.clone(), async {
+                    // Remote payload / wordlist fetch. Inside the budget on
+                    // purpose: `scan_timeout` is a promise about the whole job,
+                    // and both front ends used to do this fetch *before*
+                    // `run_within_scan_budget`, so a slow provider stretched a
+                    // job past a bound the caller had set. Each request is
+                    // capped by `--timeout`, but N provider URLs are not.
+                    //
+                    // A failure is not cosmetic: the scan proceeds without the
+                    // list the caller explicitly asked for and still settles
+                    // `done`, which reads as "scanned, found nothing" — so it
+                    // goes through `warn` rather than being swallowed.
+                    if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
+                        && let Err(e) = crate::utils::init_remote_resources_with_options(
+                            &args.remote_payloads,
+                            &args.remote_wordlists,
+                            Some(args.timeout),
+                            args.proxy.clone(),
+                        )
+                        .await
+                    {
+                        warn(&format!(
+                            "remote resource fetch failed ({e}); scanning without the requested remote lists"
+                        ));
+                    }
+
                     if let Some(callback_url) = &args.blind_callback_url {
                         crate::scanning::blind_scanning(
                             target,
