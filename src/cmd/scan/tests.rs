@@ -1393,6 +1393,58 @@ async fn test_a_handful_of_lost_requests_does_not_flip_incomplete() {
 }
 
 #[tokio::test]
+async fn test_a_single_reset_on_a_short_scan_does_not_flip_incomplete() {
+    // The ratio is scale-free: a one-parameter target sends fewer than a dozen
+    // requests, so one transient connection reset already clears 10% and would
+    // stamp `incomplete` on a run that was, in fact, scanned. The flag is a
+    // machine-read trust signal — it needs a floor on the absolute count too.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file_with_tally(
+        args,
+        vec![],
+        urls,
+        "short_scan_one_reset",
+        crate::cmd::scan::output::RequestTally { sent: 9, failed: 1 },
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(
+        v["meta"]["failed_requests"], 1,
+        "the count is still reported"
+    );
+    assert_eq!(
+        v["meta"]["incomplete"], false,
+        "one reset out of nine is not 'this run was not really scanned', got {}",
+        v["meta"]
+    );
+}
+
+#[tokio::test]
+async fn test_a_short_scan_that_lost_nearly_everything_is_still_incomplete() {
+    // The floor must not become a hole: a small run that lost almost all of its
+    // traffic is exactly the case the flag exists for.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file_with_tally(
+        args,
+        vec![],
+        urls,
+        "short_scan_all_lost",
+        crate::cmd::scan::output::RequestTally { sent: 6, failed: 5 },
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(
+        v["meta"]["incomplete"], true,
+        "5 of 6 requests lost is not a clean bill of health, got {}",
+        v["meta"]
+    );
+}
+
+#[tokio::test]
 async fn test_render_results_json_writes_envelope() {
     let mut args = default_scan_args();
     args.format = "json".to_string();

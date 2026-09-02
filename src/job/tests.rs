@@ -367,12 +367,13 @@ fn enforce_retention_cap_never_evicts_a_draining_job() {
     let _lease = draining.issue_worker_lease();
     draining.status = JobStatus::Cancelled;
     // Oldest by finished_at, so it is the *first* candidate the cap would take.
-    draining.finished_at_ms = Some(1_000);
+    // Still inside the drain grace, so the worker genuinely owns it.
+    draining.finished_at_ms = Some(now_ms() - 2_000);
     jobs.insert("draining".to_string(), draining);
 
     let mut settled = Job::new_queued("http://settled".to_string());
     settled.status = JobStatus::Done;
-    settled.finished_at_ms = Some(2_000);
+    settled.finished_at_ms = Some(now_ms() - 1_000);
     jobs.insert("settled".to_string(), settled);
 
     enforce_retention_cap(&mut jobs, 1);
@@ -389,14 +390,17 @@ fn enforce_retention_cap_never_evicts_a_draining_job() {
 
 #[test]
 fn purge_expired_jobs_keeps_a_draining_job_past_its_ttl() {
+    // A short TTL so the entry is past retention while the worker is still
+    // inside its drain grace — the window the lease guard exists for.
+    const SHORT_TTL: i64 = 1;
     let mut jobs: HashMap<String, Job> = HashMap::new();
     let mut draining = Job::new_queued("http://draining".to_string());
     let _lease = draining.issue_worker_lease();
     draining.status = JobStatus::Cancelled;
-    draining.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+    draining.finished_at_ms = Some(now_ms() - (SHORT_TTL + 10) * 1000);
     jobs.insert("draining".to_string(), draining);
 
-    purge_expired_jobs(&mut jobs, JOB_RETENTION_SECS);
+    purge_expired_jobs(&mut jobs, SHORT_TTL);
 
     assert!(
         jobs.contains_key("draining"),
@@ -407,8 +411,74 @@ fn purge_expired_jobs_keeps_a_draining_job_past_its_ttl() {
     jobs.get_mut("draining")
         .expect("still present")
         .worker_lease = None;
-    purge_expired_jobs(&mut jobs, JOB_RETENTION_SECS);
+    purge_expired_jobs(&mut jobs, SHORT_TTL);
     assert!(jobs.is_empty(), "an expired settled job is still purged");
+}
+
+// A live lease is what keeps a terminal job's slot and entry alive, but "until
+// the lease drops" is not a bound: `effective_scan_timeout` is 0 (unbounded)
+// unless the request or `--scan-timeout` sets one, so a worker wedged past its
+// cancellation checkpoints would otherwise pin one of `--max-concurrent-scans`
+// and one map entry forever — repeat that and /scan returns 503 for good.
+// `WORKER_DRAIN_GRACE_SECS` is the outer bound on that window.
+
+#[test]
+fn a_wedged_worker_stops_holding_its_slot_after_the_drain_grace() {
+    let mut job = Job::new_queued("http://wedged".to_string());
+    let _lease = job.issue_worker_lease();
+    job.status = JobStatus::Cancelled;
+    job.finished_at_ms = Some(now_ms() - 1_000);
+
+    assert!(
+        job.occupies_capacity(),
+        "a freshly cancelled job still holds its slot while the worker drains"
+    );
+    assert!(!job.is_evictable());
+    assert!(!job.drain_window_expired());
+
+    // Same job, same live lease, long past any healthy drain.
+    job.finished_at_ms = Some(now_ms() - (WORKER_DRAIN_GRACE_SECS + 10) * 1000);
+    assert!(job.worker_alive(), "the worker never let go");
+    assert!(job.drain_window_expired());
+    assert!(
+        !job.occupies_capacity(),
+        "a wedged worker must not pin a concurrency slot forever"
+    );
+    assert!(
+        job.is_evictable(),
+        "and its map entry must become collectable"
+    );
+}
+
+#[test]
+fn a_running_job_never_expires_its_drain_window() {
+    // The grace only bounds the *terminal* drain. A job that is legitimately
+    // still running holds its slot for as long as it runs, however long that is.
+    let mut job = Job::new_queued("http://running".to_string());
+    let _lease = job.issue_worker_lease();
+    job.status = JobStatus::Running;
+    job.started_at_ms = Some(now_ms() - (WORKER_DRAIN_GRACE_SECS + 600) * 1000);
+
+    assert!(!job.drain_window_expired());
+    assert!(job.occupies_capacity());
+    assert!(!job.is_evictable());
+}
+
+#[test]
+fn purge_expired_jobs_collects_a_wedged_worker_past_the_grace() {
+    let mut jobs: HashMap<String, Job> = HashMap::new();
+    let mut wedged = Job::new_queued("http://wedged".to_string());
+    let _lease = wedged.issue_worker_lease();
+    wedged.status = JobStatus::Cancelled;
+    wedged.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+    jobs.insert("wedged".to_string(), wedged);
+
+    purge_expired_jobs(&mut jobs, JOB_RETENTION_SECS);
+
+    assert!(
+        jobs.is_empty(),
+        "an entry whose worker wedged an hour ago is not still draining"
+    );
 }
 
 #[test]

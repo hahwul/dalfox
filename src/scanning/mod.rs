@@ -1033,14 +1033,20 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let cookie_param = header_param && crate::scanning::url_inject::param_is_cookie(target, param);
     let injected_header = header_param && !cookie_param;
 
-    let has_ct_header = target
-        .headers
-        .iter()
-        .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
     for (k, v) in &target.headers {
-        // The wire path applies the injected header as an *override*, so a
-        // same-named original must not also be emitted.
+        // `apply_header_overrides` replaces rather than appends, so a
+        // same-named original is not on the wire and must not be shown here.
         if injected_header && k.eq_ignore_ascii_case(&param.name) {
+            continue;
+        }
+        // Same for the composed `Cookie` a cookie param is injected through
+        // (`build_request_with_cookie` overrides any captured Cookie header),
+        // and for a captured `Content-Type` on a body injection, which
+        // `build_body_request_base` drops in favour of the injector's.
+        if cookie_param && k.eq_ignore_ascii_case("cookie") {
+            continue;
+        }
+        if content_type.is_some() && k.eq_ignore_ascii_case("content-type") {
             continue;
         }
         buf.push_str("\r\n");
@@ -1054,7 +1060,10 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
         buf.push_str(": ");
         buf.push_str(payload);
     }
-    if !has_ct_header && let Some(ct) = content_type {
+    // Body injectors always set their own `Content-Type` on the wire; a
+    // Query/Path injector re-sends the original body verbatim and passes
+    // `None` here, keeping whatever the target captured.
+    if let Some(ct) = content_type {
         buf.push_str("\r\nContent-Type: ");
         buf.push_str(ct);
     }
@@ -1074,7 +1083,15 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
             buf.push_str("; ");
             buf.push_str(&rest);
         }
-    } else if !target.cookies.is_empty() {
+    } else if !target.cookies.is_empty()
+        && !target
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+    {
+        // Mirrors `apply_headers_ua_cookies`: `target.cookies` are auto-attached
+        // only when the target does not already carry its own Cookie header
+        // (already emitted above), never as a second Cookie line.
         buf.push_str("\r\nCookie: ");
         for (i, (k, v)) in target.cookies.iter().enumerate() {
             if i > 0 {

@@ -2374,3 +2374,56 @@ async fn test_scan_with_dalfox_rejects_unusable_blind_callback() {
         .await
         .expect("an empty blind callback means 'no blind XSS', not an error");
 }
+
+#[test]
+fn tool_descriptions_name_the_notice_key_that_is_actually_emitted() {
+    // The notice is emitted under `_untrusted_content_notice` (leading
+    // underscore, so it sorts first in the object). Two tool descriptions
+    // promised it without the underscore, so a client or agent keying off the
+    // documented name found nothing. The key is a constant — the descriptions
+    // are string literals inside an attribute macro and cannot interpolate it,
+    // so this test is the only thing holding them together.
+    let tools = DalfoxMcp::tool_router().list_all();
+    assert!(!tools.is_empty(), "the router should expose tools");
+
+    let mut mentioned = 0usize;
+    for tool in &tools {
+        let Some(desc) = tool.description.as_deref() else {
+            continue;
+        };
+        if !desc.contains("untrusted_content_notice") {
+            continue;
+        }
+        mentioned += 1;
+        assert!(
+            desc.contains(UNTRUSTED_CONTENT_KEY),
+            "tool `{}` documents the notice under a name it is not emitted as; \
+             the emitted key is `{UNTRUSTED_CONTENT_KEY}`",
+            tool.name
+        );
+    }
+    assert!(
+        mentioned >= 2,
+        "expected the scan-result and preflight tools to document the notice, saw {mentioned}"
+    );
+}
+
+#[test]
+fn get_results_documents_the_failed_request_counter_it_returns() {
+    // `progress.requests_failed` is the daemon's half of the CLI's
+    // `failed_requests`: a large share of it means "not scanned", not "nothing
+    // found". A field an agent is never told about is a field it never reads.
+    let tools = DalfoxMcp::tool_router().list_all();
+    let get_results = tools
+        .iter()
+        .find(|t| t.name == "get_results_dalfox")
+        .expect("get_results_dalfox is registered");
+    let desc = get_results
+        .description
+        .as_deref()
+        .expect("the tool carries a description");
+    assert!(
+        desc.contains("requests_failed"),
+        "get_results_dalfox returns progress.requests_failed but never says so"
+    );
+}

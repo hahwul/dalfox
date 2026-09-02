@@ -10,10 +10,12 @@ Rationale:
 Notes:
 - If target.headers already contains a Cookie header (case-insensitive), we do NOT auto-attach cookies.
 - If a custom cookie header is provided to build_request_with_cookie, it takes precedence over auto-attach.
-- reqwest's `RequestBuilder::header()` *appends*, so if `target.headers` already carries a
-  "User-Agent" entry AND `target.user_agent` is `Some`, the request sends BOTH (two User-Agent
-  headers). The scan/MCP/REST paths do exactly this on purpose — the header entry lets the
-  header-reflection probe exercise the UA while `target.user_agent` drives the common sweep.
+- `--user-agent X` is recorded twice on purpose: as a `target.headers` entry (so the
+  header-reflection probe enumerates and exercises the UA even on blanket-echo targets, where the
+  common header sweep is suppressed) and as `target.user_agent` (which drives the common sweep).
+  Both carry the same value, and the wire must still show ONE `User-Agent`. reqwest's
+  `RequestBuilder::header()` *appends*, so every "override" in this file goes through
+  [`set_header`], which is a real replace.
 
 Usage examples:
   let rb = http::build_request(&client, &target, Method::GET, target.url.clone(), None);
@@ -26,6 +28,7 @@ Usage examples:
 
 */
 
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, Method, RequestBuilder};
 use url::Url;
 
@@ -125,9 +128,11 @@ fn apply_headers_ua_cookies_inner(
         rb = rb.header(k, v);
     }
 
-    // Apply UA (override any existing UA header)
+    // Apply UA, replacing any `target.headers` entry: `--user-agent` populates
+    // both, and an imported (raw-http/HAR) target's captured UA must lose to an
+    // explicit override rather than ride along as a duplicate first value.
     if let Some(ua) = target.effective_user_agent() {
-        rb = rb.header("User-Agent", ua);
+        rb = set_header(rb, "User-Agent", ua);
     }
 
     // Cookie precedence:
@@ -137,14 +142,14 @@ fn apply_headers_ua_cookies_inner(
     if let Some(ch) = cookie_header
         && !ch.is_empty()
     {
-        rb = rb.header("Cookie", ch);
+        rb = set_header(rb, "Cookie", &ch);
         return rb;
     }
     if !has_header(&target.headers, "Cookie")
         && let Some(ch) = compose_cookie_header(&target.cookies)
         && !ch.is_empty()
     {
-        rb = rb.header("Cookie", ch);
+        rb = set_header(rb, "Cookie", &ch);
     }
 
     rb
@@ -168,10 +173,13 @@ pub(crate) fn build_request(
 /// Build a RequestBuilder for a body injector, dropping any `Content-Type`
 /// inherited from `target.headers`.
 ///
-/// The caller sets the injected body's `Content-Type` itself (via
-/// `apply_header_overrides` or reqwest's `.multipart()`); reqwest appends rather
-/// than replaces, so a captured `Content-Type` from an imported target would
-/// otherwise survive as a duplicate first value the server acts on. See
+/// The caller sets the injected body's `Content-Type` itself, and the two ways
+/// it does that do not agree: `apply_header_overrides` replaces (see
+/// [`set_header`]), but reqwest's `.multipart()` *appends*, so a captured
+/// `multipart/...; boundary=OLD` from an imported target would survive as the
+/// first value and frame the injected body with a boundary that never appears
+/// in it — every multipart injection would then parse as zero parts and test
+/// nothing. Dropping the inherited value here makes both callers safe. See
 /// [`apply_headers_ua_cookies_inner`]. Query/Path injectors keep using
 /// [`build_request`], which preserves the captured `Content-Type` since they
 /// re-send the original body verbatim.
@@ -203,14 +211,46 @@ pub(crate) fn build_request_with_cookie(
     if let Some(b) = body { rb.body(b) } else { rb }
 }
 
+/// Set `name: value`, *replacing* any value already staged under that name.
+///
+/// reqwest's `RequestBuilder::header()` appends (`HeaderMap::append`), so every
+/// site in this file that means "override" used to leave the earlier value on
+/// the wire as the **first** of two. That is not cosmetic for a scanner: a
+/// server that reads the first value of a repeated header never sees the
+/// injected one, so the payload silently never arrives and the parameter reads
+/// as clean. `RequestBuilder::headers()` runs reqwest's `replace_headers`,
+/// which is insert-per-name — the real override.
+///
+/// A name or value reqwest cannot parse falls back to `.header()`, which
+/// records the same builder error the caller used to get at `send()` time
+/// rather than dropping the header silently.
+fn set_header(rb: RequestBuilder, name: &str, value: &str) -> RequestBuilder {
+    match (
+        HeaderName::from_bytes(name.as_bytes()),
+        HeaderValue::from_str(value),
+    ) {
+        (Ok(n), Ok(v)) => {
+            let mut map = HeaderMap::with_capacity(1);
+            map.insert(n, v);
+            rb.headers(map)
+        }
+        _ => rb.header(name, value),
+    }
+}
+
 /// Apply arbitrary header overrides on top of an existing RequestBuilder (late binding).
-/// Provided `overrides` are appended after target headers and UA, so they take precedence.
+///
+/// Each entry *replaces* any same-named value already staged by `target.headers`
+/// or the UA/Cookie defaults, so the injected or probed value is the only one on
+/// the wire. Repeating a name within `overrides` keeps the last entry, matching
+/// override semantics. See [`set_header`] for why replacement rather than
+/// reqwest's default append.
 pub(crate) fn apply_header_overrides(
     mut rb: RequestBuilder,
     overrides: &[(String, String)],
 ) -> RequestBuilder {
     for (k, v) in overrides {
-        rb = rb.header(k, v);
+        rb = set_header(rb, k, v);
     }
     rb
 }
@@ -389,14 +429,14 @@ pub(crate) fn content_type_is_inert_data(ct: &str) -> bool {
     false
 }
 
-/// Same as [`content_type_is_inert_data`], plus the types that are only
-/// sniffable — and therefore only exploitable — when the server has *not* sent
-/// `X-Content-Type-Options: nosniff`.
+/// Same as [`content_type_is_inert_data`], plus `text/plain`.
 ///
-/// The plain-content-type version cannot add `text/plain` on its own, because
-/// that list is also consulted where the caller has no headers to inspect.
+/// Split from the plain version because that list is also consulted where a
+/// `text/plain` response still has to be treated as live (it is the
+/// caller-supplied type of an unparsed body, not a rendered document).
 ///
-/// `nosniff` is *not* what makes `text/plain` inert. Per the MIME Sniffing
+/// This deliberately takes no `nosniff` argument. It used to, and the header is
+/// *not* what makes `text/plain` inert. Per the MIME Sniffing
 /// standard, sniffing can only produce `text/html` when the supplied type is
 /// absent or one of `unknown/unknown` / `application/unknown` / `*/*`. A
 /// supplied `text/plain` either trips the check-for-apache-bug flag — whose
@@ -417,22 +457,11 @@ pub(crate) fn content_type_is_inert_data(ct: &str) -> bool {
 /// An absent or empty content-type is deliberately still treated as live: that
 /// is exactly the case the standard *does* sniff, so the same reasoning does
 /// not carry over.
-pub(crate) fn content_type_is_inert_data_with_nosniff(ct: &str, _nosniff: bool) -> bool {
+pub(crate) fn content_type_is_never_markup(ct: &str) -> bool {
     if content_type_is_inert_data(ct) {
         return true;
     }
     matches!(content_type_primary(ct).as_deref(), Some("text/plain"))
-}
-
-/// True when the response carries `X-Content-Type-Options: nosniff`.
-///
-/// The header is a single token by spec; compared case-insensitively because
-/// the value is not case-sensitive in practice and servers do send `NoSniff`.
-pub(crate) fn headers_declare_nosniff(headers: &reqwest::header::HeaderMap) -> bool {
-    headers
-        .get("x-content-type-options")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("nosniff"))
 }
 
 /// Build a preflight request for content-type detection.

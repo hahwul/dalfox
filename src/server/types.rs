@@ -324,6 +324,9 @@ pub(crate) struct ProgressPayload {
     pub(crate) params_total: u32,
     pub(crate) params_tested: u32,
     pub(crate) requests_sent: u64,
+    /// Requests that never reached the target (connect/TLS/timeout/transport).
+    /// A large share of these means "not scanned", not "nothing found".
+    pub(crate) requests_failed: u64,
     pub(crate) findings_so_far: u64,
     pub(crate) estimated_completion_pct: u32,
     /// Recommended delay (ms) before next poll; 0 when done/cancelled.

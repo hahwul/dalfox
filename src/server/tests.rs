@@ -5425,3 +5425,90 @@ fn test_validate_scan_options_rejects_unusable_blind_callback() {
     assert!(validate_scan_options(&mut padded).is_ok());
     assert_eq!(padded.blind.as_deref(), Some("https://cb.example/x"));
 }
+
+/// A target that answers its first `healthy` connections with a small HTML page
+/// and then accepts-and-drops every later one, so the scan reaches it but loses
+/// part of its traffic. Returns the bound address.
+async fn start_flaky_target_server(healthy: usize) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind flaky target");
+    let addr = listener.local_addr().expect("flaky addr");
+    tokio::spawn(async move {
+        let mut served = 0usize;
+        while let Ok((mut sock, _)) = listener.accept().await {
+            if served >= healthy {
+                // Close without answering: the client sees a transport error,
+                // which is exactly what `tick_request_failure` counts.
+                drop(sock);
+                continue;
+            }
+            served += 1;
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let body = "<html><body><p>hi</p></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            });
+        }
+    });
+    addr
+}
+
+#[tokio::test]
+async fn test_run_scan_job_populates_live_failure_counter() {
+    // The sibling of `progress.requests_sent`. `REQUEST_FAILURE_COUNT_JOB` was
+    // declared, captured and re-bound across `tokio::spawn` but never actually
+    // scoped by the runner, so `tick_request_failure` only ever reached the
+    // process-global tally: every job in a daemon shared one number and none of
+    // them could report their own. A target on a closed port fails every
+    // request it attempts, so this is nonzero exactly when the scope is bound.
+    // Reachable (so the scan actually starts) but loses everything after the
+    // first few requests.
+    let addr = start_flaky_target_server(3).await;
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "live-failures".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+    let progress = {
+        let jobs = state.jobs.lock().await;
+        jobs.get(&id).expect("job").progress.clone()
+    };
+
+    let opts = ScanOptions {
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(2),
+        ..ScanOptions::default()
+    };
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{addr}/?q=1"),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(run.is_ok(), "run_scan_job should complete in time");
+
+    assert!(
+        progress
+            .requests_failed
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > 0,
+        "requests that never reached the target must land on the job's own counter"
+    );
+}

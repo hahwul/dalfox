@@ -425,6 +425,10 @@ pub(crate) fn parse_job_status(s: &str) -> Option<JobStatus> {
 #[derive(Clone, Default)]
 pub(crate) struct JobProgress {
     pub requests_sent: Arc<AtomicU64>,
+    /// Requests that never reached the target (connect/TLS/timeout/transport),
+    /// the sibling of `requests_sent`. Scoped per job by the runner so one
+    /// scan's transport failures are not attributed to another's.
+    pub requests_failed: Arc<AtomicU64>,
     pub findings_so_far: Arc<AtomicU64>,
     pub params_total: Arc<AtomicU32>,
     pub params_tested: Arc<AtomicU32>,
@@ -468,6 +472,23 @@ pub(crate) struct Job {
 /// never polled — is what makes [`Job::worker_alive`] go false, so there is no
 /// "clear the flag" path to forget on an error branch.
 pub(crate) type WorkerLease = Arc<()>;
+
+/// How long a terminal job may keep its concurrency slot and its map entry
+/// while its worker is still draining.
+///
+/// Cancelling stamps a terminal status immediately and the worker winds down at
+/// its next cancellation checkpoint — bounded in practice by one in-flight
+/// request, i.e. `--timeout` (default 10s). Holding the slot across that window
+/// is deliberate: releasing it at cancel time let a client submit-then-cancel in
+/// a loop and keep unbounded workers alive against `--max-concurrent-scans`.
+///
+/// But "until the lease drops" is not a bound. `effective_scan_timeout` returns
+/// `0` (unbounded) when neither the request nor `--scan-timeout` sets one, so a
+/// worker wedged past its checkpoints would otherwise pin one slot and one map
+/// entry *forever*, and repeating that drives `/scan` to a permanent 503. This
+/// grace is the outer bound: far longer than any healthy drain, so only a stuck
+/// worker is ever force-reclaimed.
+pub(crate) const WORKER_DRAIN_GRACE_SECS: i64 = 300;
 
 impl Job {
     /// Construct a freshly-queued Job for `target_url`, with timestamps and
@@ -524,7 +545,26 @@ impl Job {
     /// waits for the lease; an explicit `DELETE ?purge=1` still wins, because
     /// that is the caller asking for exactly this.
     pub(crate) fn is_evictable(&self) -> bool {
-        self.is_terminal() && !self.worker_alive()
+        self.is_terminal() && (!self.worker_alive() || self.drain_window_expired())
+    }
+
+    /// True when this job went terminal more than [`WORKER_DRAIN_GRACE_SECS`]
+    /// ago and its worker *still* holds the lease — i.e. the worker is wedged,
+    /// not draining. Only meaningful for a terminal job; a running one legitimately
+    /// holds its slot for as long as it runs.
+    ///
+    /// `finished_at_ms` is stamped whenever a status goes terminal, but fall
+    /// back through the earlier timestamps so a missing one cannot make the
+    /// window unbounded again — `queued_at_ms` is always set.
+    pub(crate) fn drain_window_expired(&self) -> bool {
+        if !self.is_terminal() {
+            return false;
+        }
+        let since = self
+            .finished_at_ms
+            .or(self.started_at_ms)
+            .unwrap_or(self.queued_at_ms);
+        now_ms() - since > WORKER_DRAIN_GRACE_SECS * 1000
     }
 
     /// Whether this job still occupies a concurrency slot.
@@ -539,9 +579,11 @@ impl Job {
     ///
     /// The slot is released when the worker's [`WorkerLease`] drops, which is
     /// the same signal [`Job::is_evictable`] uses — so admission and retention
-    /// agree on what "still running" means.
+    /// agree on what "still running" means, and after
+    /// [`WORKER_DRAIN_GRACE_SECS`] a wedged worker's slot is reclaimed anyway
+    /// so the cap cannot be exhausted permanently.
     pub(crate) fn occupies_capacity(&self) -> bool {
-        !self.is_terminal() || self.worker_alive()
+        !self.is_terminal() || (self.worker_alive() && !self.drain_window_expired())
     }
 
     /// Total elapsed ms from `started_at_ms` to `finished_at_ms` (or now, for
@@ -559,7 +601,9 @@ pub(crate) fn purge_expired_jobs(jobs: &mut HashMap<String, Job>, retention_secs
         // A cancelled job is stamped terminal (status + finished_at_ms) the
         // moment the user asks, while its worker keeps draining. Retention must
         // not collect it out from under that worker — see `Job::is_evictable`.
-        if job.worker_alive() {
+        // Bounded by `WORKER_DRAIN_GRACE_SECS` so a wedged worker cannot pin the
+        // entry (and its concurrency slot) forever.
+        if job.worker_alive() && !job.drain_window_expired() {
             return true;
         }
         match job.finished_at_ms {

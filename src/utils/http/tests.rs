@@ -567,27 +567,25 @@ async fn test_read_body_capped_handles_utf8_split_at_cap() {
 }
 
 #[test]
-fn test_content_type_is_inert_data_with_nosniff_covers_text_plain() {
+fn test_content_type_is_never_markup_covers_text_plain() {
     // `text/plain` stays out of the plain deny-list (that list is consulted
-    // where the caller has no headers), but it is inert here whether or not the
-    // server sent `nosniff`. Per the MIME Sniffing standard a *supplied*
-    // `text/plain` can never become `text/html`: sniffing to HTML requires an
-    // absent or `unknown`/`*/*` type. Confirmed against real Chrome — the same
+    // where a `text/plain` body still has to be treated as live), but it is
+    // inert here. Per the MIME Sniffing standard a *supplied* `text/plain` can
+    // never become `text/html`: sniffing to HTML requires an absent or
+    // `unknown`/`*/*` type. Confirmed against real Chrome — the same
     // `<h1 id=marker>` + `<script>` body was HTML-parsed as `text/html` and not
-    // parsed under any `text/plain` spelling, with or without the header.
+    // parsed under any `text/plain` spelling, with or without `nosniff`.
     assert!(!content_type_is_inert_data("text/plain"));
-    for nosniff in [true, false] {
-        for ct in [
-            "text/plain",
-            "text/plain; charset=utf-8",
-            "text/plain; charset=windows-1252",
-            "TEXT/PLAIN",
-        ] {
-            assert!(
-                content_type_is_inert_data_with_nosniff(ct, nosniff),
-                "{ct} must be inert (nosniff={nosniff}) — no browser HTML-parses a supplied text/plain"
-            );
-        }
+    for ct in [
+        "text/plain",
+        "text/plain; charset=utf-8",
+        "text/plain; charset=windows-1252",
+        "TEXT/PLAIN",
+    ] {
+        assert!(
+            content_type_is_never_markup(ct),
+            "{ct} must be inert — no browser HTML-parses a supplied text/plain"
+        );
     }
 }
 
@@ -596,16 +594,14 @@ fn test_a_typeless_response_is_still_treated_as_live() {
     // The carve-out: an absent or empty content-type is exactly the case the
     // standard *does* sniff, and sniffing an unknown type can produce
     // `text/html`. Widening `text/plain` must not widen this.
-    for nosniff in [true, false] {
-        assert!(!content_type_is_inert_data_with_nosniff("", nosniff));
-    }
+    assert!(!content_type_is_never_markup(""));
 }
 
 #[test]
-fn test_content_type_is_inert_data_with_nosniff_keeps_live_types_live() {
-    // `nosniff` must not turn a genuinely executable or renderable type inert:
-    // it constrains sniffing, not parsing. JSONP is the one that would hurt —
-    // `application/javascript` executes via `<script src>` regardless.
+fn test_content_type_is_never_markup_keeps_live_types_live() {
+    // A genuinely executable or renderable type must stay scannable. JSONP is
+    // the one that would hurt — `application/javascript` executes via
+    // `<script src>` regardless of any response header.
     for ct in [
         "text/html",
         "application/xhtml+xml",
@@ -614,50 +610,20 @@ fn test_content_type_is_inert_data_with_nosniff_keeps_live_types_live() {
         "text/javascript",
     ] {
         assert!(
-            !content_type_is_inert_data_with_nosniff(ct, true),
-            "{ct} must stay scannable even under nosniff"
+            !content_type_is_never_markup(ct),
+            "{ct} must stay scannable"
         );
     }
-    // An absent content-type stays live: `nosniff` does not stop a navigation
-    // to a typeless response from being sniffed.
-    assert!(!content_type_is_inert_data_with_nosniff("", true));
+    assert!(!content_type_is_never_markup(""));
 }
 
 #[test]
-fn test_content_type_is_inert_data_with_nosniff_is_superset() {
-    // Whatever the plain version calls inert stays inert regardless of the
-    // header, so the new gate can never *lose* a suppression.
+fn test_content_type_is_never_markup_is_superset() {
+    // Whatever the plain version calls inert stays inert here, so this gate can
+    // never *lose* a suppression the plain one would have made.
     for ct in ["application/json", "text/csv", "image/png", "font/woff2"] {
-        assert!(content_type_is_inert_data_with_nosniff(ct, false));
-        assert!(content_type_is_inert_data_with_nosniff(ct, true));
+        assert!(content_type_is_never_markup(ct));
     }
-}
-
-#[test]
-fn test_headers_declare_nosniff() {
-    use reqwest::header::{HeaderMap, HeaderValue};
-
-    let mut headers = HeaderMap::new();
-    assert!(!headers_declare_nosniff(&headers));
-
-    headers.insert(
-        "x-content-type-options",
-        HeaderValue::from_static("nosniff"),
-    );
-    assert!(headers_declare_nosniff(&headers));
-
-    // Servers do send mixed case and stray whitespace.
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "x-content-type-options",
-        HeaderValue::from_static("  NoSniff "),
-    );
-    assert!(headers_declare_nosniff(&headers));
-
-    // Anything that is not the nosniff token does not count.
-    let mut headers = HeaderMap::new();
-    headers.insert("x-content-type-options", HeaderValue::from_static("sniff"));
-    assert!(!headers_declare_nosniff(&headers));
 }
 
 // ---- build_body_request_base: captured Content-Type suppression ----
@@ -783,4 +749,190 @@ async fn send_counted_counts_a_request_that_never_answers() {
             );
         })
         .await;
+}
+
+// ---- header overrides replace rather than append ----
+
+#[test]
+fn apply_header_overrides_replaces_a_same_named_target_header() {
+    // reqwest's `.header()` appends. When the injected/probed value landed
+    // *second*, a server that reads the first value of a repeated header never
+    // saw the payload at all: the request looked delivered, nothing reflected,
+    // and the parameter read as clean. The override must be the only value.
+    let mut target = parse_target("https://example.com/").unwrap();
+    target.headers = vec![
+        (
+            "Referer".to_string(),
+            "https://original.example/".to_string(),
+        ),
+        ("X-Keep".to_string(), "1".to_string()),
+    ];
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let base = build_request(
+        &client,
+        &target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+    );
+    let req = apply_header_overrides(base, &[("Referer".to_string(), "PAYLOAD".to_string())])
+        .build()
+        .expect("request should build");
+
+    let seen: Vec<&str> = req
+        .headers()
+        .get_all("referer")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert_eq!(
+        seen,
+        vec!["PAYLOAD"],
+        "the override must replace the captured Referer, not ride behind it"
+    );
+    assert_eq!(
+        req.headers().get("X-Keep").and_then(|v| v.to_str().ok()),
+        Some("1"),
+        "unrelated headers are untouched"
+    );
+}
+
+#[test]
+fn apply_header_overrides_keeps_the_last_entry_for_a_repeated_name() {
+    crate::ensure_crypto_provider();
+    let target = parse_target("https://example.com/").unwrap();
+    let client = reqwest::Client::new();
+    let base = build_request(
+        &client,
+        &target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+    );
+    let req = apply_header_overrides(
+        base,
+        &[
+            ("X-Probe".to_string(), "first".to_string()),
+            ("X-Probe".to_string(), "second".to_string()),
+        ],
+    )
+    .build()
+    .expect("request should build");
+
+    let seen: Vec<&str> = req
+        .headers()
+        .get_all("x-probe")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert_eq!(seen, vec!["second"], "override semantics: last entry wins");
+}
+
+#[test]
+fn a_user_agent_is_never_sent_twice() {
+    // `--user-agent X` is deliberately recorded in BOTH `target.headers` (so the
+    // header-reflection probe enumerates it) and `target.user_agent` (which
+    // drives the common sweep). The wire must still carry one `User-Agent`.
+    let mut target = parse_target("https://example.com/").unwrap();
+    target.headers = vec![("User-Agent".to_string(), "dalfox-ua".to_string())];
+    target.user_agent = Some("dalfox-ua".to_string());
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let req = build_request(
+        &client,
+        &target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+    )
+    .build()
+    .expect("request should build");
+
+    assert_eq!(
+        req.headers().get_all("user-agent").iter().count(),
+        1,
+        "one User-Agent on the wire"
+    );
+}
+
+#[test]
+fn an_explicit_user_agent_beats_a_captured_one() {
+    // raw-http/HAR imports carry the captured UA in `target.headers`. An
+    // explicit `--user-agent` must win outright rather than trail it as a
+    // second value the server may ignore.
+    let mut target = parse_target("https://example.com/").unwrap();
+    target.headers = vec![("User-Agent".to_string(), "captured-from-har".to_string())];
+    target.user_agent = Some("explicit-override".to_string());
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let req = build_request(
+        &client,
+        &target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+    )
+    .build()
+    .expect("request should build");
+
+    let seen: Vec<&str> = req
+        .headers()
+        .get_all("user-agent")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert_eq!(seen, vec!["explicit-override"]);
+}
+
+#[test]
+fn an_explicit_cookie_header_replaces_a_captured_one() {
+    // Documented precedence: an explicit cookie override wins over a Cookie
+    // captured into `target.headers`. Appending sent both, and a server that
+    // reads the first never saw the injected cookie value.
+    let mut target = parse_target("https://example.com/").unwrap();
+    target.headers = vec![("Cookie".to_string(), "sid=original".to_string())];
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let req = build_request_with_cookie(
+        &client,
+        &target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+        Some("sid=PAYLOAD".to_string()),
+    )
+    .build()
+    .expect("request should build");
+
+    let seen: Vec<&str> = req
+        .headers()
+        .get_all("cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert_eq!(seen, vec!["sid=PAYLOAD"]);
+}
+
+#[test]
+fn an_unparsable_override_still_surfaces_as_a_builder_error() {
+    // The replace path goes through `HeaderName`/`HeaderValue` parsing. A name
+    // reqwest cannot parse must keep failing at build/send time rather than
+    // being silently dropped.
+    crate::ensure_crypto_provider();
+    let target = parse_target("https://example.com/").unwrap();
+    let client = reqwest::Client::new();
+    let base = build_request(
+        &client,
+        &target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+    );
+    let built =
+        apply_header_overrides(base, &[("Bad Header".to_string(), "x".to_string())]).build();
+    assert!(
+        built.is_err(),
+        "an invalid header name must not be swallowed"
+    );
 }
