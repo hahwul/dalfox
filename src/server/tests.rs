@@ -4569,7 +4569,10 @@ async fn test_cancelled_but_draining_scan_survives_the_retention_cap() {
     {
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&scan_id).expect("job still present after cancel");
-        assert!(job.is_terminal(), "cancel stamps the terminal state at once");
+        assert!(
+            job.is_terminal(),
+            "cancel stamps the terminal state at once"
+        );
         assert!(
             job.worker_alive(),
             "the slow target guarantees the worker is still draining here"
@@ -4600,7 +4603,9 @@ async fn test_cancelled_but_draining_scan_survives_the_retention_cap() {
     for _ in 0..400 {
         {
             let jobs = state.jobs.lock().await;
-            let job = jobs.get(&scan_id).expect("job must remain until it settles");
+            let job = jobs
+                .get(&scan_id)
+                .expect("job must remain until it settles");
             if !job.worker_alive() {
                 assert!(
                     job.results.is_some(),

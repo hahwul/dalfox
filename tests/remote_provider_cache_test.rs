@@ -77,11 +77,15 @@ async fn test_remote_payload_cache_is_keyed_by_provider_set() {
         .expect("provider B fetch");
 
     assert_eq!(
-        get_remote_payloads_for(&a).expect("provider A cached").as_ref(),
+        get_remote_payloads_for(&a)
+            .expect("provider A cached")
+            .as_ref(),
         &vec!["alpha-payload".to_string()],
     );
     assert_eq!(
-        get_remote_payloads_for(&b).expect("provider B cached").as_ref(),
+        get_remote_payloads_for(&b)
+            .expect("provider B cached")
+            .as_ref(),
         &vec!["beta-payload".to_string()],
         "a job asking for provider B must not be served provider A's payloads"
     );

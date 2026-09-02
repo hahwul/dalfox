@@ -510,6 +510,71 @@ async fn test_scan_with_dalfox_queues_and_can_be_queried() {
     assert!(matches!(status, "queued" | "running" | "done" | "error"));
 }
 
+/// The MCP scan tool must not `.await` the remote payload/wordlist fetch.
+///
+/// The job is inserted (counting against `MAX_ACTIVE_SCANS_MCP`) before the
+/// worker is spawned. A network await in between — against a caller-named host,
+/// for up to the request timeout — is a window in which a cancelled tool call
+/// drops this future: the worker is never spawned, nothing moves the job out of
+/// `queued`, `purge_expired_jobs` only collects terminal jobs, and the capacity
+/// slot is gone for the life of the process. The REST server never had this
+/// hole because it spawns first and fetches inside the task; MCP now matches.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_scan_with_dalfox_does_not_await_remote_fetch_in_the_tool_call() {
+    // A provider URL that accepts the connection and never answers, so the
+    // fetch takes the full request timeout.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind blackhole listener");
+    let addr = listener.local_addr().expect("blackhole addr");
+    let _blackhole = tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            held.push(stream); // keep the connection open, never respond
+        }
+    });
+    crate::payload::register_payload_provider(
+        "mcp-blackhole-provider",
+        vec![format!("http://{addr}/list.txt")],
+    );
+
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        // Unreachable target so the scan itself settles quickly once spawned.
+        timeout: 5,
+        remote_payloads: vec!["mcp-blackhole-provider".to_string()],
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+
+    let outcome = tokio::time::timeout(
+        Duration::from_millis(500),
+        mcp.scan_with_dalfox(Parameters(params)),
+    )
+    .await;
+    assert!(
+        outcome.is_ok(),
+        "scan_with_dalfox must return as soon as the job is spawned; awaiting \
+         the remote fetch here leaks the capacity slot if the call is cancelled"
+    );
+    let payload = parse_result_json(&outcome.unwrap().expect("scan_with_dalfox should queue"));
+    assert_eq!(payload["status"], "queued");
+
+    // And the job must actually be owned by a worker: it leaves `queued` on its
+    // own rather than sitting there for the life of the process.
+    for _ in 0..200 {
+        {
+            let jobs = mcp.lock_jobs();
+            assert_eq!(jobs.len(), 1, "exactly one job was submitted");
+            let job = jobs.values().next().expect("the job");
+            if job.status != JobStatus::Queued {
+                return;
+            }
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the submitted scan never left `queued` — no worker owns it");
+}
+
 #[tokio::test]
 async fn test_scan_with_dalfox_rejects_out_of_range_timeout() {
     let mcp = DalfoxMcp::new();

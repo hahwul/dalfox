@@ -343,7 +343,10 @@ fn cancelled_job_with_a_live_worker_is_not_evictable() {
     job.status = JobStatus::Cancelled;
     job.finished_at_ms = Some(now_ms());
 
-    assert!(job.is_terminal(), "cancel stamps the terminal state at once");
+    assert!(
+        job.is_terminal(),
+        "cancel stamps the terminal state at once"
+    );
     assert!(job.worker_alive(), "but the worker is still draining");
     assert!(
         !job.is_evictable(),
@@ -401,7 +404,9 @@ fn purge_expired_jobs_keeps_a_draining_job_past_its_ttl() {
     );
 
     // Same job once the worker is gone: now it is past its TTL and collectable.
-    jobs.get_mut("draining").expect("still present").worker_lease = None;
+    jobs.get_mut("draining")
+        .expect("still present")
+        .worker_lease = None;
     purge_expired_jobs(&mut jobs, JOB_RETENTION_SECS);
     assert!(jobs.is_empty(), "an expired settled job is still purged");
 }
