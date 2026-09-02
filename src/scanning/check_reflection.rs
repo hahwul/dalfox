@@ -1727,6 +1727,103 @@ impl ReflectionBody {
     }
 }
 
+/// Status/header-level suppression gates every injection response must pass
+/// before a reflection may be recorded from it.
+///
+/// Shared by the normal reflection branch and the `--sxss` branch of
+/// [`fetch_injection_response_with_client`]. The `--sxss` branch used to apply
+/// none of them, so a stored-XSS run reported reflections the plain run drops:
+/// echoes into `application/json` / `text/csv` / nosniff `text/plain` bodies,
+/// responses whose status the operator excluded with `--ignore-return`, and
+/// path-injection echoes on redirects or non-markup content-types.
+///
+/// Returns `true` when the response must not produce a finding. Body-level
+/// suppression (`should_suppress_path_reflection_with_body`) is applied
+/// separately by the callers, once the body has been read.
+fn injection_response_suppressed(
+    status_code: u16,
+    headers: &reqwest::header::HeaderMap,
+    param: &Param,
+    args: &crate::cmd::scan::ScanArgs,
+) -> bool {
+    // Skip processing if the status code is in the ignore_return list
+    if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
+        return true;
+    }
+    let content_type = headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    // Inert-data content-type suppression for ALL non-Path locations.
+    // When the response declares a structured-data / binary type
+    // (`application/json`, `text/csv`, raster image, …), a browser
+    // navigating to it renders the body as data — never as markup —
+    // so a payload reflected into it is not exploitable as reflected
+    // XSS even when the body happens to contain HTML-looking text.
+    // This removes the false positives where a query/body param is
+    // echoed into a JSON API response (e.g. `{"q":"<svg onload=…>"}`).
+    // Path has its own stricter markup-only gate just below; JSONP
+    // (`application/javascript`) is intentionally NOT treated as inert
+    // here (see `content_type_is_inert_data`), preserving those
+    // detections. `text/plain` is inert only when the response also
+    // sends `X-Content-Type-Options: nosniff` — without it a browser
+    // sniffs the body as HTML, with it the body can never be markup.
+    //
+    // Skip redirects: a 3xx carries the reflection in its `Location`
+    // header, and the body content-type describes the (usually empty)
+    // redirect body, not the redirect target — so it says nothing about
+    // whether the Location reflection is exploitable. Let those fall
+    // through to the Location-header check in the caller.
+    if !matches!(param.location, Location::Path) && !(300..400).contains(&status_code) {
+        let nosniff = crate::utils::headers_declare_nosniff(headers);
+        if crate::utils::content_type_is_inert_data_with_nosniff(content_type, nosniff) {
+            crate::dbg_log!(
+                "suppressing reflection on inert-data content-type (param={}, content-type={}, nosniff={})",
+                param.name,
+                content_type,
+                nosniff
+            );
+            return true;
+        }
+    }
+
+    // Hard suppressions for Path that don't need to read the body:
+    //   * 3xx redirects: any reflection lives in the Location header,
+    //     not a rendered HTML sink. Browsers don't execute Location
+    //     bodies, so there's nothing exploitable here regardless of
+    //     marker context — keep the old blanket drop.
+    //   * non-HTML content-types: response is JSON / JS / image and
+    //     browsers render it as data, not markup.
+    if matches!(param.location, Location::Path) {
+        if (300..400).contains(&status_code) {
+            crate::dbg_log!(
+                "suppressing path reflection on 3xx redirect (param={}, status={})",
+                param.name,
+                status_code
+            );
+            return true;
+        }
+        // `image/svg+xml` executes inline <script>/event handlers on
+        // top-level navigation, so a dynamically-generated SVG that
+        // reflects a path segment is a real sink — allow it alongside
+        // the HTML-ish types (don't open up JSON/JS/raster, which render
+        // as data).
+        let executes_as_markup = crate::utils::is_htmlish_content_type(content_type)
+            || crate::utils::content_type_primary(content_type).as_deref() == Some("image/svg+xml");
+        if !content_type.is_empty() && !executes_as_markup {
+            crate::dbg_log!(
+                "suppressing path-injection reflection on non-HTML content-type (param={}, content-type={})",
+                param.name,
+                content_type
+            );
+            return true;
+        }
+    }
+
+    false
+}
+
 async fn fetch_injection_response(
     target: &Target,
     param: &Param,
@@ -1801,11 +1898,51 @@ async fn fetch_injection_response_with_client(
     // from the injection request. If retrieval URLs don't surface the
     // payload, classify the inject body before giving up.
     if args.sxss {
-        // Eagerly consume the injection response body so we can use it as
-        // an inline-rendered fallback. We drop status/headers because the
-        // retrieval-URL path doesn't gate on them either, and we want
-        // consistent SXSS evidence semantics.
-        let inject_body: Option<String> = match inject_resp {
+        // Read a candidate body — the injection response (usable as an
+        // inline-rendered fallback) or a retrieval-URL response — applying the
+        // same status/header gates and the same body-level Path gate the normal
+        // branch applies, then tag it with whether it was served as executable
+        // JavaScript. Both SXSS paths previously skipped all of that, so a
+        // stored run reported reflections into JSON APIs, into statuses the
+        // operator excluded with `--ignore-return`, and path echoes on
+        // non-markup responses — every false positive the plain path removes.
+        async fn gated_body(
+            resp: reqwest::Response,
+            param: &Param,
+            payload: &str,
+            args: &crate::cmd::scan::ScanArgs,
+        ) -> Option<ReflectionBody> {
+            let status_code = resp.status().as_u16();
+            if injection_response_suppressed(status_code, resp.headers(), param, args) {
+                return None;
+            }
+            let is_js_content_type = crate::utils::is_javascript_content_type(
+                resp.headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or(""),
+            );
+            let text = crate::utils::http::read_body(resp).await.ok()?;
+            if text.is_empty() {
+                return None;
+            }
+            if should_suppress_path_reflection_with_body(
+                &param.location,
+                status_code,
+                &text,
+                payload,
+            ) {
+                crate::dbg_log!(
+                    "suppressing url-echo-only path reflection (param={}, status={})",
+                    param.name,
+                    status_code
+                );
+                return None;
+            }
+            Some(ReflectionBody::rendered(text).with_js_content_type(is_js_content_type))
+        }
+
+        let inject_body: Option<ReflectionBody> = match inject_resp {
             Ok(resp) => {
                 // Mirror the normal path's WAF accounting on the stored-write
                 // response before consuming the body: a 403/406/503 stored-write
@@ -1815,17 +1952,14 @@ async fn fetch_injection_response_with_client(
                 // target_summary.waf.bypass is always empty.
                 let status_code = resp.status().as_u16();
                 apply_injection_waf_accounting(status_code, target, args, streak).await;
-                crate::utils::http::read_body(resp)
-                    .await
-                    .ok()
-                    .filter(|t| !t.is_empty())
+                gated_body(resp, param, payload, args).await
             }
             Err(_) => None,
         };
 
         let check_urls = resolve_sxss_check_urls(target, param, args);
         let retries = args.sxss_retries.max(1) as u64;
-        let mut fallback_body: Option<String> = None;
+        let mut fallback_body: Option<ReflectionBody> = None;
         for sxss_url in &check_urls {
             // Retry with delay to handle session / content propagation
             for attempt in 0u64..retries {
@@ -1843,14 +1977,13 @@ async fn fetch_injection_response_with_client(
 
                 crate::record_outbound_request().await;
                 if let Ok(resp) = check_request.send().await
-                    && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && !text.is_empty()
+                    && let Some(body) = gated_body(resp, param, payload, args).await
                 {
-                    if classify_reflection(&text, payload).is_some() {
-                        return Some(ReflectionBody::rendered(text));
+                    if classify_reflection(&body.text, payload).is_some() {
+                        return Some(body);
                     }
                     if fallback_body.is_none() {
-                        fallback_body = Some(text);
+                        fallback_body = Some(body);
                     }
                 }
             }
@@ -1860,11 +1993,11 @@ async fn fetch_injection_response_with_client(
         // /comments page). Without this check we'd miss the entire class
         // of sinks where the write-response is the rendered view.
         if let Some(body) = inject_body.as_ref()
-            && classify_reflection(body, payload).is_some()
+            && classify_reflection(&body.text, payload).is_some()
         {
-            return inject_body.map(ReflectionBody::rendered);
+            return inject_body;
         }
-        fallback_body.or(inject_body).map(ReflectionBody::rendered)
+        fallback_body.or(inject_body)
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
@@ -1883,83 +2016,10 @@ async fn fetch_injection_response_with_client(
             // Adaptive WAF accounting (per-worker streak + cooldown + telemetry).
             apply_injection_waf_accounting(status_code, target, args, streak).await;
 
-            // Skip processing if the status code is in the ignore_return list
-            if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
+            // `--ignore-return`, inert-data content-types, and the Path-only
+            // redirect / non-markup drops. Shared with the `--sxss` branch above.
+            if injection_response_suppressed(status_code, resp.headers(), param, args) {
                 return None;
-            }
-            // Inert-data content-type suppression for ALL non-Path locations.
-            // When the response declares a structured-data / binary type
-            // (`application/json`, `text/csv`, raster image, …), a browser
-            // navigating to it renders the body as data — never as markup —
-            // so a payload reflected into it is not exploitable as reflected
-            // XSS even when the body happens to contain HTML-looking text.
-            // This removes the false positives where a query/body param is
-            // echoed into a JSON API response (e.g. `{"q":"<svg onload=…>"}`).
-            // Path has its own stricter markup-only gate just below; JSONP
-            // (`application/javascript`) is intentionally NOT treated as inert
-            // here (see `content_type_is_inert_data`), preserving those
-            // detections. `text/plain` is inert only when the response also
-            // sends `X-Content-Type-Options: nosniff` — without it a browser
-            // sniffs the body as HTML, with it the body can never be markup.
-            //
-            // Skip redirects: a 3xx carries the reflection in its `Location`
-            // header, and the body content-type describes the (usually empty)
-            // redirect body, not the redirect target — so it says nothing about
-            // whether the Location reflection is exploitable. Let those fall
-            // through to the Location-header check below.
-            if !matches!(param.location, Location::Path) && !(300..400).contains(&status_code) {
-                let ct = resp
-                    .headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("");
-                let nosniff = crate::utils::headers_declare_nosniff(resp.headers());
-                if crate::utils::content_type_is_inert_data_with_nosniff(ct, nosniff) {
-                    crate::dbg_log!(
-                        "suppressing reflection on inert-data content-type (param={}, content-type={}, nosniff={})",
-                        param.name,
-                        ct,
-                        nosniff
-                    );
-                    return None;
-                }
-            }
-            // Hard suppressions for Path that don't need to read the body:
-            //   * 3xx redirects: any reflection lives in the Location header,
-            //     not a rendered HTML sink. Browsers don't execute Location
-            //     bodies, so there's nothing exploitable here regardless of
-            //     marker context — keep the old blanket drop.
-            //   * non-HTML content-types: response is JSON / JS / image and
-            //     browsers render it as data, not markup.
-            if matches!(param.location, Location::Path) {
-                if (300..400).contains(&status_code) {
-                    crate::dbg_log!(
-                        "suppressing path reflection on 3xx redirect (param={}, status={})",
-                        param.name,
-                        status_code
-                    );
-                    return None;
-                }
-                let ct = resp
-                    .headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("");
-                // `image/svg+xml` executes inline <script>/event handlers on
-                // top-level navigation, so a dynamically-generated SVG that
-                // reflects a path segment is a real sink — allow it alongside
-                // the HTML-ish types (don't open up JSON/JS/raster, which render
-                // as data).
-                let executes_as_markup = crate::utils::is_htmlish_content_type(ct)
-                    || crate::utils::content_type_primary(ct).as_deref() == Some("image/svg+xml");
-                if !ct.is_empty() && !executes_as_markup {
-                    crate::dbg_log!(
-                        "suppressing path-injection reflection on non-HTML content-type (param={}, content-type={})",
-                        param.name,
-                        ct
-                    );
-                    return None;
-                }
             }
             // Check for redirect context: if the response is a 3xx redirect,
             // the Location header may contain the reflected payload in either
