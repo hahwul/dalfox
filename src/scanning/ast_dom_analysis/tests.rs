@@ -5024,3 +5024,57 @@ document.getElementById('c').innerHTML = justStrings`<article>${raw}</article>`;
         "unknown / escaping / strings-only tags must not report: {vulns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Taint-forwarding constructors (`new Proxy(...)`, collections)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_proxy_get_trap_forwards_taint() {
+    // xssmaze taintflow-level2: the sink reads a property whose value is
+    // produced by a Proxy get trap, not by an access on the wrapped object.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+var store = new Proxy({ body: raw }, {
+  get: function (target, prop) { return target[prop]; }
+});
+if (store.body) { document.getElementById('out').innerHTML = store.body; }
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Proxy over a tainted target should read back tainted: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_map_constructor_forwards_taint() {
+    let code = r#"
+var raw = location.hash.slice(1);
+var m = new Map([['body', raw]]);
+document.getElementById('out').innerHTML = m.get('body');
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "new Map(taintedEntries) should read back tainted: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_taint_forwarding_constructor_fp_control() {
+    // FP control: a Proxy/Map built from page-authored data stays clean, and a
+    // constructor outside the allowlist does not forward taint on its own.
+    let code = r#"
+var raw = location.hash.slice(1);
+var defaults = new Proxy({ body: '<b>hi</b>' }, { get: function (t, p) { return t[p]; } });
+document.getElementById('a').innerHTML = defaults.body;
+var when = new Date(raw);
+document.getElementById('b').innerHTML = when;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "clean Proxy and non-forwarding constructors must not report: {vulns:?}"
+    );
+}

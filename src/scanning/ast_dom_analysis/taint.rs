@@ -495,6 +495,41 @@ impl<'a> DomXssVisitor<'a> {
         }
         None
     }
+    /// The argument a taint-forwarding constructor hands straight back out
+    /// through the object it builds.
+    ///
+    /// `new Proxy(target, handler)` is the motivating one: every property read
+    /// off the proxy is served by the handler from `target`, so a proxy wrapped
+    /// around tainted data reads back tainted — but the read is a trap call, not
+    /// a property access on the object the taint was stored in, so nothing in
+    /// the member/alias tracking connects the two. The collection constructors
+    /// are here for the same reason: `new Map(tainted)` stores exactly the
+    /// argument's values, and a later `.get(k)` hands one back.
+    ///
+    /// Deliberately a short allowlist rather than "any `new` with a tainted
+    /// argument": most constructors transform their input into something whose
+    /// taint has to be argued separately (`new Date(x)` yields a timestamp,
+    /// `new Function(x)` is a *sink*, `new URL(x)` / `new URLSearchParams(x)`
+    /// already have their own richer source tracking that this must not
+    /// shadow).
+    pub(super) fn taint_forwarding_new_argument<'b>(
+        &self,
+        new_expr: &'b NewExpression<'a>,
+    ) -> Option<&'b Expression<'a>> {
+        const TAINT_FORWARDING_CONSTRUCTORS: &[&str] = &[
+            "Proxy", "Map", "Set", "WeakMap", "WeakSet", "String", "Object",
+        ];
+        let Expression::Identifier(id) = &new_expr.callee else {
+            return None;
+        };
+        if !TAINT_FORWARDING_CONSTRUCTORS.contains(&id.name.as_str()) {
+            return None;
+        }
+        new_expr.arguments.first().and_then(|arg| match arg {
+            Argument::SpreadElement(spread) => Some(&spread.argument),
+            _ => arg.as_expression(),
+        })
+    }
     /// Check if expression is tainted.
     ///
     /// Hostile JavaScript can nest expressions arbitrarily deep (`a.b.c.d…`,
@@ -611,6 +646,11 @@ impl<'a> DomXssVisitor<'a> {
             Expression::TaggedTemplateExpression(tagged) => {
                 self.tagged_template_source(tagged).is_some()
             }
+            // `new Proxy(taintedTarget, handler)` and the collection
+            // constructors hand their argument's values back out on read.
+            Expression::NewExpression(new_expr) => self
+                .taint_forwarding_new_argument(new_expr)
+                .is_some_and(|arg| self.is_tainted(arg)),
             _ => false,
         }
     }

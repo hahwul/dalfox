@@ -417,6 +417,9 @@ impl<'a> DomXssVisitor<'a> {
                 self.find_source_in_expr(&await_expr.argument)
             }
             Expression::TaggedTemplateExpression(tagged) => self.tagged_template_source(tagged),
+            Expression::NewExpression(new_expr) => self
+                .taint_forwarding_new_argument(new_expr)
+                .and_then(|arg| self.find_source_in_expr(arg)),
             _ => None,
         }
     }
