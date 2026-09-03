@@ -24,6 +24,7 @@ impl<'a> DomXssVisitor<'a> {
                     prop_name,
                     &assign.right,
                 );
+                self.analyze_idb_success_assignment(&member.object, prop_name, &assign.right);
                 // Script-element body assignments (e.g. `s.text = tainted`
                 // where `s` came from `document.createElement('script')`).
                 // The browser parses the value as JS source once the

@@ -98,6 +98,17 @@ impl<'a> DomXssVisitor<'a> {
             self.url_object_sources.remove(var_name);
         }
 
+        // `const req = store.get(key)` — remember the request so its
+        // `onsuccess` handler is walked with the stored record treated as
+        // untrusted, and so a direct `req.result` read resolves.
+        if self.expr_is_idb_value_request(init) {
+            self.idb_request_vars.insert(var_name.to_string());
+            self.field_taints
+                .insert(format!("{var_name}.result"), "indexedDB".to_string());
+        } else {
+            self.idb_request_vars.remove(var_name);
+        }
+
         // `let s = document.createElement('script')` — remember the
         // variable so a later `s.text = tainted` is recognised as a
         // sink even though `text` is a benign property on every

@@ -373,6 +373,15 @@ struct DomXssVisitor<'a> {
     url_search_params_objects: HashSet<String>,
     /// Track `paramsVar.key -> upstream source` for URLSearchParams set/get reparses.
     url_search_params_field_sources: HashMap<String, String>,
+    /// Variables bound to an IndexedDB *value* request — the object an
+    /// `objectStore(...).get(...)` / `.getAll()` / `.openCursor()` call
+    /// returns. Its `onsuccess` handler receives the stored record, which is
+    /// same-origin persisted data in exactly the trust class `localStorage` /
+    /// `sessionStorage` already sit in: whatever wrote it (an earlier visit, a
+    /// seeded parameter, another page on the origin) is not this page's
+    /// literal text. The database handle from `indexedDB.open(...)` is
+    /// deliberately *not* in here — its `result` is a connection, not data.
+    idb_request_vars: HashSet<String>,
     /// Variables that hold a `<script>` element created via
     /// `document.createElement('script')`. Assigning a tainted value to
     /// `.text` / `.textContent` / `.innerText` / `.innerHTML` on these
@@ -671,6 +680,7 @@ impl<'a> DomXssVisitor<'a> {
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
+            idb_request_vars: HashSet::new(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),
             response_object_vars: HashSet::new(),

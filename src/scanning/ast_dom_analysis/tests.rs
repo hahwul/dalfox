@@ -5232,3 +5232,59 @@ document.getElementById('out').textContent = steps.length + nums.length + fns.le
         "clean receivers and non-executing callbacks must not report: {vulns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// IndexedDB stored records as a source
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_indexeddb_get_result_reaches_sink() {
+    // xssmaze domsource-level1: the value is persisted to IndexedDB and read
+    // back through two async callbacks.
+    let code = r#"
+var open = indexedDB.open('notes-db', 1);
+open.onsuccess = function (e) {
+  var db = e.target.result;
+  var get = db.transaction('notes', 'readonly').objectStore('notes').get('latest');
+  get.onsuccess = function (ev) {
+    if (ev.target.result != null) {
+      document.getElementById('out').innerHTML = ev.target.result;
+    }
+  };
+};
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns
+            .iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("indexedDB")),
+        "IndexedDB record read should reach the sink: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_indexeddb_fp_control_connection_and_write_requests() {
+    // FP control: neither of the two IndexedDB requests whose `result` is not
+    // data may be treated as a source — `indexedDB.open()` resolves to a
+    // database connection, and `put()` resolves to the written key. Nor may a
+    // same-named `.get()` on a plain Map.
+    let code = r#"
+var open = indexedDB.open('notes-db', 1);
+open.onsuccess = function (e) {
+  document.getElementById('a').innerHTML = e.target.result.name;
+  var db = e.target.result;
+  var put = db.transaction('notes', 'readwrite').objectStore('notes').put('hi', 'k');
+  put.onsuccess = function (ev) {
+    document.getElementById('b').innerHTML = ev.target.result;
+  };
+};
+var settings = new Map();
+var got = settings.get('theme');
+document.getElementById('c').innerHTML = got;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "connection / write requests and plain Map reads must not report: {vulns:?}"
+    );
+}

@@ -210,4 +210,37 @@ impl<'a> DomXssVisitor<'a> {
             self.clone_url_search_params_field_sources(id.name.as_str(), target);
         }
     }
+
+    /// True when `expr` is an IndexedDB request whose `result` is a *stored
+    /// value* — `store.get(k)`, `.getAll()`, `.openCursor()` and friends.
+    ///
+    /// The receiver has to be an `objectStore(...)` / `index(...)` call, which
+    /// is what separates a record read from the two IndexedDB calls whose
+    /// `result` is not data: `indexedDB.open(...)` resolves to a database
+    /// connection, and `store.put(...)` / `.add(...)` resolve to the key that
+    /// was written.
+    pub(super) fn expr_is_idb_value_request(&self, expr: &Expression<'a>) -> bool {
+        let Expression::CallExpression(call) = expr else {
+            return false;
+        };
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        if !matches!(
+            method.as_str(),
+            "get" | "getAll" | "getAllKeys" | "openCursor" | "openKeyCursor"
+        ) {
+            return false;
+        }
+        let Some(receiver) = self.get_callee_object_expr(&call.callee) else {
+            return false;
+        };
+        let Expression::CallExpression(store_call) = receiver else {
+            return false;
+        };
+        matches!(
+            self.get_callee_property_name(&store_call.callee).as_deref(),
+            Some("objectStore" | "index")
+        )
+    }
 }
