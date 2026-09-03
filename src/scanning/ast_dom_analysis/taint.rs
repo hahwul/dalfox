@@ -241,6 +241,13 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        // The tainted value can also arrive as the *return value* of a callback
+        // the call runs over its receiver — `tpl.replace('SLOT', () => tainted)`
+        // never receives the tainted value as an argument at all.
+        if let Some(source) = self.callback_result_source(call) {
+            return (true, Some(source));
+        }
+
         // Conservative fallback: tainted argument taints call result.
         for arg in &call.arguments {
             let (tainted, source_hint) = self.argument_taint_and_source(arg);
@@ -302,6 +309,132 @@ impl<'a> DomXssVisitor<'a> {
             return None;
         }
         (member.property.name.as_str() == "result").then(|| "FileReader.result".to_string())
+    }
+    /// Source label when a *callback* handed to a value-producing method
+    /// returns tainted data, so the call's own result is tainted even though
+    /// nothing tainted was ever passed as an argument.
+    ///
+    /// The motivating shape is the templating idiom
+    /// `template.replace('SLOT', function () { return userInput; })` — the
+    /// replacer's return value is spliced into the result string, and
+    /// `replace()` itself only ever sees a constant pattern and a function.
+    /// The array transforms (`map` / `flatMap` / `reduce`) build their result
+    /// out of callback return values the same way.
+    ///
+    /// Two deliberate restrictions keep this precise:
+    ///
+    /// * only the callback position of the listed methods is inspected, so an
+    ///   arbitrary function argument (an `addEventListener` handler, a
+    ///   comparator, …) whose return value is discarded never taints anything;
+    /// * a callback whose parameter list is anything but plain identifiers, or
+    ///   whose parameter *shadows* a name we currently consider tainted, is
+    ///   skipped entirely — otherwise `tpl.replace(re, function (q) { return q; })`
+    ///   would read the shadowed parameter as the outer tainted `q`.
+    pub(super) fn callback_result_source(&self, call: &CallExpression<'a>) -> Option<String> {
+        let method = self.get_callee_property_name(&call.callee)?;
+        let cb_index = match method.as_str() {
+            // `str.replace(pattern, replacerFn)` / `replaceAll`.
+            "replace" | "replaceAll" => 1,
+            // Array transforms whose result is built from the callback's
+            // return values.
+            "map" | "flatMap" | "reduce" | "reduceRight" => 0,
+            _ => return None,
+        };
+        let cb = call.arguments.get(cb_index)?.as_expression()?;
+        self.callback_return_source(cb)
+    }
+    /// Source of the first tainted `return` in a function/arrow expression,
+    /// or `None` when the callback is unanalysable (see
+    /// [`callback_result_source`](Self::callback_result_source) for why
+    /// shadowing parameters bail out).
+    pub(super) fn callback_return_source(&self, cb: &Expression<'a>) -> Option<String> {
+        let _guard = self.enter_recursion()?;
+        let (params, statements, concise) = match cb {
+            Expression::FunctionExpression(func) => {
+                (&func.params, &func.body.as_ref()?.statements, false)
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                (&arrow.params, &arrow.body.statements, arrow.expression)
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                return self.callback_return_source(&paren.expression);
+            }
+            _ => return None,
+        };
+
+        // Only plain-identifier parameters are analysable from outside the
+        // callback; a destructured / defaulted / rest parameter can bind names
+        // we cannot enumerate, so it might shadow a tainted one.
+        for param in &params.items {
+            let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+                return None;
+            };
+            let name = id.name.as_str();
+            if self.tainted_vars.contains(name) || self.global_taints.contains(name) {
+                return None;
+            }
+        }
+        if params.rest.is_some() {
+            return None;
+        }
+
+        // `x => tainted` has no `return` statement: the concise body *is* the
+        // returned expression.
+        if concise {
+            let Some(Statement::ExpressionStatement(stmt)) = statements.first() else {
+                return None;
+            };
+            return self
+                .is_tainted(&stmt.expression)
+                .then(|| self.find_source_in_expr(&stmt.expression))
+                .flatten();
+        }
+        self.first_tainted_return_source(statements)
+    }
+    /// First tainted `return <expr>` reachable in `stmts`, descending through
+    /// the block-shaped statements a callback body commonly wraps its returns
+    /// in. Nested function bodies are *not* descended: their returns belong to
+    /// that inner function, not to this callback.
+    pub(super) fn first_tainted_return_source(
+        &self,
+        stmts: &[Statement<'a>],
+    ) -> Option<String> {
+        let _guard = self.enter_recursion()?;
+        for stmt in stmts {
+            let found = match stmt {
+                Statement::ReturnStatement(ret) => ret
+                    .argument
+                    .as_ref()
+                    .filter(|arg| self.is_tainted(arg))
+                    .and_then(|arg| self.find_source_in_expr(arg)),
+                Statement::BlockStatement(block) => self.first_tainted_return_source(&block.body),
+                Statement::IfStatement(if_stmt) => {
+                    self.first_tainted_return_source(std::slice::from_ref(&if_stmt.consequent))
+                        .or_else(|| {
+                            if_stmt.alternate.as_ref().and_then(|alt| {
+                                self.first_tainted_return_source(std::slice::from_ref(alt))
+                            })
+                        })
+                }
+                Statement::TryStatement(try_stmt) => self
+                    .first_tainted_return_source(&try_stmt.block.body)
+                    .or_else(|| {
+                        try_stmt
+                            .handler
+                            .as_ref()
+                            .and_then(|h| self.first_tainted_return_source(&h.body.body))
+                    }),
+                Statement::SwitchStatement(switch_stmt) => switch_stmt
+                    .cases
+                    .iter()
+                    .find_map(|case| self.first_tainted_return_source(&case.consequent)),
+                _ => None,
+            };
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
     }
     /// Check if expression is tainted.
     ///

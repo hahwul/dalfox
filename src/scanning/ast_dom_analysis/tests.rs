@@ -4919,3 +4919,61 @@ Promise.resolve('static').then(function (v) {
         "untainted Promise chains must not report: {vulns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Taint arriving as a callback's *return* value
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_string_replace_replacer_function_return() {
+    // xssmaze taintflow-level8: the tainted value is the replacer's return
+    // value; `replace()` itself only ever sees a constant pattern.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var template = '<p>Hello NAME_SLOT!</p>';
+var rendered = template.replace('NAME_SLOT', function () { return q; });
+document.getElementById('out').innerHTML = rendered;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "replacer-function return should taint the replace() result: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_array_map_arrow_return_taints_result() {
+    let code = r#"
+var q = location.hash.slice(1);
+var rows = ['a', 'b'].map(row => '<li>' + q + '</li>');
+document.getElementById('out').innerHTML = rows.join('');
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "map callback return should taint the mapped array: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_callback_return_fp_control_sanitized_and_shadowed() {
+    // Three benign forms that must stay silent:
+    //  1. the replacer returns a *sanitized* value;
+    //  2. the replacer's parameter shadows the tainted outer name, so the
+    //     returned identifier is the match, not the URL parameter;
+    //  3. the callback is in a position whose return value is discarded.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var t1 = '<p>SLOT</p>'.replace('SLOT', function () { return encodeURIComponent(q); });
+document.getElementById('a').innerHTML = t1;
+var t2 = '<p>xx</p>'.replace(/x/g, function (q) { return q.toUpperCase(); });
+document.getElementById('b').innerHTML = t2;
+var t3 = ['a'].filter(function () { return q; });
+document.getElementById('c').innerHTML = t3;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "sanitized / shadowed / discarded callback returns must not report: {vulns:?}"
+    );
+}
