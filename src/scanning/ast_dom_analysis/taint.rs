@@ -241,6 +241,12 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        // `getComputedStyle(el).getPropertyValue('--x')` reads back a custom
+        // property this script wrote a tainted value into.
+        if let Some(source) = self.css_custom_property_read_source(call) {
+            return (true, Some(source));
+        }
+
         // The tainted value can also arrive as the *return value* of a callback
         // the call runs over its receiver — `tpl.replace('SLOT', () => tainted)`
         // never receives the tainted value as an argument at all.

@@ -243,4 +243,43 @@ impl<'a> DomXssVisitor<'a> {
             Some("objectStore" | "index")
         )
     }
+
+    /// Record `el.style.setProperty('--name', tainted)` so a later
+    /// `getPropertyValue('--name')` reads back tainted.
+    ///
+    /// Only custom properties (`--*`) are tracked: the CSSOM stores their value
+    /// as the author wrote it, while a standard property is parsed and
+    /// serialized back, so what a read returns is not the input string.
+    pub(super) fn record_css_custom_property_write(&mut self, call: &CallExpression<'a>) {
+        if self.get_callee_property_name(&call.callee).as_deref() != Some("setProperty") {
+            return;
+        }
+        let Some(name) = Self::extract_static_string_argument(call, 0) else {
+            return;
+        };
+        if !name.starts_with("--") {
+            return;
+        }
+        let Some(value) = call.arguments.get(1) else {
+            return;
+        };
+        let (tainted, source) = self.argument_taint_and_source(value);
+        if !tainted {
+            return;
+        }
+        self.css_custom_property_sources
+            .insert(name, source.unwrap_or_else(|| "unknown source".to_string()));
+    }
+    /// Source label when `call` reads back a CSS custom property this script
+    /// previously wrote a tainted value into.
+    pub(super) fn css_custom_property_read_source(
+        &self,
+        call: &CallExpression<'a>,
+    ) -> Option<String> {
+        if self.get_callee_property_name(&call.callee).as_deref() != Some("getPropertyValue") {
+            return None;
+        }
+        let name = Self::extract_static_string_argument(call, 0)?;
+        self.css_custom_property_sources.get(&name).cloned()
+    }
 }

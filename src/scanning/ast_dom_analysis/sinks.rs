@@ -1113,6 +1113,8 @@ impl<'a> DomXssVisitor<'a> {
             return;
         }
 
+        self.record_css_custom_property_write(call);
+
         self.handle_jquery_html_constructor(call);
 
         if let Expression::StaticMemberExpression(member) = &call.callee

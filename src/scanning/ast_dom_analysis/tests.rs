@@ -5288,3 +5288,66 @@ document.getElementById('c').innerHTML = got;
         "connection / write requests and plain Map reads must not report: {vulns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// CSS custom property round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_css_custom_property_round_trip() {
+    // xssmaze domsource-level6: the value is stashed on a --custom-property and
+    // read back through the CSSOM before it reaches an HTML sink.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+if (raw) { document.documentElement.style.setProperty('--maze-label', raw); }
+var label = getComputedStyle(document.documentElement)
+  .getPropertyValue('--maze-label').trim();
+if (label) { document.getElementById('out').insertAdjacentHTML('beforeend', label); }
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "insertAdjacentHTML"),
+        "a custom property written tainted should read back tainted: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_css_custom_property_fp_control() {
+    // FP control: a custom property the page only ever wrote literal text into,
+    // and a *standard* property — whose value the CSSOM reparses, so what comes
+    // back is not the input string.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+document.documentElement.style.setProperty('--theme', 'dark');
+var theme = getComputedStyle(document.documentElement).getPropertyValue('--theme');
+document.getElementById('a').insertAdjacentHTML('beforeend', theme);
+document.documentElement.style.setProperty('color', raw);
+var color = getComputedStyle(document.documentElement).getPropertyValue('color');
+document.getElementById('b').insertAdjacentHTML('beforeend', color);
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "clean custom properties and standard properties must not report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_css_custom_property_helper_summary_does_not_leak() {
+    // The summary walk assumes each parameter is tainted in turn, so a helper
+    // that writes its parameter into a custom property must not leave that
+    // property tainted for a read that follows a *clean* call.
+    let code = r#"
+function setLabel(value) {
+  document.documentElement.style.setProperty('--label', value);
+}
+setLabel('Drafts');
+var label = getComputedStyle(document.documentElement).getPropertyValue('--label');
+document.getElementById('out').insertAdjacentHTML('beforeend', label);
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "a hypothetical summary walk must not taint a global custom property: {vulns:?}"
+    );
+}

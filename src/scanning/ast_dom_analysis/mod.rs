@@ -373,6 +373,17 @@ struct DomXssVisitor<'a> {
     url_search_params_objects: HashSet<String>,
     /// Track `paramsVar.key -> upstream source` for URLSearchParams set/get reparses.
     url_search_params_field_sources: HashMap<String, String>,
+    /// `--custom-property -> source` for CSS custom properties the page wrote a
+    /// tainted value into (`el.style.setProperty('--label', tainted)`). A
+    /// custom property round-trips through the CSSOM verbatim, so reading it
+    /// back with `getPropertyValue('--label')` returns the attacker's string —
+    /// a laundering step that hides the flow from a source/sink pairing.
+    ///
+    /// Keyed by the property name, and only ever populated from a tainted
+    /// write, so reading a custom property the page never fed untrusted data
+    /// into stays clean. Standard CSS properties are deliberately excluded:
+    /// the CSSOM normalizes those, so what comes back is not the input.
+    css_custom_property_sources: HashMap<String, String>,
     /// Variables bound to an IndexedDB *value* request — the object an
     /// `objectStore(...).get(...)` / `.getAll()` / `.openCursor()` call
     /// returns. Its `onsuccess` handler receives the stored record, which is
@@ -680,6 +691,7 @@ impl<'a> DomXssVisitor<'a> {
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
+            css_custom_property_sources: HashMap::new(),
             idb_request_vars: HashSet::new(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),

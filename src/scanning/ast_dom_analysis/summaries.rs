@@ -57,6 +57,14 @@ impl<'a> DomXssVisitor<'a> {
         let saved_instance_classes = self.instance_classes.clone();
         let saved_bound_aliases = self.bound_function_aliases.clone();
         let saved_response_vars = self.response_object_vars.clone();
+        // The summary walk is *hypothetical* — it assumes each parameter in
+        // turn is tainted — so any state it records must not leak into the real
+        // walk. The CSS custom-property map is keyed by a global property name
+        // rather than by a variable, so a helper that writes a parameter into
+        // `--label` would otherwise leave every later `getPropertyValue('--label')`
+        // reading tainted no matter what the helper was actually called with.
+        let saved_css_custom_properties = self.css_custom_property_sources.clone();
+        let saved_idb_requests = self.idb_request_vars.clone();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -111,6 +119,8 @@ impl<'a> DomXssVisitor<'a> {
         self.instance_classes = saved_instance_classes;
         self.bound_function_aliases = saved_bound_aliases;
         self.response_object_vars = saved_response_vars;
+        self.css_custom_property_sources = saved_css_custom_properties;
+        self.idb_request_vars = saved_idb_requests;
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;
