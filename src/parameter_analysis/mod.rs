@@ -24,6 +24,7 @@
 
 pub mod discovery;
 pub mod mining;
+pub(crate) mod xml_inject;
 
 pub(crate) use mining::detect_injection_context;
 
