@@ -5078,3 +5078,71 @@ document.getElementById('b').innerHTML = when;
         "clean Proxy and non-forwarding constructors must not report: {vulns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Class accessors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_class_getter_returns_constructor_argument() {
+    // xssmaze taintflow-level3: the sink reads an accessor property, not the
+    // field the value was written to.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+document.getElementById('out').innerHTML = new Message(q).body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "class getter over a tainted constructor argument should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_class_getter_through_instance_variable() {
+    let code = r#"
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+var m = new Message(location.hash.slice(1));
+document.getElementById('out').innerHTML = m.body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "accessor read off an instance variable should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_class_accessor_fp_control() {
+    // FP control:
+    //  1. the constructor escapes before storing, so the accessor reads clean;
+    //  2. the accessor returns a different, page-authored field;
+    //  3. the tainted argument is stored in a field nothing reads.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+class Escaped {
+  constructor(value) { this._value = encodeURIComponent(value); }
+  get body() { return this._value; }
+}
+document.getElementById('a').innerHTML = new Escaped(q).body;
+class Titled {
+  constructor(value) { this._value = value; this._title = 'Draft'; }
+  get title() { return this._title; }
+}
+document.getElementById('b').innerHTML = new Titled(q).title;
+var t = new Titled(q);
+document.getElementById('c').innerHTML = t.title;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "escaping constructors and unrelated accessors must not report: {vulns:?}"
+    );
+}

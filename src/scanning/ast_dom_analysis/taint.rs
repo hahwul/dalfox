@@ -530,6 +530,53 @@ impl<'a> DomXssVisitor<'a> {
             _ => arg.as_expression(),
         })
     }
+    /// Source label for a read off a freshly constructed instance —
+    /// `new Message(tainted).body` — resolved through the class's accessor
+    /// bookkeeping.
+    ///
+    /// The accessor is a function call, so no member/alias tracking connects
+    /// the property the sink reads to the constructor argument the value came
+    /// from; the two halves recorded by
+    /// [`register_class_accessor_fields`](Self::register_class_accessor_fields)
+    /// are what bridge it.
+    pub(super) fn class_accessor_taint_source(
+        &self,
+        member: &StaticMemberExpression<'a>,
+    ) -> Option<String> {
+        let Expression::NewExpression(new_expr) = &member.object else {
+            return None;
+        };
+        let Expression::Identifier(class_id) = &new_expr.callee else {
+            return None;
+        };
+        self.class_property_ctor_arg_source(
+            class_id.name.as_str(),
+            member.property.name.as_str(),
+            &new_expr.arguments,
+        )
+    }
+    /// Source label when reading `property` off an instance of `class_name`
+    /// constructed with `args` yields the value of a tainted constructor
+    /// argument — either because the property *is* a stored field, or because
+    /// it is a getter that returns one.
+    pub(super) fn class_property_ctor_arg_source(
+        &self,
+        class_name: &str,
+        property: &str,
+        args: &[Argument<'a>],
+    ) -> Option<String> {
+        let field = self
+            .class_getter_fields
+            .get(&format!("{class_name}.{property}"))
+            .cloned()
+            .unwrap_or_else(|| property.to_string());
+        let idx = *self
+            .class_ctor_param_fields
+            .get(&format!("{class_name}.{field}"))?;
+        let arg = args.get(idx)?;
+        let (tainted, source) = self.argument_taint_and_source(arg);
+        tainted.then(|| source.unwrap_or_else(|| "unknown source".to_string()))
+    }
     /// Check if expression is tainted.
     ///
     /// Hostile JavaScript can nest expressions arbitrarily deep (`a.b.c.d…`,
@@ -552,6 +599,9 @@ impl<'a> DomXssVisitor<'a> {
             }
             Expression::StaticMemberExpression(member) => {
                 if self.url_search_params_source_for_member(member).is_some() {
+                    return true;
+                }
+                if self.class_accessor_taint_source(member).is_some() {
                     return true;
                 }
                 if self.xhr_response_source_for_member(member).is_some() {

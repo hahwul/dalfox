@@ -335,6 +335,22 @@ struct DomXssVisitor<'a> {
     function_summaries: HashMap<String, FunctionSummary>,
     /// Track `instanceVar -> ClassName` for class instance method summary resolution.
     instance_classes: HashMap<String, String>,
+    /// `"Class.field" -> constructor parameter index`, for fields a class
+    /// constructor stores straight from one of its parameters
+    /// (`constructor(v) { this._value = v; }`). Together with
+    /// [`class_getter_fields`] this is what connects `new C(tainted).accessor`
+    /// back to the argument, since the accessor read is a function call that
+    /// never mentions the constructor argument.
+    ///
+    /// Only a *bare parameter* right-hand side is recorded: a constructor that
+    /// stores `escapeHtml(v)` has no entry, so the accessor reads clean.
+    ///
+    /// [`class_getter_fields`]: DomXssVisitor::class_getter_fields
+    class_ctor_param_fields: HashMap<String, usize>,
+    /// `"Class.getter" -> field name` for `get x() { return this.field; }`
+    /// accessors — the indirection between the property the sink reads and the
+    /// field the constructor wrote.
+    class_getter_fields: HashMap<String, String>,
     /// Track aliases produced by `.bind()` calls.
     bound_function_aliases: HashMap<String, BoundCallableAlias>,
     /// Internal flag for summary collection of tainted return values
@@ -642,6 +658,8 @@ impl<'a> DomXssVisitor<'a> {
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
             instance_classes: HashMap::new(),
+            class_ctor_param_fields: HashMap::new(),
+            class_getter_fields: HashMap::new(),
             bound_function_aliases: HashMap::new(),
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),

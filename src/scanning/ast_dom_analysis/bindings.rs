@@ -53,6 +53,14 @@ impl<'a> DomXssVisitor<'a> {
         {
             self.instance_classes
                 .insert(var_name.to_string(), class_id.name.to_string());
+            // `const m = new Message(tainted)` — record the accessor reads that
+            // now hand the tainted constructor argument back out, so a later
+            // `m.body` resolves without re-deriving the construction.
+            self.seed_instance_field_taints(
+                var_name,
+                class_id.name.as_str(),
+                &new_expr.arguments,
+            );
             assigned_instance_class = true;
         }
         if !assigned_instance_class {
@@ -281,6 +289,9 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(source) = self.url_search_params_source_for_member(member) {
                     return Some(source);
                 }
+                if let Some(source) = self.class_accessor_taint_source(member) {
+                    return Some(source);
+                }
                 if let Some(source) = self.xhr_response_source_for_member(member) {
                     return Some(source);
                 }
@@ -421,6 +432,53 @@ impl<'a> DomXssVisitor<'a> {
                 .taint_forwarding_new_argument(new_expr)
                 .and_then(|arg| self.find_source_in_expr(arg)),
             _ => None,
+        }
+    }
+
+    /// Mark the properties of `var_name` that read back a tainted constructor
+    /// argument of `class_name` — the stored fields themselves, and every
+    /// getter that aliases one.
+    pub(super) fn seed_instance_field_taints(
+        &mut self,
+        var_name: &str,
+        class_name: &str,
+        args: &[Argument<'a>],
+    ) {
+        let prefix = format!("{class_name}.");
+        let fields: Vec<(String, usize)> = self
+            .class_ctor_param_fields
+            .iter()
+            .filter_map(|(key, idx)| key.strip_prefix(&prefix).map(|f| (f.to_string(), *idx)))
+            .collect();
+        if fields.is_empty() {
+            return;
+        }
+        let getters: Vec<(String, String)> = self
+            .class_getter_fields
+            .iter()
+            .filter_map(|(key, field)| {
+                key.strip_prefix(&prefix)
+                    .map(|g| (g.to_string(), field.clone()))
+            })
+            .collect();
+
+        for (field, idx) in &fields {
+            let Some(arg) = args.get(*idx) else {
+                continue;
+            };
+            let (tainted, source) = self.argument_taint_and_source(arg);
+            if !tainted {
+                continue;
+            }
+            let source = source.unwrap_or_else(|| "unknown source".to_string());
+            self.field_taints
+                .insert(format!("{var_name}.{field}"), source.clone());
+            for (getter, getter_field) in &getters {
+                if getter_field == field {
+                    self.field_taints
+                        .insert(format!("{var_name}.{getter}"), source.clone());
+                }
+            }
         }
     }
 }
