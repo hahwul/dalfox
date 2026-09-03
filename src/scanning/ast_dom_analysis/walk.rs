@@ -262,6 +262,13 @@ impl<'a> DomXssVisitor<'a> {
                     self.walk_expression(e);
                 }
             }
+            // ``tag`…${x}…` `` — walk the interpolated slots so a sink nested
+            // inside one (`` html`${eval(location.hash)}` ``) is still seen.
+            Expression::TaggedTemplateExpression(tagged) => {
+                for e in &tagged.quasi.expressions {
+                    self.walk_expression(e);
+                }
+            }
             Expression::BinaryExpression(binary) => {
                 self.walk_expression(&binary.left);
                 self.walk_expression(&binary.right);

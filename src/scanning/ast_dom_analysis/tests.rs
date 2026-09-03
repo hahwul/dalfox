@@ -4977,3 +4977,50 @@ document.getElementById('c').innerHTML = t3;
         "sanitized / shadowed / discarded callback returns must not report: {vulns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tagged templates
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_tagged_template_tag_returns_interpolated_value() {
+    // xssmaze taintflow-level7: the value is never in the cooked strings — the
+    // tag receives it as a positional argument and splices it into its result.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+function html(strings, value) {
+  return strings[0] + value + strings[1];
+}
+document.getElementById('out').innerHTML = html`<article>${raw}</article>`;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "tagged template with a value-splicing tag should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_tagged_template_fp_control_unknown_and_escaping_tags() {
+    // FP control, both halves of the realistic benign space:
+    //  1. `html` is imported (lit-html and friends) — no summary, and those
+    //     tags insert values as text, so an unknown tag must stay opaque;
+    //  2. a local tag that escapes every interpolated slot.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+document.getElementById('a').innerHTML = html`<article>${raw}</article>`;
+function safe(strings, value) {
+  return strings[0] + encodeURIComponent(value) + strings[1];
+}
+document.getElementById('b').innerHTML = safe`<article>${raw}</article>`;
+function justStrings(strings) {
+  return strings.join('');
+}
+document.getElementById('c').innerHTML = justStrings`<article>${raw}</article>`;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "unknown / escaping / strings-only tags must not report: {vulns:?}"
+    );
+}

@@ -436,6 +436,65 @@ impl<'a> DomXssVisitor<'a> {
         }
         None
     }
+    /// Source label when a tagged template `tag`…${x}…`` produces tainted data.
+    ///
+    /// The interpolated value never appears in the template literal's cooked
+    /// strings — the tag function receives it as a positional argument
+    /// (`tag(strings, v0, v1, …)`) and decides what to do with it. So the
+    /// verdict is the *tag's* verdict, read off its function summary: only a
+    /// tag we can see the body of, and whose body returns one of the
+    /// interpolated values, taints its result.
+    ///
+    /// That restriction is what keeps the modern component-library idiom
+    /// (`html`<div>${x}</div>`` from lit-html and friends) quiet: those tags
+    /// are imported, have no summary here, and insert their values as text
+    /// rather than markup. A tag whose body we cannot read is treated as
+    /// opaque, exactly like any other unknown call.
+    ///
+    /// Parameter 0 is the cooked-strings array — page-authored literal text,
+    /// never attacker-controlled — so a tag that merely returns
+    /// `strings.join('')` does not taint; only parameters 1.. (the `${}`
+    /// slots) are consulted.
+    pub(super) fn tagged_template_source(
+        &self,
+        tagged: &TaggedTemplateExpression<'a>,
+    ) -> Option<String> {
+        let _guard = self.enter_recursion()?;
+
+        // A tag with a sanitizer's name neutralizes its inputs, like any other
+        // sanitizing call.
+        if let Some(tag_name) = self.get_expr_string(&tagged.tag)
+            && (self.sanitizers.contains(tag_name.as_str())
+                || Self::is_likely_sanitizer_name(&tag_name))
+        {
+            return None;
+        }
+
+        let summary_key = self.get_summary_key_for_callee_expr(&tagged.tag)?;
+        let summary = self.function_summaries.get(&summary_key)?;
+
+        // The tag returns a tainted value regardless of its arguments
+        // (e.g. it reads `location.hash` itself).
+        if let Some(source) = &summary.return_without_tainted_params {
+            return Some(source.clone());
+        }
+
+        for (idx, fallback_source) in &summary.tainted_param_returns {
+            // Slot i is argument i + 1; argument 0 is the strings array.
+            let Some(slot) = idx.checked_sub(1) else {
+                continue;
+            };
+            let Some(expr) = tagged.quasi.expressions.get(slot) else {
+                continue;
+            };
+            if self.is_tainted(expr) {
+                return self
+                    .find_source_in_expr(expr)
+                    .or_else(|| Some(fallback_source.clone()));
+            }
+        }
+        None
+    }
     /// Check if expression is tainted.
     ///
     /// Hostile JavaScript can nest expressions arbitrarily deep (`a.b.c.d…`,
@@ -548,6 +607,10 @@ impl<'a> DomXssVisitor<'a> {
             // `await taintedPromise` yields the resolved tainted value — e.g.
             // `await r.text()` on a fetch Response (issue #1024).
             Expression::AwaitExpression(await_expr) => self.is_tainted(&await_expr.argument),
+            // ``tag`…${x}…` `` — the verdict belongs to the tag function.
+            Expression::TaggedTemplateExpression(tagged) => {
+                self.tagged_template_source(tagged).is_some()
+            }
             _ => false,
         }
     }
