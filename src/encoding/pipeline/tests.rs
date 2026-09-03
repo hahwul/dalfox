@@ -473,3 +473,115 @@ fn jwt_alg_none_empty_signature_is_discovered() {
         "alg=none JWT must yield nested-field leaves, got none"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Splice step
+// ---------------------------------------------------------------------------
+
+#[test]
+fn step_splice_reglues_prefix_and_suffix() {
+    let step = EncodingStep::Splice {
+        prefix: "<a>".to_string(),
+        suffix: "</a>".to_string(),
+    };
+    let out = step.apply("<svg onload=alert(1)>").expect("splice");
+    assert_eq!(out, "<a><svg onload=alert(1)></a>");
+}
+
+#[test]
+fn step_splice_preserves_rest_of_document_byte_for_byte() {
+    // The whole document minus the injected span survives verbatim — the point
+    // of `Splice` over parse-and-reserialize.
+    let original = "<note><to>Bob</to><body>hi</body></note>";
+    // Inject at the <to> text node "Bob" (bytes 10..13).
+    let (prefix, rest) = original.split_at(10);
+    let suffix = &rest[3..];
+    let step = EncodingStep::Splice {
+        prefix: prefix.to_string(),
+        suffix: suffix.to_string(),
+    };
+    let out = step.apply("PAY").expect("splice");
+    assert_eq!(out, "<note><to>PAY</to><body>hi</body></note>");
+}
+
+// ---------------------------------------------------------------------------
+// GraphQL variable-field detection
+// ---------------------------------------------------------------------------
+
+#[test]
+fn graphql_variables_string_leaf_is_detected() {
+    let data = r#"{"query":"mutation($n:String!){add(name:$n){id}}","variables":{"n":"seed"}}"#;
+    let fields = infer_graphql_variable_fields(data);
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].pointer, "/variables/n");
+    assert_eq!(fields[0].path, vec!["variables", "n"]);
+    // The pipeline rebuilds the whole request with the payload in that slot.
+    let body = fields[0].pipeline.apply("<svg/onload=alert(1)>").expect("apply");
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+    assert_eq!(parsed["variables"]["n"], "<svg/onload=alert(1)>");
+    // Query source is preserved intact.
+    assert!(
+        parsed["query"].as_str().unwrap().contains("mutation"),
+        "query source must survive the rebuild"
+    );
+}
+
+#[test]
+fn graphql_nested_variables_object_is_walked() {
+    let data = r#"{"query":"query($f:Filter){search(f:$f){id}}","variables":{"f":{"title":"a","tag":"b"}}}"#;
+    let fields = infer_graphql_variable_fields(data);
+    let mut ptrs: Vec<&str> = fields.iter().map(|f| f.pointer.as_str()).collect();
+    ptrs.sort_unstable();
+    assert_eq!(ptrs, vec!["/variables/f/tag", "/variables/f/title"]);
+}
+
+#[test]
+fn graphql_anonymous_query_shorthand_is_detected() {
+    let data = r#"{"query":"{ me { name } }","variables":{"x":"y"}}"#;
+    assert_eq!(infer_graphql_variable_fields(data).len(), 1);
+}
+
+#[test]
+fn graphql_query_under_mutation_key_is_detected() {
+    let data = r#"{"mutation":"mutation Go($p:String){go(p:$p)}","variables":{"p":"z"}}"#;
+    assert_eq!(infer_graphql_variable_fields(data).len(), 1);
+}
+
+// --- FP controls: plain JSON must NOT be treated as GraphQL ---
+
+#[test]
+fn fp_control_search_api_with_query_field_is_not_graphql() {
+    // A REST search box literally named `query` and no `variables` object.
+    // Must produce zero GraphQL fields so it stays on the JsonBody path.
+    let data = r#"{"query":"laptop","page":1}"#;
+    assert!(infer_graphql_variable_fields(data).is_empty());
+}
+
+#[test]
+fn fp_control_query_field_without_variables_is_not_graphql() {
+    // Even a GraphQL-looking operation string is ignored without a `variables`
+    // object — nothing to inject, and requiring it blocks the search-box class.
+    let data = r#"{"query":"query { me { name } }"}"#;
+    assert!(infer_graphql_variable_fields(data).is_empty());
+}
+
+#[test]
+fn fp_control_queryable_field_value_is_not_graphql() {
+    // `queryable` starts with `query` but is a plain word, not an operation.
+    let data = r#"{"query":"queryable results","variables":{"x":"y"}}"#;
+    assert!(infer_graphql_variable_fields(data).is_empty());
+}
+
+#[test]
+fn fp_control_scalar_variables_are_skipped() {
+    // Only string leaves are injectable; a request whose variables are all
+    // numeric/bool yields no fields (no string to break out of).
+    let data = r#"{"query":"query($n:Int){f(n:$n)}","variables":{"n":5,"ok":true}}"#;
+    assert!(infer_graphql_variable_fields(data).is_empty());
+}
+
+#[test]
+fn fp_control_variables_not_object_is_ignored() {
+    let data = r#"{"query":"query{a}","variables":"oops"}"#;
+    assert!(infer_graphql_variable_fields(data).is_empty());
+}

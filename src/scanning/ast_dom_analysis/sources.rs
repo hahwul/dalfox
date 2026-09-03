@@ -210,4 +210,86 @@ impl<'a> DomXssVisitor<'a> {
             self.clone_url_search_params_field_sources(id.name.as_str(), target);
         }
     }
+
+    /// True when `expr` is an IndexedDB request whose `result` is a *stored
+    /// value* — `store.get(k)`, `.getAll()`, `.openCursor()` and friends.
+    ///
+    /// The receiver has to be an `objectStore(...)` / `index(...)` call, which
+    /// is what separates a record read from the two IndexedDB calls whose
+    /// `result` is not data: `indexedDB.open(...)` resolves to a database
+    /// connection, and `store.put(...)` / `.add(...)` resolve to the key that
+    /// was written.
+    pub(super) fn expr_is_idb_value_request(&self, expr: &Expression<'a>) -> bool {
+        let Expression::CallExpression(call) = expr else {
+            return false;
+        };
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        if !matches!(
+            method.as_str(),
+            "get" | "getAll" | "getAllKeys" | "openCursor" | "openKeyCursor"
+        ) {
+            return false;
+        }
+        let Some(receiver) = self.get_callee_object_expr(&call.callee) else {
+            return false;
+        };
+        self.expr_is_idb_object_store(receiver)
+    }
+    /// True when `expr` denotes an IndexedDB object store or index — either the
+    /// `objectStore(...)` / `index(...)` call itself, or a variable bound to
+    /// one.
+    pub(super) fn expr_is_idb_object_store(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::ParenthesizedExpression(paren) => {
+                self.expr_is_idb_object_store(&paren.expression)
+            }
+            Expression::Identifier(id) => self.idb_object_store_vars.contains(id.name.as_str()),
+            Expression::CallExpression(store_call) => matches!(
+                self.get_callee_property_name(&store_call.callee).as_deref(),
+                Some("objectStore" | "index")
+            ),
+            _ => false,
+        }
+    }
+
+    /// Record `el.style.setProperty('--name', tainted)` so a later
+    /// `getPropertyValue('--name')` reads back tainted.
+    ///
+    /// Only custom properties (`--*`) are tracked: the CSSOM stores their value
+    /// as the author wrote it, while a standard property is parsed and
+    /// serialized back, so what a read returns is not the input string.
+    pub(super) fn record_css_custom_property_write(&mut self, call: &CallExpression<'a>) {
+        if self.get_callee_property_name(&call.callee).as_deref() != Some("setProperty") {
+            return;
+        }
+        let Some(name) = Self::extract_static_string_argument(call, 0) else {
+            return;
+        };
+        if !name.starts_with("--") {
+            return;
+        }
+        let Some(value) = call.arguments.get(1) else {
+            return;
+        };
+        let (tainted, source) = self.argument_taint_and_source(value);
+        if !tainted {
+            return;
+        }
+        self.css_custom_property_sources
+            .insert(name, source.unwrap_or_else(|| "unknown source".to_string()));
+    }
+    /// Source label when `call` reads back a CSS custom property this script
+    /// previously wrote a tainted value into.
+    pub(super) fn css_custom_property_read_source(
+        &self,
+        call: &CallExpression<'a>,
+    ) -> Option<String> {
+        if self.get_callee_property_name(&call.callee).as_deref() != Some("getPropertyValue") {
+            return None;
+        }
+        let name = Self::extract_static_string_argument(call, 0)?;
+        self.css_custom_property_sources.get(&name).cloned()
+    }
 }

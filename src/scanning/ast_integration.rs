@@ -522,6 +522,10 @@ fn source_uses_bootstrap_query_param(source: &str) -> bool {
         || source.contains("document.referrer")
         || source.contains("localStorage")
         || source.contains("sessionStorage")
+        // IndexedDB records sit in the same trust class as web storage: the
+        // page seeds them on one visit and renders them on the next, so a
+        // link that carries the seed is still the delivery vehicle.
+        || source.contains("indexedDB")
         || source.contains("history.state")
         || source.contains("event.data")
         || source.contains(".message")
@@ -679,6 +683,13 @@ pub(crate) fn build_dom_xss_manual_poc_hint(
         return Some(format!(
             "set a same-origin cookie whose value carries {} (cookie-safe variant may be needed), then open {};",
             quoted_payload, quoted_url
+        ));
+    }
+
+    if source.contains("indexedDB") {
+        return Some(format!(
+            "open {} once with a query parameter carrying {} so the page persists it to IndexedDB, then reopen the page (the record renders on every later visit);",
+            quoted_url, quoted_payload
         ));
     }
 

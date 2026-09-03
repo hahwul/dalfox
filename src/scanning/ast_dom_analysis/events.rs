@@ -191,4 +191,51 @@ impl<'a> DomXssVisitor<'a> {
             _ => {}
         }
     }
+
+    /// `request.onsuccess = function (ev) { … }` on an IndexedDB value request:
+    /// walk the handler with its event parameter treated as untrusted, so the
+    /// `ev.target.result` read inside resolves to the stored record.
+    ///
+    /// Reached from the assignment walk, which does not otherwise bind
+    /// anything to a handler's parameter — the handler body *is* walked
+    /// (it is the assignment's right-hand side), but with `ev` clean, so every
+    /// flow out of the record was lost.
+    pub(super) fn analyze_idb_success_assignment(
+        &mut self,
+        receiver: &Expression<'a>,
+        property_name: &str,
+        right: &Expression<'a>,
+    ) {
+        if property_name != "onsuccess" {
+            return;
+        }
+        let is_value_request = match receiver {
+            Expression::Identifier(id) => self.idb_request_vars.contains(id.name.as_str()),
+            other => self.expr_is_idb_value_request(other),
+        };
+        if !is_value_request {
+            return;
+        }
+
+        let (param, statements) = match right {
+            Expression::FunctionExpression(func) => {
+                let Some(body) = &func.body else {
+                    return;
+                };
+                (func.params.items.first(), &body.statements)
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                (arrow.params.items.first(), &arrow.body.statements)
+            }
+            _ => return,
+        };
+        let Some(BindingPattern::BindingIdentifier(id)) = param.map(|p| &p.pattern) else {
+            return;
+        };
+        let param_name = id.name.to_string();
+        // A cursor request hands the record one level deeper, on
+        // `ev.target.result.value`; both spellings resolve through the
+        // parameter binding `walk_event_handler_body` installs.
+        self.walk_event_handler_body(&param_name, "indexedDB", statements);
+    }
 }

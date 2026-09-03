@@ -40,6 +40,8 @@ fn poc_location_tag(location: &str, param: &str) -> Option<&'static str> {
         // Header location with the literal `Cookie` name folds to a cookie POC.
         "Header" if param.eq_ignore_ascii_case("cookie") => Some("cookie"),
         "Header" => Some("hdr"),
+        "GraphqlBody" => Some("graphql"),
+        "XmlBody" => Some("xml"),
         "Body" | "JsonBody" | "MultipartBody" => Some("body"),
         "Path" => Some("path"),
         "Fragment" => Some("frag"),
@@ -216,8 +218,43 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
             escaped(&result.payload),
             attack_url
         ),
+        // GraphQL / XML carry a full structured document as the body — a
+        // faithful one-liner can't be rebuilt from (param, payload) alone, so
+        // replay the exact recorded request body (rebuilt from the param's
+        // pipeline in `build_request_text`). Falls back to a plain-URL curl if
+        // the request text wasn't recorded.
+        "GraphqlBody" | "XmlBody" => match request_content_type_and_body(result.request.as_deref())
+        {
+            Some((ct, body)) => format!(
+                "curl -X {} -H \"Content-Type: {}\" --data \"{}\" \"{}\"\n",
+                method,
+                escaped(&ct),
+                escaped(body),
+                attack_url
+            ),
+            None => format!("curl -X {} \"{}\"\n", method, attack_url),
+        },
         _ => format!("curl -X {} \"{}\"\n", method, attack_url),
     }
+}
+
+/// Extract `(Content-Type, body)` from a recorded raw HTTP request text
+/// (`build_request_text` output). The body is everything after the blank line
+/// that separates headers from body (`\r\n\r\n`); the Content-Type is read
+/// from the headers. Returns `None` when there is no body section.
+fn request_content_type_and_body(request: Option<&str>) -> Option<(String, &str)> {
+    let request = request?;
+    let (head, body) = request.split_once("\r\n\r\n")?;
+    let ct = head
+        .lines()
+        .find_map(|line| {
+            let (k, v) = line.split_once(':')?;
+            k.trim()
+                .eq_ignore_ascii_case("content-type")
+                .then(|| v.trim().to_string())
+        })
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    Some((ct, body))
 }
 
 /// `httpie` mirror of [`render_curl_poc`].
@@ -240,6 +277,19 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
             "http {} \"{}\" \"{}={}\"\n",
             method, attack_url, result.param, result.payload
         ),
+        // Feed the exact recorded structured body to httpie via stdin — its
+        // `key=value` field syntax can't express a full GraphQL/XML document.
+        "GraphqlBody" | "XmlBody" => match request_content_type_and_body(result.request.as_deref())
+        {
+            Some((ct, body)) => format!(
+                "http {} \"{}\" \"Content-Type:{}\" <<< '{}'\n",
+                method,
+                attack_url,
+                ct,
+                body.replace('\'', "'\\''")
+            ),
+            None => format!("http {} \"{}\"\n", method, attack_url),
+        },
         _ => format!("http {} \"{}\"\n", method, attack_url),
     }
 }

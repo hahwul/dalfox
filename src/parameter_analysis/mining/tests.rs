@@ -1439,3 +1439,226 @@ async fn test_probe_json_body_params_mines_a_name_already_discovered_in_the_quer
             .collect::<Vec<_>>()
     );
 }
+
+// --- GraphQL variable mining ---
+
+async fn graphql_reflect_handler(body: String) -> Html<String> {
+    // Reflect every string value inside `variables` into the HTML body raw.
+    let mut echo = String::new();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body)
+        && let Some(vars) = v.get("variables")
+    {
+        fn walk(v: &serde_json::Value, out: &mut String) {
+            match v {
+                serde_json::Value::String(s) => {
+                    out.push_str(s);
+                    out.push(' ');
+                }
+                serde_json::Value::Object(m) => m.values().for_each(|x| walk(x, out)),
+                serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+                _ => {}
+            }
+        }
+        walk(vars, &mut echo);
+    }
+    Html(format!("<html><body><div>{}</div></body></html>", echo))
+}
+
+async fn start_graphql_server() -> SocketAddr {
+    use axum::routing::post;
+    let app = Router::new().route("/graphql", post(graphql_reflect_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn probe_graphql_params_seeds_reflected_variable() {
+    let addr = start_graphql_server().await;
+    let target = parse_target(&format!("http://{}:{}/graphql", addr.ip(), addr.port()))
+        .expect("parse target");
+    let mut args = default_scan_args();
+    args.data =
+        Some(r#"{"query":"mutation($n:String!){add(name:$n){id}}","variables":{"n":"seed"}}"#.to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_graphql_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    let gql: Vec<_> = params
+        .iter()
+        .filter(|p| p.location == Location::GraphqlBody)
+        .collect();
+    assert_eq!(gql.len(), 1, "expected one GraphQL variable param, got {params:?}");
+    assert_eq!(gql[0].name, "variables.n");
+    assert!(
+        gql[0].pre_encoding_pipeline.is_some(),
+        "GraphQL param must carry a whole-request rebuild pipeline"
+    );
+}
+
+#[tokio::test]
+async fn probe_graphql_params_noop_on_plain_json_body() {
+    // FP control: a non-GraphQL JSON body seeds zero GraphQL params even
+    // against a reflecting server.
+    let addr = start_graphql_server().await;
+    let target = parse_target(&format!("http://{}:{}/graphql", addr.ip(), addr.port()))
+        .expect("parse target");
+    let mut args = default_scan_args();
+    args.data = Some(r#"{"name":"seed","page":2}"#.to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_graphql_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    assert!(
+        reflection_params.lock().await.is_empty(),
+        "plain JSON body must not seed GraphQL params"
+    );
+}
+
+#[tokio::test]
+async fn probe_json_body_params_defers_graphql_body() {
+    // The JSON body probe must hand off GraphQL bodies to `probe_graphql_params`
+    // rather than mining the top-level `query`/`variables` keys (which would
+    // garble the request by replacing the `variables` object with a marker).
+    let addr = start_graphql_server().await;
+    let target = parse_target(&format!("http://{}:{}/graphql", addr.ip(), addr.port()))
+        .expect("parse target");
+    let mut args = default_scan_args();
+    args.data =
+        Some(r#"{"query":"mutation($n:String!){add(name:$n){id}}","variables":{"n":"seed"}}"#.to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_json_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    assert!(
+        reflection_params.lock().await.is_empty(),
+        "JSON body probe must skip GraphQL bodies (no top-level query/variables mining)"
+    );
+}
+
+// --- XML / SOAP body mining ---
+
+async fn xml_reflect_handler(body: String) -> Html<String> {
+    // Reflect the first <msg>…</msg> text raw into an HTML page.
+    let echo = body
+        .split_once("<msg>")
+        .and_then(|(_, rest)| rest.split_once("</msg>"))
+        .map(|(inner, _)| inner.to_string())
+        .unwrap_or_default();
+    Html(format!("<html><body><p>{}</p></body></html>", echo))
+}
+
+async fn start_xml_server() -> SocketAddr {
+    use axum::routing::post;
+    let app = Router::new().route("/xml", post(xml_reflect_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+fn xml_target(addr: &SocketAddr) -> Target {
+    let mut t = parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port()))
+        .expect("parse target");
+    t.headers
+        .push(("Content-Type".to_string(), "application/xml".to_string()));
+    t
+}
+
+#[tokio::test]
+async fn probe_xml_body_params_seeds_reflected_text_node() {
+    let addr = start_xml_server().await;
+    let target = xml_target(&addr);
+    let mut args = default_scan_args();
+    args.data = Some("<req><item id=\"1\">x</item><msg>seed</msg></req>".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_xml_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    let msg = params
+        .iter()
+        .find(|p| p.name == "msg" && p.location == Location::XmlBody)
+        .expect("msg text node seeded");
+    assert!(
+        msg.pre_encoding_pipeline.is_some(),
+        "XML param must carry a Splice pipeline"
+    );
+    // The pipeline rebuilds the whole document with the payload in <msg>.
+    let body = msg
+        .pre_encoding_pipeline
+        .as_ref()
+        .unwrap()
+        .apply("<svg/onload=alert(1)>")
+        .expect("apply");
+    assert_eq!(body, "<req><item id=\"1\">x</item><msg><svg/onload=alert(1)></msg></req>");
+}
+
+#[tokio::test]
+async fn probe_xml_body_params_noop_without_xml_content_type() {
+    // FP control: an XML-looking body but no XML content-type and no `<?xml`
+    // prolog must not be treated as XML.
+    let addr = start_xml_server().await;
+    let target = parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port()))
+        .expect("parse target"); // no Content-Type header
+    let mut args = default_scan_args();
+    args.data = Some("<req><msg>seed</msg></req>".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_xml_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    assert!(reflection_params.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn probe_xml_body_params_noop_on_json_body() {
+    // FP control: a JSON body with an (incorrect) XML content-type still
+    // tokenizes to no XML leaves, so nothing is seeded.
+    let addr = start_xml_server().await;
+    let target = xml_target(&addr);
+    let mut args = default_scan_args();
+    args.data = Some(r#"{"msg":"seed"}"#.to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_xml_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    assert!(reflection_params.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn probe_xml_body_params_fires_on_xml_prolog_without_content_type() {
+    // An `<?xml` prolog is a strong enough signal to probe even when the user
+    // forgot the Content-Type header.
+    let addr = start_xml_server().await;
+    let target = parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port()))
+        .expect("parse target");
+    let mut args = default_scan_args();
+    args.data = Some("<?xml version=\"1.0\"?><req><msg>seed</msg></req>".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_xml_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    assert!(
+        reflection_params
+            .lock()
+            .await
+            .iter()
+            .any(|p| p.name == "msg" && p.location == Location::XmlBody)
+    );
+}

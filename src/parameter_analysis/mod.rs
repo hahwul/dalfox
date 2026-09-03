@@ -24,6 +24,7 @@
 
 pub mod discovery;
 pub mod mining;
+pub(crate) mod xml_inject;
 
 pub(crate) use mining::detect_injection_context;
 
@@ -57,6 +58,18 @@ pub enum Location {
     Body,
     JsonBody,
     MultipartBody,
+    /// A GraphQL request whose payload is injected into one string value inside
+    /// the `variables` object. The whole request body (query + all variables)
+    /// is rebuilt from the param's `pre_encoding_pipeline` (`JsonField` at the
+    /// variable's JSON pointer) and sent as `application/json`. Distinct from
+    /// `JsonBody`, whose builder substitutes at a *top-level* key.
+    GraphqlBody,
+    /// An XML / SOAP request whose payload is injected into one element text
+    /// node or attribute value. The whole body is rebuilt from the param's
+    /// `pre_encoding_pipeline` (a `Splice` of the original document around the
+    /// injection point) and sent with the request's XML content-type. The
+    /// non-target bytes of the document survive verbatim.
+    XmlBody,
     Header,
     Path,
     Fragment,
@@ -421,7 +434,11 @@ async fn send_probe_request_for_param(
     // params preserve body-capable methods (POST/PUT/PATCH/QUERY/…). See
     // `body_location_method_for_param`.
     let req_method = match location {
-        Location::Body | Location::JsonBody | Location::MultipartBody => {
+        Location::Body
+        | Location::JsonBody
+        | Location::MultipartBody
+        | Location::GraphqlBody
+        | Location::XmlBody => {
             crate::scanning::url_inject::body_location_method_for_param(&target.method, param)
         }
         _ => parsed_method,
@@ -565,6 +582,26 @@ async fn send_probe_request_for_param(
             request_builder = client
                 .request(req_method, action_resolved_url.clone())
                 .multipart(form);
+        }
+        Location::GraphqlBody => {
+            // `payload` is the full rebuilt request body: the param's
+            // `JsonField` pipeline already spliced the value into the GraphQL
+            // request template, so it ships verbatim as JSON.
+            request_builder = client
+                .request(req_method, action_resolved_url.clone())
+                .header("Content-Type", "application/json")
+                .body(payload.to_string());
+        }
+        Location::XmlBody => {
+            // `payload` is the full rebuilt XML document (the `Splice` pipeline
+            // re-glued the original body around the injection point). Preserve
+            // the request's declared XML content-type so SOAP endpoints still
+            // frame it correctly.
+            let ct = crate::scanning::url_inject::xml_request_content_type(target);
+            request_builder = client
+                .request(req_method, action_resolved_url.clone())
+                .header("Content-Type", ct)
+                .body(payload.to_string());
         }
         Location::Fragment => {
             let inject_url_str = crate::scanning::url_inject::build_injected_url(
@@ -1358,6 +1395,8 @@ fn param_type_label(p: &Param, target: &Target) -> &'static str {
         Location::Body => "body",
         Location::JsonBody => "json",
         Location::MultipartBody => "multipart",
+        Location::GraphqlBody => "graphql",
+        Location::XmlBody => "xml",
         Location::Path => "path",
         Location::Fragment => "fragment",
         Location::Header => {

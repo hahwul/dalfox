@@ -4858,3 +4858,563 @@ xhr.open('GET', location.hash);
         "xhr.open must not be treated as a navigation sink, got {r:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Promise combinator roots (`Promise.all` / `Promise.resolve`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_promise_all_indexed_element_reaches_sink() {
+    // xssmaze taintflow-level5: the tainted element is identified only by its
+    // index inside the `Promise.all` array, and arrives in the callback as one
+    // slot of the settled array.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+Promise.all([
+  Promise.resolve('<section>'),
+  Promise.resolve(q),
+  Promise.resolve('</section>')
+]).then(function (parts) {
+  document.getElementById('out').innerHTML = parts.join('');
+});
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Promise.all element taint should reach the .then callback: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_promise_resolve_tainted_reaches_sink() {
+    let code = r#"
+var q = location.hash.slice(1);
+Promise.resolve(q).then(function (v) {
+  document.getElementById('out').innerHTML = v;
+});
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Promise.resolve(tainted) should carry taint into .then: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_promise_combinator_fp_control_untainted_values() {
+    // FP control: nothing attacker-controlled enters the chain, so no finding —
+    // the combinator must be a *link*, never a source of its own.
+    let code = r#"
+var greeting = '<b>hello</b>';
+Promise.all([Promise.resolve('<section>'), Promise.resolve(greeting)]).then(function (parts) {
+  document.getElementById('out').innerHTML = parts.join('');
+});
+Promise.resolve('static').then(function (v) {
+  document.getElementById('out2').innerHTML = v;
+});
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "untainted Promise chains must not report: {vulns:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Taint arriving as a callback's *return* value
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_string_replace_replacer_function_return() {
+    // xssmaze taintflow-level8: the tainted value is the replacer's return
+    // value; `replace()` itself only ever sees a constant pattern.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var template = '<p>Hello NAME_SLOT!</p>';
+var rendered = template.replace('NAME_SLOT', function () { return q; });
+document.getElementById('out').innerHTML = rendered;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "replacer-function return should taint the replace() result: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_array_map_arrow_return_taints_result() {
+    let code = r#"
+var q = location.hash.slice(1);
+var rows = ['a', 'b'].map(row => '<li>' + q + '</li>');
+document.getElementById('out').innerHTML = rows.join('');
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "map callback return should taint the mapped array: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_callback_return_fp_control_sanitized_and_shadowed() {
+    // Three benign forms that must stay silent:
+    //  1. the replacer returns a *sanitized* value;
+    //  2. the replacer's parameter shadows the tainted outer name, so the
+    //     returned identifier is the match, not the URL parameter;
+    //  3. the callback is in a position whose return value is discarded.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var t1 = '<p>SLOT</p>'.replace('SLOT', function () { return encodeURIComponent(q); });
+document.getElementById('a').innerHTML = t1;
+var t2 = '<p>xx</p>'.replace(/x/g, function (q) { return q.toUpperCase(); });
+document.getElementById('b').innerHTML = t2;
+var t3 = ['a'].filter(function () { return q; });
+document.getElementById('c').innerHTML = t3;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "sanitized / shadowed / discarded callback returns must not report: {vulns:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tagged templates
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_tagged_template_tag_returns_interpolated_value() {
+    // xssmaze taintflow-level7: the value is never in the cooked strings — the
+    // tag receives it as a positional argument and splices it into its result.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+function html(strings, value) {
+  return strings[0] + value + strings[1];
+}
+document.getElementById('out').innerHTML = html`<article>${raw}</article>`;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "tagged template with a value-splicing tag should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_tagged_template_fp_control_unknown_and_escaping_tags() {
+    // FP control, both halves of the realistic benign space:
+    //  1. `html` is imported (lit-html and friends) — no summary, and those
+    //     tags insert values as text, so an unknown tag must stay opaque;
+    //  2. a local tag that escapes every interpolated slot.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+document.getElementById('a').innerHTML = html`<article>${raw}</article>`;
+function safe(strings, value) {
+  return strings[0] + encodeURIComponent(value) + strings[1];
+}
+document.getElementById('b').innerHTML = safe`<article>${raw}</article>`;
+function justStrings(strings) {
+  return strings.join('');
+}
+document.getElementById('c').innerHTML = justStrings`<article>${raw}</article>`;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "unknown / escaping / strings-only tags must not report: {vulns:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Taint-forwarding constructors (`new Proxy(...)`, collections)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_proxy_get_trap_forwards_taint() {
+    // xssmaze taintflow-level2: the sink reads a property whose value is
+    // produced by a Proxy get trap, not by an access on the wrapped object.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+var store = new Proxy({ body: raw }, {
+  get: function (target, prop) { return target[prop]; }
+});
+if (store.body) { document.getElementById('out').innerHTML = store.body; }
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Proxy over a tainted target should read back tainted: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_map_constructor_forwards_taint() {
+    let code = r#"
+var raw = location.hash.slice(1);
+var m = new Map([['body', raw]]);
+document.getElementById('out').innerHTML = m.get('body');
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "new Map(taintedEntries) should read back tainted: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_taint_forwarding_constructor_fp_control() {
+    // FP control: a Proxy/Map built from page-authored data stays clean, and a
+    // constructor outside the allowlist does not forward taint on its own.
+    let code = r#"
+var raw = location.hash.slice(1);
+var defaults = new Proxy({ body: '<b>hi</b>' }, { get: function (t, p) { return t[p]; } });
+document.getElementById('a').innerHTML = defaults.body;
+var when = new Date(raw);
+document.getElementById('b').innerHTML = when;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "clean Proxy and non-forwarding constructors must not report: {vulns:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Class accessors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_class_getter_returns_constructor_argument() {
+    // xssmaze taintflow-level3: the sink reads an accessor property, not the
+    // field the value was written to.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+document.getElementById('out').innerHTML = new Message(q).body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "class getter over a tainted constructor argument should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_class_getter_through_instance_variable() {
+    let code = r#"
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+var m = new Message(location.hash.slice(1));
+document.getElementById('out').innerHTML = m.body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "accessor read off an instance variable should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_class_accessor_fp_control() {
+    // FP control:
+    //  1. the constructor escapes before storing, so the accessor reads clean;
+    //  2. the accessor returns a different, page-authored field;
+    //  3. the tainted argument is stored in a field nothing reads.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+class Escaped {
+  constructor(value) { this._value = encodeURIComponent(value); }
+  get body() { return this._value; }
+}
+document.getElementById('a').innerHTML = new Escaped(q).body;
+class Titled {
+  constructor(value) { this._value = value; this._title = 'Draft'; }
+  get title() { return this._title; }
+}
+document.getElementById('b').innerHTML = new Titled(q).title;
+var t = new Titled(q);
+document.getElementById('c').innerHTML = t.title;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "escaping constructors and unrelated accessors must not report: {vulns:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Object.assign and iteration-callback exec sinks
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_object_assign_onto_location_href() {
+    // xssmaze domsink-level6: the href setter still fires, so a javascript:
+    // URL navigates and runs.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+if (q) { Object.assign(location, { href: q }); }
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "location.href"),
+        "Object.assign onto location should report a navigation sink: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_object_assign_onto_element_inner_html() {
+    let code = r#"
+var q = location.hash.slice(1);
+Object.assign(document.getElementById('out'), { innerHTML: q });
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Object.assign onto a looked-up element should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_object_assign_fp_control_plain_config_object() {
+    // FP control: `href` / `src` are ordinary keys on a plain options object,
+    // and a merge onto `location` of anything but `href` cannot navigate to a
+    // javascript: URL.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var opts = { retries: 1 };
+Object.assign(opts, { href: q, src: q, innerHTML: q });
+Object.assign(location, { hash: q, search: q, pathname: q });
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "config-object merges and non-navigating location keys must not report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_array_map_eval_over_tainted_receiver() {
+    // xssmaze domsink-level5: eval is handed to .map() as a callback and never
+    // appears in call position.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+if (q) {
+  var results = q.split('\n').map(eval);
+  document.getElementById('out').textContent = 'ran ' + results.length;
+}
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "eval"),
+        "map(eval) over a tainted receiver should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_exec_callback_iteration_fp_control() {
+    // FP control: a clean receiver, a non-executing builtin callback, and a
+    // sink name that only builds functions rather than running them.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var steps = ['1+1', '2+2'].map(eval);
+var nums = q.split(',').map(Number);
+var fns = q.split(',').map(Function);
+document.getElementById('out').textContent = steps.length + nums.length + fns.length;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "clean receivers and non-executing callbacks must not report: {vulns:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// IndexedDB stored records as a source
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_indexeddb_get_result_reaches_sink() {
+    // xssmaze domsource-level1: the value is persisted to IndexedDB and read
+    // back through two async callbacks.
+    let code = r#"
+var open = indexedDB.open('notes-db', 1);
+open.onsuccess = function (e) {
+  var db = e.target.result;
+  var get = db.transaction('notes', 'readonly').objectStore('notes').get('latest');
+  get.onsuccess = function (ev) {
+    if (ev.target.result != null) {
+      document.getElementById('out').innerHTML = ev.target.result;
+    }
+  };
+};
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns
+            .iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("indexedDB")),
+        "IndexedDB record read should reach the sink: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_indexeddb_fp_control_connection_and_write_requests() {
+    // FP control: neither of the two IndexedDB requests whose `result` is not
+    // data may be treated as a source — `indexedDB.open()` resolves to a
+    // database connection, and `put()` resolves to the written key. Nor may a
+    // same-named `.get()` on a plain Map.
+    let code = r#"
+var open = indexedDB.open('notes-db', 1);
+open.onsuccess = function (e) {
+  document.getElementById('a').innerHTML = e.target.result.name;
+  var db = e.target.result;
+  var put = db.transaction('notes', 'readwrite').objectStore('notes').put('hi', 'k');
+  put.onsuccess = function (ev) {
+    document.getElementById('b').innerHTML = ev.target.result;
+  };
+};
+var settings = new Map();
+var got = settings.get('theme');
+document.getElementById('c').innerHTML = got;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "connection / write requests and plain Map reads must not report: {vulns:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// CSS custom property round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_css_custom_property_round_trip() {
+    // xssmaze domsource-level6: the value is stashed on a --custom-property and
+    // read back through the CSSOM before it reaches an HTML sink.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+if (raw) { document.documentElement.style.setProperty('--maze-label', raw); }
+var label = getComputedStyle(document.documentElement)
+  .getPropertyValue('--maze-label').trim();
+if (label) { document.getElementById('out').insertAdjacentHTML('beforeend', label); }
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "insertAdjacentHTML"),
+        "a custom property written tainted should read back tainted: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_css_custom_property_fp_control() {
+    // FP control: a custom property the page only ever wrote literal text into,
+    // and a *standard* property — whose value the CSSOM reparses, so what comes
+    // back is not the input string.
+    let code = r#"
+var raw = decodeURIComponent(location.hash.slice(1));
+document.documentElement.style.setProperty('--theme', 'dark');
+var theme = getComputedStyle(document.documentElement).getPropertyValue('--theme');
+document.getElementById('a').insertAdjacentHTML('beforeend', theme);
+document.documentElement.style.setProperty('color', raw);
+var color = getComputedStyle(document.documentElement).getPropertyValue('color');
+document.getElementById('b').insertAdjacentHTML('beforeend', color);
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "clean custom properties and standard properties must not report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_css_custom_property_helper_summary_does_not_leak() {
+    // The summary walk assumes each parameter is tainted in turn, so a helper
+    // that writes its parameter into a custom property must not leave that
+    // property tainted for a read that follows a *clean* call.
+    let code = r#"
+function setLabel(value) {
+  document.documentElement.style.setProperty('--label', value);
+}
+setLabel('Drafts');
+var label = getComputedStyle(document.documentElement).getPropertyValue('--label');
+document.getElementById('out').insertAdjacentHTML('beforeend', label);
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "a hypothetical summary walk must not taint a global custom property: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_class_accessor_taint_cleared_on_rebinding() {
+    // Rebinding the name replaces the instance, so the accessor read must not
+    // keep the previous instance's taint — in either spelling.
+    let code = r#"
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+var m = new Message(location.hash.slice(1));
+var m2 = new Message('static');
+document.getElementById('a').innerHTML = m2.body;
+m = new Message('static');
+document.getElementById('b').innerHTML = m.body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "a rebound instance must not keep the earlier accessor taint: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_class_accessor_through_assignment_form() {
+    // Parity with the declarator form: `m = new Message(tainted)` must not be a
+    // blind spot the `const` spelling avoids.
+    let code = r#"
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+var m;
+m = new Message(location.hash.slice(1));
+document.getElementById('out').innerHTML = m.body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "assignment-form construction should report like the declarator: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_indexeddb_named_object_store_variable() {
+    // The idiomatic spelling names the store before reading from it, rather
+    // than chaining `objectStore(...).get(...)` in one expression.
+    let code = r#"
+var open = indexedDB.open('notes-db', 1);
+open.onsuccess = function (e) {
+  var db = e.target.result;
+  var tx = db.transaction('notes', 'readonly');
+  var store = tx.objectStore('notes');
+  var req = store.get('latest');
+  req.onsuccess = function (ev) {
+    document.getElementById('out').innerHTML = ev.target.result;
+  };
+};
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns
+            .iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("indexedDB")),
+        "a named object-store variable should still resolve: {vulns:?}"
+    );
+}

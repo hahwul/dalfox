@@ -57,6 +57,15 @@ impl<'a> DomXssVisitor<'a> {
         let saved_instance_classes = self.instance_classes.clone();
         let saved_bound_aliases = self.bound_function_aliases.clone();
         let saved_response_vars = self.response_object_vars.clone();
+        // The summary walk is *hypothetical* — it assumes each parameter in
+        // turn is tainted — so any state it records must not leak into the real
+        // walk. The CSS custom-property map is keyed by a global property name
+        // rather than by a variable, so a helper that writes a parameter into
+        // `--label` would otherwise leave every later `getPropertyValue('--label')`
+        // reading tainted no matter what the helper was actually called with.
+        let saved_css_custom_properties = self.css_custom_property_sources.clone();
+        let saved_idb_requests = self.idb_request_vars.clone();
+        let saved_idb_stores = self.idb_object_store_vars.clone();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -111,6 +120,9 @@ impl<'a> DomXssVisitor<'a> {
         self.instance_classes = saved_instance_classes;
         self.bound_function_aliases = saved_bound_aliases;
         self.response_object_vars = saved_response_vars;
+        self.css_custom_property_sources = saved_css_custom_properties;
+        self.idb_request_vars = saved_idb_requests;
+        self.idb_object_store_vars = saved_idb_stores;
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;
@@ -170,6 +182,7 @@ impl<'a> DomXssVisitor<'a> {
         class_name: &str,
         class_decl: &Class<'a>,
     ) {
+        self.register_class_accessor_fields(class_name, class_decl);
         for elem in &class_decl.body.body {
             let ClassElement::MethodDefinition(method_def) = elem else {
                 continue;
@@ -188,6 +201,89 @@ impl<'a> DomXssVisitor<'a> {
                 self.extract_param_names(&method_def.value.params),
                 &body.statements,
             );
+        }
+    }
+
+    /// Record the two halves of the accessor indirection for `class_name`:
+    /// which fields the constructor stores straight from a parameter, and which
+    /// getters just hand a field back.
+    ///
+    /// Together they let `new C(tainted).accessor` resolve — a read the member
+    /// walk cannot follow on its own, because the accessor is a function call
+    /// whose body never mentions the constructor argument.
+    ///
+    /// Both halves are deliberately literal-minded. Only a bare
+    /// `this.field = param` is a stored parameter, so a constructor that
+    /// sanitizes (`this.field = escapeHtml(param)`) records nothing and the
+    /// accessor reads clean; and only a getter whose body is `return this.field`
+    /// is an alias, so a getter that formats or escapes its field records
+    /// nothing either.
+    pub(super) fn register_class_accessor_fields(
+        &mut self,
+        class_name: &str,
+        class_decl: &Class<'a>,
+    ) {
+        for elem in &class_decl.body.body {
+            let ClassElement::MethodDefinition(method_def) = elem else {
+                continue;
+            };
+            let Some(body) = &method_def.value.body else {
+                continue;
+            };
+            match method_def.kind {
+                MethodDefinitionKind::Constructor => {
+                    let params = self.extract_param_names(&method_def.value.params);
+                    for stmt in &body.statements {
+                        let Statement::ExpressionStatement(expr_stmt) = stmt else {
+                            continue;
+                        };
+                        let Expression::AssignmentExpression(assign) = &expr_stmt.expression else {
+                            continue;
+                        };
+                        if assign.operator != AssignmentOperator::Assign {
+                            continue;
+                        }
+                        let AssignmentTarget::StaticMemberExpression(target) = &assign.left else {
+                            continue;
+                        };
+                        if !matches!(target.object, Expression::ThisExpression(_)) {
+                            continue;
+                        }
+                        let Expression::Identifier(rhs) = &assign.right else {
+                            continue;
+                        };
+                        let Some(idx) = params.iter().position(|p| p == rhs.name.as_str()) else {
+                            continue;
+                        };
+                        self.class_ctor_param_fields.insert(
+                            format!("{class_name}.{}", target.property.name.as_str()),
+                            idx,
+                        );
+                    }
+                }
+                MethodDefinitionKind::Get => {
+                    let Some(getter_name) = self.get_property_key_name(&method_def.key) else {
+                        continue;
+                    };
+                    for stmt in &body.statements {
+                        let Statement::ReturnStatement(ret) = stmt else {
+                            continue;
+                        };
+                        let Some(Expression::StaticMemberExpression(member)) = &ret.argument else {
+                            continue;
+                        };
+                        if !matches!(member.object, Expression::ThisExpression(_)) {
+                            continue;
+                        }
+                        self.class_getter_fields.insert(
+                            format!("{class_name}.{getter_name}"),
+                            member.property.name.to_string(),
+                        );
+                        break;
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }

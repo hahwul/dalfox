@@ -335,6 +335,22 @@ struct DomXssVisitor<'a> {
     function_summaries: HashMap<String, FunctionSummary>,
     /// Track `instanceVar -> ClassName` for class instance method summary resolution.
     instance_classes: HashMap<String, String>,
+    /// `"Class.field" -> constructor parameter index`, for fields a class
+    /// constructor stores straight from one of its parameters
+    /// (`constructor(v) { this._value = v; }`). Together with
+    /// [`class_getter_fields`] this is what connects `new C(tainted).accessor`
+    /// back to the argument, since the accessor read is a function call that
+    /// never mentions the constructor argument.
+    ///
+    /// Only a *bare parameter* right-hand side is recorded: a constructor that
+    /// stores `escapeHtml(v)` has no entry, so the accessor reads clean.
+    ///
+    /// [`class_getter_fields`]: DomXssVisitor::class_getter_fields
+    class_ctor_param_fields: HashMap<String, usize>,
+    /// `"Class.getter" -> field name` for `get x() { return this.field; }`
+    /// accessors — the indirection between the property the sink reads and the
+    /// field the constructor wrote.
+    class_getter_fields: HashMap<String, String>,
     /// Track aliases produced by `.bind()` calls.
     bound_function_aliases: HashMap<String, BoundCallableAlias>,
     /// Internal flag for summary collection of tainted return values
@@ -357,6 +373,31 @@ struct DomXssVisitor<'a> {
     url_search_params_objects: HashSet<String>,
     /// Track `paramsVar.key -> upstream source` for URLSearchParams set/get reparses.
     url_search_params_field_sources: HashMap<String, String>,
+    /// `--custom-property -> source` for CSS custom properties the page wrote a
+    /// tainted value into (`el.style.setProperty('--label', tainted)`). A
+    /// custom property round-trips through the CSSOM verbatim, so reading it
+    /// back with `getPropertyValue('--label')` returns the attacker's string —
+    /// a laundering step that hides the flow from a source/sink pairing.
+    ///
+    /// Keyed by the property name, and only ever populated from a tainted
+    /// write, so reading a custom property the page never fed untrusted data
+    /// into stays clean. Standard CSS properties are deliberately excluded:
+    /// the CSSOM normalizes those, so what comes back is not the input.
+    css_custom_property_sources: HashMap<String, String>,
+    /// Variables bound to an IndexedDB object store or index
+    /// (`tx.objectStore('notes')`). Real code names the store before reading
+    /// from it, so without this only the fully-chained
+    /// `…objectStore(…).get(k)` spelling would resolve.
+    idb_object_store_vars: HashSet<String>,
+    /// Variables bound to an IndexedDB *value* request — the object an
+    /// `objectStore(...).get(...)` / `.getAll()` / `.openCursor()` call
+    /// returns. Its `onsuccess` handler receives the stored record, which is
+    /// same-origin persisted data in exactly the trust class `localStorage` /
+    /// `sessionStorage` already sit in: whatever wrote it (an earlier visit, a
+    /// seeded parameter, another page on the origin) is not this page's
+    /// literal text. The database handle from `indexedDB.open(...)` is
+    /// deliberately *not* in here — its `result` is a connection, not data.
+    idb_request_vars: HashSet<String>,
     /// Variables that hold a `<script>` element created via
     /// `document.createElement('script')`. Assigning a tainted value to
     /// `.text` / `.textContent` / `.innerText` / `.innerHTML` on these
@@ -642,6 +683,8 @@ impl<'a> DomXssVisitor<'a> {
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
             instance_classes: HashMap::new(),
+            class_ctor_param_fields: HashMap::new(),
+            class_getter_fields: HashMap::new(),
             bound_function_aliases: HashMap::new(),
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),
@@ -653,6 +696,9 @@ impl<'a> DomXssVisitor<'a> {
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
+            css_custom_property_sources: HashMap::new(),
+            idb_object_store_vars: HashSet::new(),
+            idb_request_vars: HashSet::new(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),
             response_object_vars: HashSet::new(),

@@ -296,7 +296,16 @@ fn prune_blocked_raw_angles(payloads: Vec<String>, invalid_specials: &[char]) ->
     }
     payloads
         .into_iter()
-        .filter(|p| !((block_lt && p.contains('<')) || (block_gt && p.contains('>'))))
+        .filter(|p| {
+            // Leading-window ("positional") filter bypass payloads carry raw
+            // `<`/`>` on purpose: their premise is that the block is positional,
+            // so the raw angle passes once the leading pad pushes it past the
+            // filtered window. Keep them despite the blocked-angle classification
+            // (they are FP-safe — a non-positional filter still encodes the `<`
+            // and nothing verifies). See `synthesis::positional_pad_payloads`.
+            crate::payload::synthesis::is_positional_pad_bypass(p)
+                || !((block_lt && p.contains('<')) || (block_gt && p.contains('>')))
+        })
         .collect()
 }
 
@@ -358,17 +367,30 @@ fn hoist_angle_free_payloads(payloads: Vec<String>, invalid_specials: &[char]) -
     if !block_lt && !block_gt {
         return payloads;
     }
+    // Three tiers, front to back:
+    //   pad   — leading-window ("positional") bypass payloads (raw `<` on
+    //           purpose). When angles are reported blocked the block may be
+    //           positional, and these are then the *only* shapes that can reach
+    //           a tag injection, so they must lead — otherwise the DOM phase's
+    //           inert-echo early exit can retire before they are ever tried.
+    //   clean — angle-free survivors (event-handler / quote-breakout shapes).
+    //   rest  — encoded-angle variants (need a naive single-pass-decode filter).
+    let mut pad: Vec<String> = Vec::new();
     let mut clean: Vec<String> = Vec::with_capacity(payloads.len());
     let mut rest: Vec<String> = Vec::with_capacity(payloads.len());
     for p in payloads {
-        if payload_is_angle_free(&p) {
+        if crate::payload::synthesis::is_positional_pad_bypass(&p) {
+            pad.push(p);
+        } else if payload_is_angle_free(&p) {
             clean.push(p);
         } else {
             rest.push(p);
         }
     }
-    clean.extend(rest);
-    clean
+    pad.reserve(clean.len() + rest.len());
+    pad.extend(clean);
+    pad.extend(rest);
+    pad
 }
 
 fn get_fallback_reflection_payloads(
@@ -971,7 +993,11 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
             }
             url
         }
-        Location::Body | Location::JsonBody | Location::MultipartBody => {
+        Location::Body
+        | Location::JsonBody
+        | Location::MultipartBody
+        | Location::GraphqlBody
+        | Location::XmlBody => {
             // Body params use the form action URL when discovered from a form,
             // so the displayed request matches the POST actually sent.
             crate::scanning::url_inject::effective_query_base(&target.url, param)
@@ -982,14 +1008,14 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let method = crate::scanning::url_inject::effective_method(&target.method, param);
     // Body-bearing locations always send a body; synthesize one when the
     // target has no original `data`, so the displayed PoC isn't an empty POST.
-    let (body, content_type): (Option<String>, Option<&'static str>) = match param.location {
+    let (body, content_type): (Option<String>, Option<String>) = match param.location {
         Location::Body => {
             let body = crate::scanning::url_inject::urlencoded_body(
                 target.data.as_deref(),
                 &param.name,
                 payload,
             );
-            (Some(body), Some("application/x-www-form-urlencoded"))
+            (Some(body), Some("application/x-www-form-urlencoded".to_string()))
         }
         Location::JsonBody => {
             let body = crate::scanning::url_inject::json_body(
@@ -998,9 +1024,25 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
                 &param.value,
                 payload,
             );
-            (Some(body), Some("application/json"))
+            (Some(body), Some("application/json".to_string()))
         }
-        Location::MultipartBody => (target.data.clone(), Some("multipart/form-data")),
+        Location::MultipartBody => (target.data.clone(), Some("multipart/form-data".to_string())),
+        // GraphQL / XML rebuild the whole body from the param's pipeline
+        // (`JsonField` into the GraphQL request / `Splice` around the XML
+        // injection point). `apply_param_encoding` runs that pipeline on the
+        // raw `payload`, so the displayed PoC body is exactly what goes on the
+        // wire.
+        Location::GraphqlBody => {
+            let body = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
+            (Some(body), Some("application/json".to_string()))
+        }
+        Location::XmlBody => {
+            let body = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
+            (
+                Some(body),
+                Some(crate::scanning::url_inject::xml_request_content_type(target)),
+            )
+        }
         _ => (target.data.clone(), None),
     };
 
@@ -1063,7 +1105,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     // Body injectors always set their own `Content-Type` on the wire; a
     // Query/Path injector re-sends the original body verbatim and passes
     // `None` here, keeping whatever the target captured.
-    if let Some(ct) = content_type {
+    if let Some(ct) = &content_type {
         buf.push_str("\r\nContent-Type: ");
         buf.push_str(ct);
     }

@@ -141,11 +141,13 @@ pub(crate) fn body_location_method_for_param(
 /// method. Finding metadata must match the verb that is actually sent.
 pub(crate) fn effective_method(target_method: &str, param: &Param) -> String {
     match param.location {
-        Location::Body | Location::JsonBody | Location::MultipartBody => {
-            body_location_method_for_param(target_method, param)
-                .as_str()
-                .to_string()
-        }
+        Location::Body
+        | Location::JsonBody
+        | Location::MultipartBody
+        | Location::GraphqlBody
+        | Location::XmlBody => body_location_method_for_param(target_method, param)
+            .as_str()
+            .to_string(),
         _ => target_method.to_string(),
     }
 }
@@ -265,7 +267,11 @@ pub(crate) fn build_injected_url(base: &url::Url, param: &Param, injected: &str)
             }
             url.to_string()
         }
-        Location::Body | Location::JsonBody | Location::MultipartBody => {
+        Location::Body
+        | Location::JsonBody
+        | Location::MultipartBody
+        | Location::GraphqlBody
+        | Location::XmlBody => {
             // For body params, the URL itself does not change.
             // Return the base URL as-is; actual payload injection happens in the
             // request body (handled by the caller when building the request).
@@ -701,6 +707,70 @@ pub(crate) fn resolve_form_action_url(param: &Param, target: &Target) -> url::Ur
         .unwrap_or_else(|| target.url.clone())
 }
 
+/// The XML content-type to frame an [`Location::XmlBody`] injection with:
+/// the request's own declared `Content-Type` when it is an XML family type,
+/// else `application/xml`. Preserving `application/soap+xml` matters — a SOAP
+/// endpoint routes on it — while a stray non-XML captured type (or none) must
+/// not override the XML body we are actually sending.
+pub(crate) fn xml_request_content_type(target: &Target) -> String {
+    target
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.trim())
+        .filter(|v| {
+            let primary = crate::utils::content_type_primary(v);
+            matches!(
+                primary.as_deref(),
+                Some("text/xml")
+                    | Some("application/xml")
+                    | Some("application/soap+xml")
+                    | Some("application/xhtml+xml")
+            )
+        })
+        .map(str::to_string)
+        .unwrap_or_else(|| "application/xml".to_string())
+}
+
+/// GraphQL body injection. The param's `pre_encoding_pipeline` has already
+/// rebuilt the full request body (query + all variables, the target variable
+/// carrying `value`), so it ships verbatim as `application/json`.
+pub(crate) fn build_graphql_body_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let method = body_location_method_for_param(&target.method, param);
+    let base =
+        crate::utils::build_body_request_base(client, target, method, parsed_url, Some(value.to_string()));
+    crate::utils::apply_header_overrides(
+        base,
+        &[("Content-Type".to_string(), "application/json".to_string())],
+    )
+}
+
+/// XML / SOAP body injection. The param's `pre_encoding_pipeline` (a `Splice`)
+/// has already re-glued the original document around the injection point, so
+/// `value` is the complete XML body; it ships with the request's declared XML
+/// content-type (see [`xml_request_content_type`]).
+pub(crate) fn build_xml_body_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    value: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let method = body_location_method_for_param(&target.method, param);
+    let base =
+        crate::utils::build_body_request_base(client, target, method, parsed_url, Some(value.to_string()));
+    crate::utils::apply_header_overrides(
+        base,
+        &[("Content-Type".to_string(), xml_request_content_type(target))],
+    )
+}
+
 /// `application/x-www-form-urlencoded` body injection.
 pub(crate) fn build_body_request(
     client: &Client,
@@ -801,6 +871,8 @@ pub(crate) fn build_inject_request(
         Location::Body => build_body_request(client, target, param, value),
         Location::JsonBody => build_json_body_request(client, target, param, value),
         Location::MultipartBody => build_multipart_request(client, target, param, value),
+        Location::GraphqlBody => build_graphql_body_request(client, target, param, value),
+        Location::XmlBody => build_xml_body_request(client, target, param, value),
         _ => build_url_inject_request(client, target, param, value, default_method),
     }
 }
