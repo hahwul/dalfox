@@ -5351,3 +5351,70 @@ document.getElementById('out').insertAdjacentHTML('beforeend', label);
         "a hypothetical summary walk must not taint a global custom property: {vulns:?}"
     );
 }
+
+#[test]
+fn test_class_accessor_taint_cleared_on_rebinding() {
+    // Rebinding the name replaces the instance, so the accessor read must not
+    // keep the previous instance's taint — in either spelling.
+    let code = r#"
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+var m = new Message(location.hash.slice(1));
+var m2 = new Message('static');
+document.getElementById('a').innerHTML = m2.body;
+m = new Message('static');
+document.getElementById('b').innerHTML = m.body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "a rebound instance must not keep the earlier accessor taint: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_class_accessor_through_assignment_form() {
+    // Parity with the declarator form: `m = new Message(tainted)` must not be a
+    // blind spot the `const` spelling avoids.
+    let code = r#"
+class Message {
+  constructor(value) { this._value = value; }
+  get body() { return this._value; }
+}
+var m;
+m = new Message(location.hash.slice(1));
+document.getElementById('out').innerHTML = m.body;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "assignment-form construction should report like the declarator: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_indexeddb_named_object_store_variable() {
+    // The idiomatic spelling names the store before reading from it, rather
+    // than chaining `objectStore(...).get(...)` in one expression.
+    let code = r#"
+var open = indexedDB.open('notes-db', 1);
+open.onsuccess = function (e) {
+  var db = e.target.result;
+  var tx = db.transaction('notes', 'readonly');
+  var store = tx.objectStore('notes');
+  var req = store.get('latest');
+  req.onsuccess = function (ev) {
+    document.getElementById('out').innerHTML = ev.target.result;
+  };
+};
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns
+            .iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("indexedDB")),
+        "a named object-store variable should still resolve: {vulns:?}"
+    );
+}

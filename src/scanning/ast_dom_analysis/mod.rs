@@ -384,6 +384,11 @@ struct DomXssVisitor<'a> {
     /// into stays clean. Standard CSS properties are deliberately excluded:
     /// the CSSOM normalizes those, so what comes back is not the input.
     css_custom_property_sources: HashMap<String, String>,
+    /// Variables bound to an IndexedDB object store or index
+    /// (`tx.objectStore('notes')`). Real code names the store before reading
+    /// from it, so without this only the fully-chained
+    /// `…objectStore(…).get(k)` spelling would resolve.
+    idb_object_store_vars: HashSet<String>,
     /// Variables bound to an IndexedDB *value* request — the object an
     /// `objectStore(...).get(...)` / `.getAll()` / `.openCursor()` call
     /// returns. Its `onsuccess` handler receives the stored record, which is
@@ -692,6 +697,7 @@ impl<'a> DomXssVisitor<'a> {
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
             css_custom_property_sources: HashMap::new(),
+            idb_object_store_vars: HashSet::new(),
             idb_request_vars: HashSet::new(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),

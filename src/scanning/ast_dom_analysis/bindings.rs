@@ -19,6 +19,10 @@ impl<'a> DomXssVisitor<'a> {
     ) {
         let var_name = id.name.as_str();
         self.clear_url_search_params_field_sources(var_name);
+        // Rebinding the name drops whatever the *previous* instance's accessors
+        // read back, or a stale `m.body` would stay tainted after
+        // `m = new Message('static')`.
+        self.clear_instance_field_taints(var_name);
 
         // Register summaries for function expressions assigned to variables.
         if let Expression::FunctionExpression(func_expr) = init
@@ -96,6 +100,14 @@ impl<'a> DomXssVisitor<'a> {
         }
         if !assigned_url_object_source {
             self.url_object_sources.remove(var_name);
+        }
+
+        // `const store = tx.objectStore('notes')` — remember the store so a
+        // `store.get(key)` on the next line still resolves as a record read.
+        if self.expr_is_idb_object_store(init) {
+            self.idb_object_store_vars.insert(var_name.to_string());
+        } else {
+            self.idb_object_store_vars.remove(var_name);
         }
 
         // `const req = store.get(key)` — remember the request so its
@@ -490,6 +502,30 @@ impl<'a> DomXssVisitor<'a> {
                         .insert(format!("{var_name}.{getter}"), source.clone());
                 }
             }
+        }
+    }
+
+    /// Drop the accessor field taints [`seed_instance_field_taints`] recorded
+    /// for `var_name` under the class it was previously bound to.
+    ///
+    /// [`seed_instance_field_taints`]: Self::seed_instance_field_taints
+    pub(super) fn clear_instance_field_taints(&mut self, var_name: &str) {
+        let Some(class_name) = self.instance_classes.get(var_name).cloned() else {
+            return;
+        };
+        let prefix = format!("{class_name}.");
+        let mut properties: Vec<String> = self
+            .class_ctor_param_fields
+            .keys()
+            .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string))
+            .collect();
+        properties.extend(
+            self.class_getter_fields
+                .keys()
+                .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string)),
+        );
+        for property in properties {
+            self.field_taints.remove(&format!("{var_name}.{property}"));
         }
     }
 }

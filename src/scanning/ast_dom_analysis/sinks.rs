@@ -139,11 +139,20 @@ impl<'a> DomXssVisitor<'a> {
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
                 let mut assigned_instance_class = false;
+                self.clear_instance_field_taints(target_name);
                 if let Expression::NewExpression(new_expr) = &assign.right
                     && let Expression::Identifier(class_id) = &new_expr.callee
                 {
                     self.instance_classes
                         .insert(target_name.to_string(), class_id.name.to_string());
+                    // Same accessor bookkeeping the declarator form does, so
+                    // `m = new Message(tainted); el.innerHTML = m.body` is not
+                    // a blind spot the `const` spelling avoids.
+                    self.seed_instance_field_taints(
+                        target_name,
+                        class_id.name.as_str(),
+                        &new_expr.arguments,
+                    );
                     assigned_instance_class = true;
                 }
                 if !assigned_instance_class {
@@ -1089,6 +1098,10 @@ impl<'a> DomXssVisitor<'a> {
             "Code-execution sink passed as an iteration callback over tainted elements",
             source,
         );
+        // Consuming the call skips the trailing callee walk, so descend the
+        // receiver here — a sink nested inside it (`eval(t).split(',').map(eval)`)
+        // would otherwise go unreported.
+        self.walk_expression(receiver);
         true
     }
     /// Walk through a call expression

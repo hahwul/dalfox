@@ -65,6 +65,7 @@ impl<'a> DomXssVisitor<'a> {
         // reading tainted no matter what the helper was actually called with.
         let saved_css_custom_properties = self.css_custom_property_sources.clone();
         let saved_idb_requests = self.idb_request_vars.clone();
+        let saved_idb_stores = self.idb_object_store_vars.clone();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -121,6 +122,7 @@ impl<'a> DomXssVisitor<'a> {
         self.response_object_vars = saved_response_vars;
         self.css_custom_property_sources = saved_css_custom_properties;
         self.idb_request_vars = saved_idb_requests;
+        self.idb_object_store_vars = saved_idb_stores;
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;

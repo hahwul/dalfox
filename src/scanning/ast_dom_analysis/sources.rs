@@ -235,13 +235,23 @@ impl<'a> DomXssVisitor<'a> {
         let Some(receiver) = self.get_callee_object_expr(&call.callee) else {
             return false;
         };
-        let Expression::CallExpression(store_call) = receiver else {
-            return false;
-        };
-        matches!(
-            self.get_callee_property_name(&store_call.callee).as_deref(),
-            Some("objectStore" | "index")
-        )
+        self.expr_is_idb_object_store(receiver)
+    }
+    /// True when `expr` denotes an IndexedDB object store or index — either the
+    /// `objectStore(...)` / `index(...)` call itself, or a variable bound to
+    /// one.
+    pub(super) fn expr_is_idb_object_store(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::ParenthesizedExpression(paren) => {
+                self.expr_is_idb_object_store(&paren.expression)
+            }
+            Expression::Identifier(id) => self.idb_object_store_vars.contains(id.name.as_str()),
+            Expression::CallExpression(store_call) => matches!(
+                self.get_callee_property_name(&store_call.callee).as_deref(),
+                Some("objectStore" | "index")
+            ),
+            _ => false,
+        }
     }
 
     /// Record `el.style.setProperty('--name', tainted)` so a later
