@@ -44,6 +44,15 @@ pub enum EncodingStep {
     /// Single-round percent encoding. Useful when an outer layer (e.g. JSON
     /// stringify) preserves characters that a query value cannot carry.
     Url,
+    /// Reconstruct a body around the payload by concatenating a fixed
+    /// `prefix`, the payload, and a fixed `suffix`. Used for structured text
+    /// bodies (XML/SOAP element text and attribute values) where the payload
+    /// occupies one exact byte range and the rest of the document must survive
+    /// byte-for-byte. Splitting the original body at the injection point and
+    /// re-gluing it around the raw payload avoids the lossy parse-and-reserialize
+    /// round-trip (and the `str::replace` "replace every occurrence" garble the
+    /// JSON builder was bitten by).
+    Splice { prefix: String, suffix: String },
     /// Assemble a JWT/JWS by gluing the supplied (already base64url-encoded)
     /// header and signature segments around the input. The input is treated
     /// as the already-encoded payload segment, so this step is normally
@@ -65,6 +74,7 @@ impl EncodingStep {
             EncodingStep::Base64 => Ok(STANDARD.encode(payload)),
             EncodingStep::Base64Url => Ok(URL_SAFE_NO_PAD.encode(payload)),
             EncodingStep::Url => Ok(urlencoding::encode(payload).to_string()),
+            EncodingStep::Splice { prefix, suffix } => Ok(format!("{prefix}{payload}{suffix}")),
             EncodingStep::JsonField { pointer, template } => {
                 let mut value = template.clone();
                 set_by_pointer(
@@ -366,6 +376,87 @@ fn infer_url_json(value: &str) -> Vec<NestedField> {
             pointer,
             template: json.clone(),
         }])
+    })
+}
+
+/// Detect a GraphQL-over-JSON request body and return one injection field per
+/// string leaf inside its `variables` object.
+///
+/// A body qualifies only when it is a JSON object carrying BOTH:
+///   * a `query` (or `mutation`) *string* whose text begins with a GraphQL
+///     operation (`query` / `mutation` / `subscription`, or the anonymous
+///     `{` shorthand), and
+///   * a `variables` object with at least one string leaf.
+///
+/// Requiring the `variables` object keeps ordinary JSON APIs that merely carry
+/// a field literally named `query` (a search box: `{"query":"laptop"}`) on the
+/// existing `JsonBody` path — they yield no fields here. Each returned field
+/// carries a `JsonField` pipeline that rebuilds the *entire* request with only
+/// that one variable replaced by the payload, so the server always receives a
+/// complete, parseable GraphQL request (query source + every other variable
+/// intact).
+///
+/// Scalar (non-string) variables are skipped: injection only targets values
+/// that are already strings, matching the minimal, false-positive-safe scope.
+pub(crate) fn infer_graphql_variable_fields(data: &str) -> Vec<NestedField> {
+    let Some(root) = parse_json_object_or_array(data) else {
+        return Vec::new();
+    };
+    let serde_json::Value::Object(map) = &root else {
+        return Vec::new();
+    };
+
+    // `query` is the GraphQL-spec transport field name; some clients send the
+    // operation under `mutation`. Either way it must be a string that reads as
+    // an operation.
+    let op_src = map.get("query").or_else(|| map.get("mutation"));
+    let Some(serde_json::Value::String(op)) = op_src else {
+        return Vec::new();
+    };
+    if !looks_like_graphql_operation(op) {
+        return Vec::new();
+    }
+
+    let Some(vars) = map.get("variables") else {
+        return Vec::new();
+    };
+    if !vars.is_object() {
+        return Vec::new();
+    }
+
+    // Walk string leaves under `variables`, then re-root each pointer/path at
+    // `/variables` and attach a whole-request rebuild pipeline.
+    let mut leaves = collect_leaves(vars);
+    if leaves.is_empty() {
+        return Vec::new();
+    }
+    for nf in &mut leaves {
+        nf.pointer = format!("/variables{}", nf.pointer);
+        let mut path = vec!["variables".to_string()];
+        path.extend(std::mem::take(&mut nf.path));
+        nf.path = path;
+    }
+    attach_pipelines(leaves, move |pointer| {
+        EncodingPipeline::new(vec![EncodingStep::JsonField {
+            pointer,
+            template: root.clone(),
+        }])
+    })
+}
+
+/// True when a string reads as the start of a GraphQL operation: the
+/// `query` / `mutation` / `subscription` keyword (followed by whitespace, `{`,
+/// or `(`), or the anonymous-query `{` shorthand. Rejects a bare field value
+/// like `"queryable"` so a search API is not mistaken for GraphQL.
+fn looks_like_graphql_operation(s: &str) -> bool {
+    let t = s.trim_start();
+    if t.starts_with('{') {
+        return true;
+    }
+    ["query", "mutation", "subscription"].iter().any(|kw| {
+        t.strip_prefix(kw).is_some_and(|rest| {
+            rest.starts_with(|c: char| c.is_whitespace() || c == '{' || c == '(')
+        })
     })
 }
 

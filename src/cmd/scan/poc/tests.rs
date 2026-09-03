@@ -100,3 +100,54 @@ fn poc_location_in_url_false_for_side_channel_locations() {
     assert!(!poc_location_in_url("JsonBody"));
     assert!(!poc_location_in_url("MultipartBody"));
 }
+
+#[test]
+fn poc_location_tag_graphql_and_xml() {
+    assert_eq!(poc_location_tag("GraphqlBody", "variables.n"), Some("graphql"));
+    assert_eq!(poc_location_tag("XmlBody", "msg"), Some("xml"));
+}
+
+#[test]
+fn poc_location_in_url_false_for_graphql_and_xml() {
+    // Structured bodies are side-channel deliveries — never synthesize a
+    // `?param=payload` query for them.
+    assert!(!poc_location_in_url("GraphqlBody"));
+    assert!(!poc_location_in_url("XmlBody"));
+}
+
+#[test]
+fn request_ct_and_body_splits_headers_from_body() {
+    let req = "POST /graphql HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 9\r\n\r\n{\"a\":\"b\"}";
+    let (ct, body) = request_content_type_and_body(Some(req)).expect("has body");
+    assert_eq!(ct, "application/json");
+    assert_eq!(body, "{\"a\":\"b\"}");
+}
+
+#[test]
+fn request_ct_and_body_none_when_no_body_section() {
+    // A request with no blank-line separator yields no body.
+    assert!(request_content_type_and_body(Some("GET / HTTP/1.1\r\nHost: x")).is_none());
+    assert!(request_content_type_and_body(None).is_none());
+}
+
+#[test]
+fn graphql_curl_poc_reproduces_full_recorded_body() {
+    let req = "POST /graphql HTTP/1.1\r\nHost: h:8899\r\nContent-Type: application/json\r\nContent-Length: 5\r\n\r\n{\"query\":\"mutation($n:String){a(n:$n)}\",\"variables\":{\"n\":\"<svg onload=alert(1)>\"}}";
+    let r = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("POST")
+        .data("http://h:8899/graphql")
+        .param("variables.n")
+        .payload("<svg onload=alert(1)>")
+        .message_str("x")
+        .build();
+    let mut r = r;
+    r.location = "GraphqlBody".to_string();
+    r.request = Some(req.to_string());
+    let out = render_curl_poc(&r, "http://h:8899/graphql");
+    assert!(out.contains("-H \"Content-Type: application/json\""), "{out}");
+    // The full structured body (query + the injected variable) is present,
+    // not a lossy `{"variables.n":"payload"}` fragment.
+    assert!(out.contains("mutation($n:String)"), "{out}");
+    assert!(out.contains("\\\"variables\\\":{\\\"n\\\":\\\"<svg onload=alert(1)>\\\"}"), "{out}");
+}

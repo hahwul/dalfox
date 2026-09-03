@@ -971,7 +971,11 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
             }
             url
         }
-        Location::Body | Location::JsonBody | Location::MultipartBody => {
+        Location::Body
+        | Location::JsonBody
+        | Location::MultipartBody
+        | Location::GraphqlBody
+        | Location::XmlBody => {
             // Body params use the form action URL when discovered from a form,
             // so the displayed request matches the POST actually sent.
             crate::scanning::url_inject::effective_query_base(&target.url, param)
@@ -982,14 +986,14 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let method = crate::scanning::url_inject::effective_method(&target.method, param);
     // Body-bearing locations always send a body; synthesize one when the
     // target has no original `data`, so the displayed PoC isn't an empty POST.
-    let (body, content_type): (Option<String>, Option<&'static str>) = match param.location {
+    let (body, content_type): (Option<String>, Option<String>) = match param.location {
         Location::Body => {
             let body = crate::scanning::url_inject::urlencoded_body(
                 target.data.as_deref(),
                 &param.name,
                 payload,
             );
-            (Some(body), Some("application/x-www-form-urlencoded"))
+            (Some(body), Some("application/x-www-form-urlencoded".to_string()))
         }
         Location::JsonBody => {
             let body = crate::scanning::url_inject::json_body(
@@ -998,9 +1002,25 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
                 &param.value,
                 payload,
             );
-            (Some(body), Some("application/json"))
+            (Some(body), Some("application/json".to_string()))
         }
-        Location::MultipartBody => (target.data.clone(), Some("multipart/form-data")),
+        Location::MultipartBody => (target.data.clone(), Some("multipart/form-data".to_string())),
+        // GraphQL / XML rebuild the whole body from the param's pipeline
+        // (`JsonField` into the GraphQL request / `Splice` around the XML
+        // injection point). `apply_param_encoding` runs that pipeline on the
+        // raw `payload`, so the displayed PoC body is exactly what goes on the
+        // wire.
+        Location::GraphqlBody => {
+            let body = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
+            (Some(body), Some("application/json".to_string()))
+        }
+        Location::XmlBody => {
+            let body = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
+            (
+                Some(body),
+                Some(crate::scanning::url_inject::xml_request_content_type(target)),
+            )
+        }
         _ => (target.data.clone(), None),
     };
 
@@ -1063,7 +1083,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     // Body injectors always set their own `Content-Type` on the wire; a
     // Query/Path injector re-sends the original body verbatim and passes
     // `None` here, keeping whatever the target captured.
-    if let Some(ct) = content_type {
+    if let Some(ct) = &content_type {
         buf.push_str("\r\nContent-Type: ");
         buf.push_str(ct);
     }
