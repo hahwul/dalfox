@@ -29,7 +29,7 @@ dalfox https://target.app/api \
   -p token:cookie
 ```
 
-위치(Location): `query`, `body`, `json`, `multipart`, `cookie`, `header`. 주입 지점이 쿼리 문자열이 아니라면 `name:location` 형식을 쓰세요.
+위치(Location): `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`. 주입 지점이 쿼리 문자열이 아니라면 `name:location` 형식을 쓰세요. `graphql`과 `xml`은 요청 본문에서 자동으로 탐지됩니다([GraphQL 및 XML 본문 주입](#graphql-및-xml-본문-주입) 참조). 힌트는 이미 발견된 파라미터를 필터링할 수는 있지만, 이름만으로 새 본문을 합성하지는 못합니다.
 
 위치 힌트가 없는 경우(`-p q`만 지정):
 
@@ -163,6 +163,34 @@ dalfox scan https://example.com -H 'X-Search: FUZZ' --inject-marker FUZZ
 JWT의 경우 원래 헤더와 서명 세그먼트는 그대로(verbatim) 보존됩니다. 서명은 수정된 페이로드와 일치하지 않으므로, 이는 토큰을 검증하지 않는 엔드포인트에서만 발동합니다. 올바르게 서명된 JWT는 탐지 결과를 반환하지 않습니다. 이는 놓친 것이 아니라 의도된 동작입니다.
 
 대상이 Dalfox가 자동 탐지하지 못하는 래핑을 쓴다면, `--inject-marker`로 주입 지점을 강제로 지정할 수 있습니다(위 참조).
+
+## GraphQL 및 XML 본문 주입
+
+요청 본문(`-d`, 또는 캡처된 `raw-http` / `har` 요청)이 GraphQL이나 XML 문서라면, Dalfox는 본문 전체를 하나의 불투명한 덩어리로 테스트하는 대신 그 안의 값들을 주입 지점으로 다룹니다.
+
+**GraphQL**(`application/json` 또는 `application/graphql`): GraphQL 오퍼레이션(값이 `query`/`mutation`/`subscription` 또는 익명 `{ … }` 축약형으로 시작하는 `query`/`mutation` 필드)과 `variables` 오브젝트를 **둘 다** 가진 본문은, `variables` 안의 모든 문자열 leaf가 각각 `graphql` 파라미터로 등록됩니다. 각 페이로드는 요청 전체를 재구성하며(오퍼레이션과 다른 변수들은 그대로 함께 전송) 서버는 항상 유효하고 파싱 가능한 GraphQL 요청을 받습니다.
+
+```bash
+dalfox https://target.app/graphql \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"query($q:String!){ search(term:$q){ id } }","variables":{"q":"seed"}}'
+# → variables.q 가 `graphql` 파라미터로 주입됩니다
+```
+
+단지 `query`라는 이름의 필드만 있는 평범한 REST 엔드포인트(검색창, `{"query":"laptop"}`)는 GraphQL로 **취급되지 않습니다** — `variables` 오브젝트와 오퍼레이션 형태의 값이 모두 필요하므로, 일반 JSON 본문은 그대로 `json` 경로에 남습니다.
+
+**XML / SOAP**(`text/xml`, `application/xml`, `application/soap+xml`, 또는 `<?xml …?>` 프롤로그가 있는 본문): 각 엘리먼트 텍스트 노드와 속성 값이 `xml` 파라미터가 됩니다. byte-range splice가 페이로드를 제자리에 주입하며, 문서의 다른 모든 바이트 — 네임스페이스, 형제 엘리먼트, SOAP 엔벨로프 — 는 그대로 유지되고 요청의 XML content-type도 보존됩니다.
+
+```bash
+dalfox https://target.app/soap \
+  -X POST \
+  -H 'Content-Type: application/soap+xml' \
+  -d '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><search><term>seed</term></search></soap:Body></soap:Envelope>'
+# → <term> 텍스트 노드가 `xml` 파라미터로 주입됩니다
+```
+
+모든 반사 결과와 마찬가지로, 값은 응답이 이를 HTML로 파싱할 때만 `[V]`로 등급이 매겨집니다 — `application/json`으로 응답하는 GraphQL API나 이스케이프된 값을 되돌려주는 XML 서비스는 올바르게 무해(inert)로 보고됩니다. 실제 도달점은 반사된 값을 마크업으로 렌더링하는 관리자 화면, 리포트, 에러 페이지입니다.
 
 ## 반사 프로브 형태
 

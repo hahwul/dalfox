@@ -410,7 +410,7 @@ pub struct ScanArgs {
     pub baseline_mode_arg: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
+    /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, multipart, cookie, header, graphql, xml.
     #[arg(short = 'p', long)]
     pub param: Vec<String>,
 
