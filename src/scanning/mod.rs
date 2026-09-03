@@ -1015,7 +1015,10 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
                 &param.name,
                 payload,
             );
-            (Some(body), Some("application/x-www-form-urlencoded".to_string()))
+            (
+                Some(body),
+                Some("application/x-www-form-urlencoded".to_string()),
+            )
         }
         Location::JsonBody => {
             let body = crate::scanning::url_inject::json_body(
@@ -1040,7 +1043,9 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
             let body = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
             (
                 Some(body),
-                Some(crate::scanning::url_inject::xml_request_content_type(target)),
+                Some(crate::scanning::url_inject::xml_request_content_type(
+                    target,
+                )),
             )
         }
         _ => (target.data.clone(), None),

@@ -806,11 +806,23 @@ fn positional_pad_payloads_are_padded_verifiable_tags() {
             is_positional_pad_bypass(p),
             "pad payload must be recognised by the prune exemption: {p:?}"
         );
-        assert!(p.contains(class), "pad payload must carry the class marker: {p:?}");
-        assert!(p.contains("alert(1)"), "pad payload must carry an executor: {p:?}");
+        assert!(
+            p.contains(class),
+            "pad payload must carry the class marker: {p:?}"
+        );
+        assert!(
+            p.contains("alert(1)"),
+            "pad payload must carry an executor: {p:?}"
+        );
         let digits = p.bytes().take_while(u8::is_ascii_digit).count();
-        assert!(digits >= 20, "pad prefix must exceed common leading windows: {p:?}");
-        assert!(p.as_bytes()[digits] == b'<', "digits must run right up to the tag: {p:?}");
+        assert!(
+            digits >= 20,
+            "pad prefix must exceed common leading windows: {p:?}"
+        );
+        assert!(
+            p.as_bytes()[digits] == b'<',
+            "digits must run right up to the tag: {p:?}"
+        );
     }
 }
 
@@ -821,11 +833,11 @@ fn positional_pad_bypass_predicate_rejects_ordinary_payloads() {
     // wrongly survive the raw-angle prune and waste requests.
     for p in [
         "<svg onload=alert(1) class=x>",
-        "1<svg onload=alert(1)>",             // short digit run, not a pad
-        "0000000000<svg>",                     // 10 digits < MIN_RUN(12)
+        "1<svg onload=alert(1)>", // short digit run, not a pad
+        "0000000000<svg>",        // 10 digits < MIN_RUN(12)
         "'><svg onload=alert(1)>",
         "\" onmouseover=alert(1) x=\"",
-        "000000000000000000000000alert(1)",    // digits but no tag
+        "000000000000000000000000alert(1)", // digits but no tag
     ] {
         assert!(
             !is_positional_pad_bypass(p),
@@ -833,7 +845,9 @@ fn positional_pad_bypass_predicate_rejects_ordinary_payloads() {
         );
     }
     // ...and accept a real pad payload.
-    assert!(is_positional_pad_bypass("000000000000<svg onload=alert(1) class=x>"));
+    assert!(is_positional_pad_bypass(
+        "000000000000<svg onload=alert(1) class=x>"
+    ));
 }
 
 #[test]

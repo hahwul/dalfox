@@ -51,7 +51,10 @@ fn single_quoted_attribute() {
     let xml = "<a href='http://x'>t</a>";
     let pts = xml_injection_points(xml);
     assert_ranges_match_values(xml, &pts);
-    assert!(pts.iter().any(|p| p.name == "a@href" && p.value == "http://x"));
+    assert!(
+        pts.iter()
+            .any(|p| p.name == "a@href" && p.value == "http://x")
+    );
 }
 
 #[test]
@@ -190,7 +193,10 @@ fn multibyte_utf8_text_and_attribute_ranges_are_char_aligned() {
     let xml = "<r><t title=\"héllo\">wörld😀世</t></r>";
     let pts = xml_injection_points(xml);
     assert_ranges_match_values(xml, &pts); // slices here; panics if misaligned
-    assert!(pts.iter().any(|p| p.name == "t@title" && p.value == "héllo"));
+    assert!(
+        pts.iter()
+            .any(|p| p.name == "t@title" && p.value == "héllo")
+    );
     assert!(pts.iter().any(|p| p.name == "t" && p.value == "wörld😀世"));
     let t = pts.iter().find(|p| p.name == "t").unwrap();
     assert_eq!(splice(xml, t, "X"), "<r><t title=\"héllo\">X</t></r>");

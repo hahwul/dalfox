@@ -516,7 +516,10 @@ fn graphql_variables_string_leaf_is_detected() {
     assert_eq!(fields[0].pointer, "/variables/n");
     assert_eq!(fields[0].path, vec!["variables", "n"]);
     // The pipeline rebuilds the whole request with the payload in that slot.
-    let body = fields[0].pipeline.apply("<svg/onload=alert(1)>").expect("apply");
+    let body = fields[0]
+        .pipeline
+        .apply("<svg/onload=alert(1)>")
+        .expect("apply");
     let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid json");
     assert_eq!(parsed["variables"]["n"], "<svg/onload=alert(1)>");
     // Query source is preserved intact.

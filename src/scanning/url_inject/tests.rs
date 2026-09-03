@@ -933,8 +933,14 @@ fn build_injected_url_output_is_always_parseable() {
 fn xml_content_type_prefers_declared_xml_family() {
     for (declared, expected) in [
         ("text/xml", "text/xml"),
-        ("application/xml; charset=utf-8", "application/xml; charset=utf-8"),
-        ("application/soap+xml; action=\"x\"", "application/soap+xml; action=\"x\""),
+        (
+            "application/xml; charset=utf-8",
+            "application/xml; charset=utf-8",
+        ),
+        (
+            "application/soap+xml; action=\"x\"",
+            "application/soap+xml; action=\"x\"",
+        ),
     ] {
         let target = Target {
             headers: vec![("Content-Type".to_string(), declared.to_string())],

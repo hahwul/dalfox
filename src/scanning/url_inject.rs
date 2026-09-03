@@ -743,8 +743,13 @@ pub(crate) fn build_graphql_body_request(
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
     let method = body_location_method_for_param(&target.method, param);
-    let base =
-        crate::utils::build_body_request_base(client, target, method, parsed_url, Some(value.to_string()));
+    let base = crate::utils::build_body_request_base(
+        client,
+        target,
+        method,
+        parsed_url,
+        Some(value.to_string()),
+    );
     crate::utils::apply_header_overrides(
         base,
         &[("Content-Type".to_string(), "application/json".to_string())],
@@ -763,8 +768,13 @@ pub(crate) fn build_xml_body_request(
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
     let method = body_location_method_for_param(&target.method, param);
-    let base =
-        crate::utils::build_body_request_base(client, target, method, parsed_url, Some(value.to_string()));
+    let base = crate::utils::build_body_request_base(
+        client,
+        target,
+        method,
+        parsed_url,
+        Some(value.to_string()),
+    );
     crate::utils::apply_header_overrides(
         base,
         &[("Content-Type".to_string(), xml_request_content_type(target))],
