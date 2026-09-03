@@ -19,6 +19,10 @@ impl<'a> DomXssVisitor<'a> {
     ) {
         let var_name = id.name.as_str();
         self.clear_url_search_params_field_sources(var_name);
+        // Rebinding the name drops whatever the *previous* instance's accessors
+        // read back, or a stale `m.body` would stay tainted after
+        // `m = new Message('static')`.
+        self.clear_instance_field_taints(var_name);
 
         // Register summaries for function expressions assigned to variables.
         if let Expression::FunctionExpression(func_expr) = init
@@ -53,6 +57,14 @@ impl<'a> DomXssVisitor<'a> {
         {
             self.instance_classes
                 .insert(var_name.to_string(), class_id.name.to_string());
+            // `const m = new Message(tainted)` — record the accessor reads that
+            // now hand the tainted constructor argument back out, so a later
+            // `m.body` resolves without re-deriving the construction.
+            self.seed_instance_field_taints(
+                var_name,
+                class_id.name.as_str(),
+                &new_expr.arguments,
+            );
             assigned_instance_class = true;
         }
         if !assigned_instance_class {
@@ -88,6 +100,25 @@ impl<'a> DomXssVisitor<'a> {
         }
         if !assigned_url_object_source {
             self.url_object_sources.remove(var_name);
+        }
+
+        // `const store = tx.objectStore('notes')` — remember the store so a
+        // `store.get(key)` on the next line still resolves as a record read.
+        if self.expr_is_idb_object_store(init) {
+            self.idb_object_store_vars.insert(var_name.to_string());
+        } else {
+            self.idb_object_store_vars.remove(var_name);
+        }
+
+        // `const req = store.get(key)` — remember the request so its
+        // `onsuccess` handler is walked with the stored record treated as
+        // untrusted, and so a direct `req.result` read resolves.
+        if self.expr_is_idb_value_request(init) {
+            self.idb_request_vars.insert(var_name.to_string());
+            self.field_taints
+                .insert(format!("{var_name}.result"), "indexedDB".to_string());
+        } else {
+            self.idb_request_vars.remove(var_name);
         }
 
         // `let s = document.createElement('script')` — remember the
@@ -281,6 +312,9 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(source) = self.url_search_params_source_for_member(member) {
                     return Some(source);
                 }
+                if let Some(source) = self.class_accessor_taint_source(member) {
+                    return Some(source);
+                }
                 if let Some(source) = self.xhr_response_source_for_member(member) {
                     return Some(source);
                 }
@@ -416,7 +450,82 @@ impl<'a> DomXssVisitor<'a> {
             Expression::AwaitExpression(await_expr) => {
                 self.find_source_in_expr(&await_expr.argument)
             }
+            Expression::TaggedTemplateExpression(tagged) => self.tagged_template_source(tagged),
+            Expression::NewExpression(new_expr) => self
+                .taint_forwarding_new_argument(new_expr)
+                .and_then(|arg| self.find_source_in_expr(arg)),
             _ => None,
+        }
+    }
+
+    /// Mark the properties of `var_name` that read back a tainted constructor
+    /// argument of `class_name` — the stored fields themselves, and every
+    /// getter that aliases one.
+    pub(super) fn seed_instance_field_taints(
+        &mut self,
+        var_name: &str,
+        class_name: &str,
+        args: &[Argument<'a>],
+    ) {
+        let prefix = format!("{class_name}.");
+        let fields: Vec<(String, usize)> = self
+            .class_ctor_param_fields
+            .iter()
+            .filter_map(|(key, idx)| key.strip_prefix(&prefix).map(|f| (f.to_string(), *idx)))
+            .collect();
+        if fields.is_empty() {
+            return;
+        }
+        let getters: Vec<(String, String)> = self
+            .class_getter_fields
+            .iter()
+            .filter_map(|(key, field)| {
+                key.strip_prefix(&prefix)
+                    .map(|g| (g.to_string(), field.clone()))
+            })
+            .collect();
+
+        for (field, idx) in &fields {
+            let Some(arg) = args.get(*idx) else {
+                continue;
+            };
+            let (tainted, source) = self.argument_taint_and_source(arg);
+            if !tainted {
+                continue;
+            }
+            let source = source.unwrap_or_else(|| "unknown source".to_string());
+            self.field_taints
+                .insert(format!("{var_name}.{field}"), source.clone());
+            for (getter, getter_field) in &getters {
+                if getter_field == field {
+                    self.field_taints
+                        .insert(format!("{var_name}.{getter}"), source.clone());
+                }
+            }
+        }
+    }
+
+    /// Drop the accessor field taints [`seed_instance_field_taints`] recorded
+    /// for `var_name` under the class it was previously bound to.
+    ///
+    /// [`seed_instance_field_taints`]: Self::seed_instance_field_taints
+    pub(super) fn clear_instance_field_taints(&mut self, var_name: &str) {
+        let Some(class_name) = self.instance_classes.get(var_name).cloned() else {
+            return;
+        };
+        let prefix = format!("{class_name}.");
+        let mut properties: Vec<String> = self
+            .class_ctor_param_fields
+            .keys()
+            .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string))
+            .collect();
+        properties.extend(
+            self.class_getter_fields
+                .keys()
+                .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string)),
+        );
+        for property in properties {
+            self.field_taints.remove(&format!("{var_name}.{property}"));
         }
     }
 }

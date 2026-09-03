@@ -241,6 +241,19 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        // `getComputedStyle(el).getPropertyValue('--x')` reads back a custom
+        // property this script wrote a tainted value into.
+        if let Some(source) = self.css_custom_property_read_source(call) {
+            return (true, Some(source));
+        }
+
+        // The tainted value can also arrive as the *return value* of a callback
+        // the call runs over its receiver — `tpl.replace('SLOT', () => tainted)`
+        // never receives the tainted value as an argument at all.
+        if let Some(source) = self.callback_result_source(call) {
+            return (true, Some(source));
+        }
+
         // Conservative fallback: tainted argument taints call result.
         for arg in &call.arguments {
             let (tainted, source_hint) = self.argument_taint_and_source(arg);
@@ -303,6 +316,273 @@ impl<'a> DomXssVisitor<'a> {
         }
         (member.property.name.as_str() == "result").then(|| "FileReader.result".to_string())
     }
+    /// Source label when a *callback* handed to a value-producing method
+    /// returns tainted data, so the call's own result is tainted even though
+    /// nothing tainted was ever passed as an argument.
+    ///
+    /// The motivating shape is the templating idiom
+    /// `template.replace('SLOT', function () { return userInput; })` — the
+    /// replacer's return value is spliced into the result string, and
+    /// `replace()` itself only ever sees a constant pattern and a function.
+    /// The array transforms (`map` / `flatMap` / `reduce`) build their result
+    /// out of callback return values the same way.
+    ///
+    /// Two deliberate restrictions keep this precise:
+    ///
+    /// * only the callback position of the listed methods is inspected, so an
+    ///   arbitrary function argument (an `addEventListener` handler, a
+    ///   comparator, …) whose return value is discarded never taints anything;
+    /// * a callback whose parameter list is anything but plain identifiers, or
+    ///   whose parameter *shadows* a name we currently consider tainted, is
+    ///   skipped entirely — otherwise `tpl.replace(re, function (q) { return q; })`
+    ///   would read the shadowed parameter as the outer tainted `q`.
+    pub(super) fn callback_result_source(&self, call: &CallExpression<'a>) -> Option<String> {
+        let method = self.get_callee_property_name(&call.callee)?;
+        let cb_index = match method.as_str() {
+            // `str.replace(pattern, replacerFn)` / `replaceAll`.
+            "replace" | "replaceAll" => 1,
+            // Array transforms whose result is built from the callback's
+            // return values.
+            "map" | "flatMap" | "reduce" | "reduceRight" => 0,
+            _ => return None,
+        };
+        let cb = call.arguments.get(cb_index)?.as_expression()?;
+        self.callback_return_source(cb)
+    }
+    /// Source of the first tainted `return` in a function/arrow expression,
+    /// or `None` when the callback is unanalysable (see
+    /// [`callback_result_source`](Self::callback_result_source) for why
+    /// shadowing parameters bail out).
+    pub(super) fn callback_return_source(&self, cb: &Expression<'a>) -> Option<String> {
+        let _guard = self.enter_recursion()?;
+        let (params, statements, concise) = match cb {
+            Expression::FunctionExpression(func) => {
+                (&func.params, &func.body.as_ref()?.statements, false)
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                (&arrow.params, &arrow.body.statements, arrow.expression)
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                return self.callback_return_source(&paren.expression);
+            }
+            _ => return None,
+        };
+
+        // Only plain-identifier parameters are analysable from outside the
+        // callback; a destructured / defaulted / rest parameter can bind names
+        // we cannot enumerate, so it might shadow a tainted one.
+        for param in &params.items {
+            let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+                return None;
+            };
+            let name = id.name.as_str();
+            if self.tainted_vars.contains(name) || self.global_taints.contains(name) {
+                return None;
+            }
+        }
+        if params.rest.is_some() {
+            return None;
+        }
+
+        // `x => tainted` has no `return` statement: the concise body *is* the
+        // returned expression.
+        if concise {
+            let Some(Statement::ExpressionStatement(stmt)) = statements.first() else {
+                return None;
+            };
+            return self
+                .is_tainted(&stmt.expression)
+                .then(|| self.find_source_in_expr(&stmt.expression))
+                .flatten();
+        }
+        self.first_tainted_return_source(statements)
+    }
+    /// First tainted `return <expr>` reachable in `stmts`, descending through
+    /// the block-shaped statements a callback body commonly wraps its returns
+    /// in. Nested function bodies are *not* descended: their returns belong to
+    /// that inner function, not to this callback.
+    pub(super) fn first_tainted_return_source(
+        &self,
+        stmts: &[Statement<'a>],
+    ) -> Option<String> {
+        let _guard = self.enter_recursion()?;
+        for stmt in stmts {
+            let found = match stmt {
+                Statement::ReturnStatement(ret) => ret
+                    .argument
+                    .as_ref()
+                    .filter(|arg| self.is_tainted(arg))
+                    .and_then(|arg| self.find_source_in_expr(arg)),
+                Statement::BlockStatement(block) => self.first_tainted_return_source(&block.body),
+                Statement::IfStatement(if_stmt) => {
+                    self.first_tainted_return_source(std::slice::from_ref(&if_stmt.consequent))
+                        .or_else(|| {
+                            if_stmt.alternate.as_ref().and_then(|alt| {
+                                self.first_tainted_return_source(std::slice::from_ref(alt))
+                            })
+                        })
+                }
+                Statement::TryStatement(try_stmt) => self
+                    .first_tainted_return_source(&try_stmt.block.body)
+                    .or_else(|| {
+                        try_stmt
+                            .handler
+                            .as_ref()
+                            .and_then(|h| self.first_tainted_return_source(&h.body.body))
+                    }),
+                Statement::SwitchStatement(switch_stmt) => switch_stmt
+                    .cases
+                    .iter()
+                    .find_map(|case| self.first_tainted_return_source(&case.consequent)),
+                _ => None,
+            };
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
+    }
+    /// Source label when a tagged template `tag`…${x}…`` produces tainted data.
+    ///
+    /// The interpolated value never appears in the template literal's cooked
+    /// strings — the tag function receives it as a positional argument
+    /// (`tag(strings, v0, v1, …)`) and decides what to do with it. So the
+    /// verdict is the *tag's* verdict, read off its function summary: only a
+    /// tag we can see the body of, and whose body returns one of the
+    /// interpolated values, taints its result.
+    ///
+    /// That restriction is what keeps the modern component-library idiom
+    /// (`html`<div>${x}</div>`` from lit-html and friends) quiet: those tags
+    /// are imported, have no summary here, and insert their values as text
+    /// rather than markup. A tag whose body we cannot read is treated as
+    /// opaque, exactly like any other unknown call.
+    ///
+    /// Parameter 0 is the cooked-strings array — page-authored literal text,
+    /// never attacker-controlled — so a tag that merely returns
+    /// `strings.join('')` does not taint; only parameters 1.. (the `${}`
+    /// slots) are consulted.
+    pub(super) fn tagged_template_source(
+        &self,
+        tagged: &TaggedTemplateExpression<'a>,
+    ) -> Option<String> {
+        let _guard = self.enter_recursion()?;
+
+        // A tag with a sanitizer's name neutralizes its inputs, like any other
+        // sanitizing call.
+        if let Some(tag_name) = self.get_expr_string(&tagged.tag)
+            && (self.sanitizers.contains(tag_name.as_str())
+                || Self::is_likely_sanitizer_name(&tag_name))
+        {
+            return None;
+        }
+
+        let summary_key = self.get_summary_key_for_callee_expr(&tagged.tag)?;
+        let summary = self.function_summaries.get(&summary_key)?;
+
+        // The tag returns a tainted value regardless of its arguments
+        // (e.g. it reads `location.hash` itself).
+        if let Some(source) = &summary.return_without_tainted_params {
+            return Some(source.clone());
+        }
+
+        for (idx, fallback_source) in &summary.tainted_param_returns {
+            // Slot i is argument i + 1; argument 0 is the strings array.
+            let Some(slot) = idx.checked_sub(1) else {
+                continue;
+            };
+            let Some(expr) = tagged.quasi.expressions.get(slot) else {
+                continue;
+            };
+            if self.is_tainted(expr) {
+                return self
+                    .find_source_in_expr(expr)
+                    .or_else(|| Some(fallback_source.clone()));
+            }
+        }
+        None
+    }
+    /// The argument a taint-forwarding constructor hands straight back out
+    /// through the object it builds.
+    ///
+    /// `new Proxy(target, handler)` is the motivating one: every property read
+    /// off the proxy is served by the handler from `target`, so a proxy wrapped
+    /// around tainted data reads back tainted — but the read is a trap call, not
+    /// a property access on the object the taint was stored in, so nothing in
+    /// the member/alias tracking connects the two. The collection constructors
+    /// are here for the same reason: `new Map(tainted)` stores exactly the
+    /// argument's values, and a later `.get(k)` hands one back.
+    ///
+    /// Deliberately a short allowlist rather than "any `new` with a tainted
+    /// argument": most constructors transform their input into something whose
+    /// taint has to be argued separately (`new Date(x)` yields a timestamp,
+    /// `new Function(x)` is a *sink*, `new URL(x)` / `new URLSearchParams(x)`
+    /// already have their own richer source tracking that this must not
+    /// shadow).
+    pub(super) fn taint_forwarding_new_argument<'b>(
+        &self,
+        new_expr: &'b NewExpression<'a>,
+    ) -> Option<&'b Expression<'a>> {
+        const TAINT_FORWARDING_CONSTRUCTORS: &[&str] = &[
+            "Proxy", "Map", "Set", "WeakMap", "WeakSet", "String", "Object",
+        ];
+        let Expression::Identifier(id) = &new_expr.callee else {
+            return None;
+        };
+        if !TAINT_FORWARDING_CONSTRUCTORS.contains(&id.name.as_str()) {
+            return None;
+        }
+        new_expr.arguments.first().and_then(|arg| match arg {
+            Argument::SpreadElement(spread) => Some(&spread.argument),
+            _ => arg.as_expression(),
+        })
+    }
+    /// Source label for a read off a freshly constructed instance —
+    /// `new Message(tainted).body` — resolved through the class's accessor
+    /// bookkeeping.
+    ///
+    /// The accessor is a function call, so no member/alias tracking connects
+    /// the property the sink reads to the constructor argument the value came
+    /// from; the two halves recorded by
+    /// [`register_class_accessor_fields`](Self::register_class_accessor_fields)
+    /// are what bridge it.
+    pub(super) fn class_accessor_taint_source(
+        &self,
+        member: &StaticMemberExpression<'a>,
+    ) -> Option<String> {
+        let Expression::NewExpression(new_expr) = &member.object else {
+            return None;
+        };
+        let Expression::Identifier(class_id) = &new_expr.callee else {
+            return None;
+        };
+        self.class_property_ctor_arg_source(
+            class_id.name.as_str(),
+            member.property.name.as_str(),
+            &new_expr.arguments,
+        )
+    }
+    /// Source label when reading `property` off an instance of `class_name`
+    /// constructed with `args` yields the value of a tainted constructor
+    /// argument — either because the property *is* a stored field, or because
+    /// it is a getter that returns one.
+    pub(super) fn class_property_ctor_arg_source(
+        &self,
+        class_name: &str,
+        property: &str,
+        args: &[Argument<'a>],
+    ) -> Option<String> {
+        let field = self
+            .class_getter_fields
+            .get(&format!("{class_name}.{property}"))
+            .cloned()
+            .unwrap_or_else(|| property.to_string());
+        let idx = *self
+            .class_ctor_param_fields
+            .get(&format!("{class_name}.{field}"))?;
+        let arg = args.get(idx)?;
+        let (tainted, source) = self.argument_taint_and_source(arg);
+        tainted.then(|| source.unwrap_or_else(|| "unknown source".to_string()))
+    }
     /// Check if expression is tainted.
     ///
     /// Hostile JavaScript can nest expressions arbitrarily deep (`a.b.c.d…`,
@@ -325,6 +605,9 @@ impl<'a> DomXssVisitor<'a> {
             }
             Expression::StaticMemberExpression(member) => {
                 if self.url_search_params_source_for_member(member).is_some() {
+                    return true;
+                }
+                if self.class_accessor_taint_source(member).is_some() {
                     return true;
                 }
                 if self.xhr_response_source_for_member(member).is_some() {
@@ -415,6 +698,15 @@ impl<'a> DomXssVisitor<'a> {
             // `await taintedPromise` yields the resolved tainted value — e.g.
             // `await r.text()` on a fetch Response (issue #1024).
             Expression::AwaitExpression(await_expr) => self.is_tainted(&await_expr.argument),
+            // ``tag`…${x}…` `` — the verdict belongs to the tag function.
+            Expression::TaggedTemplateExpression(tagged) => {
+                self.tagged_template_source(tagged).is_some()
+            }
+            // `new Proxy(taintedTarget, handler)` and the collection
+            // constructors hand their argument's values back out on read.
+            Expression::NewExpression(new_expr) => self
+                .taint_forwarding_new_argument(new_expr)
+                .is_some_and(|arg| self.is_tainted(arg)),
             _ => false,
         }
     }
