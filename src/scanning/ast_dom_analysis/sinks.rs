@@ -940,6 +940,156 @@ impl<'a> DomXssVisitor<'a> {
             self.walk_expression(arg_expr);
         }
     }
+    /// `Object.assign(target, {...})` writing a sink property.
+    ///
+    /// The property setter still runs, so `Object.assign(location, {href: q})`
+    /// navigates exactly like `location.href = q` — but the sink never appears
+    /// in assignment position, so the assignment walk never sees it. Same for a
+    /// merge onto an element (`Object.assign(el, {innerHTML: q})`).
+    ///
+    /// Gated on the *target*, not the key: `href` / `src` / `innerHTML` are
+    /// perfectly ordinary keys on a plain configuration object, so a merge is
+    /// only a sink when the receiver is provably the `Location` object or a DOM
+    /// element the page just looked up. Only object *literal* sources are
+    /// inspected — a spread or a variable would need the key set proven, and
+    /// guessing there is how this check would start firing on config merges.
+    pub(super) fn handle_object_assign_sink(&mut self, call: &CallExpression<'a>) -> bool {
+        if self.get_expr_string(&call.callee).as_deref() != Some("Object.assign") {
+            return false;
+        }
+        let Some(target) = call.arguments.first().and_then(|arg| arg.as_expression()) else {
+            return false;
+        };
+        let is_location = self.expr_is_location_object(target);
+        if !is_location && !self.expr_is_dom_element_receiver(target) {
+            return false;
+        }
+
+        for arg in call.arguments.iter().skip(1) {
+            let Some(Expression::ObjectExpression(obj)) = arg.as_expression() else {
+                continue;
+            };
+            for prop in &obj.properties {
+                let ObjectPropertyKind::ObjectProperty(p) = prop else {
+                    continue;
+                };
+                let Some(key) = self.get_property_key_name(&p.key) else {
+                    continue;
+                };
+                // On `Location` only `href` navigates to an arbitrary scheme;
+                // `search` / `hash` / `pathname` cannot carry `javascript:`.
+                let is_sink_key = if is_location {
+                    key == "href"
+                } else {
+                    self.is_assignment_sink_property(&key)
+                };
+                if !is_sink_key || !self.is_tainted(&p.value) {
+                    continue;
+                }
+                let source = self.find_source_in_expr(&p.value);
+                let sink_name = if is_location {
+                    "location.href".to_string()
+                } else {
+                    key
+                };
+                self.report_vulnerability_with_source(
+                    call.span(),
+                    &sink_name,
+                    "Tainted value merged onto a sink property by Object.assign",
+                    source,
+                );
+                return true;
+            }
+        }
+        false
+    }
+    /// True when `expr` denotes the `Location` object, in any of its global
+    /// spellings.
+    pub(super) fn expr_is_location_object(&self, expr: &Expression<'a>) -> bool {
+        matches!(
+            self.get_expr_string(expr).as_deref(),
+            Some(
+                "location"
+                    | "window.location"
+                    | "document.location"
+                    | "self.location"
+                    | "top.location"
+                    | "parent.location"
+                    | "globalThis.location"
+            )
+        )
+    }
+    /// True when `expr` is an element the page just looked up or created.
+    /// Deliberately narrow — the point is to separate a DOM node from a plain
+    /// options object, not to resolve arbitrary element-valued expressions.
+    pub(super) fn expr_is_dom_element_receiver(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::ParenthesizedExpression(paren) => {
+                self.expr_is_dom_element_receiver(&paren.expression)
+            }
+            Expression::CallExpression(call) => matches!(
+                self.get_callee_property_name(&call.callee).as_deref(),
+                Some(
+                    "getElementById"
+                        | "querySelector"
+                        | "createElement"
+                        | "createElementNS"
+                        | "closest"
+                )
+            ),
+            Expression::StaticMemberExpression(member) => matches!(
+                self.get_member_string(member).as_deref(),
+                Some("document.body" | "document.head" | "document.documentElement")
+            ),
+            _ => false,
+        }
+    }
+    /// An iteration method handed a code-execution sink as its callback —
+    /// `q.split('\n').map(eval)`.
+    ///
+    /// `eval` never appears in call position here, so neither the sink-name
+    /// lookup nor the argument scan sees it; what makes the flow real is that
+    /// the *receiver* is tainted, since the iteratee is applied to each of its
+    /// elements. Restricted to callbacks that genuinely execute their argument:
+    /// `arr.map(Function)` builds functions without running them, and
+    /// `arr.map(Number)` is not a sink at all.
+    pub(super) fn handle_exec_callback_iteration(&mut self, call: &CallExpression<'a>) -> bool {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        if !matches!(
+            method.as_str(),
+            "map" | "forEach" | "flatMap" | "filter" | "find" | "findLast" | "some" | "every"
+        ) {
+            return false;
+        }
+        let Some(receiver) = self.get_callee_object_expr(&call.callee) else {
+            return false;
+        };
+        if !self.is_tainted(receiver) {
+            return false;
+        }
+        let Some(callback) = call.arguments.first().and_then(|arg| arg.as_expression()) else {
+            return false;
+        };
+        let Some(name) = self.get_expr_string(callback) else {
+            return false;
+        };
+        if !matches!(
+            name.as_str(),
+            "eval" | "window.eval" | "self.eval" | "globalThis.eval" | "execScript"
+        ) {
+            return false;
+        }
+        let source = self.find_source_in_expr(receiver);
+        self.report_vulnerability_with_source(
+            call.span(),
+            &name,
+            "Code-execution sink passed as an iteration callback over tainted elements",
+            source,
+        );
+        true
+    }
     /// Walk through a call expression
     pub(super) fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
         // Standalone `trustedTypes.createPolicy('default', {...})` (not bound to
@@ -978,6 +1128,14 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         if self.handle_add_event_listener(call) {
+            return;
+        }
+
+        if self.handle_object_assign_sink(call) {
+            return;
+        }
+
+        if self.handle_exec_callback_iteration(call) {
             return;
         }
 

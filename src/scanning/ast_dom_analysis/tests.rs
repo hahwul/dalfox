@@ -5146,3 +5146,89 @@ document.getElementById('c').innerHTML = t.title;
         "escaping constructors and unrelated accessors must not report: {vulns:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Object.assign and iteration-callback exec sinks
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_object_assign_onto_location_href() {
+    // xssmaze domsink-level6: the href setter still fires, so a javascript:
+    // URL navigates and runs.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+if (q) { Object.assign(location, { href: q }); }
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "location.href"),
+        "Object.assign onto location should report a navigation sink: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_object_assign_onto_element_inner_html() {
+    let code = r#"
+var q = location.hash.slice(1);
+Object.assign(document.getElementById('out'), { innerHTML: q });
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Object.assign onto a looked-up element should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_object_assign_fp_control_plain_config_object() {
+    // FP control: `href` / `src` are ordinary keys on a plain options object,
+    // and a merge onto `location` of anything but `href` cannot navigate to a
+    // javascript: URL.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var opts = { retries: 1 };
+Object.assign(opts, { href: q, src: q, innerHTML: q });
+Object.assign(location, { hash: q, search: q, pathname: q });
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "config-object merges and non-navigating location keys must not report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_array_map_eval_over_tainted_receiver() {
+    // xssmaze domsink-level5: eval is handed to .map() as a callback and never
+    // appears in call position.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+if (q) {
+  var results = q.split('\n').map(eval);
+  document.getElementById('out').textContent = 'ran ' + results.length;
+}
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "eval"),
+        "map(eval) over a tainted receiver should report: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_exec_callback_iteration_fp_control() {
+    // FP control: a clean receiver, a non-executing builtin callback, and a
+    // sink name that only builds functions rather than running them.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var steps = ['1+1', '2+2'].map(eval);
+var nums = q.split(',').map(Number);
+var fns = q.split(',').map(Function);
+document.getElementById('out').textContent = steps.length + nums.length + fns.length;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "clean receivers and non-executing callbacks must not report: {vulns:?}"
+    );
+}
