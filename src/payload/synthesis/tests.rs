@@ -903,3 +903,85 @@ fn positional_pad_is_fp_safe_against_a_non_positional_filter() {
         "a filter that encodes `<` everywhere must yield NO marker element (no false [V])"
     );
 }
+
+// ===================================================================
+// Paren-free / backtick-free execution — for filters that strip `(` `)` and
+// backticks, neutralising every standard `alert(1)` / `alert`1`` primitive.
+// ===================================================================
+
+/// Parse `payload` dropped into a `delim`-quoted attribute (the injection point)
+/// and return whether the id-marker element carries an on* handler holding a
+/// recognised sink — i.e. whether the DOM-verification stage would confirm it.
+fn attr_breakout_verifies(payload: &str, open: char) -> bool {
+    let id = crate::scanning::markers::id_marker();
+    let reflected = format!("<div class={open}{payload}{open}>x</div>");
+    let doc = scraper::Html::parse_document(&reflected);
+    let sel = scraper::Selector::parse(&format!("#{id}")).unwrap();
+    doc.select(&sel).next().is_some_and(|el| {
+        el.value()
+            .attrs()
+            .any(|(n, v)| n.len() >= 3 && n.starts_with("on") && v.contains("alert"))
+    })
+}
+
+#[test]
+fn paren_and_backtick_blocked_still_synthesizes_a_verifiable_handler() {
+    // filterchain-5 shape: `(` `)` and backtick stripped (so alert(1) / alert`1`
+    // / confirm(1) are all char-gated out), reflection in a double-quoted
+    // attribute. A paren-free handler must survive and, when reflected, parse to
+    // a marker element carrying an executing on* handler.
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
+    let blocked = &['(', ')', '`'];
+    let payloads = synthesize_payloads(&ctx, blocked, &[], &[], None);
+    assert_obeys_filter(&payloads, blocked);
+    let pf = payloads
+        .iter()
+        .find(|p| !p.contains('<') && attr_breakout_verifies(p, '"'))
+        .unwrap_or_else(|| {
+            panic!("no paren-free verifiable handler survived `(`/`)`/backtick strip: {payloads:?}")
+        });
+    // It must be genuinely paren/backtick-free (not a smuggled call).
+    assert!(
+        !pf.contains('(') && !pf.contains(')') && !pf.contains('`'),
+        "the surviving handler must be paren/backtick-free: {pf:?}"
+    );
+}
+
+#[test]
+fn paren_free_handler_present_for_single_quote_attr_too() {
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::SingleQuote));
+    let payloads = synthesize_payloads(&ctx, &['(', ')', '`'], &[], &[], None);
+    assert!(
+        payloads
+            .iter()
+            .any(|p| !p.contains('<') && attr_breakout_verifies(p, '\'')),
+        "single-quote attribute must also offer a paren-free verifiable handler: {payloads:?}"
+    );
+}
+
+#[test]
+fn paren_free_handler_is_fp_safe_when_quote_is_blocked() {
+    // FP control: the paren-free handler still needs its breakout quote. When the
+    // delimiter quote is ALSO stripped, no template survives (all attribute
+    // shapes lead with the quote), so synthesis emits nothing that could land an
+    // inert handler as a false positive.
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
+    // Block the breakout quote plus parens/backtick: nothing can break out.
+    let payloads = synthesize_payloads(&ctx, &['"', '(', ')', '`'], &[], &[], None);
+    assert!(
+        payloads.iter().all(|p| !p.contains("throw onerror")),
+        "no paren-free handler may be emitted once its breakout quote is blocked: {payloads:?}"
+    );
+    // And a benign reflection that entity-encodes the breakout quote yields no
+    // marker element (the handler lands inert inside the value).
+    let id = crate::scanning::markers::id_marker();
+    let inert = format!(
+        "<div class=\"&quot; onmouseover='throw onerror=alert,1' id={id} x=&quot;\">x</div>"
+    );
+    let doc = scraper::Html::parse_document(&inert);
+    let sel = scraper::Selector::parse(&format!("#{id}")).unwrap();
+    assert!(
+        doc.select(&sel).next().is_none(),
+        "an escaped breakout quote must yield no marker element (no false [V])"
+    );
+}
