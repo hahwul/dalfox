@@ -296,7 +296,16 @@ fn prune_blocked_raw_angles(payloads: Vec<String>, invalid_specials: &[char]) ->
     }
     payloads
         .into_iter()
-        .filter(|p| !((block_lt && p.contains('<')) || (block_gt && p.contains('>'))))
+        .filter(|p| {
+            // Leading-window ("positional") filter bypass payloads carry raw
+            // `<`/`>` on purpose: their premise is that the block is positional,
+            // so the raw angle passes once the leading pad pushes it past the
+            // filtered window. Keep them despite the blocked-angle classification
+            // (they are FP-safe — a non-positional filter still encodes the `<`
+            // and nothing verifies). See `synthesis::positional_pad_payloads`.
+            crate::payload::synthesis::is_positional_pad_bypass(p)
+                || !((block_lt && p.contains('<')) || (block_gt && p.contains('>')))
+        })
         .collect()
 }
 
@@ -358,17 +367,30 @@ fn hoist_angle_free_payloads(payloads: Vec<String>, invalid_specials: &[char]) -
     if !block_lt && !block_gt {
         return payloads;
     }
+    // Three tiers, front to back:
+    //   pad   — leading-window ("positional") bypass payloads (raw `<` on
+    //           purpose). When angles are reported blocked the block may be
+    //           positional, and these are then the *only* shapes that can reach
+    //           a tag injection, so they must lead — otherwise the DOM phase's
+    //           inert-echo early exit can retire before they are ever tried.
+    //   clean — angle-free survivors (event-handler / quote-breakout shapes).
+    //   rest  — encoded-angle variants (need a naive single-pass-decode filter).
+    let mut pad: Vec<String> = Vec::new();
     let mut clean: Vec<String> = Vec::with_capacity(payloads.len());
     let mut rest: Vec<String> = Vec::with_capacity(payloads.len());
     for p in payloads {
-        if payload_is_angle_free(&p) {
+        if crate::payload::synthesis::is_positional_pad_bypass(&p) {
+            pad.push(p);
+        } else if payload_is_angle_free(&p) {
             clean.push(p);
         } else {
             rest.push(p);
         }
     }
-    clean.extend(rest);
-    clean
+    pad.reserve(clean.len() + rest.len());
+    pad.extend(clean);
+    pad.extend(rest);
+    pad
 }
 
 fn get_fallback_reflection_payloads(

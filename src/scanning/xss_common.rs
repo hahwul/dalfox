@@ -406,12 +406,30 @@ pub(crate) fn generate_adaptive_payloads(
         None,
     );
 
+    // Leading-window ("positional") filter bypass: some filters entity-encode /
+    // strip only a fixed leading window of the value, which the per-character
+    // probe cannot see (it reflects its `<` past the window and records it
+    // valid). These padded tag payloads push the real vector past that window;
+    // they carry raw `<`/`>` deliberately, so the caller's raw-angle prune
+    // exempts them via `synthesis::is_positional_pad_bypass`. FP-safe by marker
+    // verification. Placed AFTER `synthesized` (which leads with the clean tag
+    // shapes) so an easily-exploitable param still verifies on — and reports —
+    // the tidy PoC first; on an easy param the DOM phase stops at that `[V]` and
+    // these are never sent. Still well inside the DOM phase's 256-echo early-exit
+    // window, so they are reached when the clean tags are positionally filtered.
+    let positional = crate::payload::synthesis::positional_pad_payloads(context);
+
     // Apply adaptive encoders with pre-allocated capacity
-    let estimated_cap =
-        (synthesized.len() + filtered_payloads.len()) * (2 + adaptive_encoders.len());
+    let estimated_cap = (positional.len() + synthesized.len() + filtered_payloads.len())
+        * (2 + adaptive_encoders.len());
     let mut out = Vec::with_capacity(estimated_cap);
     let mut seen = std::collections::HashSet::with_capacity(estimated_cap);
     for p in synthesized {
+        if seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
+    for p in positional {
         if seen.insert(p.clone()) {
             out.push(p);
         }

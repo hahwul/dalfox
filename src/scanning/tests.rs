@@ -661,6 +661,42 @@ fn test_hoist_angle_free_payloads_no_op_without_block() {
     assert_eq!(hoisted, original, "non-angle invalids must not reorder");
 }
 
+#[test]
+fn test_prune_keeps_positional_pad_bypass_despite_blocked_angles() {
+    // A leading-window ("positional") pad payload carries a raw `<` on purpose —
+    // the block may only touch a leading window, so the tag passes once padded
+    // past it. The raw-angle prune must exempt it while still dropping ordinary
+    // raw-angle payloads.
+    let pad = format!("{}<svg onload=alert(1) class=x>", "0".repeat(24));
+    let payloads = vec![
+        pad.clone(),
+        "<svg onload=alert(1)>".to_string(), // ordinary raw-angle: dropped
+        "\" onfocus=alert(1) \"".to_string(), // angle-free: kept
+    ];
+    let pruned = prune_blocked_raw_angles(payloads, &['<', '>']);
+    assert!(pruned.contains(&pad), "positional-pad payload must survive the prune");
+    assert!(
+        !pruned.iter().any(|p| p == "<svg onload=alert(1)>"),
+        "ordinary raw-angle payloads must still be dropped"
+    );
+}
+
+#[test]
+fn test_hoist_puts_positional_pad_bypass_first() {
+    // When angles are reported blocked, positional-pad payloads must lead so the
+    // DOM phase's inert-echo early exit cannot retire before they are tried.
+    let pad = format!("{}<svg onload=alert(1) class=x>", "0".repeat(24));
+    let payloads = vec![
+        "\" onfocus=alert(1) \"".to_string(), // angle-free
+        pad.clone(),                          // positional pad (raw <)
+        "%3Csvg%3E".to_string(),              // encoded angle
+    ];
+    let hoisted = hoist_angle_free_payloads(payloads, &['<']);
+    assert_eq!(hoisted[0], pad, "positional-pad payload must be hoisted to the very front");
+    assert_eq!(hoisted[1], "\" onfocus=alert(1) \"");
+    assert!(hoisted[2].contains("%3C"));
+}
+
 // ── expand_waf_payloads: orthogonal mutation/encoder expansion ───────
 
 #[test]

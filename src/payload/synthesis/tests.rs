@@ -765,3 +765,223 @@ fn raw_js_context_offers_regex_literal_breakout() {
         "angle-bracket filter must drop the </script> template"
     );
 }
+
+// ===================================================================
+// Leading-window ("positional") filter bypass — issue: partial-encoding
+// filters that only entity-encode / strip a fixed leading window of the value.
+// ===================================================================
+
+#[test]
+fn positional_pad_emitted_only_for_html_context() {
+    // A leading-window angle filter can only be defeated by pushing an injected
+    // *tag* past the window, so the pad set is HTML-text-only. Attribute / JS /
+    // CSS reflections break out without `<` and gain nothing.
+    assert!(
+        !positional_pad_payloads(&html()).is_empty(),
+        "HTML context must offer positional-pad payloads"
+    );
+    for ctx in [
+        InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
+        InjectionContext::Javascript(Some(DelimiterType::SingleQuote)),
+        InjectionContext::Css(None),
+    ] {
+        assert!(
+            positional_pad_payloads(&ctx).is_empty(),
+            "non-HTML context must not offer positional-pad payloads: {ctx:?}"
+        );
+    }
+}
+
+#[test]
+fn positional_pad_payloads_are_padded_verifiable_tags() {
+    // Every pad payload is a run of inert digits followed by a self-firing tag
+    // carrying the class marker, and is recognised by the prune-exemption
+    // predicate. The class marker rides a *fresh* injected tag, so a class (not
+    // id) marker is safe (no pre-existing `class="…"` to collide with).
+    let class = crate::scanning::markers::class_marker();
+    let payloads = positional_pad_payloads(&html());
+    assert!(!payloads.is_empty());
+    for p in &payloads {
+        assert!(
+            is_positional_pad_bypass(p),
+            "pad payload must be recognised by the prune exemption: {p:?}"
+        );
+        assert!(p.contains(class), "pad payload must carry the class marker: {p:?}");
+        assert!(p.contains("alert(1)"), "pad payload must carry an executor: {p:?}");
+        let digits = p.bytes().take_while(u8::is_ascii_digit).count();
+        assert!(digits >= 20, "pad prefix must exceed common leading windows: {p:?}");
+        assert!(p.as_bytes()[digits] == b'<', "digits must run right up to the tag: {p:?}");
+    }
+}
+
+#[test]
+fn positional_pad_bypass_predicate_rejects_ordinary_payloads() {
+    // The prune exemption must fire ONLY for the pad shape, never for an
+    // ordinary payload — otherwise a genuinely blocked raw-angle payload would
+    // wrongly survive the raw-angle prune and waste requests.
+    for p in [
+        "<svg onload=alert(1) class=x>",
+        "1<svg onload=alert(1)>",             // short digit run, not a pad
+        "0000000000<svg>",                     // 10 digits < MIN_RUN(12)
+        "'><svg onload=alert(1)>",
+        "\" onmouseover=alert(1) x=\"",
+        "000000000000000000000000alert(1)",    // digits but no tag
+    ] {
+        assert!(
+            !is_positional_pad_bypass(p),
+            "predicate must reject ordinary payload: {p:?}"
+        );
+    }
+    // ...and accept a real pad payload.
+    assert!(is_positional_pad_bypass("000000000000<svg onload=alert(1) class=x>"));
+}
+
+#[test]
+fn positional_pad_verifies_a_real_leading_window_bypass() {
+    // Behavioural proof (not shape-only): a filter that entity-encodes the first
+    // 20 characters and passes the rest raw (edgefilter-6 shape) leaves the pad
+    // payload's tag intact past the window, so it parses to a REAL marker
+    // element carrying the executing handler. Model the server transform, then
+    // parse the reflection the way the DOM-verification stage does.
+    let class = crate::scanning::markers::class_marker();
+    let payloads = positional_pad_payloads(&html());
+    // Pick a pad long enough to clear a 20-char window (all our lengths are).
+    let payload = payloads
+        .iter()
+        .find(|p| p.contains("svg"))
+        .expect("an svg pad payload");
+
+    // Server: entity-encode `<>&\"'` in the first 20 chars only, rest raw.
+    let encode_head = |s: &str| -> String {
+        let mut out = String::new();
+        for (i, c) in s.chars().enumerate() {
+            if i < 20 {
+                match c {
+                    '<' => out.push_str("&lt;"),
+                    '>' => out.push_str("&gt;"),
+                    '&' => out.push_str("&amp;"),
+                    '"' => out.push_str("&quot;"),
+                    '\'' => out.push_str("&#39;"),
+                    _ => out.push(c),
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+    let reflected = format!("<div>{}</div>", encode_head(payload));
+    let doc = scraper::Html::parse_document(&reflected);
+    let sel = scraper::Selector::parse(&format!(".{class}")).unwrap();
+    let el = doc
+        .select(&sel)
+        .next()
+        .expect("pad tag must parse to a real marker element past the window");
+    assert!(
+        el.value()
+            .attrs()
+            .any(|(n, v)| n.len() >= 3 && n.starts_with("on") && v.contains("alert")),
+        "marker element must carry the surviving on* handler, got {:?}",
+        el.value().attrs().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn positional_pad_is_fp_safe_against_a_non_positional_filter() {
+    // FP control: a proper filter that entity-encodes angle brackets EVERYWHERE
+    // (not just a leading window) leaves the pad payload's `<` encoded, so no
+    // element materialises and nothing can promote to [V]. This is the exact
+    // shape that would be a false positive if the pad "worked" unconditionally.
+    let class = crate::scanning::markers::class_marker();
+    let payload = &positional_pad_payloads(&html())[0];
+    let encoded_everywhere = payload.replace('<', "&lt;").replace('>', "&gt;");
+    let reflected = format!("<div>{encoded_everywhere}</div>");
+    let doc = scraper::Html::parse_document(&reflected);
+    let sel = scraper::Selector::parse(&format!(".{class}")).unwrap();
+    assert!(
+        doc.select(&sel).next().is_none(),
+        "a filter that encodes `<` everywhere must yield NO marker element (no false [V])"
+    );
+}
+
+// ===================================================================
+// Paren-free / backtick-free execution — for filters that strip `(` `)` and
+// backticks, neutralising every standard `alert(1)` / `alert`1`` primitive.
+// ===================================================================
+
+/// Parse `payload` dropped into a `delim`-quoted attribute (the injection point)
+/// and return whether the id-marker element carries an on* handler holding a
+/// recognised sink — i.e. whether the DOM-verification stage would confirm it.
+fn attr_breakout_verifies(payload: &str, open: char) -> bool {
+    let id = crate::scanning::markers::id_marker();
+    let reflected = format!("<div class={open}{payload}{open}>x</div>");
+    let doc = scraper::Html::parse_document(&reflected);
+    let sel = scraper::Selector::parse(&format!("#{id}")).unwrap();
+    doc.select(&sel).next().is_some_and(|el| {
+        el.value()
+            .attrs()
+            .any(|(n, v)| n.len() >= 3 && n.starts_with("on") && v.contains("alert"))
+    })
+}
+
+#[test]
+fn paren_and_backtick_blocked_still_synthesizes_a_verifiable_handler() {
+    // filterchain-5 shape: `(` `)` and backtick stripped (so alert(1) / alert`1`
+    // / confirm(1) are all char-gated out), reflection in a double-quoted
+    // attribute. A paren-free handler must survive and, when reflected, parse to
+    // a marker element carrying an executing on* handler.
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
+    let blocked = &['(', ')', '`'];
+    let payloads = synthesize_payloads(&ctx, blocked, &[], &[], None);
+    assert_obeys_filter(&payloads, blocked);
+    let pf = payloads
+        .iter()
+        .find(|p| !p.contains('<') && attr_breakout_verifies(p, '"'))
+        .unwrap_or_else(|| {
+            panic!("no paren-free verifiable handler survived `(`/`)`/backtick strip: {payloads:?}")
+        });
+    // It must be genuinely paren/backtick-free (not a smuggled call).
+    assert!(
+        !pf.contains('(') && !pf.contains(')') && !pf.contains('`'),
+        "the surviving handler must be paren/backtick-free: {pf:?}"
+    );
+}
+
+#[test]
+fn paren_free_handler_present_for_single_quote_attr_too() {
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::SingleQuote));
+    let payloads = synthesize_payloads(&ctx, &['(', ')', '`'], &[], &[], None);
+    assert!(
+        payloads
+            .iter()
+            .any(|p| !p.contains('<') && attr_breakout_verifies(p, '\'')),
+        "single-quote attribute must also offer a paren-free verifiable handler: {payloads:?}"
+    );
+}
+
+#[test]
+fn paren_free_handler_is_fp_safe_when_quote_is_blocked() {
+    // FP control: the paren-free handler still needs its breakout quote. When the
+    // delimiter quote is ALSO stripped, no template survives (all attribute
+    // shapes lead with the quote), so synthesis emits nothing that could land an
+    // inert handler as a false positive.
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
+    // Block the breakout quote plus parens/backtick: nothing can break out.
+    let payloads = synthesize_payloads(&ctx, &['"', '(', ')', '`'], &[], &[], None);
+    assert!(
+        payloads.iter().all(|p| !p.contains("throw onerror")),
+        "no paren-free handler may be emitted once its breakout quote is blocked: {payloads:?}"
+    );
+    // And a benign reflection that entity-encodes the breakout quote yields no
+    // marker element (the handler lands inert inside the value).
+    let id = crate::scanning::markers::id_marker();
+    let inert = format!(
+        "<div class=\"&quot; onmouseover='throw onerror=alert,1' id={id} x=&quot;\">x</div>"
+    );
+    let doc = scraper::Html::parse_document(&inert);
+    let sel = scraper::Selector::parse(&format!("#{id}")).unwrap();
+    assert!(
+        doc.select(&sel).next().is_none(),
+        "an escaped breakout quote must yield no marker element (no false [V])"
+    );
+}
