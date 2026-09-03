@@ -84,6 +84,37 @@ impl<'a> DomXssVisitor<'a> {
             .contains(&callee.as_str())
             .then_some(callee)
     }
+    /// Recognise a `Promise` *static* combinator whose settled value carries
+    /// taint from its argument — `Promise.resolve(x)`, and the array
+    /// combinators `Promise.all/allSettled/race/any([… x …])`.
+    ///
+    /// These are not sources of their own: the taint has to already be in the
+    /// argument, so a `Promise.resolve('static')` chain stays clean. What they
+    /// add is the *link*, so the value survives the microtask hop into the
+    /// `.then` callback's parameter — the `Promise.all([a, tainted, b])
+    /// .then(parts => sink(parts.join('')))` shape, where the tainted element is
+    /// identified only by its index in the settled array.
+    ///
+    /// The array combinators resolve to a container (an array, or for
+    /// `allSettled` an array of result wrappers) rather than the value itself;
+    /// treating the container as tainted is the same over-approximation the
+    /// analysis already makes for `arr.push(tainted)` and object literals.
+    pub(super) fn promise_combinator_source(&self, call: &CallExpression<'a>) -> Option<String> {
+        const PROMISE_COMBINATORS: &[&str] = &[
+            "Promise.resolve",
+            "Promise.all",
+            "Promise.allSettled",
+            "Promise.race",
+            "Promise.any",
+        ];
+        let callee = self.get_expr_string(&call.callee)?;
+        if !PROMISE_COMBINATORS.contains(&callee.as_str()) {
+            return None;
+        }
+        let arg = call.arguments.first()?;
+        let (tainted, source) = self.argument_taint_and_source(arg);
+        tainted.then(|| source.unwrap_or(callee))
+    }
     /// If `call` invokes a Promise combinator (`.then` / `.catch` / `.finally`),
     /// return the method name.
     pub(super) fn promise_method_name(call: &CallExpression<'a>) -> Option<&'static str> {
@@ -113,7 +144,9 @@ impl<'a> DomXssVisitor<'a> {
             match current {
                 Expression::ParenthesizedExpression(p) => current = &p.expression,
                 Expression::CallExpression(inner) => {
-                    if self.is_fetch_call(inner) || self.async_tainted_source_call(inner).is_some()
+                    if self.is_fetch_call(inner)
+                        || self.async_tainted_source_call(inner).is_some()
+                        || self.promise_combinator_source(inner).is_some()
                     {
                         return true;
                     }
@@ -165,6 +198,17 @@ impl<'a> DomXssVisitor<'a> {
         // An async source call (`navigator.clipboard.readText()`) resolves
         // straight to the untrusted string, so the chain is tainted at its root.
         if let Some(source) = self.async_tainted_source_call(call) {
+            for arg in &call.arguments {
+                if let Some(expr) = arg.as_expression() {
+                    self.walk_expression(expr);
+                }
+            }
+            return PromiseValueKind::Tainted(source);
+        }
+
+        // `Promise.resolve(tainted)` / `Promise.all([… tainted …])` settle to a
+        // value that carries the argument's taint into the next `.then`.
+        if let Some(source) = self.promise_combinator_source(call) {
             for arg in &call.arguments {
                 if let Some(expr) = arg.as_expression() {
                     self.walk_expression(expr);

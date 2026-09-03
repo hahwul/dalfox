@@ -4858,3 +4858,64 @@ xhr.open('GET', location.hash);
         "xhr.open must not be treated as a navigation sink, got {r:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Promise combinator roots (`Promise.all` / `Promise.resolve`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_promise_all_indexed_element_reaches_sink() {
+    // xssmaze taintflow-level5: the tainted element is identified only by its
+    // index inside the `Promise.all` array, and arrives in the callback as one
+    // slot of the settled array.
+    let code = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+Promise.all([
+  Promise.resolve('<section>'),
+  Promise.resolve(q),
+  Promise.resolve('</section>')
+]).then(function (parts) {
+  document.getElementById('out').innerHTML = parts.join('');
+});
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Promise.all element taint should reach the .then callback: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_promise_resolve_tainted_reaches_sink() {
+    let code = r#"
+var q = location.hash.slice(1);
+Promise.resolve(q).then(function (v) {
+  document.getElementById('out').innerHTML = v;
+});
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink == "innerHTML"),
+        "Promise.resolve(tainted) should carry taint into .then: {vulns:?}"
+    );
+}
+
+#[test]
+fn test_promise_combinator_fp_control_untainted_values() {
+    // FP control: nothing attacker-controlled enters the chain, so no finding —
+    // the combinator must be a *link*, never a source of its own.
+    let code = r#"
+var greeting = '<b>hello</b>';
+Promise.all([Promise.resolve('<section>'), Promise.resolve(greeting)]).then(function (parts) {
+  document.getElementById('out').innerHTML = parts.join('');
+});
+Promise.resolve('static').then(function (v) {
+  document.getElementById('out2').innerHTML = v;
+});
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.is_empty(),
+        "untainted Promise chains must not report: {vulns:?}"
+    );
+}
