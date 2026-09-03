@@ -29,7 +29,7 @@ dalfox https://target.app/api \
   -p token:cookie
 ```
 
-Locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`. Prefer `name:location` when the injection point is not the query string.
+Locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`. Prefer `name:location` when the injection point is not the query string. `graphql` and `xml` are discovered automatically from the request body (see [GraphQL and XML body injection](#graphql-and-xml-body-injection)); a hint filters an already-discovered one but cannot synthesize a fresh body from a bare name.
 
 Without a location hint (`-p q` only):
 
@@ -163,6 +163,34 @@ Each leaf is registered as a separate Param using bracket-style display naming. 
 For JWTs the original header and signature segments are preserved verbatim. The signature won't match the modified payload, so this only fires on endpoints that don't verify the token. Properly-signed JWTs return no findings. That's expected behaviour, not a miss.
 
 If your target uses a wrapping that Dalfox doesn't auto-detect, you can still force the injection point with `--inject-marker` (see above).
+
+## GraphQL and XML body injection
+
+When the request body (`-d`, or a captured `raw-http` / `har` request) is a GraphQL or XML document, Dalfox treats its inner values as injection points instead of testing the raw body as one opaque blob.
+
+**GraphQL** (`application/json` or `application/graphql`): a body that carries both a GraphQL operation (a `query`/`mutation` field whose value starts with `query`/`mutation`/`subscription` or the anonymous `{ … }` shorthand) **and** a `variables` object has every string leaf inside `variables` registered as its own `graphql` parameter. Each payload rebuilds the whole request — the operation and the other variables ride along unchanged — so the server always receives a valid, parseable GraphQL request.
+
+```bash
+dalfox https://target.app/graphql \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"query($q:String!){ search(term:$q){ id } }","variables":{"q":"seed"}}'
+# → variables.q is injected as a `graphql` parameter
+```
+
+A plain REST endpoint that merely has a field named `query` (a search box, `{"query":"laptop"}`) is **not** treated as GraphQL — the `variables` object and an operation-shaped value are both required, so ordinary JSON bodies stay on the normal `json` path.
+
+**XML / SOAP** (`text/xml`, `application/xml`, `application/soap+xml`, or a body with an `<?xml …?>` prolog): each element text node and attribute value becomes an `xml` parameter. A byte-range splice injects the payload in place, leaving every other byte of the document — namespaces, sibling elements, the SOAP envelope — untouched, and the request's XML content-type is preserved.
+
+```bash
+dalfox https://target.app/soap \
+  -X POST \
+  -H 'Content-Type: application/soap+xml' \
+  -d '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><search><term>seed</term></search></soap:Body></soap:Envelope>'
+# → the <term> text node is injected as an `xml` parameter
+```
+
+As with every reflected finding, a value only grades `[V]` when the response parses it as HTML — a GraphQL API that answers `application/json`, or an XML service that echoes an escaped value, is correctly reported as inert. The real reach is an admin view, report, or error page that renders the reflected value as markup.
 
 ## Reflection probe shape
 
