@@ -1484,8 +1484,10 @@ async fn probe_graphql_params_seeds_reflected_variable() {
     let target = parse_target(&format!("http://{}:{}/graphql", addr.ip(), addr.port()))
         .expect("parse target");
     let mut args = default_scan_args();
-    args.data =
-        Some(r#"{"query":"mutation($n:String!){add(name:$n){id}}","variables":{"n":"seed"}}"#.to_string());
+    args.data = Some(
+        r#"{"query":"mutation($n:String!){add(name:$n){id}}","variables":{"n":"seed"}}"#
+            .to_string(),
+    );
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
@@ -1496,7 +1498,11 @@ async fn probe_graphql_params_seeds_reflected_variable() {
         .iter()
         .filter(|p| p.location == Location::GraphqlBody)
         .collect();
-    assert_eq!(gql.len(), 1, "expected one GraphQL variable param, got {params:?}");
+    assert_eq!(
+        gql.len(),
+        1,
+        "expected one GraphQL variable param, got {params:?}"
+    );
     assert_eq!(gql[0].name, "variables.n");
     assert!(
         gql[0].pre_encoding_pipeline.is_some(),
@@ -1533,8 +1539,10 @@ async fn probe_json_body_params_defers_graphql_body() {
     let target = parse_target(&format!("http://{}:{}/graphql", addr.ip(), addr.port()))
         .expect("parse target");
     let mut args = default_scan_args();
-    args.data =
-        Some(r#"{"query":"mutation($n:String!){add(name:$n){id}}","variables":{"n":"seed"}}"#.to_string());
+    args.data = Some(
+        r#"{"query":"mutation($n:String!){add(name:$n){id}}","variables":{"n":"seed"}}"#
+            .to_string(),
+    );
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
@@ -1573,8 +1581,8 @@ async fn start_xml_server() -> SocketAddr {
 }
 
 fn xml_target(addr: &SocketAddr) -> Target {
-    let mut t = parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port()))
-        .expect("parse target");
+    let mut t =
+        parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port())).expect("parse target");
     t.headers
         .push(("Content-Type".to_string(), "application/xml".to_string()));
     t
@@ -1607,7 +1615,10 @@ async fn probe_xml_body_params_seeds_reflected_text_node() {
         .unwrap()
         .apply("<svg/onload=alert(1)>")
         .expect("apply");
-    assert_eq!(body, "<req><item id=\"1\">x</item><msg><svg/onload=alert(1)></msg></req>");
+    assert_eq!(
+        body,
+        "<req><item id=\"1\">x</item><msg><svg/onload=alert(1)></msg></req>"
+    );
 }
 
 #[tokio::test]
@@ -1615,8 +1626,8 @@ async fn probe_xml_body_params_noop_without_xml_content_type() {
     // FP control: an XML-looking body but no XML content-type and no `<?xml`
     // prolog must not be treated as XML.
     let addr = start_xml_server().await;
-    let target = parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port()))
-        .expect("parse target"); // no Content-Type header
+    let target =
+        parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port())).expect("parse target"); // no Content-Type header
     let mut args = default_scan_args();
     args.data = Some("<req><msg>seed</msg></req>".to_string());
 
@@ -1646,8 +1657,8 @@ async fn probe_xml_body_params_fires_on_xml_prolog_without_content_type() {
     // An `<?xml` prolog is a strong enough signal to probe even when the user
     // forgot the Content-Type header.
     let addr = start_xml_server().await;
-    let target = parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port()))
-        .expect("parse target");
+    let target =
+        parse_target(&format!("http://{}:{}/xml", addr.ip(), addr.port())).expect("parse target");
     let mut args = default_scan_args();
     args.data = Some("<?xml version=\"1.0\"?><req><msg>seed</msg></req>".to_string());
 

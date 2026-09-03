@@ -401,10 +401,7 @@ impl<'a> DomXssVisitor<'a> {
     /// the block-shaped statements a callback body commonly wraps its returns
     /// in. Nested function bodies are *not* descended: their returns belong to
     /// that inner function, not to this callback.
-    pub(super) fn first_tainted_return_source(
-        &self,
-        stmts: &[Statement<'a>],
-    ) -> Option<String> {
+    pub(super) fn first_tainted_return_source(&self, stmts: &[Statement<'a>]) -> Option<String> {
         let _guard = self.enter_recursion()?;
         for stmt in stmts {
             let found = match stmt {
@@ -414,14 +411,13 @@ impl<'a> DomXssVisitor<'a> {
                     .filter(|arg| self.is_tainted(arg))
                     .and_then(|arg| self.find_source_in_expr(arg)),
                 Statement::BlockStatement(block) => self.first_tainted_return_source(&block.body),
-                Statement::IfStatement(if_stmt) => {
-                    self.first_tainted_return_source(std::slice::from_ref(&if_stmt.consequent))
-                        .or_else(|| {
-                            if_stmt.alternate.as_ref().and_then(|alt| {
-                                self.first_tainted_return_source(std::slice::from_ref(alt))
-                            })
+                Statement::IfStatement(if_stmt) => self
+                    .first_tainted_return_source(std::slice::from_ref(&if_stmt.consequent))
+                    .or_else(|| {
+                        if_stmt.alternate.as_ref().and_then(|alt| {
+                            self.first_tainted_return_source(std::slice::from_ref(alt))
                         })
-                }
+                    }),
                 Statement::TryStatement(try_stmt) => self
                     .first_tainted_return_source(&try_stmt.block.body)
                     .or_else(|| {

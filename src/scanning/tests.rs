@@ -674,7 +674,10 @@ fn test_prune_keeps_positional_pad_bypass_despite_blocked_angles() {
         "\" onfocus=alert(1) \"".to_string(), // angle-free: kept
     ];
     let pruned = prune_blocked_raw_angles(payloads, &['<', '>']);
-    assert!(pruned.contains(&pad), "positional-pad payload must survive the prune");
+    assert!(
+        pruned.contains(&pad),
+        "positional-pad payload must survive the prune"
+    );
     assert!(
         !pruned.iter().any(|p| p == "<svg onload=alert(1)>"),
         "ordinary raw-angle payloads must still be dropped"
@@ -692,7 +695,10 @@ fn test_hoist_puts_positional_pad_bypass_first() {
         "%3Csvg%3E".to_string(),              // encoded angle
     ];
     let hoisted = hoist_angle_free_payloads(payloads, &['<']);
-    assert_eq!(hoisted[0], pad, "positional-pad payload must be hoisted to the very front");
+    assert_eq!(
+        hoisted[0], pad,
+        "positional-pad payload must be hoisted to the very front"
+    );
     assert_eq!(hoisted[1], "\" onfocus=alert(1) \"");
     assert!(hoisted[2].contains("%3C"));
 }

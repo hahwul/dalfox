@@ -1769,13 +1769,12 @@ pub async fn probe_xml_body_params(
 
         // Exact-byte-range splice: prefix + payload + suffix rebuilds the whole
         // document with only this leaf replaced.
-        let pipeline =
-            crate::encoding::pipeline::EncodingPipeline::new(vec![
-                crate::encoding::pipeline::EncodingStep::Splice {
-                    prefix: data[..point.start].to_string(),
-                    suffix: data[point.end..].to_string(),
-                },
-            ]);
+        let pipeline = crate::encoding::pipeline::EncodingPipeline::new(vec![
+            crate::encoding::pipeline::EncodingStep::Splice {
+                prefix: data[..point.start].to_string(),
+                suffix: data[point.end..].to_string(),
+            },
+        ]);
 
         let client_clone = client.clone();
         let url = target.url.clone();

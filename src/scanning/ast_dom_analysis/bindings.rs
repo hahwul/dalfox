@@ -60,11 +60,7 @@ impl<'a> DomXssVisitor<'a> {
             // `const m = new Message(tainted)` — record the accessor reads that
             // now hand the tainted constructor argument back out, so a later
             // `m.body` resolves without re-deriving the construction.
-            self.seed_instance_field_taints(
-                var_name,
-                class_id.name.as_str(),
-                &new_expr.arguments,
-            );
+            self.seed_instance_field_taints(var_name, class_id.name.as_str(), &new_expr.arguments);
             assigned_instance_class = true;
         }
         if !assigned_instance_class {

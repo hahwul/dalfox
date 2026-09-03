@@ -103,7 +103,10 @@ fn poc_location_in_url_false_for_side_channel_locations() {
 
 #[test]
 fn poc_location_tag_graphql_and_xml() {
-    assert_eq!(poc_location_tag("GraphqlBody", "variables.n"), Some("graphql"));
+    assert_eq!(
+        poc_location_tag("GraphqlBody", "variables.n"),
+        Some("graphql")
+    );
     assert_eq!(poc_location_tag("XmlBody", "msg"), Some("xml"));
 }
 
@@ -145,9 +148,15 @@ fn graphql_curl_poc_reproduces_full_recorded_body() {
     r.location = "GraphqlBody".to_string();
     r.request = Some(req.to_string());
     let out = render_curl_poc(&r, "http://h:8899/graphql");
-    assert!(out.contains("-H \"Content-Type: application/json\""), "{out}");
+    assert!(
+        out.contains("-H \"Content-Type: application/json\""),
+        "{out}"
+    );
     // The full structured body (query + the injected variable) is present,
     // not a lossy `{"variables.n":"payload"}` fragment.
     assert!(out.contains("mutation($n:String)"), "{out}");
-    assert!(out.contains("\\\"variables\\\":{\\\"n\\\":\\\"<svg onload=alert(1)>\\\"}"), "{out}");
+    assert!(
+        out.contains("\\\"variables\\\":{\\\"n\\\":\\\"<svg onload=alert(1)>\\\"}"),
+        "{out}"
+    );
 }
