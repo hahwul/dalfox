@@ -707,10 +707,14 @@ pub fn default_toml_template() -> String {
 # include_response = false
 # include_all = false          # shorthand for include_request + include_response
 # silence = false
+# no_color = false           # disable colored output (also honors the NO_COLOR env var)
+# dry_run = false            # parse targets + run discovery, report what would be scanned, send no payloads
 # debug = false              # enable debug logging (DBG lines)
 # stream_findings = false    # emit findings mid-scan instead of after `WRN XSS found N XSS` (plain format only)
 # poc_type = "plain"         # plain, curl, httpie, http-request
 # limit = 100
+# limit_result_type = "all"  # which finding types count toward `limit`: all, v (vulnerable), r (reflected), a (AST DOM XSS), i (informational)
+# only_poc = ["v", "r"]      # show only these finding types: v (vulnerable), r (reflected), a (AST DOM XSS), i (informational)
 # baseline = "baseline.json"  # CLI only (not applied by `dalfox server` / MCP); prior JSON/JSONL report, report only findings new since it
 # baseline_mode = "filter"    # filter (drop known findings) or annotate (keep them, mark each `new`)
 
@@ -731,11 +735,16 @@ pub fn default_toml_template() -> String {
 # SCOPE
 # include_url = []
 # exclude_url = []
+# ignore_param = ["utm_source", "csrf_token"]  # skip these parameters during scanning
+# out_of_scope = ["*.cdn.example.com"]         # exclude targets whose domain matches these patterns (supports wildcards)
+# out_of_scope_file = "out-of-scope.txt"       # load out-of-scope domain patterns from a file (one per line)
 
 # PARAMETER DISCOVERY
+# only_discovery = false          # only run parameter discovery, then stop (skip XSS scanning)
 # skip_discovery = false
 # skip_reflection_header = false
 # skip_reflection_cookie = false
+# skip_reflection_path = false
 
 # PARAMETER MINING
 # mining_dict_word = "wordlist.txt"
@@ -748,9 +757,13 @@ pub fn default_toml_template() -> String {
 # timeout = 10               # seconds (applies to HTTP requests and remote provider fetches)
 # scan_timeout = 0           # hard wall-clock cap per target for the scan stage in seconds
 # delay = 0                  # milliseconds
+# rate_limit = 0             # cap outbound requests/sec (0 = unlimited); also eases off under WAF thresholds
+# retries = 0                # retry failed requests on HTTP 5xx / transient transport errors (0 = off; 429 always retried)
+# retry_delay = 1000         # base delay (ms) for the exponential backoff between retries
 # proxy = "http://127.0.0.1:8080"  # also used for remote provider fetches
 # insecure = true            # skip TLS certificate verification (default true); set false to enforce validation
 # follow_redirects = false
+# ignore_return = [302, 403, 404]  # ignore responses carrying these HTTP status codes
 
 # ENGINE
 # workers = 50
@@ -767,6 +780,9 @@ pub fn default_toml_template() -> String {
 # blind_oob_wait = 30                   # seconds to keep polling for callbacks after the scan
 # custom_payload = "payloads.txt"
 # only_custom_payload = false
+# custom_alert_value = "1"    # value used inside alert()/prompt()/confirm() in generated payloads
+# custom_alert_type = "none"  # alert value handling: none (keep original), str (wrap value in quotes)
+# inject_marker = "FUZZ"      # replace this marker in URL/headers/body with payloads instead of auto-injecting
 # skip_xss_scanning = false
 # max_payloads_per_param = 0  # cap payloads per param (0 = built-in safety cap of 3000 per set, unless deep_scan)
 # deep_scan = false

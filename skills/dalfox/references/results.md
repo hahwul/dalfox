@@ -206,6 +206,8 @@ See `src/cmd/mod.rs` for the canonical list. Common ones:
 - `TRUNCATED_PER_HOST_CAP`
 - `SESSION_LOST` — the authenticated session died (or was already dead) while
   scanning this target
+- `INTERNAL_ERROR` — a dalfox task handling this target panicked, so the target
+  was never analyzed (reported as `skipped`, never `clean`)
 
 In JSON output the per-target summary contains `error_code` when the target failed before any payloads were sent.
 

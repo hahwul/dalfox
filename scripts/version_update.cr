@@ -1,6 +1,7 @@
 # Bumps the dalfox version across every file that hardcodes it
 # (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, aur/PKGBUILD,
-# docs/data/dalfox.json, docs/content/getting-started/installation.md).
+# docs/data/dalfox.json, and both language variants of
+# docs/content/getting-started/installation.md — EN and .ko.md).
 # Prompts for the new version interactively and prints a per-file checkmark.
 #
 # flake.nix is deliberately absent: it reads the version out of Cargo.toml at
@@ -15,6 +16,7 @@ SNAP_YAML    = "snap/snapcraft.yaml"
 AUR_PKGBUILD = "aur/PKGBUILD"
 DOCS_DATA    = "docs/data/dalfox.json"
 INSTALL_DOC  = "docs/content/getting-started/installation.md"
+INSTALL_DOC_KO = "docs/content/getting-started/installation.ko.md"
 
 # Read helpers (mirror version_check.cr).
 
@@ -60,8 +62,8 @@ rescue
   nil
 end
 
-def install_doc_version : String?
-  content = File.read(INSTALL_DOC)
+def install_doc_version(path : String) : String?
+  content = File.read(path)
   match = content.match(/`dalfox (\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?)`/)
   match ? match[1] : nil
 rescue
@@ -144,18 +146,19 @@ rescue ex
   false
 end
 
-# docs/content/getting-started/installation.md: the inline `dalfox X.Y.Z`
-# sample under "Verify" mirrors `dalfox --version`, so it keeps the full
-# version (suffix included). Anchored on the surrounding backticks so the
-# nearby `dalfox --help` / `dalfox scan --help` snippets are left untouched.
-def update_install_doc(new_version : String) : Bool
-  content = File.read(INSTALL_DOC)
+# docs/content/getting-started/installation.md (and its .ko.md sibling): the
+# inline `dalfox X.Y.Z` sample under "Verify" mirrors `dalfox --version`, so it
+# keeps the full version (suffix included). Anchored on the surrounding
+# backticks so the nearby `dalfox --help` / `dalfox scan --help` snippets are
+# left untouched.
+def update_install_doc(path : String, new_version : String) : Bool
+  content = File.read(path)
   updated = content.sub(
     /(`dalfox )\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?(`)/,
     "\\1#{new_version}\\2",
   )
   return false if updated == content
-  File.write(INSTALL_DOC, updated)
+  File.write(path, updated)
   true
 rescue ex
   puts "  error: #{ex.message}"
@@ -174,8 +177,9 @@ cargo_v   = cargo_toml_version
 lock_v    = cargo_lock_version
 snap_v    = snap_version
 aur_v     = aur_version
-docs_v    = docs_data_version
-install_v = install_doc_version
+docs_v       = docs_data_version
+install_v    = install_doc_version(INSTALL_DOC)
+install_ko_v = install_doc_version(INSTALL_DOC_KO)
 
 puts "Current versions:"
 puts "  #{CARGO_TOML.ljust(46)} #{cargo_v || "Not found"}"
@@ -184,9 +188,10 @@ puts "  #{SNAP_YAML.ljust(46)} #{snap_v || "Not found"}"
 puts "  #{AUR_PKGBUILD.ljust(46)} #{aur_v || "Not found"}"
 puts "  #{DOCS_DATA.ljust(46)} #{docs_v || "Not found"}"
 puts "  #{INSTALL_DOC.ljust(46)} #{install_v || "Not found"}"
+puts "  #{INSTALL_DOC_KO.ljust(46)} #{install_ko_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v].compact
+versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v, install_ko_v].compact
 unique = versions.uniq
 
 if unique.size > 1
@@ -194,7 +199,7 @@ if unique.size > 1
   puts
 end
 
-current = cargo_v || lock_v || snap_v || aur_v || docs_v || install_v || "unknown"
+current = cargo_v || lock_v || snap_v || aur_v || docs_v || install_v || install_ko_v || "unknown"
 puts "Current: #{current}"
 print "New version (Enter to cancel): "
 input = gets
@@ -227,7 +232,8 @@ total = 0
   {SNAP_YAML, ->{ update_snap(new_version) }, !snap_v.nil?},
   {AUR_PKGBUILD, ->{ update_aur(new_version) }, !aur_v.nil?},
   {DOCS_DATA, ->{ update_docs_data(new_version) }, !docs_v.nil?},
-  {INSTALL_DOC, ->{ update_install_doc(new_version) }, !install_v.nil?},
+  {INSTALL_DOC, ->{ update_install_doc(INSTALL_DOC, new_version) }, !install_v.nil?},
+  {INSTALL_DOC_KO, ->{ update_install_doc(INSTALL_DOC_KO, new_version) }, !install_ko_v.nil?},
 ].each do |tuple|
   path, fn, present = tuple
   next unless present

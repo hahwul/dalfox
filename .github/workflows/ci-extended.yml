@@ -89,6 +89,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: crystal-lang/install-crystal@v1
+      # Reads files only (no binary needed), so it runs first and fails fast:
+      # every version-bearing file must agree, catching a partial bump before
+      # a release rather than after publishing.
+      - name: Version lockstep (Cargo / snap / AUR / docs incl. KO)
+        run: crystal run scripts/version_check.cr
       - run: cargo build --release
       # All green, so all blocking. `effectiveness` fails when recall drops or
       # the FP count rises against docs/data/effectiveness.json; `perf-budget`

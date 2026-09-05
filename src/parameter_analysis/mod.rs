@@ -415,240 +415,22 @@ async fn send_probe_request_for_param(
     param: &Param,
     payload: &str,
 ) -> Option<String> {
-    let parsed_method = target.parse_method();
-    let url_original = target.url.clone();
-    let headers = target.headers.clone();
-    let cookies = target.cookies.clone();
-    // `effective_user_agent`, not the raw field: `Some("")` is the "no
-    // override" sentinel every entry point sets when none was supplied, and
-    // sending it verbatim put a literal blank `User-Agent:` on every probe.
-    let user_agent = target.effective_user_agent().map(str::to_string);
-    let data = target.data.clone();
-    let param_name = param.name.clone();
-    let wire_name = param.effective_wire_name().to_string();
-    let location = param.location.clone();
-    let form_action_url = param.form_action_url.clone();
+    // Build the probe request through the canonical injection builder — the
+    // same request the reflection / light-verify / DOM-verify paths send — so a
+    // special-char probe carries the user's headers, User-Agent, cookies, and
+    // Content-Type exactly as the real injection will, at the same
+    // form-action-resolved URL and method.
+    //
+    // This replaces a hand-rolled copy of the Body/JsonBody/MultipartBody/
+    // GraphqlBody/XmlBody/Query/Header/Path/Fragment matrix that (1) dropped
+    // `target.headers` on every location except Header injection — so
+    // `-H "Authorization: ..."` never reached a Body/Query probe, a silent
+    // false negative against authed endpoints — (2) appended headers instead of
+    // replacing them (duplicate values on imported targets), and (3) emitted
+    // only `{name:value}` for JSON bodies with no non-object fallback.
     let ignore_return = target.ignore_return.clone();
-
-    // Body-bearing locations: form-discovered sinks stay POST; own-body
-    // params preserve body-capable methods (POST/PUT/PATCH/QUERY/…). See
-    // `body_location_method_for_param`.
-    let req_method = match location {
-        Location::Body
-        | Location::JsonBody
-        | Location::MultipartBody
-        | Location::GraphqlBody
-        | Location::XmlBody => {
-            crate::scanning::url_inject::body_location_method_for_param(&target.method, param)
-        }
-        _ => parsed_method,
-    };
-
-    // When this param came from form discovery, `form_action_url` points at
-    // the form's action endpoint, which may differ from the page URL where
-    // the form was found. Every body-bearing location probes at the action;
-    // Query must do the same so we exercise the sink rather than the
-    // form-host page.
-    let action_resolved_url = form_action_url
-        .as_ref()
-        .and_then(|u| url::Url::parse(u).ok())
-        .unwrap_or_else(|| url_original.clone());
-    let mut url = match location {
-        Location::Query => action_resolved_url.clone(),
-        _ => url_original.clone(),
-    };
-    let mut request_builder;
-
-    match location {
-        Location::Query => {
-            let mut new_pairs: Vec<(String, String)> = Vec::new();
-            let mut replaced = false;
-            for (k, v) in url.query_pairs() {
-                if k == wire_name {
-                    new_pairs.push((k.to_string(), payload.to_string()));
-                    replaced = true;
-                } else {
-                    new_pairs.push((k.to_string(), v.to_string()));
-                }
-            }
-            if !replaced {
-                new_pairs.push((wire_name.clone(), payload.to_string()));
-            }
-            url.query_pairs_mut().clear();
-            for (k, v) in new_pairs {
-                url.query_pairs_mut().append_pair(&k, &v);
-            }
-            request_builder = client.request(req_method, url);
-        }
-        Location::Body => {
-            let body_string =
-                crate::scanning::url_inject::urlencoded_body(data.as_deref(), &param_name, payload);
-            request_builder = client
-                .request(req_method, action_resolved_url.clone())
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(body_string);
-        }
-        Location::Header => {
-            let is_cookie = cookies.iter().any(|(n, _)| n == &param_name);
-            request_builder = client.request(req_method, url);
-            if is_cookie {
-                let mut cookie_header = String::new();
-                for (k, v) in &cookies {
-                    if k == &param_name {
-                        cookie_header.push_str(k);
-                        cookie_header.push('=');
-                        cookie_header.push_str(payload);
-                        cookie_header.push_str("; ");
-                    } else {
-                        cookie_header.push_str(k);
-                        cookie_header.push('=');
-                        cookie_header.push_str(v);
-                        cookie_header.push_str("; ");
-                    }
-                }
-                if !cookie_header.is_empty() {
-                    cookie_header.pop();
-                    cookie_header.pop();
-                    request_builder = request_builder.header("Cookie", cookie_header);
-                }
-            } else {
-                let mut injected = false;
-                for (k, v) in &headers {
-                    if k == &param_name {
-                        request_builder = request_builder.header(k, payload);
-                        injected = true;
-                    } else {
-                        request_builder = request_builder.header(k, v);
-                    }
-                }
-                if !injected {
-                    request_builder = request_builder.header(&param_name, payload);
-                }
-            }
-        }
-        Location::Path => {
-            let mut path_url = url_original.clone();
-            if let Some(idx_str) = param_name.strip_prefix("path_segment_")
-                && let Ok(idx) = idx_str.parse::<usize>()
-            {
-                let original_path = path_url.path();
-                let mut segments: Vec<String> = if original_path == "/" {
-                    Vec::new()
-                } else {
-                    original_path
-                        .trim_matches('/')
-                        .split('/')
-                        .filter(|s| !s.is_empty())
-                        .map(ToString::to_string)
-                        .collect()
-                };
-                if idx < segments.len() {
-                    segments[idx] = payload.to_string();
-                    let new_path = if segments.is_empty() {
-                        "/".to_string()
-                    } else {
-                        format!("/{}", segments.join("/"))
-                    };
-                    path_url.set_path(&new_path);
-                }
-            }
-            request_builder = client.request(req_method, path_url);
-        }
-        Location::JsonBody => {
-            let mut json_value_opt: Option<Value> = None;
-            if let Some(d) = &data
-                && let Ok(parsed) = serde_json::from_str::<Value>(d)
-            {
-                json_value_opt = Some(parsed);
-            }
-            let mut root = json_value_opt.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-            if let Value::Object(ref mut map) = root {
-                map.insert(param_name.clone(), Value::String(payload.to_string()));
-            } else {
-                let mut map = serde_json::Map::new();
-                map.insert(param_name.clone(), Value::String(payload.to_string()));
-                root = Value::Object(map);
-            }
-            let body_string = serde_json::to_string(&root)
-                .unwrap_or_else(|_| format!("{{\"{}\":\"{}\"}}", param_name, payload));
-            request_builder = client
-                .request(req_method, action_resolved_url.clone())
-                .header("Content-Type", "application/json")
-                .body(body_string);
-        }
-        Location::MultipartBody => {
-            let form =
-                crate::scanning::url_inject::multipart_form(data.as_deref(), &param_name, payload);
-            request_builder = client
-                .request(req_method, action_resolved_url.clone())
-                .multipart(form);
-        }
-        Location::GraphqlBody => {
-            // `payload` is the full rebuilt request body: the param's
-            // `JsonField` pipeline already spliced the value into the GraphQL
-            // request template, so it ships verbatim as JSON.
-            request_builder = client
-                .request(req_method, action_resolved_url.clone())
-                .header("Content-Type", "application/json")
-                .body(payload.to_string());
-        }
-        Location::XmlBody => {
-            // `payload` is the full rebuilt XML document (the `Splice` pipeline
-            // re-glued the original body around the injection point). Preserve
-            // the request's declared XML content-type so SOAP endpoints still
-            // frame it correctly.
-            let ct = crate::scanning::url_inject::xml_request_content_type(target);
-            request_builder = client
-                .request(req_method, action_resolved_url.clone())
-                .header("Content-Type", ct)
-                .body(payload.to_string());
-        }
-        Location::Fragment => {
-            let inject_url_str = crate::scanning::url_inject::build_injected_url(
-                &url_original,
-                &crate::parameter_analysis::Param::new(
-                    param_name.clone(),
-                    String::new(),
-                    Location::Fragment,
-                ),
-                payload,
-            );
-            let frag_url =
-                url::Url::parse(&inject_url_str).unwrap_or_else(|_| url_original.clone());
-            request_builder = client.request(req_method, frag_url);
-        }
-    }
-
-    if let Some(ua) = &user_agent {
-        request_builder = request_builder.header("User-Agent", ua);
-    }
-    let is_cookie_param =
-        location == Location::Header && cookies.iter().any(|(n, _)| n == &param_name);
-    if !is_cookie_param && !cookies.is_empty() {
-        let mut cookie_header = String::new();
-        for (ck, cv) in &cookies {
-            if ck == &param_name && location == Location::Header {
-                continue;
-            }
-            cookie_header.push_str(ck);
-            cookie_header.push('=');
-            cookie_header.push_str(cv);
-            cookie_header.push_str("; ");
-        }
-        if !cookie_header.is_empty() {
-            cookie_header.pop();
-            cookie_header.pop();
-            request_builder = request_builder.header("Cookie", cookie_header);
-        }
-    }
-    if let Some(d) = &data
-        && matches!(
-            location,
-            Location::Query | Location::Header | Location::Fragment
-        )
-    {
-        request_builder = request_builder.body(d.clone());
-    }
+    let request_builder =
+        crate::scanning::url_inject::build_inject_request(client, target, param, payload);
 
     crate::record_outbound_request().await;
     let resp = crate::utils::http::send_counted(request_builder)
@@ -1214,7 +996,17 @@ pub async fn active_probe_param(
                 }
                 _ => unreachable!(),
             };
-            let request_builder = client.request(target.parse_method(), url);
+            // Route the pre-encoding detection probe through the canonical builder
+            // so it carries the user's headers / UA / cookies too — otherwise an
+            // authed endpoint 401s this probe and pre-encoding is silently never
+            // detected, the same header-drop class fixed in the probe path.
+            let request_builder = crate::utils::build_request(
+                &client,
+                target,
+                target.parse_method(),
+                url,
+                target.data.clone(),
+            );
             crate::record_outbound_request().await;
             if let Ok(resp) = crate::utils::http::send_counted(request_builder).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await

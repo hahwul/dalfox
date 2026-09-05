@@ -28,16 +28,16 @@ Primary modules:
 - `src/cmd/scan/`: scan command, split into focused submodules — `mod.rs` (`run_scan` orchestrator + `ScanArgs`-independent glue), `args.rs` (`ScanArgs` + default/cap constants + value parsers), `validation.rs`, `preflight.rs`, `input.rs` (target resolution), `analysis.rs` (preflight/param loop), `scan_loop.rs` (scanning loop), `output.rs` (dry-run/only-discovery/result rendering), `poc.rs`, `postprocess.rs`, `logging.rs`
 - `src/cmd/mod.rs`: shared `error_codes` constants (used by CLI + server + MCP)
 - `src/config.rs`: config schema + precedence (`apply_to_scan_args_if_default`)
-- `src/scanning/`: reflection/DOM checks, AST integration, payload execution pipeline, result models
-- `src/parameter_analysis/`: discovery + mining + parameter filtering
+- `src/scanning/`: reflection/DOM checks, AST integration, payload execution pipeline, result models. `mod.rs` keeps the scan-worker orchestration (`ScanWorkerCtx` + phases + `run_scanning`); helper clusters are sibling files — `payload_families.rs`, `waf_strategy.rs`, `request_render.rs`, `ast_dom_phase.rs`, `param_jobs.rs`, `progress.rs`. Output serialization is one `format_<fmt>.rs` per format under `src/scanning/result/`.
+- `src/parameter_analysis/`: discovery + mining + parameter filtering. `discovery/` is one file per discovery surface (query/header/path/cookie/form/fragment); `mining/` is one file per probe strategy (`probe_*.rs`) plus `collapse.rs` and the cross-module `context_detect.rs` (`detect_injection_context` family)
 - `src/payload/`: canonical payloads, dynamic payload generation, remote providers
 - `src/encoding/`: payload encoding pipeline (`apply_encoders_to_payloads`) + pre-encoding detection
 - `src/target_parser/`: URL/file/raw-HTTP target normalization
-- `src/waf/`: WAF fingerprinting + bypass strategies
+- `src/waf/`: WAF fingerprinting + bypass strategies. `bypass/` splits into `types.rs`, `strategy.rs`, and per-family mutators in `mutate.rs`
 - `src/utils/`: shared CLI helpers (banner, color, logging)
 - `src/server/`: async scan API server, split into focused submodules — `mod.rs` (router + `ServerArgs`), `types.rs` (`ScanOptions` + request/response bodies), `handlers.rs` (route handlers), `job_runner.rs` (`run_scan_job`), `auth.rs` (API key), `cors.rs`, `response.rs` (JSON/JSONP rendering), `util.rs` (option validation + logging)
 - `src/job/`: shared job model — `JobStatus` enum, `Job` record, progress counters, retention/cap purging, and bounds helpers (`effective_rate_limit`, `effective_scan_timeout`) used by server + MCP
-- `src/mcp/mod.rs`: MCP stdio tool server (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`)
+- `src/mcp/`: MCP stdio tool server — `mod.rs` keeps the `#[tool_router]` impl with the six tool handlers (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`); `params.rs` holds the `*Params` input structs + serde defaults, `job_runtime.rs` / `pagination.rs` the helpers
 
 Top-level commands:
 - `scan`
@@ -79,7 +79,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 
 3. Preserve output contract.
 - Output formats currently include: `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml`.
-- Keep serialization behavior in `src/scanning/result.rs` aligned with output routing in `src/cmd/scan/output.rs`.
+- Keep serialization behavior in `src/scanning/result/` (one `format_<fmt>.rs` per output format) aligned with output routing in `src/cmd/scan/output.rs`.
 - `include_request` and `include_response` flags must remain opt-in. `--include-all` is a convenience that sets both (resolved in `src/main.rs` before `run_scan`).
 - JSON/JSONL envelope `meta` includes `target_summary` (per-target status/findings/error_code).
 - All findings include `type_description` alongside the single-letter `type` code.
@@ -145,7 +145,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
   - CLI help/docs and tests
 
 - New output format:
-  - conversion in `src/scanning/result.rs`
+  - conversion in `src/scanning/result/` (add a `format_<fmt>.rs`; the model + shared helpers live in `src/scanning/result/mod.rs`)
   - dispatch branch in `src/cmd/scan/output.rs`
   - integration tests under `tests/integration/`
 
@@ -171,8 +171,15 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
   - `cancel_*` flips the cancellation flag (job ends in `cancelled`); `delete_*` removes the job record entirely.
 
 - New error code:
-  - Add constant to `src/cmd/mod.rs` `error_codes` module
-  - Use the constant in all three interfaces (CLI, server, MCP) plus the agent skill bundle (`skills/dalfox/references/results.md`)
+  - Add the constant to `src/cmd/mod.rs` `error_codes` module (the source of
+    truth), and add an assertion to the wire-contract test
+    `error_code_constants_have_stable_string_values` in the same file — the
+    string values are part of the JSON contract.
+  - Use the constant in all three interfaces (CLI, server, MCP) — never a bare
+    string literal.
+  - `skills/dalfox/references/results.md` carries a curated "common ones" list
+    that points back to `src/cmd/mod.rs` as the canonical list; add the new code
+    there only if consumers will commonly surface it, not mechanically for every code.
   - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `STDIN_NOT_PIPED`, `INPUT_TOO_LARGE`, `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, `CONTENT_TYPE_MISMATCH`, `TRUNCATED_PER_HOST_CAP`, `SESSION_LOST`, `INTERNAL_ERROR`
 
 ---
