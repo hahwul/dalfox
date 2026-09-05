@@ -1413,18 +1413,23 @@ async fn active_probe_multipart_replaces_present_param_and_keeps_siblings() {
     );
 }
 
-/// A captured JSON body whose root is not an object (an array, here) must be
-/// replaced by a fresh single-key object rather than dropped — otherwise the
-/// probe body carries no payload at all.
+/// A JSON body whose root is not an object (an array, here) is sent to the
+/// probe **exactly as the real injection would send it**: the canonical
+/// `json_body` builder only inserts into object roots, so an array root goes
+/// out unchanged. The active probe used to hand-roll a fresh `{q: payload}`
+/// object instead — a request shape the real injection never produces, so any
+/// "valid special" it found there could not be reproduced (a false positive).
+/// Now the probe routes through `url_inject::build_inject_request`, so probe
+/// and injection agree.
 #[tokio::test]
-async fn active_probe_json_body_replaces_non_object_root_with_object() {
+async fn active_probe_json_body_array_root_matches_the_real_injection() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let addr = start_body_echo_server(seen.clone()).await;
     let mut target = parse_target(&format!("http://{addr}/echo")).unwrap();
     target.method = "POST".to_string();
     target.data = Some("[1,2,3]".to_string());
 
-    let res = active_probe_param(
+    let _ = active_probe_param(
         &target,
         probe_param("q", Location::JsonBody),
         Arc::new(Semaphore::new(8)),
@@ -1432,18 +1437,14 @@ async fn active_probe_json_body_replaces_non_object_root_with_object() {
     .await;
 
     let bodies = seen.lock().expect("bodies").clone();
-    let first = bodies.first().cloned().unwrap_or_default();
-    let parsed: serde_json::Value =
-        serde_json::from_str(&first).expect("probe body must still be valid JSON");
-    assert!(
-        parsed.get("q").and_then(|v| v.as_str()).is_some(),
-        "the array root must be replaced by an object keyed on the param, got: {first}"
-    );
-    let valid = res.valid_specials.clone().unwrap_or_default();
-    assert!(
-        !valid.is_empty(),
-        "the payload must have been echoed back for classification"
-    );
+    assert!(!bodies.is_empty(), "the probe must still send a request");
+    for body in &bodies {
+        assert_eq!(
+            body, "[1,2,3]",
+            "an array-root JSON body must go out unchanged (matching the real \
+             injection), not be rewritten into an object: got {body}"
+        );
+    }
 }
 
 /// Fragment params are DOM-side: the fragment never travels to the server, so
@@ -1608,6 +1609,62 @@ async fn active_probe_omits_user_agent_for_the_no_override_sentinel() {
     assert!(
         !uas.iter().any(|ua| ua.as_deref() == Some("")),
         "the empty sentinel must not become a blank User-Agent header; saw {uas:?}"
+    );
+}
+
+/// The active probe routes through the canonical injection builder, so a
+/// user-supplied `-H` header (`Authorization`, here) reaches every probe
+/// location. The hand-rolled matrix this replaced applied only User-Agent and
+/// Cookie on non-Header locations and never iterated `target.headers`, so an
+/// authed endpoint's `Authorization` header silently dropped off every
+/// Body/Query special-char probe — a false negative against anything behind
+/// auth. Reached through a reflecting query param so the probe actually runs.
+#[tokio::test]
+async fn active_probe_forwards_user_headers_on_a_query_probe() {
+    use axum::{Router, extract::State, http::HeaderMap, response::Html};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    type Seen = std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>;
+
+    async fn echo(State(seen): State<Seen>, headers: HeaderMap) -> Html<String> {
+        seen.lock().expect("record auth").push(
+            headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string),
+        );
+        Html("<div>ok</div>".to_string())
+    }
+
+    let seen: Seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/probe", axum::routing::get(echo))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/probe?q=seed")).unwrap();
+    target.headers = vec![("Authorization".to_string(), "Bearer secret".to_string())];
+
+    let _ = active_probe_param(
+        &target,
+        probe_param("q", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let auths = seen.lock().expect("auths").clone();
+    assert!(!auths.is_empty(), "the probe must have reached the server");
+    assert!(
+        auths.iter().all(|a| a.as_deref() == Some("Bearer secret")),
+        "the user's Authorization header must ride along on every probe; saw {auths:?}"
     );
 }
 
