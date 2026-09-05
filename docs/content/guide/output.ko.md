@@ -56,7 +56,7 @@ dalfox https://target.app -f jsonl -o findings.jsonl
 `V` / `A` / `R`은 XSS 탐지 결과입니다. `I`(**Informational**)는 공격에 사용할 수 없는
 관찰 항목으로, 현재는 **오래되었거나 알려진 취약점이 있는 JS 라이브러리**
 (`inject_type: "OutdatedComponent"`, `CWE-1104`)만 해당하며, 페이로드나 파라미터가 없는 간결한
-`[INF]` 라인으로 렌더링됩니다. 이 항목은 **명시적 활성화 방식**입니다. Dalfox는 기본적으로
+`[INF]` 라인으로 렌더링됩니다. 이 항목은 **옵트인**입니다. Dalfox는 기본적으로
 검증된 XSS에 집중하므로, `--detect-outdated-libs`를 전달하지 않는 한 라이브러리 리포팅은 꺼져 있습니다
 (추가 요청은 **0건**이며, 프리플라이트 응답의 `<script>` 태그를 검사합니다). `--only-poc v,a,r`로 걸러낼 수 있습니다.
 
@@ -71,7 +71,7 @@ dalfox ... --include-response
 
 ## 스캔 메타데이터 엔벨로프
 
-JSON, JSONL, SARIF, TOML, Markdown 출력은 이제 모두 동일한 스캔 수준 메타데이터 엔벨로프를 담습니다(이전에는 JSON/JSONL만 해당, [#1093](https://github.com/hahwul/dalfox/issues/1093) 참조).
+JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메타데이터 엔벨로프를 담습니다.
 
 - `dalfox_version`
 - `targets` (입력 대상)
@@ -91,7 +91,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 이제 모두 동일한 스캔 수�
 
 **Markdown**에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다.
 
-Plain 텍스트 출력은 여전히 탐지 결과에만 집중합니다.
+Plain 텍스트 출력은 탐지 결과만 담습니다.
 
 ## 사일런스 모드
 
@@ -206,7 +206,7 @@ dalfox scan scope.txt -f json -o baseline.json
 git commit -am "chore: refresh dalfox baseline"
 ```
 
-`--baseline`을 켠 채 `-o`를 같은 파일로 지정하면 `filter` 모드에서 베이스라인이 파괴됩니다. 되쓰이는 리포트에는 신규 건만 들어 있어서 다음 실행이 백로그 전체를 다시 보고하게 됩니다. 두 경로가 같으면 Dalfox가 경고합니다.
+`--baseline`을 켠 채 `-o`를 같은 파일로 지정하면 `filter` 모드에서 베이스라인이 파괴됩니다. 다시 쓰인 리포트에는 신규 건만 들어 있어서 다음 실행이 백로그 전체를 다시 보고하게 됩니다. 두 경로가 같으면 Dalfox가 경고합니다.
 
 ### 주의사항
 
@@ -325,4 +325,4 @@ Dalfox는 다음을 반환합니다.
 ## 다음
 
 - [REST API 서버](../../integrations/server/)로 스캔을 자동화하세요.
-- [MCP 서버](../../integrations/mcp/)로 AI 드라이버가 처리하도록 맡기세요.
+- [MCP 서버](../../integrations/mcp/)로 AI 에이전트에 맡기세요.

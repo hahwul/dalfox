@@ -99,7 +99,7 @@ When is it safe? When the parameter *name* is what decides where input lands —
 
 Ctrl-C stops a scan cleanly and still reports what was found, but on its own it buys you a partial report and nothing else: nothing records *which* targets finished, so re-running a 50k-URL list that stopped at 80% redoes the 80%. The same applies to a crash, a dropped SSH session, or an OOM on a shared box.
 
-`--state-file` (opt-in — without it, behavior is exactly as before) records each target as it reaches a terminal state, and skips the finished ones on the next run:
+`--state-file` (opt-in; without it nothing is recorded) records each target as it reaches a terminal state, and skips the finished ones on the next run:
 
 ```bash
 dalfox scan --input-type file urls.txt --state-file scan.state
@@ -163,7 +163,7 @@ mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 
 Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target; requests are deduplicated by URL + method and run through the same scope filters as every other mode. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
 
-This restores a capability the Go v2.x line had that the v3 rewrite initially dropped. CLI request flags still apply on top — e.g. `-H "Authorization: Bearer …"` is appended to every entry, and `--include-url` / `--out-of-scope` narrow the set.
+CLI request flags still apply on top — e.g. `-H "Authorization: Bearer …"` is appended to every entry, and `--include-url` / `--out-of-scope` narrow the set.
 
 ## Stored XSS mode (SXSS)
 

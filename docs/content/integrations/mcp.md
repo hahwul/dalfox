@@ -105,7 +105,7 @@ informational `[I]` findings for outdated / known-vulnerable JS libraries
 (CWE-1104, 0 extra requests). Left off, the scan reports only XSS.
 
 `rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
-default), now enforced across all worker tasks — use it to be gentle on a
+default), enforced across all worker tasks — use it to be gentle on a
 fragile target or to stay under a WAF threshold.
 
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
@@ -274,8 +274,8 @@ rest are still there at the next `offset`. A single finding larger than the
 budget is emitted alone rather than dropped, so paging always advances.
 
 `progress.estimated_completion_pct` and `params_tested` advance live as each
-discovered parameter finishes (they no longer sit at 0 until the scan ends), so
-they are usable for pacing polls — honor `suggested_poll_interval_ms`.
+discovered parameter finishes, so they are usable for pacing polls — honor
+`suggested_poll_interval_ms`.
 
 If the target can't be reached (DNS failure, connection refused, TLS error,
 timeout) the scan ends as `status: "error"` with `error_message` containing

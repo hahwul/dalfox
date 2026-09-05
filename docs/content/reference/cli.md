@@ -83,7 +83,7 @@ See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for th
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--param` | `-p` | — | Parameter to analyse; supports `name:location` (locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`) |
+| `--param` | `-p` | — | Parameter to analyse; supports `name:location` (locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`) |
 | `--data` | `-d` | — | Request body |
 | `--headers` | `-H` | — | Extra HTTP header (repeatable) |
 | `--cookies` | — | — | Cookie (repeatable) |
@@ -195,7 +195,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--waf-bypass` | `auto` | `auto`, `force`, `off` |
 | `--skip-waf-probe` | false | Skip active WAF fingerprinting |
 | `--force-waf` | — | WAF name when `--waf-bypass force` |
-| `--waf-evasion` | false | Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses (replaces the old blunt `workers=1`/`delay=3000` preset). The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. |
+| `--waf-evasion` | false | Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses. The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. |
 | `--waf-min-confidence` | `0.3` | Drop fingerprints below this confidence (0.0–1.0). The default `0.3` suppresses weak matches like `Server: Google Frontend` (0.15). Set lower to keep weak signals; `1.0` keeps only fingerprints with full confidence. |
 
 ---

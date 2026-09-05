@@ -83,7 +83,7 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
-| `--param` | `-p` | — | 분석할 파라미터; `name:location` 형식 지원 (위치: `query`, `body`, `json`, `multipart`, `cookie`, `header`) |
+| `--param` | `-p` | — | 분석할 파라미터; `name:location` 형식 지원 (위치: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`) |
 | `--data` | `-d` | — | 요청 본문 |
 | `--headers` | `-H` | — | 추가 HTTP 헤더 (반복 지정 가능) |
 | `--cookies` | — | — | 쿠키 (반복 지정 가능) |
@@ -194,7 +194,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--waf-bypass` | `auto` | `auto`, `force`, `off` |
 | `--skip-waf-probe` | false | 능동 WAF 핑거프린팅을 건너뜁니다 |
 | `--force-waf` | — | `--waf-bypass force`일 때 사용할 WAF 이름 |
-| `--waf-evasion` | false | WAF 탐지 시 적응형 회피: 요청 간 무작위 지터 + 차단된 응답이 몰릴 때 점증하는 쿨다운 (기존의 단순한 `workers=1`/`delay=3000` 프리셋을 대체). 이 플래그가 없어도 WAF별 페이싱 힌트는 탐지 시 자동으로 적용됩니다. `--rate-limit`와 함께 쓰면 좋습니다. |
+| `--waf-evasion` | false | WAF 탐지 시 적응형 회피: 요청 간 무작위 지터 + 차단된 응답이 몰릴 때 점증하는 쿨다운. 이 플래그가 없어도 WAF별 페이싱 힌트는 탐지 시 자동으로 적용됩니다. `--rate-limit`와 함께 쓰면 좋습니다. |
 | `--waf-min-confidence` | `0.3` | 이 신뢰도 미만의 핑거프린트를 제거합니다 (0.0–1.0). 기본값 `0.3`은 `Server: Google Frontend`(0.15) 같은 약한 매칭을 억제합니다. 약한 신호를 유지하려면 더 낮게 설정하고, `1.0`은 완전한 신뢰도를 가진 핑거프린트만 유지합니다. |
 
 ---
@@ -225,7 +225,7 @@ dalfox server [FLAGS]
 | `--max-retained-scans` | — | `1000` | 메모리에 보관하는 *종료된* 스캔 수 상한. 초과하면 가장 오래된 것부터 제거됩니다 (`0` = 무제한). 큐에 있거나 실행 중인 스캔은 제거되지 않습니다 |
 | `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 `413` 응답 |
 
-엔드포인트는 [REST API Server](../../integrations/server/)를 참조하세요.
+엔드포인트는 [REST API 서버](../../integrations/server/)를 참고하세요.
 
 ---
 
@@ -267,7 +267,7 @@ MCP stdio 서버를 실행합니다.
 dalfox mcp
 ```
 
-추가 플래그는 없습니다. 도구 정의는 [MCP Server](../../integrations/mcp/)를 참조하세요.
+추가 플래그는 없습니다. 도구 정의는 [MCP 서버](../../integrations/mcp/)를 참고하세요.
 
 ---
 
@@ -300,5 +300,5 @@ stdout에는 스크립트 외에 아무것도 출력되지 않으므로, 출력�
 
 ## 함께 보기
 
-- [Config File reference](../config/)
-- [Environment variables](../environment/)
+- [설정 파일 레퍼런스](../config/)
+- [환경 변수](../environment/)

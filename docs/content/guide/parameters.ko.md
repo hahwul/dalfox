@@ -108,12 +108,12 @@ dalfox https://target.app --only-discovery
 | `--skip-discovery` | 탐색 단계 전체 |
 | `--skip-mining` | 모든 워드리스트/DOM 마이닝 |
 | `--skip-mining-dict` | 사전 마이닝만 |
-| `--skip-mining-dom` | HTML `id`/`name` 속성에서 파라미터 이름을 수확하는 마이닝만 |
+| `--skip-mining-dom` | HTML `id`/`name` 속성에서 파라미터 이름을 수집하는 마이닝만 |
 | `--skip-reflection-header` | 헤더 반사 확인 |
 | `--skip-reflection-cookie` | 쿠키 반사 확인 |
 | `--skip-reflection-path` | 경로 반사 확인 |
 
-> `--skip-mining-dom`은 응답 HTML에서 파라미터 *이름*을 수확하는 동작만 멈춥니다. DOM-XSS 탐지 자체를 끄지는 **않습니다**: 인라인 `<script>` 블록을 정적 분석해 `location.hash` → `innerHTML` 같은 source→sink 흐름을 찾아 `[A]`(AST 탐지) 결과를 내는 패스는 [`--skip-ast-analysis`](../payloads/)가 제어하는 별개의 단계입니다. 결과에서 해당 항목만 걸러내려면 `--only-poc v,r`을 사용하세요. 두 서브시스템의 차이와 각 증거 등급의 의미는 [탐지 모델](../detection-model/) 문서를 참고하세요.
+> `--skip-mining-dom`은 응답 HTML에서 파라미터 *이름*을 수집하는 동작만 멈춥니다. DOM-XSS 탐지 자체를 끄지는 **않습니다**: 인라인 `<script>` 블록을 정적 분석해 `location.hash` → `innerHTML` 같은 source→sink 흐름을 찾아 `[A]`(AST 탐지) 결과를 내는 패스는 [`--skip-ast-analysis`](../payloads/)가 제어하는 별개의 단계입니다. 결과에서 해당 항목만 걸러내려면 `--only-poc v,r`을 사용하세요. 두 서브시스템의 차이와 각 증거 등급의 의미는 [탐지 모델](../detection-model/) 문서를 참고하세요.
 
 ## 주입 마커(Injection markers)
 
@@ -190,7 +190,7 @@ dalfox https://target.app/soap \
 # → <term> 텍스트 노드가 `xml` 파라미터로 주입됩니다
 ```
 
-모든 반사 결과와 마찬가지로, 값은 응답이 이를 HTML로 파싱할 때만 `[V]`로 등급이 매겨집니다 — `application/json`으로 응답하는 GraphQL API나 이스케이프된 값을 되돌려주는 XML 서비스는 올바르게 무해(inert)로 보고됩니다. 실제 도달점은 반사된 값을 마크업으로 렌더링하는 관리자 화면, 리포트, 에러 페이지입니다.
+모든 반사 결과와 마찬가지로, 값은 응답이 이를 HTML로 파싱할 때만 `[V]`로 등급이 매겨집니다 — `application/json`으로 응답하는 GraphQL API나 이스케이프된 값을 되돌려주는 XML 서비스는 올바르게 무해(inert)로 보고됩니다. 실제로 위험한 곳은 반사된 값을 마크업으로 렌더링하는 관리자 화면, 리포트, 에러 페이지입니다.
 
 ## 반사 프로브 형태
 
@@ -221,5 +221,5 @@ Dalfox는 `<textarea>`, `<title>`, `<noscript>`, `<style>`, `<xmp>`, `<plaintext
 
 ## 다음 단계
 
-- 페이로드가 어떻게 구성되는지는 [Payloads &amp; Encoding](../payloads/)에서 확인하세요.
-- WAF를 상대하고 있나요? [WAF Bypass](../waf-bypass/)로 이동하세요.
+- 페이로드가 어떻게 구성되는지는 [페이로드와 인코딩](../payloads/)에서 확인하세요.
+- WAF를 상대하고 있나요? [WAF 우회](../waf-bypass/)로 넘어가세요.

@@ -75,7 +75,7 @@ silence = true
 
 ## 무엇을 설정할 수 있나요?
 
-`dalfox scan` 아래에 CLI 플래그가 있는 모든 항목은 `[scan]` 테이블에 넣을 수 있습니다. 일반적인 예시는 다음과 같습니다.
+`dalfox scan` 아래에 CLI 플래그가 있는 모든 항목은 `[scan]` 테이블에 넣을 수 있습니다. 자주 쓰는 키 몇 가지입니다.
 
 | 키 | 예시 | 기능 |
 |-----|---------|--------------|
@@ -91,7 +91,7 @@ silence = true
 | `headers` | `["Accept: text/html"]` | 추가 요청 헤더 |
 | `user_agent` | `"Dalfox Scanner"` | 기본 User-Agent |
 | `waf_bypass` | `"auto"` | WAF 우회 모드(`auto`, `force`, `off`) |
-| `insecure` | `true` | TLS 인증서 검증 건너뛰기(`false`로 설정 시 강제) |
+| `insecure` | `true` | TLS 인증서 검증 건너뛰기(`false`면 검증 수행) |
 | `follow_redirects` | `true` | 3xx 응답 따라가기 |
 
 모든 키는 [설정 파일 레퍼런스](../../reference/config/)를 참고하세요.
@@ -105,7 +105,7 @@ silence = true
 export DALFOX_API_KEY="..."
 ```
 
-또는 커맨드 라인에서 전달하고 절대 저장하지 마세요.
+아니면 커맨드 라인에서만 넘기고 파일에는 남기지 마세요.
 
 ## 다음 단계
 

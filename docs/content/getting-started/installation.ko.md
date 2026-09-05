@@ -130,7 +130,7 @@ Rust(2024 edition)가 필요합니다. 없다면 [rustup](https://rustup.rs/)으
 dalfox --version
 ```
 
-`dalfox 3.2.1` 같은 버전 정보와 함께 Dalfox 배너가 보이면 됩니다.
+`dalfox 3.2.2` 같은 버전 정보와 함께 Dalfox 배너가 보이면 됩니다.
 
 ## 셸 자동완성
 
