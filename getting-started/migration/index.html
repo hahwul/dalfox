@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="What changed between Dalfox v2 (Go) and v3 (Rust): consolidated subcommands, renamed flags, retired features, and their replacements.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d18">
+  <title>Migrating from v2 · Dalfox</title>
+  <meta property="og:title" content="Migrating from v2">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/getting-started/migration/">
+  <meta property="og:description" content="What changed between Dalfox v2 (Go) and v3 (Rust): consolidated subcommands, renamed flags, retired features, and their replacements.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/getting-started-migration.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Migrating from v2">
+  <meta name="twitter:description" content="What changed between Dalfox v2 (Go) and v3 (Rust): consolidated subcommands, renamed flags, retired features, and their replacements.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/getting-started-migration.png">
+  <link rel="alternate" hreflang="en" href="https://dalfox.hahwul.com/getting-started/migration/">
+<link rel="alternate" hreflang="ko" href="https://dalfox.hahwul.com/ko/getting-started/migration/">
+  <link rel="canonical" href="https://dalfox.hahwul.com/getting-started/migration/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Migrating from v2","url":"https://dalfox.hahwul.com/getting-started/migration/","description":"What changed between Dalfox v2 (Go) and v3 (Rust): consolidated subcommands, renamed flags, retired features, and their replacements.","image":"https://dalfox.hahwul.com/og-images/getting-started-migration.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Getting Started","item":"https://dalfox.hahwul.com/getting-started/"},{"@type":"ListItem","position":3,"name":"Migrating from v2"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="getting-started">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        
+        
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        
+        <div class="lang-switch" role="group" aria-label="Language">
+          <span class="lang-switch-item is-active" aria-current="true">EN</span><a class="lang-switch-item" href="https://dalfox.hahwul.com/ko/getting-started/migration/" hreflang="ko">KO</a>
+        </div>
+        
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+
+
+
+
+
+
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/migration/">Migrating from v2</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters & Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads & Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output & Reports</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+        
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+        
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.2.2" target="_blank" rel="noopener" title="Dalfox v3.2.2 release notes">v3.2.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Migrating from v2</h1>
+          <p>Dalfox v3 is a complete rewrite in Rust, replacing the legacy Go architecture. The Go sources live on the <a href="https://github.com/hahwul/dalfox/tree/v2"><code>v2</code> branch</a> and receive critical security backports only — all new work happens in v3.</p>
+<p>This page maps a v2 workflow onto v3: which subcommands collapsed, which flags were renamed, what was retired and why, and what you get in return.</p>
+<h2 id="1-subcommand-consolidation">1. Subcommand consolidation</h2>
+<p>v3 unifies the scan subcommands behind a single entrypoint.</p>
+<table>
+<thead>
+<tr>
+<th>v2 usage</th>
+<th>v3 equivalent</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dalfox url [url]</code></td>
+<td><code>dalfox scan [url]</code></td>
+<td>Or just <code>dalfox [url]</code> — <code>scan</code> is the default subcommand</td>
+</tr>
+<tr>
+<td><code>dalfox file [file]</code></td>
+<td><code>dalfox scan [file]</code></td>
+<td>Input type is auto-detected</td>
+</tr>
+<tr>
+<td><code>dalfox pipe</code></td>
+<td><code>cat targets | dalfox scan</code> (or <code>dalfox scan --input-type pipe</code>)</td>
+<td>Piped input is read from <code>stdin</code> natively</td>
+</tr>
+<tr>
+<td><code>dalfox sxss [url]</code></td>
+<td><code>dalfox scan [url] --sxss</code></td>
+<td>Stored XSS is a scan option now — see <a href="../../guide/stored-xss/">Stored XSS</a></td>
+</tr>
+</tbody>
+</table>
+<div class="alert alert-info">
+  <span class="alert-icon" aria-hidden="true">
+    
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+    
+  </span>
+  <div class="alert-content"><p>So existing scripts keep working, the legacy url, file and pipe subcommands survive as hidden aliases. sxss did not: stored-XSS scanning moved onto the scan subcommand as the --sxss flag.</p></div>
+</div>
+<p>Auto-detection also covers input formats v2 never read: a captured raw HTTP request (<code>--input-type raw-http</code>) and a HAR export (<code>dalfox scan capture.har</code>). See <a href="../quick-start/">Quick Start</a>.</p>
+<h2 id="2-renamed-flags">2. Renamed flags</h2>
+<table>
+<thead>
+<tr>
+<th>v2 flag</th>
+<th>v3 flag</th>
+<th>Reason &amp; behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--concurrence &lt;int&gt;</code></td>
+<td><code>--workers &lt;int&gt;</code></td>
+<td>Renamed. Sets the number of concurrent scanning workers.</td>
+</tr>
+<tr>
+<td><code>-C, --cookie &lt;string&gt;</code></td>
+<td><code>--cookies &lt;string&gt;</code></td>
+<td>Pluralized for consistency; may be passed more than once.</td>
+</tr>
+<tr>
+<td><code>-p &lt;string&gt;</code></td>
+<td><code>-p, --param &lt;string&gt;</code></td>
+<td>Now scoped by parameter type — <code>-p id:query</code>, <code>-p sort:body</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The full, generated flag list lives in the <a href="../../reference/cli/">CLI Reference</a>.</p>
+<h2 id="3-retired-features-and-their-replacements">3. Retired features and their replacements</h2>
+<p>Some legacy flags and the heavyweight engines behind them were dropped to keep v3 fast, safe, and focused on XSS.</p>
+<table>
+<thead>
+<tr>
+<th>Retired v2 flag</th>
+<th>Alternative</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--use-bav</code>, <code>--skip-bav</code></td>
+<td>None.</td>
+<td><strong>Scope</strong>. Basic Another Vulnerability (BAV) checks are gone; v3 is strictly an XSS scanner. Use a dedicated scanner for non-XSS classes.</td>
+</tr>
+<tr>
+<td><code>--found-action &lt;cmd&gt;</code>, <code>--found-action-shell</code></td>
+<td><a href="../../integrations/server/">REST API webhooks</a>, or pipe stdout (<code>dalfox scan ... | post-script.sh</code>).</td>
+<td><strong>Security</strong>. Arbitrary shell execution on every finding invited RCE and throttled concurrency.</td>
+</tr>
+<tr>
+<td><code>--skip-headless</code>, <code>--force-headless-verification</code></td>
+<td>Nothing to configure — static analysis is always on.</td>
+<td><strong>Engine replaced</strong>. Headless Chrome (<code>chromedp</code>) is gone. v3 verifies with a compiler-grade JavaScript parser (<code>oxc</code>), tracing data flows and DOM sinks without a browser. See <a href="../../guide/detection-model/">Detection Model</a>.</td>
+</tr>
+<tr>
+<td><code>--grep &lt;file&gt;</code>, <code>--skip-grep</code></td>
+<td>None.</td>
+<td><strong>Engine replaced</strong>. Regex response matching gave way to context-aware AST analysis.</td>
+</tr>
+<tr>
+<td><code>--report</code>, <code>--report-format</code></td>
+<td><code>-f markdown -o &lt;file&gt;</code>, <code>-f sarif -o &lt;file&gt;</code>.</td>
+<td><strong>Standardization</strong>. Report flags folded into the output format flags — see <a href="../../guide/output/">Output &amp; Reports</a>.</td>
+</tr>
+<tr>
+<td><code>--max-cpu</code></td>
+<td>Automatic.</td>
+<td><strong>Architecture</strong>. The async scheduler (<code>tokio</code>) allocates work across cores; manual CPU pinning is obsolete.</td>
+</tr>
+<tr>
+<td><code>--no-spinner</code></td>
+<td>Automatic.</td>
+<td><strong>UI</strong>. Banners and spinners are suppressed on their own for pipes, silent mode (<code>-S</code>), and machine-readable formats (<code>json</code>, <code>sarif</code>, …).</td>
+</tr>
+</tbody>
+</table>
+<p>Because headless verification is gone, a finding's evidence class matters more than it did in v2: <code>[V]</code> means DOM-level evidence in the parsed response, <code>[A]</code> means a static-analysis source-to-sink flow worth confirming in a browser. <a href="../../guide/detection-model/">Detection Model</a> explains the grading.</p>
+<h2 id="4-what-v3-adds">4. What v3 adds</h2>
+<ul>
+<li><strong>MCP server (<code>dalfox mcp</code>)</strong> — exposes Dalfox to AI coding assistants over JSON-RPC. See <a href="../../integrations/mcp/">MCP Server</a>.</li>
+<li><strong>Hard time budget (<code>--scan-timeout &lt;secs&gt;</code>)</strong> — bounds total scan time per target so a half-hung server can't stall the run.</li>
+<li><strong>Payload cap (<code>--max-payloads-per-param &lt;int&gt;</code>)</strong> — keeps combinatorial payload expansion (bypasses × encoders) from turning into a request burst.</li>
+<li><strong>Preflight (<code>--dry-run</code>)</strong> — reports discovered parameters and an estimated request count without sending a single payload.</li>
+<li><strong>Adaptive WAF evasion (<code>--waf-evasion</code>)</strong> — on WAF detection, randomizes inter-request timing and escalates a cooldown when blocked responses cluster. See <a href="../../guide/waf-bypass/">WAF Bypass</a>.</li>
+<li><strong>HTTP parameter pollution (<code>--hpp</code>)</strong> — duplicates query parameters to slip past string-matching WAF layers.</li>
+</ul>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li>Re-read the <a href="../../guide/scanning-modes/">scanning modes</a> — the flags you reach for by reflex may have moved.</li>
+<li>Move your recurring v2 command line into a <a href="../configuration/">config file</a>.</li>
+<li>Skim the <a href="../../reference/cli/">CLI Reference</a> for flags that have no v2 ancestor at all.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#1-subcommand-consolidation">1. Subcommand consolidation</a></li><li><a href="#2-renamed-flags">2. Renamed flags</a></li><li><a href="#3-retired-features-and-their-replacements">3. Retired features and their replacements</a></li><li><a href="#4-what-v3-adds">4. What v3 adds</a></li><li><a href="#next-steps">Next steps</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+
+      
+      
+      
+      
+      
+      
+      
+      
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/getting-started/migration.md" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+      
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>
