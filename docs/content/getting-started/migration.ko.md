@@ -28,7 +28,7 @@ v3는 스캔 관련 서브커맨드를 하나의 진입점으로 모았습니다
 
 | v2 플래그 | v3 플래그 | 이유와 동작 |
 | :--- | :--- | :--- |
-| `--concurrence <int>` | `--workers <int>` | 이름을 현대적으로 다듬었습니다. 동시에 도는 스캔 워커 수를 정합니다. |
+| `--concurrence <int>` | `--workers <int>` | 이름만 바뀌었습니다. 동시에 도는 스캔 워커 수를 정합니다. |
 | `-C, --cookie <string>` | `--cookies <string>` | 일관성을 위해 복수형으로 바꿨고, 여러 번 넘길 수 있습니다. |
 | `-p <string>` | `-p, --param <string>` | 파라미터 종류까지 지정합니다 — `-p id:query`, `-p sort:body`. |
 

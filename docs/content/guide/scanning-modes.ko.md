@@ -67,7 +67,7 @@ cat urls.txt | dalfox scan https://target.app/one
 
 이 경우 명령줄 대상만으로도 이미 스캔이 가능하므로, Dalfox는 `stdin`의 첫 바이트를 약 500ms만 기다립니다. 래퍼나 CI 잡, 잡 러너가 열어둔 채 아무것도 쓰지 않는 파이프는 실행을 막지 않고 경고와 함께 건너뜁니다. 일단 스트림이 데이터를 보내기 시작하면 끝까지 읽으므로, 길거나 천천히 쓰이는 목록이 잘리는 일은 없습니다.
 
-이 동작을 조정하려면 `DALFOX_STDIN_WAIT_MS`로 대기 시간을 늘리거나 `0`으로 병합을 끌 수 있습니다([Environment](../../reference/environment/) 참고). `stdin`이 곧 입력이며 얼마가 걸리든 기다려야 한다면 `--input-type pipe`를 사용하세요.
+이 동작을 조정하려면 `DALFOX_STDIN_WAIT_MS`로 대기 시간을 늘리거나 `0`으로 병합을 끌 수 있습니다([환경 변수](../../reference/environment/) 참고). `stdin`이 곧 입력이며 얼마가 걸리든 기다려야 한다면 `--input-type pipe`를 사용하세요.
 
 ### 거의 같은 URL 묶기
 
@@ -99,7 +99,7 @@ gau target.app | dalfox scan --dedup-urls signature
 
 Ctrl-C는 스캔을 깔끔하게 멈추고 그때까지 찾은 것도 정상적으로 출력합니다. 하지만 그것만으로는 부분 리포트 하나가 남을 뿐입니다. **어떤 대상까지 끝났는지가 어디에도 기록되지 않으므로**, 5만 URL 목록을 80%에서 멈췄다면 다시 돌릴 때 그 80%를 처음부터 훑습니다. 크래시, 끊어진 SSH 세션, 공용 서버의 OOM도 마찬가지입니다.
 
-`--state-file`은 옵트인입니다(지정하지 않으면 동작은 지금까지와 완전히 동일합니다). 각 대상이 종료 상태에 도달할 때마다 기록해 두고, 다음 실행에서 끝난 것들을 건너뜁니다:
+`--state-file`은 옵트인입니다(지정하지 않으면 아무것도 기록하지 않습니다). 각 대상이 종료 상태에 도달할 때마다 기록해 두고, 다음 실행에서 끝난 것들을 건너뜁니다:
 
 ```bash
 dalfox scan --input-type file urls.txt --state-file scan.state
@@ -126,7 +126,7 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 Warning: scan configuration changed since 'scan.state' was written (recorded a5f8…, now 6447…) — starting fresh (previous state kept at 'scan.state.bak')
 ```
 
-덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 만료된 세션 쿠키를 갈아끼우고 인증 스캔을 이어가는 경우가 바로 이 경로를 타는데, 그것 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 제자리에서 파괴하지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
+덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 만료된 세션 쿠키를 갈아끼우고 인증 스캔을 이어가는 경우가 바로 이 경로를 타는데, 그것 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 기존 파일을 그 자리에서 덮어쓰거나 지우지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
 
 출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--silence`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--cookies` / `--headers` 등이 여기에 해당합니다.
 
@@ -163,7 +163,7 @@ mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 
 HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 요청은 URL + 메서드로 중복 제거되고 다른 모든 모드와 동일한 스코프 필터를 거칩니다. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
-이는 Go v2.x 라인이 가졌으나 v3 재작성에서 처음에 빠졌던 기능을 복원한 것입니다. CLI 요청 플래그는 그 위에 그대로 적용됩니다. 예를 들어 `-H "Authorization: Bearer …"`는 모든 항목에 추가되고, `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
+CLI 요청 플래그는 그 위에 그대로 적용됩니다. 예를 들어 `-H "Authorization: Bearer …"`는 모든 항목에 추가되고, `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
 
 ## 저장형 XSS 모드 (SXSS)
 
@@ -236,7 +236,7 @@ Dalfox를 장시간 유지되는 HTTP 서비스로 실행합니다. REST로 스�
 dalfox server --port 6664 --api-key "$DALFOX_API_KEY"
 ```
 
-엔드포인트와 요청 형태는 [REST API Server](../../integrations/server/)를 참고하세요.
+엔드포인트와 요청 형태는 [REST API 서버](../../integrations/server/)를 참고하세요.
 
 ## MCP 모드
 
@@ -246,11 +246,11 @@ Dalfox를 [Model Context Protocol](https://modelcontextprotocol.io) 서버로 �
 dalfox mcp
 ```
 
-도구(`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`)는 [MCP Server](../../integrations/mcp/)에 설명되어 있습니다.
+도구(`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`)는 [MCP 서버](../../integrations/mcp/)에 설명되어 있습니다.
 
 ## Payload 모드 (유틸리티)
 
-스캔 모드는 아니지만 함께 유용합니다. 스캔을 실행하지 않고 페이로드를 출력하거나 가져옵니다.
+스캔 모드는 아니지만 곁에 두면 유용합니다. 스캔을 실행하지 않고 페이로드를 출력하거나 가져옵니다.
 
 ```bash
 dalfox payload event-handlers    # list DOM event handlers

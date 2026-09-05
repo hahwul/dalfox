@@ -71,7 +71,7 @@ You still need to wait for someone to view the page; the callback tells you when
 ## Tips
 
 - **Scope narrowly.** Use `-p` to name the field(s) you know are rendered on the retrieval URL. That way Dalfox isn't testing every cookie.
-- **Watch for sanitisation-then-render.** Stored XSS often survives a HTML sanitizer on write but breaks on a second sanitization on read. Dalfox's mXSS payloads are tuned for this.
+- **Watch for sanitisation-then-render.** Stored XSS often survives an HTML sanitizer on write but breaks on a second sanitization on read. Dalfox's mXSS payloads are tuned for this.
 - **Slow down.** Some apps debounce or batch writes. A small `--delay` helps the retrieval see your payload.
 
 ## Next

@@ -53,7 +53,7 @@ CSP (or a hardened one) sees no extra requests.
 | whitelisted CDN host | the matching JSONP / framework **script gadget** for that host |
 | `strict-dynamic` | DOM script-gadgets (RequireJS `data-main`, `document.write` self-propagation, AngularJS bootstrap) plus **nonce reuse** when a nonce is captured |
 
-Two modern shapes that earlier releases parsed but never acted on are now live:
+Two shapes deserve a closer look:
 
 - **`strict-dynamic`.** Under `strict-dynamic` the browser ignores the host
   allowlist, so a plain `<script src=allowed-host>` no longer loads. Dalfox
@@ -83,7 +83,7 @@ mitigation in hardened apps. Dalfox's AST DOM-XSS analyzer understands it:
   protection; the finding is kept and flagged.
 - When the response CSP enforces `require-trusted-types-for 'script'` **and** the
   page defines a strict `'default'` policy, the browser auto-sanitizes every
-  TrustedHTML sink — Dalfox suppresses those now-false-positive findings.
+  TrustedHTML sink — Dalfox suppresses those findings, which would otherwise be false positives.
 
 The classifier is deliberately conservative: anything it can't prove safe stays
 permissive, so the finding is kept. Suppression never fires without enforcement,

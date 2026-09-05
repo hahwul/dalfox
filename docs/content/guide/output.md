@@ -72,7 +72,7 @@ dalfox ... --include-response
 
 ## Scan metadata envelope
 
-JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level metadata envelope (previously JSON/JSONL only; see [#1093](https://github.com/hahwul/dalfox/issues/1093)):
+JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level metadata envelope:
 
 - `dalfox_version`
 - `targets` (the input targets)
@@ -92,7 +92,7 @@ In **TOML** it appears as a top-level `[meta]` table (findings under `[[results]
 
 In **Markdown** it is rendered as human-readable tables (`## Scan Metadata` + `### Target Summary`) above the findings summary.
 
-Plain text output remains findings-focused only.
+Plain text output stays findings-only.
 
 ## Silence mode
 

@@ -28,7 +28,7 @@ Auto-detection also covers input formats v2 never read: a captured raw HTTP requ
 
 | v2 flag | v3 flag | Reason & behavior |
 | :--- | :--- | :--- |
-| `--concurrence <int>` | `--workers <int>` | Modernized naming. Sets the number of concurrent scanning workers. |
+| `--concurrence <int>` | `--workers <int>` | Renamed. Sets the number of concurrent scanning workers. |
 | `-C, --cookie <string>` | `--cookies <string>` | Pluralized for consistency; may be passed more than once. |
 | `-p <string>` | `-p, --param <string>` | Now scoped by parameter type — `-p id:query`, `-p sort:body`. |
 

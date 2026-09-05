@@ -78,8 +78,8 @@ Caido의 Workflow If/Else 노드는 자체 [bool 규칙](https://docs.caido.io/a
 | `-S` / `--silence` | POC / 탐지 결과 라인만 stdout으로 나갑니다 (Caido 로그의 노이즈 감소) |
 | `--no-color`      | 탐지 결과, 검색, 내보내기를 위한 깔끔한 텍스트 (커뮤니티 워크플로 예시에서 제안됨) |
 | `--poc-type curl` (또는 `httpie`, `http-request`) | Caido Finding에서 바로 사용할 수 있는 재현 코드 |
-| `--timeout 6-10`  | 요청별 예산; 워크플로를 빠릿하게 유지 |
-| `--waf-bypass auto` | 프록시 내부에서도 여전히 가치 있음 |
+| `--timeout 6-10`  | 요청별 예산; 워크플로를 빠르게 유지 |
+| `--waf-bypass auto` | 프록시 안에서도 여전히 유용함 |
 
 Finding 증거에 전체 마크다운 보고서를 담고 싶다면 `-f markdown`을 추가할 수도 있습니다.
 
@@ -100,7 +100,7 @@ Finding 증거에 전체 마크다운 보고서를 담고 싶다면 `-f markdown
      - 심각도: 규칙에 따라 High / Medium
    - **True 분기 (깨끗)**: Set Color(녹색)나 Add Tag `dalfox-clean`
 
-Caido의 추가 컨텍스트(호스트, 메서드, 파라미터 이름 등)로 Finding을 풍부하게 할 수 있습니다.
+호스트, 메서드, 파라미터 이름 같은 Caido의 컨텍스트를 Finding에 더 담을 수도 있습니다.
 
 ## 대안: 파일 단계 먼저 사용하기
 
@@ -114,7 +114,7 @@ Caido의 추가 컨텍스트(호스트, 메서드, 파라미터 이름 등)로 F
 ## 팁 및 함정
 
 - **바이너리 위치**: Caido의 PATH에는 brew, asdf, linuxbrew가 포함되지 않을 수 있습니다. 전체 경로를 사용하거나 워크플로 / Caido 설정에서 `DALFOX_PATH` 환경 변수를 설정하고 `$DALFOX_PATH`를 참조하세요.
-- **성능**: 브라우징이 바쁠 때는 Dalfox 단계 *앞에* Content-Type이나 스코프 내 필터를 추가하세요. Dalfox는 빠르지만 모든 이미지/스타일시트를 스캔할 필요는 없습니다.
+- **성능**: 트래픽이 많을 때는 Dalfox 단계 *앞에* Content-Type이나 스코프 내 필터를 추가하세요. Dalfox는 빠르지만 모든 이미지/스타일시트를 스캔할 필요는 없습니다.
 - **Blind XSS**: Caido가 구동하는 트래픽에서 대역 외(out-of-band) 탐지를 원할 때 `--blind https://your.collaborator/`를 추가하세요.
 - **DOM XSS**: 기본 설정으로 바로 작동합니다 (AST 분석이 응답에서 실행됩니다).
 - **JSON 출력**: 이후 워크플로 노드에서 더 고급 후처리를 하려면 `--format jsonl`을 사용하여 스트림을 파싱할 수 있습니다.
@@ -123,11 +123,11 @@ Caido의 추가 컨텍스트(호스트, 메서드, 파라미터 이름 등)로 F
 
 이전 Dalfox v2 문서는 `dalfox pipe --rawdata`를 사용했습니다. v3에서 이에 해당하는 것은 `dalfox scan --input-type raw-http`(또는 입력 처리가 조정된 숨겨진 `dalfox pipe` 호환 명령)입니다. 위에 보인 임시 파일이나 프로세스 치환 방식이 가장 이식성이 높습니다.
 
-표준 raw-http 사용법은 [스캐닝 모드](../../guide/scanning-modes/#raw-http-모드) 페이지를 참조하세요.
+표준 raw-http 사용법은 [스캔 모드](../../guide/scanning-modes/#raw-http-모드) 페이지를 참조하세요.
 
 ## 참고
 
-- [스캐닝 모드: Raw HTTP](../../guide/scanning-modes/#raw-http-모드)
-- [출력 및 보고서](../../guide/output/)
+- [스캔 모드: Raw HTTP](../../guide/scanning-modes/#raw-http-모드)
+- [출력과 리포트](../../guide/output/)
 - [WAF 우회](../../guide/waf-bypass/)
 - GitHub 논의 [#992 (댓글)](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370): Caido If/Else 불리언 우회 스크립트와 `--no-color` 제안이 담긴 원본 커뮤니티 보고

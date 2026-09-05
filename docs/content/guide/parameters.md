@@ -52,12 +52,12 @@ dalfox https://target.app --remote-wordlists burp,assetnote
 
 ### Auto-collapse
 
-Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this two ways:
+Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this in two ways:
 
 - **Sentinel pre-probe:** Before iterating the wordlist, three random parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic `any` Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (>15 entries) for the pre-probe to pay off.
 - **EWMA collapse:** While iterating, Dalfox watches the rolling reflection ratio. Once it stays ≥85% after at least 15 attempts, mining stops and any Query params already collected are folded into the same `any` placeholder.
 
-Both routes produce identical downstream state: Stage 5–7 sees one Query injection point regardless of which trigger fired.
+Both routes produce identical downstream state: Stages 5–7 see one Query injection point regardless of which trigger fired.
 
 ## Pruning the noise
 
