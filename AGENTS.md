@@ -171,8 +171,15 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
   - `cancel_*` flips the cancellation flag (job ends in `cancelled`); `delete_*` removes the job record entirely.
 
 - New error code:
-  - Add constant to `src/cmd/mod.rs` `error_codes` module
-  - Use the constant in all three interfaces (CLI, server, MCP) plus the agent skill bundle (`skills/dalfox/references/results.md`)
+  - Add the constant to `src/cmd/mod.rs` `error_codes` module (the source of
+    truth), and add an assertion to the wire-contract test
+    `error_code_constants_have_stable_string_values` in the same file — the
+    string values are part of the JSON contract.
+  - Use the constant in all three interfaces (CLI, server, MCP) — never a bare
+    string literal.
+  - `skills/dalfox/references/results.md` carries a curated "common ones" list
+    that points back to `src/cmd/mod.rs` as the canonical list; add the new code
+    there only if consumers will commonly surface it, not mechanically for every code.
   - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `STDIN_NOT_PIPED`, `INPUT_TOO_LARGE`, `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, `CONTENT_TYPE_MISMATCH`, `TRUNCATED_PER_HOST_CAP`, `SESSION_LOST`, `INTERNAL_ERROR`
 
 ---

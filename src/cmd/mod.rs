@@ -67,12 +67,18 @@ mod tests {
         assert_eq!(error_codes::PARSE_ERROR, "PARSE_ERROR");
         assert_eq!(error_codes::FILE_READ_ERROR, "FILE_READ_ERROR");
         assert_eq!(error_codes::STDIN_ERROR, "STDIN_ERROR");
+        assert_eq!(error_codes::INPUT_TOO_LARGE, "INPUT_TOO_LARGE");
+        assert_eq!(error_codes::STDIN_NOT_PIPED, "STDIN_NOT_PIPED");
         assert_eq!(error_codes::CONNECTION_FAILED, "CONNECTION_FAILED");
+        assert_eq!(error_codes::DNS_RESOLUTION_FAILED, "DNS_RESOLUTION_FAILED");
+        assert_eq!(error_codes::TLS_HANDSHAKE_FAILED, "TLS_HANDSHAKE_FAILED");
+        assert_eq!(error_codes::REQUEST_TIMEOUT, "REQUEST_TIMEOUT");
         assert_eq!(error_codes::CONTENT_TYPE_MISMATCH, "CONTENT_TYPE_MISMATCH");
         assert_eq!(
             error_codes::TRUNCATED_PER_HOST_CAP,
             "TRUNCATED_PER_HOST_CAP"
         );
         assert_eq!(error_codes::SESSION_LOST, "SESSION_LOST");
+        assert_eq!(error_codes::INTERNAL_ERROR, "INTERNAL_ERROR");
     }
 }
