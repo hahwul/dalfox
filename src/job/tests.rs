@@ -640,6 +640,95 @@ fn rest_and_mcp_requests_agree_on_scan_args() {
     );
 }
 
+/// The value-plumbing seam. `into_scan_args` fills `ScanArgs` with
+/// `..Default::default()`, so a field accepted by `ScanOptions` but not wired
+/// through `from_rest_options` + `into_scan_args` is silently dropped: it still
+/// passes `surface_parity` (which only checks a field *name* maps to a flag)
+/// and `rest_and_mcp_requests_agree_on_scan_args` (which only exercises
+/// defaults). This asserts a *non-default* value on every mapped REST option
+/// actually reaches `ScanArgs` — the #1388 drop class, one layer in.
+#[test]
+fn rest_non_default_options_reach_scan_args() {
+    use crate::server::types::ScanOptions;
+    let opts = ScanOptions {
+        param: Some(vec!["myparam:query".to_string()]),
+        data: Some("a=b".to_string()),
+        header: Some(vec!["X-Test: 1".to_string()]),
+        cookie: Some("sid=abc".to_string()),
+        method: Some("PUT".to_string()),
+        user_agent: Some("UA/1".to_string()),
+        encoders: Some(vec!["base64".to_string()]),
+        timeout: Some(7),
+        delay: Some(50),
+        follow_redirects: Some(true),
+        insecure: Some(false),
+        proxy: Some("http://127.0.0.1:9".to_string()),
+        skip_mining: Some(true),
+        skip_discovery: Some(true),
+        deep_scan: Some(true),
+        skip_ast_analysis: Some(true),
+        analyze_external_js: Some(true),
+        detect_outdated_libs: Some(true),
+        blind: Some("http://cb".to_string()),
+        worker: Some(9),
+        waf_bypass: Some("off".to_string()),
+        skip_waf_probe: Some(true),
+        waf_evasion: Some(true),
+        waf_min_confidence: Some(0.7),
+        remote_payloads: Some(vec!["portswigger".to_string()]),
+        remote_wordlists: Some(vec!["burp".to_string()]),
+        max_payloads_per_param: Some(11),
+        ..Default::default()
+    };
+
+    let args = ScanRequestSpec::from_rest_options(
+        "http://example.com/?q=1".to_string(),
+        &opts,
+        true,                           // include_request
+        true,                           // include_response
+        1234,                           // scan_timeout (already capped by the handler)
+        42,                             // rate_limit (already capped)
+        Some("cloudflare".to_string()), // force_waf (already normalized)
+    )
+    .into_scan_args();
+
+    assert_eq!(args.param, vec!["myparam:query".to_string()]);
+    assert_eq!(args.data.as_deref(), Some("a=b"));
+    assert_eq!(args.headers, vec!["X-Test: 1".to_string()]);
+    assert_eq!(args.cookies, vec!["sid=abc".to_string()]);
+    assert_eq!(args.method, "PUT");
+    assert_eq!(args.user_agent.as_deref(), Some("UA/1"));
+    assert_eq!(args.encoders, vec!["base64".to_string()]);
+    assert_eq!(args.timeout, 7);
+    assert_eq!(args.scan_timeout, 1234);
+    assert_eq!(args.delay, 50);
+    assert!(args.follow_redirects);
+    assert_eq!(args.insecure, Some(false));
+    assert_eq!(args.proxy.as_deref(), Some("http://127.0.0.1:9"));
+    // One request switch drives all three mining stages.
+    assert!(args.skip_mining);
+    assert!(args.skip_mining_dict);
+    assert!(args.skip_mining_dom);
+    assert!(args.skip_discovery);
+    assert!(args.deep_scan);
+    assert!(args.skip_ast_analysis);
+    assert!(args.analyze_external_js);
+    assert!(args.detect_outdated_libs);
+    assert_eq!(args.blind_callback_url.as_deref(), Some("http://cb"));
+    assert_eq!(args.workers, 9);
+    assert_eq!(args.rate_limit, 42);
+    assert_eq!(args.waf_bypass, "off");
+    assert!(args.skip_waf_probe);
+    assert_eq!(args.force_waf.as_deref(), Some("cloudflare"));
+    assert!(args.waf_evasion);
+    assert_eq!(args.waf_min_confidence, 0.7_f32);
+    assert_eq!(args.remote_payloads, vec!["portswigger".to_string()]);
+    assert_eq!(args.remote_wordlists, vec!["burp".to_string()]);
+    assert_eq!(args.max_payloads_per_param, 11);
+    assert!(args.include_request);
+    assert!(args.include_response);
+}
+
 #[test]
 fn validate_header_value_matches_reqwest_builder_semantics() {
     // What reqwest's `.header()` accepts for a &str value, this must accept —
