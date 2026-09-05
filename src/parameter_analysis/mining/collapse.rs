@@ -53,7 +53,10 @@ const SENTINEL_QUERY_NAMES: &[&str] = &[
 /// response body when every sentinel reflects, or `None` as soon as any
 /// sentinel fails to reflect — `None` is the "this page is fine, run the
 /// wordlist normally" signal.
-pub(super) async fn pre_collapse_query_probe(client: &reqwest::Client, target: &Target) -> Option<String> {
+pub(super) async fn pre_collapse_query_probe(
+    client: &reqwest::Client,
+    target: &Target,
+) -> Option<String> {
     let marker = crate::scanning::markers::bracketed_marker();
     let mut first_text: Option<String> = None;
     for name in SENTINEL_QUERY_NAMES.iter().take(SENTINEL_PROBE_COUNT) {

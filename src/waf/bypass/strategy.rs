@@ -4,8 +4,8 @@
 //! (`get_bypass_strategy`), plus the multi-WAF merge used when fingerprinting
 //! is ambiguous (`merge_strategies`).
 
-use crate::waf::WafType;
 use super::types::{BypassStrategy, MutationType};
+use crate::waf::WafType;
 
 /// Get the optimal bypass strategy for a specific WAF type.
 pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
