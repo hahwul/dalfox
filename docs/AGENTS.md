@@ -68,8 +68,8 @@ This site documents [Dalfox](https://github.com/hahwul/dalfox), a Rust XSS scann
 
 - **CLI flags / default values**: `src/cmd/scan/args.rs` (look for `pub struct ScanArgs` and `DEFAULT_*` constants). When you add or change a flag in code, update `docs/content/reference/cli.md` *in the same commit*.
 - **Agent skill surface**: `skills/dalfox/` (SKILL.md + `references/*.md`). The published agent skill must stay in sync with flag names, defaults, error codes, MCP tool schemas, and the invariants in the repo-root `AGENTS.md`. Treat it as a fourth interface alongside CLI / server / MCP.
-- **Output formats**: `src/scanning/result.rs` and `src/cmd/scan/output.rs` (output routing). Keep `docs/content/guide/output.md` aligned.
-- **Stage names**: see `src/lib.rs` doc-comment (authoritative 6-stage table) and `src/parameter_analysis/mining.rs` / `src/scanning/mod.rs` headers. Don't invent stage numbers — read what the code already labels.
+- **Output formats**: `src/scanning/result/` and `src/cmd/scan/output.rs` (output routing). Keep `docs/content/guide/output.md` aligned.
+- **Stage names**: see `src/lib.rs` doc-comment (authoritative 6-stage table) and `src/parameter_analysis/mining/mod.rs` / `src/scanning/mod.rs` headers. Don't invent stage numbers — read what the code already labels.
 
 ### Stage model (current)
 
@@ -92,7 +92,7 @@ When working on docs, double-check that these are reflected:
 - **Bracketed sandwich marker** — discovery/mining probes inject `OPEN+INNER+CLOSE`, response classified as Full / PrefixOnly / SuffixOnly / InnerOnly. See `src/scanning/markers.rs::classify_probe_reflection`.
 - **Composable EncodingPipeline** — `src/encoding/pipeline.rs`. Supports `JsonField{pointer}`, `Base64`, `Base64Url`, `Url`, `JwtAssemble`. Inferred automatically from existing parameter values.
 - **Nested sub-param naming** — bracket style (`qs[move_url]`, `qs[items][0]`). The `Param.wire_name` field carries the parent param when this kicks in.
-- **Sentinel pre-probe** — `src/parameter_analysis/mining.rs::pre_collapse_query_probe`. Mining's first defence against reflect-everything pages.
+- **Sentinel pre-probe** — `src/parameter_analysis/mining/collapse.rs::pre_collapse_query_probe`. Mining's first defence against reflect-everything pages.
 
 ### Verifying flags before you write about them
 

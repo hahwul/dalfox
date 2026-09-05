@@ -270,7 +270,11 @@ config_src = read(CONFIG_RS)
 args_src = read(ARGS_RS)
 session_src = read(SESSION_RS)
 server_src = read(SERVER_TYPES_RS)
-mcp_src = read(MCP_RS)
+# The MCP tool server is split across `src/mcp/*.rs` (mod.rs keeps the
+# `#[tool]` handlers; params.rs the `*Params` structs + serde defaults;
+# job_runtime.rs / pagination.rs the helpers). Read the whole module so a
+# future split can't hide a param or default from this gate.
+mcp_src = Dir.glob("src/mcp/*.rs").reject(&.ends_with?("tests.rs")).sort.map { |f| File.read(f) }.join("\n")
 
 scan_flags = parse_help(["scan"])
 server_flags = parse_help(["server"])
