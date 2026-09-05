@@ -31,7 +31,7 @@ Do not proceed without a clear affirmative. Record the scope in one sentence whe
    → Use CLI.
 
 3. **Neither**  
-   → Tell the user the install options: `brew install dalfox`, `cargo install --path .`, or `nix run github:hahwul/dalfox`.
+   → Tell the user the install options: `brew install dalfox`, `cargo install dalfox`, or `nix run github:hahwul/dalfox`.
 
 When both are present, MCP is usually the better agent experience for anything longer than a quick smoke test.
 
