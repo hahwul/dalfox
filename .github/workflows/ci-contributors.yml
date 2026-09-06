@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: crystal-actions/contributor-mural@v1.3.0
+      - uses: crystal-actions/contributor-mural@v1.5.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config: .github/contributor-mural.yml
