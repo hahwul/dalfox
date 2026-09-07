@@ -1945,6 +1945,38 @@ fn build_request_text_jsonbody_injects_into_object() {
 }
 
 #[test]
+fn build_request_text_graphqlbody_uses_field_value_as_json_body() {
+    // GraphQL bodies rebuild the whole document from the param pipeline via
+    // `apply_param_encoding`; with no pipeline set that is the raw payload,
+    // shipped as `application/json`.
+    let target = target_for("https://example.com/graphql");
+    let param = req_param("variables.n", "", Location::GraphqlBody);
+    let req = super::build_request_text(&target, &param, "<svg onload=alert(1)>");
+    assert!(
+        req.contains("Content-Type: application/json"),
+        "req:\n{req}"
+    );
+    assert!(
+        req.contains("\r\n\r\n<svg onload=alert(1)>"),
+        "graphql body should be the rebuilt document, req:\n{req}"
+    );
+}
+
+#[test]
+fn build_request_text_xmlbody_uses_field_value_and_xml_content_type() {
+    // XML bodies are likewise the pipeline-rebuilt document; the content type
+    // comes from `xml_request_content_type` (default `application/xml`).
+    let target = target_for("https://example.com/soap");
+    let param = req_param("q", "", Location::XmlBody);
+    let req = super::build_request_text(&target, &param, "<svg onload=alert(1)>");
+    assert!(req.contains("Content-Type: application/xml"), "req:\n{req}");
+    assert!(
+        req.contains("\r\n\r\n<svg onload=alert(1)>"),
+        "xml body should be the rebuilt document, req:\n{req}"
+    );
+}
+
+#[test]
 fn build_request_text_jsonbody_synthesizes_when_no_data() {
     let target = target_for("https://example.com/api");
     let param = req_param("q", "", Location::JsonBody);
