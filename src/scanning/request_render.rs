@@ -98,7 +98,19 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
             );
             (Some(body), Some("application/json".to_string()))
         }
-        Location::MultipartBody => (target.data.clone(), Some("multipart/form-data".to_string())),
+        Location::MultipartBody => {
+            // Mirror the multipart form actually sent (`build_multipart_request`
+            // → `multipart_form`): inject the payload into the named field and
+            // frame it with a real boundary. Cloning `target.data` shipped the
+            // original, payload-free, urlencoded body under a boundary-less
+            // `multipart/form-data` type — a PoC that reproduced nothing.
+            let (body, content_type) = crate::scanning::url_inject::multipart_poc_body(
+                target.data.as_deref(),
+                &param.name,
+                payload,
+            );
+            (Some(body), Some(content_type))
+        }
         // GraphQL / XML rebuild the whole body from the param's pipeline
         // (`JsonField` into the GraphQL request / `Splice` around the XML
         // injection point). `apply_param_encoding` runs that pipeline on the

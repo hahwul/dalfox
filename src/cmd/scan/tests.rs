@@ -981,14 +981,22 @@ fn test_generate_poc_curl_jsonbody_emits_json_content_type() {
 }
 
 #[test]
-fn test_generate_poc_curl_multipart_uses_data_flag() {
+fn test_generate_poc_curl_multipart_uses_form_string() {
     let mut r = reflected_result("http://example.com/upload", "file", "<x>");
     r.method = "POST".to_string();
     r.location = "MultipartBody".to_string();
     let out = generate_poc(&r, "curl");
+    // A multipart finding must reproduce as multipart, not urlencoded. curl's
+    // `--form-string` sends a literal multipart field; `-F` would read the
+    // leading `<` as a filename and `--data` would send the wrong wire format.
     assert!(
-        out.contains("--data \"file=<x>\""),
-        "curl multipart POC missing --data: {}",
+        out.contains("--form-string \"file=<x>\""),
+        "curl multipart POC should use --form-string: {}",
+        out
+    );
+    assert!(
+        !out.contains("--data"),
+        "curl multipart POC must not fall back to urlencoded --data: {}",
         out
     );
 }

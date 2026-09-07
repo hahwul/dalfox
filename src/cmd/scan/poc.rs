@@ -204,8 +204,22 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
             escaped(&result.payload),
             attack_url
         ),
-        "Body" | "MultipartBody" => format!(
+        "Body" => format!(
             "curl -X {} --data \"{}={}\" \"{}\"\n",
+            method,
+            result.param,
+            escaped(&result.payload),
+            attack_url
+        ),
+        // `--data` sends `application/x-www-form-urlencoded`; a multipart
+        // finding only reproduces as a multipart request. `--form-string`
+        // builds one (with curl's own boundary), matching the
+        // `reqwest::multipart::Form` the scanner actually sent. It must be
+        // `--form-string`, not `-F`: under `-F` a value with a leading `<` or
+        // `@` means "read the field from this file" — and every HTML payload
+        // starts with `<`, so `-F` would try to open a bogus file.
+        "MultipartBody" => format!(
+            "curl -X {} --form-string \"{}={}\" \"{}\"\n",
             method,
             result.param,
             escaped(&result.payload),
@@ -269,8 +283,15 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
             "http {} \"{}\" \"{}:{}\"\n",
             method, attack_url, result.param, result.payload
         ),
-        "Body" | "MultipartBody" => format!(
+        "Body" => format!(
             "http -f {} \"{}\" \"{}={}\"\n",
+            method, attack_url, result.param, result.payload
+        ),
+        // httpie's `-f`/`--form` sends urlencoded unless a file field is
+        // present; `--multipart` forces the multipart/form-data request a
+        // multipart finding needs to reproduce.
+        "MultipartBody" => format!(
+            "http --multipart {} \"{}\" \"{}={}\"\n",
             method, attack_url, result.param, result.payload
         ),
         "JsonBody" => format!(

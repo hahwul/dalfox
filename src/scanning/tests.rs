@@ -1972,6 +1972,50 @@ fn build_request_text_jsonbody_empty_value_reserializes_invalid_json() {
 }
 
 #[test]
+fn build_request_text_multipart_injects_field_with_boundary() {
+    // Regression: the multipart PoC used to clone `target.data` verbatim (the
+    // payload-free, urlencoded original) under a boundary-less
+    // `multipart/form-data` type — a request that reproduced nothing. It must
+    // now render a real multipart body: the payload in the named field, framed
+    // by a boundary that the Content-Type header declares.
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some("q=seed&other=keep".to_string()),
+        ..target_for("https://example.com/upload")
+    };
+    let param = req_param("q", "seed", Location::MultipartBody);
+    let req = super::build_request_text(&target, &param, "<svg onload=alert(1)>");
+    // Content-Type carries a boundary...
+    let boundary = req
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("Content-Type: multipart/form-data; boundary=")
+                .map(str::to_string)
+        })
+        .expect("multipart Content-Type with a boundary");
+    assert!(
+        !boundary.is_empty(),
+        "boundary must be non-empty, req:\n{req}"
+    );
+    // ...and the body is framed by exactly that boundary, with the payload in
+    // the `q` field and the untouched neighbour preserved.
+    assert!(
+        req.contains(&format!("--{boundary}\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\n<svg onload=alert(1)>\r\n")),
+        "payload must land in the q field, req:\n{req}"
+    );
+    assert!(
+        req.contains("name=\"other\"\r\n\r\nkeep\r\n"),
+        "req:\n{req}"
+    );
+    assert!(
+        req.contains(&format!("--{boundary}--\r\n")),
+        "closing boundary, req:\n{req}"
+    );
+    // The original urlencoded form must not leak through as the body.
+    assert!(!req.contains("q=seed&other=keep"), "req:\n{req}");
+}
+
+#[test]
 fn build_request_text_does_not_duplicate_content_type_header() {
     // When the target already carries a Content-Type the synthesizer must not
     // append a second one.
@@ -2008,20 +2052,31 @@ fn build_request_text_includes_headers_and_cookies() {
 }
 
 #[test]
-fn build_request_text_multipart_keeps_body_and_type() {
+fn build_request_text_multipart_synthesizes_field_when_absent() {
+    // `target.data` for a multipart injection is `key=value` pairs (see
+    // `multipart_form`), never a raw multipart blob. When the injected field
+    // isn't among them, it is appended as a new multipart part carrying the
+    // payload — the request must still be a well-framed multipart body.
     let target = Target {
         method: "POST".to_string(),
-        data: Some("--boundary\r\n...".to_string()),
+        data: Some("unrelated=1".to_string()),
         ..target_for("https://example.com/upload")
     };
     let param = req_param("file", "", Location::MultipartBody);
     let req = super::build_request_text(&target, &param, "PAY");
     assert!(req.starts_with("POST /upload "), "req:\n{req}");
     assert!(
-        req.contains("Content-Type: multipart/form-data"),
+        req.contains("Content-Type: multipart/form-data; boundary="),
         "req:\n{req}"
     );
-    assert!(req.contains("--boundary"), "req:\n{req}");
+    assert!(
+        req.contains("name=\"file\"\r\n\r\nPAY\r\n"),
+        "injected field must be present, req:\n{req}"
+    );
+    assert!(
+        req.contains("name=\"unrelated\"\r\n\r\n1\r\n"),
+        "existing fields preserved, req:\n{req}"
+    );
 }
 
 // ---- ast_source_uses_browser_url_surface --------------------------------

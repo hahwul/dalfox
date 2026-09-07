@@ -160,3 +160,54 @@ fn graphql_curl_poc_reproduces_full_recorded_body() {
         "{out}"
     );
 }
+
+#[test]
+fn multipart_curl_poc_uses_form_string_not_urlencoded() {
+    // A multipart finding must reproduce as a multipart request. `--data`
+    // would send `application/x-www-form-urlencoded` — the wrong wire format —
+    // and `-F` would treat the leading `<` as "read from file". `--form-string`
+    // sends the literal value as a real multipart field.
+    let r = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("POST")
+        .param("q")
+        .payload("<svg onload=alert(1)>")
+        .message_str("x")
+        .build();
+    let mut r = r;
+    r.location = "MultipartBody".to_string();
+    let out = render_curl_poc(&r, "http://h:8899/m");
+    assert!(
+        out.contains("--form-string \"q=<svg onload=alert(1)>\""),
+        "{out}"
+    );
+    assert!(
+        !out.contains("--data"),
+        "must not fall back to urlencoded: {out}"
+    );
+    assert!(
+        !out.contains("-F \""),
+        "must not use -F (leading `<` = read-from-file): {out}"
+    );
+}
+
+#[test]
+fn multipart_httpie_poc_forces_multipart() {
+    // httpie's `-f`/`--form` sends urlencoded unless a file field is present;
+    // `--multipart` forces the multipart/form-data request needed to reproduce.
+    let r = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("POST")
+        .param("q")
+        .payload("<svg onload=alert(1)>")
+        .message_str("x")
+        .build();
+    let mut r = r;
+    r.location = "MultipartBody".to_string();
+    let out = render_httpie_poc(&r, "http://h:8899/m");
+    assert!(out.contains("http --multipart post"), "{out}");
+    assert!(
+        !out.contains("http -f "),
+        "must not use urlencoded form mode: {out}"
+    );
+}

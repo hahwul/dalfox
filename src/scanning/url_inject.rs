@@ -695,6 +695,59 @@ pub(crate) fn multipart_form(
     form
 }
 
+/// Fixed, representative boundary for a rendered multipart PoC. reqwest picks a
+/// random boundary at send time; the PoC needs a stable, self-consistent one so
+/// the displayed body and its `Content-Type` agree and the request is
+/// copy-pasteable.
+const MULTIPART_POC_BOUNDARY: &str = "----DalfoxBoundary7MA4YWxkTrZu0gW";
+
+/// Render a faithful `multipart/form-data` body (and matching `Content-Type`)
+/// for the PoC, mirroring field-for-field what [`multipart_form`] puts on the
+/// wire (same source `data`, same "inject into the named field, else append"
+/// logic). Kept next to `multipart_form` on purpose: the two must serialize the
+/// same fields, so a change to one is a visible prompt to change the other.
+pub(crate) fn multipart_poc_body(data: Option<&str>, name: &str, value: &str) -> (String, String) {
+    fn push_field(body: &mut String, k: &str, v: &str) {
+        body.push_str("--");
+        body.push_str(MULTIPART_POC_BOUNDARY);
+        body.push_str("\r\nContent-Disposition: form-data; name=\"");
+        body.push_str(k);
+        body.push_str("\"\r\n\r\n");
+        body.push_str(v);
+        body.push_str("\r\n");
+    }
+
+    let mut body = String::new();
+    let mut found = false;
+    if let Some(data) = data {
+        for pair in data.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                let k = urlencoding::decode(k)
+                    .unwrap_or(Cow::Borrowed(k))
+                    .to_string();
+                let v = urlencoding::decode(v)
+                    .unwrap_or(Cow::Borrowed(v))
+                    .to_string();
+                if k == name {
+                    push_field(&mut body, &k, value);
+                    found = true;
+                } else {
+                    push_field(&mut body, &k, &v);
+                }
+            }
+        }
+    }
+    if !found {
+        push_field(&mut body, name, value);
+    }
+    body.push_str("--");
+    body.push_str(MULTIPART_POC_BOUNDARY);
+    body.push_str("--\r\n");
+
+    let content_type = format!("multipart/form-data; boundary={MULTIPART_POC_BOUNDARY}");
+    (body, content_type)
+}
+
 /// Resolve the URL a body-bearing injection must be sent to: the discovered
 /// `<form action=...>` endpoint when the param came from a form, else the
 /// target's own URL. A form-discovered body param reflects at the action
