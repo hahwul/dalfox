@@ -27,21 +27,29 @@
       <div class="search-results" id="searchResults"></div>
     </div>
   </div>
+  {# One centered tier, mirroring the gori docs footer: a quiet pill row of
+     outbound links over a single meta line that carries the hahwul signature,
+     the licence and the generator credit. "Built with Love" stays untranslated
+     on purpose — it is a signature, and the handwriting stack carries no
+     Hangul anyway. #}
   <footer class="site-footer">
     <div class="footer-inner">
-      <div class="footer-branding">
-        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
-        <span class="divider" style="color:var(--border-light)">·</span>
-        <span>{% if page_language == "ko" %}MIT 라이선스로 배포{% else %}Released under the MIT License{% endif %}</span>
-        <span class="divider" style="color:var(--border-light)">·</span>
-        <span>{% if page_language == "ko" %}<a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작{% else %}Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>{% endif %}</span>
-      </div>
-      <div class="footer-links">
+      <nav class="footer-links" aria-label="{% if page_language == "ko" %}푸터 링크{% else %}Footer links{% endif %}">
         <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">{% if page_language == "ko" %}릴리스{% else %}Releases{% endif %}</a>
         <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">{% if page_language == "ko" %}이슈{% else %}Issues{% endif %}</a>
         <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" target="_blank" rel="noopener">{% if page_language == "ko" %}기여하기{% else %}Contribute{% endif %}</a>
-      </div>
+      </nav>
+      <p class="footer-meta">
+        <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+          <span class="hahwul-img" aria-hidden="true"></span>
+          <span class="footer-love">Built with Love</span>
+        </a>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span>MIT &middot; &copy; 2026 <a href="https://github.com/hahwul" target="_blank" rel="noopener">HAHWUL</a></span>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span>{% if page_language == "ko" %}<a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작{% else %}Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>{% endif %}</span>
+      </p>
     </div>
   </footer>
   <script src="{{ base_url }}/assets/js/highlight.min.js"></script>

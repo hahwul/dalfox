@@ -1183,11 +1183,14 @@ nav.pagination a:hover {
 /* ==========================================================================
    Site footer
    ========================================================================== */
+/* One centered tier on the body ground: the old two-column branding/links
+   split was more scaffolding than four links and a copyright ever needed.
+   No panel fill — the hairline and its seal carry the close. */
 .site-footer {
     position: relative;
     border-top: 1px solid var(--ink-line);
-    padding: 2.5rem 2rem;
-    background: var(--bg-sidebar);
+    padding: 3rem 2rem 3.25rem;
+    text-align: center;
 }
 /* Lozenge seal centred on the footer's top divider — mirrors `.section::after`
    so the footer reads as the final panel in the same sequence of dividers. */
@@ -1246,38 +1249,73 @@ body:has(.docs-layout) .site-footer {
     max-width: 1100px;
     margin: 0 auto;
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+    gap: 1.1rem;
 }
-.footer-branding {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    color: var(--text-muted);
-    font-size: 0.82rem;
-}
-.footer-branding a {
-    color: var(--text-secondary);
-    text-decoration: none;
-}
-.footer-branding a:hover {
-    color: var(--text-primary);
-}
+/* Borrows the header nav's quiet pill so the row reads as the header's echo
+   rather than a second link idiom. Wrapping keeps it upright without a
+   breakpoint. */
 .footer-links {
     display: flex;
-    gap: 1.25rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.25rem 0.4rem;
 }
 .footer-links a {
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
     color: var(--text-muted);
     text-decoration: none;
     font-size: 0.8rem;
     font-weight: 500;
-    transition: color 0.15s;
+    transition:
+        color 0.15s,
+        background 0.15s;
 }
 .footer-links a:hover {
+    background: var(--accent-dim);
     color: var(--text-primary);
+}
+.footer-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem 0.55rem;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+.footer-meta a {
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+.footer-meta a:hover {
+    color: var(--text-primary);
+}
+/* Dim the separators one step below the meta text so they read as spacing
+   rather than punctuation. */
+.footer-sep {
+    opacity: 0.55;
+}
+/* The hahwul mark, folded into the meta line: the signature costs a glyph
+   here instead of the landing footer's own block. */
+.footer-sig {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.footer-sig .hahwul-img {
+    width: 22px;
+    height: 22px;
+}
+.footer-sig:hover .hahwul-img {
+    background-color: var(--text-primary);
+}
+.footer-sig .footer-love {
+    margin-top: 0;
+    font-size: 0.9rem;
 }
 /* ==========================================================================
    Landing page
@@ -2481,10 +2519,6 @@ body:has(.docs-layout) .site-footer {
     }
     .cta-illustration {
         opacity: 0.1;
-    }
-    .footer-inner {
-        flex-direction: column;
-        text-align: center;
     }
 }
 
