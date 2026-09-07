@@ -962,3 +962,56 @@ fn xml_content_type_defaults_when_non_xml_or_absent() {
     let bare = Target::for_url(Url::parse("http://x/").unwrap());
     assert_eq!(xml_request_content_type(&bare), "application/xml");
 }
+
+#[test]
+fn multipart_fields_replace_preserve_append() {
+    // Named field's value replaced, siblings kept in order.
+    let f = multipart_fields(Some("a=1&q=seed&b=2"), "q", "PAY");
+    assert_eq!(
+        f,
+        vec![
+            ("a".to_string(), "1".to_string()),
+            ("q".to_string(), "PAY".to_string()),
+            ("b".to_string(), "2".to_string()),
+        ]
+    );
+    // Absent field appended after the existing ones.
+    let f = multipart_fields(Some("a=1"), "q", "PAY");
+    assert_eq!(
+        f,
+        vec![
+            ("a".to_string(), "1".to_string()),
+            ("q".to_string(), "PAY".to_string()),
+        ]
+    );
+    // No data at all: just the injected field.
+    assert_eq!(
+        multipart_fields(None, "q", "PAY"),
+        vec![("q".to_string(), "PAY".to_string())]
+    );
+}
+
+#[test]
+fn multipart_poc_body_serializes_exactly_the_shared_fields() {
+    // The PoC body must contain every field `multipart_fields` selects — the
+    // same set the wire `multipart_form` sends — framed by the boundary its
+    // Content-Type declares. This is the drift guard binding the displayed PoC
+    // to the sent request.
+    let data = Some("a=1&q=seed");
+    let (body, content_type) = multipart_poc_body(data, "q", "<svg/onload=alert(1)>");
+    let boundary = content_type
+        .strip_prefix("multipart/form-data; boundary=")
+        .expect("content-type carries a boundary");
+    for (k, v) in multipart_fields(data, "q", "<svg/onload=alert(1)>") {
+        assert!(
+            body.contains(&format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n"
+            )),
+            "field {k}={v} missing from body:\n{body}"
+        );
+    }
+    assert!(
+        body.ends_with(&format!("--{boundary}--\r\n")),
+        "body:\n{body}"
+    );
+}

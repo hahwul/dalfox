@@ -657,6 +657,40 @@ pub(crate) fn json_body(data: Option<&str>, name: &str, param_value: &str, value
     }
 }
 
+/// The ordered form fields a multipart injection puts on the wire: the target's
+/// captured `data` parsed as `key=value` pairs (percent-decoded), with `name`'s
+/// value replaced by `value`, or a fresh `name=value` field appended when the
+/// param isn't already present. Single source of field selection for both the
+/// wire form ([`multipart_form`]) and the rendered PoC ([`multipart_poc_body`]),
+/// so the request that is sent and the request that is displayed cannot disagree
+/// on which fields exist.
+fn multipart_fields(data: Option<&str>, name: &str, value: &str) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    let mut found = false;
+    if let Some(data) = data {
+        for pair in data.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                let k = urlencoding::decode(k)
+                    .unwrap_or(Cow::Borrowed(k))
+                    .to_string();
+                let v = urlencoding::decode(v)
+                    .unwrap_or(Cow::Borrowed(v))
+                    .to_string();
+                if k == name {
+                    fields.push((k, value.to_string()));
+                    found = true;
+                } else {
+                    fields.push((k, v));
+                }
+            }
+        }
+    }
+    if !found {
+        fields.push((name.to_string(), value.to_string()));
+    }
+    fields
+}
+
 /// Build a `multipart/form-data` form that carries `value` for `name`,
 /// replacing the matching field from the captured `data` and appending it when
 /// absent so an explicit `--param` not present in an imported body still ships
@@ -670,27 +704,8 @@ pub(crate) fn multipart_form(
     value: &str,
 ) -> reqwest::multipart::Form {
     let mut form = reqwest::multipart::Form::new();
-    let mut found = false;
-    if let Some(data) = data {
-        for pair in data.split('&') {
-            if let Some((k, v)) = pair.split_once('=') {
-                let k = urlencoding::decode(k)
-                    .unwrap_or(Cow::Borrowed(k))
-                    .to_string();
-                let v = urlencoding::decode(v)
-                    .unwrap_or(Cow::Borrowed(v))
-                    .to_string();
-                if k == name {
-                    form = form.text(k, value.to_string());
-                    found = true;
-                } else {
-                    form = form.text(k, v);
-                }
-            }
-        }
-    }
-    if !found {
-        form = form.text(name.to_string(), value.to_string());
+    for (k, v) in multipart_fields(data, name, value) {
+        form = form.text(k, v);
     }
     form
 }
@@ -702,43 +717,19 @@ pub(crate) fn multipart_form(
 const MULTIPART_POC_BOUNDARY: &str = "----DalfoxBoundary7MA4YWxkTrZu0gW";
 
 /// Render a faithful `multipart/form-data` body (and matching `Content-Type`)
-/// for the PoC, mirroring field-for-field what [`multipart_form`] puts on the
-/// wire (same source `data`, same "inject into the named field, else append"
-/// logic). Kept next to `multipart_form` on purpose: the two must serialize the
-/// same fields, so a change to one is a visible prompt to change the other.
+/// for the PoC. Serializes the exact fields [`multipart_form`] sends — both draw
+/// from [`multipart_fields`], so they cannot disagree on which fields exist —
+/// framed here with a fixed boundary the displayed `Content-Type` declares.
 pub(crate) fn multipart_poc_body(data: Option<&str>, name: &str, value: &str) -> (String, String) {
-    fn push_field(body: &mut String, k: &str, v: &str) {
+    let mut body = String::new();
+    for (k, v) in multipart_fields(data, name, value) {
         body.push_str("--");
         body.push_str(MULTIPART_POC_BOUNDARY);
         body.push_str("\r\nContent-Disposition: form-data; name=\"");
-        body.push_str(k);
+        body.push_str(&k);
         body.push_str("\"\r\n\r\n");
-        body.push_str(v);
+        body.push_str(&v);
         body.push_str("\r\n");
-    }
-
-    let mut body = String::new();
-    let mut found = false;
-    if let Some(data) = data {
-        for pair in data.split('&') {
-            if let Some((k, v)) = pair.split_once('=') {
-                let k = urlencoding::decode(k)
-                    .unwrap_or(Cow::Borrowed(k))
-                    .to_string();
-                let v = urlencoding::decode(v)
-                    .unwrap_or(Cow::Borrowed(v))
-                    .to_string();
-                if k == name {
-                    push_field(&mut body, &k, value);
-                    found = true;
-                } else {
-                    push_field(&mut body, &k, &v);
-                }
-            }
-        }
-    }
-    if !found {
-        push_field(&mut body, name, value);
     }
     body.push_str("--");
     body.push_str(MULTIPART_POC_BOUNDARY);

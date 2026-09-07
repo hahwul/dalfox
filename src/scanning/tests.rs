@@ -2052,6 +2052,53 @@ fn build_request_text_includes_headers_and_cookies() {
 }
 
 #[test]
+fn build_request_text_body_renders_pre_encoded_value() {
+    // A param that requires pre-encoding is sent encoded on the wire (the scan
+    // applies `apply_param_encoding` before injecting), and the server decodes
+    // it back to the raw payload. The PoC must show the encoded value it would
+    // replay — otherwise a pasted request carries un-encoded bytes the sink
+    // never reflects. base64("PAY") == "UEFZ".
+    let mut param = req_param("q", "seed", Location::Body);
+    param.pre_encoding = Some("base64".to_string());
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some("q=seed".to_string()),
+        ..target_for("https://example.com/e")
+    };
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(
+        req.contains("q=UEFZ"),
+        "expected base64 field value, req:\n{req}"
+    );
+    assert!(
+        !req.contains("q=PAY"),
+        "raw payload must not appear, req:\n{req}"
+    );
+}
+
+#[test]
+fn build_request_text_multipart_renders_pre_encoded_value() {
+    // Same contract for a multipart field: the boundary-framed part carries the
+    // pre-encoded value, mirroring `build_multipart_request`.
+    let mut param = req_param("q", "seed", Location::MultipartBody);
+    param.pre_encoding = Some("base64".to_string());
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some("q=seed".to_string()),
+        ..target_for("https://example.com/e")
+    };
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(
+        req.contains("name=\"q\"\r\n\r\nUEFZ\r\n"),
+        "expected base64 in the multipart field, req:\n{req}"
+    );
+    assert!(
+        !req.contains("\r\nPAY\r\n"),
+        "raw payload must not appear, req:\n{req}"
+    );
+}
+
+#[test]
 fn build_request_text_multipart_synthesizes_field_when_absent() {
     // `target.data` for a multipart injection is `key=value` pairs (see
     // `multipart_form`), never a raw multipart blob. When the injected field

@@ -77,12 +77,20 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
     let method = crate::scanning::url_inject::effective_method(&target.method, param);
     // Body-bearing locations always send a body; synthesize one when the
     // target has no original `data`, so the displayed PoC isn't an empty POST.
+    // The scan applies `apply_param_encoding` to every injected value before it
+    // goes on the wire (see `check_reflection`/`check_dom_verification`), so a
+    // param that requires pre-encoding (e.g. an auto-detected base64 field) is
+    // sent encoded and the server decodes it back to the raw payload. For the
+    // body-scalar locations the PoC must embed that same encoded value, or a
+    // pasted request would carry un-encoded bytes the sink never reflects. A
+    // param with no pre-encoding gets the raw payload back unchanged.
+    let field_value = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
     let (body, content_type): (Option<String>, Option<String>) = match param.location {
         Location::Body => {
             let body = crate::scanning::url_inject::urlencoded_body(
                 target.data.as_deref(),
                 &param.name,
-                payload,
+                &field_value,
             );
             (
                 Some(body),
@@ -94,41 +102,36 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
                 target.data.as_deref(),
                 &param.name,
                 &param.value,
-                payload,
+                &field_value,
             );
             (Some(body), Some("application/json".to_string()))
         }
         Location::MultipartBody => {
             // Mirror the multipart form actually sent (`build_multipart_request`
-            // → `multipart_form`): inject the payload into the named field and
-            // frame it with a real boundary. Cloning `target.data` shipped the
-            // original, payload-free, urlencoded body under a boundary-less
-            // `multipart/form-data` type — a PoC that reproduced nothing.
+            // → `multipart_form`): inject the (pre-encoded) value into the named
+            // field and frame it with a real boundary. Cloning `target.data`
+            // shipped the original, payload-free, urlencoded body under a
+            // boundary-less `multipart/form-data` type — a PoC that reproduced
+            // nothing.
             let (body, content_type) = crate::scanning::url_inject::multipart_poc_body(
                 target.data.as_deref(),
                 &param.name,
-                payload,
+                &field_value,
             );
             (Some(body), Some(content_type))
         }
         // GraphQL / XML rebuild the whole body from the param's pipeline
         // (`JsonField` into the GraphQL request / `Splice` around the XML
-        // injection point). `apply_param_encoding` runs that pipeline on the
-        // raw `payload`, so the displayed PoC body is exactly what goes on the
-        // wire.
-        Location::GraphqlBody => {
-            let body = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
-            (Some(body), Some("application/json".to_string()))
-        }
-        Location::XmlBody => {
-            let body = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
-            (
-                Some(body),
-                Some(crate::scanning::url_inject::xml_request_content_type(
-                    target,
-                )),
-            )
-        }
+        // injection point). For these, `apply_param_encoding` (already computed
+        // as `field_value`) runs that pipeline on the raw `payload` and yields
+        // the complete body — exactly what goes on the wire.
+        Location::GraphqlBody => (Some(field_value), Some("application/json".to_string())),
+        Location::XmlBody => (
+            Some(field_value),
+            Some(crate::scanning::url_inject::xml_request_content_type(
+                target,
+            )),
+        ),
         _ => (target.data.clone(), None),
     };
 
