@@ -185,6 +185,9 @@ impl Target {
         // is harmless (the loser's value is dropped on insert).
         let mut client_builder = Client::builder()
             .timeout(Duration::from_secs(self.timeout))
+            // reqwest reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY by default;
+            // `--proxy` is applied below and still takes effect.
+            .no_proxy()
             // Insecure mode for scanner (default on; `--insecure=false` to
             // enforce TLS certificate validation).
             .danger_accept_invalid_certs(self.insecure);
