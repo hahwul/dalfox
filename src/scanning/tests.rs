@@ -960,7 +960,8 @@ fn test_next_blocked_streak_spares_reflecting_error_pages() {
     assert!(!dom_phase_should_early_exit(
         false,
         0,
-        next_blocked_streak(63, 500, true)
+        next_blocked_streak(63, 500, true),
+        0
     ));
 }
 
@@ -981,7 +982,8 @@ fn test_dom_phase_early_exit_disabled_under_deep_scan() {
     assert!(!dom_phase_should_early_exit(
         true,
         INERT_ECHO_BUDGET * 10,
-        BLOCKED_STREAK_LIMIT * 10
+        BLOCKED_STREAK_LIMIT * 10,
+        REDIRECT_STREAK_LIMIT * 10
     ));
 }
 
@@ -991,10 +993,16 @@ fn test_dom_phase_early_exit_inert_echo_threshold() {
     assert!(!dom_phase_should_early_exit(
         false,
         INERT_ECHO_BUDGET - 1,
+        0,
         0
     ));
-    assert!(dom_phase_should_early_exit(false, INERT_ECHO_BUDGET, 0));
-    assert!(dom_phase_should_early_exit(false, INERT_ECHO_BUDGET + 1, 0));
+    assert!(dom_phase_should_early_exit(false, INERT_ECHO_BUDGET, 0, 0));
+    assert!(dom_phase_should_early_exit(
+        false,
+        INERT_ECHO_BUDGET + 1,
+        0,
+        0
+    ));
 }
 
 #[test]
@@ -1002,16 +1010,35 @@ fn test_dom_phase_early_exit_blocked_streak_threshold() {
     assert!(!dom_phase_should_early_exit(
         false,
         0,
-        BLOCKED_STREAK_LIMIT - 1
+        BLOCKED_STREAK_LIMIT - 1,
+        0
     ));
-    assert!(dom_phase_should_early_exit(false, 0, BLOCKED_STREAK_LIMIT));
+    assert!(dom_phase_should_early_exit(
+        false,
+        0,
+        BLOCKED_STREAK_LIMIT,
+        0
+    ));
 }
 
 #[test]
 fn test_dom_phase_no_early_exit_without_signal() {
     // No inert echoes and no block streak → run the full (capped) set.
-    assert!(!dom_phase_should_early_exit(false, 0, 0));
-    assert!(!dom_phase_should_early_exit(false, 10, 5));
+    assert!(!dom_phase_should_early_exit(false, 0, 0, 0));
+    assert!(!dom_phase_should_early_exit(false, 10, 5, 0));
+    // Redirect streak alone triggers the exit at its own threshold.
+    assert!(!dom_phase_should_early_exit(
+        false,
+        0,
+        0,
+        REDIRECT_STREAK_LIMIT - 1
+    ));
+    assert!(dom_phase_should_early_exit(
+        false,
+        0,
+        0,
+        REDIRECT_STREAK_LIMIT
+    ));
 }
 
 #[tokio::test]
@@ -3460,4 +3487,192 @@ fn test_build_request_text_query_param_keeps_the_captured_content_type() {
         request.contains("Content-Type: application/json"),
         "got:\n{request}"
     );
+}
+
+/// A safe/sanitizing single-parameter endpoint (entity-encodes `<`/`>`, so it
+/// reflects the marker but never verifies) exercises the full reflection + DOM
+/// catalog. With within-parameter concurrency the payloads are fanned out, so
+/// the mock must observe more than one request in flight at once — bounded by
+/// `--workers`. Before within-param concurrency this endpoint issued its entire
+/// catalog one request at a time (observed concurrency == 1), which was the
+/// single-parameter wall-time bottleneck.
+#[tokio::test]
+async fn test_within_param_concurrency_fans_out_requests() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    let cur = Arc::new(AtomicUsize::new(0));
+    let observed_max = Arc::new(AtomicUsize::new(0));
+    let cur_h = cur.clone();
+    let max_h = observed_max.clone();
+    let handler = move |Query(params): Query<HashMap<String, String>>| {
+        let cur = cur_h.clone();
+        let max = max_h.clone();
+        async move {
+            let now = cur.fetch_add(1, Ordering::SeqCst) + 1;
+            max.fetch_max(now, Ordering::SeqCst);
+            // Hold the request open briefly so genuinely-concurrent requests
+            // overlap in the counter (a purely serial loop never would).
+            sleep(Duration::from_millis(20)).await;
+            cur.fetch_sub(1, Ordering::SeqCst);
+            // Entity-encode angles: the marker still reflects (probe passes) but
+            // no payload ever verifies, so the whole catalog is exercised.
+            let q = params.get("q").cloned().unwrap_or_default();
+            let esc = q.replace('<', "&lt;").replace('>', "&gt;");
+            Html(format!("<html><body><div>{}</div></body></html>", esc))
+        }
+    };
+    let app = Router::new().route("/", get(handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?q=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.workers = 8;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+    });
+
+    let mut args = integration_scan_args(false);
+    // Keep the run quick but comfortably larger than the concurrency window so
+    // several chunks are issued.
+    args.max_payloads_per_param = 60;
+    let args = Arc::new(args);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        ScanRunHandles::new(results, Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let observed = observed_max.load(Ordering::SeqCst);
+    assert!(
+        observed > 1,
+        "within-parameter concurrency should keep more than one request in \
+         flight on a single parameter; observed max concurrency = {observed}"
+    );
+    assert!(
+        observed <= target.workers,
+        "observed concurrency {observed} must never exceed --workers {}",
+        target.workers
+    );
+}
+
+/// `--waf-evasion` opts out of within-parameter concurrency: its stealth cadence
+/// requires a single request at a time. The same sanitizing endpoint must be
+/// scanned strictly serially (observed max concurrency == 1). This also guards
+/// the `--sxss` / `--delay` serial modes, which share the `request_concurrency`
+/// gate.
+#[tokio::test]
+async fn test_waf_evasion_keeps_requests_serial() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    let cur = Arc::new(AtomicUsize::new(0));
+    let observed_max = Arc::new(AtomicUsize::new(0));
+    let cur_h = cur.clone();
+    let max_h = observed_max.clone();
+    let handler = move |Query(params): Query<HashMap<String, String>>| {
+        let cur = cur_h.clone();
+        let max = max_h.clone();
+        async move {
+            let now = cur.fetch_add(1, Ordering::SeqCst) + 1;
+            max.fetch_max(now, Ordering::SeqCst);
+            sleep(Duration::from_millis(5)).await;
+            cur.fetch_sub(1, Ordering::SeqCst);
+            let q = params.get("q").cloned().unwrap_or_default();
+            let esc = q.replace('<', "&lt;").replace('>', "&gt;");
+            Html(format!("<html><body><div>{}</div></body></html>", esc))
+        }
+    };
+    let app = Router::new().route("/", get(handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?q=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.workers = 8;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+    });
+
+    let mut args = integration_scan_args(false);
+    args.max_payloads_per_param = 40;
+    args.waf_evasion = true;
+    let args = Arc::new(args);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        ScanRunHandles::new(results, Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    assert_eq!(
+        observed_max.load(Ordering::SeqCst),
+        1,
+        "--waf-evasion must keep requests strictly serial (no within-param fan-out)"
+    );
+}
+
+#[test]
+fn test_next_redirect_streak_consecutive_and_resets() {
+    // A 3xx increments the streak…
+    assert_eq!(next_redirect_streak(0, 302), 1);
+    assert_eq!(next_redirect_streak(5, 301), 6);
+    assert_eq!(next_redirect_streak(31, 307), 32);
+    // …every non-3xx (2xx render, 4xx block, 5xx error, 0 transport error)
+    // resets it, so a conditionally-redirecting endpoint is never abandoned on
+    // the first 200 that dodges the redirect rule.
+    assert_eq!(next_redirect_streak(31, 200), 0);
+    assert_eq!(next_redirect_streak(31, 404), 0);
+    assert_eq!(next_redirect_streak(31, 500), 0);
+    assert_eq!(next_redirect_streak(31, 0), 0);
+    // Boundary of the redirect class.
+    assert_eq!(next_redirect_streak(0, 299), 0);
+    assert_eq!(next_redirect_streak(0, 300), 1);
+    assert_eq!(next_redirect_streak(0, 399), 1);
+    assert_eq!(next_redirect_streak(0, 400), 0);
+}
+
+#[test]
+fn test_is_redirect_dom_status_classifies_3xx_only() {
+    assert!(is_redirect_dom_status(300));
+    assert!(is_redirect_dom_status(302));
+    assert!(is_redirect_dom_status(399));
+    assert!(!is_redirect_dom_status(200));
+    assert!(!is_redirect_dom_status(404));
+    assert!(!is_redirect_dom_status(500));
+}
+
+#[test]
+fn test_dom_phase_early_exit_redirect_streak_disabled_under_deep_scan() {
+    // --deep-scan opts out of the redirect early-exit too (exhaustive).
+    assert!(!dom_phase_should_early_exit(
+        true,
+        0,
+        0,
+        REDIRECT_STREAK_LIMIT * 10
+    ));
 }

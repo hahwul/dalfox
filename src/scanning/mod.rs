@@ -29,9 +29,30 @@
 //!     non-reflecting / safe-context one
 //! + DOM phase: 1 request per DOM payload until a payload verifies (`V`) OR the
 //!     recall-preserving early exit fires (see `INERT_ECHO_BUDGET` /
-//!     `BLOCKED_STREAK_LIMIT`) OR the per-param cap is hit
+//!     `BLOCKED_STREAK_LIMIT` / `REDIRECT_STREAK_LIMIT`) OR the per-param cap is
+//!     hit
 //! + HPP (only with `--hpp`, ≤ 5 payloads × 3 positions)
 //! ```
+//!
+//! ## Concurrency model
+//! Two budgets, both sized to `workers`:
+//! * a **parameter** semaphore (`ScanWorkerCtx::semaphore`) — one permit per
+//!   parameter, held for the parameter's whole lifetime — so at most `workers`
+//!   parameters are scanned at once, and
+//! * a **request** budget (`ScanWorkerCtx::req_budget`) — one permit per HTTP
+//!   request — so the scan-wide number of *in-flight requests* never exceeds
+//!   `workers`.
+//!
+//! The reflection and DOM phases issue their payloads in chunks of up to
+//! `request_concurrency()` in flight (bounded by `req_budget`) and fold the
+//! responses back **in payload order**, so first-hit-wins dedup and the ordered
+//! #1156 early-exit budgets behave exactly as under the old strictly-serial
+//! loop. This is what makes a single-parameter target actually use `--workers`:
+//! previously one permit was held for the whole parameter, so its entire payload
+//! catalog went out one request at a time regardless of `--workers` (a scan of
+//! one hard-filter parameter took `catalog × latency` wall-time). `--sxss`,
+//! `--waf-evasion`, and `--delay` opt back out to a strictly serial cadence (see
+//! `ScanWorkerCtx::request_concurrency`).
 //!
 //! The DOM/reflection payload-set size is `base × encoder_factor`, then a WAF
 //! multiplier only when a WAF is detected (or `--force-waf`):
@@ -262,6 +283,25 @@ const INERT_ECHO_BUDGET: u32 = 256;
 /// budget designed for "reflects everything, verifies nothing".
 const BLOCKED_STREAK_LIMIT: u32 = 64;
 
+/// *Consecutive* 3xx-redirect responses that end the DOM phase.
+///
+/// A redirect can never produce a DOM verification: browsers do not render a
+/// 3xx response body (only `Location:` drives navigation), and
+/// [`check_dom_verification::check_redirect_location`] returns `None` for every
+/// `javascript:` / `data:` / reflected-`next=` redirect (see its doc — modern
+/// browsers refuse to execute those from a `Location:` header). So a DOM payload
+/// sent to a redirecting response is guaranteed non-verifying, and a long run of
+/// them is pure waste — the reflection phase already recorded any `R` the
+/// `Location:` echo warrants.
+///
+/// Scoped **consecutive** (any non-3xx resets it, like [`BLOCKED_STREAK_LIMIT`])
+/// so a *conditionally* redirecting endpoint — one that redirects for most
+/// payloads but renders a 200 for a specific shape that dodges the redirect
+/// rule — is never abandoned: the first 200 clears the streak and the phase
+/// continues. The diverse interleave (#1156) means that non-redirecting shape,
+/// if it exists, appears well within this window. `--deep-scan` disables it.
+const REDIRECT_STREAK_LIMIT: u32 = 32;
+
 /// True for statuses that signal the endpoint will not yield a DOM verification
 /// *and* that no payload variant could turn around: any 5xx server error. 4xx
 /// WAF blocks are intentionally excluded (see [`BLOCKED_STREAK_LIMIT`]); `0`
@@ -299,6 +339,24 @@ fn next_blocked_streak(prev: u32, status: u16, reflected: bool) -> u32 {
     }
 }
 
+/// True for a 3xx redirect status, which structurally cannot DOM-verify
+/// (see [`REDIRECT_STREAK_LIMIT`]).
+fn is_redirect_dom_status(status: u16) -> bool {
+    (300..400).contains(&status)
+}
+
+/// Fold one DOM response's status into the consecutive redirect streak:
+/// increment on a 3xx, reset to 0 on anything else. The reset keeps it
+/// *consecutive*, so a conditionally-redirecting endpoint is never abandoned on
+/// a transient redirect. Pure for unit testing.
+fn next_redirect_streak(prev: u32, status: u16) -> u32 {
+    if is_redirect_dom_status(status) {
+        prev + 1
+    } else {
+        0
+    }
+}
+
 /// Decide whether the DOM phase should stop early given the signals accumulated
 /// so far. Pure so it can be unit-tested without a live server. Disabled under
 /// `--deep-scan` (the exhaustive mode that opts out of all fan-out trimming).
@@ -306,8 +364,12 @@ fn dom_phase_should_early_exit(
     deep_scan: bool,
     inert_echo_count: u32,
     blocked_streak: u32,
+    redirect_streak: u32,
 ) -> bool {
-    !deep_scan && (inert_echo_count >= INERT_ECHO_BUDGET || blocked_streak >= BLOCKED_STREAK_LIMIT)
+    !deep_scan
+        && (inert_echo_count >= INERT_ECHO_BUDGET
+            || blocked_streak >= BLOCKED_STREAK_LIMIT
+            || redirect_streak >= REDIRECT_STREAK_LIMIT)
 }
 
 /// Mutable per-parameter state shared across a single worker's probe,
@@ -327,12 +389,6 @@ struct ParamScanState {
     /// DOM XSS already confirmed for this param locally — skip the
     /// remaining DOM payloads.
     dom_found_locally: bool,
-    /// Per-worker consecutive-WAF-block streak driving the `--waf-evasion`
-    /// backoff escalation. Lives on the per-param scan state (one per worker)
-    /// so a single scan's ~50 concurrent workers don't reset each other's
-    /// streak — which previously kept the escalation from ever firing. Threaded
-    /// into `check_reflection_with_response_tracked`.
-    waf_streak: std::sync::atomic::AtomicU32,
 }
 
 /// Shared, cheaply-clonable context handed to each spawned worker. Every
@@ -351,7 +407,15 @@ struct ScanWorkerCtx {
     limit_result_type: Arc<str>,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
+    /// Per-parameter worker slot: one permit per param, held for the whole
+    /// param, so at most `workers` parameters are scanned at once.
     semaphore: Arc<Semaphore>,
+    /// Global per-*request* budget: every payload request acquires one permit
+    /// for its duration, so the total number of concurrent HTTP requests across
+    /// the whole scan is bounded by `workers` — while letting a single
+    /// parameter fan its payloads out across the budget (within-parameter
+    /// concurrency) instead of sending them strictly one at a time.
+    req_budget: Arc<Semaphore>,
     /// Live per-parameter completion counter (see `run_scanning`'s
     /// `params_done`). Bumped once per finished parameter worker.
     params_done: Option<Arc<AtomicU32>>,
@@ -371,6 +435,91 @@ impl ScanWorkerCtx {
         self.args
             .limit
             .is_some_and(|lim| self.findings_count.load(Ordering::Relaxed) >= lim)
+    }
+
+    /// How many payload requests this parameter may keep in flight at once.
+    ///
+    /// Several modes stay strictly sequential (return 1) because concurrency
+    /// would violate their contract:
+    /// * `--sxss` — stored-write ordering, per-URL retrieval retries, and the
+    ///   propagation backoff all assume one request at a time.
+    /// * `--waf-evasion` — its whole point is a slow, jittered, *non-bursty*
+    ///   cadence a WAF can't fingerprint; firing 50 requests at once is the
+    ///   opposite of that.
+    /// * `--delay > 0` — the documented meaning is a pause *between* requests, so
+    ///   a serial cadence is what the operator asked for. (`--rate-limit` needs
+    ///   no such guard: it is a scan-wide token bucket that bounds the aggregate
+    ///   rate regardless of how many requests are in flight.)
+    ///
+    /// Otherwise a parameter fans out up to `workers` requests, capped by
+    /// [`crate::cmd::scan::MAX_PER_PARAM_CONCURRENCY`] so one hard-filter
+    /// parameter can't monopolise the whole budget. The global `req_budget`
+    /// semaphore still bounds the scan-wide total, so this is only a per-param
+    /// ceiling, never an addition to it.
+    fn request_concurrency(&self) -> usize {
+        if self.args.sxss || self.args.waf_evasion || self.target.delay > 0 {
+            return 1;
+        }
+        self.target
+            .workers
+            .clamp(1, crate::cmd::scan::MAX_PER_PARAM_CONCURRENCY)
+    }
+
+    /// Run one payload's reflection request under the global per-request budget.
+    /// Pure I/O — no shared mutable state — so a chunk of these can be awaited
+    /// concurrently and their results processed serially afterwards.
+    async fn fetch_reflection(
+        &self,
+        param: &Param,
+        payload: &str,
+        waf_streak: &std::sync::atomic::AtomicU32,
+    ) -> (
+        Option<check_reflection::ReflectionKind>,
+        Option<check_reflection::ReflectionBody>,
+    ) {
+        let _permit = self.req_budget.acquire().await;
+        check_reflection_with_response_tracked(
+            Some(self.client.as_ref()),
+            &self.target,
+            param,
+            payload,
+            &self.args,
+            waf_streak,
+        )
+        .await
+    }
+
+    /// Run one payload's DOM-verification request under the global per-request
+    /// budget. Pure I/O; see [`Self::fetch_reflection`].
+    async fn fetch_dom(
+        &self,
+        param: &Param,
+        payload: &str,
+    ) -> crate::scanning::check_dom_verification::DomVerifyOutcome {
+        let _permit = self.req_budget.acquire().await;
+        check_dom_verification_with_client_outcome(
+            self.client.as_ref(),
+            &self.target,
+            param,
+            payload,
+            &self.args,
+        )
+        .await
+    }
+
+    /// Advance both progress bars by `n` ticks in one call (used to reconcile
+    /// the bar when a phase stops early without launching its remaining
+    /// payloads).
+    fn inc_progress(&self, n: u64) {
+        if n == 0 {
+            return;
+        }
+        if let Some(ref pb) = self.pb {
+            pb.inc(n);
+        }
+        if let Some(ref opb) = self.overall_pb {
+            opb.inc(n);
+        }
     }
 
     /// Stream a new finding through the channel (if provided) before it is
@@ -424,6 +573,12 @@ impl ScanWorkerCtx {
         };
 
         let mut state = ParamScanState::default();
+        // Per-parameter consecutive-WAF-block streak driving the `--waf-evasion`
+        // backoff escalation. Owned here (not on `ParamScanState`) so the
+        // concurrent per-payload fetches in the reflection phase can share it by
+        // `&` while the serial result processing keeps `&mut state`. One per
+        // parameter keeps sibling parameters from resetting each other's streak.
+        let waf_streak = std::sync::atomic::AtomicU32::new(0);
 
         // Every parameter's worker is spawned up front (the dispatch loop only
         // gates *spawning* on cancellation), so on a cancelled scan the workers
@@ -436,7 +591,7 @@ impl ScanWorkerCtx {
 
         // Stage 0: fast probe to avoid large payload blasts on non-reflective
         // params (also runs one-shot AST DOM analysis on the probe response).
-        let probe_reflected = self.probe_param(&param, &mut state).await;
+        let probe_reflected = self.probe_param(&param, &mut state, &waf_streak).await;
 
         // If probe found no reflection and not in deep_scan, skip heavy
         // payload loops for this param.
@@ -457,7 +612,7 @@ impl ScanWorkerCtx {
             };
 
         if let PhaseFlow::Abort = self
-            .run_reflection_phase(&param, reflection_payloads, &mut state)
+            .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
             .await
         {
             self.flush_results(&mut state.local_results).await;
@@ -477,7 +632,12 @@ impl ScanWorkerCtx {
     /// one-shot AST DOM analysis on the probe response, and a numeric-only
     /// fallback probe (to catch letter-stripping filters). Returns whether
     /// any reflection was observed; AST findings are pushed into `state`.
-    async fn probe_param(&self, param: &Param, state: &mut ParamScanState) -> bool {
+    async fn probe_param(
+        &self,
+        param: &Param,
+        state: &mut ParamScanState,
+        waf_streak: &std::sync::atomic::AtomicU32,
+    ) -> bool {
         let client = self.client.as_ref();
 
         // Sandwich probe (OPEN+INNER+CLOSE) so the response check picks up
@@ -497,7 +657,7 @@ impl ScanWorkerCtx {
                 param,
                 pp,
                 &self.args,
-                &state.waf_streak,
+                waf_streak,
             )
             .await;
             // Only a browser-rendered body may seed AST analysis / probe
@@ -552,7 +712,7 @@ impl ScanWorkerCtx {
                 param,
                 numeric_probe,
                 &self.args,
-                &state.waf_streak,
+                waf_streak,
             )
             .await;
             if kind.is_some() {
@@ -575,57 +735,98 @@ impl ScanWorkerCtx {
         param: &Param,
         reflection_payloads: Vec<String>,
         state: &mut ParamScanState,
+        waf_streak: &std::sync::atomic::AtomicU32,
     ) -> PhaseFlow {
-        for reflection_payload in reflection_payloads {
-            // Check cancellation
+        // Within-parameter concurrency: the reflection set is issued in chunks
+        // of up to `request_concurrency()` requests in flight at once (each
+        // bounded by the scan-wide `req_budget`), and the responses are
+        // processed serially in payload order so the first-hit-wins dedup, the
+        // static V upgrade, and the once-per-param AST pass all behave exactly
+        // as they did in the old strictly-sequential loop. The very first
+        // payload is sent alone so a parameter that reflects on payload 0 (the
+        // common case) still costs a single request — the fan-out only pays off
+        // on the non-short-circuiting sanitizing / hard-filter parameters, which
+        // is where a serial catalog used to spend thousands of round-trips.
+        let total = reflection_payloads.len();
+        let concurrency = self.request_concurrency();
+        let mut i = 0usize;
+        while i < total {
             if self.cancelled() {
+                // Reconcile the progress bar for the payloads we never launch.
+                self.inc_progress((total - i) as u64);
                 break;
             }
-            // Early stop if global limit reached
             if self.limit_reached() {
+                self.inc_progress((total - i) as u64);
                 return PhaseFlow::Abort;
             }
-            // Skip reflection if already found for this param
-            let reflection_tuple = if state.reflection_found_locally {
-                (None, None)
-            } else if self.args.deep_scan {
-                // deep_scan never records into `found_params.reflection` (the
-                // write path short-circuits to `should_add = true` below), so
-                // the shared read would always return false. Skip the awaited
-                // lock and run the reflection check directly on every payload.
-                check_reflection_with_response_tracked(
-                    Some(self.client.as_ref()),
-                    &self.target,
-                    param,
-                    &reflection_payload,
-                    &self.args,
-                    &state.waf_streak,
-                )
-                .await
-            } else {
-                let already = self
-                    .found_params
-                    .read()
-                    .await
-                    .reflection
-                    .contains(&found_param_key(param));
-                if already {
-                    state.reflection_found_locally = true;
-                    (None, None)
-                } else {
-                    check_reflection_with_response_tracked(
-                        Some(self.client.as_ref()),
-                        &self.target,
-                        param,
-                        &reflection_payload,
-                        &self.args,
-                        &state.waf_streak,
-                    )
-                    .await
+            // Stop launching once this parameter's reflection slot is confirmed
+            // — locally, or by a sibling worker that shares the slot. deep_scan
+            // never records into the shared set (it keeps every finding), so its
+            // read would always miss; skip it there and run the whole catalog.
+            if state.reflection_found_locally
+                || (!self.args.deep_scan && self.shared_reflection_found(param).await)
+            {
+                state.reflection_found_locally = true;
+                self.inc_progress((total - i) as u64);
+                break;
+            }
+            let chunk = if i == 0 { 1 } else { concurrency };
+            let end = (i + chunk).min(total);
+            let fetched = futures::future::join_all(
+                reflection_payloads[i..end]
+                    .iter()
+                    .map(|p| self.fetch_reflection(param, p, waf_streak)),
+            )
+            .await;
+            for (reflection_payload, (reflected_kind, reflection_body)) in
+                reflection_payloads[i..end].iter().zip(fetched)
+            {
+                self.inc_progress(1);
+                // A hit earlier in this same chunk already claimed the slot; the
+                // rest were speculatively fetched (bounded overshoot) — don't
+                // record duplicates for them.
+                if state.reflection_found_locally {
+                    continue;
                 }
-            };
-            let reflected_kind = reflection_tuple.0;
-            let reflection_body = reflection_tuple.1;
+                self.process_reflection_result(
+                    param,
+                    reflection_payload,
+                    reflected_kind,
+                    reflection_body,
+                    state,
+                )
+                .await;
+            }
+            i = end;
+        }
+        PhaseFlow::Continue
+    }
+
+    /// True when this parameter's reflection slot has already been recorded in
+    /// the shared cross-worker set (a sibling worker on the same slot found it).
+    async fn shared_reflection_found(&self, param: &Param) -> bool {
+        self.found_params
+            .read()
+            .await
+            .reflection
+            .contains(&found_param_key(param))
+    }
+
+    /// Process one reflection response: run the once-per-param AST pass, then —
+    /// if the payload reflected — apply the static V upgrade and record the
+    /// R/V finding under the shared first-hit-wins dedup. Extracted from
+    /// [`Self::run_reflection_phase`] so its (concurrently fetched) results can
+    /// be handled serially in payload order.
+    async fn process_reflection_result(
+        &self,
+        param: &Param,
+        reflection_payload: &str,
+        reflected_kind: Option<check_reflection::ReflectionKind>,
+        reflection_body: Option<check_reflection::ReflectionBody>,
+        state: &mut ParamScanState,
+    ) {
+        {
             // Everything downstream of here infers execution from the body
             // (AST sinks, the static V upgrade), so it may only ever see a
             // body a browser would actually render. The 3xx `Location:`
@@ -661,12 +862,6 @@ impl ScanWorkerCtx {
                 state.local_results.extend(ast_findings);
             }
 
-            if let Some(ref pb) = self.pb {
-                pb.inc(1);
-            }
-            if let Some(ref opb) = self.overall_pb {
-                opb.inc(1);
-            }
             if let Some(kind) = reflected_kind {
                 // Static V upgrade: reuse the reflection response body to look
                 // for browser-executable DOM evidence (marker, executable URL in
@@ -685,7 +880,7 @@ impl ScanWorkerCtx {
                 let dom_evidence_kind = renderable_text
                     .and_then(|body| {
                         crate::scanning::check_dom_verification::classify_dom_evidence(
-                            &reflection_payload,
+                            reflection_payload,
                             body,
                         )
                     })
@@ -702,7 +897,7 @@ impl ScanWorkerCtx {
                         found.reflection.insert(found_param_key(param));
                         state.reflection_found_locally = true;
                     }
-                    continue;
+                    return;
                 }
 
                 let should_add = if self.args.deep_scan {
@@ -732,7 +927,7 @@ impl ScanWorkerCtx {
                     // the dedicated reflection-check PoC path. No-op for the common
                     // case (no pre-encoding → payload unchanged).
                     let poc_payload = crate::encoding::pre_encoding::apply_param_encoding(
-                        &reflection_payload,
+                        reflection_payload,
                         param,
                     );
                     let result_url =
@@ -823,7 +1018,7 @@ impl ScanWorkerCtx {
                     let mut result = crate::scanning::result::Result::builder(finding_type)
                         .inject_type(inject_type_for_payload_with_sink(
                             self.args.sxss,
-                            &reflection_payload,
+                            reflection_payload,
                             param.framework_sink.as_deref(),
                         ))
                         .method(crate::scanning::url_inject::effective_method(
@@ -834,7 +1029,7 @@ impl ScanWorkerCtx {
                         .confidence(confidence, confidence_reason)
                         .data(result_url)
                         .param(param.name.clone())
-                        .payload(reflection_payload.clone())
+                        .payload(reflection_payload.to_string())
                         .evidence(summary)
                         .cwe("CWE-79")
                         .severity(severity)
@@ -843,14 +1038,14 @@ impl ScanWorkerCtx {
                         .build();
                     result.location = format!("{:?}", param.location);
                     result.request =
-                        Some(build_request_text(&self.target, param, &reflection_payload));
+                        Some(build_request_text(&self.target, param, reflection_payload));
                     // Report the observed text even when it isn't renderable:
                     // the redirect stand-in is an honest `HTTP 302 Location: …`
                     // line, which is the real evidence for that vector. Only
                     // execution-inferring consumers above are gated on
                     // `renderable`.
                     result.response = reflection_body.map(|b| {
-                        crate::scanning::result::bound_evidence_body(b.text, &reflection_payload)
+                        crate::scanning::result::bound_evidence_body(b.text, reflection_payload)
                     });
 
                     self.stream_finding(&result);
@@ -859,7 +1054,6 @@ impl ScanWorkerCtx {
                 }
             }
         }
-        PhaseFlow::Continue
     }
 
     /// === Stage 6: DOM Verification ===
@@ -878,22 +1072,38 @@ impl ScanWorkerCtx {
         // accrues across the whole phase); `blocked_streak` is consecutive (a
         // single response that gets through resets it, preserving WAF-bypass
         // recall). Both are disabled under `--deep-scan`.
+        //
+        // Within-parameter concurrency (see `run_reflection_phase`): payloads
+        // are issued in chunks of up to `request_concurrency()` in-flight
+        // requests but the responses are folded into the early-exit budgets
+        // **in payload order**, so the #1156 diversity-sampling guarantee (every
+        // DOM-evidence family is represented within the first `INERT_ECHO_BUDGET`
+        // echoes) is preserved exactly. The first payload is sent alone so a
+        // parameter that verifies on payload 0 still costs one request.
         let mut inert_echo_count: u32 = 0;
         let mut blocked_streak: u32 = 0;
-
-        for dom_payload in dom_payloads {
-            // Check cancellation
+        // Consecutive 3xx redirects — a redirecting response can never
+        // DOM-verify (see `REDIRECT_STREAK_LIMIT`).
+        let mut redirect_streak: u32 = 0;
+        let total = dom_payloads.len();
+        let concurrency = self.request_concurrency();
+        // How many payloads have been folded into the progress bar / budgets so
+        // far; used to reconcile the bar for the un-launched tail on any early
+        // exit so the overall bar still reaches 100%.
+        let mut done = 0usize;
+        let mut i = 0usize;
+        'outer: while i < total {
             if self.cancelled() {
+                self.inc_progress((total - done) as u64);
                 break;
             }
-            // Early stop if global limit reached
             if self.limit_reached() {
+                self.inc_progress((total - done) as u64);
                 return PhaseFlow::Abort;
             }
-            // Skip DOM verification if already found for this param
-            let already_dom_found = if state.dom_found_locally {
-                true
-            } else {
+            // Stop launching once this parameter's DOM slot is confirmed —
+            // locally or by a sibling worker that shares the slot.
+            let already_dom_found = state.dom_found_locally || {
                 let is_found = self
                     .found_params
                     .read()
@@ -906,137 +1116,155 @@ impl ScanWorkerCtx {
                 is_found
             };
             if already_dom_found {
-                if let Some(ref pb) = self.pb {
-                    pb.inc(1);
-                }
-                if let Some(ref opb) = self.overall_pb {
-                    opb.inc(1);
-                }
-                continue;
-            }
-            let crate::scanning::check_dom_verification::DomVerifyOutcome {
-                verified: dom_verified,
-                response_text,
-                reflected,
-                status,
-            } = check_dom_verification_with_client_outcome(
-                self.client.as_ref(),
-                &self.target,
-                param,
-                &dom_payload,
-                &self.args,
-            )
-            .await;
-            if dom_verified {
-                let should_add = if self.args.deep_scan {
-                    true
-                } else {
-                    let mut found = self.found_params.write().await;
-                    let key = found_param_key(param);
-                    if !found.dom.contains(&key) {
-                        found.dom.insert(key);
-                        state.dom_found_locally = true;
-                        true
-                    } else {
-                        false
-                    }
-                };
-
-                if should_add {
-                    // Create result (via helper). Use the form action URL
-                    // when the param came from form discovery.
-                    let base =
-                        crate::scanning::url_inject::effective_query_base(&self.target.url, param);
-                    // PoC URL from the as-sent payload (see reflection path above)
-                    // so window-pad / base64 / multi-URL findings reproduce.
-                    let poc_payload =
-                        crate::encoding::pre_encoding::apply_param_encoding(&dom_payload, param);
-                    let result_url =
-                        crate::scanning::url_inject::build_injected_url(&base, param, &poc_payload);
-
-                    // Determine which evidence path proved exploitability
-                    // so the V finding's message reflects the route.
-                    let evidence_label = response_text
-                        .as_deref()
-                        .and_then(|body| {
-                            crate::scanning::check_dom_verification::classify_dom_evidence(
-                                &dom_payload,
-                                body,
-                            )
-                        })
-                        .map_or("DOM evidence", |k| k.label());
-
-                    // DOM-verified => Vulnerability
-                    let mut result =
-                        crate::scanning::result::Result::builder(FindingType::Verified)
-                            .confidence(
-                                crate::scanning::result::Confidence::High,
-                                format!(
-                                    "DOM verification confirmed an executable position ({})",
-                                    evidence_label
-                                ),
-                            )
-                            .inject_type(inject_type_for_payload_with_sink(
-                                self.args.sxss,
-                                &dom_payload,
-                                param.framework_sink.as_deref(),
-                            ))
-                            .method(crate::scanning::url_inject::effective_method(
-                                &self.target.method,
-                                param,
-                            ))
-                            .data(result_url)
-                            .param(param.name.clone())
-                            .payload(dom_payload.clone())
-                            .evidence(format!(
-                                "DOM verification successful for param {} ({})",
-                                param.name, evidence_label
-                            ))
-                            .cwe("CWE-79")
-                            .severity("High")
-                            .message_id(606)
-                            .message_str(format!(
-                                "Triggered XSS Payload ({}): {}={}",
-                                evidence_label, param.name, dom_payload
-                            ))
-                            .build();
-                    result.location = format!("{:?}", param.location);
-                    result.request = Some(build_request_text(&self.target, param, &dom_payload));
-                    result.response = response_text
-                        .map(|t| crate::scanning::result::bound_evidence_body(t, &dom_payload));
-
-                    self.stream_finding(&result);
-                    // Defer pushing to shared results (batched)
-                    state.local_results.push(result);
-                    break;
-                }
-            }
-
-            // Issue #1156 — accumulate the recall-preserving early-exit signals
-            // for this response, then stop the phase once the endpoint has shown
-            // overwhelming evidence it will never verify. Only non-verifying
-            // responses feed the signals: a `dom_verified` response that did not
-            // `break` above (another worker recorded it first, `should_add ==
-            // false`) must not be miscounted as an inert echo.
-            if !dom_verified {
-                inert_echo_count = next_inert_echo_count(inert_echo_count, reflected);
-                blocked_streak = next_blocked_streak(blocked_streak, status, reflected);
-            }
-            if let Some(ref pb) = self.pb {
-                pb.inc(1);
-            }
-            if let Some(ref opb) = self.overall_pb {
-                opb.inc(1);
-            }
-            if dom_phase_should_early_exit(self.args.deep_scan, inert_echo_count, blocked_streak) {
-                crate::dbg_log!(
-                    "dom phase early-exit (param={}): inert_echo={}, blocked_streak={} — endpoint shows no path to DOM verification, skipping remaining payloads",
-                    param.name,
-                    inert_echo_count,
-                    blocked_streak,
-                );
+                self.inc_progress((total - done) as u64);
                 break;
             }
+            let chunk = if i == 0 { 1 } else { concurrency };
+            let end = (i + chunk).min(total);
+            let fetched = futures::future::join_all(
+                dom_payloads[i..end]
+                    .iter()
+                    .map(|p| self.fetch_dom(param, p)),
+            )
+            .await;
+            for (dom_payload, outcome) in dom_payloads[i..end].iter().zip(fetched) {
+                done += 1;
+                self.inc_progress(1);
+                // A hit earlier in this same chunk already recorded the V; the
+                // rest were speculatively fetched (bounded overshoot).
+                if state.dom_found_locally {
+                    continue;
+                }
+                let crate::scanning::check_dom_verification::DomVerifyOutcome {
+                    verified: dom_verified,
+                    response_text,
+                    reflected,
+                    status,
+                } = outcome;
+                if dom_verified {
+                    let should_add = if self.args.deep_scan {
+                        true
+                    } else {
+                        let mut found = self.found_params.write().await;
+                        let key = found_param_key(param);
+                        if !found.dom.contains(&key) {
+                            found.dom.insert(key);
+                            state.dom_found_locally = true;
+                            true
+                        } else {
+                            false
+                        }
+                    };
+
+                    if should_add {
+                        // Create result (via helper). Use the form action URL
+                        // when the param came from form discovery.
+                        let base = crate::scanning::url_inject::effective_query_base(
+                            &self.target.url,
+                            param,
+                        );
+                        // PoC URL from the as-sent payload (see reflection path
+                        // above) so window-pad / base64 / multi-URL findings
+                        // reproduce.
+                        let poc_payload =
+                            crate::encoding::pre_encoding::apply_param_encoding(dom_payload, param);
+                        let result_url = crate::scanning::url_inject::build_injected_url(
+                            &base,
+                            param,
+                            &poc_payload,
+                        );
+
+                        // Determine which evidence path proved exploitability
+                        // so the V finding's message reflects the route.
+                        let evidence_label = response_text
+                            .as_deref()
+                            .and_then(|body| {
+                                crate::scanning::check_dom_verification::classify_dom_evidence(
+                                    dom_payload,
+                                    body,
+                                )
+                            })
+                            .map_or("DOM evidence", |k| k.label());
+
+                        // DOM-verified => Vulnerability
+                        let mut result =
+                            crate::scanning::result::Result::builder(FindingType::Verified)
+                                .confidence(
+                                    crate::scanning::result::Confidence::High,
+                                    format!(
+                                        "DOM verification confirmed an executable position ({})",
+                                        evidence_label
+                                    ),
+                                )
+                                .inject_type(inject_type_for_payload_with_sink(
+                                    self.args.sxss,
+                                    dom_payload,
+                                    param.framework_sink.as_deref(),
+                                ))
+                                .method(crate::scanning::url_inject::effective_method(
+                                    &self.target.method,
+                                    param,
+                                ))
+                                .data(result_url)
+                                .param(param.name.clone())
+                                .payload(dom_payload.to_string())
+                                .evidence(format!(
+                                    "DOM verification successful for param {} ({})",
+                                    param.name, evidence_label
+                                ))
+                                .cwe("CWE-79")
+                                .severity("High")
+                                .message_id(606)
+                                .message_str(format!(
+                                    "Triggered XSS Payload ({}): {}={}",
+                                    evidence_label, param.name, dom_payload
+                                ))
+                                .build();
+                        result.location = format!("{:?}", param.location);
+                        result.request = Some(build_request_text(&self.target, param, dom_payload));
+                        result.response = response_text
+                            .map(|t| crate::scanning::result::bound_evidence_body(t, dom_payload));
+
+                        self.stream_finding(&result);
+                        // Defer pushing to shared results (batched)
+                        state.local_results.push(result);
+                        // V found: stop launching further chunks; reconcile the
+                        // bar for the un-processed remainder (this chunk's tail
+                        // plus every un-launched chunk).
+                        self.inc_progress((total - done) as u64);
+                        break 'outer;
+                    }
+                }
+
+                // Issue #1156 — accumulate the recall-preserving early-exit
+                // signals for this response, then stop the phase once the
+                // endpoint has shown overwhelming evidence it will never verify.
+                // Only non-verifying responses feed the signals: a `dom_verified`
+                // response that did not record above (another worker got there
+                // first, `should_add == false`) must not be miscounted.
+                if !dom_verified {
+                    inert_echo_count = next_inert_echo_count(inert_echo_count, reflected);
+                    blocked_streak = next_blocked_streak(blocked_streak, status, reflected);
+                    redirect_streak = next_redirect_streak(redirect_streak, status);
+                }
+                if dom_phase_should_early_exit(
+                    self.args.deep_scan,
+                    inert_echo_count,
+                    blocked_streak,
+                    redirect_streak,
+                ) {
+                    crate::dbg_log!(
+                        "dom phase early-exit (param={}): inert_echo={}, blocked_streak={}, redirect_streak={} — endpoint shows no path to DOM verification, skipping remaining payloads",
+                        param.name,
+                        inert_echo_count,
+                        blocked_streak,
+                        redirect_streak,
+                    );
+                    self.inc_progress((total - done) as u64);
+                    break 'outer;
+                }
+            }
+            i = end;
         }
         PhaseFlow::Continue
     }
@@ -1265,8 +1493,22 @@ pub async fn run_scanning(
     }
     let arc_target = Arc::new(target.clone());
     let shared_client = Arc::new(arc_target.build_client_or_default());
+    let effective_workers = if args.sxss { 1 } else { target.workers };
+    // Two budgets share the same `workers` size but govern different things:
+    //   * `semaphore` — one permit per *parameter*, held for the whole param, so
+    //     at most `workers` parameters are scanned at once (bounds parked
+    //     request futures and probe/HPP concurrency, unchanged from before).
+    //   * `req_budget` — one permit per *request*, so the total number of
+    //     concurrent HTTP requests across the scan stays bounded by `workers`
+    //     even though each parameter now fans its payloads out (within-parameter
+    //     concurrency). Before this, a permit was held for the whole param, so a
+    //     single-parameter target issued its entire payload catalog strictly one
+    //     request at a time regardless of `--workers`.
     let semaphore = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
-        if args.sxss { 1 } else { target.workers },
+        effective_workers,
+    )));
+    let req_budget = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
+        effective_workers,
     )));
     let limit_result_type: Arc<str> = Arc::from(args.limit_result_type.to_uppercase());
 
@@ -1303,6 +1545,7 @@ pub async fn run_scanning(
         cancel: cancel.clone(),
         finding_tx: finding_tx.clone(),
         semaphore: semaphore.clone(),
+        req_budget: req_budget.clone(),
         params_done: params_done.clone(),
     };
 
