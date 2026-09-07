@@ -136,6 +136,19 @@ pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
 /// first) while bounding the fan-out. `--deep-scan` or an explicit
 /// `--max-payloads-per-param` opts out.
 pub const DEFAULT_PAYLOAD_SAFETY_CAP: usize = 3000;
+/// Upper bound on how many payload requests a *single* parameter may keep in
+/// flight at once (within-parameter concurrency).
+///
+/// `--workers N` bounds the total number of concurrent HTTP requests across the
+/// whole scan; this constant additionally caps how much of that budget one
+/// parameter is allowed to claim. Without a per-parameter ceiling a single hard
+/// filter / sanitizing parameter — whose reflection or DOM phase legitimately
+/// sends thousands of sequential payloads — would monopolise every worker and
+/// hammer that one endpoint. Capping at 64 keeps a single-parameter scan fast
+/// (a serial ~6000-request chain that used to take minutes at real-network
+/// latency now fans out 64-wide) while leaving headroom for other parameters
+/// and bounding the number of parked request futures (`workers × cap`).
+pub const MAX_PER_PARAM_CONCURRENCY: usize = 64;
 /// Default for `--rate-limit`: 0 = unlimited (no token bucket installed),
 /// preserving the historical "only `--delay` paces requests" behavior.
 pub const DEFAULT_RATE_LIMIT: u32 = 0;

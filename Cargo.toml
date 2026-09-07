@@ -36,6 +36,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # `main` only exists to build scraper's own CLI binary (it pulls `getopts`).
 scraper = { version = "0.27", default-features = false }
 tokio = { version = "1", features = ["full"] }
+# `join_all` for bounded within-parameter request concurrency (scanning phases).
+# Already present transitively via reqwest/tokio; pinned here as a direct dep.
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 indicatif = "0.18"
