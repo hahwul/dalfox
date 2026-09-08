@@ -16,6 +16,11 @@ async fn echo_all_server() -> (Target, Arc<AtomicUsize>, tokio::task::JoinHandle
             async move {
                 count.fetch_add(1, Ordering::Relaxed);
                 let mut body = String::from("<html><body>");
+                if params.is_empty() {
+                    for i in 0..SENTINEL_PROBE_COUNT * 5 {
+                        body.push_str(&format!("<input name=field_{i}>"));
+                    }
+                }
                 for (_name, value) in params {
                     body.push_str(&value);
                 }
@@ -168,5 +173,31 @@ async fn unprobed_wordlist_confirms_before_folding() {
         requests.load(Ordering::Relaxed),
         SENTINEL_PROBE_COUNT * 5 + SENTINEL_PROBE_COUNT,
         "fifteen candidates, then the three confirming sentinels"
+    );
+}
+
+/// The DOM stage carries the same fold-time confirmation. Exactly
+/// `SENTINEL_PROBE_COUNT * 5` candidate fields keep it under the pre-probe
+/// threshold, so the collapse it reaches has to ask the sentinels itself.
+#[tokio::test]
+async fn unprobed_dom_candidates_confirm_before_folding() {
+    let (target, requests, server) = echo_all_server().await;
+    let params = Arc::new(Mutex::new(Vec::new()));
+    probe_response_id_params(
+        &target,
+        &default_scan_args(),
+        params.clone(),
+        Arc::new(Semaphore::new(1)),
+        None,
+    )
+    .await;
+    server.abort();
+    let params = params.lock().await;
+    let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["any"], "{names:?}");
+    assert_eq!(
+        requests.load(Ordering::Relaxed),
+        1 + SENTINEL_PROBE_COUNT * 5 + SENTINEL_PROBE_COUNT,
+        "HTML fetch, fifteen fields, then the three confirming sentinels"
     );
 }
