@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::time::{Duration, sleep};
 
+mod collapse_recall;
+mod request_efficiency;
+
 #[test]
 fn cap_dom_params_boundary() {
     let mk = |n: usize| (0..n).map(|i| i.to_string()).collect::<Vec<_>>();

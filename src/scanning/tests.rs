@@ -2,6 +2,8 @@ use super::*;
 use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::target_parser::parse_target;
 
+mod request_efficiency;
+
 /// ScanArgs preset for run_scanning integration tests below. Keeps
 /// `skip_xss_scanning` toggleable per-test so the empty/short-circuit
 /// tests can still opt out of real HTTP traffic while the

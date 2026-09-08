@@ -43,11 +43,12 @@
 //!   request — so the scan-wide number of *in-flight requests* never exceeds
 //!   `workers`.
 //!
-//! The reflection and DOM phases issue their payloads in chunks of up to
-//! `request_concurrency()` in flight (bounded by `req_budget`) and fold the
-//! responses back **in payload order**, so first-hit-wins dedup and the ordered
-//! #1156 early-exit budgets behave exactly as under the old strictly-serial
-//! loop. This is what makes a single-parameter target actually use `--workers`:
+//! The reflection and DOM phases grow their initial batches (1, 2, 4, ...)
+//! within the existing full-window boundaries, up to `request_concurrency()`
+//! in flight (bounded by `req_budget`). Responses are processed in payload
+//! order. After an R finding or a DOM early-exit signal, the remaining fetched
+//! responses can still supply a V; only future requests are skipped. This is
+//! what makes a single-parameter target actually use `--workers`:
 //! previously one permit was held for the whole parameter, so its entire payload
 //! catalog went out one request at a time regardless of `--workers` (a scan of
 //! one hard-filter parameter took `catalog × latency` wall-time). `--sxss`,
@@ -389,6 +390,19 @@ struct ParamScanState {
     /// DOM XSS already confirmed for this param locally — skip the
     /// remaining DOM payloads.
     dom_found_locally: bool,
+}
+
+/// Grow speculative batches gradually: early catalog hits should not cost a
+/// full worker window. Failed prefixes still ramp up to the existing ceiling.
+/// Keep the old boundaries (1, 1 + concurrency, ...) so reaching a given hit
+/// or early-exit budget never sends more requests than the full-window scheme.
+fn payload_chunk_size(completed: usize, concurrency: usize) -> usize {
+    if completed == 0 {
+        return 1;
+    }
+    let concurrency = concurrency.max(1);
+    let remaining_in_window = concurrency - (completed - 1) % concurrency;
+    completed.saturating_add(1).min(remaining_in_window)
 }
 
 /// Shared, cheaply-clonable context handed to each spawned worker. Every
@@ -740,13 +754,11 @@ impl ScanWorkerCtx {
         // Within-parameter concurrency: the reflection set is issued in chunks
         // of up to `request_concurrency()` requests in flight at once (each
         // bounded by the scan-wide `req_budget`), and the responses are
-        // processed serially in payload order so the first-hit-wins dedup, the
-        // static V upgrade, and the once-per-param AST pass all behave exactly
-        // as they did in the old strictly-sequential loop. The very first
-        // payload is sent alone so a parameter that reflects on payload 0 (the
-        // common case) still costs a single request — the fan-out only pays off
-        // on the non-short-circuiting sanitizing / hard-filter parameters, which
-        // is where a serial catalog used to spend thousands of round-trips.
+        // processed serially in payload order for deterministic dedup, the
+        // static V upgrade, and the once-per-param AST pass. The very first
+        // payload is sent alone, then batches grow 2, 4, 8, ... within the old
+        // full-window boundaries. Early hits avoid a full window of speculation;
+        // hard-filter parameters still reach the configured concurrency.
         let total = reflection_payloads.len();
         let concurrency = self.request_concurrency();
         let mut i = 0usize;
@@ -771,7 +783,7 @@ impl ScanWorkerCtx {
                 self.inc_progress((total - i) as u64);
                 break;
             }
-            let chunk = if i == 0 { 1 } else { concurrency };
+            let chunk = payload_chunk_size(i, concurrency);
             let end = (i + chunk).min(total);
             let fetched = futures::future::join_all(
                 reflection_payloads[i..end]
@@ -783,10 +795,10 @@ impl ScanWorkerCtx {
                 reflection_payloads[i..end].iter().zip(fetched)
             {
                 self.inc_progress(1);
-                // A hit earlier in this same chunk already claimed the slot; the
-                // rest were speculatively fetched (bounded overshoot) — don't
-                // record duplicates for them.
-                if state.reflection_found_locally {
+                // A plain R must not hide a V in responses we already paid for.
+                // Keep checking this chunk until execution is confirmed; the
+                // result processor still deduplicates repeated R findings.
+                if !self.args.deep_scan && state.dom_found_locally {
                     continue;
                 }
                 self.process_reflection_result(
@@ -905,13 +917,10 @@ impl ScanWorkerCtx {
                 } else {
                     let mut found = self.found_params.write().await;
                     let key = found_param_key(param);
-                    if !found.reflection.contains(&key) {
-                        found.reflection.insert(key);
-                        state.reflection_found_locally = true;
-                        true
-                    } else {
-                        false
-                    }
+                    let new_reflection = found.reflection.insert(key.clone());
+                    state.reflection_found_locally = true;
+                    let new_verification = dom_evidence_kind.is_some() && found.dom.insert(key);
+                    new_reflection || new_verification
                 };
 
                 if should_add {
@@ -1119,7 +1128,7 @@ impl ScanWorkerCtx {
                 self.inc_progress((total - done) as u64);
                 break;
             }
-            let chunk = if i == 0 { 1 } else { concurrency };
+            let chunk = payload_chunk_size(i, concurrency);
             let end = (i + chunk).min(total);
             let fetched = futures::future::join_all(
                 dom_payloads[i..end]
@@ -1127,6 +1136,7 @@ impl ScanWorkerCtx {
                     .map(|p| self.fetch_dom(param, p)),
             )
             .await;
+            let mut early_exit = None;
             for (dom_payload, outcome) in dom_payloads[i..end].iter().zip(fetched) {
                 done += 1;
                 self.inc_progress(1);
@@ -1247,22 +1257,29 @@ impl ScanWorkerCtx {
                     blocked_streak = next_blocked_streak(blocked_streak, status, reflected);
                     redirect_streak = next_redirect_streak(redirect_streak, status);
                 }
-                if dom_phase_should_early_exit(
-                    self.args.deep_scan,
-                    inert_echo_count,
-                    blocked_streak,
-                    redirect_streak,
-                ) {
-                    crate::dbg_log!(
-                        "dom phase early-exit (param={}): inert_echo={}, blocked_streak={}, redirect_streak={} — endpoint shows no path to DOM verification, skipping remaining payloads",
-                        param.name,
+                if early_exit.is_none()
+                    && dom_phase_should_early_exit(
+                        self.args.deep_scan,
                         inert_echo_count,
                         blocked_streak,
                         redirect_streak,
-                    );
-                    self.inc_progress((total - done) as u64);
-                    break 'outer;
+                    )
+                {
+                    // Stop future requests, but inspect the rest of this
+                    // already-fetched chunk for a V before abandoning it.
+                    early_exit = Some((inert_echo_count, blocked_streak, redirect_streak));
                 }
+            }
+            if let Some((inert, blocked, redirects)) = early_exit {
+                crate::dbg_log!(
+                    "dom phase early-exit (param={}): inert_echo={}, blocked_streak={}, redirect_streak={} — no verification in fetched responses, skipping remaining payloads",
+                    param.name,
+                    inert,
+                    blocked,
+                    redirects,
+                );
+                self.inc_progress((total - done) as u64);
+                break;
             }
             i = end;
         }
