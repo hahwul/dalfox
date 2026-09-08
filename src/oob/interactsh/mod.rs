@@ -92,6 +92,7 @@ impl InteractshClient {
 
         let mut builder = Client::builder()
             .timeout(Duration::from_secs(config.timeout.max(1)))
+            .no_proxy()
             .danger_accept_invalid_certs(config.insecure);
         if let Some(pxy) = config.proxy.as_ref()
             && let Ok(proxy) = reqwest::Proxy::all(pxy)
