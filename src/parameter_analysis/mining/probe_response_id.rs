@@ -63,32 +63,40 @@ pub async fn probe_response_id_params(
                 MAX_DOM_MINING_PARAMS, original
             );
         }
+        // Measured before the filtering below, for the reason given in
+        // `probe_dictionary_params`: a candidate set that shrinks because its
+        // names are duplicates or already-discovered slots still needs the
+        // arbitrary-name check.
+        let sentinel_eligible = params_to_check.len() > SENTINEL_PROBE_COUNT * 5;
+        let params_to_check = unique_query_candidates(params_to_check, &reflection_params).await;
 
         // Sentinel pre-probe — same rationale as Query mining: a
         // reflect-everything page would mark every DOM-extracted name as
         // reflected and balloon downstream cost. Threshold matches Query
         // mining: only run when the candidate set exceeds the pre-probe
         // ceiling.
-        if params_to_check.len() > SENTINEL_PROBE_COUNT * 5
-            && let Some(text) = pre_collapse_query_probe(&client, target).await
-        {
-            if !silence {
-                eprintln!(
-                    "[mining-collapse] sentinel pre-probe collapsed DOM mining: \
-                     every random param name reflected; adding single 'any' param"
-                );
+        let mut arbitrary_names_disproved = false;
+        if sentinel_eligible {
+            if let Some(text) = pre_collapse_query_probe(&client, target).await {
+                if !silence {
+                    eprintln!(
+                        "[mining-collapse] sentinel pre-probe collapsed DOM mining: \
+                         every random param name reflected; adding single 'any' param"
+                    );
+                }
+                collapse_mined_params(
+                    &reflection_params,
+                    &preexisting,
+                    Location::Query,
+                    Some(&text),
+                )
+                .await;
+                if let Some(ref pb) = pb {
+                    pb.finish_and_clear();
+                }
+                return;
             }
-            collapse_mined_params(
-                &reflection_params,
-                &preexisting,
-                Location::Query,
-                Some(&text),
-            )
-            .await;
-            if let Some(ref pb) = pb {
-                pb.finish_and_clear();
-            }
-            return;
+            arbitrary_names_disproved = true;
         }
 
         if let Some(ref pb) = pb {
@@ -108,15 +116,6 @@ pub async fn probe_response_id_params(
                     break;
                 }
             }
-            // Slot-scoped, not name-scoped: see `param_slot_key`.
-            let existing = reflection_params
-                .lock()
-                .await
-                .iter()
-                .any(|p| p.name == param && p.location == Location::Query);
-            if existing {
-                continue;
-            }
             let mut url = target.url.clone();
             url.query_pairs_mut()
                 .append_pair(&param, crate::scanning::markers::bracketed_marker());
@@ -134,10 +133,17 @@ pub async fn probe_response_id_params(
             let handle = tokio::spawn(crate::with_job_scopes(
                 crate::JobScopes::capture(),
                 async move {
-                    let permit = semaphore_clone
-                        .acquire()
-                        .await
-                        .expect("acquire semaphore permit");
+                    let Ok(permit) = semaphore_clone.acquire().await else {
+                        return None;
+                    };
+                    // Do not send probes queued before another worker
+                    // established that this mining stage should stop.
+                    if stats_clone.lock().await.collapsed {
+                        if let Some(ref pb) = pb_clone {
+                            pb.inc(1);
+                        }
+                        return None;
+                    }
                     let m = parsed_method;
                     let request = crate::utils::build_request(
                         &client_clone,
@@ -170,31 +176,31 @@ pub async fn probe_response_id_params(
                             if crate::scanning::markers::classify_probe_reflection(&text).detected()
                             {
                                 st.record_reflection();
-                                if !st.collapsed {
-                                    // Store discovered Param for return (batched later)
-                                    discovered = Some(
-                                        Param::new(
-                                            param.clone(),
-                                            crate::scanning::markers::bracketed_marker()
-                                                .to_string(),
-                                            crate::parameter_analysis::Location::Query,
-                                        )
-                                        .with_reflection_analysis(&text),
+                                // Store discovered Param for return (batched
+                                // later). Kept even when a sibling set
+                                // `collapsed` mid-flight: the response is paid
+                                // for, and a confirmed collapse folds it anyway.
+                                discovered = Some(
+                                    Param::new(
+                                        param.clone(),
+                                        crate::scanning::markers::bracketed_marker().to_string(),
+                                        crate::parameter_analysis::Location::Query,
+                                    )
+                                    .with_reflection_analysis(&text),
+                                );
+                                if !silence {
+                                    eprintln!(
+                                        "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
+                                        param, st.ewma_ratio, st.reflections, st.attempts
                                     );
+                                }
+                                if st.should_collapse() {
+                                    st.collapsed = true;
                                     if !silence {
                                         eprintln!(
-                                            "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
-                                            param, st.ewma_ratio, st.reflections, st.attempts
+                                            "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                            st.ewma_ratio, st.attempts, st.reflections
                                         );
-                                    }
-                                    if st.should_collapse() {
-                                        st.collapsed = true;
-                                        if !silence {
-                                            eprintln!(
-                                                "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                                st.ewma_ratio, st.attempts, st.reflections
-                                            );
-                                        }
                                     }
                                 }
                             } else {
@@ -233,9 +239,30 @@ pub async fn probe_response_id_params(
         // triggered it. Only the Query params this stage mined are folded in;
         // params discovered via other channels — and the ones discovery already
         // confirmed — survive.
-        let st_final = stats.lock().await;
-        if st_final.collapsed {
-            collapse_mined_params(&reflection_params, &preexisting, Location::Query, None).await;
+        let collapsed = stats.lock().await.collapsed;
+        if collapsed {
+            // Confirm the collapse premise before folding — the EWMA alone
+            // cannot tell "echoes any name" from "these fields all reflect".
+            // See `probe_dictionary_params` for the full rationale.
+            let confirmed = if arbitrary_names_disproved {
+                None
+            } else {
+                pre_collapse_query_probe(&client, target).await
+            };
+            if let Some(text) = confirmed {
+                collapse_mined_params(
+                    &reflection_params,
+                    &preexisting,
+                    Location::Query,
+                    Some(&text),
+                )
+                .await;
+            } else if !silence {
+                eprintln!(
+                    "[mining-collapse] high reflection EWMA, but the sentinels did not \
+                     reflect: keeping the mined DOM params instead of folding them into 'any'"
+                );
+            }
         }
     }
 }

@@ -69,32 +69,45 @@ pub async fn probe_dictionary_params(
         params = GF_PATTERNS_PARAMS.iter().map(ToString::to_string).collect();
     }
 
+    // Pre-probe eligibility is measured on the *loaded* wordlist, before the
+    // filtering below. The arbitrary-name check is the only thing that finds
+    // the synthetic `any` injection point, and a list that shrinks past the
+    // threshold because its entries are duplicates or already-discovered slots
+    // says nothing about whether this target echoes names it does not have.
+    let sentinel_eligible = params.len() > SENTINEL_PROBE_COUNT * 5;
+
+    // Stable dedup also keeps repeats from manufacturing a high EWMA and
+    // collapsing real, distinct candidates later in the wordlist to `any`.
+    params = unique_query_candidates(params, &reflection_params).await;
+
     // Sentinel pre-probe: 3 unique random param names. If every one reflects,
     // the page echoes arbitrary input and the wordlist would just balloon
     // into Stage 3-6 cost. Skip the wordlist and add a single "any" param
     // instead — the params discovered before this stage are kept and still
     // scanned. Skip when the wordlist is small enough that the pre-probe is
     // more expensive than just running it.
-    if params.len() > SENTINEL_PROBE_COUNT * 5
-        && let Some(text) = pre_collapse_query_probe(&client, target).await
-    {
-        if !silence {
-            eprintln!(
-                "[mining-collapse] sentinel pre-probe collapsed Query mining: \
-                 every random param name reflected; adding single 'any' param"
-            );
+    let mut arbitrary_names_disproved = false;
+    if sentinel_eligible {
+        if let Some(text) = pre_collapse_query_probe(&client, target).await {
+            if !silence {
+                eprintln!(
+                    "[mining-collapse] sentinel pre-probe collapsed Query mining: \
+                     every random param name reflected; adding single 'any' param"
+                );
+            }
+            collapse_mined_params(
+                &reflection_params,
+                &preexisting,
+                Location::Query,
+                Some(&text),
+            )
+            .await;
+            if let Some(ref pb) = pb {
+                pb.finish_and_clear();
+            }
+            return;
         }
-        collapse_mined_params(
-            &reflection_params,
-            &preexisting,
-            Location::Query,
-            Some(&text),
-        )
-        .await;
-        if let Some(ref pb) = pb {
-            pb.finish_and_clear();
-        }
-        return;
+        arbitrary_names_disproved = true;
     }
 
     if let Some(ref pb) = pb {
@@ -123,26 +136,13 @@ pub async fn probe_dictionary_params(
         // Per-chunk handles, drained at the end of this chunk (see below).
         let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
         for param in param_chunk {
-            // Early collapse stop. (A second identical `collapsed` check used to
-            // follow immediately with no await in between — dead code, since
-            // this `break 'outer` already fires first when collapsed is set.)
+            // Stop spawning, then drain this chunk below. Breaking the outer
+            // loop here would detach its tasks and discard their metadata.
             {
                 let st = stats.lock().await;
                 if st.collapsed {
-                    break 'outer;
+                    break;
                 }
-            }
-            // Skip only when this *slot* was already discovered. Matching on
-            // the name alone let a param found at another wire location (a
-            // query `q`, a header `q`) suppress mining of the same name here,
-            // so the slot was never probed at all. See `param_slot_key`.
-            let exists = reflection_params
-                .lock()
-                .await
-                .iter()
-                .any(|p| p.name == *param && p.location == Location::Query);
-            if exists {
-                continue;
             }
 
             let mut url = target.url.clone();
@@ -163,10 +163,17 @@ pub async fn probe_dictionary_params(
             let handle = tokio::spawn(crate::with_job_scopes(
                 crate::JobScopes::capture(),
                 async move {
-                    let permit = semaphore_clone
-                        .acquire()
-                        .await
-                        .expect("acquire semaphore permit");
+                    let Ok(permit) = semaphore_clone.acquire().await else {
+                        return None;
+                    };
+                    // Collapse may have fired while this task waited for its
+                    // permit. Only requests already in flight may finish.
+                    if stats_clone.lock().await.collapsed {
+                        if let Some(ref pb) = pb_clone {
+                            pb.inc(1);
+                        }
+                        return None;
+                    }
                     let request = crate::utils::build_request(
                         &client_clone,
                         &target_clone,
@@ -215,22 +222,53 @@ pub async fn probe_dictionary_params(
                             let mut st = stats_clone.lock().await;
                             st.record_attempt();
                             st.record_reflection();
-                            if !st.collapsed {
-                                discovered = Some(Param {
-                                    injection_context: Some(
-                                        crate::parameter_analysis::InjectionContext::AttributeUrl(
-                                            None,
-                                        ),
-                                    ),
-                                    ..Param::new(
+                            // Recorded even if a sibling set `collapsed` while
+                            // this request was in flight: the response is paid
+                            // for, and a confirmed collapse folds it anyway.
+                            discovered = Some(Param {
+                                injection_context: Some(
+                                    crate::parameter_analysis::InjectionContext::AttributeUrl(None),
+                                ),
+                                ..Param::new(
+                                    param_name.clone(),
+                                    crate::scanning::markers::bracketed_marker().to_string(),
+                                    crate::parameter_analysis::Location::Query,
+                                )
+                            });
+                            if !silence {
+                                eprintln!(
+                                    "Discovered parameter (redirect): {} (EWMA {:.2}, {}/{})",
+                                    param_name, st.ewma_ratio, st.reflections, st.attempts
+                                );
+                            }
+                            if st.should_collapse() {
+                                st.collapsed = true;
+                                if !silence {
+                                    eprintln!(
+                                        "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
+                                        st.ewma_ratio, st.attempts, st.reflections
+                                    );
+                                }
+                            }
+                        } else if let Ok(text) = crate::utils::http::read_body(r).await {
+                            let mut st = stats_clone.lock().await;
+                            st.record_attempt();
+                            if crate::scanning::markers::classify_probe_reflection(&text).detected()
+                            {
+                                st.record_reflection();
+                                // See the redirect arm: an in-flight response is
+                                // kept regardless of the collapse flag.
+                                discovered = Some(
+                                    Param::new(
                                         param_name.clone(),
                                         crate::scanning::markers::bracketed_marker().to_string(),
                                         crate::parameter_analysis::Location::Query,
                                     )
-                                });
+                                    .with_reflection_analysis(&text),
+                                );
                                 if !silence {
                                     eprintln!(
-                                        "Discovered parameter (redirect): {} (EWMA {:.2}, {}/{})",
+                                        "Discovered parameter: {} (EWMA {:.2}, {}/{})",
                                         param_name, st.ewma_ratio, st.reflections, st.attempts
                                     );
                                 }
@@ -241,39 +279,6 @@ pub async fn probe_dictionary_params(
                                             "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
                                             st.ewma_ratio, st.attempts, st.reflections
                                         );
-                                    }
-                                }
-                            }
-                        } else if let Ok(text) = crate::utils::http::read_body(r).await {
-                            let mut st = stats_clone.lock().await;
-                            st.record_attempt();
-                            if crate::scanning::markers::classify_probe_reflection(&text).detected()
-                            {
-                                st.record_reflection();
-                                if !st.collapsed {
-                                    discovered = Some(
-                                        Param::new(
-                                            param_name.clone(),
-                                            crate::scanning::markers::bracketed_marker()
-                                                .to_string(),
-                                            crate::parameter_analysis::Location::Query,
-                                        )
-                                        .with_reflection_analysis(&text),
-                                    );
-                                    if !silence {
-                                        eprintln!(
-                                            "Discovered parameter: {} (EWMA {:.2}, {}/{})",
-                                            param_name, st.ewma_ratio, st.reflections, st.attempts
-                                        );
-                                    }
-                                    if st.should_collapse() {
-                                        st.collapsed = true;
-                                        if !silence {
-                                            eprintln!(
-                                                "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
-                                                st.ewma_ratio, st.attempts, st.reflections
-                                            );
-                                        }
                                     }
                                 }
                             } else {
@@ -316,8 +321,34 @@ pub async fn probe_dictionary_params(
     // Only the Query params *this stage mined* collapse — params discovered via
     // other channels (Body, Header, Path, JsonBody, …) and the Query params
     // Stage 1 discovery already confirmed are left alone.
-    let st_final = stats.lock().await;
-    if st_final.collapsed {
-        collapse_mined_params(&reflection_params, &preexisting, Location::Query, None).await;
+    let collapsed = stats.lock().await.collapsed;
+    if collapsed {
+        // The EWMA stop is a cost control and always applies — an endpoint that
+        // reflects most of a wordlist would otherwise hand Stage 3-6 hundreds of
+        // near-identical injection points. Replacing what it *did* mine with the
+        // synthetic `any` is a different claim, and only the sentinels can back
+        // it: fold when they reflect, keep the confirmed params when they do not.
+        // `arbitrary_names_disproved` already carries that answer (the pre-probe
+        // ran above); otherwise the wordlist was under the pre-probe threshold,
+        // so ask now — 3 requests to avoid deleting real findings.
+        let confirmed = if arbitrary_names_disproved {
+            None
+        } else {
+            pre_collapse_query_probe(&client, target).await
+        };
+        if let Some(text) = confirmed {
+            collapse_mined_params(
+                &reflection_params,
+                &preexisting,
+                Location::Query,
+                Some(&text),
+            )
+            .await;
+        } else if !silence {
+            eprintln!(
+                "[mining-collapse] high reflection EWMA, but the sentinels did not \
+                 reflect: keeping the mined params instead of folding them into 'any'"
+            );
+        }
     }
 }

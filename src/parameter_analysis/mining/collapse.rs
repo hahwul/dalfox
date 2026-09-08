@@ -112,6 +112,30 @@ pub(super) async fn snapshot_param_slots(
         .collect()
 }
 
+/// Filter before EWMA sampling and task creation: repeated dictionary entries
+/// must not inflate reflection statistics, and already-discovered query slots
+/// need no new probes. Same-named body/header slots stay eligible.
+///
+/// Callers must measure sentinel-pre-probe eligibility *before* calling this —
+/// a list that shrinks past that threshold here still needs the arbitrary-name
+/// check, which is the only source of the synthetic `any` injection point.
+pub(super) async fn unique_query_candidates(
+    names: Vec<String>,
+    reflection_params: &Arc<Mutex<Vec<Param>>>,
+) -> Vec<String> {
+    let mut seen: std::collections::HashSet<String> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .filter(|p| p.location == Location::Query)
+        .map(|p| p.name.clone())
+        .collect();
+    names
+        .into_iter()
+        .filter(|name| seen.insert(name.clone()))
+        .collect()
+}
+
 /// Build the synthetic `any` param standing in for "this target echoes
 /// arbitrary parameter names at `location`".
 ///

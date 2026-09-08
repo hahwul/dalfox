@@ -13,6 +13,12 @@
 //! collapse detection to short-circuit when a target reflects everything
 //! (sustained ≥85% reflection rate after ≥15 attempts). Filters out 5xx
 //! responses to avoid false positives from debug/error pages.
+//! Query candidates are deduplicated and already-discovered Query slots dropped
+//! before probing; the sentinel pre-probe's eligibility is still measured on the
+//! candidate list as loaded. On collapse, queued dictionary/DOM probes stop
+//! before sending and started workers are drained; folding the mined params into
+//! the synthetic `any` additionally requires the sentinels to confirm that this
+//! target really does echo parameter names it does not have.
 //!
 //! **Skippable via:** `--skip-mining`, `--skip-mining-dict`, `--skip-mining-dom`.
 

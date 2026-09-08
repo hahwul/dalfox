@@ -65,6 +65,15 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `-W, --mining-dict-word` | Path to custom wordlist for dictionary mining |
 | `--remote-wordlists` | `burp,assetnote` (comma-separated) |
 
+Dictionary and DOM mining drop duplicate names and already-discovered query
+slots before probing, so a repeated entry costs no request and cannot inflate
+the reflection ratio. Eligibility for the arbitrary-name sentinel check is still
+measured on the wordlist as loaded, so a heavily filtered list keeps that check.
+When reflection sampling stops a stage early, queued probes stop before sending
+and in-flight ones are drained; the parameters already confirmed are kept unless
+the sentinels show the target echoes names it does not have. Same-named
+body/header parameters remain separate injection points.
+
 **Common fast-mode combo**: `--skip-mining` (or `--skip-mining-dom`) + explicit `-p` for the params you care about. With `--skip-discovery`, always pass `-p` (bare name is OK for query; use `name:location` for body/header/cookie/json).
 
 ## Network & Concurrency
@@ -84,6 +93,15 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--workers` | 50 | Concurrent workers |
 | `--max-concurrent-targets` | 50 | For file/pipe input |
 | `--max-targets-per-host` | 100 | Safety cap per host |
+
+Reflection and DOM payload batches start small and grow toward the worker limit.
+An early hit therefore avoids a full batch of speculative requests. Already-fetched
+responses are still checked for verified evidence after a reflection or DOM
+early-exit signal. Payload order and catalogs are unchanged; `--sxss`,
+`--waf-evasion`, and positive `--delay` retain serial payload requests. Targets
+that need the full catalog reach it in the same number of requests but a few
+more round trips, so a tight `--scan-timeout` can now cut a deep payload the
+full-window batching would have reached.
 
 ## XSS Engine
 
