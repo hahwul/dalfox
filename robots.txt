@@ -1,0 +1,14 @@
+# Dalfox documentation — https://dalfox.hahwul.com
+#
+# AI agents are welcome to READ these docs — that is the whole point of the
+# llms.txt, MCP server, and Agent Skill surfaces this project ships. Using the
+# content to TRAIN models is not granted by default (see /llms.txt). The
+# Content-Signal line below states that machine-readably (emerging
+# Cloudflare / IETF AI-preferences convention).
+
+User-agent: *
+Disallow: /admin
+Disallow: /private
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+
+Sitemap: https://dalfox.hahwul.com/sitemap.xml
