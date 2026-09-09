@@ -5418,3 +5418,4 @@ open.onsuccess = function (e) {
         "a named object-store variable should still resolve: {vulns:?}"
     );
 }
+mod expression_regressions;
