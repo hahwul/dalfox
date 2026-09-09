@@ -1194,31 +1194,55 @@ impl<'a> DomXssVisitor<'a> {
     /// Walk function/arrow callbacks passed as call arguments, each with an
     /// isolated taint scope so a callback-local variable (`var q = …` inside
     /// the callback) does not leak taint into the enclosing scope. Only
-    /// function-shaped arguments are descended; data arguments keep their
+    /// callback-shaped arguments are descended; data arguments keep their
     /// existing taint-evaluation-only treatment.
     pub(super) fn walk_callback_argument_bodies(&mut self, call: &CallExpression<'a>) {
         for arg in &call.arguments {
-            let Some(expr) = arg.as_expression() else {
-                continue;
-            };
-            let statements = match expr {
-                Expression::FunctionExpression(func) => {
-                    let Some(body) = &func.body else {
-                        continue;
-                    };
-                    &body.statements
-                }
-                Expression::ArrowFunctionExpression(arrow) => &arrow.body.statements,
-                _ => continue,
-            };
-
-            let saved_tainted = self.tainted_vars.clone();
-            let saved_aliases = self.var_aliases.clone();
-            let saved_field_taints = self.field_taints.clone();
-            self.walk_statements(statements);
-            self.tainted_vars = saved_tainted;
-            self.var_aliases = saved_aliases;
-            self.field_taints = saved_field_taints;
+            if let Some(expr) = arg.as_expression() {
+                self.walk_callback_argument_expression(expr);
+            }
         }
+    }
+    /// A callback reaches a call either directly (`setTimeout(fn)`) or as a
+    /// property of an options object (`$.ajax({ success: fn })`) — the shape
+    /// every jQuery/axios-style API uses. Both defer the body the same way, so
+    /// both are descended; anything else is left to taint evaluation.
+    fn walk_callback_argument_expression(&mut self, expr: &Expression<'a>) {
+        let Some(_guard) = self.enter_recursion() else {
+            return;
+        };
+        match expr {
+            Expression::FunctionExpression(func) => {
+                if let Some(body) = &func.body {
+                    self.walk_isolated_callback_body(&func.params, &body.statements);
+                }
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                self.walk_isolated_callback_body(&arrow.params, &arrow.body.statements);
+            }
+            Expression::ObjectExpression(object) => {
+                for property in &object.properties {
+                    if let ObjectPropertyKind::ObjectProperty(property) = property {
+                        self.walk_callback_argument_expression(&property.value);
+                    }
+                }
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.walk_callback_argument_expression(&paren.expression);
+            }
+            _ => {}
+        }
+    }
+    /// A callback body additionally isolates `field_taints`: an argument
+    /// callback runs later and elsewhere, so an `obj.x = …` inside it must not
+    /// be read back as a fact about the enclosing scope's `obj`.
+    fn walk_isolated_callback_body(
+        &mut self,
+        params: &FormalParameters<'a>,
+        statements: &[Statement<'a>],
+    ) {
+        let saved_field_taints = self.field_taints.clone();
+        self.walk_function_literal_body(params, statements);
+        self.field_taints = saved_field_taints;
     }
 }

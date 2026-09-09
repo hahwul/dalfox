@@ -16,6 +16,13 @@ impl<'a> DomXssVisitor<'a> {
             Expression::MetaProperty(meta) => {
                 Some(format!("{}.{}", meta.meta.name, meta.property.name))
             }
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::StaticMemberExpression(member) => self.get_member_string(member),
+                ChainElement::ComputedMemberExpression(member) => {
+                    self.get_computed_member_string(member)
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -32,6 +39,9 @@ impl<'a> DomXssVisitor<'a> {
             Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
             Expression::StaticMemberExpression(inner) => self
                 .get_member_string(inner)
+                .map(|obj| format!("{}.{}", obj, property)),
+            Expression::ComputedMemberExpression(inner) => self
+                .get_computed_member_string(inner)
                 .map(|obj| format!("{}.{}", obj, property)),
             Expression::MetaProperty(meta) => Some(format!(
                 "{}.{}.{}",

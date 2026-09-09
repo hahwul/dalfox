@@ -1,6 +1,73 @@
 use super::*;
 
 #[test]
+fn inactive_script_bodies_do_not_produce_dom_findings() {
+    for attrs in [
+        "type='application/json'",
+        "type='application/ld+json'",
+        "type='text/template'",
+        "type='importmap'",
+        "type='speculationrules'",
+        "type='text/javascript; charset=utf-8'",
+        "language='vbscript'",
+        "src='/app.js'",
+        "src=''",
+    ] {
+        let html = format!("<script {attrs}>document.write(location.hash);</script>");
+        let results = run_initial_ast_dom_analysis(
+            &html,
+            "https://example.com/",
+            "GET",
+            PageSecurityPosture::default(),
+        );
+        assert!(results.is_empty(), "{attrs}: {results:?}");
+    }
+}
+
+#[test]
+fn executable_script_types_reach_the_result_pipeline() {
+    for attrs in [
+        "",
+        "type=''",
+        "type='module'",
+        "type='text/javascript'",
+        "type='APPLICATION/JAVASCRIPT'",
+        "type='text/javascript1.5'",
+        "language='JavaScript'",
+        "type='' language='vbscript'",
+    ] {
+        let html = format!(
+            "<script {attrs}>document.write?.(new URLSearchParams(location.search)['get']('query'));</script>"
+        );
+        let results = run_initial_ast_dom_analysis(
+            &html,
+            "https://example.com/",
+            "GET",
+            PageSecurityPosture::default(),
+        );
+        assert_eq!(results.len(), 1, "{attrs}: {results:?}");
+        assert_eq!(results[0].param, "query", "{attrs}: {:?}", results[0]);
+        assert!(results[0].data.contains("query="));
+    }
+}
+
+#[test]
+fn external_script_discovery_skips_data_blocks() {
+    let html = r#"
+        <script type="application/json" src="/data.json"></script>
+        <script type="importmap" src="/imports.json"></script>
+        <script type="module" src="/app.mjs"></script>
+        <script src="/app.js"></script>
+    "#;
+    let urls =
+        extract_same_origin_script_srcs(html, &url::Url::parse("https://example.com/").unwrap());
+    assert_eq!(
+        urls.iter().map(|u| u.path()).collect::<Vec<_>>(),
+        ["/app.mjs", "/app.js"]
+    );
+}
+
+#[test]
 fn test_extract_javascript_from_html() {
     let html = r#"
 <html>

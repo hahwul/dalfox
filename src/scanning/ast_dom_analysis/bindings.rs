@@ -304,36 +304,7 @@ impl<'a> DomXssVisitor<'a> {
         let _guard = self.enter_recursion()?;
         match expr {
             Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
-            Expression::StaticMemberExpression(member) => {
-                if let Some(source) = self.url_search_params_source_for_member(member) {
-                    return Some(source);
-                }
-                if let Some(source) = self.class_accessor_taint_source(member) {
-                    return Some(source);
-                }
-                if let Some(source) = self.xhr_response_source_for_member(member) {
-                    return Some(source);
-                }
-                if let Some(source) = self.file_reader_source_for_member(member) {
-                    return Some(source);
-                }
-                if let Some(full_path) = self.get_member_string(member) {
-                    if matches!(
-                        full_path.as_str(),
-                        "event.data" | "e.data" | "event.newValue"
-                    ) && let Some(source) = self.field_taints.get(&full_path)
-                    {
-                        return Some(source.clone());
-                    }
-                    if self.sources.contains(full_path.as_str()) {
-                        return Some(full_path);
-                    }
-                    if let Some(source) = self.field_taints.get(&full_path) {
-                        return Some(source.clone());
-                    }
-                }
-                self.find_source_in_expr(&member.object)
-            }
+            Expression::StaticMemberExpression(member) => self.static_member_source(member),
             Expression::ArrayExpression(array) => {
                 // Find first tainted element's source
                 for elem in &array.elements {
@@ -380,9 +351,10 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 None
             }
-            Expression::BinaryExpression(binary) => self
-                .find_source_in_expr(&binary.left)
-                .or_else(|| self.find_source_in_expr(&binary.right)),
+            Expression::BinaryExpression(binary) if binary.operator == BinaryOperator::Addition => {
+                self.find_source_in_expr(&binary.left)
+                    .or_else(|| self.find_source_in_expr(&binary.right))
+            }
             Expression::LogicalExpression(logical) => self
                 .find_source_in_expr(&logical.left)
                 .or_else(|| self.find_source_in_expr(&logical.right)),
@@ -428,14 +400,15 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 None
             }
-            Expression::ComputedMemberExpression(member) => {
-                if let Some(full_path) = self.get_computed_member_string(member)
-                    && self.sources.contains(full_path.as_str())
-                {
-                    return Some(full_path);
+            Expression::ComputedMemberExpression(member) => self.computed_member_source(member),
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::CallExpression(call) => self.call_taint_and_source(call).1,
+                ChainElement::StaticMemberExpression(member) => self.static_member_source(member),
+                ChainElement::ComputedMemberExpression(member) => {
+                    self.computed_member_source(member)
                 }
-                self.find_source_in_expr(&member.object)
-            }
+                _ => None,
+            },
             Expression::ParenthesizedExpression(paren) => {
                 self.find_source_in_expr(&paren.expression)
             }
@@ -523,5 +496,52 @@ impl<'a> DomXssVisitor<'a> {
         for property in properties {
             self.field_taints.remove(&format!("{var_name}.{property}"));
         }
+    }
+    pub(super) fn static_member_source(
+        &self,
+        member: &StaticMemberExpression<'a>,
+    ) -> Option<String> {
+        if let Some(source) = self.url_search_params_source_for_member(member) {
+            return Some(source);
+        }
+        if let Some(source) = self.class_accessor_taint_source(member) {
+            return Some(source);
+        }
+        if let Some(source) = self.xhr_response_source_for_member(member) {
+            return Some(source);
+        }
+        if let Some(source) = self.file_reader_source_for_member(member) {
+            return Some(source);
+        }
+        if let Some(full_path) = self.get_member_string(member) {
+            if matches!(
+                full_path.as_str(),
+                "event.data" | "e.data" | "event.newValue"
+            ) && let Some(source) = self.field_taints.get(&full_path)
+            {
+                return Some(source.clone());
+            }
+            if self.sources.contains(full_path.as_str()) {
+                return Some(full_path);
+            }
+            if let Some(source) = self.field_taints.get(&full_path) {
+                return Some(source.clone());
+            }
+        }
+        self.find_source_in_expr(&member.object)
+    }
+    pub(super) fn computed_member_source(
+        &self,
+        member: &ComputedMemberExpression<'a>,
+    ) -> Option<String> {
+        if let Some(path) = self.get_computed_member_string(member) {
+            if let Some(source) = self.field_taints.get(&path) {
+                return Some(source.clone());
+            }
+            if self.sources.contains(path.as_str()) {
+                return Some(path);
+            }
+        }
+        self.find_source_in_expr(&member.object)
     }
 }

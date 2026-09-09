@@ -68,6 +68,12 @@ fn js_blocks_from_document(document: &Html) -> Vec<String> {
     {
         let selector = selectors::script();
         for element in document.select(selector) {
+            // With src present the browser ignores child text, even when src
+            // is empty or fails to load. Data blocks are not JavaScript.
+            if !script_type_is_javascript(element.value()) || element.value().attr("src").is_some()
+            {
+                continue;
+            }
             let text = element.text().fold(String::new(), |mut acc, t| {
                 acc.push_str(t);
                 acc
@@ -117,6 +123,42 @@ fn js_blocks_from_document(document: &Html) -> Vec<String> {
     js_code
 }
 
+/// HTML's script preparation rules use a MIME *essence match*, not a
+/// Content-Type parser: parameters such as `; charset=utf-8` are invalid here.
+/// https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element
+fn script_type_is_javascript(element: &scraper::node::Element) -> bool {
+    let script_type = match element.attr("type") {
+        Some("") => return true,
+        Some(value) => value
+            .trim_matches(|c| matches!(c, '\t' | '\n' | '\u{000C}' | '\r' | ' '))
+            .to_ascii_lowercase(),
+        None => match element.attr("language") {
+            None | Some("") => return true,
+            Some(language) => format!("text/{}", language.to_ascii_lowercase()),
+        },
+    };
+    matches!(
+        script_type.as_str(),
+        "module"
+            | "application/ecmascript"
+            | "application/javascript"
+            | "application/x-ecmascript"
+            | "application/x-javascript"
+            | "text/ecmascript"
+            | "text/javascript"
+            | "text/javascript1.0"
+            | "text/javascript1.1"
+            | "text/javascript1.2"
+            | "text/javascript1.3"
+            | "text/javascript1.4"
+            | "text/javascript1.5"
+            | "text/jscript"
+            | "text/livescript"
+            | "text/x-ecmascript"
+            | "text/x-javascript"
+    )
+}
+
 /// Collect resolved, deduped, same-origin `<script src>` URLs from `html`,
 /// resolved relative to `base` (the response URL). Cross-origin srcs are dropped.
 pub(crate) fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Vec<url::Url> {
@@ -125,6 +167,9 @@ pub(crate) fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Ve
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for element in document.select(selector) {
+        if !script_type_is_javascript(element.value()) {
+            continue;
+        }
         let src = match element.value().attr("src") {
             Some(s) if !s.trim().is_empty() => s.trim(),
             _ => continue,

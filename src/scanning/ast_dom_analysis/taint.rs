@@ -230,6 +230,16 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
         if let Expression::ComputedMemberExpression(member) = &call.callee {
+            if self.get_computed_property_string(member).as_deref() == Some("get")
+                && let Some(source) = self.url_search_params_get_source(call, &member.object)
+            {
+                return (true, Some(source));
+            }
+            if let Some(callee_str) = self.get_computed_member_string(member)
+                && let Some(source) = self.storage_get_source(call, &callee_str)
+            {
+                return (true, Some(source));
+            }
             if let Some(callee_str) = self.get_computed_member_string(member)
                 && self.sources.contains(callee_str.as_str())
             {
@@ -579,6 +589,53 @@ impl<'a> DomXssVisitor<'a> {
         let (tainted, source) = self.argument_taint_and_source(arg);
         tainted.then(|| source.unwrap_or_else(|| "unknown source".to_string()))
     }
+    pub(super) fn static_member_is_tainted(&self, member: &StaticMemberExpression<'a>) -> bool {
+        if self.url_search_params_source_for_member(member).is_some() {
+            return true;
+        }
+        if self.class_accessor_taint_source(member).is_some() {
+            return true;
+        }
+        if self.xhr_response_source_for_member(member).is_some() {
+            return true;
+        }
+        if self.file_reader_source_for_member(member).is_some() {
+            return true;
+        }
+        if let Some(full_path) = self.get_member_string(member) {
+            // Check field-level taint first for precise tracking
+            if self.field_taints.contains_key(&full_path) {
+                return true;
+            }
+            // Check if the full path is a known source
+            if self.sources.contains(full_path.as_str()) {
+                return true;
+            }
+        }
+        // Also check if the base object is a tainted variable
+        // e.g., if 'data' is tainted, then 'data.field' is also tainted
+        self.is_tainted(&member.object)
+    }
+    pub(super) fn computed_member_is_tainted(&self, member: &ComputedMemberExpression<'a>) -> bool {
+        if let Some(path) = self.get_computed_member_string(member)
+            && (self.sources.contains(path.as_str()) || self.field_taints.contains_key(&path))
+        {
+            return true;
+        }
+        self.is_tainted(&member.object)
+    }
+    /// Optional chaining changes whether an expression runs, not the value
+    /// it returns when it does. Reuse the ordinary call/member rules.
+    pub(super) fn chain_is_tainted(&self, chain: &ChainExpression<'a>) -> bool {
+        match &chain.expression {
+            ChainElement::CallExpression(call) => self.call_taint_and_source(call).0,
+            ChainElement::StaticMemberExpression(member) => self.static_member_is_tainted(member),
+            ChainElement::ComputedMemberExpression(member) => {
+                self.computed_member_is_tainted(member)
+            }
+            _ => false,
+        }
+    }
     /// Check if expression is tainted.
     ///
     /// Hostile JavaScript can nest expressions arbitrarily deep (`a.b.c.d…`,
@@ -599,38 +656,15 @@ impl<'a> DomXssVisitor<'a> {
                 self.tainted_vars.contains(id.name.as_str())
                     || self.global_taints.contains(id.name.as_str())
             }
-            Expression::StaticMemberExpression(member) => {
-                if self.url_search_params_source_for_member(member).is_some() {
-                    return true;
-                }
-                if self.class_accessor_taint_source(member).is_some() {
-                    return true;
-                }
-                if self.xhr_response_source_for_member(member).is_some() {
-                    return true;
-                }
-                if self.file_reader_source_for_member(member).is_some() {
-                    return true;
-                }
-                if let Some(full_path) = self.get_member_string(member) {
-                    // Check field-level taint first for precise tracking
-                    if self.field_taints.contains_key(&full_path) {
-                        return true;
-                    }
-                    // Check if the full path is a known source
-                    if self.sources.contains(full_path.as_str()) {
-                        return true;
-                    }
-                }
-                // Also check if the base object is a tainted variable
-                // e.g., if 'data' is tainted, then 'data.field' is also tainted
-                self.is_tainted(&member.object)
-            }
+            Expression::StaticMemberExpression(member) => self.static_member_is_tainted(member),
             Expression::TemplateLiteral(template) => {
                 template.expressions.iter().any(|e| self.is_tainted(e))
             }
             Expression::BinaryExpression(binary) => {
-                self.is_tainted(&binary.left) || self.is_tainted(&binary.right)
+                // Only + can preserve attacker-controlled string content.
+                // Comparisons and arithmetic produce booleans/numbers.
+                binary.operator == BinaryOperator::Addition
+                    && (self.is_tainted(&binary.left) || self.is_tainted(&binary.right))
             }
             Expression::LogicalExpression(logical) => {
                 self.is_tainted(&logical.left) || self.is_tainted(&logical.right)
@@ -670,15 +704,8 @@ impl<'a> DomXssVisitor<'a> {
                     }
                 })
             }
-            Expression::ComputedMemberExpression(member) => {
-                if let Some(full_path) = self.get_computed_member_string(member)
-                    && self.sources.contains(full_path.as_str())
-                {
-                    return true;
-                }
-                // Check if base object is tainted (e.g., arr[0] where arr is tainted)
-                self.is_tainted(&member.object)
-            }
+            Expression::ComputedMemberExpression(member) => self.computed_member_is_tainted(member),
+            Expression::ChainExpression(chain) => self.chain_is_tainted(chain),
             Expression::ParenthesizedExpression(paren) => {
                 // Parentheses don't affect taint
                 self.is_tainted(&paren.expression)

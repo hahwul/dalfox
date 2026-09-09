@@ -41,6 +41,21 @@ produces. Never tell a user dalfox "watched an alert fire".
 The method field is stable; the `A` tier is being absorbed into the confidence
 axis (issue #1238).
 
+AST analysis follows optional calls/member access (`?.`), statically resolved
+bracket notation, and sinks nested in unary expressions, arrays, objects, and
+constructor arguments. Computed `URLSearchParams.get` and storage `getItem`
+calls retain their parameter/key labels for PoCs. Numeric and comparison
+results do not carry executable string taint; string concatenation still does.
+Function bodies are analyzed wherever the literal is written — including
+options-object callbacks (`$.ajax({success: fn})`) — and a function's
+parameters shadow same-named bindings from the enclosing scope, so a helper
+that only ever touches its own argument is not reported against an outer
+variable.
+HTML extraction skips non-JavaScript script types (including JSON, templates,
+import maps, and speculation rules) and ignores inline text when `src` is
+present. Same-origin external script discovery uses the same type filter.
+These are static flow checks; runtime reachability still needs confirmation.
+
 ### `confidence` — the grade behind the claim
 
 Every XSS finding carries `confidence` (`"high"` / `"low"`) plus a
