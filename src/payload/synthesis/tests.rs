@@ -999,3 +999,142 @@ fn paren_free_handler_is_fp_safe_when_quote_is_blocked() {
         "an escaped breakout quote must yield no marker element (no false [V])"
     );
 }
+
+#[test]
+fn sub_filter_doubled_emitted_only_for_html_context() {
+    // A one-shot ("sub-not-gsub") angle filter is only defeatable by opening a
+    // real *tag*, so the doubled-angle set is HTML-text-only — attribute / JS /
+    // CSS reflections break out without `<` and gain nothing from doubling it.
+    assert!(
+        !sub_filter_doubled_payloads(&html()).is_empty(),
+        "HTML context must offer doubled-angle payloads"
+    );
+    for ctx in [
+        InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
+        InjectionContext::Javascript(Some(DelimiterType::SingleQuote)),
+        InjectionContext::Css(None),
+    ] {
+        assert!(
+            sub_filter_doubled_payloads(&ctx).is_empty(),
+            "non-HTML context must not offer doubled-angle payloads: {ctx:?}"
+        );
+    }
+}
+
+#[test]
+fn sub_filter_doubled_payloads_are_marker_carrying_doubled_tags() {
+    // Every payload opens with `<<` (recognised by the prune-exemption predicate)
+    // and leads with the class marker so a filter that entity-encodes only the
+    // first `>` cannot corrupt the marker token.
+    let class = crate::scanning::markers::class_marker();
+    let payloads = sub_filter_doubled_payloads(&html());
+    assert!(!payloads.is_empty());
+    for p in &payloads {
+        assert!(
+            is_sub_filter_doubled_bypass(p),
+            "doubled payload must be recognised by the prune exemption: {p:?}"
+        );
+        assert!(
+            p.starts_with("<<"),
+            "doubled payload must open with `<<`: {p:?}"
+        );
+        assert!(
+            p.contains(class),
+            "doubled payload must carry the class marker: {p:?}"
+        );
+        assert!(
+            p.contains("alert(1)"),
+            "doubled payload must carry an executor: {p:?}"
+        );
+        // Marker before the handler: the class token must precede the first `on`
+        // handler so a first-`>`-only encode lands on the handler, not the marker.
+        let cls_at = p.find(class).unwrap();
+        let on_at = p.find("on").unwrap();
+        assert!(
+            cls_at < on_at,
+            "class marker must precede the handler in {p:?}"
+        );
+    }
+}
+
+#[test]
+fn sub_filter_doubled_bypass_predicate_rejects_ordinary_payloads() {
+    // The prune exemption must fire ONLY for the doubled-angle shape, never for
+    // an ordinary payload — otherwise a genuinely blocked raw-angle payload would
+    // wrongly survive the raw-angle prune and waste requests.
+    for p in [
+        "<svg onload=alert(1) class=x>",
+        "<img src=x onerror=alert(1)>",
+        "'><svg onload=alert(1)>",
+        "\" onmouseover=alert(1) x=\"",
+        "000000000000<svg onload=alert(1) class=x>", // positional pad, not doubled
+    ] {
+        assert!(
+            !is_sub_filter_doubled_bypass(p),
+            "predicate must reject ordinary payload: {p:?}"
+        );
+    }
+    assert!(is_sub_filter_doubled_bypass(
+        "<<svg class=x onload=alert(1)>>"
+    ));
+}
+
+#[test]
+fn sub_filter_doubled_verifies_a_real_one_shot_filter_bypass() {
+    // Behavioural proof: a filter that strips only the FIRST `<` and the FIRST
+    // `>` (a `str::replace`/`sub` firing once — the encoding-bypass-level2 shape)
+    // leaves the doubled payload's second angle to open a REAL marker element
+    // carrying the executing handler. Model the transform, then parse the
+    // reflection the way the DOM-verification stage does.
+    let class = crate::scanning::markers::class_marker();
+    let payload = sub_filter_doubled_payloads(&html())
+        .into_iter()
+        .find(|p| p.contains("svg"))
+        .expect("an svg doubled payload");
+
+    // Server: remove the first `<` and the first `>` only (one pass each).
+    let once = |s: &str, ch: char| -> String {
+        match s.find(ch) {
+            Some(i) => {
+                let mut out = String::with_capacity(s.len() - 1);
+                out.push_str(&s[..i]);
+                out.push_str(&s[i + ch.len_utf8()..]);
+                out
+            }
+            None => s.to_string(),
+        }
+    };
+    let stripped = once(&once(&payload, '<'), '>');
+    let reflected = format!("<body>{stripped}</body>");
+    let doc = scraper::Html::parse_document(&reflected);
+    let sel = scraper::Selector::parse(&format!(".{class}")).unwrap();
+    let el = doc
+        .select(&sel)
+        .next()
+        .expect("doubled tag must parse to a real marker element after one-shot strip");
+    assert!(
+        el.value()
+            .attrs()
+            .any(|(n, v)| n.len() >= 3 && n.starts_with("on") && v.contains("alert")),
+        "marker element must carry the surviving on* handler, got {:?}",
+        el.value().attrs().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn sub_filter_doubled_is_fp_safe_against_a_global_strip() {
+    // FP control: a filter that strips EVERY `<` (not just the first) collapses
+    // `<<svg …>>` to plain text with no tag, so no marker element materialises
+    // and nothing can promote to [V]. This is the exact shape that would be a
+    // false positive if the doubled bypass "worked" unconditionally.
+    let class = crate::scanning::markers::class_marker();
+    let payload = &sub_filter_doubled_payloads(&html())[0];
+    let global_strip = payload.replace('<', "");
+    let reflected = format!("<body>{global_strip}</body>");
+    let doc = scraper::Html::parse_document(&reflected);
+    let sel = scraper::Selector::parse(&format!(".{class}")).unwrap();
+    assert!(
+        doc.select(&sel).next().is_none(),
+        "a filter that strips `<` globally must yield NO marker element (no false [V])"
+    );
+}

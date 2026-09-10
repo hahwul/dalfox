@@ -2371,6 +2371,45 @@ fn url_attr_backwalk_verdicts_are_unchanged_for_normal_markup() {
     );
 }
 
+#[test]
+fn payload_marker_present_detects_transformed_reflection() {
+    let class = crate::scanning::markers::class_marker();
+    // A doubled-angle payload the server collapsed to a single-angle tag: the
+    // whole payload no longer matches byte-exact, but the unique marker survived.
+    let payload = format!("<<svg class={class} onload=alert(1)>>");
+    let resp = format!("<body><svg class={class} onload=alert(1)></body>");
+    assert!(
+        classify_reflection(&resp, &payload).is_none(),
+        "byte-exact classification must miss the transformed payload (the gap this covers)"
+    );
+    assert!(
+        payload_marker_present(&resp, &payload),
+        "the surviving marker must be recognised as a reflection signal"
+    );
+    // Case-folded server (uppercased reflection) still matches.
+    assert!(
+        payload_marker_present(&resp.to_uppercase(), &payload),
+        "marker presence must tolerate ASCII case-folding"
+    );
+}
+
+#[test]
+fn payload_marker_present_is_false_without_the_marker() {
+    let class = crate::scanning::markers::class_marker();
+    // Payload carries the marker but the response does not echo it: not reflected.
+    let payload = format!("<<svg class={class} onload=alert(1)>>");
+    assert!(!payload_marker_present(
+        "<body>nothing here</body>",
+        &payload
+    ));
+    // Payload carries no marker at all: the predicate must never fire (it would
+    // otherwise match an unrelated `dalfox` substring in arbitrary page text).
+    assert!(!payload_marker_present(
+        "<body>class=dalfoxeries onload=alert(1)</body>",
+        "<svg onload=alert(1)>"
+    ));
+}
+
 /// `injection_response_suppressed` is the single copy of the status/header gates
 /// that the normal reflection branch and the `--sxss` branch both run. The
 /// `--sxss` branch previously had no gates at all, so these cases pin the shared
