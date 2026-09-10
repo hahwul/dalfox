@@ -419,9 +419,22 @@ pub(crate) fn generate_adaptive_payloads(
     // window, so they are reached when the clean tags are positionally filtered.
     let positional = crate::payload::synthesis::positional_pad_payloads(context);
 
+    // Doubled-angle ("sub-not-gsub") filter bypass: a filter that strips /
+    // entity-encodes only the *first* `<` (a one-shot `str::replace`) makes the
+    // per-character probe record `<` blocked, so the clean tag shapes above are
+    // all pruned — yet doubling the angle (`<<svg …>>`) opens a real tag once
+    // the filter has spent its single pass. Carries raw `<`/`>` deliberately
+    // (exempted from the raw-angle prune via
+    // `synthesis::is_sub_filter_doubled_bypass`) and, like `positional`, is
+    // placed after the clean synthesized shapes so an easy param verifies the
+    // tidy PoC first and these are never sent. FP-safe by marker + sink
+    // co-survival: a global `<` strip collapses `<<` to inert text.
+    let doubled = crate::payload::synthesis::sub_filter_doubled_payloads(context);
+
     // Apply adaptive encoders with pre-allocated capacity
-    let estimated_cap = (positional.len() + synthesized.len() + filtered_payloads.len())
-        * (2 + adaptive_encoders.len());
+    let estimated_cap =
+        (positional.len() + doubled.len() + synthesized.len() + filtered_payloads.len())
+            * (2 + adaptive_encoders.len());
     let mut out = Vec::with_capacity(estimated_cap);
     let mut seen = std::collections::HashSet::with_capacity(estimated_cap);
     for p in synthesized {
@@ -430,6 +443,11 @@ pub(crate) fn generate_adaptive_payloads(
         }
     }
     for p in positional {
+        if seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
+    for p in doubled {
         if seen.insert(p.clone()) {
             out.push(p);
         }

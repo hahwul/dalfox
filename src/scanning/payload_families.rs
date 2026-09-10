@@ -111,7 +111,11 @@ pub(crate) fn prune_blocked_raw_angles(
             // filtered window. Keep them despite the blocked-angle classification
             // (they are FP-safe — a non-positional filter still encodes the `<`
             // and nothing verifies). See `synthesis::positional_pad_payloads`.
+            // Doubled-angle ("sub-not-gsub") bypasses carry raw `<`/`>` for the
+            // same reason — the second angle opens a tag once a one-shot filter
+            // has consumed the first. See `synthesis::sub_filter_doubled_payloads`.
             crate::payload::synthesis::is_positional_pad_bypass(p)
+                || crate::payload::synthesis::is_sub_filter_doubled_bypass(p)
                 || !((block_lt && p.contains('<')) || (block_gt && p.contains('>')))
         })
         .collect()
@@ -176,18 +180,21 @@ pub(crate) fn hoist_angle_free_payloads(
         return payloads;
     }
     // Three tiers, front to back:
-    //   pad   — leading-window ("positional") bypass payloads (raw `<` on
-    //           purpose). When angles are reported blocked the block may be
-    //           positional, and these are then the *only* shapes that can reach
-    //           a tag injection, so they must lead — otherwise the DOM phase's
-    //           inert-echo early exit can retire before they are ever tried.
+    //   pad   — leading-window ("positional") and doubled-angle ("sub-not-gsub")
+    //           bypass payloads (raw `<` on purpose). When angles are reported
+    //           blocked the block may be positional or one-shot, and these are
+    //           then the *only* shapes that can reach a tag injection, so they
+    //           must lead — otherwise the DOM phase's inert-echo early exit can
+    //           retire before they are ever tried.
     //   clean — angle-free survivors (event-handler / quote-breakout shapes).
     //   rest  — encoded-angle variants (need a naive single-pass-decode filter).
     let mut pad: Vec<String> = Vec::new();
     let mut clean: Vec<String> = Vec::with_capacity(payloads.len());
     let mut rest: Vec<String> = Vec::with_capacity(payloads.len());
     for p in payloads {
-        if crate::payload::synthesis::is_positional_pad_bypass(&p) {
+        if crate::payload::synthesis::is_positional_pad_bypass(&p)
+            || crate::payload::synthesis::is_sub_filter_doubled_bypass(&p)
+        {
             pad.push(p);
         } else if payload_is_angle_free(&p) {
             clean.push(p);

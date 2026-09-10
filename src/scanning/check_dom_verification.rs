@@ -1005,9 +1005,28 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
     // echo (payload present, but not executable) is still reported as reflected
     // for the DOM-phase early-exit signal.
     if let Ok(text) = crate::utils::http::read_body(resp).await {
+        // Strict, byte-exact reflection. This is the signal the DOM-phase
+        // inert-echo early exit budgets against, and its recall safety rests on
+        // `classify_reflection` returning `None` for escaped/encoded reflections
+        // (see `INERT_ECHO_BUDGET`): a *sanitizing* endpoint must never advance
+        // that counter, or the early exit can retire before a genuine late
+        // verifier (e.g. sanitizer-level3's whitelisted `<a href=javascript:>`)
+        // is reached. So the returned `reflected` flag stays on this strict form.
         let reflected =
             crate::scanning::check_reflection::classify_reflection(&text, payload).is_some();
-        let verified = reflected
+        // Verification uses a *broader* reflection pre-gate: the byte-exact check
+        // misses a payload the server *transforms* — a one-shot angle filter
+        // collapsing a doubled-angle bypass (`<<svg class=dlx… onload=…>>`) to a
+        // single-angle tag being the motivating case. The payload's unique
+        // per-scan marker surviving into the response is an equally valid "this
+        // came from us" signal there. It is confined to the `verified` gate (not
+        // the inert-echo `reflected` signal above) precisely to preserve that
+        // budget's invariant, and `classify_dom_evidence` still independently
+        // proves the marker landed on a real sink-carrying element (issue #1118),
+        // so an inert marker echo yields no finding.
+        let reflected_for_evidence =
+            reflected || crate::scanning::check_reflection::payload_marker_present(&text, payload);
+        let verified = reflected_for_evidence
             && classify_dom_evidence(payload, &text)
                 .is_some_and(|kind| !(js_body_inert_to_markup && kind.requires_html_rendering()));
         if verified {

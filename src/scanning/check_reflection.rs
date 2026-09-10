@@ -1521,6 +1521,33 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
     None
 }
 
+/// True when the payload embeds a Dalfox marker (class/id, dynamic or legacy)
+/// and that marker appears in `resp_text`, in exact case or under ASCII
+/// case-folding.
+///
+/// The markers are `dlx` + 8 random hex digits (plus the legacy `dalfox`),
+/// unique to this scan, so their presence is a strong "this reflection came
+/// from our payload" signal even when the server *transformed* the payload so
+/// that no byte-exact variant of the whole string survives — a one-shot angle
+/// filter turning `<<svg class=dlx… onload=…>>` into `<svg class=dlx… onload=…>`
+/// being the motivating case. Unlike [`marker_case_fold_reflected`], this does
+/// not bail when the marker is already present in exact case: it is the reflection
+/// pre-gate for the DOM-verification path, whose evidence check
+/// ([`check_dom_verification::classify_dom_evidence`]) independently proves the
+/// marker landed on a real, sink-carrying element (issue #1118), so an inert
+/// echo of the marker as plain text still yields no finding.
+pub(crate) fn payload_marker_present(resp_text: &str, payload: &str) -> bool {
+    let candidates: [&str; 3] = [
+        crate::scanning::markers::class_marker(),
+        crate::scanning::markers::id_marker(),
+        "dalfox",
+    ];
+    candidates
+        .iter()
+        .filter(|m| payload.contains(**m))
+        .any(|m| resp_text.contains(m) || ascii_ci_contains(resp_text, m))
+}
+
 /// True when the payload embeds a Dalfox marker (class/id, dynamic or
 /// legacy) and that marker appears in `resp_text` only after ASCII
 /// case-folding. Used as a last-chance reflection signal for servers
