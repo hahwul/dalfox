@@ -147,6 +147,31 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
         None
     }
 
+    // Infer surrounding quote delimiter for an attribute value directly from the tag syntax in text.
+    // An attribute is quoted if the opening quote inside the tag before the marker is unclosed (odd count).
+    fn infer_attribute_quote_delimiter(text: &str, marker: &str) -> Option<DelimiterType> {
+        let pos = text.find(marker)?;
+        let tag_start = text[..pos].rfind('<')?;
+        let tag_end = text[pos..].find('>').map(|p| pos + p)?;
+        if tag_start >= pos || pos >= tag_end {
+            return None;
+        }
+
+        let before_in_tag = &text[tag_start..pos];
+        let after_in_tag = &text[pos + marker.len()..tag_end];
+
+        let dquote_odd = before_in_tag.bytes().filter(|&b| b == b'"').count() % 2 == 1;
+        let squote_odd = before_in_tag.bytes().filter(|&b| b == b'\'').count() % 2 == 1;
+
+        if dquote_odd && after_in_tag.contains('"') {
+            Some(DelimiterType::DoubleQuote)
+        } else if squote_odd && after_in_tag.contains('\'') {
+            Some(DelimiterType::SingleQuote)
+        } else {
+            None
+        }
+    }
+
     fn is_url_like_attribute(name: &str) -> bool {
         matches!(
             name.to_ascii_lowercase().as_str(),
@@ -163,7 +188,7 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
                 acc
             });
             if s.contains(marker) {
-                let delim = infer_quote_delimiter(text, marker);
+                let delim = infer_quote_delimiter(&s, marker);
                 return InjectionContext::Javascript(delim);
             }
         }
@@ -178,7 +203,7 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
                 acc
             });
             if s.contains(marker) {
-                let delim = infer_quote_delimiter(text, marker);
+                let delim = infer_quote_delimiter(&s, marker);
                 return InjectionContext::Css(delim);
             }
         }
@@ -204,10 +229,11 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
         for el in document.select(any) {
             for (name, v) in el.value().attrs() {
                 if v.contains(marker) {
-                    let delim = infer_quote_delimiter(text, marker);
                     if is_event_handler_attribute(name) {
+                        let delim = infer_quote_delimiter(v, marker);
                         return InjectionContext::Javascript(delim);
                     }
+                    let delim = infer_attribute_quote_delimiter(text, marker);
                     return if is_url_like_attribute(name) {
                         InjectionContext::AttributeUrl(delim)
                     } else {

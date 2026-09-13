@@ -125,6 +125,16 @@ fn test_detect_injection_context_script_backtick_wins_over_earlier_quote() {
 }
 
 #[test]
+fn test_detect_injection_context_script_unquoted_with_document_quotes() {
+    // When marker is in an unquoted JS expression, but the surrounding HTML
+    // has quotes in other tags, it should still be detected as unquoted Javascript(None).
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<div class=\"header\"><script>var count = {};</script><div class=\"footer\"></div>", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(ctx, InjectionContext::Javascript(None));
+}
+
+#[test]
 fn test_detect_js_breakout_bare_double_quote_string() {
     // Reflection inside a plain double-quoted JS string: the closer is just the
     // quote that returns to statement position.
@@ -249,6 +259,33 @@ fn test_detect_injection_context_url_attribute_double_quote() {
     assert_eq!(
         ctx,
         InjectionContext::AttributeUrl(Some(DelimiterType::DoubleQuote))
+    );
+}
+
+#[test]
+fn test_detect_injection_context_attribute_unquoted_with_document_quotes() {
+    // When marker is in an unquoted attribute value on a page with other quoted attributes,
+    // it should be detected as Attribute(None) instead of picking up outer quotes.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!(
+        "<div class=\"container\"><input type=\"text\" value={}><div class=\"footer\"></div>",
+        marker
+    );
+    let ctx = detect_injection_context(&body);
+    assert_eq!(ctx, InjectionContext::Attribute(None));
+}
+
+#[test]
+fn test_detect_injection_context_attribute_single_quote_with_document_quotes() {
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!(
+        "<div class=\"container\"><input type=\"text\" value='{}'><div class=\"footer\"></div>",
+        marker
+    );
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Attribute(Some(DelimiterType::SingleQuote))
     );
 }
 
