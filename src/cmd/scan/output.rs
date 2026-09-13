@@ -109,11 +109,13 @@ pub(crate) async fn render_dry_run(
         .map(|n| n as usize)
         .sum();
     let skipped = skipped_targets.lock().await;
+    let total_input_targets =
+        dry_run_targets.len() + skipped.len() + state.dedup.collapsed + state.resumed_skipped;
 
     let report = if args.format == "json" || args.format == "jsonl" {
         let mut meta = serde_json::json!({
             "dalfox_version": env!("CARGO_PKG_VERSION"),
-            "targets_input": args.targets.len(),
+            "targets_input": total_input_targets,
             "targets_scannable": dry_run_targets.len(),
             "targets_skipped": skipped.len(),
             "total_params_discovered": total_params,
@@ -146,7 +148,7 @@ pub(crate) async fn render_dry_run(
         use std::fmt::Write as _;
         let mut out = String::new();
         let _ = writeln!(out, "Dry-run summary:");
-        let _ = writeln!(out, "  Targets (input):     {}", args.targets.len());
+        let _ = writeln!(out, "  Targets (input):     {}", total_input_targets);
         let _ = writeln!(out, "  Targets (scannable): {}", dry_run_targets.len());
         let _ = writeln!(out, "  Targets (skipped):   {}", skipped.len());
         if state.dedup.collapsed > 0 {
