@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-13T08:45:41Z",
+  "generated_at": "2026-09-13T09:06:09Z",
   "tool": "perf_budget",
   "dalfox_version": "3.2.2",
   "scan_args": [
@@ -21,7 +21,7 @@
       "timed_out": false,
       "bytes_sent": 2175,
       "distinct_payloads": 6,
-      "requests_per_second": 2450.12
+      "requests_per_second": 2397.81
     },
     "reflect_all": {
       "path": "/reflect-all",
@@ -30,13 +30,13 @@
       "requests": 22,
       "reported_requests": 22,
       "requests_per_param": 22.0,
-      "duration_s": 0.009,
+      "duration_s": 0.01,
       "findings": 1,
       "verified": 1,
       "timed_out": false,
       "bytes_sent": 4900,
       "distinct_payloads": 7,
-      "requests_per_second": 6119.61
+      "requests_per_second": 5774.28
     },
     "many": {
       "path": "/many",
@@ -51,7 +51,7 @@
       "timed_out": false,
       "bytes_sent": 6018,
       "distinct_payloads": 9,
-      "requests_per_second": 1638.61
+      "requests_per_second": 1661.05
     },
     "inert": {
       "path": "/inert",
@@ -66,7 +66,7 @@
       "timed_out": false,
       "bytes_sent": 135781,
       "distinct_payloads": 265,
-      "requests_per_second": 20591.25
+      "requests_per_second": 20113.83
     },
     "slow": {
       "path": "/slow",
@@ -75,18 +75,18 @@
       "requests": 21,
       "reported_requests": 21,
       "requests_per_param": 21.0,
-      "duration_s": 0.557,
+      "duration_s": 0.581,
       "findings": 1,
       "verified": 1,
       "timed_out": false,
       "bytes_sent": 2175,
       "distinct_payloads": 6,
-      "requests_per_second": 42.32
+      "requests_per_second": 40.21
     }
   },
   "total": {
     "requests": 719,
-    "duration_s": 0.642,
+    "duration_s": 0.667,
     "findings": 8
   }
 }

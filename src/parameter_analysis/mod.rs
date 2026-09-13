@@ -891,11 +891,17 @@ pub async fn active_probe_param(
                 Some((win_valid, win_invalid)) => {
                     valid = win_valid;
                     invalid = win_invalid;
-                    // The padded probe reflected, and Stage 0 pads too (the
-                    // `WafWindowPad` pre-encoding below applies to every
-                    // injection), so its request would ask a question this one
-                    // already answered.
-                    param.marker_echoed = true;
+                    // `marker_echoed` is deliberately NOT set here. This branch
+                    // is reached when the batched probe came back with nothing
+                    // — including when it simply failed or timed out under load
+                    // — and `window_overflow_probe` reports only the
+                    // valid/invalid split, not the content-type of the response
+                    // it saw. Setting the flag on that made a JSON API case
+                    // skip the Stage-0 probe, and with it the inert-data
+                    // suppression, whenever the first probe lost the race: an
+                    // intermittent `[V]` on a `application/json` body. Stage 0
+                    // runs for these (one request, rare path) and judges its
+                    // own response.
                     param.pre_encoding = Some(
                         crate::encoding::pre_encoding::PreEncodingType::WafWindowPad
                             .as_str()

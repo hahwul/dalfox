@@ -977,6 +977,70 @@ fn slice_between_extracts_region() {
 /// (403, no reflection), but the full value reflects raw — so a vector pushed
 /// past the window slips through (xssmaze `waf-facade/level2`). `active_probe_param`
 /// must detect this via the window-overflow probe: reclassify the angle
+/// The race that produced an intermittent `[V]` on a JSON API in CI: the
+/// batched probe loses (a timeout, a 5xx, an empty body), the window-overflow
+/// probe then succeeds against the same `application/json` endpoint, and the
+/// echo it saw gets recorded — skipping the Stage-0 probe, and with it the
+/// inert-data suppression that is the only thing keeping that case clean.
+/// `window_overflow_probe` reports no content-type, so this branch must never
+/// record an echo.
+#[tokio::test]
+async fn active_probe_does_not_record_an_echo_when_only_the_window_probe_answered() {
+    use axum::{Router, extract::Query, http::StatusCode, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    let seen = Arc::new(AtomicUsize::new(0));
+    let seen_h = seen.clone();
+    let handler = move |Query(p): Query<HashMap<String, String>>| {
+        let seen = seen_h.clone();
+        async move {
+            let v = p.get("x").cloned().unwrap_or_default();
+            if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+                // First request — the batched probe — answers nothing.
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [("content-type", "")],
+                    String::new(),
+                );
+            }
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                format!("{{\"q\":\"{v}\"}}"),
+            )
+        }
+    };
+
+    let app = Router::new().route("/api", get(handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/api?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    assert!(
+        seen.load(Ordering::SeqCst) >= 2,
+        "the window-overflow probe should have run after the batched probe answered nothing"
+    );
+    assert!(
+        !res.marker_echoed,
+        "an echo only the window-overflow probe saw must not skip the Stage-0 probe"
+    );
+}
+
 /// `Param::marker_echoed` is what lets the scan worker's Stage-0 probe skip its
 /// own request, so it may only be set when this probe saw the markers come back
 /// in a response the scan phases would act on.
@@ -1153,6 +1217,11 @@ async fn active_probe_detects_inspection_window_waf_and_sets_wafpad() {
     assert!(
         valid.contains(&'<') && valid.contains(&'>'),
         "angle brackets must be reclassified valid once pushed past the window; got {valid:?}"
+    );
+    assert!(
+        !res.marker_echoed,
+        "the window-overflow probe reports no content-type, so it must leave the \
+         Stage-0 probe to judge its own response"
     );
 }
 

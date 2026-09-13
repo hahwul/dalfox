@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-13T08:45:39Z",
+  "generated_at": "2026-09-13T09:02:11Z",
   "tool": "effectiveness",
   "dalfox_version": "3.2.2",
   "corpus": {
@@ -181,7 +181,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.07,
+      "seconds": 0.08,
       "error": null
     },
     {
@@ -307,7 +307,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.02,
+      "seconds": 0.01,
       "error": null
     },
     {
@@ -451,7 +451,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.07,
+      "seconds": 0.06,
       "error": null
     },
     {
@@ -469,7 +469,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.02,
+      "seconds": 0.01,
       "error": null
     },
     {
@@ -523,7 +523,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.01,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -609,7 +609,7 @@
       "result_type": "V",
       "detection_method": "reflection",
       "confidence": "high",
-      "payload": "</textarea><IMG src=x onerror=alert(1) ClAss=dlxe319b8c5>",
+      "payload": "</textarea><IMG src=x onerror=alert(1) ClAss=dlx9051c17e>",
       "evidence": "DOM verification successful for param query (DOM marker)",
       "findings": 1,
       "verified_findings": 1,

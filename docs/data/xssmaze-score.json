@@ -1,14 +1,14 @@
 {
-  "generated_at": "2026-09-13T08:45:58Z",
+  "generated_at": "2026-09-13T09:06:30Z",
   "dalfox_version": "3.2.2",
   "xssmaze_version": "0.3.0",
   "xssmaze_image": "ghcr.io/hahwul/xssmaze:main",
   "xssmaze_digest": "ghcr.io/hahwul/xssmaze@sha256:cf0b894287cb09ab2de38eed42ee616515bcb888a77894f4e43502caccb509e4",
   "total": {
     "endpoints": 1064,
-    "detected": 1042,
-    "verified": 905,
-    "rate": 97.9
+    "detected": 1041,
+    "verified": 904,
+    "rate": 97.8
   },
   "categories": [
     {
@@ -803,13 +803,6 @@
       "rate": 100.0
     },
     {
-      "category": "postmethod",
-      "endpoints": 6,
-      "detected": 6,
-      "verified": 6,
-      "rate": 100.0
-    },
-    {
       "category": "querymethod",
       "endpoints": 5,
       "detected": 5,
@@ -1193,6 +1186,13 @@
       "detected": 27,
       "verified": 20,
       "rate": 84.4
+    },
+    {
+      "category": "postmethod",
+      "endpoints": 6,
+      "detected": 5,
+      "verified": 5,
+      "rate": 83.3
     },
     {
       "category": "storedpat",
