@@ -198,7 +198,7 @@ toc = true
 | `xsleak` | 5 | 0 | 0 | 0.0% |
 | **Total** | **1064** | **1042** | **905** | **97.9%** |
 
-_Generated 2026-09-13T08:09:24Z · image `ghcr.io/hahwul/xssmaze:main` (`ghcr.io/hahwul/xssmaze@sha256:cf0b894287cb09ab2de38eed42ee616515bcb888a77894f4e43502caccb509e4`) · run `just xssmaze-score` to refresh._
+_Generated 2026-09-13T08:45:58Z · image `ghcr.io/hahwul/xssmaze:main` (`ghcr.io/hahwul/xssmaze@sha256:cf0b894287cb09ab2de38eed42ee616515bcb888a77894f4e43502caccb509e4`) · run `just xssmaze-score` to refresh._
 
 <!-- XSSMAZE:END -->
 

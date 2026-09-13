@@ -712,6 +712,30 @@ impl ScanWorkerCtx {
         // partial reflections (PrefixOnly / SuffixOnly / InnerOnly) where a
         // server-side filter strips a prefix or suffix off the input before
         // echoing — those cases would slip past a single-token contains().
+        // The pre-scan active probe (`parameter_analysis::active_probe_param`)
+        // sends `OPEN + specials + CLOSE` to this same parameter immediately
+        // before the scan starts and reads the echo. When it saw the markers
+        // come back, this request would ask the identical question with the
+        // identical markers — so take its answer instead of paying for it
+        // again. On a reflecting target that is one of the four requests a
+        // parameter costs before its first payload.
+        //
+        // The AST pass below is what the probe response is otherwise good for;
+        // skipping leaves `probe_response_text` empty and the reflection phase
+        // runs the same analysis on its first renderable response
+        // (`process_reflection_result`'s `!state.ast_analysis_done` arm), which
+        // is a body from this same page.
+        //
+        // `--deep-scan` keeps the probe: exhaustive mode should not depend on
+        // an earlier stage's verdict.
+        if param.marker_echoed && !self.args.deep_scan {
+            crate::dbg_log!(
+                "stage-0 probe skipped (param={}): active probe already observed the marker echo",
+                param.name,
+            );
+            return true;
+        }
+
         let probe_payloads: [&str; 1] = [crate::scanning::markers::bracketed_marker()];
         let mut probe_reflected = false;
         let mut probe_response_text: Option<String> = None;

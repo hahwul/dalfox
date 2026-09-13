@@ -3836,6 +3836,136 @@ async fn test_within_param_concurrency_fans_out_requests() {
 /// scanned strictly serially (observed max concurrency == 1). This also guards
 /// the `--sxss` / `--delay` serial modes, which share the `request_concurrency`
 /// gate.
+/// The scan worker's Stage-0 probe asks the same question, with the same
+/// markers, that `parameter_analysis::active_probe_param` asked one stage
+/// earlier. When that probe already saw the echo (`Param::marker_echoed`) the
+/// request is skipped — one request per parameter — and the scan is otherwise
+/// identical: the same findings, and the AST pass the probe response used to
+/// seed now runs on the reflection phase's first renderable body.
+#[tokio::test]
+async fn test_marker_echoed_param_skips_the_stage_0_probe_request() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    async fn scan_counting_requests(marker_echoed: bool) -> (usize, usize) {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_h = hits.clone();
+        let handler = move |Query(params): Query<HashMap<String, String>>| {
+            let hits = hits_h.clone();
+            async move {
+                hits.fetch_add(1, Ordering::SeqCst);
+                let q = params.get("q").cloned().unwrap_or_default();
+                Html(format!("<html><body><div>{}</div></body></html>", q))
+            }
+        };
+        let app = Router::new().route("/", get(handler));
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind test listener");
+        let addr: SocketAddr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+        sleep(Duration::from_millis(20)).await;
+
+        let url = format!("http://{}/?q=a", addr);
+        let mut target = parse_target(&url).expect("parse_target");
+        target.reflection_params.push(Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            marker_echoed,
+            ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+        });
+
+        let args = Arc::new(integration_scan_args(false));
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            args,
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        let findings = results.lock().await.len();
+        (hits.load(Ordering::SeqCst), findings)
+    }
+
+    let (with_probe, findings_with_probe) = scan_counting_requests(false).await;
+    let (reusing_echo, findings_reusing_echo) = scan_counting_requests(true).await;
+
+    assert_eq!(
+        reusing_echo + 1,
+        with_probe,
+        "reusing the active probe's echo must cost exactly one request less \
+         (probe: {with_probe}, reuse: {reusing_echo})"
+    );
+    assert!(
+        findings_reusing_echo >= 1 && findings_reusing_echo == findings_with_probe,
+        "skipping the probe must not change the findings \
+         (probe: {findings_with_probe}, reuse: {findings_reusing_echo})"
+    );
+}
+
+/// `--deep-scan` keeps the probe: exhaustive mode must not depend on an earlier
+/// stage's verdict.
+#[tokio::test]
+async fn test_deep_scan_keeps_the_stage_0_probe_for_an_echoed_param() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_h = hits.clone();
+    let handler = move |Query(params): Query<HashMap<String, String>>| {
+        let hits = hits_h.clone();
+        async move {
+            hits.fetch_add(1, Ordering::SeqCst);
+            let q = params.get("q").cloned().unwrap_or_default();
+            // Echo the markers back so the probe records a reflection, but keep
+            // the body free of anything that verifies.
+            Html(format!("<html><body><div>{}</div></body></html>", q))
+        }
+    };
+    let app = Router::new().route("/", get(handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?q=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        marker_echoed: true,
+        ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+    });
+
+    let mut args = integration_scan_args(false);
+    args.deep_scan = true;
+    args.max_payloads_per_param = 2;
+    let args = Arc::new(args);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        ScanRunHandles::new(results, Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let sent = hits.load(Ordering::SeqCst);
+    assert!(
+        sent > 2,
+        "--deep-scan must still send its own Stage-0 probe (requests: {sent})"
+    );
+}
+
 #[tokio::test]
 async fn test_waf_evasion_keeps_requests_serial() {
     use axum::{Router, extract::Query, response::Html, routing::get};
