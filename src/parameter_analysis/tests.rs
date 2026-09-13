@@ -977,6 +977,192 @@ fn slice_between_extracts_region() {
 /// (403, no reflection), but the full value reflects raw — so a vector pushed
 /// past the window slips through (xssmaze `waf-facade/level2`). `active_probe_param`
 /// must detect this via the window-overflow probe: reclassify the angle
+/// The race that produced an intermittent `[V]` on a JSON API in CI: the
+/// batched probe loses (a timeout, a 5xx, an empty body), the window-overflow
+/// probe then succeeds against the same `application/json` endpoint, and the
+/// echo it saw gets recorded — skipping the Stage-0 probe, and with it the
+/// inert-data suppression that is the only thing keeping that case clean.
+/// `window_overflow_probe` reports no content-type, so this branch must never
+/// record an echo.
+#[tokio::test]
+async fn active_probe_does_not_record_an_echo_when_only_the_window_probe_answered() {
+    use axum::{Router, extract::Query, http::StatusCode, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    let seen = Arc::new(AtomicUsize::new(0));
+    let seen_h = seen.clone();
+    let handler = move |Query(p): Query<HashMap<String, String>>| {
+        let seen = seen_h.clone();
+        async move {
+            let v = p.get("x").cloned().unwrap_or_default();
+            if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+                // First request — the batched probe — answers nothing.
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [("content-type", "")],
+                    String::new(),
+                );
+            }
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                format!("{{\"q\":\"{v}\"}}"),
+            )
+        }
+    };
+
+    let app = Router::new().route("/api", get(handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/api?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    assert!(
+        seen.load(Ordering::SeqCst) >= 2,
+        "the window-overflow probe should have run after the batched probe answered nothing"
+    );
+    assert!(
+        !res.marker_echoed,
+        "an echo only the window-overflow probe saw must not skip the Stage-0 probe"
+    );
+}
+
+/// `Param::marker_echoed` is what lets the scan worker's Stage-0 probe skip its
+/// own request, so it may only be set when this probe saw the markers come back
+/// in a response the scan phases would act on.
+#[tokio::test]
+async fn active_probe_records_the_marker_echo_for_an_html_response() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn echo(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let v = p.get("x").cloned().unwrap_or_default();
+        Html(format!("<html><body><div>{v}</div></body></html>"))
+    }
+
+    let app = Router::new().route("/e", get(echo));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/e?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    assert!(
+        res.marker_echoed,
+        "an HTML echo of the probe markers must be recorded for Stage 0"
+    );
+}
+
+/// Counter-case that cost a real false positive while this was being built: a
+/// JSON API echoes the markers, but `injection_response_suppressed` drops
+/// reflections on inert-data content-types — which is a judgement the scan
+/// worker's Stage-0 probe makes on its own response. Recording the echo here
+/// would skip that probe and let the DOM phase "verify" a marker inside a JSON
+/// body.
+#[tokio::test]
+async fn active_probe_does_not_record_an_echo_from_an_inert_content_type() {
+    use axum::{Router, extract::Query, http::StatusCode, response::IntoResponse, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn json_echo(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let v = p.get("x").cloned().unwrap_or_default();
+        (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            format!("{{\"q\":\"{v}\"}}"),
+        )
+    }
+
+    let app = Router::new().route("/api", get(json_echo));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/api?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    assert!(
+        !res.marker_echoed,
+        "a marker echoed into a JSON body is not evidence Stage 0 can be skipped"
+    );
+}
+
+/// Path parameters keep their Stage-0 probe: the path suppressions
+/// (`should_suppress_path_reflection_with_body`, the non-2xx error-page rule)
+/// need the body, which this cheap content-type check cannot stand in for.
+#[tokio::test]
+async fn active_probe_does_not_record_an_echo_for_a_path_param() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    let app = Router::new().route(
+        "/{seg}",
+        get(
+            |axum::extract::Path(seg): axum::extract::Path<String>| async move {
+                Html(format!("<html><body><div>{seg}</div></body></html>"))
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/seg1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("path_segment_1", Location::Path),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    assert!(
+        !res.marker_echoed,
+        "path params must keep the Stage-0 probe that judges their body"
+    );
+}
+
 /// brackets as valid and record the `wafpad` pre-encoding so payloads are sent
 /// past the window.
 #[tokio::test]
@@ -1031,6 +1217,11 @@ async fn active_probe_detects_inspection_window_waf_and_sets_wafpad() {
     assert!(
         valid.contains(&'<') && valid.contains(&'>'),
         "angle brackets must be reclassified valid once pushed past the window; got {valid:?}"
+    );
+    assert!(
+        !res.marker_echoed,
+        "the window-overflow probe reports no content-type, so it must leave the \
+         Stage-0 probe to judge its own response"
     );
 }
 

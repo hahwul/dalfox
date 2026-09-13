@@ -944,11 +944,12 @@ pub struct DomVerifyOutcome {
     /// Response body — populated only when `verified`, so the full DOM payload
     /// set does not accumulate response bodies in memory.
     pub response_text: Option<String>,
-    /// The payload's bytes were detected in the response (reflection present)
-    /// but not necessarily in an executable context. Distinguishes a
-    /// "reflected-but-inert echo" from a non-reflecting or blocked response.
-    /// Always `false` for redirects, request errors, and `--sxss` (where it is
-    /// not meaningfully observable).
+    /// The payload came back in the response — byte-exact, or as a pure
+    /// *escaped* echo of the same bytes — but not necessarily in an executable
+    /// context. Distinguishes a "reflected-but-inert echo" from a
+    /// non-reflecting, sanitized, or blocked response. Always `false` for
+    /// redirects, request errors, and `--sxss` (where it is not meaningfully
+    /// observable).
     pub reflected: bool,
     /// HTTP status of the injection response, or `0` when the request errored
     /// (or for `--sxss`, whose verification fans out across secondary URLs).
@@ -1005,15 +1006,36 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
     // echo (payload present, but not executable) is still reported as reflected
     // for the DOM-phase early-exit signal.
     if let Ok(text) = crate::utils::http::read_body(resp).await {
-        // Strict, byte-exact reflection. This is the signal the DOM-phase
-        // inert-echo early exit budgets against, and its recall safety rests on
-        // `classify_reflection` returning `None` for escaped/encoded reflections
-        // (see `INERT_ECHO_BUDGET`): a *sanitizing* endpoint must never advance
-        // that counter, or the early exit can retire before a genuine late
-        // verifier (e.g. sanitizer-level3's whitelisted `<a href=javascript:>`)
-        // is reached. So the returned `reflected` flag stays on this strict form.
-        let reflected =
-            crate::scanning::check_reflection::classify_reflection(&text, payload).is_some();
+        // The signal the DOM-phase inert-echo early exit budgets against.
+        //
+        // Byte-exact reflection is one half. The other half is the *escaped
+        // echo*: the server handed our exact payload back, escaped
+        // (`&lt;svg …&gt;`, `%3Csvg%20…`), which `classify_reflection`
+        // deliberately reports as no reflection because it is not a finding.
+        // Budgeting only on the byte-exact form meant a uniformly escaping
+        // endpoint — the most common shape on the web — advanced the counter
+        // zero times and the phase ran its entire catalog against a body that
+        // can never verify (measured: 5394 requests, 0 findings, on the
+        // `inert` perf-budget scenario).
+        //
+        // The recall constraint this used to protect is preserved by
+        // `is_escaped_echo` itself, not by abstaining: a *sanitizing* endpoint
+        // must never advance the counter, or the early exit can retire before a
+        // genuine late verifier (e.g. sanitizer-level3's whitelisted
+        // `<a href=javascript:>`) is reached. A whitelisting sanitizer *removes*
+        // markup rather than escaping it, so the payload never surfaces whole in
+        // any decoded view and `is_escaped_echo` returns false — as it also does
+        // for truncated echoes, `+`→space form decoding, event-handler and
+        // URL-attribute contexts, and unrelated bodies.
+        //
+        // 4xx is excluded for the reason `BLOCKED_STREAK_LIMIT` is scoped to
+        // 5xx: a WAF block page that echoes the payload is a *block*, and a
+        // later payload variant may still bypass it, so it must not consume the
+        // budget that keeps the bypass surface alive.
+        let reflected = crate::scanning::check_reflection::classify_reflection(&text, payload)
+            .is_some()
+            || (!(400..500).contains(&status_code)
+                && crate::scanning::check_reflection::is_escaped_echo(&text, payload));
         // Verification uses a *broader* reflection pre-gate: the byte-exact check
         // misses a payload the server *transforms* — a one-shot angle filter
         // collapsing a doubled-angle bypass (`<<svg class=dlx… onload=…>>`) to a

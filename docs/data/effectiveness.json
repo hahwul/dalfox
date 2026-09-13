@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-08T16:07:22Z",
+  "generated_at": "2026-09-13T09:02:11Z",
   "tool": "effectiveness",
-  "dalfox_version": "3.2.0",
+  "dalfox_version": "3.2.2",
   "corpus": {
     "lab_cases": 809,
     "scanned": 809,
@@ -9,60 +9,60 @@
   },
   "total": {
     "cases": 809,
-    "expected": 762,
-    "tp": 738,
-    "fp": 2,
+    "expected": 753,
+    "tp": 729,
+    "fp": 1,
     "fn": 24,
-    "tn": 45,
-    "precision": 99.73,
-    "recall": 96.85,
-    "f1": 98.27
+    "tn": 55,
+    "precision": 99.86,
+    "recall": 96.81,
+    "f1": 98.31
   },
   "verified": {
     "cases": 809,
-    "expected": 762,
-    "tp": 617,
+    "expected": 753,
+    "tp": 618,
     "fp": 1,
-    "fn": 145,
-    "tn": 46,
+    "fn": 135,
+    "tn": 55,
     "precision": 99.84,
-    "recall": 80.97,
-    "f1": 89.42
+    "recall": 82.07,
+    "f1": 90.09
   },
   "categories": [
     {
       "category": "body",
       "cases": 36,
-      "expected": 36,
-      "tp": 31,
+      "expected": 34,
+      "tp": 29,
       "fp": 0,
       "fn": 5,
-      "tn": 0,
+      "tn": 2,
       "precision": 100.0,
-      "recall": 86.11,
-      "f1": 92.54,
+      "recall": 85.29,
+      "f1": 92.06,
       "verified": {
         "tp": 29,
         "fp": 0,
-        "recall": 80.56,
+        "recall": 85.29,
         "precision": 100.0
       }
     },
     {
       "category": "cookie",
       "cases": 40,
-      "expected": 40,
-      "tp": 35,
+      "expected": 38,
+      "tp": 33,
       "fp": 0,
       "fn": 5,
-      "tn": 0,
+      "tn": 2,
       "precision": 100.0,
-      "recall": 87.5,
-      "f1": 93.33,
+      "recall": 86.84,
+      "f1": 92.96,
       "verified": {
         "tp": 33,
         "fp": 0,
-        "recall": 82.5,
+        "recall": 86.84,
         "precision": 100.0
       }
     },
@@ -87,54 +87,54 @@
     {
       "category": "header",
       "cases": 50,
-      "expected": 50,
-      "tp": 45,
+      "expected": 48,
+      "tp": 43,
       "fp": 0,
       "fn": 5,
-      "tn": 0,
+      "tn": 2,
       "precision": 100.0,
-      "recall": 90.0,
-      "f1": 94.74,
+      "recall": 89.58,
+      "f1": 94.5,
       "verified": {
         "tp": 43,
         "fp": 0,
-        "recall": 86.0,
+        "recall": 89.58,
         "precision": 100.0
       }
     },
     {
       "category": "path",
       "cases": 33,
-      "expected": 33,
-      "tp": 28,
+      "expected": 31,
+      "tp": 26,
       "fp": 0,
       "fn": 5,
-      "tn": 0,
+      "tn": 2,
       "precision": 100.0,
-      "recall": 84.85,
-      "f1": 91.8,
+      "recall": 83.87,
+      "f1": 91.23,
       "verified": {
         "tp": 26,
         "fp": 0,
-        "recall": 78.79,
+        "recall": 83.87,
         "precision": 100.0
       }
     },
     {
       "category": "query",
       "cases": 266,
-      "expected": 266,
-      "tp": 262,
+      "expected": 265,
+      "tp": 261,
       "fp": 0,
       "fn": 4,
-      "tn": 0,
+      "tn": 1,
       "precision": 100.0,
-      "recall": 98.5,
+      "recall": 98.49,
       "f1": 99.24,
       "verified": {
         "tp": 260,
         "fp": 0,
-        "recall": 97.74,
+        "recall": 98.11,
         "precision": 100.0
       }
     },
@@ -143,24 +143,24 @@
       "cases": 231,
       "expected": 227,
       "tp": 227,
-      "fp": 2,
+      "fp": 1,
       "fn": 0,
-      "tn": 2,
-      "precision": 99.13,
+      "tn": 3,
+      "precision": 99.56,
       "recall": 100.0,
-      "f1": 99.56,
+      "f1": 99.78,
       "verified": {
-        "tp": 226,
+        "tp": 227,
         "fp": 1,
-        "recall": 99.56,
+        "recall": 100.0,
         "precision": 99.56
       }
     }
   ],
   "timing": {
-    "wall_clock_seconds": 3.7,
-    "median_seconds": 0.016,
-    "slowest_seconds": 1.09,
+    "wall_clock_seconds": 1.4,
+    "median_seconds": 0.011,
+    "slowest_seconds": 0.08,
     "concurrency": 8
   },
   "ast_only": 110,
@@ -181,7 +181,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 1.03,
+      "seconds": 0.08,
       "error": null
     },
     {
@@ -271,7 +271,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.91,
+      "seconds": 0.08,
       "error": null
     },
     {
@@ -343,7 +343,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.01,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -361,7 +361,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 1.03,
+      "seconds": 0.05,
       "error": null
     },
     {
@@ -379,7 +379,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.03,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -397,7 +397,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.03,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -433,7 +433,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.03,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -451,7 +451,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 1.09,
+      "seconds": 0.06,
       "error": null
     },
     {
@@ -469,7 +469,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.02,
+      "seconds": 0.01,
       "error": null
     },
     {
@@ -505,7 +505,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.01,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -523,7 +523,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 0.01,
+      "seconds": 0.02,
       "error": null
     },
     {
@@ -559,7 +559,7 @@
       "evidence": "",
       "findings": 0,
       "verified_findings": 0,
-      "seconds": 1.08,
+      "seconds": 0.03,
       "error": null
     },
     {
@@ -600,24 +600,6 @@
     },
     {
       "kind": "FP",
-      "uid": "realworld/5144",
-      "name": "encoding_url_encoded_reflection",
-      "category": "realworld",
-      "param": "query",
-      "location": "Query",
-      "url": "http://127.0.0.1:4801/case/realworld/5144?query=test",
-      "result_type": "R",
-      "detection_method": "reflection",
-      "confidence": "low",
-      "payload": "<svg onload=alert(1) class=dlx42f2c202>",
-      "evidence": "Reflected XSS detected for param query (reflected after URL/form decoding)",
-      "findings": 1,
-      "verified_findings": 0,
-      "seconds": 0.07,
-      "error": null
-    },
-    {
-      "kind": "FP",
       "uid": "realworld/9102",
       "name": "current_lib_jquery_3_7_1",
       "category": "realworld",
@@ -627,11 +609,11 @@
       "result_type": "V",
       "detection_method": "reflection",
       "confidence": "high",
-      "payload": "</textarea><IMG src=x onerror=alert(1) ClAss=dlxf116eb78>",
+      "payload": "</textarea><IMG src=x onerror=alert(1) ClAss=dlx9051c17e>",
       "evidence": "DOM verification successful for param query (DOM marker)",
       "findings": 1,
       "verified_findings": 1,
-      "seconds": 0.03,
+      "seconds": 0.02,
       "error": null
     }
   ]

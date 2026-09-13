@@ -64,6 +64,16 @@ async fn html_entity_handler(Query(params): Query<HashMap<String, String>>) -> H
     Html(format!("<div>{}</div>", html_named_encode_all(&q)))
 }
 
+/// A WAF block page that echoes the (entity-escaped) payload back with a 403.
+/// Used to pin that the crate-private status path threads the 4xx status out.
+async fn block_echo_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FORBIDDEN,
+        Html(format!("<div>blocked: {}</div>", html_named_encode_all(&q))),
+    )
+}
+
 /// Mirrors brutelogic c1: reflects the param into a JS string literal
 /// after HTML-encoding `'` and `<`. Browser does not decode entities
 /// inside `<script>` so the reflection is inert.
@@ -142,6 +152,7 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
     let app = Router::new()
         .route("/reflect/raw", get(raw_handler))
         .route("/reflect/html-entity", get(html_entity_handler))
+        .route("/reflect/block-echo", get(block_echo_handler))
         .route("/reflect/js-string-apos", get(js_string_apos_handler))
         .route("/reflect/url-encoded", get(url_encoded_handler))
         .route("/reflect/form-url-encoded", get(form_urlencoded_handler))
@@ -189,6 +200,7 @@ async fn test_fetch_injection_multipart_injects_absent_param() {
     let body =
         fetch_injection_response_with_client(&client, &target, &param, "PAYMARK", &args, &streak)
             .await
+            .body
             .expect("injection response");
     let text = body.renderable_text().unwrap_or_default();
     assert!(
@@ -761,11 +773,14 @@ async fn test_check_reflection_suppresses_inert_js_string_apos_reflection() {
 }
 
 #[tokio::test]
-async fn test_check_reflection_detects_url_encoded_response() {
-    // Tag-payload echo (`<div>%3Csvg…%3E</div>`): out of scope for the inert-
-    // encoded-echo report gate (a byte gate can't tell a dead echo from a live
-    // element), so it remains reported. Soundly suppressing this needs the
-    // DOM/AST verification path.
+async fn test_check_reflection_demotes_url_encoded_tag_echo() {
+    // `<div>%3Csvg+onload%3Dalert%281%29%3E</div>`: the server percent-encoded
+    // our whole payload into element content, where a browser renders it as the
+    // literal text `%3Csvg…`. `is_escaped_echo` proves that (whole payload, no
+    // raw variant anywhere, every occurrence in a position a browser can do
+    // nothing with), so the report gate demotes it instead of minting an [R].
+    // A payload the server reflects *live* — even with edits — fails the
+    // whole-payload decoded match, and the DOM/AST phase still runs.
     let payload = "<svg onload=alert(1)>";
     let addr = start_mock_server("stored").await;
     let target = make_target(addr, "/reflect/url-encoded");
@@ -773,11 +788,17 @@ async fn test_check_reflection_detects_url_encoded_response() {
     let args = default_scan_args();
 
     let found = check_reflection(&target, &param, payload, &args).await;
-    assert!(found, "URL-encoded tag reflection should be detected");
+    assert!(
+        !found,
+        "percent-encoded tag echo in element content is inert — no [R]"
+    );
 }
 
 #[tokio::test]
-async fn test_check_reflection_detects_form_urlencoded_response_runtime() {
+async fn test_check_reflection_demotes_form_urlencoded_tag_echo_but_keeps_body() {
+    // Same proof through the form-style (`+` for space) encoder: inert echo, no
+    // [R] — but the body is still handed back so the DOM/AST phase and the
+    // caller's evidence rendering can inspect it.
     let payload = "<img src=x onerror=alert(1) class=dalfox>";
     let addr = start_mock_server("stored").await;
     let target = make_target(addr, "/reflect/form-url-encoded");
@@ -785,7 +806,7 @@ async fn test_check_reflection_detects_form_urlencoded_response_runtime() {
     let args = default_scan_args();
 
     let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
-    assert_eq!(kind, Some(ReflectionKind::UrlDecoded));
+    assert_eq!(kind, None, "form-encoded tag echo is an inert escaped echo");
     assert!(
         body.unwrap_or_default()
             .contains("%3Cimg+src%3Dx+onerror%3Dalert%281%29+class%3Ddalfox%3E"),
@@ -2569,5 +2590,509 @@ mod injection_response_gates {
             &path,
             &args
         ));
+    }
+}
+
+/// `is_escaped_echo` answers one question — "did the server hand our exact
+/// payload back, escaped, in a position a browser can do nothing with?" — for
+/// two callers: the scan phases' inert-echo budgets (a *cost* signal, letting
+/// them see the transformed-but-inert echoes `classify_reflection` reports as
+/// no reflection) and the report gate (where such an echo is not a finding).
+/// Its safety is entirely in the cases it REFUSES to claim, so those get the
+/// most coverage here — a sanitizer that strips markup, a truncated echo, a
+/// `+`→space form decode, an event handler, a URL scheme position, an already
+/// executable URL value, an HTML-parsed `srcdoc`, a framework innerHTML sink.
+/// The status the reflection-phase budget needs rides on a crate-private path
+/// (`check_reflection_with_response_status`), NOT on the public `ReflectionBody`
+/// — adding a required field there would break external exhaustive matches.
+/// These pin (a) the status is threaded correctly and (b) the public
+/// `_tracked` entry still returns the identical `(kind, body)`.
+mod status_path {
+    use super::*;
+
+    #[tokio::test]
+    async fn status_path_threads_200_and_matches_public_tracked() {
+        let payload = "<svg/onload=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/raw");
+        let param = make_param();
+        let args = default_scan_args();
+        let streak = std::sync::atomic::AtomicU32::new(0);
+
+        let (kind, body, status) =
+            crate::scanning::check_reflection::check_reflection_with_response_status(
+                None, &target, &param, payload, &args, &streak,
+            )
+            .await;
+        assert_eq!(
+            status, 200,
+            "a 200 injection response must thread status 200"
+        );
+        assert!(kind.is_some(), "raw reflection must classify");
+
+        // The public entry returns the same (kind, body), status dropped.
+        let streak2 = std::sync::atomic::AtomicU32::new(0);
+        let (pk, pb) = crate::scanning::check_reflection::check_reflection_with_response_tracked(
+            None, &target, &param, payload, &args, &streak2,
+        )
+        .await;
+        assert_eq!(
+            format!("{:?}", pk),
+            format!("{:?}", kind),
+            "public tracked kind must match the status path"
+        );
+        assert_eq!(
+            pb.map(|b| b.text),
+            body.map(|b| b.text),
+            "public tracked body must match the status path"
+        );
+    }
+
+    #[tokio::test]
+    async fn status_path_threads_4xx_block_status() {
+        // A 403 block page that echoes the escaped payload: the status path must
+        // surface 403 so the reflection budget can exclude it (a variant may
+        // still bypass). Reporting is unchanged — no finding either way.
+        let payload = "<svg/onload=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/block-echo");
+        let param = make_param();
+        let args = default_scan_args();
+        let streak = std::sync::atomic::AtomicU32::new(0);
+
+        let (_kind, _body, status) =
+            crate::scanning::check_reflection::check_reflection_with_response_status(
+                None, &target, &param, payload, &args, &streak,
+            )
+            .await;
+        assert_eq!(status, 403, "a 4xx block must thread its status out");
+    }
+}
+
+mod escaped_echo {
+    use super::*;
+
+    /// The DOM catalog's canonical tag payload shape, marker included.
+    const TAG_PAYLOAD: &str = "<svg onload=alert(1) class=dlxtest01>";
+    /// A quote break-out (no raw angle brackets).
+    const QUOTE_PAYLOAD: &str = "\";alert(1)//";
+
+    fn entity_escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#39;")
+    }
+
+    fn page(inner: &str) -> String {
+        format!("<html><body><h1>Search</h1><div id=\"out\">{inner}</div></body></html>")
+    }
+
+    // --- Claims an escaped echo (the case the budget exists for) ---
+
+    #[test]
+    fn entity_escaped_tag_payload_is_an_escaped_echo() {
+        // The uniformly-escaping endpoint: `html.escape()` over the whole value.
+        // This is the shape that previously advanced no budget at all and made
+        // the DOM phase run its entire catalog for zero findings.
+        let html = page(&entity_escape(TAG_PAYLOAD));
+        assert!(
+            !html.contains(TAG_PAYLOAD),
+            "fixture must not contain the raw payload"
+        );
+        assert!(
+            classify_reflection(&html, TAG_PAYLOAD).is_none(),
+            "an entity-escaped echo is correctly not a reported reflection"
+        );
+        assert!(
+            is_escaped_echo(&html, TAG_PAYLOAD),
+            "a whole-payload entity-escaped echo must advance the inert budget"
+        );
+    }
+
+    #[test]
+    fn percent_escaped_tag_payload_is_an_escaped_echo() {
+        // The other output-escaping flavour: the value is percent-encoded into
+        // body text (a `%3Csvg…` echo renders as literal characters).
+        let encoded = TAG_PAYLOAD
+            .replace('<', "%3C")
+            .replace('>', "%3E")
+            .replace(' ', "%20")
+            .replace('(', "%28")
+            .replace(')', "%29")
+            .replace('=', "%3D");
+        let html = page(&encoded);
+        assert!(!html.contains(TAG_PAYLOAD));
+        assert!(
+            is_escaped_echo(&html, TAG_PAYLOAD),
+            "a whole-payload percent-escaped echo must advance the inert budget"
+        );
+    }
+
+    #[test]
+    fn entity_escaped_quote_breakout_is_an_escaped_echo() {
+        let html = page(&entity_escape(QUOTE_PAYLOAD));
+        assert!(
+            is_escaped_echo(&html, QUOTE_PAYLOAD),
+            "an entity-escaped quote break-out echo is inert and countable"
+        );
+    }
+
+    // --- Refuses to claim (recall guards) ---
+
+    #[test]
+    fn sanitizer_stripped_output_is_not_an_escaped_echo() {
+        // A whitelisting sanitizer REMOVES the dangerous markup instead of
+        // escaping it. Counting this would let the DOM phase retire before a
+        // late whitelisted verifier (the `<a href=javascript:>` class) is
+        // reached — the exact recall loss the strict byte-exact signal used to
+        // prevent by abstaining from every escaped reflection.
+        let stripped = page("<svg class=\"dlxtest01\"></svg>");
+        assert!(
+            !is_escaped_echo(&stripped, TAG_PAYLOAD),
+            "sanitizer-stripped markup must not be counted as an escaped echo"
+        );
+
+        // Same endpoint, the whitelisted shape that DOES survive: still not an
+        // escaped echo of the payload we sent.
+        let whitelisted = page("<a href=\"javascript:alert(1)\">x</a>");
+        assert!(!is_escaped_echo(&whitelisted, TAG_PAYLOAD));
+    }
+
+    #[test]
+    fn attribute_stripping_sanitizer_is_not_an_escaped_echo() {
+        // Escapes the tag but drops the handler — our bytes did not come back
+        // whole, so the endpoint is transforming, not merely escaping, and a
+        // different payload shape may still get through.
+        let html = page(&entity_escape("<svg class=dlxtest01>"));
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "an echo missing part of the payload must not be counted"
+        );
+    }
+
+    #[test]
+    fn truncated_echo_is_not_an_escaped_echo() {
+        // Server-side length limit: only a prefix comes back. The match must
+        // cover the whole payload, never a prefix.
+        let escaped = entity_escape(TAG_PAYLOAD);
+        let truncated = &escaped[..escaped.len() / 2];
+        let html = page(truncated);
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "a truncated echo must not be counted"
+        );
+    }
+
+    #[test]
+    fn raw_reflection_is_not_an_escaped_echo() {
+        // A byte-exact echo is `classify_reflection`'s business; this gate only
+        // covers the transformed case, so the two signals never double-count.
+        let html = page(TAG_PAYLOAD);
+        assert!(classify_reflection(&html, TAG_PAYLOAD).is_some());
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "a raw echo is already covered by classify_reflection"
+        );
+    }
+
+    #[test]
+    fn plus_to_space_form_decoding_alone_is_not_an_escaped_echo() {
+        // `+`→space neutralises nothing, so a view that only differs by that
+        // substitution is not evidence the server escaped its output.
+        let payload = "alert(1)+confirm(1)";
+        let html = page("alert(1) confirm(1)");
+        assert!(
+            !is_escaped_echo(&html, payload),
+            "a whitespace-only form decode must not count as escaping"
+        );
+    }
+
+    #[test]
+    fn unrelated_body_is_not_an_escaped_echo() {
+        let html = page("no results found");
+        assert!(!is_escaped_echo(&html, TAG_PAYLOAD));
+        assert!(!is_escaped_echo(&html, QUOTE_PAYLOAD));
+        assert!(!is_escaped_echo("", TAG_PAYLOAD));
+    }
+
+    #[test]
+    fn event_handler_context_is_not_an_escaped_echo() {
+        // The HTML parser decodes character references while building an `on*=`
+        // value and only then hands it to the JS engine, so an entity-escaped
+        // echo there executes — it is live, not inert.
+        let html = format!(
+            "<html><body><div onclick=\"{}\">x</div></body></html>",
+            entity_escape(QUOTE_PAYLOAD)
+        );
+        assert!(
+            !is_escaped_echo(&html, QUOTE_PAYLOAD),
+            "an escaped echo inside an event handler is live and must not be counted"
+        );
+    }
+
+    #[test]
+    fn url_attr_scheme_position_is_not_an_escaped_echo() {
+        // The echo IS the URL: the value starts with our payload, so a decoded
+        // executable scheme there navigates. Not provably inert.
+        let html = "<html><body><a href=\"%22;alert(1)//\">x</a></body></html>";
+        assert!(
+            !is_escaped_echo(html, QUOTE_PAYLOAD),
+            "an encoded echo at a URL attribute's scheme position must be kept"
+        );
+    }
+
+    #[test]
+    fn escaped_echo_in_a_self_link_query_is_inert() {
+        // The canonical/self-link shape: the href is rebuilt server-side from a
+        // hard-coded relative path plus the percent-encoded input, so the echo
+        // sits in the QUERY of a relative URL — the scheme position is
+        // unreachable and the escaped bytes cannot close the attribute. This is
+        // the `[R] reflected after URL/form decoding` false positive
+        // (`self_link`, `search_shell`, `meta_refresh`, `redirect_relative`).
+        let html = format!(
+            "<html><body><a href=\"/page/self_link?q={}\">permalink</a></body></html>",
+            urlencoding::encode(TAG_PAYLOAD)
+        );
+        assert!(
+            is_escaped_echo(&html, TAG_PAYLOAD),
+            "a percent-encoded echo in a relative URL's query is inert"
+        );
+    }
+
+    #[test]
+    fn escaped_echo_inside_an_executable_url_value_is_kept() {
+        // The attribute value already opens an executable scheme, so the
+        // browser decodes the entities INTO the document it executes — the echo
+        // is live even though it is not at the scheme position itself.
+        let html = format!(
+            "<html><body><a href=\"data:text/html,{}\">x</a></body></html>",
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "an escaped echo inside a data:text/html URL is live and must be kept"
+        );
+    }
+
+    #[test]
+    fn escaped_echo_in_a_script_src_url_is_kept() {
+        // XSSMaze `domsource-level4`: the server only reflects into the
+        // `<script src>` URL, and the script reads it back out of
+        // `document.currentScript.src` into `document.write`. The echo is
+        // escaped and mid-URL, but it is a DOM taint source, not inert text.
+        let html = format!(
+            "<html><body><script src=\"/boot.js?msg={}\"></script></body></html>",
+            urlencoding::encode(TAG_PAYLOAD)
+        );
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "a payload in a <script src> URL is readable back as a DOM source"
+        );
+    }
+
+    #[test]
+    fn escaped_echo_in_an_iframe_src_url_is_kept() {
+        let html = format!(
+            "<html><body><iframe src=\"/frame?msg={}\"></iframe></body></html>",
+            urlencoding::encode(TAG_PAYLOAD)
+        );
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "a framed document can read back the URL it was loaded with"
+        );
+    }
+
+    #[test]
+    fn escaped_echo_inside_srcdoc_is_kept() {
+        // `srcdoc` is entity-decoded and then HTML-PARSED, so an escaped tag
+        // payload landing there becomes real markup in the iframe's document.
+        let html = format!(
+            "<html><body><iframe srcdoc=\"{}\"></iframe></body></html>",
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "an escaped tag payload inside srcdoc is live and must be kept"
+        );
+    }
+
+    #[test]
+    fn marker_attribute_payload_echoed_in_text_is_demoted() {
+        // `x onmouseover=alert(1) class=dlx…` rendered as a text node: it has no
+        // structural character of its own, so it cannot open a tag and — with
+        // no quote — cannot leave a quoted attribute either. The `class=` marker
+        // it carries only means anything as an attribute of an injected element.
+        let payload = format!(
+            "x onmouseover=alert(1) class={}",
+            crate::scanning::markers::class_marker()
+        );
+        let html =
+            format!("<html><body><p>No results for <strong>{payload}</strong>.</p></body></html>");
+        assert!(
+            is_in_safe_context_decoded(&html, &payload),
+            "a marker attribute payload echoed as text must be demoted"
+        );
+    }
+
+    #[test]
+    fn marker_attribute_payload_inside_a_tag_is_kept() {
+        // The same payload after an UNQUOTED attribute value: the browser parses
+        // it as new attributes on that element, so the handler is live.
+        let payload = format!(
+            "x onmouseover=alert(1) class={}",
+            crate::scanning::markers::class_marker()
+        );
+        let html = format!("<html><body><input value={payload}></body></html>");
+        assert!(
+            !is_in_safe_context_decoded(&html, &payload),
+            "an attribute payload inside a tag must stay reported"
+        );
+    }
+
+    #[test]
+    fn one_in_tag_occurrence_keeps_a_mostly_textual_echo() {
+        // Multi-echo page: every occurrence has to be inert, not most of them.
+        let payload = format!(
+            "x onmouseover=alert(1) class={}",
+            crate::scanning::markers::class_marker()
+        );
+        let html = format!("<html><body><p>{payload}</p><input value={payload}></body></html>");
+        assert!(
+            !is_in_safe_context_decoded(&html, &payload),
+            "a single in-tag occurrence must keep the finding"
+        );
+    }
+
+    #[test]
+    fn quote_free_probe_markers_are_never_demoted_by_the_text_gate() {
+        // The reflection PROBES are quote-free and land in text — there a text
+        // echo is the signal the pipeline runs on, so the gate must not touch
+        // them. (`is_in_safe_context_decoded` may still demote them for another
+        // reason; this asserts the text gate itself abstains.)
+        for probe in [
+            crate::scanning::markers::bracketed_marker().to_string(),
+            "DALFOXHPP".to_string(),
+            "STORED_XSS_PAYLOAD".to_string(),
+        ] {
+            let html = format!("<html><body><p>{probe}</p></body></html>");
+            assert!(
+                !crate::scanning::check_reflection::raw_reflection_inert_in_text(&html, &probe),
+                "probe marker {probe} must not be demoted as an inert text echo"
+            );
+        }
+    }
+
+    #[test]
+    fn script_block_echo_of_a_marker_payload_is_kept_by_the_text_gate() {
+        // A quote-free payload inside <script> is live JavaScript; that context
+        // belongs to `is_payload_inert_in_scripts` and its AST check, not here.
+        let payload = format!("-alert(1)-{}", crate::scanning::markers::class_marker());
+        let html = format!("<html><body><script>var q = {payload};</script></body></html>");
+        assert!(
+            !crate::scanning::check_reflection::raw_reflection_inert_in_text(&html, &payload),
+            "a script-block echo must not be treated as an inert text echo"
+        );
+    }
+
+    #[test]
+    fn report_gate_demotes_an_inert_escaped_echo_and_keeps_a_live_one() {
+        // End-to-end through the ordered OR-chain the scan actually calls, not
+        // just the helper: an earlier gate must not mask this one, and a live
+        // landing site must survive the whole chain.
+        let inert = format!(
+            "<html><body><a href=\"/s?q={}\">x</a><p>{}</p></body></html>",
+            urlencoding::encode(TAG_PAYLOAD),
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            is_in_safe_context_decoded(&inert, TAG_PAYLOAD),
+            "a whole-payload escaped echo in inert positions must be demoted"
+        );
+
+        let live = format!(
+            "<html><body><iframe srcdoc=\"{}\"></iframe></body></html>",
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            !is_in_safe_context_decoded(&live, TAG_PAYLOAD),
+            "an escaped echo in an HTML-parsed attribute must stay reported"
+        );
+    }
+
+    #[test]
+    fn short_payloads_are_never_an_escaped_echo() {
+        // A couple of bytes occur incidentally in any decoded view of a real
+        // page, so a whole-payload match on one proves nothing.
+        let html = page("&quot;&gt;");
+        assert!(!is_escaped_echo(&html, "\">"));
+        assert!(!is_escaped_echo(&html, "'>"));
+        assert!(!is_escaped_echo(&html, ""));
+    }
+
+    // --- Framework innerHTML sinks (v-html / ng-bind-html / [innerHTML] /
+    //     Knockout html:) decode entities into markup at runtime, so an
+    //     entity-escaped tag payload landing in one is LIVE, not inert, and must
+    //     never be counted toward the budget. ---
+
+    #[test]
+    fn entity_escaped_payload_in_vhtml_is_not_an_escaped_echo() {
+        // `<div v-html="&lt;svg onload=alert(1)&gt;">`: Vue entity-decodes the
+        // binding and assigns it to innerHTML, so the svg fires.
+        let html = format!(
+            "<html><body><div v-html=\"{}\"></div></body></html>",
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            !html.contains(TAG_PAYLOAD),
+            "fixture must carry only the escaped form"
+        );
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "an escaped tag payload inside a v-html sink is live and must be kept"
+        );
+    }
+
+    #[test]
+    fn entity_escaped_payload_in_knockout_html_binding_is_not_an_escaped_echo() {
+        // Server reflects into a Knockout `html:` clause value; the HTML parser
+        // decodes the entities while building the `data-bind` attribute, so
+        // Knockout sets innerHTML to `<svg onload=alert(1)>` and it fires.
+        let html = format!(
+            "<html><body><div data-bind=\"html: '{}'\"></div></body></html>",
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "an escaped payload inside a Knockout html: binding must be kept"
+        );
+    }
+
+    #[test]
+    fn entity_escaped_payload_in_ng_bind_html_is_not_an_escaped_echo() {
+        let html = format!(
+            "<html><body><div ng-bind-html=\"{}\"></div></body></html>",
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            !is_escaped_echo(&html, TAG_PAYLOAD),
+            "an escaped tag payload inside ng-bind-html is live and must be kept"
+        );
+    }
+
+    #[test]
+    fn escaped_echo_in_plain_text_still_counts_despite_a_framework_page() {
+        // Control: the SAME escaped payload in ordinary body text (no sink
+        // binding on the element it lands in) is genuinely inert and must still
+        // count — the framework carve-out must not swallow the common case.
+        let html = format!(
+            "<html><body><div id=\"out\">{}</div></body></html>",
+            entity_escape(TAG_PAYLOAD)
+        );
+        assert!(
+            is_escaped_echo(&html, TAG_PAYLOAD),
+            "an escaped echo in plain text is inert and must still advance the budget"
+        );
     }
 }

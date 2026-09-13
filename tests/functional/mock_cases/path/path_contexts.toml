@@ -54,7 +54,11 @@ name = "url_encode"
 description = "URL encoding"
 handler_type = "path"
 reflection = "encoded_url"
-expected_detection = true
+# The server percent-encodes its whole output, so the reflection renders as
+# the literal text `%3Csvg…` in every context on the page — nothing a browser
+# parses as markup, an attribute or a scheme. Not exploitable, and labelled
+# the same way as its identical realworld sibling (case 5144).
+expected_detection = false
 
 [[case]]
 id = 8

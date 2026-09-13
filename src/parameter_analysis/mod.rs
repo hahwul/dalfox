@@ -173,6 +173,25 @@ pub struct Param {
     /// case synthesis falls back to the fixed catalog exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub js_breakout: Option<String>,
+    /// A pre-scan probe already saw this parameter's markers come back.
+    ///
+    /// Set by [`active_probe_param`], the last stage before scanning, which
+    /// sends `OPEN + specials + CLOSE` and reads the echo. The scan worker's
+    /// Stage-0 probe asks the *same* question with the *same* markers, so when
+    /// this is set it skips its request and takes the answer (one request per
+    /// parameter, ~25% of the per-parameter cost on a reflecting target).
+    ///
+    /// One-directional on purpose: `false` never means "does not reflect", only
+    /// "no probe has proved it does". The batched probe is dense with special
+    /// characters, so a WAF can block it while the plain marker gets through —
+    /// which is exactly why Stage 0 still runs in that case.
+    ///
+    /// Scan-internal despite being `pub` (the struct's other fields are too,
+    /// and integration tests build `Param` literals): `#[serde(skip)]` keeps it
+    /// off every output and API surface, and a param deserialized from one
+    /// starts out `false`, i.e. gets the pre-existing behaviour.
+    #[serde(default, skip)]
+    pub marker_echoed: bool,
 }
 
 impl Param {
@@ -208,6 +227,7 @@ impl Param {
             framework_sink: None,
             escaped_specials: None,
             js_breakout: None,
+            marker_echoed: false,
         }
     }
 
@@ -415,6 +435,32 @@ async fn send_probe_request_for_param(
     param: &Param,
     payload: &str,
 ) -> Option<String> {
+    send_probe_request_detailed(client, target, param, payload)
+        .await
+        .text
+}
+
+/// One probe response, plus whether the scan phases would act on a reflection
+/// found in it.
+pub(crate) struct ProbeResponse {
+    /// `Location:` header and body concatenated, exactly what
+    /// [`send_probe_request_for_param`] returns; `None` on a transport error or
+    /// an `--ignore-return` status.
+    text: Option<String>,
+    /// The response is one an injection would be judged on: not an inert-data
+    /// or `text/plain` content-type. Mirrors the non-Path half of
+    /// `check_reflection::injection_response_suppressed`, which is what the
+    /// scan worker's Stage-0 probe applies to its own response — so a marker
+    /// echoed in a JSON API body is *not* evidence Stage 0 can be skipped on.
+    actionable: bool,
+}
+
+async fn send_probe_request_detailed(
+    client: &reqwest::Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+) -> ProbeResponse {
     // Build the probe request through the canonical injection builder — the
     // same request the reflection / light-verify / DOM-verify paths send — so a
     // special-char probe carries the user's headers, User-Agent, cookies, and
@@ -433,12 +479,29 @@ async fn send_probe_request_for_param(
         crate::scanning::url_inject::build_inject_request(client, target, param, payload);
 
     crate::record_outbound_request().await;
-    let resp = crate::utils::http::send_counted(request_builder)
-        .await
-        .ok()?;
+    let unusable = ProbeResponse {
+        text: None,
+        actionable: false,
+    };
+    let Ok(resp) = crate::utils::http::send_counted(request_builder).await else {
+        return unusable;
+    };
     if !ignore_return.is_empty() && ignore_return.contains(&resp.status().as_u16()) {
-        return None;
+        return unusable;
     }
+    let status_code = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    // Path has extra body-dependent suppressions (error pages echo the URL, a
+    // marker outside markup) that this cheap check cannot replicate, so a path
+    // param is never counted as actionable — Stage 0 keeps judging those.
+    let actionable = !matches!(param.location, Location::Path)
+        && !(300..400).contains(&status_code)
+        && !crate::utils::http::content_type_is_never_markup(&content_type);
     let redirect_text = if resp.status().is_redirection() {
         resp.headers()
             .get(reqwest::header::LOCATION)
@@ -454,12 +517,15 @@ async fn send_probe_request_for_param(
             None
         }
     };
-    Some(match (redirect_text, body_text) {
-        (Some(loc), Some(body)) => format!("{}{}", loc, body),
-        (Some(loc), None) => loc,
-        (None, Some(body)) => body,
-        (None, None) => String::new(),
-    })
+    ProbeResponse {
+        text: Some(match (redirect_text, body_text) {
+            (Some(loc), Some(body)) => format!("{}{}", loc, body),
+            (Some(loc), None) => loc,
+            (None, Some(body)) => body,
+            (None, None) => String::new(),
+        }),
+        actionable,
+    }
 }
 
 /// Check whether a single char `c` is observable in the reflected segment,
@@ -742,9 +808,16 @@ pub async fn active_probe_param(
         crate::encoding::pre_encoding::apply_param_encoding(&batched_probe, &param);
 
     let permit = semaphore.acquire().await.expect("acquire semaphore permit");
-    let batched_response =
-        send_probe_request_for_param(&client, target, &param, &batched_payload).await;
+    let batched = send_probe_request_detailed(&client, target, &param, &batched_payload).await;
     drop(permit);
+
+    // Record the echo for the scan worker's Stage-0 probe (see
+    // `Param::marker_echoed`): this request already asked, with the same
+    // markers, whether the parameter comes back in a response the scan would
+    // act on.
+    param.marker_echoed =
+        batched.actionable && batched.text.as_deref().is_some_and(body_has_probe_marker);
+    let batched_response = batched.text;
 
     let mut valid: Vec<char> = Vec::new();
     let mut invalid: Vec<char> = Vec::new();
@@ -818,6 +891,17 @@ pub async fn active_probe_param(
                 Some((win_valid, win_invalid)) => {
                     valid = win_valid;
                     invalid = win_invalid;
+                    // `marker_echoed` is deliberately NOT set here. This branch
+                    // is reached when the batched probe came back with nothing
+                    // — including when it simply failed or timed out under load
+                    // — and `window_overflow_probe` reports only the
+                    // valid/invalid split, not the content-type of the response
+                    // it saw. Setting the flag on that made a JSON API case
+                    // skip the Stage-0 probe, and with it the inert-data
+                    // suppression, whenever the first probe lost the race: an
+                    // intermittent `[V]` on a `application/json` body. Stage 0
+                    // runs for these (one request, rare path) and judges its
+                    // own response.
                     param.pre_encoding = Some(
                         crate::encoding::pre_encoding::PreEncodingType::WafWindowPad
                             .as_str()
