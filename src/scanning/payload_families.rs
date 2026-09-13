@@ -217,15 +217,31 @@ pub(crate) fn get_fallback_reflection_payloads(
             base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
         }
     } else {
-        // HTML/attribute payloads first — they break out of attribute contexts
-        // and create real DOM elements. JS-only payloads (alert(1), etc.) are
-        // excluded from the reflection list because they cause false-positive R
-        // findings when reflected inside quoted attribute values, blocking the
-        // attribute-breakout payloads that follow.
-        base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
-        base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
-        base_payloads.extend(crate::payload::get_mxss_payloads());
-        base_payloads.extend(crate::payload::get_protocol_injection_payloads());
+        // Round-robin interleave the reflection families so any prefix of the
+        // list samples *every* family proportionally — the same #1156 diversity
+        // guarantee the DOM catalog gets (see `get_dom_payloads_for_context`'s
+        // None arm). The reflection phase's transformed-inert-echo budget and
+        // the per-parameter safety cap both sample a *prefix* of this list, and
+        // plain concatenation appended the protocol family thousands of payloads
+        // in, so on a uniformly-escaping URL-attribute echo the budget could
+        // retire before a single `javascript:` protocol payload — the only
+        // reflection-phase verifier for that sink — was ever tried.
+        //
+        // JS-only payloads (`alert(1)` etc.) are still excluded from the
+        // reflection set: reflected inside a quoted attribute value they cause
+        // false-positive R findings that block the attribute-breakout payloads.
+        // Within-family order is preserved (HTML tag-breakouts first inside the
+        // HTML family, event-handler order inside the attribute family, …), so
+        // the encoder pass and downstream dedup see the same members as before —
+        // only their interleaving changes.
+        base_payloads = interleave_payload_families(vec![
+            crate::payload::get_dynamic_xss_html_payloads(),
+            crate::payload::get_dynamic_xss_attribute_payloads(),
+            crate::payload::get_mxss_payloads(),
+            crate::payload::get_protocol_injection_payloads(),
+        ]);
+        // Custom payloads keep their appended position (after the built-in
+        // families), matching the pre-interleave order and the custom-only arm.
         if let Some(path) = &args.custom_payload {
             base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
         }

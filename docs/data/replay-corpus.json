@@ -1,16 +1,16 @@
 {
-  "generated_at": "2026-08-08T16:10:38Z",
+  "generated_at": "2026-09-13T08:07:34Z",
   "tool": "replay_corpus",
-  "dalfox_version": "3.2.0",
+  "dalfox_version": "3.2.2",
   "strict": "va",
   "base_url": "http://127.0.0.1:4804",
   "total": {
     "fixtures": 21,
-    "clean": 15,
-    "warn": 6,
+    "clean": 21,
+    "warn": 0,
     "failed": 0,
     "errored": 0,
-    "findings": 6
+    "findings": 0
   },
   "fixtures": [
     {
@@ -38,22 +38,14 @@
       "status": 200,
       "escape": "html",
       "url_decode": false,
-      "verdict": "warn",
+      "verdict": "clean",
       "counts": {
         "V": 0,
         "A": 0,
-        "R": 1,
+        "R": 0,
         "I": 0
       },
-      "findings": [
-        {
-          "type": "R",
-          "param": "q",
-          "payload": "\"><svg onload=alert(1) class=dlx826c48a4>",
-          "evidence": "Reflected XSS detected for param q (reflected after HTML-entity and URL/form decoding)",
-          "detection_method": "reflection"
-        }
-      ]
+      "findings": []
     },
     {
       "name": "double_decode_escaped",
@@ -165,22 +157,14 @@
       "status": 200,
       "escape": "html",
       "url_decode": false,
-      "verdict": "warn",
+      "verdict": "clean",
       "counts": {
         "V": 0,
         "A": 0,
-        "R": 1,
+        "R": 0,
         "I": 0
       },
-      "findings": [
-        {
-          "type": "R",
-          "param": "q",
-          "payload": "\"><svg onload=alert(1) class=dlxa3fc26d3>",
-          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
-          "detection_method": "reflection"
-        }
-      ]
+      "findings": []
     },
     {
       "name": "noscript_block",
@@ -241,22 +225,14 @@
       "status": 302,
       "escape": "html",
       "url_decode": false,
-      "verdict": "warn",
+      "verdict": "clean",
       "counts": {
         "V": 0,
         "A": 0,
-        "R": 1,
+        "R": 0,
         "I": 0
       },
-      "findings": [
-        {
-          "type": "R",
-          "param": "q",
-          "payload": "x onmouseover=alert(1) class=dlx5bba4e4c ",
-          "evidence": "Reflected XSS detected for param q (reflected)",
-          "detection_method": "reflection"
-        }
-      ]
+      "findings": []
     },
     {
       "name": "script_html_entities",
@@ -300,22 +276,14 @@
       "status": 200,
       "escape": "html",
       "url_decode": false,
-      "verdict": "warn",
+      "verdict": "clean",
       "counts": {
         "V": 0,
         "A": 0,
-        "R": 1,
+        "R": 0,
         "I": 0
       },
-      "findings": [
-        {
-          "type": "R",
-          "param": "q",
-          "payload": "\"><svg onload=alert(1) class=dlx3c70ccea>",
-          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
-          "detection_method": "reflection"
-        }
-      ]
+      "findings": []
     },
     {
       "name": "self_link",
@@ -325,22 +293,14 @@
       "status": 200,
       "escape": "html",
       "url_decode": false,
-      "verdict": "warn",
+      "verdict": "clean",
       "counts": {
         "V": 0,
         "A": 0,
-        "R": 1,
+        "R": 0,
         "I": 0
       },
-      "findings": [
-        {
-          "type": "R",
-          "param": "q",
-          "payload": "\"><svg onload=alert(1) class=dlxed3bc2ce>",
-          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
-          "detection_method": "reflection"
-        }
-      ]
+      "findings": []
     },
     {
       "name": "strict_csp",
@@ -401,22 +361,14 @@
       "status": 200,
       "escape": "url",
       "url_decode": false,
-      "verdict": "warn",
+      "verdict": "clean",
       "counts": {
         "V": 0,
         "A": 0,
-        "R": 1,
+        "R": 0,
         "I": 0
       },
-      "findings": [
-        {
-          "type": "R",
-          "param": "q",
-          "payload": "\"><svg onload=alert(1) class=dlxdf290d68>",
-          "evidence": "Reflected XSS detected for param q (reflected after URL/form decoding)",
-          "detection_method": "reflection"
-        }
-      ]
+      "findings": []
     }
   ]
 }

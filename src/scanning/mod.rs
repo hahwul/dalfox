@@ -238,13 +238,29 @@ enum PhaseFlow {
 ///
 /// Recall safety rests on two properties:
 ///
-/// 1. **The budget only accrues on raw-reflecting endpoints.**
-///    `check_reflection::classify_reflection` returns `None` for reflections the
-///    server escaped/encoded (entity, percent, fullwidth) — see its FP guards —
-///    so a *sanitizing* endpoint (DOMPurify, `&lt;IMG&gt;`-emitting templates,
-///    …) never advances `inert_echo_count` and is never cut. The early exit
-///    therefore fires only on endpoints that echo our bytes verbatim yet never
-///    execute them.
+/// 1. **The budget only accrues on endpoints that hand our exact bytes back.**
+///    `DomVerifyOutcome::reflected` is true for a byte-exact reflection *or* for
+///    a pure escaped echo of the same bytes
+///    (`check_reflection::is_escaped_echo`: the server emitted `&amp;lt;svg …`
+///    / `%3Csvg%20…` for the whole payload). Both are proof the endpoint took
+///    our payload and rendered it inertly.
+///
+///    A *sanitizing* endpoint (DOMPurify, whitelisting templates, …) is
+///    excluded, because it **removes** markup rather than escaping it: the
+///    payload never surfaces whole in any decoded view, so `is_escaped_echo` is
+///    false and `inert_echo_count` does not advance. That is what keeps a late
+///    whitelisted verifier (sanitizer-level3's `<a href=javascript:>`) from
+///    being cut. The same gate abstains on truncated/partial echoes,
+///    `+`→space-only form decoding, event-handler and URL-valued-attribute
+///    contexts (where an escaped echo still executes), and on 4xx responses (a
+///    WAF block page that echoes the payload is a block, not an inert echo —
+///    see `BLOCKED_STREAK_LIMIT`).
+///
+///    Before escaped echoes were counted, a *uniformly escaping* endpoint — the
+///    most common shape on the web — advanced this counter zero times, and the
+///    phase ran its whole catalog against a body that can never verify
+///    (measured: 5394 requests, 0 findings, on the `inert` perf-budget
+///    scenario).
 ///
 /// 2. **Every DOM-evidence kind is sampled before the budget can trip.** For the
 ///    unknown-context catalog the families are round-robin interleaved (see
@@ -261,6 +277,37 @@ enum PhaseFlow {
 /// redundant sink-variations (`alert` vs `prompt`) and encoder-variants of
 /// shapes that already failed, so cutting them is recall-neutral.
 const INERT_ECHO_BUDGET: u32 = 256;
+
+/// Cumulative count of *transformed-inert* echoes that ends the **reflection**
+/// phase early.
+///
+/// The reflection phase mints an `R` on the first byte-exact reflection and its
+/// `reflection_found_locally` short-circuit then stops the loop. But a
+/// *uniformly-escaping* endpoint — the most common shape on the web — mints no
+/// `R` at all: `classify_reflection` correctly demotes an escaped echo
+/// (`&lt;svg …&gt;`, `%3Csvg…`) to `None`, so the short-circuit never trips and
+/// the phase runs its **entire** catalog against a body that can never yield a
+/// finding (measured: the reflection half of the `inert` perf-budget scenario).
+///
+/// This budget gives that case the same recall-preserving stop the DOM phase
+/// already has. It accrues only on responses that are a *transformed-but-inert*
+/// echo of our exact payload — `check_reflection::is_escaped_echo` returns true
+/// — which by construction excludes sanitizer-stripped output (markup removed,
+/// not escaped, so the payload never surfaces whole), truncated/partial echoes,
+/// event-handler and URL-attribute landing sites (an escaped echo there
+/// executes), and `+`→space-only form decoding. Callers additionally exclude
+/// 4xx responses (a WAF block page that echoes the payload is a block, not an
+/// inert echo — a later variant may bypass it) and non-renderable bodies (the
+/// 3xx `Location:` stand-in).
+///
+/// Recall rests on the same diversity guarantee as `INERT_ECHO_BUDGET`: the
+/// unknown-context reflection catalog is family-interleaved
+/// (`get_fallback_reflection_payloads`), so a representative of every family —
+/// including the `javascript:`/`data:` protocol payloads that are the sole
+/// reflection-phase verifier for a URL-attribute sink — appears well within
+/// this window. Disabled under `--deep-scan`. It only stops *launching* further
+/// payloads; nothing about reporting classification changes.
+const REFLECTION_INERT_ECHO_BUDGET: u32 = 256;
 
 /// Issue #1156 — *consecutive* dead-server responses that end the DOM phase.
 ///
@@ -482,6 +529,12 @@ impl ScanWorkerCtx {
     /// Run one payload's reflection request under the global per-request budget.
     /// Pure I/O — no shared mutable state — so a chunk of these can be awaited
     /// concurrently and their results processed serially afterwards.
+    ///
+    /// Returns the injection status alongside the classified reflection so the
+    /// reflection phase's transformed-inert-echo budget can exclude 4xx block
+    /// pages. Uses the crate-private status-aware path
+    /// ([`check_reflection::check_reflection_with_response_status`]); the public
+    /// `_tracked` entry keeps its `(kind, body)` contract for external callers.
     async fn fetch_reflection(
         &self,
         param: &Param,
@@ -490,9 +543,10 @@ impl ScanWorkerCtx {
     ) -> (
         Option<check_reflection::ReflectionKind>,
         Option<check_reflection::ReflectionBody>,
+        u16,
     ) {
         let _permit = self.req_budget.acquire().await;
-        check_reflection_with_response_tracked(
+        check_reflection::check_reflection_with_response_status(
             Some(self.client.as_ref()),
             &self.target,
             param,
@@ -761,6 +815,10 @@ impl ScanWorkerCtx {
         // hard-filter parameters still reach the configured concurrency.
         let total = reflection_payloads.len();
         let concurrency = self.request_concurrency();
+        // Transformed-inert-echo budget (see `REFLECTION_INERT_ECHO_BUDGET`).
+        // Cumulative across the phase, in payload order, so the family-interleave
+        // diversity guarantee holds exactly. Disabled under `--deep-scan`.
+        let mut inert_echo_count: u32 = 0;
         let mut i = 0usize;
         while i < total {
             if self.cancelled() {
@@ -791,7 +849,7 @@ impl ScanWorkerCtx {
                     .map(|p| self.fetch_reflection(param, p, waf_streak)),
             )
             .await;
-            for (reflection_payload, (reflected_kind, reflection_body)) in
+            for (reflection_payload, (reflected_kind, reflection_body, status)) in
                 reflection_payloads[i..end].iter().zip(fetched)
             {
                 self.inc_progress(1);
@@ -800,6 +858,26 @@ impl ScanWorkerCtx {
                 // result processor still deduplicates repeated R findings.
                 if !self.args.deep_scan && state.dom_found_locally {
                     continue;
+                }
+                // Fold this response into the transformed-inert-echo budget
+                // BEFORE `process_reflection_result` consumes the body. Only a
+                // renderable, non-4xx body that is a whole-payload escaped echo
+                // (`is_escaped_echo`) counts — that is the uniformly-escaping
+                // endpoint the reflection short-circuit can never see, because it
+                // mints no `R`. `reflected_kind.is_some()` responses are handled
+                // by that short-circuit and never reach the budget. The status
+                // rides alongside the body (not on the public `ReflectionBody`)
+                // via the crate-private status-aware fetch; `0` (request error /
+                // sxss) is treated as non-4xx.
+                if !self.args.deep_scan
+                    && reflected_kind.is_none()
+                    && !(400..500).contains(&status)
+                    && reflection_body.as_ref().is_some_and(|b| {
+                        b.renderable
+                            && check_reflection::is_escaped_echo(&b.text, reflection_payload)
+                    })
+                {
+                    inert_echo_count += 1;
                 }
                 self.process_reflection_result(
                     param,
@@ -811,6 +889,20 @@ impl ScanWorkerCtx {
                 .await;
             }
             i = end;
+            // Stop launching once the endpoint has shown overwhelming evidence it
+            // will only ever escape our payloads. Checked after the whole chunk is
+            // processed (like the DOM phase's early exit) so an in-flight batch is
+            // never abandoned mid-way, and only counts toward the budget in
+            // payload order. Reconcile the bar for the un-launched tail.
+            if inert_echo_count >= REFLECTION_INERT_ECHO_BUDGET {
+                crate::dbg_log!(
+                    "reflection phase early-exit (param={}): {} transformed-inert echoes, no reflection recorded — skipping remaining payloads",
+                    param.name,
+                    inert_echo_count,
+                );
+                self.inc_progress((total - i) as u64);
+                break;
+            }
         }
         PhaseFlow::Continue
     }

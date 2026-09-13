@@ -292,6 +292,19 @@ pub(crate) fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     if is_inert_encoded_reflection(html, payload) {
         return true;
     }
+    // Same proof, widened to tag-bearing payloads and with a payload-length
+    // floor: the server handed our *whole* payload back escaped and every
+    // occurrence landed somewhere a browser can do nothing with it (see
+    // `escaped_occurrence_is_inert`). This is the `[R] reflected after
+    // URL/form decoding` false positive on pages that percent-encode the query
+    // into their own self-/canonical link, meta-refresh target, `data-*`
+    // attribute or 302 `Location:` — the payload is text inside a relative
+    // URL's query string, not markup. A payload the server reflects *live*
+    // (even with edits) fails the whole-payload decoded match, and the DOM/AST
+    // phase — which can prove a live element — is unaffected by this gate.
+    if is_escaped_echo(html, payload) {
+        return true;
+    }
     // Inert dangerous-scheme echo: a `javascript:`/`vbscript:`/`data:…` payload
     // that never reflects at the scheme-start of a URL-valued attribute (only in
     // body text, a non-URL attribute, or the query/fragment of a self-/canonical
@@ -305,6 +318,14 @@ pub(crate) fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     // reflects the param verbatim) can't break out. Covers `javascript:` scheme
     // WAF-evasion mutations the server echoes without transforming (issue #1153).
     if reflection_trapped_in_url_value(html, payload) {
+        return true;
+    }
+    // Inert text-node echo: a payload with no structural character of its own
+    // (an attribute-level shape like `x onmouseover=alert(1) class=dlx…`)
+    // reflected verbatim, and only, into HTML text content. Last in the chain
+    // so every executable-context carve-out above — script blocks, URL
+    // positions, entity/percent echoes — is consulted first.
+    if raw_reflection_inert_in_text(html, payload) {
         return true;
     }
     false
@@ -397,6 +418,17 @@ pub(crate) fn marker_reflects_in_url_attr_only(html: &str, marker: &str) -> bool
 /// that name is in [`URL_VALUED_ATTRS`]. The single home for the
 /// name-matching rule shared by every URL-attribute occurrence check.
 fn url_valued_attr_name_before_eq(bytes: &[u8], eq: usize) -> bool {
+    attr_name_before_eq(bytes, eq).is_some_and(|name| {
+        URL_VALUED_ATTRS
+            .iter()
+            .any(|n| name.eq_ignore_ascii_case(n))
+    })
+}
+
+/// The attribute name immediately left of the `=` at `eq` (whitespace skipped),
+/// or `None` when there is no name there. The single backwalk every
+/// attribute-name rule in this module reads through.
+fn attr_name_before_eq(bytes: &[u8], eq: usize) -> Option<&[u8]> {
     // Skip whitespace between `=` and the attribute name.
     let mut name_end = eq;
     while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
@@ -411,13 +443,7 @@ fn url_valued_attr_name_before_eq(bytes: &[u8], eq: usize) -> bool {
         }
         name_start -= 1;
     }
-    if name_start == name_end {
-        return false;
-    }
-    let name = &bytes[name_start..name_end];
-    URL_VALUED_ATTRS
-        .iter()
-        .any(|n| name.eq_ignore_ascii_case(n))
+    (name_start != name_end).then(|| &bytes[name_start..name_end])
 }
 
 /// Walk backwards from byte offset `at` looking for the surrounding HTML
@@ -1260,77 +1286,447 @@ fn structural_char_count(s: &str) -> usize {
         .count()
 }
 
-/// True when a reflection that `classify_reflection` matched only after
-/// decoding the whole response body is an inert *encoded echo* — the server
-/// escaped its own output and a browser renders the bytes literally, so the
-/// reflection cannot form markup, an attribute break-out, or an executable
-/// scheme.
+/// How far forward a URL-valued attribute's value is inspected when deciding
+/// whether it already opens an executable scheme. Long enough for every scheme
+/// [`decoded_is_dangerous_scheme`] recognises (the longest, the single-pass
+/// strip-bypass `javascriptjavascript:`, is 21 bytes) plus the `data:` media
+/// type, and short enough that the check stays O(1) per occurrence.
+const MAX_SCHEME_WINDOW: usize = 64;
+
+/// Elements whose URL-valued attribute the page can read back as a DOM source:
+/// a `<script src>` is handed to its own code as `document.currentScript.src`,
+/// and a framed/embedded document can read the URL it was loaded with. An
+/// escaped payload in the QUERY of one of those URLs is therefore not inert —
+/// it is a taint source a sink on the other side may write to the DOM
+/// (XSSMaze `domsource-level4`: `<script src="…?msg=PAYLOAD">` read back through
+/// `currentScript.src` into `document.write`).
+const URL_READBACK_ELEMENTS: &[&[u8]] = &[b"script", b"iframe", b"object", b"embed"];
+
+/// Attributes whose value the browser HTML-parses *after* entity-decoding it,
+/// so an entity-escaped tag payload landing inside one is live markup, not
+/// inert text. `srcdoc` is the whole set: `<iframe srcdoc="&lt;svg onload=…&gt;">`
+/// builds a real document out of the decoded value.
+const HTML_PARSED_ATTRS: &[&[u8]] = &[b"srcdoc"];
+
+/// Byte offset where the attribute value containing `at` starts, or `None` when
+/// the backwalk crossed a tag boundary or ran past [`MAX_ATTR_BACKWALK`].
+/// Mirrors [`occurrence_is_in_url_attr`]'s walk, then steps over the `=`,
+/// intervening whitespace, and the opening quote.
+fn attr_value_start(bytes: &[u8], at: usize) -> Option<usize> {
+    let mut i = at;
+    let floor = at.saturating_sub(MAX_ATTR_BACKWALK);
+    loop {
+        if i == 0 || i <= floor {
+            return None;
+        }
+        i -= 1;
+        match bytes[i] {
+            b'=' => break,
+            b'<' | b'>' => return None,
+            _ => {}
+        }
+    }
+    let mut v = i + 1;
+    while v < bytes.len() && bytes[v].is_ascii_whitespace() {
+        v += 1;
+    }
+    if v < bytes.len() && (bytes[v] == b'"' || bytes[v] == b'\'') {
+        v += 1;
+    }
+    Some(v)
+}
+
+/// The name of the element whose opening tag contains `at`, or `None` when the
+/// position is not inside a tag (a `>` comes first) or the walk ran past
+/// [`MAX_ATTR_BACKWALK`].
+fn enclosing_tag_name(bytes: &[u8], at: usize) -> Option<&[u8]> {
+    let floor = at.saturating_sub(MAX_ATTR_BACKWALK);
+    let mut i = at;
+    let open = loop {
+        if i == 0 || i <= floor {
+            return None;
+        }
+        i -= 1;
+        match bytes[i] {
+            b'<' => break i,
+            b'>' => return None,
+            _ => {}
+        }
+    };
+    let start = open + 1;
+    let mut end = start;
+    while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'-') {
+        end += 1;
+    }
+    (end > start).then(|| &bytes[start..end])
+}
+
+/// True when the attribute value containing `at` *already* starts with a
+/// JS-executable scheme — `href="data:text/html,…"`, `src="javascript:…"`.
+/// An escaped payload appended to such a URL is still live: the browser
+/// entity-decodes the attribute value, so the payload becomes part of the
+/// executed document / script. Answers `true` whenever the value start cannot
+/// be established, so an unresolvable walk keeps the finding.
+fn url_attr_value_opens_executable(bytes: &[u8], at: usize) -> bool {
+    let Some(start) = attr_value_start(bytes, at) else {
+        return true;
+    };
+    if start > at {
+        return true;
+    }
+    let end = at.min(start + MAX_SCHEME_WINDOW).min(bytes.len());
+    decoded_is_dangerous_scheme(&String::from_utf8_lossy(&bytes[start..end]))
+}
+
+/// True when `at` sits inside an [`HTML_PARSED_ATTRS`] attribute value. `false`
+/// when the walk cannot reach a verdict: the caller's other gates
+/// (`occurrence_is_in_url_attr` returning `None`) already keep the finding in
+/// that case, so this one does not need to double-count it.
+fn occurrence_is_in_html_parsed_attr(bytes: &[u8], at: usize) -> bool {
+    if at == 0 || at > bytes.len() {
+        return false;
+    }
+    let mut i = at;
+    let floor = at.saturating_sub(MAX_ATTR_BACKWALK);
+    loop {
+        if i == 0 || i <= floor {
+            return false;
+        }
+        i -= 1;
+        match bytes[i] {
+            b'=' => break,
+            b'<' | b'>' => return false,
+            _ => {}
+        }
+    }
+    attr_name_before_eq(bytes, i).is_some_and(|name| {
+        HTML_PARSED_ATTRS
+            .iter()
+            .any(|n| name.eq_ignore_ascii_case(n))
+    })
+}
+
+/// Template-interpolation delimiters. A payload carrying one is a client-side
+/// template injection probe (`{{7*7}}`, `${7*7}`): plain *text content* is
+/// exactly where a framework evaluates it, so the text-position argument in
+/// [`raw_reflection_inert_in_text`] does not hold for these.
+const TEMPLATE_DELIMITERS: &[&str] = &["{{", "${", "<%", "#{"];
+
+/// `Some(true)` when `at` sits in HTML **text content** (the walk back reaches
+/// a `>`, or the start of the document, before any `<`), `Some(false)` when it
+/// sits inside a tag — an attribute value or an attribute name position — and
+/// `None` when the walk ran past [`MAX_ATTR_BACKWALK`] without a verdict.
 ///
-/// Scope: this gate only soundly vets payloads that cannot inject an HTML
-/// TAG (no raw `<`/`>` in any variant) — quote / attribute-value / scheme
-/// break-outs. Deciding whether an escaped `<svg…>` echo co-exists with a
-/// *live* `<svg…>` element requires real HTML parsing (a page's own
-/// `<body>`/`<svg>` markup defeats byte heuristics), which is the DOM /
-/// AST-verification path's job, not the raw-byte report gate's.
+/// The byte walk agrees with a real parser exactly where it matters here. A `>`
+/// inside a *quoted* attribute value does not end the tag for a parser, so this
+/// can answer "text" for a position that is really inside `title="a > b …"` —
+/// but the only caller restricts itself to payloads that carry no quote and no
+/// angle bracket, which cannot break out of a quoted value either way. In an
+/// *unquoted* value, where such a payload WOULD become a new attribute, a `>`
+/// genuinely ends the tag, so the walk hits the opening `<` first and answers
+/// "inside a tag", keeping the finding.
+fn occurrence_is_in_text_content(bytes: &[u8], at: usize) -> Option<bool> {
+    if at > bytes.len() {
+        return Some(false);
+    }
+    let floor = at.saturating_sub(MAX_ATTR_BACKWALK);
+    let mut i = at;
+    loop {
+        if i == 0 {
+            return Some(true);
+        }
+        if i <= floor {
+            return None;
+        }
+        i -= 1;
+        match bytes[i] {
+            b'>' => return Some(true),
+            b'<' => return Some(false),
+            _ => {}
+        }
+    }
+}
+
+/// Suppression gate for the `[R] reflected` false positive every page that
+/// echoes a search term produces: a payload that carries **no structural
+/// character of its own** (`<`, `>`, `"`, `'`) reflected verbatim into HTML
+/// text content.
 ///
-/// Within that scope it rejects EVERY way the payload could still be live;
-/// each of the following keeps the finding (returns false): (a) a payload
-/// variant is present RAW (byte-exact) anywhere; (b) any variant carries a raw
-/// `<`/`>` (a tag payload — out of scope, keep); (c) the reflection lands in an
-/// event-handler (`on*=`) attribute value, where the HTML parser decodes
-/// entities before the JS engine runs them; (d) any decoded occurrence sits
-/// inside a URL-valued attribute.
+/// Such a payload is an *attribute-level* shape — `x onmouseover=alert(1)
+/// class=dlx…`, a bare handler or value break-out. It only becomes code inside
+/// a tag, where an unquoted value lets it start a new attribute. As a text node
+/// the browser renders it as the literal characters; it cannot open a tag, and
+/// with no quote of its own it cannot leave a quoted attribute either. If the
+/// endpoint were injectable the scanner's tag-bearing payloads reflect there
+/// too and are reported on their own evidence, so this costs no real finding.
 ///
-/// It suppresses ONLY when a variant surfaces via a decode that genuinely
-/// un-escaped a structural character (`<`, `>`, `"`, `'`) — never via a bare
-/// `+`-to-space form-decode that neutralizes nothing.
-fn is_inert_encoded_reflection(html: &str, payload: &str) -> bool {
+/// Everything that could still execute keeps the finding:
+///
+/// * any occurrence **inside a tag** (`Some(false)`) or unresolvable (`None`),
+/// * any occurrence inside a `<script>` block, where a quote-free payload
+///   (`-alert(1)-`, `;alert(1)//`) is live JavaScript — [`is_payload_inert_in_scripts`]
+///   is the gate that judges those, with the AST,
+/// * a payload that decodes to an executable URL scheme, judged by
+///   [`dangerous_scheme_reflection_is_inert`] at the URL-position level,
+/// * a client-side template probe ([`TEMPLATE_DELIMITERS`]), which a framework
+///   evaluates *in* text content,
+/// * a payload shorter than [`MIN_ESCAPED_ECHO_PAYLOAD_LEN`], which can match
+///   incidental page text.
+pub(crate) fn raw_reflection_inert_in_text(html: &str, payload: &str) -> bool {
+    if payload.len() < MIN_ESCAPED_ECHO_PAYLOAD_LEN
+        || payload.contains(['<', '>', '"', '\''])
+        || decoded_is_dangerous_scheme(payload)
+        || TEMPLATE_DELIMITERS.iter().any(|d| payload.contains(d))
+    {
+        return false;
+    }
+    // Scope: attribute-shaped ATTACK payloads only — the ones carrying the
+    // scan's `class=`/`id=` marker, which exists to be matched as an attribute
+    // of an injected element and is meaningless in a text node. Reflection
+    // PROBES (the sandwich marker, an HPP or stored-XSS marker) are quote-free
+    // and land in text too, but there a text echo is precisely the signal the
+    // pipeline needs — "this parameter reaches the page" — so they are never
+    // suppressed here.
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+    if !payload.contains(class_marker) && !payload.contains(id_marker) {
+        return false;
+    }
     let variants = payload_variants(payload);
-    // (a) A genuine un-escaped reflection (raw variant present) is never an echo.
-    if variants.iter().any(|v| !v.is_empty() && html.contains(v)) {
+    // A decoded variant CAN carry structural characters even when the payload
+    // does not (a percent-encoded payload whose url-decoded form is a tag). If
+    // one of those is in the body the reflection is markup, not text — keep it.
+    if variants
+        .iter()
+        .any(|v| v.contains(['<', '>', '"', '\'']) && html.contains(v.as_str()))
+    {
         return false;
     }
-    // (b) Out of scope: any tag-injecting variant (raw `<`/`>`) is left to the
-    //     DOM/AST verification path — a byte gate cannot tell a fully-escaped
-    //     echo apart from a live element the server reflected with edits.
-    if variants.iter().any(|v| v.contains(['<', '>'])) {
+    let script_ranges = script_block_ranges(html);
+    let bytes = html.as_bytes();
+    let mut surfaced = false;
+    for v in &variants {
+        if v.is_empty() || v.contains(['<', '>', '"', '\'']) {
+            continue;
+        }
+        let mut start = 0;
+        let mut scanned = 0usize;
+        while let Some(pos) = html[start..].find(v.as_str()) {
+            scanned += 1;
+            if scanned > MAX_PAYLOAD_OCCURRENCES {
+                // Couldn't vet them all — keep the finding.
+                return false;
+            }
+            let abs = start + pos;
+            if script_ranges.iter().any(|&(s, e)| abs >= s && abs < e) {
+                return false;
+            }
+            if occurrence_is_in_text_content(bytes, abs) != Some(true) {
+                return false;
+            }
+            surfaced = true;
+            start = next_char_boundary(html, abs + 1);
+        }
+    }
+    surfaced
+}
+
+/// Verdict for ONE occurrence of an escaped payload: can a browser still make
+/// it do something?
+///
+/// The payload's own bytes are already neutralised at this point — it surfaced
+/// only after undoing the server's escaping, so it cannot close a quote, open a
+/// tag, or add an attribute where it landed. Three positions survive that:
+///
+/// * the **scheme position** of a URL-valued attribute, where the value the
+///   payload starts *is* the URL (`href="javascript:…"`),
+/// * anywhere inside a URL-valued attribute whose value already opens an
+///   executable scheme (`href="data:text/html,…"` — the browser decodes the
+///   entities into the executed document),
+/// * an [`HTML_PARSED_ATTRS`] value (`<iframe srcdoc="&lt;svg onload=…&gt;">`),
+///   which is parsed as markup after decoding,
+/// * any position in a [`URL_READBACK_ELEMENTS`] URL (`<script src="…?q=…">`),
+///   whose own code can read the URL back as a DOM source.
+///
+/// Mid-URL positions — the query/path of a self-link, canonical link or meta
+/// refresh target — are inert: the escaped bytes stay inside the query string
+/// of a relative URL. That is the shape behind the `[R] reflected after
+/// URL/form decoding` false positives on `self_link`, `search_shell`,
+/// `meta_refresh`, `redirect_relative`, `data_attribute` and `url_encoded_echo`.
+///
+/// An unresolvable backwalk (`None`) keeps the finding.
+fn escaped_occurrence_is_inert(bytes: &[u8], at: usize) -> bool {
+    if occurrence_is_in_html_parsed_attr(bytes, at) {
         return false;
     }
-    // (c) Event-handler (`on*=`) context: the parser decodes entities before the
-    //     JS engine, so an entity-escaped break-out there executes. Keep — this
-    //     mirrors classify_reflection's own unsafe-context carve-out.
+    // Checked before the URL-attribute rules, and independently of them:
+    // `occurrence_is_in_url_attr` answers on the NEAREST `=`, which for a
+    // position inside a URL's query string is that query parameter's own `=`
+    // (`src="/boot.js?msg=HERE"` reads the name `boot.js?msg`), so a mid-URL
+    // occurrence never reaches the `Some(true)` arm below.
+    if enclosing_tag_name(bytes, at).is_some_and(|tag| {
+        URL_READBACK_ELEMENTS
+            .iter()
+            .any(|e| tag.eq_ignore_ascii_case(e))
+    }) {
+        return false;
+    }
+    match occurrence_is_in_url_attr(bytes, at) {
+        Some(false) => true,
+        None => false,
+        Some(true) => {
+            !scheme_at_url_attr_value_start(bytes, at)
+                && !url_attr_value_opens_executable(bytes, at)
+        }
+    }
+}
+
+/// Scope knobs for [`escaped_echo_is_inert`], whose two callers trust it at
+/// different widths.
+#[derive(Clone, Copy)]
+struct EscapedEchoScope {
+    /// Accept payloads carrying a raw `<`/`>`. The narrow (`false`) scope is
+    /// the historical [`is_inert_encoded_reflection`] one: quote / attribute /
+    /// scheme break-outs only.
+    tags: bool,
+    /// Shortest payload the verdict is trusted on. A handful of bytes (`"`,
+    /// `'>`, `-->`) occurs incidentally in any decoded view of a real page, so
+    /// a whole-payload match on one proves nothing about the server.
+    min_payload_len: usize,
+}
+
+/// Payload-length floor for the tag-bearing scope. Every payload the DOM and
+/// reflection catalogs generate is comfortably longer than this.
+const MIN_ESCAPED_ECHO_PAYLOAD_LEN: usize = 8;
+
+/// True when `payload` came back in `html` only after a **pure escaping**
+/// transform: the server echoed our exact bytes modulo output escaping (HTML
+/// character references or percent-escapes), so a browser renders them as
+/// literal text and the payload cannot form markup, cross an attribute
+/// boundary, or navigate a scheme.
+///
+/// Every way the echo could still be live, or could fail to be *our* echo,
+/// returns `false`:
+///
+/// * **Raw presence** — a variant present byte-exact anywhere is a raw echo,
+///   which `classify_reflection` already owns.
+/// * **Sanitizer-stripped output** — a whitelisting sanitizer *removes* markup
+///   instead of escaping it, so the payload never surfaces whole in any decoded
+///   view. This is what keeps a late whitelisted verifier (the
+///   `<a href=javascript:>` class) from being budgeted away.
+/// * **Truncated / partial echo** — same reason: the match must cover the whole
+///   payload, never a prefix.
+/// * **`+`-to-space form decoding only** — a decoded view is considered only
+///   when it genuinely un-escaped a structural character (`<`, `>`, `"`, `'`);
+///   a whitespace substitution neutralises nothing.
+/// * **Event-handler (`on*=`) context** — the HTML parser decodes character
+///   references while building the attribute value and *then* hands it to the
+///   JS engine, so an escaped echo there executes.
+/// * **Framework innerHTML sink** — a `v-html` / `ng-bind-html` /
+///   `[innerHTML]` / Knockout `data-bind="html: …"` binding decodes the
+///   entities and assigns the result to `innerHTML` at runtime. Detected by
+///   reusing [`crate::parameter_analysis::mining::detect_framework_html_sink`]
+///   on the decoded views, keeping the recognised-sink set in one place.
+/// * **A live landing site** — see [`escaped_occurrence_is_inert`]: URL scheme
+///   position, an already-executable URL, or an HTML-parsed `srcdoc` value.
+/// * **Unrelated output** — the payload has to be there.
+fn escaped_echo_is_inert(html: &str, payload: &str, scope: EscapedEchoScope) -> bool {
+    if payload.len() < scope.min_payload_len {
+        return false;
+    }
+
+    let variants = payload_variants(payload);
+
+    // (a) A byte-exact variant anywhere is a raw echo, not an escaped one.
+    if variants
+        .iter()
+        .any(|v| !v.is_empty() && html.contains(v.as_str()))
+    {
+        return false;
+    }
+
+    // (b) Tag payloads only in the wide scope.
+    if !scope.tags && variants.iter().any(|v| v.contains(['<', '>'])) {
+        return false;
+    }
+
+    // (c) Event-handler context: entities decode before the JS engine runs.
     if html_entity_reflection_in_unsafe_context(html, &variants) {
         return false;
     }
-    // Build the decoded views the classifier matches against, keeping only the
-    // ones that actually un-escaped a structural character (real server escaping
-    // — not a `+`→space whitespace substitution).
-    let html_struct = structural_char_count(html);
+
+    // (d) Decoded views. The set has to cover at least the lattice
+    //     `classify_reflection` matched on, or the gate cannot vet the very
+    //     reflection that produced the finding.
+    //
+    //     A view is only evidence of *server escaping* when undoing it actually
+    //     neutralised something. Two rules, because the danger differs:
+    //
+    //     * A payload that carries its own structural characters (`<`, `>`,
+    //       quotes) can be reflected LIVE with only its harmless bytes encoded
+    //       (`"><svg%20onload=alert(1)>`): the tag is already in the markup and
+    //       percent-decoding merely restores a space. Requiring the decode to
+    //       un-escape a structural character somewhere in the body is what
+    //       tells that apart from a genuinely escaped echo — and it is what
+    //       keeps a `+`→space form decode, which neutralises nothing at all,
+    //       from ever counting.
+    //     * A payload with NO structural characters of its own (a fully
+    //       entity- or percent-encoded payload, `javascript:…`, a bare
+    //       attribute-injection shape) cannot form markup wherever it lands, so
+    //       that comparison has nothing to measure and would reject every view.
+    //       Its live positions — raw presence in an attribute, an event
+    //       handler, a URL scheme position — are checked separately in (a),
+    //       (c) and (f). The `+`→space form decode stays gated for it too: a
+    //       whitespace substitution is never evidence of escaping.
+    let payload_is_structural = payload.contains(['<', '>', '"', '\'']);
+    let html_structural = structural_char_count(html);
     let mut decoded_forms: Vec<String> = Vec::new();
+    let push_unescaping = |forms: &mut Vec<String>, d: String| {
+        if !payload_is_structural || structural_char_count(&d) > html_structural {
+            forms.push(d);
+        }
+    };
     let push_if_unescapes = |forms: &mut Vec<String>, d: String| {
-        if structural_char_count(&d) > html_struct {
+        if structural_char_count(&d) > html_structural {
             forms.push(d);
         }
     };
     if let Ok(d) = urlencoding::decode(html)
         && d.as_ref() != html
     {
-        push_if_unescapes(&mut decoded_forms, d.into_owned());
+        push_unescaping(&mut decoded_forms, d.into_owned());
     }
     let html_dec = decode_html_entities(html);
     if html_dec != html {
         if let Ok(d) = urlencoding::decode(&html_dec)
             && d.as_ref() != html_dec.as_str()
         {
-            push_if_unescapes(&mut decoded_forms, d.into_owned());
+            push_unescaping(&mut decoded_forms, d.into_owned());
         }
-        push_if_unescapes(&mut decoded_forms, html_dec);
+        push_unescaping(&mut decoded_forms, html_dec);
     }
     if let Some(f) = decode_form_urlencoded_like(html) {
         push_if_unescapes(&mut decoded_forms, f);
     }
-    // The payload must surface in such a decoded view (confirming an encoded
-    // echo) and no decoded occurrence may sit in a URL attribute.
+
+    // (e) Framework innerHTML sink: the binding decodes the entities and
+    //     assigns the result to `innerHTML`, so an escaped tag payload landing
+    //     inside one is live. In a decoded view it surfaces as real bytes
+    //     inside the sink attribute value, where the mining parser helper
+    //     (single source of truth for the sink set) finds it.
+    for decoded in &decoded_forms {
+        for v in &variants {
+            if v.is_empty() || !decoded.contains(v.as_str()) {
+                continue;
+            }
+            if crate::parameter_analysis::mining::detect_framework_html_sink(decoded, v).is_some() {
+                return false;
+            }
+        }
+    }
+
+    // (f) The whole payload must surface in such a view, and every occurrence
+    //     must sit somewhere a browser can do nothing with it.
     let mut surfaced = false;
     for decoded in &decoded_forms {
         let bytes = decoded.as_bytes();
@@ -1341,23 +1737,74 @@ fn is_inert_encoded_reflection(html: &str, payload: &str) -> bool {
             let mut start = 0;
             let mut scanned = 0usize;
             while let Some(pos) = decoded[start..].find(v.as_str()) {
-                surfaced = true;
                 scanned += 1;
                 if scanned > MAX_PAYLOAD_OCCURRENCES {
-                    // Couldn't fully vet occurrences — keep the finding.
+                    // Couldn't fully vet the occurrences — fail toward "not a
+                    // provably inert echo".
                     return false;
                 }
                 let abs = start + pos;
-                // Same rule as the other two sites: anything but a definite
-                // `false` keeps the finding.
-                if occurrence_is_in_url_attr(bytes, abs) != Some(false) {
+                if !escaped_occurrence_is_inert(bytes, abs) {
                     return false;
                 }
+                surfaced = true;
                 start = next_char_boundary(decoded, abs + 1);
             }
         }
     }
     surfaced
+}
+
+/// True when a reflection that `classify_reflection` matched only after
+/// decoding the whole response body is an inert *encoded echo* — the server
+/// escaped its own output and a browser renders the bytes literally, so the
+/// reflection cannot form markup, an attribute break-out, or an executable
+/// scheme.
+///
+/// The narrow, non-tag scope of [`escaped_echo_is_inert`]: quote /
+/// attribute-value / scheme break-outs, with no length floor (these payloads
+/// are the short ones). Tag payloads go through [`is_escaped_echo`] instead,
+/// which applies the length floor.
+fn is_inert_encoded_reflection(html: &str, payload: &str) -> bool {
+    escaped_echo_is_inert(
+        html,
+        payload,
+        EscapedEchoScope {
+            tags: false,
+            min_payload_len: 0,
+        },
+    )
+}
+
+/// The wide scope of [`escaped_echo_is_inert`]: tag payloads included, with the
+/// [`MIN_ESCAPED_ECHO_PAYLOAD_LEN`] floor.
+///
+/// Two callers, both of which want exactly "did the server hand our exact
+/// payload back, escaped?":
+///
+/// * the report gate ([`is_in_safe_context_decoded`]), where a provably inert
+///   echo is not a finding;
+/// * the scan phases' recall-preserving early exits (the DOM phase's
+///   [`crate::scanning::INERT_ECHO_BUDGET`] and the reflection phase's
+///   [`crate::scanning::REFLECTION_INERT_ECHO_BUDGET`]), which need to see the
+///   transformed-but-inert echoes `classify_reflection` deliberately reports as
+///   "no reflection" — without them a uniformly escaping endpoint, the single
+///   most common shape on the web, advances no budget at all and the phase runs
+///   its entire catalog against a body that can never verify.
+///
+/// Budget callers must additionally exclude 4xx responses: a WAF block page
+/// that echoes the payload is a *block*, and a later payload variant may still
+/// get through (the same reasoning that scopes
+/// [`crate::scanning::BLOCKED_STREAK_LIMIT`] to 5xx).
+pub(crate) fn is_escaped_echo(html: &str, payload: &str) -> bool {
+    escaped_echo_is_inert(
+        html,
+        payload,
+        EscapedEchoScope {
+            tags: true,
+            min_payload_len: MIN_ESCAPED_ECHO_PAYLOAD_LEN,
+        },
+    )
 }
 
 /// Determine if payload is reflected in any normalization variant.
@@ -1851,15 +2298,34 @@ fn injection_response_suppressed(
     false
 }
 
+/// A fetched injection response body paired with the HTTP status it came from.
+///
+/// Crate-private: the status is threaded out only for the reflection phase's
+/// transformed-inert-echo budget (see [`crate::scanning`]). It is deliberately
+/// **not** a field on the public [`ReflectionBody`] — adding a required field
+/// there would be a source-compatibility break for external consumers that
+/// exhaustively match it. `status` is `0` for a request error, a
+/// `--skip-xss-scanning` no-op, and the `--sxss` path (whose retrieval fan-out
+/// makes a single injection status meaningless — mirroring how the DOM phase's
+/// [`check_dom_verification::DomVerifyOutcome`] never drives its early exit
+/// under `--sxss`).
+struct FetchedInjection {
+    body: Option<ReflectionBody>,
+    status: u16,
+}
+
 async fn fetch_injection_response(
     target: &Target,
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
-) -> Option<ReflectionBody> {
+) -> FetchedInjection {
     if args.skip_xss_scanning {
-        return None;
+        return FetchedInjection {
+            body: None,
+            status: 0,
+        };
     }
     let client = target.build_client_or_default();
     fetch_injection_response_with_client(&client, target, param, payload, args, streak).await
@@ -1872,9 +2338,12 @@ async fn fetch_injection_response_with_client(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
-) -> Option<ReflectionBody> {
+) -> FetchedInjection {
     if args.skip_xss_scanning {
-        return None;
+        return FetchedInjection {
+            body: None,
+            status: 0,
+        };
     }
 
     // Apply pre-encoding if the parameter requires it (e.g. base64, 2base64)
@@ -2014,7 +2483,15 @@ async fn fetch_injection_response_with_client(
                     && let Some(body) = gated_body(resp, param, payload, args).await
                 {
                     if classify_reflection(&body.text, payload).is_some() {
-                        return Some(body);
+                        // `--sxss` fans retrieval across secondary URLs, so a
+                        // single injection status is meaningless here; report `0`
+                        // (mirroring `DomVerifyOutcome`'s sxss handling), which
+                        // keeps the reflection-phase inert-echo budget off the
+                        // stored path.
+                        return FetchedInjection {
+                            body: Some(body),
+                            status: 0,
+                        };
                     }
                     if fallback_body.is_none() {
                         fallback_body = Some(body);
@@ -2029,9 +2506,15 @@ async fn fetch_injection_response_with_client(
         if let Some(body) = inject_body.as_ref()
             && classify_reflection(&body.text, payload).is_some()
         {
-            return inject_body;
+            return FetchedInjection {
+                body: inject_body,
+                status: 0,
+            };
         }
-        fallback_body.or(inject_body)
+        FetchedInjection {
+            body: fallback_body.or(inject_body),
+            status: 0,
+        }
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
@@ -2053,7 +2536,10 @@ async fn fetch_injection_response_with_client(
             // `--ignore-return`, inert-data content-types, and the Path-only
             // redirect / non-markup drops. Shared with the `--sxss` branch above.
             if injection_response_suppressed(status_code, resp.headers(), param, args) {
-                return None;
+                return FetchedInjection {
+                    body: None,
+                    status: status_code,
+                };
             }
             // Check for redirect context: if the response is a 3xx redirect,
             // the Location header may contain the reflected payload in either
@@ -2080,7 +2566,10 @@ async fn fetch_injection_response_with_client(
                 // carrying a `dlx` marker matched the DOM-marker selector and
                 // minted a Verified/High finding whose "response" evidence the
                 // server never sent.
-                return Some(ReflectionBody::redirect_location(status_code, location));
+                return FetchedInjection {
+                    body: Some(ReflectionBody::redirect_location(status_code, location)),
+                    status: status_code,
+                };
             }
             match crate::utils::http::read_body(resp).await {
                 Ok(body) => {
@@ -2101,9 +2590,17 @@ async fn fetch_injection_response_with_client(
                             param.name,
                             status_code
                         );
-                        return None;
+                        return FetchedInjection {
+                            body: None,
+                            status: status_code,
+                        };
                     }
-                    Some(ReflectionBody::rendered(body).with_js_content_type(is_js_content_type))
+                    FetchedInjection {
+                        body: Some(
+                            ReflectionBody::rendered(body).with_js_content_type(is_js_content_type),
+                        ),
+                        status: status_code,
+                    }
                 }
                 Err(e) => {
                     crate::dbg_log!(
@@ -2111,11 +2608,18 @@ async fn fetch_injection_response_with_client(
                         param.name,
                         e
                     );
-                    None
+                    FetchedInjection {
+                        body: None,
+                        status: status_code,
+                    }
                 }
             }
         } else {
-            None
+            // Request transport error — no response, so no status.
+            FetchedInjection {
+                body: None,
+                status: 0,
+            }
         }
     }
 }
@@ -2156,7 +2660,31 @@ pub async fn check_reflection_with_response_tracked(
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
 ) -> (Option<ReflectionKind>, Option<ReflectionBody>) {
-    let body = match client {
+    // The public contract returns only `(kind, body)`. The status-aware path
+    // computes the same values plus the injection status; drop the status here
+    // so this signature and return type stay byte-for-byte compatible.
+    let (kind, body, _status) =
+        check_reflection_with_response_status(client, target, param, payload, args, streak).await;
+    (kind, body)
+}
+
+/// Crate-private status-aware sibling of [`check_reflection_with_response_tracked`].
+///
+/// Identical classification, plus the HTTP status of the injection response
+/// (`0` for a request error, a `--skip-xss-scanning` no-op, or the `--sxss`
+/// path). Production scan workers use this so the reflection phase's
+/// transformed-inert-echo budget can skip a 4xx block page that echoes the
+/// payload — without exposing the status on the public [`ReflectionBody`], whose
+/// field set is part of the crate's public API.
+pub(crate) async fn check_reflection_with_response_status(
+    client: Option<&Client>,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+    streak: &std::sync::atomic::AtomicU32,
+) -> (Option<ReflectionKind>, Option<ReflectionBody>, u16) {
+    let FetchedInjection { body, status } = match client {
         Some(client) => {
             fetch_injection_response_with_client(client, target, param, payload, args, streak).await
         }
@@ -2168,9 +2696,9 @@ pub async fn check_reflection_with_response_tracked(
             Some(_) if is_in_safe_context_decoded(&body.text, payload) => None,
             other => other,
         };
-        (kind, Some(body))
+        (kind, Some(body), status)
     } else {
-        (None, None)
+        (None, None, status)
     }
 }
 

@@ -152,6 +152,45 @@ async fn server_error_handler() -> impl IntoResponse {
     (StatusCode::SERVICE_UNAVAILABLE, Html(String::new()))
 }
 
+/// HTML-escape every structural character, the way a correctly-templating
+/// server does. The reflection can never execute, but our exact bytes do come
+/// back — the *escaped echo* the inert-echo budget needs to see.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// The uniformly-escaping endpoint: `html.escape()` over the reflected value.
+async fn escaped_echo_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    let q = params.get("q").cloned().unwrap_or_default();
+    Html(format!("<div id=\"out\">{}</div>", escape_html(&q)))
+}
+
+/// A WAF block page that *echoes* the escaped payload back with a 403. A later
+/// payload variant may still bypass the rule, so this must not consume the
+/// inert-echo budget (same reasoning that scopes `BLOCKED_STREAK_LIMIT` to 5xx).
+async fn waf_block_echo_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FORBIDDEN,
+        Html(format!("<div>Request blocked: {}</div>", escape_html(&q))),
+    )
+}
+
+/// A whitelisting sanitizer: it *removes* the markup instead of escaping it, so
+/// our bytes never come back whole. Counting this would let the DOM phase
+/// retire before a late whitelisted verifier is reached.
+async fn sanitizing_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    let q = params.get("q").cloned().unwrap_or_default();
+    let stripped: String = q.chars().filter(|c| *c != '<' && *c != '>').collect();
+    Html(format!("<div id=\"out\">{}</div>", stripped))
+}
+
 async fn sxss_html_handler(State(state): State<TestState>) -> Html<String> {
     Html(format!("<div>{}</div>", state.stored_payload))
 }
@@ -189,6 +228,9 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
             axum::routing::post(json_reflection_handler),
         )
         .route("/dom/server-error", get(server_error_handler))
+        .route("/dom/escaped", get(escaped_echo_handler))
+        .route("/dom/waf-block", get(waf_block_echo_handler))
+        .route("/dom/sanitized", get(sanitizing_handler))
         .route("/sxss/html", get(sxss_html_handler))
         .route("/sxss/json", get(sxss_json_handler))
         .route(
@@ -353,6 +395,89 @@ async fn test_dom_outcome_inert_echo_reflected_but_not_verified() {
         outcome.response_text.is_none(),
         "non-verified outcomes must not retain the body (memory bound)"
     );
+}
+
+#[tokio::test]
+async fn test_dom_outcome_escaped_echo_counts_as_reflected() {
+    // A correctly-templating server escapes every structural character. The
+    // payload can never execute, but our exact bytes DID come back — so the
+    // response must advance the inert-echo budget. Before this signal existed,
+    // `classify_reflection` returned None here (rightly — it is not a finding)
+    // and the DOM phase ran its entire catalog against a body that can never
+    // verify.
+    let payload = format!(
+        "<svg onload=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/escaped");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(!outcome.verified, "an escaped echo must never verify");
+    assert!(
+        outcome.reflected,
+        "an escaped echo of the whole payload must advance the inert-echo budget"
+    );
+    assert_eq!(outcome.status, 200);
+    assert!(
+        outcome.response_text.is_none(),
+        "non-verified outcomes must not retain the body (memory bound)"
+    );
+}
+
+#[tokio::test]
+async fn test_dom_outcome_sanitized_strip_is_not_reflected() {
+    // A whitelisting sanitizer REMOVES markup rather than escaping it, so the
+    // payload never comes back whole. Counting it would let the phase retire
+    // before a late whitelisted verifier (the `<a href=javascript:>` class) is
+    // reached — the recall guarantee `INERT_ECHO_BUDGET` rests on.
+    let payload = format!(
+        "<svg onload=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/sanitized");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(!outcome.verified, "stripped markup must not verify");
+    assert!(
+        !outcome.reflected,
+        "a sanitizer that strips markup must not advance the inert-echo budget"
+    );
+    assert_eq!(outcome.status, 200);
+}
+
+#[tokio::test]
+async fn test_dom_outcome_4xx_block_echo_is_not_reflected() {
+    // A WAF block page that echoes the escaped payload is a *block*: a later
+    // payload variant may still bypass the rule, so it must not consume the
+    // budget that keeps the bypass surface alive.
+    let payload = format!(
+        "<svg onload=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/waf-block");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(!outcome.verified, "a 403 block page must not verify");
+    assert!(
+        !outcome.reflected,
+        "a 4xx block page that echoes the payload must not advance the inert-echo budget"
+    );
+    assert_eq!(outcome.status, 403, "the 4xx status must be threaded out");
 }
 
 #[tokio::test]

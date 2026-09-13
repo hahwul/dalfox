@@ -555,6 +555,106 @@ fn test_get_fallback_reflection_payloads_include_encoder_outputs() {
     );
 }
 
+/// The reflection catalog (unknown context) must interleave its families like
+/// the DOM catalog does, so the reflection phase's transformed-inert-echo
+/// budget samples every family in an early prefix. Before the interleave the
+/// protocol family was concatenated last and sat thousands of payloads past the
+/// budget — on a uniformly-escaping URL-attribute echo the budget could retire
+/// before a single `javascript:` protocol payload was tried.
+#[test]
+fn test_get_fallback_reflection_payloads_samples_every_family_in_budget_window() {
+    let mut args = default_scan_args();
+    // `none` keeps the base interleaved order (no encoder fan-out), so the
+    // assertion is about catalog ordering only.
+    args.encoders = vec!["none".to_string()];
+    args.custom_payload = None;
+    args.only_custom_payload = false;
+
+    let payloads = get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
+
+    use std::collections::HashSet;
+    let html: HashSet<String> = crate::payload::get_dynamic_xss_html_payloads()
+        .into_iter()
+        .collect();
+    let attr: HashSet<String> = crate::payload::get_dynamic_xss_attribute_payloads()
+        .into_iter()
+        .collect();
+    let mxss: HashSet<String> = crate::payload::get_mxss_payloads().into_iter().collect();
+    let protocol: HashSet<String> = crate::payload::get_protocol_injection_payloads()
+        .into_iter()
+        .collect();
+
+    // Far below the reflection phase's transformed-echo budget: with four
+    // interleaved families each appears within the first few rounds.
+    let window = 40.min(payloads.len());
+    let head = &payloads[..window];
+    for (name, fam) in [
+        ("html-tag", &html),
+        ("attribute/event-handler", &attr),
+        ("mXSS", &mxss),
+        ("protocol/url", &protocol),
+    ] {
+        assert!(
+            head.iter().any(|p| fam.contains(p)),
+            "reflection family '{name}' must appear within the first {window} payloads"
+        );
+    }
+}
+
+/// The interleave is a pure reordering: same union, same within-family order,
+/// no member added or dropped (the encoder pass dedups downstream, so this
+/// asserts the pre-encoder base is a permutation of the four families).
+#[test]
+fn test_get_fallback_reflection_payloads_union_and_within_family_order_preserved() {
+    let mut args = default_scan_args();
+    args.encoders = vec!["none".to_string()];
+    args.custom_payload = None;
+    args.only_custom_payload = false;
+
+    let payloads = get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
+
+    let html = crate::payload::get_dynamic_xss_html_payloads();
+    let attr = crate::payload::get_dynamic_xss_attribute_payloads();
+    let mxss = crate::payload::get_mxss_payloads();
+    let protocol = crate::payload::get_protocol_injection_payloads();
+
+    // Union: every family member is present, and the total is exactly the sum
+    // (families are disjoint; if a future family shared a member this would flag
+    // it so the assertion is revisited rather than silently masked).
+    use std::collections::HashSet;
+    let actual: HashSet<&String> = payloads.iter().collect();
+    for fam in [&html, &attr, &mxss, &protocol] {
+        for p in fam {
+            assert!(
+                actual.contains(p),
+                "family member {p:?} must survive interleave"
+            );
+        }
+    }
+    assert_eq!(
+        payloads.len(),
+        html.len() + attr.len() + mxss.len() + protocol.len(),
+        "interleave must be a permutation of the four families' union"
+    );
+
+    // Within-family order: the subsequence of `payloads` restricted to each
+    // family equals that family's own order.
+    for (name, fam) in [
+        ("html", &html),
+        ("attr", &attr),
+        ("mxss", &mxss),
+        ("protocol", &protocol),
+    ] {
+        let fam_set: HashSet<&String> = fam.iter().collect();
+        let subseq: Vec<&String> = payloads.iter().filter(|p| fam_set.contains(*p)).collect();
+        let expected: Vec<&String> = fam.iter().collect();
+        assert_eq!(
+            subseq, expected,
+            "within-family order for '{name}' must be preserved by the interleave"
+        );
+    }
+}
+
 #[test]
 fn test_format_req_per_sec_renders_fixed_width_field() {
     // Pins the field shape consumed by the `{req_per_sec}` template key in
@@ -1473,6 +1573,166 @@ async fn test_run_scanning_dom_phase_inert_echo_count_is_cumulative() {
     assert!(
         sent < 1500,
         "inert_echo_count must be cumulative across non-reflecting gaps; sent {sent} requests"
+    );
+}
+
+/// HTML-escape every structural character — the uniformly-escaping shape the
+/// reflection-phase transformed-inert-echo budget targets. Shared by the budget
+/// tests below.
+fn escape_structural_for_test(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// axum handler: reflect the `query` param HTML-escaped into a `<div>` (inert
+/// literal text — no payload can form markup) and count every request. Shared
+/// by the reflection-phase budget tests.
+async fn counting_escaping_handler(
+    axum::extract::State(counter): axum::extract::State<Arc<std::sync::atomic::AtomicUsize>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Html<String> {
+    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let q = params.get("query").cloned().unwrap_or_default();
+    axum::response::Html(format!(
+        "<html><body><div>{}</div></body></html>",
+        escape_structural_for_test(&q)
+    ))
+}
+
+/// Spawn [`counting_escaping_handler`] on an ephemeral port; returns the address
+/// and the per-request counter.
+async fn spawn_counting_escaping_server()
+-> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+    let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let app = axum::Router::new()
+        .route("/", axum::routing::get(counting_escaping_handler))
+        .with_state(counter.clone());
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    (addr, counter)
+}
+
+/// Phase 2A — the reflection phase's transformed-inert-echo budget. A server
+/// that uniformly HTML-escapes its output mints no `R` (an escaped echo is
+/// demoted to `None`), so the `reflection_found_locally` short-circuit never
+/// fires and, before this budget, the phase ran its entire catalog. The budget
+/// must cap that fan-out once enough transformed-inert echoes have been seen,
+/// without producing any finding.
+#[tokio::test]
+async fn test_run_scanning_reflection_phase_early_exits_on_escaped_echo() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let (addr, counter) = spawn_counting_escaping_server().await;
+
+    let url = format!("http://{}/?query=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.clear();
+    // Unknown context → the full (thousands-strong) reflection catalog.
+    target
+        .reflection_params
+        .push(Param::new("query", "a", Location::Query));
+
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let sent = counter.load(Ordering::Relaxed);
+    // Signal-driven, not a premature bail: at least one diverse budget window of
+    // transformed-inert echoes is sampled before the cut (the reflection budget
+    // plus the DOM budget each take ~256).
+    assert!(
+        sent >= 200,
+        "the early exit must still take a diverse sample first; only sent {sent}"
+    );
+    // Without the reflection-phase budget this endpoint runs its whole catalog
+    // (thousands of requests). Both the reflection and DOM budgets cap it to a
+    // couple of diverse passes.
+    assert!(
+        sent < 1500,
+        "the transformed-inert-echo budget must curb the reflection fan-out; sent {sent}"
+    );
+
+    // The real exploitability property: a uniformly-escaping endpoint can never
+    // execute a payload, so there must be no Verified finding. (An `R` on a bare
+    // event-handler string reflected as body *text* is a pre-existing reflection
+    // classification quirk, orthogonal to this budget and to exploitability, so
+    // it is not constrained here.)
+    let guard = results.lock().await;
+    let verified = guard
+        .iter()
+        .filter(|r| matches!(r.result_type, FindingType::Verified))
+        .count();
+    assert_eq!(
+        verified,
+        0,
+        "a uniformly-escaping endpoint is not exploitable and must yield no Verified finding; got {:?}",
+        guard
+            .iter()
+            .map(|r| (&r.result_type, &r.param))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Phase 2A recall guard — `--deep-scan` disables the transformed-inert-echo
+/// budget (as it disables every other fan-out trim), so the exhaustive mode
+/// still runs the whole catalog against the same escaping endpoint. A bounded
+/// `--max-payloads-per-param` keeps the test fast while leaving the two runs
+/// clearly distinguishable: deep scan must send materially more than the
+/// budgeted run.
+#[tokio::test]
+async fn test_run_scanning_reflection_phase_budget_disabled_under_deep_scan() {
+    use std::sync::atomic::Ordering;
+
+    async fn run(deep_scan: bool, cap: usize) -> usize {
+        let (addr, counter) = spawn_counting_escaping_server().await;
+
+        let url = format!("http://{}/?query=a", addr);
+        let mut target = parse_target(&url).expect("parse_target");
+        target.reflection_params.clear();
+        target
+            .reflection_params
+            .push(Param::new("query", "a", Location::Query));
+
+        let mut args = integration_scan_args(false);
+        args.deep_scan = deep_scan;
+        // Bound the catalog so the deep-scan run stays fast but still far exceeds
+        // the ~256 budget window.
+        args.max_payloads_per_param = cap;
+
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(args),
+            ScanRunHandles::new(
+                results.clone(),
+                Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            ),
+        )
+        .await;
+        counter.load(Ordering::Relaxed)
+    }
+
+    let budgeted = run(false, 700).await;
+    let deep = run(true, 700).await;
+
+    // Deep scan opts out of the cut, so it sends materially more requests than
+    // the budgeted run against the identical endpoint.
+    assert!(
+        deep > budgeted + 200,
+        "deep scan must run past the budget: budgeted={budgeted}, deep={deep}"
     );
 }
 
