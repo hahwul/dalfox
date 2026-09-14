@@ -129,7 +129,10 @@ fn test_detect_injection_context_script_unquoted_with_document_quotes() {
     // When marker is in an unquoted JS expression, but the surrounding HTML
     // has quotes in other tags, it should still be detected as unquoted Javascript(None).
     let marker = crate::scanning::markers::open_marker();
-    let body = format!("<div class=\"header\"><script>var count = {};</script><div class=\"footer\"></div>", marker);
+    let body = format!(
+        "<div class=\"header\"><script>var count = {};</script><div class=\"footer\"></div>",
+        marker
+    );
     let ctx = detect_injection_context(&body);
     assert_eq!(ctx, InjectionContext::Javascript(None));
 }
