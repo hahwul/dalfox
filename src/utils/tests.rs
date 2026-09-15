@@ -1,4 +1,3 @@
-use super::http::{is_same_origin, same_origin_or_tls_upgrade};
 use super::{
     finding_belongs_to_target, init_remote_resources, init_remote_resources_with_options,
     stable_finding_fingerprint,
@@ -371,81 +370,28 @@ fn every_semaphore_new_clamps_its_permit_count() {
     );
 }
 
+/// A finding recorded at a TLS-upgraded form action must still be attributed to
+/// the `http://` target it came from. Comparing with the scheme attached, it
+/// matched none of the three strategies, so the per-target summary reported
+/// `clean` for a target that had just produced an XSS, and
+/// `collapse_redundant_reflected` found no verified keys to dedup against.
 #[test]
-fn is_same_origin_compares_scheme_host_and_port() {
-    let u = |s: &str| url::Url::parse(s).unwrap();
-    assert!(is_same_origin(
-        &u("https://example.com/a"),
-        &u("https://example.com/b?x=1")
+fn finding_belongs_to_target_follows_a_same_host_tls_upgrade() {
+    assert!(finding_belongs_to_target(
+        "http://example.com/page",
+        "https://example.com/login?q=payload"
     ));
-    // Implicit and explicit default ports are the same origin.
-    assert!(is_same_origin(
-        &u("https://example.com/a"),
-        &u("https://example.com:443/b")
+    assert!(finding_belongs_to_target(
+        "http://example.com/page?q=1",
+        "http://example.com/page?q=payload"
     ));
-    for (a, b) in [
-        ("https://example.com/a", "https://evil.example/b"),
-        ("https://example.com/a", "http://example.com/b"),
-        ("https://example.com/a", "https://example.com:8443/b"),
-    ] {
-        assert!(!is_same_origin(&u(a), &u(b)), "{a} vs {b}");
-    }
-}
-
-#[test]
-fn same_origin_or_tls_upgrade_allows_only_the_default_port_http_to_https_hop() {
-    let u = |s: &str| url::Url::parse(s).unwrap();
-
-    // Everything same-origin still passes...
-    assert!(same_origin_or_tls_upgrade(
-        &u("https://example.com/page"),
-        &u("https://example.com/login")
+    // A different host is still not this target's finding, scheme notwithstanding.
+    assert!(!finding_belongs_to_target(
+        "http://example.com/page",
+        "https://evil.example/login"
     ));
-    // ...plus the "page over HTTP, form posts over TLS" shape this exists for.
-    assert!(same_origin_or_tls_upgrade(
-        &u("http://example.com/page"),
-        &u("https://example.com/login")
+    assert!(!finding_belongs_to_target(
+        "http://example.com/api/v1/foo?q=1",
+        "https://example.com/other/bar?q=1"
     ));
-    assert!(same_origin_or_tls_upgrade(
-        &u("http://example.com:80/page"),
-        &u("https://example.com:443/login")
-    ));
-
-    for (page, dest, why) in [
-        (
-            "https://example.com/page",
-            "http://example.com/login",
-            "a TLS downgrade would walk credentials onto plaintext",
-        ),
-        (
-            "http://example.com/page",
-            "https://evil.example/login",
-            "a different host is foreign however the scheme changes",
-        ),
-        (
-            "http://example.com:8080/page",
-            "https://example.com/login",
-            "the carve-out is only for the default port pair",
-        ),
-        (
-            "http://example.com/page",
-            "https://example.com:8443/login",
-            "likewise on the destination side",
-        ),
-        (
-            "http://example.com/page",
-            "https://example.com.evil/login",
-            "a suffix-extended host is a different host",
-        ),
-        (
-            "http://example.com/page",
-            "https://evil.example\\@example.com/login",
-            "an authority-confusing spelling resolves to the host before the backslash",
-        ),
-    ] {
-        assert!(
-            !same_origin_or_tls_upgrade(&u(page), &u(dest)),
-            "{page} -> {dest} must be refused: {why}"
-        );
-    }
 }

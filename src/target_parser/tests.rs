@@ -492,3 +492,52 @@ async fn follow_redirects_stops_before_leaving_the_target_origin() {
         "a same-origin redirect must still be followed, got: {body}"
     );
 }
+
+/// The redirect policy shares its destination predicate with the form-action
+/// gates, which is deliberate — they answer the same question and two copies
+/// would drift. The risk of sharing is that a widening motivated by scan recall
+/// silently widens a security control, so the invariants that matter *here* are
+/// pinned here: a redirect may not carry the operator's credentials to another
+/// host, to another port, or down onto plaintext.
+#[test]
+fn redirect_destination_predicate_stays_narrow() {
+    let u = |s: &str| Url::parse(s).unwrap();
+    let ok = crate::utils::http::same_origin_or_tls_upgrade;
+
+    assert!(ok(
+        &u("http://target.example/a"),
+        &u("http://target.example/b")
+    ));
+    assert!(ok(
+        &u("http://target.example/a"),
+        &u("https://target.example/b")
+    ));
+
+    for (from, to, why) in [
+        (
+            "http://target.example/a",
+            "http://attacker.example/b",
+            "another host",
+        ),
+        (
+            "http://target.example/a",
+            "http://sub.target.example/b",
+            "a subdomain is another host",
+        ),
+        (
+            "http://target.example:8765/a",
+            "http://target.example:9988/b",
+            "another port",
+        ),
+        (
+            "https://target.example/a",
+            "http://target.example/b",
+            "a downgrade onto plaintext",
+        ),
+    ] {
+        assert!(
+            !ok(&u(from), &u(to)),
+            "a redirect must not carry credentials to {why}: {from} -> {to}"
+        );
+    }
+}
