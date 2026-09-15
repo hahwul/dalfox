@@ -3096,3 +3096,45 @@ mod escaped_echo {
         );
     }
 }
+
+/// The stored-XSS check fetches each candidate URL with the operator's headers
+/// and cookies attached, so a page-derived `form_action_url` pointing off-origin
+/// must not become a candidate. `--sxss-url` is deliberately exempt: that one is
+/// the operator's own choice.
+#[test]
+fn resolve_sxss_check_urls_drops_a_cross_origin_form_action() {
+    let target = parse_target("https://example.com/page").unwrap();
+    let args = default_scan_args();
+
+    for action in [
+        "https://attacker.example/collect",
+        "https://attacker.example\\@example.com/collect",
+    ] {
+        let param = Param {
+            form_action_url: Some(action.to_string()),
+            form_origin_url: Some("https://example.com/page".to_string()),
+            ..Param::new("comment", "", Location::Body)
+        };
+        let urls = resolve_sxss_check_urls(&target, &param, &args);
+        assert!(
+            urls.iter().all(|u| u.host_str() == Some("example.com")),
+            "cross-origin action {action} leaked into the sxss check URLs: {:?}",
+            urls.iter().map(|u| u.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    // A same-origin action is still checked, so the assertion above cannot pass
+    // by the list simply being empty.
+    let param = Param {
+        form_action_url: Some("https://example.com/stored".to_string()),
+        form_origin_url: Some("https://example.com/page".to_string()),
+        ..Param::new("comment", "", Location::Body)
+    };
+    let urls = resolve_sxss_check_urls(&target, &param, &args);
+    assert!(
+        urls.iter()
+            .any(|u| u.as_str() == "https://example.com/stored"),
+        "same-origin action must still be checked, got {:?}",
+        urls.iter().map(|u| u.as_str()).collect::<Vec<_>>()
+    );
+}
