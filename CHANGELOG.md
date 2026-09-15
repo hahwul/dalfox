@@ -7,6 +7,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./.github/SECURITY.md).
 
+## 3.2.3
+
+A credential-leak fix, large scan-performance cuts, and wider XSS coverage.
+
+* **Security**: a scanned page could choose where Dalfox sent the operator's `-H` headers and `--cookies`. Cross-origin `<form action>` targets are no longer probed, and `--follow-redirects` stops when a chain leaves the origin it started on — with a carve-out for the same-host `http` -> `https` upgrade ([GHSA-mph2-gf5w-6f9f](https://github.com/hahwul/dalfox/security/advisories/GHSA-mph2-gf5w-6f9f), [#1460](https://github.com/hahwul/dalfox/pull/1460), [#1461](https://github.com/hahwul/dalfox/pull/1461)). Thanks to the DREAM Security Research Team — Arad Inbar, Adiel Sol, Erez Cohen, Nir Somech, Ben Grinberg, Daniel Lubel and Shir Sadon — for reporting the form-action issue.
+* Scans no longer run through the environment's `HTTP_PROXY` / `HTTPS_PROXY`, which the docs already said they didn't ([#1441](https://github.com/hahwul/dalfox/pull/1441)).
+* Much faster scans: payload requests now run concurrently *within* a parameter, batches ramp instead of jumping to a full `--workers` window, and endpoints that uniformly escape their echo exit early instead of running the whole catalog ([#1440](https://github.com/hahwul/dalfox/pull/1440), [#1442](https://github.com/hahwul/dalfox/pull/1442), [#1457](https://github.com/hahwul/dalfox/pull/1457)).
+* New injection surfaces: GraphQL and XML / SOAP request bodies ([#1426](https://github.com/hahwul/dalfox/pull/1426), [#1427](https://github.com/hahwul/dalfox/pull/1427)).
+* Wider DOM-XSS AST coverage — Promise combinators, optional chaining, static bracket paths, more sinks and sources — with fewer false positives ([#1426](https://github.com/hahwul/dalfox/pull/1426), [#1444](https://github.com/hahwul/dalfox/pull/1444)).
+* Detects the sub-not-gsub angle filter: a doubled `<<svg ...>>` opens a real tag where a one-shot `str::replace` only ate the first `<` ([#1445](https://github.com/hahwul/dalfox/pull/1445)).
+* Fewer escaped-echo `[R]` false positives, and quote inference is scoped to tag / element content ([#1457](https://github.com/hahwul/dalfox/pull/1457), [#1458](https://github.com/hahwul/dalfox/pull/1458)).
+* A batch of server / MCP lifecycle, CLI / config, raw-HTTP / HAR import, and PoC-reproduction fixes ([#1405](https://github.com/hahwul/dalfox/pull/1405)-[#1425](https://github.com/hahwul/dalfox/pull/1425), [#1438](https://github.com/hahwul/dalfox/pull/1438)).
+
 ## 3.2.2
 
 Request-construction / input-validation hardening, new WAF fingerprints, and shell-completion + man-page packaging.
