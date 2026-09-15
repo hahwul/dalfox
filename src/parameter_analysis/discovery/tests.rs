@@ -898,3 +898,222 @@ async fn spawned_discovery_requests_reach_the_per_job_counter() {
          to the process-wide globals — which is also the rate-limit bypass"
     );
 }
+
+/// Serves a page holding one POST form whose `action` the test chooses, and
+/// echoes any submitted body back so a probe that lands here reflects its
+/// marker. The listener is bound before the HTML is built so an action can
+/// point at this same server's port.
+async fn start_form_page_server(make_action: impl FnOnce(SocketAddr) -> String) -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind form page listener");
+    let addr = listener.local_addr().expect("local addr");
+    let html = format!(
+        "<html><body><form action=\"{}\" method=\"POST\">\
+         <input name=\"q\" value=\"search\">\
+         <input name=\"user\" value=\"test\">\
+         </form></body></html>",
+        make_action(addr)
+    );
+    let app = Router::new()
+        .route(
+            "/",
+            any(move || {
+                let html = html.clone();
+                async move { html }
+            }),
+        )
+        .route(
+            "/{*rest}",
+            any(|body: String| async move { format!("echo {body}") }),
+        );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+/// Stands in for the attacker's collector: counts every request it receives and
+/// echoes the body, so a probe that reaches it both trips the counter and would
+/// be recorded as a discovered parameter.
+async fn start_foreign_origin_server(hits: Arc<std::sync::atomic::AtomicUsize>) -> SocketAddr {
+    let app = Router::new().route(
+        "/{*rest}",
+        any(move |body: String| {
+            let hits = hits.clone();
+            async move {
+                hits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                format!("echo {body}")
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind foreign listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+async fn discover_form_params(page: SocketAddr) -> Vec<Param> {
+    let mut target = parse_target(&format!("http://{}/?q=test", page)).unwrap();
+    target.delay = 1;
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_form_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+    reflection_params.lock().await.clone()
+}
+
+#[tokio::test]
+async fn test_check_form_discovery_probes_same_origin_form_action() {
+    // Relative and absolute spellings of the target's own origin both resolve
+    // through `Url::join`, so both must survive the origin gate. This is the
+    // control for the two skip tests below: without it they would still pass
+    // if form discovery stopped working altogether.
+    for action in ["/submit", "ABSOLUTE"] {
+        let page = start_form_page_server(|addr| {
+            if action == "ABSOLUTE" {
+                format!("http://{}/submit", addr)
+            } else {
+                action.to_string()
+            }
+        })
+        .await;
+
+        let params = discover_form_params(page).await;
+        // Assert the `Location`, not just the name: this two-field form also
+        // trips the `fields.len() <= 3` JSON-body probe, which records every
+        // field as `JsonBody` on a single reflecting response. Matching on the
+        // name alone would stay green even if the per-field urlencoded POST
+        // loop — the path this control exists to cover — stopped working.
+        for field in ["q", "user"] {
+            assert!(
+                params
+                    .iter()
+                    .any(|p| p.name == field && p.location == Location::Body),
+                "same-origin form action {action} should discover `{field}` as a \
+                 urlencoded body param, got {:?}",
+                params
+                    .iter()
+                    .map(|p| (&p.name, &p.location))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_check_form_discovery_skips_cross_origin_form_action() {
+    // A scanned page that points its form at another origin must not make
+    // dalfox send the operator's credentials there. The foreign server echoes,
+    // so a regression shows up twice: as a request count and as a discovered
+    // param carrying that host in `form_action_url`.
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let foreign = start_foreign_origin_server(hits.clone()).await;
+    let page = start_form_page_server(|_| format!("http://{}/collect", foreign)).await;
+
+    let params = discover_form_params(page).await;
+
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no request may be sent to a cross-origin form action"
+    );
+    assert!(
+        params.is_empty(),
+        "a cross-origin form must not yield discovered params, got {:?}",
+        params
+            .iter()
+            .map(|p| (&p.name, &p.form_action_url))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_check_form_discovery_skips_backslash_authority_form_action() {
+    // `http://foreign\@page/submit` resolves — correctly, per WHATWG — to the
+    // authority *before* the backslash, so it reaches `foreign` while reading
+    // as if it named `page`. The gate compares parsed origins precisely so this
+    // cannot slip through; a textual prefix check against the target URL would
+    // let it past.
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let foreign = start_foreign_origin_server(hits.clone()).await;
+    let page = start_form_page_server(|addr| format!("http://{}\\@{}/submit", foreign, addr)).await;
+
+    let params = discover_form_params(page).await;
+
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "a backslash-authority action must not be probed either"
+    );
+    assert!(params.is_empty(), "got {:?}", params);
+}
+
+/// `MAX_FORM_FIELDS` must bound the GET-form branch too. It bounded only the
+/// POST and multipart loops, so a hostile page could serve a GET form with tens
+/// of thousands of inputs and buy one request per input — while the debug log
+/// claimed only the first 200 were probed.
+#[tokio::test]
+async fn test_check_form_discovery_caps_get_form_fields() {
+    const FIELDS: usize = 260;
+
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = hits.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("local addr");
+    let inputs: String = (0..FIELDS)
+        .map(|i| format!("<input name=\"f{i}\" value=\"v\">"))
+        .collect();
+    let html =
+        format!("<html><body><form action=\"/s\" method=\"GET\">{inputs}</form></body></html>");
+    let app = Router::new()
+        .route(
+            "/",
+            any(move || {
+                let html = html.clone();
+                async move { html }
+            }),
+        )
+        .route(
+            "/{*rest}",
+            any(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    "no reflection here".to_string()
+                }
+            }),
+        );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{}/?q=test", addr)).unwrap();
+    target.delay = 0;
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_form_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+
+    let probed = hits.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        probed <= 201,
+        "a {FIELDS}-field GET form must be capped at MAX_FORM_FIELDS probes \
+         (plus the single JSON-body probe), got {probed}"
+    );
+}

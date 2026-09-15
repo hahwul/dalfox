@@ -93,7 +93,9 @@ fn selective_path_segment_encode(raw: &str) -> Cow<'_, str> {
 /// reflecting at the action URL.
 ///
 /// For non-Query locations and for params without a `form_action_url`, the
-/// caller's `target_url` is returned unchanged.
+/// caller's `target_url` is returned unchanged. A cross-origin action is
+/// likewise ignored: see [`resolve_form_action_url`] for why every site that
+/// turns a stored action back into a request URL carries that check.
 pub(crate) fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
     let uses_form_action = matches!(
         param.location,
@@ -102,6 +104,7 @@ pub(crate) fn effective_query_base(target_url: &url::Url, param: &Param) -> url:
     if uses_form_action
         && let Some(ref action) = param.form_action_url
         && let Ok(parsed) = url::Url::parse(action)
+        && crate::scanning::xss_blind::is_same_origin(target_url, &parsed)
     {
         return parsed;
     }
@@ -743,11 +746,23 @@ pub(crate) fn multipart_poc_body(data: Option<&str>, name: &str, value: &str) ->
 /// `<form action=...>` endpoint when the param came from a form, else the
 /// target's own URL. A form-discovered body param reflects at the action
 /// endpoint, not at the page that contained the form.
+///
+/// Belt and braces on the origin: `check_form_discovery` already refuses to
+/// record a cross-origin action, so this should never fire. It stays because
+/// every site that turns a stored action string back into an outbound request
+/// sends the operator's credentials with it, and a future producer of
+/// `form_action_url` must not be able to reintroduce the leak by skipping the
+/// discovery-time gate. The three such sites are this one,
+/// [`effective_query_base`] (the Query/GET-form path) and
+/// `check_reflection::resolve_sxss_check_urls`; all three carry the same check.
+/// Falling back to the target's own URL keeps the injection on-origin rather
+/// than dropping the param.
 pub(crate) fn resolve_form_action_url(param: &Param, target: &Target) -> url::Url {
     param
         .form_action_url
         .as_ref()
         .and_then(|u| url::Url::parse(u).ok())
+        .filter(|u| crate::scanning::xss_blind::is_same_origin(&target.url, u))
         .unwrap_or_else(|| target.url.clone())
 }
 
