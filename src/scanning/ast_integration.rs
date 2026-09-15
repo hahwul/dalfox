@@ -178,7 +178,7 @@ pub(crate) fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Ve
             Ok(u) => u,
             Err(_) => continue,
         };
-        if !crate::scanning::xss_blind::is_same_origin(&resolved, base) {
+        if !crate::utils::http::is_same_origin(&resolved, base) {
             continue;
         }
         let key = resolved.as_str().to_string();

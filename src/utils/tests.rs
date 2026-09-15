@@ -369,3 +369,29 @@ fn every_semaphore_new_clamps_its_permit_count() {
         offenders.join("\n  ")
     );
 }
+
+/// A finding recorded at a TLS-upgraded form action must still be attributed to
+/// the `http://` target it came from. Comparing with the scheme attached, it
+/// matched none of the three strategies, so the per-target summary reported
+/// `clean` for a target that had just produced an XSS, and
+/// `collapse_redundant_reflected` found no verified keys to dedup against.
+#[test]
+fn finding_belongs_to_target_follows_a_same_host_tls_upgrade() {
+    assert!(finding_belongs_to_target(
+        "http://example.com/page",
+        "https://example.com/login?q=payload"
+    ));
+    assert!(finding_belongs_to_target(
+        "http://example.com/page?q=1",
+        "http://example.com/page?q=payload"
+    ));
+    // A different host is still not this target's finding, scheme notwithstanding.
+    assert!(!finding_belongs_to_target(
+        "http://example.com/page",
+        "https://evil.example/login"
+    ));
+    assert!(!finding_belongs_to_target(
+        "http://example.com/api/v1/foo?q=1",
+        "https://example.com/other/bar?q=1"
+    ));
+}

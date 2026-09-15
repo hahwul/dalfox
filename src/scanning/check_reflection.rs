@@ -2114,15 +2114,16 @@ pub(crate) fn resolve_sxss_check_urls(
 
     // 3. form_action_url - form action endpoint (GET to check stored output)
     //
-    // Origin-gated, unlike `--sxss-url` above: that one is the operator's own
-    // choice and may point anywhere, while this is derived from the scanned
-    // page's HTML. Fetching it carries the operator's headers and cookies, so a
-    // cross-origin action must not become a check URL. `check_form_discovery`
-    // already refuses to record one; this keeps the request-issuing side honest
-    // if that ever changes.
+    // Destination-gated, unlike `--sxss-url` above: that one is the operator's
+    // own choice and may point anywhere, while this is derived from the scanned
+    // page's HTML. Fetching it carries the operator's headers and cookies, so it
+    // has to clear the same bar as any other credentialed request -- the
+    // target's own origin, or a same-host TLS upgrade of it.
+    // `check_form_discovery` already refuses to record anything else; this keeps
+    // the request-issuing side honest if that ever changes.
     if let Some(ref action) = param.form_action_url
         && let Ok(u) = url::Url::parse(action)
-        && crate::scanning::xss_blind::is_same_origin(&target.url, &u)
+        && crate::utils::http::same_origin_or_tls_upgrade(&target.url, &u)
     {
         let s = u.to_string();
         if seen.insert(s) {

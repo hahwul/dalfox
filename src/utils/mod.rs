@@ -106,6 +106,13 @@ fn target_identity_key_owned(url: &str) -> String {
     }
 }
 
+/// Drop a leading `http://` / `https://`, leaving anything else untouched.
+fn strip_url_scheme(url: &str) -> &str {
+    url.strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url)
+}
+
 /// Decide whether a finding URL was produced by scanning a given target URL.
 ///
 /// Used both by `collapse_redundant_reflected` (dedup) and the
@@ -127,6 +134,22 @@ fn target_identity_key_owned(url: &str) -> String {
 /// `/api/v1/bar`) will both match a single finding. This mirrors the
 /// pre-existing prefix-match behavior; single-target scans are unaffected.
 pub(crate) fn finding_belongs_to_target(target_url: &str, finding_url: &str) -> bool {
+    // Compare without the scheme. A scan is allowed to follow exactly one
+    // scheme change — the same-host `http` -> `https` form-action upgrade that
+    // `utils::http::same_origin_or_tls_upgrade` permits — and the finding is
+    // then recorded at the upgraded action URL. Attribution has to follow that
+    // hop too: comparing with the scheme attached, an `http://host/page` target
+    // whose form posts to `https://host/login` matches none of the three
+    // strategies below, so it counts zero findings and is summarised as `clean`
+    // while the same run lists the XSS in `results`.
+    //
+    // The cost is that a scan listing both `http://host/x` and `https://host/x`
+    // as separate targets attributes one finding to both, which is the same
+    // over-attribution the trade-off note above already accepts — and the
+    // failure it replaces (a target reporting `clean` while it produced
+    // findings) is the far worse of the two.
+    let target_url = strip_url_scheme(target_url);
+    let finding_url = strip_url_scheme(finding_url);
     if target_url == finding_url {
         return true;
     }

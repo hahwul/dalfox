@@ -1075,3 +1075,44 @@ fn form_action_consumers_still_honour_a_same_origin_action() {
         "https://example.com/app.php"
     );
 }
+
+/// A form on an `http://` page that posts to `https://` on the same host is the
+/// classic "page in the clear, credentials over TLS" shape. Discovery records
+/// such an action, so both consumers must honour it — gating them on strict
+/// origin equality would send the payloads to the page URL instead, which is
+/// not where the sink is.
+#[test]
+fn form_action_consumers_follow_a_same_host_tls_upgrade() {
+    let target = make_url("http://example.com/page");
+    let target_obj = crate::target_parser::parse_target("http://example.com/page").unwrap();
+    let param = Param {
+        form_action_url: Some("https://example.com/login".to_string()),
+        form_origin_url: Some("http://example.com/page".to_string()),
+        ..Param::new("xss", "", Location::Query)
+    };
+
+    assert_eq!(
+        effective_query_base(&target, &param).as_str(),
+        "https://example.com/login"
+    );
+    assert_eq!(
+        resolve_form_action_url(&param, &target_obj).as_str(),
+        "https://example.com/login"
+    );
+
+    // The reverse hop stays refused: credentials must not move onto plaintext.
+    let downgrade_target = make_url("https://example.com/page");
+    let downgrade_obj = crate::target_parser::parse_target("https://example.com/page").unwrap();
+    let param = Param {
+        form_action_url: Some("http://example.com/login".to_string()),
+        ..param
+    };
+    assert_eq!(
+        effective_query_base(&downgrade_target, &param).as_str(),
+        downgrade_target.as_str()
+    );
+    assert_eq!(
+        resolve_form_action_url(&param, &downgrade_obj).as_str(),
+        downgrade_target.as_str()
+    );
+}

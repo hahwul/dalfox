@@ -403,7 +403,7 @@ pub async fn blind_scan_forms_with(
 
     // Always GET the form-bearing page. Reusing target.method would POST to
     // the form handler instead of fetching the landing page that renders the
-    // form, mirroring discovery::probe_html_forms.
+    // form, mirroring parameter_analysis::discovery::form::check_form_discovery.
     let mut fetch = client.get(target.url.clone());
     for (k, v) in &target.headers {
         fetch = fetch.header(k, v);
@@ -451,18 +451,11 @@ pub async fn blind_scan_forms_with(
             }
 
             let action_attr = form.value().attr("action").unwrap_or("");
-            let action_url = if action_attr.is_empty() || action_attr == "#" {
-                target.url.clone()
-            } else {
-                match target.url.join(action_attr) {
-                    Ok(u) => u,
-                    Err(_) => continue,
-                }
-            };
-
-            if !is_same_origin(&target.url, &action_url) {
+            let Some(action_url) =
+                crate::utils::http::resolve_probeable_form_action(&target.url, action_attr)
+            else {
                 continue;
-            }
+            };
 
             let mut fields: Vec<FormField> = Vec::new();
             for input in form.select(input_sel) {
@@ -589,13 +582,6 @@ fn is_injectable_input(el: &scraper::element_ref::ElementRef<'_>) -> bool {
         ty.to_ascii_lowercase().as_str(),
         "text" | "search" | "url" | "email" | "tel" | "password" | "number"
     )
-}
-
-/// Same-origin check: scheme + host + port must match.
-pub(crate) fn is_same_origin(a: &url::Url, b: &url::Url) -> bool {
-    a.scheme() == b.scheme()
-        && a.host_str() == b.host_str()
-        && a.port_or_known_default() == b.port_or_known_default()
 }
 
 #[cfg(test)]

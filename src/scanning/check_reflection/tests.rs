@@ -3138,3 +3138,22 @@ fn resolve_sxss_check_urls_drops_a_cross_origin_form_action() {
         urls.iter().map(|u| u.as_str()).collect::<Vec<_>>()
     );
 }
+
+/// Counterpart to the cross-origin test: a same-host `http` -> `https` action is
+/// not foreign, and must still be fetched as a stored-XSS check URL.
+#[test]
+fn resolve_sxss_check_urls_keeps_a_same_host_tls_upgrade() {
+    let target = parse_target("http://example.com/page").unwrap();
+    let param = Param {
+        form_action_url: Some("https://example.com/stored".to_string()),
+        form_origin_url: Some("http://example.com/page".to_string()),
+        ..Param::new("comment", "", Location::Body)
+    };
+    let urls = resolve_sxss_check_urls(&target, &param, &default_scan_args());
+    assert!(
+        urls.iter()
+            .any(|u| u.as_str() == "https://example.com/stored"),
+        "TLS-upgraded action must still be checked, got {:?}",
+        urls.iter().map(|u| u.as_str()).collect::<Vec<_>>()
+    );
+}

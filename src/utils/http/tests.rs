@@ -936,3 +936,136 @@ fn an_unparsable_override_still_surfaces_as_a_builder_error() {
         "an invalid header name must not be swallowed"
     );
 }
+
+#[test]
+fn is_same_origin_compares_scheme_host_and_port() {
+    let u = |s: &str| url::Url::parse(s).unwrap();
+    assert!(is_same_origin(
+        &u("https://example.com/a"),
+        &u("https://example.com/b?x=1")
+    ));
+    // Implicit and explicit default ports are the same origin.
+    assert!(is_same_origin(
+        &u("https://example.com/a"),
+        &u("https://example.com:443/b")
+    ));
+    for (a, b) in [
+        ("https://example.com/a", "https://evil.example/b"),
+        ("https://example.com/a", "http://example.com/b"),
+        ("https://example.com/a", "https://example.com:8443/b"),
+        // Same scheme, different port: a different service on the same host.
+        ("http://example.com:8765/a", "http://example.com:9988/b"),
+    ] {
+        assert!(!is_same_origin(&u(a), &u(b)), "{a} vs {b}");
+    }
+}
+
+#[test]
+fn same_origin_or_tls_upgrade_allows_only_the_default_port_http_to_https_hop() {
+    let u = |s: &str| url::Url::parse(s).unwrap();
+
+    // Everything same-origin still passes...
+    assert!(same_origin_or_tls_upgrade(
+        &u("https://example.com/page"),
+        &u("https://example.com/login")
+    ));
+    // ...plus the "page over HTTP, form posts over TLS" shape this exists for.
+    assert!(same_origin_or_tls_upgrade(
+        &u("http://example.com/page"),
+        &u("https://example.com/login")
+    ));
+    assert!(same_origin_or_tls_upgrade(
+        &u("http://example.com:80/page"),
+        &u("https://example.com:443/login")
+    ));
+
+    for (page, dest, why) in [
+        (
+            "https://example.com/page",
+            "http://example.com/login",
+            "a TLS downgrade would walk credentials onto plaintext",
+        ),
+        (
+            "http://example.com/page",
+            "https://evil.example/login",
+            "a different host is foreign however the scheme changes",
+        ),
+        (
+            "http://example.com:8080/page",
+            "https://example.com/login",
+            "the carve-out is only for the default port pair",
+        ),
+        (
+            "http://example.com/page",
+            "https://example.com:8443/login",
+            "likewise on the destination side",
+        ),
+        (
+            "http://example.com:8765/page",
+            "http://example.com:9988/login",
+            "a same-scheme port hop is a different service, carve-out or not",
+        ),
+        (
+            "http://example.com/page",
+            "https://example.com.evil/login",
+            "a suffix-extended host is a different host",
+        ),
+        (
+            "http://example.com/page",
+            "https://evil.example\\@example.com/login",
+            "an authority-confusing spelling resolves to the host before the backslash",
+        ),
+    ] {
+        assert!(
+            !same_origin_or_tls_upgrade(&u(page), &u(dest)),
+            "{page} -> {dest} must be refused: {why}"
+        );
+    }
+}
+
+/// The gate both form-parsing paths now share. Covers what neither
+/// `check_form_discovery` nor `xss_blind::blind_scan_forms_with` can assert
+/// end to end without standing up a TLS listener.
+#[test]
+fn resolve_probeable_form_action_gates_the_destination() {
+    let page = url::Url::parse("http://example.com/page").unwrap();
+    let probe = |action: &str| {
+        crate::utils::http::resolve_probeable_form_action(&page, action).map(|u| u.to_string())
+    };
+
+    // Empty and "#" actions submit back to the page itself.
+    assert_eq!(probe(""), Some("http://example.com/page".to_string()));
+    assert_eq!(probe("#"), Some("http://example.com/page".to_string()));
+    // Relative and absolute same-origin actions resolve normally.
+    assert_eq!(
+        probe("/login"),
+        Some("http://example.com/login".to_string())
+    );
+    assert_eq!(
+        probe("http://example.com/login"),
+        Some("http://example.com/login".to_string())
+    );
+    // The upgrade this carve-out exists for.
+    assert_eq!(
+        probe("https://example.com/login"),
+        Some("https://example.com/login".to_string())
+    );
+
+    for action in [
+        "https://attacker.example/collect",
+        "http://example.com:8443/collect",
+        // Authority terminated by a backslash: resolves to `attacker.example`,
+        // which a textual check against the page URL would miss.
+        "https://attacker.example\\@example.com/collect",
+        "//attacker.example/collect",
+    ] {
+        assert_eq!(probe(action), None, "action {action} must be skipped");
+    }
+
+    // A TLS page must not be talked back down to plaintext.
+    let tls_page = url::Url::parse("https://example.com/page").unwrap();
+    assert_eq!(
+        crate::utils::http::resolve_probeable_form_action(&tls_page, "http://example.com/login"),
+        None
+    );
+}

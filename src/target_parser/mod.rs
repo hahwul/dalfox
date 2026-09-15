@@ -210,27 +210,6 @@ impl Target {
     }
 }
 
-/// Whether a redirect from `origin` to `next` keeps the operator's credentials
-/// on the origin they were meant for.
-///
-/// True for the same origin, and for the one redirect that is both ubiquitous
-/// and safe: a plain `http://host/` -> `https://host/` upgrade on default
-/// ports, which stays on the same host and moves the credentials onto TLS.
-/// Comparing the host alone would not do — that waves through a hop to a
-/// different port of the same host, which is a different service.
-pub(crate) fn redirect_stays_on_origin(origin: &Url, next: &Url) -> bool {
-    if origin.host_str() != next.host_str() {
-        return false;
-    }
-    let same_origin = origin.scheme() == next.scheme()
-        && origin.port_or_known_default() == next.port_or_known_default();
-    let tls_upgrade = origin.scheme() == "http"
-        && next.scheme() == "https"
-        && origin.port_or_known_default() == Some(80)
-        && next.port_or_known_default() == Some(443);
-    same_origin || tls_upgrade
-}
-
 /// Redirect policy for `--follow-redirects`: follow a redirect only while the
 /// chain stays on the origin that was originally requested.
 ///
@@ -255,9 +234,9 @@ pub(crate) fn redirect_stays_on_origin(origin: &Url, next: &Url) -> bool {
 ///
 /// An off-origin hop is stopped rather than turned into an error: the caller
 /// then simply sees the 3xx response, which is the graceful outcome for a
-/// scanner. The single exception to strict origin equality is the ubiquitous
-/// `http://host/` -> `https://host/` upgrade on default ports, which stays on
-/// the same host and moves the credentials onto TLS rather than off-target.
+/// scanner. What counts as staying on the origin is
+/// [`crate::utils::http::same_origin_or_tls_upgrade`], shared with the
+/// form-action gates so the two cannot drift.
 pub(crate) fn same_host_redirect_policy(max_hops: usize) -> Policy {
     Policy::custom(move |attempt| {
         // Absent only if this is not a redirect chain at all.
@@ -265,7 +244,7 @@ pub(crate) fn same_host_redirect_policy(max_hops: usize) -> Policy {
             return attempt.follow();
         };
         let next = attempt.url();
-        if !redirect_stays_on_origin(origin, next) {
+        if !crate::utils::http::same_origin_or_tls_upgrade(origin, next) {
             crate::dbg_log!(
                 "not following redirect {} -> {} (leaves the originally requested host; \
                  credentials are not sent off-origin)",
