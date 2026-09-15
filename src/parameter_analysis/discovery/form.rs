@@ -95,7 +95,7 @@ pub async fn check_form_discovery(
             // path in `scanning::xss_blind` already does: parameters on a form
             // that legitimately posts to a different host (a separate API or
             // login host) are not discovered.
-            if !crate::scanning::xss_blind::is_same_origin(&target.url, &form_url) {
+            if !crate::utils::http::same_origin_or_tls_upgrade(&target.url, &form_url) {
                 crate::dbg_log!(
                     "skipping cross-origin form action {} on {} (credentials are not sent off-origin)",
                     form_url,

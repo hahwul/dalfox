@@ -460,7 +460,7 @@ pub async fn blind_scan_forms_with(
                 }
             };
 
-            if !is_same_origin(&target.url, &action_url) {
+            if !crate::utils::http::same_origin_or_tls_upgrade(&target.url, &action_url) {
                 continue;
             }
 
@@ -589,13 +589,6 @@ fn is_injectable_input(el: &scraper::element_ref::ElementRef<'_>) -> bool {
         ty.to_ascii_lowercase().as_str(),
         "text" | "search" | "url" | "email" | "tel" | "password" | "number"
     )
-}
-
-/// Same-origin check: scheme + host + port must match.
-pub(crate) fn is_same_origin(a: &url::Url, b: &url::Url) -> bool {
-    a.scheme() == b.scheme()
-        && a.host_str() == b.host_str()
-        && a.port_or_known_default() == b.port_or_known_default()
 }
 
 #[cfg(test)]

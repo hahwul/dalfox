@@ -2122,7 +2122,7 @@ pub(crate) fn resolve_sxss_check_urls(
     // if that ever changes.
     if let Some(ref action) = param.form_action_url
         && let Ok(u) = url::Url::parse(action)
-        && crate::scanning::xss_blind::is_same_origin(&target.url, &u)
+        && crate::utils::http::same_origin_or_tls_upgrade(&target.url, &u)
     {
         let s = u.to_string();
         if seen.insert(s) {

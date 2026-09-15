@@ -1,3 +1,4 @@
+use super::http::{is_same_origin, same_origin_or_tls_upgrade};
 use super::{
     finding_belongs_to_target, init_remote_resources, init_remote_resources_with_options,
     stable_finding_fingerprint,
@@ -368,4 +369,83 @@ fn every_semaphore_new_clamps_its_permit_count() {
          --workers / --max-concurrent-targets:\n  {}",
         offenders.join("\n  ")
     );
+}
+
+#[test]
+fn is_same_origin_compares_scheme_host_and_port() {
+    let u = |s: &str| url::Url::parse(s).unwrap();
+    assert!(is_same_origin(
+        &u("https://example.com/a"),
+        &u("https://example.com/b?x=1")
+    ));
+    // Implicit and explicit default ports are the same origin.
+    assert!(is_same_origin(
+        &u("https://example.com/a"),
+        &u("https://example.com:443/b")
+    ));
+    for (a, b) in [
+        ("https://example.com/a", "https://evil.example/b"),
+        ("https://example.com/a", "http://example.com/b"),
+        ("https://example.com/a", "https://example.com:8443/b"),
+    ] {
+        assert!(!is_same_origin(&u(a), &u(b)), "{a} vs {b}");
+    }
+}
+
+#[test]
+fn same_origin_or_tls_upgrade_allows_only_the_default_port_http_to_https_hop() {
+    let u = |s: &str| url::Url::parse(s).unwrap();
+
+    // Everything same-origin still passes...
+    assert!(same_origin_or_tls_upgrade(
+        &u("https://example.com/page"),
+        &u("https://example.com/login")
+    ));
+    // ...plus the "page over HTTP, form posts over TLS" shape this exists for.
+    assert!(same_origin_or_tls_upgrade(
+        &u("http://example.com/page"),
+        &u("https://example.com/login")
+    ));
+    assert!(same_origin_or_tls_upgrade(
+        &u("http://example.com:80/page"),
+        &u("https://example.com:443/login")
+    ));
+
+    for (page, dest, why) in [
+        (
+            "https://example.com/page",
+            "http://example.com/login",
+            "a TLS downgrade would walk credentials onto plaintext",
+        ),
+        (
+            "http://example.com/page",
+            "https://evil.example/login",
+            "a different host is foreign however the scheme changes",
+        ),
+        (
+            "http://example.com:8080/page",
+            "https://example.com/login",
+            "the carve-out is only for the default port pair",
+        ),
+        (
+            "http://example.com/page",
+            "https://example.com:8443/login",
+            "likewise on the destination side",
+        ),
+        (
+            "http://example.com/page",
+            "https://example.com.evil/login",
+            "a suffix-extended host is a different host",
+        ),
+        (
+            "http://example.com/page",
+            "https://evil.example\\@example.com/login",
+            "an authority-confusing spelling resolves to the host before the backslash",
+        ),
+    ] {
+        assert!(
+            !same_origin_or_tls_upgrade(&u(page), &u(dest)),
+            "{page} -> {dest} must be refused: {why}"
+        );
+    }
 }

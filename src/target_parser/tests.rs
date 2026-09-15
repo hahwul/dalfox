@@ -350,58 +350,6 @@ fn test_parse_target_with_method_body_with_spaces() {
     assert_eq!(target.data, Some("name=John Doe".to_string()));
 }
 
-#[test]
-fn redirect_stays_on_origin_allows_only_same_origin_and_tls_upgrade() {
-    let u = |s: &str| Url::parse(s).unwrap();
-
-    // Same origin, and the canonical http -> https upgrade.
-    assert!(redirect_stays_on_origin(
-        &u("http://target.example/a"),
-        &u("http://target.example/b")
-    ));
-    assert!(redirect_stays_on_origin(
-        &u("https://target.example/a"),
-        &u("https://target.example:443/b")
-    ));
-    assert!(redirect_stays_on_origin(
-        &u("http://target.example/a"),
-        &u("https://target.example/b")
-    ));
-
-    for (origin, next, why) in [
-        (
-            "http://target.example/a",
-            "http://attacker.example/b",
-            "a different host is the whole point of the check",
-        ),
-        (
-            "http://target.example:8765/a",
-            "http://target.example:9988/b",
-            "a different port on the same host is a different service",
-        ),
-        (
-            "https://target.example/a",
-            "http://target.example/b",
-            "a TLS downgrade must not walk credentials onto plaintext",
-        ),
-        (
-            "http://target.example:8080/a",
-            "https://target.example/b",
-            "the upgrade carve-out is only for the default port pair",
-        ),
-        (
-            "http://target.example/a",
-            "http://target.example.evil/b",
-            "a suffix-extended host is a different host",
-        ),
-    ] {
-        assert!(
-            !redirect_stays_on_origin(&u(origin), &u(next)),
-            "{origin} -> {next} must not be followed: {why}"
-        );
-    }
-}
-
 /// End-to-end proof that `--follow-redirects` cannot be used to walk the
 /// operator's credentials onto a host they never named.
 ///

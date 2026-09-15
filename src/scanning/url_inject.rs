@@ -104,7 +104,7 @@ pub(crate) fn effective_query_base(target_url: &url::Url, param: &Param) -> url:
     if uses_form_action
         && let Some(ref action) = param.form_action_url
         && let Ok(parsed) = url::Url::parse(action)
-        && crate::scanning::xss_blind::is_same_origin(target_url, &parsed)
+        && crate::utils::http::same_origin_or_tls_upgrade(target_url, &parsed)
     {
         return parsed;
     }
@@ -762,7 +762,7 @@ pub(crate) fn resolve_form_action_url(param: &Param, target: &Target) -> url::Ur
         .form_action_url
         .as_ref()
         .and_then(|u| url::Url::parse(u).ok())
-        .filter(|u| crate::scanning::xss_blind::is_same_origin(&target.url, u))
+        .filter(|u| crate::utils::http::same_origin_or_tls_upgrade(&target.url, u))
         .unwrap_or_else(|| target.url.clone())
 }
 

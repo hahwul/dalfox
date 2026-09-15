@@ -87,6 +87,40 @@ pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
 /// User-Agent header when non-empty. reqwest appends rather than overrides, so a
 /// caller that also placed a User-Agent in `target.headers` ends up sending both.
 /// If `cookie_header` is Some, attach it. Otherwise, if no Cookie header exists in headers,
+/// Same-origin check: scheme, host and port must all match, compared on the
+/// *parsed* URLs so authority-confusing spellings (`http://a\\@b/`, userinfo,
+/// IDN) are already resolved before the comparison.
+pub(crate) fn is_same_origin(a: &Url, b: &Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+/// Whether sending the operator's credentials from `page` to `dest` keeps them
+/// on the origin they were meant for.
+///
+/// This is [`is_same_origin`] plus the one relaxation that is both ubiquitous
+/// and safe: a `http://host/` -> `https://host/` upgrade on default ports. The
+/// classic "page served over HTTP, form posts over TLS" shape trips a strict
+/// origin check even though the destination is the same host and strictly more
+/// protected, and treating it as foreign silently drops every parameter on such
+/// a form.
+///
+/// The relaxation is deliberately narrow. The reverse direction
+/// (`https` -> `http`) stays refused, so credentials can never be walked onto
+/// plaintext, and the host must be identical — a hop to a different port of the
+/// same host is a different service and stays refused too.
+pub(crate) fn same_origin_or_tls_upgrade(page: &Url, dest: &Url) -> bool {
+    if is_same_origin(page, dest) {
+        return true;
+    }
+    page.scheme() == "http"
+        && dest.scheme() == "https"
+        && page.host_str() == dest.host_str()
+        && page.port_or_known_default() == Some(80)
+        && dest.port_or_known_default() == Some(443)
+}
+
 /// auto-attach from target.cookies (when non-empty).
 pub(crate) fn apply_headers_ua_cookies(
     rb: RequestBuilder,

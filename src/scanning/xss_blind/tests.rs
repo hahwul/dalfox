@@ -464,33 +464,6 @@ fn location_of_maps_param_types_to_wire_locations() {
 }
 
 #[test]
-fn is_same_origin_compares_scheme_host_and_port() {
-    let parse = |s: &str| url::Url::parse(s).unwrap();
-    assert!(is_same_origin(
-        &parse("https://a.example/x"),
-        &parse("https://a.example/y?z=1")
-    ));
-    // Default port is equivalent to the explicit default port.
-    assert!(is_same_origin(
-        &parse("https://a.example/"),
-        &parse("https://a.example:443/")
-    ));
-    // Scheme, host, and port differences each break same-origin.
-    assert!(!is_same_origin(
-        &parse("https://a.example/"),
-        &parse("http://a.example/")
-    ));
-    assert!(!is_same_origin(
-        &parse("https://a.example/"),
-        &parse("https://b.example/")
-    ));
-    assert!(!is_same_origin(
-        &parse("https://a.example/"),
-        &parse("https://a.example:8443/")
-    ));
-}
-
-#[test]
 fn build_cookie_header_joins_pairs_or_returns_none() {
     assert_eq!(build_cookie_header(&[]), None);
     let cookies = vec![
