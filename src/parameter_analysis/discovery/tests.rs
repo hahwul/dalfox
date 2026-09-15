@@ -1057,3 +1057,63 @@ async fn test_check_form_discovery_skips_backslash_authority_form_action() {
     );
     assert!(params.is_empty(), "got {:?}", params);
 }
+
+/// `MAX_FORM_FIELDS` must bound the GET-form branch too. It bounded only the
+/// POST and multipart loops, so a hostile page could serve a GET form with tens
+/// of thousands of inputs and buy one request per input — while the debug log
+/// claimed only the first 200 were probed.
+#[tokio::test]
+async fn test_check_form_discovery_caps_get_form_fields() {
+    const FIELDS: usize = 260;
+
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = hits.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("local addr");
+    let inputs: String = (0..FIELDS)
+        .map(|i| format!("<input name=\"f{i}\" value=\"v\">"))
+        .collect();
+    let html =
+        format!("<html><body><form action=\"/s\" method=\"GET\">{inputs}</form></body></html>");
+    let app = Router::new()
+        .route(
+            "/",
+            any(move || {
+                let html = html.clone();
+                async move { html }
+            }),
+        )
+        .route(
+            "/{*rest}",
+            any(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    "no reflection here".to_string()
+                }
+            }),
+        );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{}/?q=test", addr)).unwrap();
+    target.delay = 0;
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_form_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+
+    let probed = hits.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        probed <= 201,
+        "a {FIELDS}-field GET form must be capped at MAX_FORM_FIELDS probes \
+         (plus the single JSON-body probe), got {probed}"
+    );
+}

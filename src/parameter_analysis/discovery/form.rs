@@ -278,8 +278,13 @@ pub async fn check_form_discovery(
                 }
             }
         } else {
-            // GET form: test each field as query parameter on the form action URL
-            for (field_name, field_value) in &fields {
+            // GET form: test each field as query parameter on the form action URL.
+            // Capped like the POST and multipart branches above: this loop was
+            // the one that was not, so a page serving a GET form with 50 000
+            // inputs bought 50 000 requests (each rebuilding the whole query
+            // string) while the debug log above still claimed only the first
+            // `MAX_FORM_FIELDS` were probed.
+            for (field_name, field_value) in fields.iter().take(MAX_FORM_FIELDS) {
                 let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                 let mut test_url = form_url.clone();
                 // Build query: set all fields, replace target field with test value
