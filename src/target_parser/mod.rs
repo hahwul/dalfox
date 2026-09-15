@@ -197,7 +197,7 @@ impl Target {
         }
 
         if self.follow_redirects {
-            client_builder = client_builder.redirect(Policy::limited(10));
+            client_builder = client_builder.redirect(same_host_redirect_policy(10));
         } else {
             client_builder = client_builder.redirect(Policy::none());
         }
@@ -208,6 +208,79 @@ impl Target {
         }
         Ok(client)
     }
+}
+
+/// Whether a redirect from `origin` to `next` keeps the operator's credentials
+/// on the origin they were meant for.
+///
+/// True for the same origin, and for the one redirect that is both ubiquitous
+/// and safe: a plain `http://host/` -> `https://host/` upgrade on default
+/// ports, which stays on the same host and moves the credentials onto TLS.
+/// Comparing the host alone would not do — that waves through a hop to a
+/// different port of the same host, which is a different service.
+pub(crate) fn redirect_stays_on_origin(origin: &Url, next: &Url) -> bool {
+    if origin.host_str() != next.host_str() {
+        return false;
+    }
+    let same_origin = origin.scheme() == next.scheme()
+        && origin.port_or_known_default() == next.port_or_known_default();
+    let tls_upgrade = origin.scheme() == "http"
+        && next.scheme() == "https"
+        && origin.port_or_known_default() == Some(80)
+        && next.port_or_known_default() == Some(443);
+    same_origin || tls_upgrade
+}
+
+/// Redirect policy for `--follow-redirects`: follow a redirect only while the
+/// chain stays on the origin that was originally requested.
+///
+/// `Policy::limited` follows anywhere, and the transport's own protection is
+/// not enough to make that safe for a scanner. reqwest strips only
+/// `Authorization`, `Cookie`, `cookie2`, `Proxy-Authorization` and
+/// `WWW-Authenticate` when a hop changes host, so a custom credential header
+/// (`-H "X-Api-Key: ..."`, which this project's own config template suggests)
+/// survives the very first hop off-target. Worse, the strip does not persist:
+/// each redirected request is rebuilt from the *original* header map and the
+/// scrub compares the next URL against the immediately preceding hop only. A
+/// target that answers `302 -> attacker/a`, with `attacker/a` answering
+/// `302 -> attacker/b`, therefore delivers the operator's full `Cookie` and
+/// `Authorization` on that second, same-host hop. 307/308 replay the request
+/// body across the same chain.
+///
+/// Anchoring on `previous[0]` — the URL that started the chain, per reqwest's
+/// own definition — rather than on the scan target keeps this free of
+/// per-target state, which matters because clients are cached under a key of
+/// `(timeout, proxy, follow_redirects, insecure)` and are shared across every
+/// target in a scan.
+///
+/// An off-origin hop is stopped rather than turned into an error: the caller
+/// then simply sees the 3xx response, which is the graceful outcome for a
+/// scanner. The single exception to strict origin equality is the ubiquitous
+/// `http://host/` -> `https://host/` upgrade on default ports, which stays on
+/// the same host and moves the credentials onto TLS rather than off-target.
+pub(crate) fn same_host_redirect_policy(max_hops: usize) -> Policy {
+    Policy::custom(move |attempt| {
+        // Absent only if this is not a redirect chain at all.
+        let Some(origin) = attempt.previous().first() else {
+            return attempt.follow();
+        };
+        let next = attempt.url();
+        if !redirect_stays_on_origin(origin, next) {
+            crate::dbg_log!(
+                "not following redirect {} -> {} (leaves the originally requested host; \
+                 credentials are not sent off-origin)",
+                origin,
+                next
+            );
+            return attempt.stop();
+        }
+        // Mirrors `Policy::limited`: `previous[0]` is the initial URL, not a
+        // redirection, so the count is compared with `>`.
+        if attempt.previous().len() > max_hops {
+            return attempt.error("too many redirects");
+        }
+        attempt.follow()
+    })
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {

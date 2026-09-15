@@ -349,3 +349,198 @@ fn test_parse_target_with_method_body_with_spaces() {
     assert_eq!(target.url.as_str(), "https://example.com/api");
     assert_eq!(target.data, Some("name=John Doe".to_string()));
 }
+
+#[test]
+fn redirect_stays_on_origin_allows_only_same_origin_and_tls_upgrade() {
+    let u = |s: &str| Url::parse(s).unwrap();
+
+    // Same origin, and the canonical http -> https upgrade.
+    assert!(redirect_stays_on_origin(
+        &u("http://target.example/a"),
+        &u("http://target.example/b")
+    ));
+    assert!(redirect_stays_on_origin(
+        &u("https://target.example/a"),
+        &u("https://target.example:443/b")
+    ));
+    assert!(redirect_stays_on_origin(
+        &u("http://target.example/a"),
+        &u("https://target.example/b")
+    ));
+
+    for (origin, next, why) in [
+        (
+            "http://target.example/a",
+            "http://attacker.example/b",
+            "a different host is the whole point of the check",
+        ),
+        (
+            "http://target.example:8765/a",
+            "http://target.example:9988/b",
+            "a different port on the same host is a different service",
+        ),
+        (
+            "https://target.example/a",
+            "http://target.example/b",
+            "a TLS downgrade must not walk credentials onto plaintext",
+        ),
+        (
+            "http://target.example:8080/a",
+            "https://target.example/b",
+            "the upgrade carve-out is only for the default port pair",
+        ),
+        (
+            "http://target.example/a",
+            "http://target.example.evil/b",
+            "a suffix-extended host is a different host",
+        ),
+    ] {
+        assert!(
+            !redirect_stays_on_origin(&u(origin), &u(next)),
+            "{origin} -> {next} must not be followed: {why}"
+        );
+    }
+}
+
+/// End-to-end proof that `--follow-redirects` cannot be used to walk the
+/// operator's credentials onto a host they never named.
+///
+/// Two hops matter here, not one. The transport strips `Authorization` and
+/// `Cookie` on a hop that changes host, but it rebuilds every redirected
+/// request from the original header map and compares only against the
+/// *immediately preceding* hop — so `target -> attacker/a -> attacker/b`
+/// restores the full credential set on that second, same-host hop. Custom
+/// credential headers (`-H "X-Api-Key: ..."`) are never stripped at all, so
+/// they would leak on the very first hop.
+#[tokio::test]
+async fn follow_redirects_stops_before_leaving_the_target_origin() {
+    use axum::Router;
+    use axum::routing::any;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    async fn serve(app: Router) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        addr
+    }
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let leaked = Arc::new(AtomicUsize::new(0));
+
+    // The foreign host: counts every request and every credential it sees,
+    // and bounces once more within itself to reach the second hop.
+    let (h, l) = (hits.clone(), leaked.clone());
+    let foreign = serve(Router::new().route(
+        "/{*rest}",
+        any(
+            move |headers: axum::http::HeaderMap, uri: axum::http::Uri| {
+                let (h, l) = (h.clone(), l.clone());
+                async move {
+                    h.fetch_add(1, Ordering::SeqCst);
+                    for name in ["authorization", "cookie", "x-api-key"] {
+                        if headers.contains_key(name) {
+                            l.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                    if uri.path().contains("first") {
+                        axum::response::Response::builder()
+                            .status(302)
+                            .header("Location", "/second")
+                            .body(axum::body::Body::empty())
+                            .expect("build redirect")
+                    } else {
+                        axum::response::Response::builder()
+                            .status(200)
+                            .body(axum::body::Body::from("landed"))
+                            .expect("build ok")
+                    }
+                }
+            },
+        ),
+    ))
+    .await;
+
+    // The scan target: bounces straight off-origin, plus one same-origin
+    // bounce used as the control.
+    let foreign_url = format!("http://{}/first", foreign);
+    let target_srv = serve(Router::new().route(
+        "/{*rest}",
+        any(move |uri: axum::http::Uri| {
+            let foreign_url = foreign_url.clone();
+            async move {
+                let location = if uri.path().contains("offsite") {
+                    foreign_url.clone()
+                } else if uri.path().contains("samehop") {
+                    "/landing".to_string()
+                } else {
+                    return axum::response::Response::builder()
+                        .status(200)
+                        .body(axum::body::Body::from("LANDED_ON_TARGET"))
+                        .expect("build ok");
+                };
+                axum::response::Response::builder()
+                    .status(302)
+                    .header("Location", location)
+                    .body(axum::body::Body::empty())
+                    .expect("build redirect")
+            }
+        }),
+    ))
+    .await;
+
+    let mut target = parse_target(&format!("http://{}/offsite", target_srv)).unwrap();
+    target.follow_redirects = true;
+    target.headers = vec![
+        ("Authorization".to_string(), "Bearer SECRET".to_string()),
+        ("X-Api-Key".to_string(), "SECRET".to_string()),
+    ];
+    target.cookies = vec![("session".to_string(), "SECRET".to_string())];
+    // A timeout no other cache test uses, so this doesn't perturb their counts.
+    target.timeout = 47;
+
+    let client = target.build_client().expect("build client");
+    let req = crate::utils::build_request(
+        &client,
+        &target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+    );
+    let _ = req.send().await;
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "the redirect chain must stop before reaching the foreign origin"
+    );
+    assert_eq!(
+        leaked.load(Ordering::SeqCst),
+        0,
+        "no operator credential may reach the foreign origin"
+    );
+
+    // Control: a same-origin redirect is still followed, so the assertions
+    // above cannot be satisfied by redirects simply being off.
+    let mut same = target.clone();
+    same.url = url::Url::parse(&format!("http://{}/samehop", target_srv)).unwrap();
+    let client = same.build_client().expect("build client");
+    let body =
+        crate::utils::build_request(&client, &same, reqwest::Method::GET, same.url.clone(), None)
+            .send()
+            .await
+            .expect("same-origin request")
+            .text()
+            .await
+            .expect("body");
+    assert!(
+        body.contains("LANDED_ON_TARGET"),
+        "a same-origin redirect must still be followed, got: {body}"
+    );
+}
