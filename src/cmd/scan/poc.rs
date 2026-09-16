@@ -9,6 +9,7 @@ use crate::encoding::{
     url_encode,
 };
 use crate::scanning::result::FindingType;
+use crate::utils::term::{sanitize_display, sanitize_display_block};
 
 // Kept around for unit-test coverage of the message-shape contract.
 // The actual scan, server, and MCP paths now go through
@@ -425,7 +426,12 @@ fn render_informational_block(result: &crate::scanning::result::Result, poc_type
     } else {
         result.inject_type.clone()
     };
-    let line = format!("[INF][{}] {} | {}", tag, result.data, result.message_str);
+    let line = format!(
+        "[INF][{}] {} | {}",
+        sanitize_display(&tag),
+        sanitize_display(&result.data),
+        sanitize_display(&result.message_str)
+    );
     let mut output = String::new();
     if poc_type == "plain" {
         output.push_str(&format!("\x1b[36m{}\x1b[0m\n", line.trim_end()));
@@ -436,7 +442,7 @@ fn render_informational_block(result: &crate::scanning::result::Result, poc_type
     if !result.evidence.is_empty() {
         output.push_str(&format!(
             "  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
-            result.evidence
+            sanitize_display(&result.evidence)
         ));
     }
     output
@@ -458,6 +464,13 @@ pub(crate) fn render_finding_block(
     let mut output = String::new();
 
     let poc_line = generate_poc(result, poc_type);
+    // The POC line embeds target-derived bytes (the URL, the parameter name,
+    // and for `http-request` the whole recorded request). Escape control
+    // bytes before anything is printed — `strip_ansi` only runs on the
+    // `--no-color` path, so on a colour terminal a response could otherwise
+    // drive OSC sequences straight at the operator. `sanitize_display_block`
+    // keeps the raw-HTTP line structure so the request POC stays pasteable.
+    let poc_line = sanitize_display_block(&poc_line);
     let trimmed = poc_line.trim_end();
     // Type-based colorization only makes sense for the `plain` POC; the
     // other formats (curl / httpie / http-request) are meant to be
@@ -528,14 +541,14 @@ pub(crate) fn render_finding_block(
     output.push_str(&format!(
         "  \x1b[90m{}\x1b[0m \x1b[38;5;247mIssue:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
         bullet_for(idx),
-        issue_text
+        sanitize_display(issue_text)
     ));
     idx += 1;
 
     output.push_str(&format!(
         "  \x1b[90m{}\x1b[0m \x1b[38;5;247mPayload:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
         bullet_for(idx),
-        result.payload
+        sanitize_display(&result.payload)
     ));
     idx += 1;
 
@@ -544,7 +557,7 @@ pub(crate) fn render_finding_block(
             "  \x1b[90m{}\x1b[0m \x1b[38;5;247mL{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
             bullet_for(idx),
             line_num,
-            context
+            sanitize_display(&context)
         ));
         idx += 1;
     }
@@ -565,7 +578,10 @@ pub(crate) fn render_finding_block(
         ));
         if let Some(req) = &result.request {
             for line in req.lines() {
-                output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
+                output.push_str(&format!(
+                    "      \x1b[38;5;247m{}\x1b[0m\n",
+                    sanitize_display(line)
+                ));
             }
         }
         idx += 1;
@@ -578,7 +594,10 @@ pub(crate) fn render_finding_block(
         ));
         if let Some(resp) = &result.response {
             for line in resp.lines() {
-                output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
+                output.push_str(&format!(
+                    "      \x1b[38;5;247m{}\x1b[0m\n",
+                    sanitize_display(line)
+                ));
             }
         }
     }

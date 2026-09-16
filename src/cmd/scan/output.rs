@@ -738,9 +738,13 @@ pub(crate) async fn render_results(
     } else {
         let mut output = String::new();
         for result in display_results {
+            // The parameter name is target-derived (page forms, parameter
+            // mining) and unfiltered — escape control bytes before it reaches
+            // the terminal or a report file.
             output.push_str(&format!(
                 "Found XSS: {} - {}\n",
-                result.param, result.payload
+                crate::utils::term::sanitize_display(&result.param),
+                crate::utils::term::sanitize_display(&result.payload)
             ));
         }
         output

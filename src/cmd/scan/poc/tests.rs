@@ -388,3 +388,83 @@ fn httpie_escape_name_escapes_request_item_separators() {
     assert_eq!(httpie_escape_name("q"), "q");
     assert_eq!(httpie_escape_name("user_id"), "user_id");
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Terminal control bytes — findings quote target-controlled bytes
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Every ANSI-colored marker the renderer itself emits, so a test can ask
+/// "is there any escape byte here that we didn't put there?".
+fn strip_own_colors(block: &str) -> String {
+    block
+        .replace("\x1b[90m", "")
+        .replace("\x1b[38;5;247m", "")
+        .replace("\x1b[36m", "")
+        .replace("\x1b[31m", "")
+        .replace("\x1b[33m", "")
+        .replace("\x1b[35m", "")
+        .replace("\x1b[0m", "")
+}
+
+#[test]
+fn finding_block_escapes_control_bytes_from_the_response() {
+    // OSC 8 (hyperlink), OSC 0 (window title) and OSC 52 (clipboard write)
+    // all survived `strip_ansi`, and on a colour terminal nothing stripped
+    // them at all.
+    let mut r = hostile_result("Query", "q");
+    r.location = String::new();
+    r.data = "http://h:8899/x".to_string();
+    r.payload = "<svg onload=alert(1)>".to_string();
+    r.response = Some(
+        "<html>\x1b]0;PWNED\x07\x1b]8;;http://evil/\x07<svg onload=alert(1)>\x1b]52;c;cm0=\x07</html>"
+            .to_string(),
+    );
+    let block = render_finding_block(&r, "plain", false, true);
+    let residue = strip_own_colors(&block);
+    assert!(
+        !residue.contains('\x1b') && !residue.contains('\x07'),
+        "raw control bytes reached the rendered block: {residue:?}"
+    );
+    assert!(residue.contains("\\x1b]0;PWNED\\x07"), "{residue:?}");
+    // Printable payload characters must survive verbatim.
+    assert!(residue.contains("<svg onload=alert(1)>"), "{residue:?}");
+}
+
+#[test]
+fn finding_block_escapes_control_bytes_from_the_param_name() {
+    let r = hostile_result("Header", "X\x1b]0;PWNED\x07H");
+    let block = render_finding_block(&r, "curl", false, false);
+    let residue = strip_own_colors(&block);
+    assert!(
+        !residue.contains('\x1b') && !residue.contains('\x07'),
+        "raw control bytes reached the rendered block: {residue:?}"
+    );
+}
+
+#[test]
+fn informational_block_escapes_control_bytes() {
+    let mut r = informational("OutdatedComponent");
+    r.data = "https://h/\x1b]8;;http://evil/\x07".to_string();
+    r.message_str = "lib\x1b]0;PWNED\x07".to_string();
+    r.evidence = "CVE-\x1b[2J0000".to_string();
+    let block = render_finding_block(&r, "plain", false, false);
+    let residue = strip_own_colors(&block);
+    assert!(
+        !residue.contains('\x1b') && !residue.contains('\x07'),
+        "raw control bytes reached the informational block: {residue:?}"
+    );
+}
+
+#[test]
+fn http_request_poc_keeps_crlf_while_escaping_controls() {
+    // The `http-request` POC is a raw HTTP artifact — it has to stay
+    // pasteable into `nc` / Repeater, so CRLF line structure survives.
+    let mut r = hostile_result("Query", "q");
+    r.request = Some("GET /x HTTP/1.1\r\nHost: h\r\nX-E: \x1b]0;P\x07\r\n\r\n".to_string());
+    let block = render_finding_block(&r, "http-request", false, false);
+    assert!(
+        block.contains("GET /x HTTP/1.1\r\nHost: h\r\n"),
+        "{block:?}"
+    );
+    assert!(block.contains("X-E: \\x1b]0;P\\x07"), "{block:?}");
+}
