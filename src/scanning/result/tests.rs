@@ -968,3 +968,25 @@ fn markdown_code_fence_outgrows_backticks_in_the_body() {
         .expect("closing fence of the same length");
     assert!(block.contains("```\n## NOT A HEADING\n```"), "{md}");
 }
+
+#[test]
+fn markdown_payload_cell_keeps_waf_bypass_whitespace() {
+    // `payload::xss_html` ships `<img\x0csrc=x\x0conerror=…>`; the Payload
+    // cell is what a reader copies to reproduce, so those bytes must survive.
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/")
+        .param("q")
+        .payload("<img\u{c}src=x\u{c}onerror=alert(1)>")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
+    let md = Result::results_to_markdown(&[result], false, false);
+    assert!(
+        md.contains("<img\u{c}src=x\u{c}onerror=alert(1)>"),
+        "{md:?}"
+    );
+}

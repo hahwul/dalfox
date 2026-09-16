@@ -468,3 +468,22 @@ fn http_request_poc_keeps_crlf_while_escaping_controls() {
     );
     assert!(block.contains("X-E: \\x1b]0;P\\x07"), "{block:?}");
 }
+
+#[test]
+fn finding_block_keeps_waf_bypass_whitespace_in_the_poc() {
+    // `payload::xss_html` ships `<img\x0csrc=x\x0conerror=…>` and
+    // `<svg\x0bonload=…>` as WAF bypasses. Escaping those bytes on the way to
+    // the terminal would print — and paste — a POC that no longer reproduces.
+    let mut r = hostile_result("Body", "q");
+    r.payload = "<img\u{c}src=x\u{c}onerror=alert(1)>".to_string();
+    let block = render_finding_block(&r, "curl", false, false);
+    assert!(
+        block.contains("--data 'q=<img\u{c}src=x\u{c}onerror=alert(1)>'"),
+        "{block:?}"
+    );
+    // The `Payload:` tree line keeps them too.
+    assert!(
+        block.contains("Payload:\u{1b}[0m \u{1b}[38;5;247m<img\u{c}src=x\u{c}onerror=alert(1)>"),
+        "{block:?}"
+    );
+}

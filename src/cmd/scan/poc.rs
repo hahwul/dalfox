@@ -199,7 +199,7 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
 /// run it by pasting the POC. Single quotes disable every shell expansion;
 /// the only character needing care is `'` itself, closed and re-opened
 /// around an escaped literal (`'\''`).
-pub(crate) fn shell_single_quote(s: &str) -> String {
+fn shell_single_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
     for ch in s.chars() {

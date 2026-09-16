@@ -12,11 +12,13 @@ use super::*;
 /// `|` ends a table cell, and a newline ends the whole table: a name like
 /// `q| forged |\n\n## FORGED HEADING\n\nx` used to close the row and open a
 /// real heading, so the report's own structure could be written by the page
-/// it was reporting on. Control bytes are escaped by the shared
-/// [`sanitize_log_message`](crate::utils::log::sanitize_log_message) rule, so
-/// a terminal reading the report with `cat` is covered too.
+/// it was reporting on. Control bytes go through the same
+/// [`sanitize_display`](crate::utils::term::sanitize_display) rule the
+/// terminal renderer uses — so `cat report.md` is covered too, and the
+/// payload whitespace dalfox's own WAF bypasses rely on (`\x0b`, `\x0c`)
+/// still round-trips out of the Payload cell.
 fn md_cell(value: &str) -> String {
-    crate::utils::log::sanitize_log_message(value).replace('|', "\\|")
+    crate::utils::term::sanitize_display(value).replace('|', "\\|")
 }
 
 /// Pick a fence long enough to contain `body`. A response echoed under

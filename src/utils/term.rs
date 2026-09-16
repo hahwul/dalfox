@@ -63,9 +63,10 @@ pub(crate) fn term_cols_stderr() -> usize {
 /// via OSC 52 — clipboard writes; DCS / SOS / PM / APC are the other string
 /// sequences. A response body dalfox echoes into a finding line is
 /// target-controlled, so leaving those to pass through handed the page a
-/// channel to the operator's terminal. A lone `ESC` is dropped too: on its
-/// own it introduces nothing, and letting it survive would re-arm the next
-/// byte as an escape introducer downstream.
+/// channel to the operator's terminal. Two-byte forms (`ESC c`, `ESC 7`, …)
+/// take the character after the `ESC` with them, and a trailing `ESC` is
+/// dropped on its own — letting one survive would re-arm the following byte
+/// as an escape introducer downstream.
 ///
 /// Printable characters are never touched — payloads contain `<`, `>` and
 /// `"` and must stay readable.
@@ -147,6 +148,20 @@ fn skip_escape_sequence(bytes: &[u8], i: usize) -> usize {
     }
 }
 
+/// Control bytes that stay raw in displayed findings.
+///
+/// Horizontal tab, plus the two vertical-whitespace bytes VT (`\x0b`) and FF
+/// (`\x0c`): dalfox's own WAF-bypass payloads use those as attribute
+/// separators (`<img\x0csrc=x\x0conerror=…>` in `payload::xss_html`), so a
+/// POC carrying one has to stay byte-exact or it stops reproducing the
+/// finding. None of the three can retarget a hyperlink, write the clipboard,
+/// set the window title, or overwrite a line that has already been drawn —
+/// which is what the escaped ones (ESC, BEL, CR, …) can do.
+#[inline]
+fn is_display_safe_control(b: u8) -> bool {
+    matches!(b, b'\t' | 0x0B | 0x0C)
+}
+
 /// Escape terminal control bytes in target-derived text before it reaches a
 /// terminal or a report file, keeping every printable character.
 ///
@@ -154,12 +169,29 @@ fn skip_escape_sequence(bytes: &[u8], i: usize) -> usize {
 /// straight out of the response body, and parameter names come from the
 /// page's forms and from parameter mining, neither filtered. [`strip_ansi`]
 /// only runs on the `--no-color` path, so on a colour terminal those bytes
-/// were printed verbatim. Delegates to
-/// [`sanitize_log_message`](crate::utils::log::sanitize_log_message), the
-/// helper the server and MCP log paths already use, so there is one rule for
-/// "control bytes in attacker text".
+/// were printed verbatim.
+///
+/// Same shape as
+/// [`sanitize_log_message`](crate::utils::log::sanitize_log_message) — CR/LF
+/// become `\r`/`\n`, other C0 bytes become `\xNN` — except that the display
+/// path additionally keeps the payload whitespace listed in
+/// [`is_display_safe_control`]. Returns a borrowed string on the common
+/// (clean) path.
 pub(crate) fn sanitize_display(s: &str) -> std::borrow::Cow<'_, str> {
-    crate::utils::log::sanitize_log_message(s)
+    if !s.bytes().any(|b| b < 0x20 && !is_display_safe_control(b)) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 0x20 && is_display_safe_control(c as u8) => out.push(c),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 /// [`sanitize_display`] for a multi-line block, preserving the line
@@ -297,6 +329,24 @@ mod tests {
         // `ESC` followed by a multi-byte char must not slice mid-character.
         assert_eq!(strip_ansi("\x1b한글"), "글");
         assert_eq!(strip_ansi("\x1b[한글"), "한글");
+    }
+
+    #[test]
+    fn sanitize_display_keeps_the_whitespace_real_payloads_use() {
+        // `payload::xss_html` ships `<img\x0csrc=x\x0conerror=…>` and
+        // `<svg\x0bonload=…>` as WAF bypasses. Escaping those bytes would
+        // print — and paste — a payload that no longer reproduces.
+        assert_eq!(
+            sanitize_display("<img\x0csrc=x\x0conerror=alert(1)>"),
+            "<img\x0csrc=x\x0conerror=alert(1)>"
+        );
+        assert_eq!(
+            sanitize_display("<svg\x0bonload=alert(1)>"),
+            "<svg\x0bonload=alert(1)>"
+        );
+        assert_eq!(sanitize_display("a\tb"), "a\tb");
+        // …while the bytes that drive or forge a terminal still go.
+        assert_eq!(sanitize_display("a\x0bb\x1bc"), "a\x0bb\\x1bc");
     }
 
     #[test]
