@@ -913,3 +913,166 @@ fn test_validate_remote_providers_error_cannot_forge_a_log_line() {
         "raw CRLF in: {err}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// REST ↔ MCP accepted-option parity
+// ---------------------------------------------------------------------------
+
+/// Every spelling a `deny_unknown_fields` struct accepts, recovered from the
+/// error serde raises for an unknown key ("unknown field `x`, expected one of
+/// `a`, `b`, …"). Reading it back out of serde is what makes this a real drift
+/// guard: it sees the `#[serde(alias)]`es too, which no hand-written list or
+/// JSON-schema dump would, and it cannot go stale when a field is added.
+fn accepted_field_names<T: serde::de::DeserializeOwned>() -> std::collections::BTreeSet<String> {
+    // A key no surface will ever define, so the error is always the unknown-field one.
+    let probe = serde_json::json!({ "zzz_not_a_real_field_zzz": null });
+    let err = serde_json::from_value::<T>(probe)
+        .err()
+        .expect("the struct must carry #[serde(deny_unknown_fields)]")
+        .to_string();
+    let list = err
+        .split_once("expected one of ")
+        .unwrap_or_else(|| panic!("unexpected serde unknown-field error shape: {err}"))
+        .1;
+    list.split(", ")
+        .map(|f| f.trim().trim_matches('`').to_string())
+        .filter(|f| !f.is_empty())
+        .collect()
+}
+
+/// The silent-false-clean guard, at the surface level. An agent that read one
+/// front-end's docs and called the other used to have the mismatched options
+/// dropped on the floor — a scan with no cookies and no headers, reported as a
+/// clean `done`. Both surfaces now refuse unknown keys, which only stays usable
+/// because each accepts the other's spellings; this pins that neither half can
+/// drift away on its own.
+///
+/// A new option on one side must either be added to the other or listed here
+/// with the reason it is deliberately one-sided.
+#[test]
+fn rest_and_mcp_accept_the_same_scan_option_names() {
+    use std::collections::BTreeSet;
+
+    // The REST surface is split across the envelope (`target`/`url`) and the
+    // nested option dict; the MCP surface is one flat object.
+    let mut rest = accepted_field_names::<crate::server::types::ScanRequest>();
+    rest.extend(accepted_field_names::<crate::server::types::ScanOptions>());
+    // Structural, not an option: REST nests options, MCP does not.
+    rest.remove("options");
+
+    let mcp = accepted_field_names::<crate::mcp::ScanWithDalfoxParams>();
+
+    /// Result-delivery webhook. Kept off the agent-facing surface on purpose:
+    /// it would hand a model a channel to ship scan output (target URLs,
+    /// reflected payloads, response excerpts) to a host of its choosing.
+    const REST_ONLY: &[&str] = &["callback_url"];
+    /// Call-transport knobs for a single tool invocation. REST has no
+    /// equivalent because a REST client polls `GET /scan/{id}` instead.
+    const MCP_ONLY: &[&str] = &["wait", "wait_timeout_sec"];
+
+    let rest_only: BTreeSet<_> = REST_ONLY.iter().map(ToString::to_string).collect();
+    let mcp_only: BTreeSet<_> = MCP_ONLY.iter().map(ToString::to_string).collect();
+
+    let missing_on_mcp: Vec<_> = rest
+        .difference(&mcp)
+        .filter(|f| !rest_only.contains(*f))
+        .collect();
+    assert!(
+        missing_on_mcp.is_empty(),
+        "REST accepts these scan options but MCP refuses them, so an agent \
+         reusing its REST arguments gets a hard error (or, worse, a scan \
+         missing them): {missing_on_mcp:?}. Add them to ScanWithDalfoxParams, \
+         or document them in REST_ONLY."
+    );
+
+    let missing_on_rest: Vec<_> = mcp
+        .difference(&rest)
+        .filter(|f| !mcp_only.contains(*f))
+        .collect();
+    assert!(
+        missing_on_rest.is_empty(),
+        "MCP accepts these scan options but REST refuses them: \
+         {missing_on_rest:?}. Add them to ScanOptions, or document them in MCP_ONLY."
+    );
+
+    // The exclusion lists must stay honest: an entry that is actually accepted
+    // on both sides is a stale exemption hiding a real divergence later.
+    for f in &rest_only {
+        assert!(
+            rest.contains(f),
+            "REST_ONLY names `{f}`, which REST does not accept"
+        );
+        assert!(
+            !mcp.contains(f),
+            "REST_ONLY names `{f}`, but MCP accepts it"
+        );
+    }
+    for f in &mcp_only {
+        assert!(
+            mcp.contains(f),
+            "MCP_ONLY names `{f}`, which MCP does not accept"
+        );
+        assert!(
+            !rest.contains(f),
+            "MCP_ONLY names `{f}`, but REST accepts it"
+        );
+    }
+}
+
+/// Parity of *names* is only half of it: the REST-spelled values have to reach
+/// `ScanArgs`. The whole point is that an agent using `cookie`/`header`/
+/// `worker`/`blind` on the MCP tool gets an authenticated scan, not a
+/// zero-finding one.
+#[test]
+fn mcp_rest_spellings_reach_scan_args() {
+    let p: crate::mcp::ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "url": "http://example.com/?q=1",
+        "cookie": "sid=abc; lang=en",
+        "header": ["Authorization: Bearer t"],
+        "worker": 9,
+        "blind": "http://cb.example/x",
+    }))
+    .expect("REST-spelled MCP arguments deserialize");
+
+    let args = ScanRequestSpec {
+        target: p.target.clone(),
+        headers: p.headers.clone(),
+        cookies: p.cookies.clone(),
+        blind_callback_url: p.blind_callback_url.clone(),
+        workers: p.workers,
+        ..Default::default()
+    }
+    .into_scan_args();
+
+    assert_eq!(args.targets, vec!["http://example.com/?q=1".to_string()]);
+    assert_eq!(args.cookies, vec!["sid=abc; lang=en".to_string()]);
+    assert_eq!(args.headers, vec!["Authorization: Bearer t".to_string()]);
+    assert_eq!(args.workers, 9);
+    assert_eq!(
+        args.blind_callback_url.as_deref(),
+        Some("http://cb.example/x")
+    );
+
+    // Same request in REST's own shape lands on exactly the same values — the
+    // two spellings are one option, not two behaviours.
+    let rest = ScanRequestSpec::from_rest_options(
+        "http://example.com/?q=1".to_string(),
+        &serde_json::from_value::<crate::server::types::ScanOptions>(serde_json::json!({
+            "cookie": "sid=abc; lang=en",
+            "header": ["Authorization: Bearer t"],
+            "worker": 9,
+            "blind": "http://cb.example/x",
+        }))
+        .expect("REST options deserialize"),
+        false,
+        false,
+        0,
+        0,
+        None,
+    )
+    .into_scan_args();
+    assert_eq!(rest.cookies, args.cookies);
+    assert_eq!(rest.headers, args.headers);
+    assert_eq!(rest.workers, args.workers);
+    assert_eq!(rest.blind_callback_url, args.blind_callback_url);
+}

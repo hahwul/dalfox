@@ -162,6 +162,27 @@ The block above is an excerpt. Every field the tool accepts, with its default �
 entries, `headers` takes full `"Name: Value"` lines, and `user_agent` overrides
 the `User-Agent` header.
 
+A field name the tool does not recognise is **rejected**: the call comes back
+with `isError: true` and a message naming the offending key and listing every
+accepted one. It is not silently dropped — a misspelled `cookies` would
+otherwise scan the target unauthenticated, find nothing, and report
+`status: "done"` with no findings, a clean result indistinguishable from a real
+one. A rejected call carries no `scan_id`, so there is nothing to poll and no
+way to mistake it for a scan that ran.
+
+Because of that, the [REST API](../server/) spellings are accepted
+as aliases: `url` for `target`, `cookie` for `cookies`, `header` for `headers`,
+`worker` for `workers`, and `blind` for `blind_callback_url`. `cookie` also
+takes a single `Cookie:`-header string (`"sid=abc; lang=en"`) in place of the
+list. The canonical MCP names above are what the tool schema advertises; the
+aliases exist so arguments written against the REST docs still run the scan
+they describe.
+
+Two REST options are deliberately absent here rather than aliased, and asking
+for them is an error: `callback_url` (a webhook that would let a model ship
+scan output to a host of its choosing) and `cookie_from_raw` (a server-side
+file read). Pass cookies directly via `cookies`.
+
 `delay` (default `0`, range `0`–`9999`) waits that many milliseconds between
 requests, `follow_redirects` (default `false`) makes the scanner follow `3xx`
 responses, and `proxy` routes every request through an HTTP or SOCKS proxy

@@ -163,6 +163,25 @@ claude mcp add dalfox -- dalfox mcp
 `"name=value"` 형태의 항목을, `headers`는 `"Name: Value"` 형태의 전체 줄을
 받으며, `user_agent`는 `User-Agent` 헤더를 덮어씁니다.
 
+도구가 모르는 필드명은 조용히 버려지지 않고 **거부**됩니다. 호출은
+`isError: true`와 함께 문제가 된 키, 그리고 허용되는 키 전체 목록을 담아
+돌아옵니다. 그렇지 않으면 `cookies`를 한 글자만 틀려도 대상이 비인증 상태로
+스캔되고, 아무것도 찾지 못한 채 `status: "done"`으로 끝나 실제 클린 결과와
+구분할 수 없게 됩니다. 거부된 호출에는 `scan_id`가 없으므로 폴링할 대상도
+없고, 실행된 스캔으로 오해할 여지도 없습니다.
+
+그래서 [REST API](../server/) 쪽 철자도 별칭으로 받습니다.
+`target`에 `url`, `cookies`에 `cookie`, `headers`에 `header`, `workers`에
+`worker`, `blind_callback_url`에 `blind`입니다. `cookie`는 리스트 대신
+`Cookie:` 헤더 문자열 하나(`"sid=abc; lang=en"`)도 받습니다. 도구 스키마가
+알리는 이름은 위의 MCP 정식 명칭이며, 별칭은 REST 문서를 보고 작성한 인자도
+의도한 그대로 스캔되게 하려고 존재합니다.
+
+REST 옵션 중 둘은 별칭을 두지 않고 의도적으로 빼두었으며, 요청하면 에러가
+납니다. `callback_url`(모델이 원하는 호스트로 스캔 결과를 내보낼 수 있는
+웹훅)과 `cookie_from_raw`(서버 측 파일 읽기)입니다. 쿠키는 `cookies`로 직접
+넘기세요.
+
 `delay`는(기본값 `0`, 범위 `0`~`9999`) 요청 사이에 그만큼의 밀리초를 대기하고,
 `follow_redirects`는(기본값 `false`) 스캐너가 `3xx` 응답을 따라가게 하며,
 `proxy`는 모든 요청을 HTTP 또는 SOCKS 프록시(`"http://127.0.0.1:8080"`)로
