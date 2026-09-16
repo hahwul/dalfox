@@ -167,8 +167,10 @@ fn test_markdown_output_special_characters() {
     // Verify pipe characters are properly escaped in payload and evidence
     assert!(markdown.contains("payload\\|with\\|pipes"));
     assert!(markdown.contains("evidence\\|test"));
-    // Parameter is in code block so doesn't need escaping
-    assert!(markdown.contains("`param|with|pipes`"));
+    // A code span does NOT protect a pipe: GFM still ends the cell there, so
+    // the parameter is escaped like every other cell.
+    assert!(markdown.contains("`param\\|with\\|pipes`"));
+    assert!(markdown.contains("### 1. Vulnerability - param\\|with\\|pipes (inHTML)"));
 }
 
 #[test]

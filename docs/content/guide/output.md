@@ -70,6 +70,12 @@ dalfox ... --include-request
 dalfox ... --include-response
 ```
 
+The recorded request is the one Dalfox sent, verbatim — every `-H` header and
+the whole cookie jar included. Check a report built with `--include-request` /
+`--include-all` before you share it. On Unix, `-o` creates the file `0600` so
+it is not readable by other local accounts, but that says nothing about where
+the file goes next.
+
 ## Scan metadata envelope
 
 JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level metadata envelope:

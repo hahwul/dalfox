@@ -2779,3 +2779,52 @@ fn test_finalize_scan_args_folds_globals_and_expands_include_all() {
         "--include-all expands to request+response"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// output.rs — report file permissions
+// ─────────────────────────────────────────────────────────────────────────
+
+#[cfg(unix)]
+#[test]
+fn test_output_report_file_is_created_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = std::env::temp_dir().join(format!(
+        "dalfox-report-perm-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path_str = path.to_string_lossy().to_string();
+    let _ = std::fs::remove_file(&path);
+
+    let target = target_with_params(
+        "https://example.com",
+        vec![make_param("q", Location::Query)],
+    );
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.silence = true;
+    args.output = Some(path_str.clone());
+    let outcome = render_only_discovery(
+        &args,
+        &host_group(vec![target.clone()]),
+        &make_scan_state(vec![]),
+    );
+    assert!(matches!(outcome, ScanOutcome::Clean));
+
+    // A report carries the raw request under --include-request, headers and
+    // cookie jar included; it must not be world-readable.
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "report file mode was {:o}", mode);
+
+    // Re-running still overwrites in place rather than appending.
+    let first_len = std::fs::metadata(&path).unwrap().len();
+    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
+    assert!(matches!(outcome, ScanOutcome::Clean));
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), first_len);
+
+    let _ = std::fs::remove_file(&path);
+}
