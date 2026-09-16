@@ -2594,6 +2594,19 @@ fn scan_params_cookie_list_form_is_unchanged() {
         blank.cookies.is_empty(),
         "a blank Cookie header means no cookies, not one empty cookie"
     );
+
+    // REST's `cookie` is `Option<String>`, so `null` is "no cookies" there and
+    // returns 200. An SDK serializing a request object emits `null` for every
+    // unset field, so accepting the name but rejecting the value would make
+    // the alias useless to exactly those callers.
+    for null_spelling in ["cookie", "cookies"] {
+        let p: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+            "target": "https://example.com/",
+            null_spelling: serde_json::Value::Null,
+        }))
+        .unwrap_or_else(|e| panic!("`{null_spelling}: null` must mean no cookies: {e}"));
+        assert!(p.cookies.is_empty());
+    }
 }
 
 /// The caller of a rejected tool call is a model deciding what to send next,

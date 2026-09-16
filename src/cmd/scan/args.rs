@@ -616,7 +616,9 @@ pub struct ScanArgs {
     #[clap(help_heading = "NETWORK")]
     /// Skip TLS/SSL certificate verification, accepting self-signed, expired,
     /// or hostname-mismatched certs. Enabled by default for scanner use; pass
-    /// `--insecure=false` to enforce certificate validation. Example: --insecure=false
+    /// `--insecure=false` to enforce certificate validation. Applies to the
+    /// scan target and to an OAST server named with `--blind-oob=`; the public
+    /// interactsh mesh is always verified. Example: --insecure=false
     ///
     /// Stored as Option so presence is distinguishable from the default:
     /// `None` means the user didn't pass the flag (config may set it; the

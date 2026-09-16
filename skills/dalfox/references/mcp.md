@@ -75,7 +75,9 @@ Terminal jobs auto-purge after 1 hour.
 
 **Unknown field names are refused, not ignored.** A key the tool does not recognise comes back as `isError: true` naming it and listing every accepted one — there is no `scan_id`, so nothing ran. This is deliberate: a misspelled `cookies` used to be dropped silently, and the scan then ran unauthenticated and reported `status: "done"` with zero findings, which is indistinguishable from a real clean result.
 
-**REST spellings are accepted as aliases**, so arguments written against the REST API still work: `url` → `target`, `cookie` → `cookies`, `header` → `headers`, `worker` → `workers`, `blind` → `blind_callback_url`. `cookie` also takes a single `Cookie:`-header string (`"sid=abc; lang=en"`). Prefer the canonical names above — they are what the tool schema advertises. REST's `callback_url` has no alias and is rejected: it is a webhook that would ship scan output to a host of your choosing.
+**REST spellings are accepted as aliases**, so arguments written against the REST API still work: `url` → `target`, `cookie` → `cookies`, `header` → `headers`, `worker` → `workers`, `blind` → `blind_callback_url`. `cookie` also takes a single `Cookie:`-header string (`"sid=abc; lang=en"`) or `null`. REST's `callback_url` has no alias and is rejected: it is a webhook that would ship scan output to a host of your choosing.
+
+Prefer the canonical names — the aliases are a compatibility path, not a second API. They map a *spelling* only (a wrong value type is still refused), arguments are flat (REST's nested `"options": {...}` envelope is an unknown field), and they are absent from the published schema, so a client that validates against `inputSchema` before dispatching will reject a REST-spelled call. Never send both spellings of one option — that is a `duplicate field` error.
 
 **`wait` mode (agent-friendly short scans):**
 - `wait=false` (default): return `{scan_id, status: "queued"}` immediately; poll with `get_results_dalfox`.
@@ -90,7 +92,7 @@ Terminal jobs auto-purge after 1 hour.
 
 ## preflight_dalfox — Parameters
 
-Fewer options (no `include_*`, no blind, no workers — it only does discovery).
+Fewer options (no `include_*`, no blind, no workers — it only does discovery), and the smaller set is **enforced**: preflight sends no payloads, so pacing (`delay`, `rate_limit`, `scan_timeout`), `workers`, the WAF options, `remote_*`, `include_request`/`include_response`, the analysis switches and `wait`/`wait_timeout_sec` are all unknown fields here and are rejected. Do not reuse a `scan_with_dalfox` argument dict wholesale — build preflight's from the list below. Credentials and the target do apply (`cookies`, `headers`, `user_agent`): running preflight unauthenticated under-reports the parameters the real scan would find.
 
 ```json
 {

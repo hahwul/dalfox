@@ -34,14 +34,34 @@
 //! either way. Without the mirror image here, `deny_unknown_fields` would turn
 //! an agent that read the REST docs from "silently scanned without cookies"
 //! into "cannot call the tool at all". The aliases are the same options under
-//! another name, so mapping them is strictly better than refusing them; the
-//! generated schema still advertises only the canonical MCP spelling, which is
-//! what a model generating a call sees.
+//! another name, so mapping them beats refusing them.
+//!
+//! They are a compatibility path, not a second API, and they cover less than
+//! the name suggests: an alias maps a *spelling*, so the wrong value type is
+//! still refused (`cookie` is the one that also takes REST's `Cookie:`-header
+//! string and `null`), REST's nested `{"options": {...}}` envelope is not
+//! accepted, and the generated schema advertises the canonical MCP spelling
+//! alone — so a client that validates arguments against `inputSchema` before
+//! dispatching rejects a REST-spelled call before it ever reaches us. What the
+//! aliases buy is the pass-through client and the model writing JSON from the
+//! REST docs, which is where the silent-drop bug actually came from. The
+//! schema stays single-spelling deliberately: advertising both invites a model
+//! to send both, and that is a `duplicate field` error.
 //!
 //! Deliberate asymmetries that are *not* aliased: REST's `callback_url`
 //! (a result-exfiltration channel that stays off the agent-facing surface, like
 //! `cookie_from_raw`), and MCP's `wait` / `wait_timeout_sec` (call-transport
 //! knobs with no REST equivalent — REST clients poll `GET /scan/{id}`).
+//!
+//! [`PreflightDalfoxParams`] takes a smaller set than the scan tool on purpose:
+//! it sends no payloads, so pacing, workers, WAF handling, blind XSS and
+//! waiting describe nothing it does. REST has no separate preflight body —
+//! `POST /preflight` reuses the scan request and ignores what it cannot use —
+//! so this is the one place the two surfaces really differ. The trade is
+//! deliberate: a refused option here costs one retry against an error that
+//! names it, and preflight returns an estimate, which is visibly wrong when it
+//! is wrong. `job::tests::preflight_accepts_a_documented_subset_of_the_scan_options`
+//! holds the exact list so it cannot drift into an accident.
 
 use super::*;
 
@@ -75,6 +95,18 @@ where
                 "a list of \"name=value\" cookies, or a single `Cookie:` header string \
                  such as \"sid=abc; lang=en\"",
             )
+        }
+
+        /// REST's `cookie` is `Option<String>`, so `"cookie": null` there means
+        /// "no cookies" and returns `200`. An argument dict with `null` for
+        /// every unset option is what an SDK serializing a dataclass emits, so
+        /// the alias would otherwise accept the name and reject the value.
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Vec::new())
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Vec::new())
         }
 
         fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {

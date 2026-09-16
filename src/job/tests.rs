@@ -1076,3 +1076,103 @@ fn mcp_rest_spellings_reach_scan_args() {
     assert_eq!(rest.workers, args.workers);
     assert_eq!(rest.blind_callback_url, args.blind_callback_url);
 }
+
+/// `preflight_dalfox` deliberately accepts a *subset* of the scan options: it
+/// sends no payloads, so most of them describe nothing it does. REST has no
+/// such tool — `POST /preflight` deserializes the same `ScanRequest` as
+/// `POST /scan` and ignores what it cannot use — so `deny_unknown_fields` on
+/// the MCP side makes this the one place the two surfaces genuinely diverge.
+///
+/// That divergence is a deliberate trade, not an oversight. An option refused
+/// here costs one retry against an error that names it, and preflight returns
+/// an *estimate*: a wrong one is visibly wrong. The scan tool's silent drop
+/// cost an unauthenticated scan reported as clean, which is not recoverable at
+/// all — which is why that surface takes the aliases and this one does not
+/// grow fields it would only ignore.
+///
+/// The list below is the whole of it. A field added to the scan tool lands
+/// here until it is either mirrored onto preflight or written down as
+/// something preflight has no use for.
+#[test]
+fn preflight_accepts_a_documented_subset_of_the_scan_options() {
+    use std::collections::BTreeSet;
+
+    let scan = accepted_field_names::<crate::mcp::ScanWithDalfoxParams>();
+    let preflight = accepted_field_names::<crate::mcp::PreflightDalfoxParams>();
+
+    /// Scan options preflight does not accept, each because it describes
+    /// behaviour preflight has not got: it sends no payloads, spawns no
+    /// workers, runs no WAF probe, and always returns inline.
+    const NOT_ON_PREFLIGHT: &[&str] = &[
+        // No payloads are sent, so nothing to pace, bound, or parallelize.
+        "delay",
+        "scan_timeout",
+        "rate_limit",
+        "worker",
+        "workers",
+        // No payloads means no blind injection and no WAF interaction.
+        "blind",
+        "blind_callback_url",
+        "waf_bypass",
+        "skip_waf_probe",
+        "force_waf",
+        "waf_evasion",
+        "waf_min_confidence",
+        // Nothing is fetched to fuel an attack the caller has not run yet.
+        "remote_payloads",
+        "remote_wordlists",
+        // There are no findings to attach raw traffic to.
+        "include_request",
+        "include_response",
+        // Analysis switches for a scan, not for discovery.
+        "skip_ast_analysis",
+        "analyze_external_js",
+        "detect_outdated_libs",
+        // Preflight is already blocking; it has nothing to wait on.
+        "wait",
+        "wait_timeout_sec",
+    ];
+
+    let exempt: BTreeSet<_> = NOT_ON_PREFLIGHT.iter().map(ToString::to_string).collect();
+
+    let unexplained: Vec<_> = scan
+        .difference(&preflight)
+        .filter(|f| !exempt.contains(*f))
+        .collect();
+    assert!(
+        unexplained.is_empty(),
+        "these scan options are refused by preflight with no reason recorded: \
+         {unexplained:?}. Either mirror them onto PreflightDalfoxParams, or add \
+         them to NOT_ON_PREFLIGHT with why preflight cannot use them."
+    );
+
+    // Preflight must not accept something the scan tool refuses: its whole job
+    // is to describe the scan that follows.
+    let preflight_only: Vec<_> = preflight.difference(&scan).collect();
+    assert!(
+        preflight_only.is_empty(),
+        "preflight accepts options the scan tool does not: {preflight_only:?}"
+    );
+
+    // Keep the exemption list honest — a stale entry would silently widen it.
+    for f in &exempt {
+        assert!(
+            scan.contains(f),
+            "NOT_ON_PREFLIGHT names `{f}`, which the scan tool does not accept either"
+        );
+        assert!(
+            !preflight.contains(f),
+            "NOT_ON_PREFLIGHT names `{f}`, but preflight accepts it"
+        );
+    }
+
+    // The cross-surface spellings that carry credentials or name the target do
+    // reach preflight: sending it without cookies would under-report the
+    // parameters an authenticated scan would find.
+    for aliased in ["url", "cookie", "cookies", "header", "headers"] {
+        assert!(
+            preflight.contains(aliased),
+            "preflight must accept `{aliased}` — it shapes what discovery sees"
+        );
+    }
+}

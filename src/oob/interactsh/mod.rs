@@ -98,6 +98,11 @@ impl InteractshClient {
             .proxy
             .as_ref()
             .and_then(|pxy| reqwest::Proxy::all(pxy).ok());
+        let intercepting_proxy = config
+            .proxy
+            .as_deref()
+            .is_some_and(is_tls_intercepting_proxy)
+            && proxy.is_some();
 
         let mut builder = Client::builder()
             .timeout(Duration::from_secs(config.timeout.max(1)))
@@ -105,7 +110,7 @@ impl InteractshClient {
             .danger_accept_invalid_certs(accept_invalid_certs(
                 &host,
                 config.insecure,
-                proxy.is_some(),
+                intercepting_proxy,
             ));
         if let Some(proxy) = proxy {
             builder = builder.proxy(proxy);
@@ -300,25 +305,99 @@ impl InteractshClient {
 /// otherwise always verified — `--insecure` cannot reach it, because nobody
 /// asked for the public mesh to be trusted less.
 ///
-/// The one exception is `through_operator_proxy`: `--proxy` also routes the
-/// OAST channel, and an intercepting proxy (Burp, mitmproxy) re-signs with its
-/// own CA, so verification against the mesh's real certificate cannot succeed.
-/// Refusing there would not protect the operator from a man in the middle —
-/// they put him there — it would just disable blind-OOB with a warning line,
-/// which is the silent-degradation failure this whole check exists to avoid.
-/// `--insecure` is how that is declared, so it is honoured.
-fn accept_invalid_certs(host: &str, config_insecure: bool, through_operator_proxy: bool) -> bool {
-    config_insecure && (through_operator_proxy || !crate::oob::is_default_server(host))
+/// The one exception is `through_intercepting_proxy`: `--proxy` also routes the
+/// OAST channel, and an HTTP-proxy front end (Burp, mitmproxy, a corporate TLS
+/// appliance) re-signs with its own CA, so verification against the mesh's real
+/// certificate cannot succeed. Refusing there would not protect the operator
+/// from a man in the middle — they put him there — it would just disable
+/// blind-OOB with a warning line, which is the silent-degradation failure this
+/// whole check exists to avoid. `--insecure` is how that is declared, so it is
+/// honoured.
+///
+/// See [`is_tls_intercepting_proxy`] for why this is not simply "a proxy is
+/// configured".
+fn accept_invalid_certs(
+    host: &str,
+    config_insecure: bool,
+    through_intercepting_proxy: bool,
+) -> bool {
+    config_insecure && (through_intercepting_proxy || !crate::oob::is_default_server(host))
 }
 
+/// Can this proxy plausibly be terminating and re-signing TLS?
+///
+/// Only an HTTP(S) proxy can: it is the one that sees a `CONNECT` and may
+/// choose to answer it with its own certificate. A SOCKS proxy (`socks5://`,
+/// as in a Tor or ssh -D setup) forwards bytes at the transport layer and
+/// never touches the certificate, so the mesh's real one arrives intact and
+/// there is nothing for `--insecure` to rescue — treating every `--proxy` as
+/// an interception would hand back accept-anything against the public mesh
+/// with no man in the middle anywhere in the path.
+///
+/// A plain CONNECT-tunnelling HTTP proxy does not re-sign either, but it is
+/// indistinguishable from an intercepting one without trying the connection,
+/// so `http://`/`https://` is resolved in the operator's favour: they named
+/// the proxy and passed `--insecure`.
+fn is_tls_intercepting_proxy(proxy: &str) -> bool {
+    let p = proxy.trim().to_ascii_lowercase();
+    // reqwest defaults a scheme-less proxy to HTTP.
+    let scheme = p.split_once("://").map(|(s, _)| s).unwrap_or("http");
+    matches!(scheme, "http" | "https")
+}
+
+/// Split a `--blind-oob` server into its API base URL and the bare
+/// `host[:port]` used in callback hosts and in the public-mesh check.
+///
+/// Normalization goes through `url::Url` rather than string surgery, because
+/// the result feeds [`accept_invalid_certs`]: every spelling of the same
+/// endpoint has to reduce to the same host, or a mesh domain could be written
+/// so that it reads as an operator-named server and slips out of certificate
+/// verification. Hand-rolled parsing missed several — `oast.pro:0443` (leading
+/// zero in the port), `oast.pro.:443` (the trailing-dot strip ran before the
+/// port strip), and `x@oast.pro` / `oast.pro?x=1` / `oast.pro#f`, which also
+/// left userinfo, a query or a fragment glued into the base URL. `Url` folds
+/// all of them: it lowercases the host, parses the port numerically and drops
+/// the scheme's default, and keeps userinfo, path, query and fragment in
+/// fields we simply do not read.
+///
+/// An input `Url` cannot parse falls back to the old string split. That path
+/// only produces a host no mesh domain can spell, so it lands on the
+/// operator-named side, which is where an unparseable custom server belongs.
 fn split_server(server: &str) -> (String, String) {
     let s = server.trim();
-    let (scheme, rest) = if let Some(r) = s.strip_prefix("https://") {
+    // Schemes are case-insensitive (RFC 3986), and a case-sensitive test here
+    // would treat `HTTPS://oast.pro` as a bare host and prepend a second
+    // scheme, producing a garbage host that reads as operator-named.
+    let lower = s.to_ascii_lowercase();
+    let with_scheme = if lower.starts_with("https://") || lower.starts_with("http://") {
+        s.to_string()
+    } else {
+        format!("https://{s}")
+    };
+
+    if let Ok(url) = url::Url::parse(&with_scheme)
+        && let Some(parsed_host) = url.host_str()
+    {
+        // A fully-qualified trailing dot names the same host; `Url` keeps it.
+        let bare = parsed_host.trim_end_matches('.').to_ascii_lowercase();
+        if !bare.is_empty() {
+            let scheme = url.scheme();
+            // `port()` is None when the port equals the scheme's default, so
+            // `:443` on https and `:80` on http normalize away here.
+            let host = match url.port() {
+                Some(p) => format!("{bare}:{p}"),
+                None => bare,
+            };
+            return (format!("{scheme}://{host}"), host);
+        }
+    }
+
+    let (scheme, rest) = if let Some(r) = lower.strip_prefix("https://") {
         ("https", r)
-    } else if let Some(r) = s.strip_prefix("http://") {
+    } else if let Some(r) = lower.strip_prefix("http://") {
         ("http", r)
     } else {
-        ("https", s)
+        ("https", lower.as_str())
     };
     let host = rest
         .split('/')
@@ -375,14 +454,62 @@ mod tests {
             "OAST.PRO",
             "oast.pro.",
             "https://oast.fun/",
-            // The mesh's own port written out is the same endpoint.
+            // The mesh's own port written out is the same endpoint, however
+            // it is padded. Each of these reached the real public mesh with
+            // verification disabled before `split_server` normalized through
+            // `url::Url`.
             "oast.pro:443",
             "https://oast.fun:443/",
+            "oast.pro:0443",
+            "oast.pro:00443",
+            "oast.pro.:443",
+            // Userinfo, query and fragment used to be glued into the host.
+            "https://x@oast.pro",
+            "https://oast.pro?x=1",
+            "https://oast.pro#f",
+            "https://oast.pro/register",
+            "HTTPS://OAST.PRO.:443/",
         ] {
             let (_, host) = split_server(spelling);
             assert!(
                 !accept_invalid_certs(&host, true, false),
                 "{spelling} is the public mesh however it is spelled"
+            );
+        }
+    }
+
+    #[test]
+    fn only_an_http_proxy_counts_as_tls_interception() {
+        // Burp / mitmproxy / a corporate appliance: terminates TLS, re-signs.
+        for p in [
+            "http://127.0.0.1:8080",
+            "https://proxy.corp.example:3128",
+            // reqwest defaults a scheme-less proxy to HTTP.
+            "127.0.0.1:8080",
+            "  HTTP://127.0.0.1:8080  ",
+        ] {
+            assert!(is_tls_intercepting_proxy(p), "{p} can re-sign");
+        }
+        // SOCKS forwards bytes; the mesh's real certificate arrives intact, so
+        // there is nothing for --insecure to rescue and no MITM to excuse.
+        for p in [
+            "socks5://127.0.0.1:9050",
+            "socks5h://127.0.0.1:9050",
+            "socks4://127.0.0.1:1080",
+        ] {
+            assert!(!is_tls_intercepting_proxy(p), "{p} never sees the cert");
+        }
+    }
+
+    #[test]
+    fn a_socks_proxy_does_not_reopen_the_mesh() {
+        // The Tor / ssh -D setup. `--proxy socks5://... --insecure` must not
+        // hand back accept-anything against the public mesh.
+        for server in crate::oob::DEFAULT_SERVERS {
+            let (_, host) = split_server(server);
+            assert!(
+                !accept_invalid_certs(&host, true, false),
+                "{server}: a SOCKS proxy is not a man in the middle"
             );
         }
     }
