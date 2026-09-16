@@ -73,6 +73,12 @@ Terminal jobs auto-purge after 1 hour.
 
 **Encoder normalization**: If `"none"` is present anywhere, the list becomes `["none"]` only.
 
+**Unknown field names are refused, not ignored.** A key the tool does not recognise comes back as `isError: true` naming it and listing every accepted one — there is no `scan_id`, so nothing ran. This is deliberate: a misspelled `cookies` used to be dropped silently, and the scan then ran unauthenticated and reported `status: "done"` with zero findings, which is indistinguishable from a real clean result.
+
+**REST spellings are accepted as aliases**, so arguments written against the REST API still work: `url` → `target`, `cookie` → `cookies`, `header` → `headers`, `worker` → `workers`, `blind` → `blind_callback_url`. `cookie` also takes a single `Cookie:`-header string (`"sid=abc; lang=en"`) or `null`. REST's `callback_url` has no alias and is rejected: it is a webhook that would ship scan output to a host of your choosing.
+
+Prefer the canonical names — the aliases are a compatibility path, not a second API. They map a *spelling* only (a wrong value type is still refused), arguments are flat (REST's nested `"options": {...}` envelope is an unknown field), and they are absent from the published schema, so a client that validates against `inputSchema` before dispatching will reject a REST-spelled call. Never send both spellings of one option — that is a `duplicate field` error.
+
 **`wait` mode (agent-friendly short scans):**
 - `wait=false` (default): return `{scan_id, status: "queued"}` immediately; poll with `get_results_dalfox`.
 - `wait=true`: block until `done` / `error` / `cancelled`, or until `wait_timeout_sec` (default 300). Response matches `get_results_dalfox`. On timeout: `wait_timed_out: true`, job left running (cancel with `cancel_scan_dalfox` if needed).
@@ -82,11 +88,11 @@ Terminal jobs auto-purge after 1 hour.
 
 **Security note — an unusable `blind_callback_url` is refused, not ignored.** Setting it arms *stored* blind-XSS injection: `<script src=...>` payloads are written into every query, body, header and cookie parameter and stay in the target. An empty value normalizes to "no blind XSS"; anything without an `http(s)` scheme is `invalid_params`, because it would leave those payloads behind and never call back.
 
-**Security note — `cookie_from_raw` is deliberately absent** from the MCP surface. Exposing it would allow an MCP caller to cause the host to read an arbitrary file on disk and forward its cookies to an attacker-controlled target (same class of issue that produced GHSA-35wr-x7v6-9fv2 in v2). MCP callers must supply cookies directly via the `cookies` array.
+**Security note — `cookie_from_raw` is deliberately absent** from the MCP surface. Exposing it would allow an MCP caller to cause the host to read an arbitrary file on disk and forward its cookies to an attacker-controlled target (same class of issue that produced GHSA-35wr-x7v6-9fv2 in v2). MCP callers must supply cookies directly via the `cookies` array. Sending it anyway is an error, not a no-op, so the path is refused before any job exists.
 
 ## preflight_dalfox — Parameters
 
-Fewer options (no `include_*`, no blind, no workers — it only does discovery).
+Fewer options (no `include_*`, no blind, no workers — it only does discovery), and the smaller set is **enforced**: preflight sends no payloads, so pacing (`delay`, `rate_limit`, `scan_timeout`), `workers`, the WAF options, `remote_*`, `include_request`/`include_response`, the analysis switches and `wait`/`wait_timeout_sec` are all unknown fields here and are rejected. Do not reuse a `scan_with_dalfox` argument dict wholesale — build preflight's from the list below. Credentials and the target do apply (`cookies`, `headers`, `user_agent`): running preflight unauthenticated under-reports the parameters the real scan would find.
 
 ```json
 {

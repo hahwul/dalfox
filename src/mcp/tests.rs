@@ -624,41 +624,28 @@ async fn test_scan_with_dalfox_rejects_out_of_range_delay() {
 // from the MCP scan tool to close a server-side arbitrary-file-read /
 // outbound-exfiltration vector matching v2's GHSA-35wr-x7v6-9fv2.
 //
-// serde's default behaviour silently drops unknown fields, so the
-// request still deserializes and the scan still queues — but the host
-// filesystem is never touched, even when the caller points the field at
-// a sentinel "must not be read" path.
+// The field used to be dropped by serde's default lenient behaviour, so the
+// scan queued regardless; with `deny_unknown_fields` the call is refused
+// outright. Either way the host filesystem is never touched — this pins the
+// stronger guarantee: the path is rejected before a job exists at all, so no
+// later code path can pick it up.
 #[tokio::test]
-async fn test_scan_with_dalfox_ignores_cookie_from_raw_field() {
+async fn test_scan_with_dalfox_rejects_cookie_from_raw_field() {
     let mcp = DalfoxMcp::new();
     let body = serde_json::json!({
         "target": "http://127.0.0.1:1/?q=a",
-        "method": "GET",
-        "encoders": ["none"],
-        "timeout": 1,
-        "delay": 0,
-        "follow_redirects": false,
-        "include_request": false,
-        "include_response": false,
-        "skip_mining": false,
-        "skip_discovery": false,
-        "deep_scan": false,
-        "skip_ast_analysis": false,
         "workers": 1,
         // Sentinel path that should never be opened. /dev/full would
         // surface as an io error if the read code path resurrected.
         "cookie_from_raw": "/dev/full",
     });
-    let params: ScanWithDalfoxParams = serde_json::from_value(body)
-        .expect("unknown field cookie_from_raw should be ignored, not error");
-    let resp = mcp
-        .scan_with_dalfox(Parameters(params))
-        .await
-        .expect("scan_with_dalfox should queue without reading cookie_from_raw");
+    let err = serde_json::from_value::<ScanWithDalfoxParams>(body)
+        .expect_err("cookie_from_raw is not part of the MCP surface");
+    assert!(err.to_string().contains("unknown field `cookie_from_raw`"));
 
-    let payload = parse_result_json(&resp);
-    assert_eq!(payload["status"], "queued");
-    assert!(payload["scan_id"].as_str().is_some());
+    // And the tool itself never sees a job for it: with the arguments refused
+    // at the serde boundary, no scan is queued.
+    assert!(mcp.jobs.lock().expect("jobs mutex poisoned").is_empty());
 }
 
 #[test]
@@ -1751,6 +1738,85 @@ async fn test_scan_with_dalfox_sends_uppercased_method_on_the_wire() {
     );
 }
 
+/// The end of the chain the other alias tests only cover in pieces: arguments
+/// written in the REST spellings must put the credentials **on the wire**.
+/// A unit test that stops at `ScanArgs` would still pass if the value were
+/// dropped later, and the whole bug class here is a scan that runs
+/// unauthenticated and reports itself clean.
+#[tokio::test]
+async fn test_rest_spelled_cookie_and_header_reach_the_wire() {
+    use axum::{Router, extract::Request, response::Html, routing::any};
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    let seen: Arc<StdMutex<Vec<(String, String)>>> = Arc::new(StdMutex::new(Vec::new()));
+    let seen_for_app = seen.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind header-recorder listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route(
+            "/{*rest}",
+            any(move |req: Request| {
+                let seen = seen_for_app.clone();
+                async move {
+                    let hdr = |n: &str| {
+                        req.headers()
+                            .get(n)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    seen.lock()
+                        .expect("seen mutex poisoned")
+                        .push((hdr("cookie"), hdr("x-alias-test")));
+                    Html("<html><body>ok</body></html>")
+                }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    // Exactly the shape an agent that read the REST docs would send.
+    let params: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "url": format!("http://{addr}/page?q=a"),
+        "cookie": "sid=abc; lang=en",
+        "header": ["X-Alias-Test: 1"],
+        "worker": 1,
+        "skip_mining": true,
+        "skip_ast_analysis": true,
+        "max_payloads_per_param": 1,
+        "wait": true,
+        "wait_timeout_sec": 30,
+    }))
+    .expect("REST-spelled arguments deserialize");
+
+    DalfoxMcp::new()
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect("the scan must run");
+
+    let seen = seen.lock().expect("seen mutex poisoned").clone();
+    assert!(!seen.is_empty(), "the scan must have reached the target");
+    // Both are also injection *targets* (cookie and header parameters get
+    // probed), so a handful of requests carry a payload in place of the
+    // original value. What must never happen is a request going out with the
+    // credential missing entirely — that is the unauthenticated scan.
+    assert!(
+        seen.iter().all(|(c, h)| !c.is_empty() && !h.is_empty()),
+        "no request may go out without the cookie/header the aliases asked for; saw {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|(c, _)| c == "sid=abc; lang=en"),
+        "the `cookie` alias's value must reach the wire verbatim; saw {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|(_, h)| h == "1"),
+        "the `header` alias's value must reach the wire verbatim; saw {seen:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_scan_with_dalfox_rejects_unsupported_method() {
     let mcp = DalfoxMcp::new();
@@ -2426,4 +2492,198 @@ fn get_results_documents_the_failed_request_counter_it_returns() {
         desc.contains("requests_failed"),
         "get_results_dalfox returns progress.requests_failed but never says so"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Tool-argument surface: unknown fields are refused, REST spellings are mapped
+// ---------------------------------------------------------------------------
+
+/// The false-clean this guards against: rmcp deserializes a tool call's
+/// `arguments` straight into `ScanWithDalfoxParams`, so before
+/// `deny_unknown_fields` a misspelled (or REST-spelled) `cookies` was dropped
+/// on the floor. The scan then ran *unauthenticated* against an authenticated
+/// endpoint, found nothing, and settled `done` with zero findings — a clean
+/// report indistinguishable from a real one. Refusing the call is the only
+/// outcome the caller can act on.
+#[test]
+fn scan_params_reject_an_unknown_field() {
+    let err = serde_json::from_value::<ScanWithDalfoxParams>(serde_json::json!({
+        "target": "https://example.com/?q=1",
+        "cookiez": ["session=abc"],
+    }))
+    .expect_err("a misspelled option must not be silently dropped");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("unknown field `cookiez`"),
+        "the error must name the offending key so the caller can fix it: {msg}"
+    );
+    assert!(
+        msg.contains("`cookies`"),
+        "and must list the accepted spellings: {msg}"
+    );
+}
+
+/// `callback_url` is a REST option deliberately withheld from the agent-facing
+/// surface (it POSTs scan results to a caller-named host). Withholding it is
+/// only meaningful if asking for it fails loudly — silently ignoring it would
+/// leave the caller believing results were delivered somewhere.
+#[test]
+fn scan_params_reject_the_withheld_rest_options() {
+    for withheld in ["callback_url", "cookie_from_raw"] {
+        let err = serde_json::from_value::<ScanWithDalfoxParams>(serde_json::json!({
+            "target": "https://example.com/",
+            withheld: "http://attacker.example/collect",
+        }))
+        .expect_err("{withheld} is not part of the MCP surface");
+        assert!(
+            err.to_string()
+                .contains(&format!("unknown field `{withheld}`")),
+            "{withheld} must be refused by name, not quietly ignored"
+        );
+    }
+}
+
+/// An agent that learned the option names from the REST docs must still get the
+/// scan it asked for. Every REST spelling maps onto the MCP field of the same
+/// meaning; the values have to actually land, not merely parse.
+#[test]
+fn scan_params_accept_the_rest_spellings() {
+    let p: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "url": "https://example.com/?q=1",
+        "cookie": "session=abc; lang=en",
+        "header": ["Authorization: Bearer t"],
+        "worker": 9,
+        "blind": "https://cb.example/x",
+    }))
+    .expect("REST-spelled arguments deserialize");
+
+    assert_eq!(p.target, "https://example.com/?q=1");
+    // The REST body carries cookies as one `Cookie:`-header string; it becomes
+    // the single-element list `from_rest_options` also produces.
+    assert_eq!(p.cookies, vec!["session=abc; lang=en".to_string()]);
+    assert_eq!(p.headers, vec!["Authorization: Bearer t".to_string()]);
+    assert_eq!(p.workers, 9);
+    assert_eq!(
+        p.blind_callback_url.as_deref(),
+        Some("https://cb.example/x")
+    );
+}
+
+/// The lenient cookie shape must not disturb what today's MCP callers send: a
+/// list is passed through element-for-element, and only a blank *string* (the
+/// REST "no cookies" spelling) collapses to none.
+#[test]
+fn scan_params_cookie_list_form_is_unchanged() {
+    let list: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "target": "https://example.com/",
+        "cookies": ["session=abc", "lang=en"],
+    }))
+    .expect("the canonical list form still deserializes");
+    assert_eq!(
+        list.cookies,
+        vec!["session=abc".to_string(), "lang=en".to_string()]
+    );
+
+    let blank: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "target": "https://example.com/",
+        "cookie": "   ",
+    }))
+    .expect("a blank Cookie string deserializes");
+    assert!(
+        blank.cookies.is_empty(),
+        "a blank Cookie header means no cookies, not one empty cookie"
+    );
+
+    // REST's `cookie` is `Option<String>`, so `null` is "no cookies" there and
+    // returns 200. An SDK serializing a request object emits `null` for every
+    // unset field, so accepting the name but rejecting the value would make
+    // the alias useless to exactly those callers.
+    for null_spelling in ["cookie", "cookies"] {
+        let p: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+            "target": "https://example.com/",
+            null_spelling: serde_json::Value::Null,
+        }))
+        .unwrap_or_else(|e| panic!("`{null_spelling}: null` must mean no cookies: {e}"));
+        assert!(p.cookies.is_empty());
+    }
+}
+
+/// The caller of a rejected tool call is a model deciding what to send next,
+/// so a wrong-shaped `cookies` has to say what the right shapes are — serde's
+/// stock untagged-enum error ("data did not match any variant of untagged enum
+/// StringOrSeq") names an internal type and describes neither.
+#[test]
+fn scan_params_cookie_type_error_names_both_accepted_shapes() {
+    let err = serde_json::from_value::<ScanWithDalfoxParams>(serde_json::json!({
+        "target": "https://example.com/",
+        "cookies": 42,
+    }))
+    .expect_err("a number is neither shape");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("name=value") && msg.contains("Cookie:"),
+        "the error must describe both accepted shapes: {msg}"
+    );
+    assert!(
+        !msg.contains("untagged"),
+        "and must not leak serde internals: {msg}"
+    );
+}
+
+#[test]
+fn preflight_params_share_the_scan_tool_argument_policy() {
+    let p: PreflightDalfoxParams = serde_json::from_value(serde_json::json!({
+        "url": "https://example.com/?q=1",
+        "cookie": "session=abc",
+        "header": ["X-Test: 1"],
+    }))
+    .expect("REST-spelled preflight arguments deserialize");
+    assert_eq!(p.target, "https://example.com/?q=1");
+    assert_eq!(p.cookies, vec!["session=abc".to_string()]);
+    assert_eq!(p.headers, vec!["X-Test: 1".to_string()]);
+
+    let err = serde_json::from_value::<PreflightDalfoxParams>(serde_json::json!({
+        "target": "https://example.com/",
+        "headerz": ["X-Test: 1"],
+    }))
+    .expect_err("preflight must refuse unknown fields too");
+    assert!(err.to_string().contains("unknown field `headerz`"));
+}
+
+/// The generated tool schema is what a model writes a call from, so it must
+/// advertise exactly one spelling per option (the aliases are a compatibility
+/// path, not a menu) and carry the `deny_unknown_fields` policy as
+/// `additionalProperties: false` for clients that validate before calling.
+#[test]
+fn scan_tool_schema_advertises_one_spelling_and_closes_the_object() {
+    let schema = serde_json::to_value(rmcp::schemars::schema_for!(ScanWithDalfoxParams))
+        .expect("the scan tool schema serializes");
+
+    assert_eq!(
+        schema.get("additionalProperties"),
+        Some(&serde_json::json!(false)),
+        "deny_unknown_fields must reach the published schema"
+    );
+
+    let props = schema["properties"]
+        .as_object()
+        .expect("the schema has properties");
+    for canonical in [
+        "target",
+        "cookies",
+        "headers",
+        "workers",
+        "blind_callback_url",
+    ] {
+        assert!(props.contains_key(canonical), "missing {canonical}");
+    }
+    for alias in ["url", "cookie", "header", "worker", "blind"] {
+        assert!(
+            !props.contains_key(alias),
+            "the REST alias `{alias}` must stay out of the schema; \
+             advertising both spellings invites a model to send both"
+        );
+    }
 }

@@ -479,19 +479,18 @@ end
 #                     no out-of-band channel; the agent polls or uses wait=true.
 #   wait,             MCP-only: collapses submit+poll into one tool call for
 #   wait_timeout_sec  agents. REST clients poll GET /scan/{id} instead.
-#   cookie, header,   REST-only *legacy spellings*. These four diverged from
-#   worker, blind     MCP (`cookies`, `headers`, `workers`,
-#                     `blind_callback_url`) and, before
-#                     `deny_unknown_fields`, an MCP-spelled request was
-#                     accepted by REST with 200 and silently discarded — a scan
-#                     with no cookies reported as clean. REST now accepts the
-#                     MCP spelling as a serde alias, so the canonical name
-#                     works on both surfaces and an unknown one 400s. The old
-#                     names stay accepted so pre-3.x REST clients keep working,
-#                     which is what makes them REST-only rather than a
-#                     divergence: nothing is silently dropped in either
-#                     direction. Adding them to MCP would advertise a legacy
-#                     spelling on the newer surface, so they are not mirrored.
+#   cookie, header,   REST-only *in the published schema*. These four diverged
+#   worker, blind     from MCP (`cookies`, `headers`, `workers`,
+#                     `blind_callback_url`) and, before `deny_unknown_fields`
+#                     on each surface, a request in the other's spelling was
+#                     accepted and silently discarded — a scan with no cookies
+#                     reported as clean. Each surface now accepts the other's
+#                     spelling as a serde alias, so nothing is dropped in
+#                     either direction and an unknown name is refused. They
+#                     stay off the MCP *schema* on purpose: advertising two
+#                     spellings for one option invites a model to send both
+#                     (which is a duplicate-field error). The wire check below
+#                     proves MCP honours them anyway.
 INTENTIONAL_REST_ONLY = Set{"callback_url", "cookie", "header", "worker", "blind"}
 INTENTIONAL_MCP_ONLY  = Set{"wait", "wait_timeout_sec"}
 
@@ -817,6 +816,8 @@ begin
         {"scan_with_dalfox", "unknown waf_bypass", %({"target":#{VULN_URL.to_json},"waf_bypass":"maybe"})},
         {"scan_with_dalfox", "unknown method verb", %({"target":#{VULN_URL.to_json},"method":"FETCH"})},
         {"scan_with_dalfox", "target is not a string", %({"target":42})},
+        {"scan_with_dalfox", "misspelled option", %({"target":#{VULN_URL.to_json},"cookiez":["a=b"]})},
+        {"scan_with_dalfox", "withheld callback_url", %({"target":#{VULN_URL.to_json},"callback_url":"http://127.0.0.1:1/x"})},
         {"get_results_dalfox", "unknown scan_id", %({"scan_id":"nope-#{Time.utc.to_unix_ms}"})},
         {"cancel_scan_dalfox", "unknown scan_id", %({"scan_id":"nope-#{Time.utc.to_unix_ms}"})},
       ]
@@ -910,6 +911,20 @@ begin
     end
   end
   report.check_empty("MCP-spelled options are not silently swallowed by REST", silently_ignored)
+
+  # The mirror image: MCP must run the scan a REST-shaped argument dict asks
+  # for. `deny_unknown_fields` without these aliases would turn "silently
+  # scanned without cookies" into "the tool cannot be called at all".
+  rest_spelled = %({"url":#{VULN_URL.to_json},"cookie":"sid=abc; lang=en","header":["X-Smoke: 1"],"worker":2,"blind":"http://127.0.0.1:1/cb"})
+  accepted, accepted_err = mcp.call_tool("scan_with_dalfox", rest_spelled, 30.seconds)
+  report.check("MCP accepts the REST spellings (url/cookie/header/worker/blind)",
+    accepted_err.try(&.to_json) || (accepted.try(&.to_json) || "no reply")[0, 200]) do
+    accepted.try(&.["scan_id"]?).try(&.as_s?) != nil
+  end
+  if aliased_id = accepted.try(&.["scan_id"]?).try(&.as_s?)
+    mcp.call_tool("cancel_scan_dalfox", %({"scan_id":#{aliased_id.to_json}}), 20.seconds)
+    mcp.call_tool("delete_scan_dalfox", %({"scan_id":#{aliased_id.to_json}}), 20.seconds)
+  end
 ensure
   # Teardown order mirrors dependency order: the scanners first, then the target
   # they were pointed at.

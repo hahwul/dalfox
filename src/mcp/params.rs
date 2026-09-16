@@ -1,6 +1,136 @@
 //! MCP tool parameter definitions (`*Params` structs + serde defaults).
+//!
+//! Two serde policies here are load-bearing, and they only work as a pair.
+//!
+//! **`deny_unknown_fields` on every `*Params` struct.** rmcp deserializes a
+//! tool call's `arguments` object straight into these structs, so without it
+//! serde silently drops any key it does not recognise and the tool runs with
+//! that option missing. For a scanner that is the worst failure mode there is:
+//! a misspelled `cookies` means the scan runs *unauthenticated*, finds nothing,
+//! and reports `status: "done"` with zero findings — a false clean that looks
+//! exactly like a real one. A rejected call is recoverable; a silently
+//! downgraded scan is not.
+//!
+//! The rejection reaches the caller as a tool result with `isError: true` whose
+//! text is serde's own "unknown field `x`, expected one of ..." — it names the
+//! offending key and lists every accepted spelling, including the aliases
+//! below. Note the channel: rmcp deserializes the arguments *before* the tool
+//! body runs, so this arrives as `isError`, while the tool's own validation
+//! (`workers` out of range, unknown encoder) returns a JSON-RPC
+//! `invalid_params` error. Both are loud, but a client that only inspects
+//! `error` sees just the second; that split is a known rmcp-level divergence
+//! tracked against `server_mcp_smoke`, not something this policy introduces.
+//! What matters here is that neither form carries a `scan_id`, so a rejected
+//! call cannot be mistaken for a scan that ran.
+//!
+//! `schemars` renders the same policy into the generated tool schema as
+//! `"additionalProperties": false`, so a schema-validating client can catch the
+//! mistake before it ever calls.
+//!
+//! **REST spellings accepted as `#[serde(alias)]`.** The REST server
+//! ([`crate::server::types::ScanOptions`]) names four of these options
+//! differently — `cookie`, `header`, `worker`, `blind`, plus `url` for the
+//! target — and accepts the MCP spellings as aliases so a caller can move
+//! either way. Without the mirror image here, `deny_unknown_fields` would turn
+//! an agent that read the REST docs from "silently scanned without cookies"
+//! into "cannot call the tool at all". The aliases are the same options under
+//! another name, so mapping them beats refusing them.
+//!
+//! They are a compatibility path, not a second API, and they cover less than
+//! the name suggests: an alias maps a *spelling*, so the wrong value type is
+//! still refused (`cookie` is the one that also takes REST's `Cookie:`-header
+//! string and `null`), REST's nested `{"options": {...}}` envelope is not
+//! accepted, and the generated schema advertises the canonical MCP spelling
+//! alone — so a client that validates arguments against `inputSchema` before
+//! dispatching rejects a REST-spelled call before it ever reaches us. What the
+//! aliases buy is the pass-through client and the model writing JSON from the
+//! REST docs, which is where the silent-drop bug actually came from. The
+//! schema stays single-spelling deliberately: advertising both invites a model
+//! to send both, and that is a `duplicate field` error.
+//!
+//! Deliberate asymmetries that are *not* aliased: REST's `callback_url`
+//! (a result-exfiltration channel that stays off the agent-facing surface, like
+//! `cookie_from_raw`), and MCP's `wait` / `wait_timeout_sec` (call-transport
+//! knobs with no REST equivalent — REST clients poll `GET /scan/{id}`).
+//!
+//! [`PreflightDalfoxParams`] takes a smaller set than the scan tool on purpose:
+//! it sends no payloads, so pacing, workers, WAF handling, blind XSS and
+//! waiting describe nothing it does. REST has no separate preflight body —
+//! `POST /preflight` reuses the scan request and ignores what it cannot use —
+//! so this is the one place the two surfaces really differ. The trade is
+//! deliberate: a refused option here costs one retry against an error that
+//! names it, and preflight returns an estimate, which is visibly wrong when it
+//! is wrong. `job::tests::preflight_accepts_a_documented_subset_of_the_scan_options`
+//! holds the exact list so it cannot drift into an accident.
 
 use super::*;
+
+/// Accept either the MCP spelling (a list of `name=value` cookies) or the REST
+/// spelling (a single `Cookie:`-header string), mirroring
+/// `server::types::string_or_seq_cookie` in the other direction.
+///
+/// A single string becomes a one-element list, which is exactly what the REST
+/// path produces (`from_rest_options` wraps its joined header value in a
+/// `vec![..]`), so both surfaces hand the scanner an identical `cookies`. A
+/// blank string yields no cookies rather than one empty cookie. A list is
+/// passed through untouched — this must not change what today's MCP callers
+/// already get.
+///
+/// A hand-written visitor rather than an `#[serde(untagged)]` enum: serde's
+/// untagged error is "data did not match any variant of untagged enum
+/// StringOrSeq", which names an internal type and never says what shape was
+/// wanted. This surface's caller is a language model reading the error to
+/// decide what to send next, so the message has to describe the two shapes.
+fn cookies_string_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct CookiesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for CookiesVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str(
+                "a list of \"name=value\" cookies, or a single `Cookie:` header string \
+                 such as \"sid=abc; lang=en\"",
+            )
+        }
+
+        /// REST's `cookie` is `Option<String>`, so `"cookie": null` there means
+        /// "no cookies" and returns `200`. An argument dict with `null` for
+        /// every unset option is what an SDK serializing a dataclass emits, so
+        /// the alias would otherwise accept the name and reject the value.
+        //
+        // Only `visit_unit` is needed: `deserialize_any` over JSON delivers
+        // `null` there, and `visit_none` is reachable only through an `Option`
+        // deserializer, which this field is not.
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Vec::new())
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(if v.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![v.to_string()]
+            })
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(64));
+            while let Some(v) = seq.next_element::<String>()? {
+                out.push(v);
+            }
+            Ok(out)
+        }
+    }
+
+    deserializer.deserialize_any(CookiesVisitor)
+}
 
 /* ---------------------------
  * Tool Parameter Definitions
@@ -8,9 +138,12 @@ use super::*;
  */
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ScanWithDalfoxParams {
     /// Target URL to scan for XSS vulnerabilities. Must start with http:// or https://.
     /// Example: "https://example.com/search?q=test"
+    // `url` is the REST envelope's spelling (`ScanRequest` accepts both).
+    #[serde(alias = "url")]
     pub target: String,
 
     /// Specific parameters to test. Supports location hints via "name:location" syntax.
@@ -30,12 +163,13 @@ pub(crate) struct ScanWithDalfoxParams {
 
     /// Custom HTTP headers. Each entry as "Name: Value".
     /// Example: ["Authorization: Bearer token", "X-Custom: value"]
-    #[serde(default)]
+    #[serde(alias = "header", default)]
     pub headers: Vec<String>,
 
     /// Cookies to include. Each entry as "name=value".
     /// Example: ["session=abc123", "lang=en"]
-    #[serde(default)]
+    /// A single `Cookie:`-header string (the REST spelling) is also accepted.
+    #[serde(alias = "cookie", default, deserialize_with = "cookies_string_or_seq")]
     pub cookies: Vec<String>,
 
     /// Custom User-Agent header string.
@@ -124,11 +258,11 @@ pub(crate) struct ScanWithDalfoxParams {
     /// empty for no blind XSS — setting it writes stored `<script src=...>`
     /// payloads into every parameter of the target, so a value that could never
     /// receive a callback is rejected rather than left behind. Default: none.
-    #[serde(default)]
+    #[serde(alias = "blind", default)]
     pub blind_callback_url: Option<String>,
 
     /// Number of concurrent workers (1-500). Default: 50
-    #[serde(default = "default_workers")]
+    #[serde(alias = "worker", default = "default_workers")]
     #[schemars(range(min = 1, max = 500))]
     pub workers: usize,
 
@@ -248,6 +382,7 @@ pub(super) fn default_true() -> bool {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct GetResultsDalfoxParams {
     /// The scan_id returned by scan_with_dalfox when the scan was started.
     pub scan_id: String,
@@ -264,6 +399,7 @@ pub(crate) struct GetResultsDalfoxParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ListScansDalfoxParams {
     /// Optional status filter: "queued", "running", "done", "error", or "cancelled". Omit to list all.
     #[serde(default)]
@@ -281,12 +417,14 @@ pub(crate) struct ListScansDalfoxParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct CancelScanDalfoxParams {
     /// The scan_id of the scan to cancel.
     pub scan_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct DeleteScanDalfoxParams {
     /// The scan_id of the scan to delete from memory.
     /// The scan must be in a terminal state (done, error, cancelled).
@@ -294,8 +432,10 @@ pub(crate) struct DeleteScanDalfoxParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PreflightDalfoxParams {
     /// Target URL to analyze. Must start with http:// or https://.
+    #[serde(alias = "url")]
     pub target: String,
 
     /// Accepted for symmetry with scan_with_dalfox but NOT used by preflight:
@@ -314,11 +454,12 @@ pub(crate) struct PreflightDalfoxParams {
     pub data: Option<String>,
 
     /// Custom HTTP headers. Each entry as "Name: Value".
-    #[serde(default)]
+    #[serde(alias = "header", default)]
     pub headers: Vec<String>,
 
     /// Cookies to include. Each entry as "name=value".
-    #[serde(default)]
+    /// A single `Cookie:`-header string (the REST spelling) is also accepted.
+    #[serde(alias = "cookie", default, deserialize_with = "cookies_string_or_seq")]
     pub cookies: Vec<String>,
 
     /// Custom User-Agent header string.

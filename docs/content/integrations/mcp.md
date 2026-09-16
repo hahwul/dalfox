@@ -98,7 +98,8 @@ expired certs. Mirrors the `--insecure` CLI flag.
 same-origin `<script src>` bundles at preflight time and run AST DOM-XSS
 analysis on them. Useful for SPAs where all sink logic lives in external
 bundles and the page has no server-side reflection. Caps: 16 files,
-512 KiB per file; honours `include_url`/`exclude_url` filters.
+512 KiB per file. (The `--include-url` / `--exclude-url` scope filters are
+CLI-only; there is no MCP argument for them, and sending one is an error.)
 
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also emit
 informational `[I]` findings for outdated / known-vulnerable JS libraries
@@ -161,6 +162,50 @@ The block above is an excerpt. Every field the tool accepts, with its default �
 (`"user=admin&pass=test"`) or a JSON string. `cookies` takes `"name=value"`
 entries, `headers` takes full `"Name: Value"` lines, and `user_agent` overrides
 the `User-Agent` header.
+
+A field name the tool does not recognise is **rejected**: the call comes back
+with `isError: true` and a message naming the offending key and listing every
+accepted one. It is not silently dropped — a misspelled `cookies` would
+otherwise scan the target unauthenticated, find nothing, and report
+`status: "done"` with no findings, a clean result indistinguishable from a real
+one. A rejected call carries no `scan_id`, so there is nothing to poll and no
+way to mistake it for a scan that ran.
+
+Because of that, the [REST API](../server/) spellings are accepted
+as aliases: `url` for `target`, `cookie` for `cookies`, `header` for `headers`,
+`worker` for `workers`, and `blind` for `blind_callback_url`. `cookie` also
+takes a single `Cookie:`-header string (`"sid=abc; lang=en"`) in place of the
+list. The canonical MCP names above are what the tool schema advertises; the
+aliases exist so arguments written against the REST docs still run the scan
+they describe.
+
+Two REST options are deliberately absent here rather than aliased, and asking
+for them is an error: `callback_url` (a webhook that would let a model ship
+scan output to a host of its choosing) and `cookie_from_raw` (a server-side
+file read). Pass cookies directly via `cookies`.
+
+Three limits on the aliases, so they are not mistaken for a general REST
+compatibility mode:
+
+- **Arguments are flat.** REST nests its options under `options`; the tool
+  takes them at the top level, and `options` is an unknown field.
+- **They are names, not shapes.** An alias maps the spelling only — a value of
+  the wrong type is still rejected. The one exception is `cookie`, which takes
+  REST's single `Cookie:`-header string (and `null`, meaning no cookies).
+- **They are absent from the published schema**, which advertises the canonical
+  MCP spelling alone. A client that validates arguments against `inputSchema`
+  before dispatching will reject a REST-spelled call before it reaches the
+  server; the aliases help callers that pass arguments through unvalidated.
+  Prefer the canonical names.
+
+`preflight_dalfox` accepts a deliberately **smaller** set than
+`scan_with_dalfox` — it sends no payloads, so options describing pacing,
+workers, WAF handling, blind XSS or waiting have nothing to act on and are
+refused. Its own field list is below. (`POST /preflight` on the REST side
+reuses the full scan body and ignores what it cannot use, so this is the one
+place the two surfaces genuinely differ.) Credentials and the target do reach
+it: sending preflight without cookies would under-report the parameters an
+authenticated scan would find.
 
 `delay` (default `0`, range `0`–`9999`) waits that many milliseconds between
 requests, `follow_redirects` (default `false`) makes the scanner follow `3xx`

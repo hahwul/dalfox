@@ -214,7 +214,7 @@ debug = false
 | `retries` | int | `0` | 5xx / 일시적 전송 오류를 이 횟수만큼 재시도 (`0` = 끔; 429는 항상 재시도) |
 | `retry_delay` | int | `1000` | `retries` 시도 사이의 기본 백오프 (ms, 지수 증가) |
 | `proxy` | string | — | 프록시 URL |
-| `insecure` | bool | `true` | TLS 인증서 검증 건너뜀; 검증을 강제하려면 `false`로 설정 |
+| `insecure` | bool | `true` | TLS 인증서 검증 건너뜀; 검증을 강제하려면 `false`로 설정. 스캔 대상과 `--blind-oob=`로 지정한 OAST 서버에 적용되며, 공개 interactsh 메시는 항상 검증 |
 | `follow_redirects` | bool | `false` | 3xx 응답 추적 |
 | `ignore_return` | array | `[]` | 무시할 HTTP 상태 코드 |
 

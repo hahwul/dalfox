@@ -214,7 +214,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `retries` | int | `0` | Retry 5xx / transient transport errors this many times (`0` = off; 429 always retried) |
 | `retry_delay` | int | `1000` | Base backoff (ms) between `retries` attempts (exponential) |
 | `proxy` | string | — | Proxy URL |
-| `insecure` | bool | `true` | Skip TLS certificate verification; set `false` to enforce validation |
+| `insecure` | bool | `true` | Skip TLS certificate verification; set `false` to enforce validation. Covers the scan target and an OAST server named with `--blind-oob=`; the public interactsh mesh is always verified |
 | `follow_redirects` | bool | `false` | Follow 3xx responses |
 | `ignore_return` | array | `[]` | HTTP status codes to ignore |
 
