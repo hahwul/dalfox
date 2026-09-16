@@ -98,6 +98,8 @@ dalfox https://target.app --blind-oob=oast.fun         # pick servers
 
 Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes.
 
+`--insecure` does **not** reach the public mesh. It is a statement about the scan target, which you do not control; the OAST server is infrastructure Dalfox picked, and that channel carries your `--blind-oob-secret` and the session key that reads your callbacks. The public servers present valid certificates, so they are always verified. `--insecure` still applies to a server you named yourself with `--blind-oob=`, which is the case it exists for — a self-hosted interactsh behind a self-signed or hostname-mismatched certificate.
+
 ## 7. Dry-run first
 
 Use `--dry-run` to preview what Dalfox would scan:

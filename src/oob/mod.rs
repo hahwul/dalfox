@@ -33,6 +33,17 @@ pub const DEFAULT_SERVERS: &[&str] = &[
     "oast.me",
 ];
 
+/// Is `host` one of the public [`DEFAULT_SERVERS`]?
+///
+/// `host` is the bare `host[:port]` produced by the interactsh client's own
+/// server parsing (scheme and path stripped, lowercased), so a bare domain, a
+/// `https://` URL and a trailing-dot FQDN for the same mesh node all answer the
+/// same. Anything else — a self-hosted instance, or a mesh domain on a
+/// non-standard port — is a server the operator named, not one dalfox picked.
+pub(crate) fn is_default_server(host: &str) -> bool {
+    DEFAULT_SERVERS.iter().any(|d| d.eq_ignore_ascii_case(host))
+}
+
 /// Static configuration for an OOB session, derived from CLI/config.
 #[derive(Debug, Clone)]
 pub struct OobConfig {
@@ -45,6 +56,9 @@ pub struct OobConfig {
     /// HTTP knobs mirrored from the scan so the OOB client behaves like the scanner.
     pub timeout: u64,
     pub proxy: Option<String>,
+    /// The scan's `--insecure` posture. Applied only to a server the operator
+    /// named themselves — see `interactsh::accept_invalid_certs`, which is
+    /// where this becomes an actual TLS decision.
     pub insecure: bool,
 }
 

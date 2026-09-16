@@ -98,6 +98,8 @@ dalfox https://target.app --blind-oob=oast.fun         # pick servers
 
 자체 호스팅 서버라면 `--blind-oob-secret`을 쓰고, 스캔이 끝난 뒤 폴링을 얼마나 더 이어갈지는 `--blind-oob-wait`으로 정합니다.
 
+`--insecure`는 공개 메시에는 **적용되지 않습니다**. 이 옵션은 여러분이 통제하지 않는 스캔 대상에 대한 선택인 반면, OAST 서버는 Dalfox가 고른 인프라이고 그 채널에는 `--blind-oob-secret`과 콜백을 읽어오는 세션 키가 실립니다. 공개 서버들은 정상 인증서를 쓰므로 항상 검증합니다. `--blind-oob=`로 직접 지정한 서버에는 `--insecure`가 그대로 적용됩니다. 자체 서명이나 호스트명이 맞지 않는 인증서를 쓰는 자체 호스팅 interactsh — 이 옵션이 원래 필요한 경우입니다.
+
 ## 7. 먼저 Dry-run 실행
 
 `--dry-run`으로 Dalfox가 무엇을 스캔할지 미리 봅니다.

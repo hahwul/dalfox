@@ -90,10 +90,12 @@ impl InteractshClient {
         let correlation_id = rand_label(CORRELATION_ID_LEN);
         let secret_key = uuid::Uuid::new_v4().to_string();
 
+        let (base, host) = split_server(server);
+
         let mut builder = Client::builder()
             .timeout(Duration::from_secs(config.timeout.max(1)))
             .no_proxy()
-            .danger_accept_invalid_certs(config.insecure);
+            .danger_accept_invalid_certs(accept_invalid_certs(&host, config.insecure));
         if let Some(pxy) = config.proxy.as_ref()
             && let Ok(proxy) = reqwest::Proxy::all(pxy)
         {
@@ -101,7 +103,6 @@ impl InteractshClient {
         }
         let http = builder.build()?;
 
-        let (base, host) = split_server(server);
         let callback_scheme = if base.starts_with("http://") {
             "http".to_string()
         } else {
@@ -271,6 +272,28 @@ impl InteractshClient {
 /// for self-hosted servers behind a TLS-terminating proxy (and for tests). The
 /// returned host (no scheme/path, trailing dot stripped, lowercased) is what
 /// gets embedded in payload callback hosts.
+/// Whether the OAST client may skip certificate verification for `host`.
+///
+/// `--insecure` is a statement about the *scan target*, which dalfox does not
+/// trust and does not control. The OAST server is the opposite: it is our own
+/// infrastructure, chosen by us, and this channel carries secrets the target
+/// never sees — `--blind-oob-secret` rides in the `Authorization` header and
+/// the session `secret_key` rides in the poll URL's query string. An on-path
+/// attacker who can MITM the connection reads both, and can then inject forged
+/// interactions (our RSA public key is, by definition, public), so callbacks
+/// dalfox reports as blind XSS need not have happened at all.
+///
+/// So the scan's TLS posture is honoured only for a server the operator named
+/// themselves with `--blind-oob`, which is what the original
+/// accept-everything default was actually for: a self-hosted interactsh behind
+/// a self-signed or hostname-mismatched certificate. The public mesh
+/// ([`crate::oob::DEFAULT_SERVERS`]) presents valid certificates and is always
+/// verified — `--insecure` cannot reach it, because nobody asked for the
+/// public mesh to be trusted less.
+fn accept_invalid_certs(host: &str, config_insecure: bool) -> bool {
+    config_insecure && !crate::oob::is_default_server(host)
+}
+
 fn split_server(server: &str) -> (String, String) {
     let s = server.trim();
     let (scheme, rest) = if let Some(r) = s.strip_prefix("https://") {
@@ -309,6 +332,64 @@ mod tests {
             timeout: 10,
             proxy: None,
             insecure: false,
+        }
+    }
+
+    #[test]
+    fn insecure_never_reaches_the_public_oast_mesh() {
+        // `--insecure` is about the scan target. The public mesh is dalfox's
+        // own pick, and the channel carries the session secret_key (poll query
+        // string) and `--blind-oob-secret` (Authorization header), so an
+        // on-path attacker who could MITM it would read both tokens and could
+        // inject forged interactions with our own public key.
+        for server in crate::oob::DEFAULT_SERVERS {
+            let (_, host) = split_server(server);
+            assert!(
+                !accept_invalid_certs(&host, true),
+                "{server}: the public mesh must be verified even under --insecure"
+            );
+            assert!(!accept_invalid_certs(&host, false));
+        }
+
+        // A mesh domain written as a URL or with a trailing dot is the same
+        // node, and must not slip past the check on spelling alone.
+        for spelling in [
+            "https://oast.pro",
+            "OAST.PRO",
+            "oast.pro.",
+            "https://oast.fun/",
+        ] {
+            let (_, host) = split_server(spelling);
+            assert!(
+                !accept_invalid_certs(&host, true),
+                "{spelling} is the public mesh however it is spelled"
+            );
+        }
+    }
+
+    #[test]
+    fn insecure_still_covers_an_operator_named_server() {
+        // The use case the accept-everything default was added for: a
+        // self-hosted interactsh behind a self-signed or hostname-mismatched
+        // certificate. `--blind-oob=my-collab.internal --insecure` keeps
+        // working.
+        for server in [
+            "my-collab.internal",
+            "https://oast.corp.example",
+            "http://127.0.0.1:8080",
+            // A mesh domain on a non-standard port is not the public endpoint.
+            "oast.pro:8443",
+        ] {
+            let (_, host) = split_server(server);
+            assert!(
+                accept_invalid_certs(&host, true),
+                "{server} was named by the operator; --insecure must apply"
+            );
+            // And without --insecure it is still verified, as before.
+            assert!(
+                !accept_invalid_certs(&host, false),
+                "{server} must be verified when --insecure was not passed"
+            );
         }
     }
 
