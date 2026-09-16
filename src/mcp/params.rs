@@ -55,22 +55,49 @@ use super::*;
 /// blank string yields no cookies rather than one empty cookie. A list is
 /// passed through untouched — this must not change what today's MCP callers
 /// already get.
+///
+/// A hand-written visitor rather than an `#[serde(untagged)]` enum: serde's
+/// untagged error is "data did not match any variant of untagged enum
+/// StringOrSeq", which names an internal type and never says what shape was
+/// wanted. This surface's caller is a language model reading the error to
+/// decide what to send next, so the message has to describe the two shapes.
 fn cookies_string_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum StringOrSeq {
-        String(String),
-        Seq(Vec<String>),
+    struct CookiesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for CookiesVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str(
+                "a list of \"name=value\" cookies, or a single `Cookie:` header string \
+                 such as \"sid=abc; lang=en\"",
+            )
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(if v.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![v.to_string()]
+            })
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(64));
+            while let Some(v) = seq.next_element::<String>()? {
+                out.push(v);
+            }
+            Ok(out)
+        }
     }
 
-    Ok(match StringOrSeq::deserialize(deserializer)? {
-        StringOrSeq::String(s) if s.trim().is_empty() => Vec::new(),
-        StringOrSeq::String(s) => vec![s],
-        StringOrSeq::Seq(v) => v,
-    })
+    deserializer.deserialize_any(CookiesVisitor)
 }
 
 /* ---------------------------

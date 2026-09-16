@@ -2517,6 +2517,29 @@ fn scan_params_cookie_list_form_is_unchanged() {
     );
 }
 
+/// The caller of a rejected tool call is a model deciding what to send next,
+/// so a wrong-shaped `cookies` has to say what the right shapes are — serde's
+/// stock untagged-enum error ("data did not match any variant of untagged enum
+/// StringOrSeq") names an internal type and describes neither.
+#[test]
+fn scan_params_cookie_type_error_names_both_accepted_shapes() {
+    let err = serde_json::from_value::<ScanWithDalfoxParams>(serde_json::json!({
+        "target": "https://example.com/",
+        "cookies": 42,
+    }))
+    .expect_err("a number is neither shape");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("name=value") && msg.contains("Cookie:"),
+        "the error must describe both accepted shapes: {msg}"
+    );
+    assert!(
+        !msg.contains("untagged"),
+        "and must not leak serde internals: {msg}"
+    );
+}
+
 #[test]
 fn preflight_params_share_the_scan_tool_argument_policy() {
     let p: PreflightDalfoxParams = serde_json::from_value(serde_json::json!({

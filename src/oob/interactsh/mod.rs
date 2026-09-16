@@ -92,13 +92,22 @@ impl InteractshClient {
 
         let (base, host) = split_server(server);
 
+        // Resolved before the TLS decision, because whether a usable proxy is
+        // actually in front of this connection is part of that decision.
+        let proxy = config
+            .proxy
+            .as_ref()
+            .and_then(|pxy| reqwest::Proxy::all(pxy).ok());
+
         let mut builder = Client::builder()
             .timeout(Duration::from_secs(config.timeout.max(1)))
             .no_proxy()
-            .danger_accept_invalid_certs(accept_invalid_certs(&host, config.insecure));
-        if let Some(pxy) = config.proxy.as_ref()
-            && let Ok(proxy) = reqwest::Proxy::all(pxy)
-        {
+            .danger_accept_invalid_certs(accept_invalid_certs(
+                &host,
+                config.insecure,
+                proxy.is_some(),
+            ));
+        if let Some(proxy) = proxy {
             builder = builder.proxy(proxy);
         }
         let http = builder.build()?;
@@ -283,15 +292,23 @@ impl InteractshClient {
 /// interactions (our RSA public key is, by definition, public), so callbacks
 /// dalfox reports as blind XSS need not have happened at all.
 ///
-/// So the scan's TLS posture is honoured only for a server the operator named
-/// themselves with `--blind-oob`, which is what the original
-/// accept-everything default was actually for: a self-hosted interactsh behind
-/// a self-signed or hostname-mismatched certificate. The public mesh
-/// ([`crate::oob::DEFAULT_SERVERS`]) presents valid certificates and is always
-/// verified — `--insecure` cannot reach it, because nobody asked for the
-/// public mesh to be trusted less.
-fn accept_invalid_certs(host: &str, config_insecure: bool) -> bool {
-    config_insecure && !crate::oob::is_default_server(host)
+/// So the scan's TLS posture is honoured for a server the operator named
+/// themselves with `--blind-oob`, which is what the original accept-everything
+/// default was actually for: a self-hosted interactsh behind a self-signed or
+/// hostname-mismatched certificate. The public mesh
+/// ([`crate::oob::DEFAULT_SERVERS`]) presents valid certificates and is
+/// otherwise always verified — `--insecure` cannot reach it, because nobody
+/// asked for the public mesh to be trusted less.
+///
+/// The one exception is `through_operator_proxy`: `--proxy` also routes the
+/// OAST channel, and an intercepting proxy (Burp, mitmproxy) re-signs with its
+/// own CA, so verification against the mesh's real certificate cannot succeed.
+/// Refusing there would not protect the operator from a man in the middle —
+/// they put him there — it would just disable blind-OOB with a warning line,
+/// which is the silent-degradation failure this whole check exists to avoid.
+/// `--insecure` is how that is declared, so it is honoured.
+fn accept_invalid_certs(host: &str, config_insecure: bool, through_operator_proxy: bool) -> bool {
+    config_insecure && (through_operator_proxy || !crate::oob::is_default_server(host))
 }
 
 fn split_server(server: &str) -> (String, String) {
@@ -345,10 +362,10 @@ mod tests {
         for server in crate::oob::DEFAULT_SERVERS {
             let (_, host) = split_server(server);
             assert!(
-                !accept_invalid_certs(&host, true),
+                !accept_invalid_certs(&host, true, false),
                 "{server}: the public mesh must be verified even under --insecure"
             );
-            assert!(!accept_invalid_certs(&host, false));
+            assert!(!accept_invalid_certs(&host, false, false));
         }
 
         // A mesh domain written as a URL or with a trailing dot is the same
@@ -361,9 +378,28 @@ mod tests {
         ] {
             let (_, host) = split_server(spelling);
             assert!(
-                !accept_invalid_certs(&host, true),
+                !accept_invalid_certs(&host, true, false),
                 "{spelling} is the public mesh however it is spelled"
             );
+        }
+    }
+
+    #[test]
+    fn an_intercepting_proxy_still_gets_the_insecure_posture() {
+        // `--proxy` routes the OAST channel too, and an intercepting proxy
+        // re-signs with its own CA. Verifying against the mesh's real
+        // certificate cannot succeed there, and registration failure is only a
+        // soft warning (see cmd::scan::blind) — so refusing would silently
+        // disable blind-OOB for anyone running dalfox through Burp.
+        for server in crate::oob::DEFAULT_SERVERS {
+            let (_, host) = split_server(server);
+            assert!(
+                accept_invalid_certs(&host, true, true),
+                "{server}: --insecure behind an operator's own proxy must apply"
+            );
+            // Still not a blanket exemption: without --insecure, a proxied
+            // connection is verified like any other.
+            assert!(!accept_invalid_certs(&host, false, true));
         }
     }
 
@@ -382,12 +418,12 @@ mod tests {
         ] {
             let (_, host) = split_server(server);
             assert!(
-                accept_invalid_certs(&host, true),
+                accept_invalid_certs(&host, true, false),
                 "{server} was named by the operator; --insecure must apply"
             );
             // And without --insecure it is still verified, as before.
             assert!(
-                !accept_invalid_certs(&host, false),
+                !accept_invalid_certs(&host, false, false),
                 "{server} must be verified when --insecure was not passed"
             );
         }
