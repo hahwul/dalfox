@@ -375,6 +375,9 @@ mod tests {
             "OAST.PRO",
             "oast.pro.",
             "https://oast.fun/",
+            // The mesh's own port written out is the same endpoint.
+            "oast.pro:443",
+            "https://oast.fun:443/",
         ] {
             let (_, host) = split_server(spelling);
             assert!(

@@ -38,9 +38,13 @@ pub const DEFAULT_SERVERS: &[&str] = &[
 /// `host` is the bare `host[:port]` produced by the interactsh client's own
 /// server parsing (scheme and path stripped, lowercased), so a bare domain, a
 /// `https://` URL and a trailing-dot FQDN for the same mesh node all answer the
-/// same. Anything else — a self-hosted instance, or a mesh domain on a
-/// non-standard port — is a server the operator named, not one dalfox picked.
+/// same. An explicit `:443` is stripped first: the mesh is https, so
+/// `oast.pro:443` is the same endpoint as `oast.pro` and must not be able to
+/// spell its way out of certificate verification. Anything else — a self-hosted
+/// instance, or a mesh domain on some other port — is a server the operator
+/// named, not one dalfox picked.
 pub(crate) fn is_default_server(host: &str) -> bool {
+    let host = host.strip_suffix(":443").unwrap_or(host);
     DEFAULT_SERVERS.iter().any(|d| d.eq_ignore_ascii_case(host))
 }
 
