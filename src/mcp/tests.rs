@@ -1738,6 +1738,85 @@ async fn test_scan_with_dalfox_sends_uppercased_method_on_the_wire() {
     );
 }
 
+/// The end of the chain the other alias tests only cover in pieces: arguments
+/// written in the REST spellings must put the credentials **on the wire**.
+/// A unit test that stops at `ScanArgs` would still pass if the value were
+/// dropped later, and the whole bug class here is a scan that runs
+/// unauthenticated and reports itself clean.
+#[tokio::test]
+async fn test_rest_spelled_cookie_and_header_reach_the_wire() {
+    use axum::{Router, extract::Request, response::Html, routing::any};
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    let seen: Arc<StdMutex<Vec<(String, String)>>> = Arc::new(StdMutex::new(Vec::new()));
+    let seen_for_app = seen.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind header-recorder listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route(
+            "/{*rest}",
+            any(move |req: Request| {
+                let seen = seen_for_app.clone();
+                async move {
+                    let hdr = |n: &str| {
+                        req.headers()
+                            .get(n)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    seen.lock()
+                        .expect("seen mutex poisoned")
+                        .push((hdr("cookie"), hdr("x-alias-test")));
+                    Html("<html><body>ok</body></html>")
+                }
+            }),
+        );
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    // Exactly the shape an agent that read the REST docs would send.
+    let params: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "url": format!("http://{addr}/page?q=a"),
+        "cookie": "sid=abc; lang=en",
+        "header": ["X-Alias-Test: 1"],
+        "worker": 1,
+        "skip_mining": true,
+        "skip_ast_analysis": true,
+        "max_payloads_per_param": 1,
+        "wait": true,
+        "wait_timeout_sec": 30,
+    }))
+    .expect("REST-spelled arguments deserialize");
+
+    DalfoxMcp::new()
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect("the scan must run");
+
+    let seen = seen.lock().expect("seen mutex poisoned").clone();
+    assert!(!seen.is_empty(), "the scan must have reached the target");
+    // Both are also injection *targets* (cookie and header parameters get
+    // probed), so a handful of requests carry a payload in place of the
+    // original value. What must never happen is a request going out with the
+    // credential missing entirely — that is the unauthenticated scan.
+    assert!(
+        seen.iter().all(|(c, h)| !c.is_empty() && !h.is_empty()),
+        "no request may go out without the cookie/header the aliases asked for; saw {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|(c, _)| c == "sid=abc; lang=en"),
+        "the `cookie` alias's value must reach the wire verbatim; saw {seen:?}"
+    );
+    assert!(
+        seen.iter().any(|(_, h)| h == "1"),
+        "the `header` alias's value must reach the wire verbatim; saw {seen:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_scan_with_dalfox_rejects_unsupported_method() {
     let mcp = DalfoxMcp::new();
