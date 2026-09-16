@@ -389,7 +389,7 @@ fn test_generate_poc_curl() {
         .message_str("msg")
         .build();
     let out = generate_poc(&r, "curl");
-    assert!(out.starts_with("curl -X GET "));
+    assert!(out.starts_with("curl -X 'GET' "));
     assert!(out.contains("?q=%3Cx%3E"));
 }
 
@@ -462,7 +462,7 @@ fn test_generate_poc_curl_header_uses_dash_h_flag() {
     r.location = "Header".to_string();
     let out = generate_poc(&r, "curl");
     assert!(
-        out.contains("-H \"X-Custom-Header: <svg/onload=alert(1)>\""),
+        out.contains("-H 'X-Custom-Header: <svg/onload=alert(1)>'"),
         "curl POC missing -H: {}",
         out
     );
@@ -492,7 +492,7 @@ fn test_generate_poc_cookie_uses_cookie_tag_and_dash_b() {
     );
     let curl = generate_poc(&r, "curl");
     assert!(
-        curl.contains("-b \"Cookie=<svg/onload=alert(1)>\""),
+        curl.contains("-b 'Cookie=<svg/onload=alert(1)>'"),
         "curl POC missing -b: {}",
         curl
     );
@@ -526,7 +526,7 @@ fn test_generate_poc_body_emits_data_flag() {
     );
     let curl = generate_poc(&r, "curl");
     assert!(
-        curl.contains("--data \"username=<svg/onload=alert(1)>\""),
+        curl.contains("--data 'username=<svg/onload=alert(1)>'"),
         "curl POC missing --data: {}",
         curl
     );
@@ -897,7 +897,7 @@ fn temp_out_path(tag: &str) -> String {
 fn test_generate_poc_httpie_query() {
     let r = reflected_result("https://example.com", "q", "<x>");
     let out = generate_poc(&r, "httpie");
-    assert!(out.starts_with("http get "), "got: {}", out);
+    assert!(out.starts_with("http 'get' "), "got: {}", out);
     assert!(out.contains("?q=%3Cx%3E"), "got: {}", out);
 }
 
@@ -911,7 +911,7 @@ fn test_generate_poc_httpie_header_uses_header_arg() {
     r.location = "Header".to_string();
     let out = generate_poc(&r, "httpie");
     assert!(
-        out.contains("\"X-Custom-Header:<svg/onload=alert(1)>\""),
+        out.contains("'X-Custom-Header:<svg/onload=alert(1)>'"),
         "httpie header POC missing header arg: {}",
         out
     );
@@ -924,7 +924,7 @@ fn test_generate_poc_httpie_cookie_uses_cookie_arg() {
     r.location = "Header".to_string();
     let out = generate_poc(&r, "httpie");
     assert!(
-        out.contains("\"Cookie:Cookie=<svg/onload=alert(1)>\""),
+        out.contains("'Cookie:Cookie=<svg/onload=alert(1)>'"),
         "httpie cookie POC missing cookie arg: {}",
         out
     );
@@ -940,9 +940,9 @@ fn test_generate_poc_httpie_body_uses_form_flag() {
     r.method = "POST".to_string();
     r.location = "Body".to_string();
     let out = generate_poc(&r, "httpie");
-    assert!(out.starts_with("http -f post "), "got: {}", out);
+    assert!(out.starts_with("http -f 'post' "), "got: {}", out);
     assert!(
-        out.contains("\"username=<svg/onload=alert(1)>\""),
+        out.contains("'username=<svg/onload=alert(1)>'"),
         "httpie body POC missing form field: {}",
         out
     );
@@ -954,8 +954,8 @@ fn test_generate_poc_httpie_jsonbody() {
     r.method = "POST".to_string();
     r.location = "JsonBody".to_string();
     let out = generate_poc(&r, "httpie");
-    assert!(out.starts_with("http post "), "got: {}", out);
-    assert!(out.contains("\"field=<x>\""), "got: {}", out);
+    assert!(out.starts_with("http 'post' "), "got: {}", out);
+    assert!(out.contains("'field=<x>'"), "got: {}", out);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -969,12 +969,12 @@ fn test_generate_poc_curl_jsonbody_emits_json_content_type() {
     r.location = "JsonBody".to_string();
     let out = generate_poc(&r, "curl");
     assert!(
-        out.contains("-H \"Content-Type: application/json\""),
+        out.contains("-H 'Content-Type: application/json'"),
         "curl json POC missing content-type: {}",
         out
     );
     assert!(
-        out.contains("--data \"{\\\"field\\\":\\\"<x>\\\"}\""),
+        out.contains("--data '{\"field\":\"<x>\"}'"),
         "curl json POC missing json body: {}",
         out
     );
@@ -990,7 +990,7 @@ fn test_generate_poc_curl_multipart_uses_form_string() {
     // `--form-string` sends a literal multipart field; `-F` would read the
     // leading `<` as a filename and `--data` would send the wrong wire format.
     assert!(
-        out.contains("--form-string \"file=<x>\""),
+        out.contains("--form-string 'file=<x>'"),
         "curl multipart POC should use --form-string: {}",
         out
     );
@@ -1002,15 +1002,15 @@ fn test_generate_poc_curl_multipart_uses_form_string() {
 }
 
 #[test]
-fn test_generate_poc_curl_escapes_quotes_and_backslashes() {
-    // The curl renderer escapes `"` and `\` in the payload so the shell
-    // command stays well-formed.
+fn test_generate_poc_curl_single_quotes_quotes_and_backslashes() {
+    // Under single quoting `"` and `\` are already literal — they need no
+    // escape and must survive verbatim, or the POC stops reproducing.
     let mut r = reflected_result("http://example.com/", "X-H", "a\"b\\c");
     r.location = "Header".to_string();
     let out = generate_poc(&r, "curl");
     assert!(
-        out.contains("-H \"X-H: a\\\"b\\\\c\""),
-        "curl POC did not escape quotes/backslashes: {}",
+        out.contains("-H 'X-H: a\"b\\c'"),
+        "curl POC mangled quotes/backslashes: {}",
         out
     );
 }
@@ -1154,7 +1154,7 @@ fn test_render_finding_block_curl_poc_type_has_no_ansi_on_poc_line() {
     let block = render_finding_block(&r, "curl", false, false);
     let first_line = block.lines().next().unwrap_or("");
     assert!(
-        first_line.starts_with("curl -X GET "),
+        first_line.starts_with("curl -X 'GET' "),
         "got: {}",
         first_line
     );
