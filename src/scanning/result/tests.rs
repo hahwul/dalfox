@@ -882,3 +882,89 @@ fn test_informational_finding_omits_confidence_in_json() {
     assert!(v.get("confidence").is_none(), "got: {}", v);
     assert!(v.get("confidence_reason").is_none(), "got: {}", v);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Markdown report — the target must not be able to write the report's shape
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn markdown_param_cannot_forge_rows_or_headings() {
+    // A page naming its input `q| forged |\n\n## FORGED HEADING\n\nx` used to
+    // end up with a real heading and an extra table row inside the report.
+    let hostile = "q| forged |\n\n## FORGED HEADING\n\nx";
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/")
+        .param(hostile)
+        .payload("<svg onload=alert(1)>")
+        .evidence("a | b")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
+    let md = Result::results_to_markdown(&[result], false, false);
+
+    assert!(
+        !md.lines().any(|l| l.trim_start().starts_with("## FORGED")),
+        "param forged a heading:\n{md}"
+    );
+    // The pipe is escaped, so the row still has exactly the two cells.
+    assert!(md.contains("| **Parameter** | `q\\| forged \\|"), "{md}");
+    assert!(md.contains("| **Evidence** | a \\| b |"), "{md}");
+    // …and the newlines are escaped rather than ending the table.
+    assert!(md.contains("\\n\\n## FORGED HEADING\\n\\nx"), "{md}");
+}
+
+#[test]
+fn markdown_control_bytes_in_cells_are_escaped() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/\u{1b}]8;;http://evil/\u{7}")
+        .param("q")
+        .payload("<svg onload=alert(1)>")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
+    let md = Result::results_to_markdown(&[result], false, false);
+    assert!(!md.contains('\u{1b}') && !md.contains('\u{7}'), "{md:?}");
+    assert!(md.contains("\\x1b]8;;http://evil/\\x07"), "{md}");
+    // Payload punctuation is untouched.
+    assert!(md.contains("<svg onload=alert(1)>"), "{md}");
+}
+
+#[test]
+fn markdown_code_fence_outgrows_backticks_in_the_body() {
+    // A response echoed under --include-response can contain ``` and used to
+    // close the fence early, spilling the rest into the document as Markdown.
+    let mut result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/")
+        .param("q")
+        .payload("<svg onload=alert(1)>")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
+    result.response = Some("HTTP/1.1 200 OK\r\n\r\n```\n## NOT A HEADING\n```".to_string());
+    let md = Result::results_to_markdown(&[result], false, true);
+    let (_, fenced) = md
+        .split_once("**Response:**\n\n")
+        .expect("response section");
+    assert!(
+        fenced.starts_with("````http\n"),
+        "fence must outgrow the body:\n{md}"
+    );
+    // The body's own ``` lines sit between the opening and closing 4-backtick
+    // fences, so nothing after them is read as Markdown.
+    let (block, _) = fenced
+        .split_once("\n````\n")
+        .expect("closing fence of the same length");
+    assert!(block.contains("```\n## NOT A HEADING\n```"), "{md}");
+}

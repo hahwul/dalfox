@@ -5,6 +5,37 @@
 
 use super::*;
 
+/// Neutralize the Markdown structure characters in a value that came off the
+/// target — a parameter name (page forms / parameter mining apply no filter),
+/// a URL, an evidence string.
+///
+/// `|` ends a table cell, and a newline ends the whole table: a name like
+/// `q| forged |\n\n## FORGED HEADING\n\nx` used to close the row and open a
+/// real heading, so the report's own structure could be written by the page
+/// it was reporting on. Control bytes are escaped by the shared
+/// [`sanitize_log_message`](crate::utils::log::sanitize_log_message) rule, so
+/// a terminal reading the report with `cat` is covered too.
+fn md_cell(value: &str) -> String {
+    crate::utils::log::sanitize_log_message(value).replace('|', "\\|")
+}
+
+/// Pick a fence long enough to contain `body`. A response echoed under
+/// `--include-response` can contain ``` and would otherwise close the fence
+/// early, spilling the rest of the body into the document as Markdown.
+fn code_fence_for(body: &str) -> String {
+    let mut longest = 0usize;
+    let mut run = 0usize;
+    for ch in body.chars() {
+        if ch == '`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    "`".repeat(longest.max(2) + 1)
+}
+
 impl Result {
     /// Serialize a slice of Result into Markdown string.
     ///
@@ -38,11 +69,7 @@ impl Result {
             out.push_str("| Field | Value |\n");
             out.push_str("|-------|-------|\n");
             let _ = writeln!(out, "| **Dalfox Version** | {} |", m.dalfox_version);
-            let _ = writeln!(
-                out,
-                "| **Targets** | {} |",
-                m.targets.join(", ").replace('|', "\\|")
-            );
+            let _ = writeln!(out, "| **Targets** | {} |", md_cell(&m.targets.join(", ")));
             let _ = writeln!(out, "| **Scan Duration** | {} ms |", m.scan_duration_ms);
             let _ = writeln!(out, "| **Total Requests** | {} |", m.total_requests);
             if m.failed_requests > 0 {
@@ -71,7 +98,7 @@ impl Result {
                         b.get("known").and_then(|v| v.as_u64()).unwrap_or(0),
                     )
                 };
-                let _ = writeln!(out, "| **Baseline** | {} |", cell.replace('|', "\\|"));
+                let _ = writeln!(out, "| **Baseline** | {} |", md_cell(&cell));
             }
             // Same rule as the dedup row: a report covering a fraction of the
             // input list because the rest was already done must say so.
@@ -87,10 +114,7 @@ impl Result {
                     r.get("targets_skipped_completed")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0),
-                    r.get("state_file")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?")
-                        .replace('|', "\\|")
+                    md_cell(r.get("state_file").and_then(|v| v.as_str()).unwrap_or("?"))
                 );
             }
             // Only rendered when true — a "Complete: yes" row on every clean
@@ -149,10 +173,10 @@ impl Result {
                     let _ = writeln!(
                         out,
                         "| {} | {} | {} | {} |",
-                        tgt.replace('|', "\\|"),
-                        status_cell.replace('|', "\\|"),
+                        md_cell(tgt),
+                        md_cell(&status_cell),
                         fc,
-                        waf_str.replace('|', "\\|")
+                        md_cell(&waf_str)
                     );
                 }
                 out.push('\n');
@@ -187,20 +211,24 @@ impl Result {
                     } else {
                         "Reflection"
                     },
-                    result.param,
-                    result.inject_type
+                    md_cell(&result.param),
+                    md_cell(&result.inject_type)
                 );
 
                 out.push_str("| Field | Value |\n");
                 out.push_str("|-------|-------|\n");
                 let _ = writeln!(out, "| **Type** | {} |", result.result_type);
-                let _ = writeln!(out, "| **Parameter** | `{}` |", result.param);
-                let _ = writeln!(out, "| **Method** | {} |", result.method);
-                let _ = writeln!(out, "| **Injection Type** | {} |", result.inject_type);
+                let _ = writeln!(out, "| **Parameter** | `{}` |", md_cell(&result.param));
+                let _ = writeln!(out, "| **Method** | {} |", md_cell(&result.method));
+                let _ = writeln!(
+                    out,
+                    "| **Injection Type** | {} |",
+                    md_cell(&result.inject_type)
+                );
                 let _ = writeln!(
                     out,
                     "| **Detected By** | {} |",
-                    result.detection_method.as_str()
+                    md_cell(result.detection_method.as_str())
                 );
                 if let Some(grade) = result.confidence {
                     let cell = if result.confidence_reason.is_empty() {
@@ -209,7 +237,7 @@ impl Result {
                         format!(
                             "{} ({})",
                             grade.as_str(),
-                            result.confidence_reason.replace('|', "\\|")
+                            md_cell(&result.confidence_reason)
                         )
                     };
                     let _ = writeln!(out, "| **Confidence** | {} |", cell);
@@ -221,37 +249,31 @@ impl Result {
                         if is_new { "yes" } else { "no (in baseline)" }
                     );
                 }
-                let _ = writeln!(out, "| **Severity** | {} |", result.severity);
-                let _ = writeln!(out, "| **CWE** | {} |", result.cwe);
-                let _ = writeln!(out, "| **URL** | {} |", result.data);
-                let _ = writeln!(
-                    out,
-                    "| **Payload** | `{}` |",
-                    result.payload.replace('|', "\\|")
-                );
+                let _ = writeln!(out, "| **Severity** | {} |", md_cell(&result.severity));
+                let _ = writeln!(out, "| **CWE** | {} |", md_cell(&result.cwe));
+                let _ = writeln!(out, "| **URL** | {} |", md_cell(&result.data));
+                let _ = writeln!(out, "| **Payload** | `{}` |", md_cell(&result.payload));
 
                 if !result.evidence.is_empty() {
-                    let _ = writeln!(
-                        out,
-                        "| **Evidence** | {} |",
-                        result.evidence.replace('|', "\\|")
-                    );
+                    let _ = writeln!(out, "| **Evidence** | {} |", md_cell(&result.evidence));
                 }
 
                 out.push('\n');
 
                 // Include request if requested
                 if include_request && let Some(req) = &result.request {
-                    out.push_str("**Request:**\n\n```http\n");
+                    let fence = code_fence_for(req);
+                    let _ = write!(out, "**Request:**\n\n{}http\n", fence);
                     out.push_str(req);
-                    out.push_str("\n```\n\n");
+                    let _ = write!(out, "\n{}\n\n", fence);
                 }
 
                 // Include response if requested
                 if include_response && let Some(resp) = &result.response {
-                    out.push_str("**Response:**\n\n```http\n");
+                    let fence = code_fence_for(resp);
+                    let _ = write!(out, "**Response:**\n\n{}http\n", fence);
                     out.push_str(resp);
-                    out.push_str("\n```\n\n");
+                    let _ = write!(out, "\n{}\n\n", fence);
                 }
 
                 out.push_str("---\n\n");
