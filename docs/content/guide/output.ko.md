@@ -69,6 +69,12 @@ dalfox ... --include-request
 dalfox ... --include-response
 ```
 
+기록되는 요청은 Dalfox가 실제로 보낸 것 그대로입니다. `-H`로 준 헤더와 쿠키가
+전부 원문으로 들어갑니다. `--include-request` / `--include-all`로 만든 리포트는
+공유하기 전에 내용을 확인하세요. 유닉스에서는 `-o` 파일을 `0600`으로 생성해
+같은 호스트의 다른 계정이 읽지 못하게 하지만, 그 파일이 이후에 어디로 가는지는
+별개의 문제입니다.
+
 ## 스캔 메타데이터 엔벨로프
 
 JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메타데이터 엔벨로프를 담습니다.

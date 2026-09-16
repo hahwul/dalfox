@@ -9,6 +9,7 @@ use crate::encoding::{
     url_encode,
 };
 use crate::scanning::result::FindingType;
+use crate::utils::term::{sanitize_display, sanitize_display_block};
 
 // Kept around for unit-test coverage of the message-shape contract.
 // The actual scan, server, and MCP paths now go through
@@ -144,11 +145,15 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
             // into the query would produce a POC that doesn't reproduce
             // the finding.
             let sep = if url.contains('?') { '&' } else { '?' };
+            // The name is percent-encoded like the value. Parameter names are
+            // target-derived (page forms, parameter mining) and pass no
+            // character filter, so a name carrying `&`, `#` or `=` used to
+            // splice extra query structure — or a fragment — into the POC URL.
             url = format!(
                 "{}{}{}={}",
                 url,
                 sep,
-                result.param,
+                urlencoding::encode(&result.param),
                 urlencoding::encode(&result.payload)
             );
         }
@@ -182,34 +187,61 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
     }
 }
 
+/// Wrap `s` in POSIX single quotes so a shell passes it through as one
+/// literal argument.
+///
+/// Every field interpolated into a `curl` / `httpie` POC — the parameter
+/// name, the payload, the attack URL, a content type, a request body — is
+/// target-derived: parameter names come from the page's own forms and from
+/// parameter mining, which apply no character filter. Double quotes (the old
+/// scheme) still let the shell see `$`, a backtick or `\`, so a page could
+/// choose a parameter name like `a";id;"b` or `c$(id)d` and have the operator
+/// run it by pasting the POC. Single quotes disable every shell expansion;
+/// the only character needing care is `'` itself, closed and re-opened
+/// around an escaped literal (`'\''`).
+fn shell_single_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
 /// Render a runnable `curl` invocation that reproduces the finding.
 /// For header / cookie / body locations we emit the matching side-channel
 /// flag so copy-pasting actually exercises the same wire request — a plain
 /// URL would silently lose the payload.
+///
+/// Every interpolated value goes through [`shell_single_quote`]; nothing is
+/// pasted into the command unquoted.
 fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -> String {
-    let method = result.method.to_uppercase();
-    let escaped = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let method = shell_single_quote(&result.method.to_uppercase());
+    let url = shell_single_quote(attack_url);
+    let field = |name: &str, value: &str| shell_single_quote(&format!("{}={}", name, value));
     match result.location.as_str() {
         "Header" if result.param.eq_ignore_ascii_case("cookie") => format!(
-            "curl -X {} -b \"{}={}\" \"{}\"\n",
+            "curl -X {} -b {} {}\n",
             method,
-            result.param,
-            escaped(&result.payload),
-            attack_url
+            field(&result.param, &result.payload),
+            url
         ),
         "Header" => format!(
-            "curl -X {} -H \"{}: {}\" \"{}\"\n",
+            "curl -X {} -H {} {}\n",
             method,
-            result.param,
-            escaped(&result.payload),
-            attack_url
+            shell_single_quote(&format!("{}: {}", result.param, result.payload)),
+            url
         ),
         "Body" => format!(
-            "curl -X {} --data \"{}={}\" \"{}\"\n",
+            "curl -X {} --data {} {}\n",
             method,
-            result.param,
-            escaped(&result.payload),
-            attack_url
+            field(&result.param, &result.payload),
+            url
         ),
         // `--data` sends `application/x-www-form-urlencoded`; a multipart
         // finding only reproduces as a multipart request. `--form-string`
@@ -219,18 +251,20 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
         // `@` means "read the field from this file" — and every HTML payload
         // starts with `<`, so `-F` would try to open a bogus file.
         "MultipartBody" => format!(
-            "curl -X {} --form-string \"{}={}\" \"{}\"\n",
+            "curl -X {} --form-string {} {}\n",
             method,
-            result.param,
-            escaped(&result.payload),
-            attack_url
+            field(&result.param, &result.payload),
+            url
         ),
+        // Built with `serde_json` rather than hand-spliced into a `{"k":"v"}`
+        // template: a parameter name or payload carrying `"` or a backslash
+        // used to produce a body that wasn't valid JSON at all, so the POC
+        // reproduced nothing.
         "JsonBody" => format!(
-            "curl -X {} -H \"Content-Type: application/json\" --data \"{{\\\"{}\\\":\\\"{}\\\"}}\" \"{}\"\n",
+            "curl -X {} -H 'Content-Type: application/json' --data {} {}\n",
             method,
-            result.param,
-            escaped(&result.payload),
-            attack_url
+            shell_single_quote(&json_object_body(&result.param, &result.payload)),
+            url
         ),
         // GraphQL / XML carry a full structured document as the body — a
         // faithful one-liner can't be rebuilt from (param, payload) alone, so
@@ -240,16 +274,28 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
         "GraphqlBody" | "XmlBody" => match request_content_type_and_body(result.request.as_deref())
         {
             Some((ct, body)) => format!(
-                "curl -X {} -H \"Content-Type: {}\" --data \"{}\" \"{}\"\n",
+                "curl -X {} -H {} --data {} {}\n",
                 method,
-                escaped(&ct),
-                escaped(body),
-                attack_url
+                shell_single_quote(&format!("Content-Type: {}", ct)),
+                shell_single_quote(body),
+                url
             ),
-            None => format!("curl -X {} \"{}\"\n", method, attack_url),
+            None => format!("curl -X {} {}\n", method, url),
         },
-        _ => format!("curl -X {} \"{}\"\n", method, attack_url),
+        _ => format!("curl -X {} {}\n", method, url),
     }
+}
+
+/// Build a one-field JSON object body (`{"param":"payload"}`) with
+/// `serde_json`, so quoting/escaping inside either value is the serializer's
+/// problem rather than a hand-written template's.
+fn json_object_body(param: &str, payload: &str) -> String {
+    let mut map = serde_json::Map::with_capacity(1);
+    map.insert(
+        param.to_string(),
+        serde_json::Value::String(payload.to_string()),
+    );
+    serde_json::Value::Object(map).to_string()
 }
 
 /// Extract `(Content-Type, body)` from a recorded raw HTTP request text
@@ -271,47 +317,93 @@ fn request_content_type_and_body(request: Option<&str>) -> Option<(String, &str)
     Some((ct, body))
 }
 
-/// `httpie` mirror of [`render_curl_poc`].
+/// Escape httpie's own request-item separators inside a field/header *name*.
+///
+/// Shell quoting only gets the string to httpie in one piece; httpie then
+/// splits each item on the first unescaped `:` / `=` / `@` / `;`, so a mined
+/// parameter name containing one of those was rejected outright ("Invalid
+/// item") and the POC reproduced nothing. A backslash makes httpie take the
+/// character literally.
+fn httpie_escape_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if matches!(ch, '\\' | ':' | '=' | '@' | ';') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// `httpie` mirror of [`render_curl_poc`]. Same quoting rule: every
+/// interpolated value is single-quoted.
 fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str) -> String {
-    let method = result.method.to_lowercase();
+    let method = shell_single_quote(&result.method.to_lowercase());
+    let url = shell_single_quote(attack_url);
     match result.location.as_str() {
         "Header" if result.param.eq_ignore_ascii_case("cookie") => format!(
-            "http {} \"{}\" \"Cookie:{}={}\"\n",
-            method, attack_url, result.param, result.payload
+            "http {} {} {}\n",
+            method,
+            url,
+            shell_single_quote(&format!("Cookie:{}={}", result.param, result.payload))
         ),
         "Header" => format!(
-            "http {} \"{}\" \"{}:{}\"\n",
-            method, attack_url, result.param, result.payload
+            "http {} {} {}\n",
+            method,
+            url,
+            shell_single_quote(&format!(
+                "{}:{}",
+                httpie_escape_name(&result.param),
+                result.payload
+            ))
         ),
         "Body" => format!(
-            "http -f {} \"{}\" \"{}={}\"\n",
-            method, attack_url, result.param, result.payload
+            "http -f {} {} {}\n",
+            method,
+            url,
+            shell_single_quote(&format!(
+                "{}={}",
+                httpie_escape_name(&result.param),
+                result.payload
+            ))
         ),
         // httpie's `-f`/`--form` sends urlencoded unless a file field is
         // present; `--multipart` forces the multipart/form-data request a
         // multipart finding needs to reproduce.
         "MultipartBody" => format!(
-            "http --multipart {} \"{}\" \"{}={}\"\n",
-            method, attack_url, result.param, result.payload
+            "http --multipart {} {} {}\n",
+            method,
+            url,
+            shell_single_quote(&format!(
+                "{}={}",
+                httpie_escape_name(&result.param),
+                result.payload
+            ))
         ),
         "JsonBody" => format!(
-            "http {} \"{}\" \"{}={}\"\n",
-            method, attack_url, result.param, result.payload
+            "http {} {} {}\n",
+            method,
+            url,
+            shell_single_quote(&format!(
+                "{}={}",
+                httpie_escape_name(&result.param),
+                result.payload
+            ))
         ),
         // Feed the exact recorded structured body to httpie via stdin — its
         // `key=value` field syntax can't express a full GraphQL/XML document.
         "GraphqlBody" | "XmlBody" => match request_content_type_and_body(result.request.as_deref())
         {
             Some((ct, body)) => format!(
-                "http {} \"{}\" \"Content-Type:{}\" <<< '{}'\n",
+                "http {} {} {} <<< {}\n",
                 method,
-                attack_url,
-                ct,
-                body.replace('\'', "'\\''")
+                url,
+                shell_single_quote(&format!("Content-Type:{}", ct)),
+                shell_single_quote(body)
             ),
-            None => format!("http {} \"{}\"\n", method, attack_url),
+            None => format!("http {} {}\n", method, url),
         },
-        _ => format!("http {} \"{}\"\n", method, attack_url),
+        _ => format!("http {} {}\n", method, url),
     }
 }
 
@@ -334,7 +426,12 @@ fn render_informational_block(result: &crate::scanning::result::Result, poc_type
     } else {
         result.inject_type.clone()
     };
-    let line = format!("[INF][{}] {} | {}", tag, result.data, result.message_str);
+    let line = format!(
+        "[INF][{}] {} | {}",
+        sanitize_display(&tag),
+        sanitize_display(&result.data),
+        sanitize_display(&result.message_str)
+    );
     let mut output = String::new();
     if poc_type == "plain" {
         output.push_str(&format!("\x1b[36m{}\x1b[0m\n", line.trim_end()));
@@ -345,7 +442,7 @@ fn render_informational_block(result: &crate::scanning::result::Result, poc_type
     if !result.evidence.is_empty() {
         output.push_str(&format!(
             "  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
-            result.evidence
+            sanitize_display(&result.evidence)
         ));
     }
     output
@@ -367,6 +464,13 @@ pub(crate) fn render_finding_block(
     let mut output = String::new();
 
     let poc_line = generate_poc(result, poc_type);
+    // The POC line embeds target-derived bytes (the URL, the parameter name,
+    // and for `http-request` the whole recorded request). Escape control
+    // bytes before anything is printed — `strip_ansi` only runs on the
+    // `--no-color` path, so on a colour terminal a response could otherwise
+    // drive OSC sequences straight at the operator. `sanitize_display_block`
+    // keeps the raw-HTTP line structure so the request POC stays pasteable.
+    let poc_line = sanitize_display_block(&poc_line);
     let trimmed = poc_line.trim_end();
     // Type-based colorization only makes sense for the `plain` POC; the
     // other formats (curl / httpie / http-request) are meant to be
@@ -437,14 +541,14 @@ pub(crate) fn render_finding_block(
     output.push_str(&format!(
         "  \x1b[90m{}\x1b[0m \x1b[38;5;247mIssue:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
         bullet_for(idx),
-        issue_text
+        sanitize_display(issue_text)
     ));
     idx += 1;
 
     output.push_str(&format!(
         "  \x1b[90m{}\x1b[0m \x1b[38;5;247mPayload:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
         bullet_for(idx),
-        result.payload
+        sanitize_display(&result.payload)
     ));
     idx += 1;
 
@@ -453,7 +557,7 @@ pub(crate) fn render_finding_block(
             "  \x1b[90m{}\x1b[0m \x1b[38;5;247mL{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
             bullet_for(idx),
             line_num,
-            context
+            sanitize_display(&context)
         ));
         idx += 1;
     }
@@ -474,7 +578,10 @@ pub(crate) fn render_finding_block(
         ));
         if let Some(req) = &result.request {
             for line in req.lines() {
-                output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
+                output.push_str(&format!(
+                    "      \x1b[38;5;247m{}\x1b[0m\n",
+                    sanitize_display(line)
+                ));
             }
         }
         idx += 1;
@@ -487,7 +594,10 @@ pub(crate) fn render_finding_block(
         ));
         if let Some(resp) = &result.response {
             for line in resp.lines() {
-                output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
+                output.push_str(&format!(
+                    "      \x1b[38;5;247m{}\x1b[0m\n",
+                    sanitize_display(line)
+                ));
             }
         }
     }

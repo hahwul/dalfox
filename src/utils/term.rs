@@ -56,30 +56,27 @@ pub(crate) fn term_cols_stderr() -> usize {
     cols_of(console::Term::stderr())
 }
 
-/// Strip ANSI CSI sequences (`\x1b[…m`, `\x1b[…K`, etc.) from `s`.
-/// Conservative: only consumes sequences starting `ESC [` followed by
-/// `0-9;` parameters and a final byte in `0x40..=0x7E`. Anything else
-/// passes through verbatim.
+/// Strip ANSI escape sequences from `s`.
+///
+/// Consumes every `ESC`-introduced form a terminal would act on, not just
+/// CSI: OSC (`ESC ]` … `BEL` / `ST`) carries hyperlinks, window titles and —
+/// via OSC 52 — clipboard writes; DCS / SOS / PM / APC are the other string
+/// sequences. A response body dalfox echoes into a finding line is
+/// target-controlled, so leaving those to pass through handed the page a
+/// channel to the operator's terminal. Two-byte forms (`ESC c`, `ESC 7`, …)
+/// take the character after the `ESC` with them, and a trailing `ESC` is
+/// dropped on its own — letting one survive would re-arm the following byte
+/// as an escape introducer downstream.
+///
+/// Printable characters are never touched — payloads contain `<`, `>` and
+/// `"` and must stay readable.
 pub(crate) fn strip_ansi(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == 0x1B && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
-            // CSI: skip params (0-9, ;, ?), then one final byte 0x40..=0x7E
-            let mut j = i + 2;
-            while j < bytes.len() {
-                let b = bytes[j];
-                if (0x30..=0x3F).contains(&b) {
-                    j += 1;
-                } else if (0x40..=0x7E).contains(&b) {
-                    j += 1; // include the final byte
-                    break;
-                } else {
-                    break; // malformed — bail
-                }
-            }
-            i = j;
+        if bytes[i] == 0x1B {
+            i = skip_escape_sequence(bytes, i);
             continue;
         }
         // Multi-byte UTF-8 safe copy: grab the whole char.
@@ -91,6 +88,127 @@ pub(crate) fn strip_ansi(s: &str) -> String {
         // SAFETY: substring between ch_start..j is a complete UTF-8 char in `s`.
         out.push_str(&s[ch_start..j]);
         i = j;
+    }
+    out
+}
+
+/// Given `bytes[i] == ESC`, return the index just past the escape sequence
+/// that starts there. Always returns a UTF-8 char boundary and always
+/// advances by at least one byte, so the caller's loop terminates.
+fn skip_escape_sequence(bytes: &[u8], i: usize) -> usize {
+    let Some(&intro) = bytes.get(i + 1) else {
+        return i + 1; // lone trailing ESC
+    };
+    match intro {
+        // CSI: parameter/intermediate bytes 0x20..=0x3F, then one final byte.
+        b'[' => {
+            let mut j = i + 2;
+            while j < bytes.len() {
+                let b = bytes[j];
+                if (0x20..=0x3F).contains(&b) {
+                    j += 1;
+                } else if (0x40..=0x7E).contains(&b) {
+                    j += 1; // include the final byte
+                    break;
+                } else {
+                    break; // malformed — bail (b is a char boundary: ASCII precedes it)
+                }
+            }
+            j
+        }
+        // String sequences: OSC / DCS / SOS / PM / APC. Terminated by BEL or
+        // ST (`ESC \`); an unterminated one runs to the end of the string.
+        b']' | b'P' | b'X' | b'^' | b'_' => {
+            let mut j = i + 2;
+            while j < bytes.len() {
+                match bytes[j] {
+                    0x07 => return j + 1, // BEL
+                    0x1B => {
+                        return if bytes.get(j + 1) == Some(&b'\\') {
+                            j + 2 // ST
+                        } else {
+                            j // a nested ESC — let the caller re-dispatch on it
+                        };
+                    }
+                    _ => j += 1,
+                }
+            }
+            j
+        }
+        // Two-byte escapes (`ESC c`, `ESC 7`, `ESC ( B`, …): drop the ESC and
+        // the character after it. Stepping by *character* rather than byte
+        // keeps the result on a UTF-8 boundary for `ESC` + multi-byte input.
+        _ => {
+            let mut j = i + 2;
+            while j < bytes.len() && (bytes[j] & 0b1100_0000) == 0b1000_0000 {
+                j += 1;
+            }
+            j
+        }
+    }
+}
+
+/// Control bytes that stay raw in displayed findings.
+///
+/// Horizontal tab, plus the two vertical-whitespace bytes VT (`\x0b`) and FF
+/// (`\x0c`): dalfox's own WAF-bypass payloads use those as attribute
+/// separators (`<img\x0csrc=x\x0conerror=…>` in `payload::xss_html`), so a
+/// POC carrying one has to stay byte-exact or it stops reproducing the
+/// finding. None of the three can retarget a hyperlink, write the clipboard,
+/// set the window title, or overwrite a line that has already been drawn —
+/// which is what the escaped ones (ESC, BEL, CR, …) can do.
+#[inline]
+fn is_display_safe_control(b: u8) -> bool {
+    matches!(b, b'\t' | 0x0B | 0x0C)
+}
+
+/// Escape terminal control bytes in target-derived text before it reaches a
+/// terminal or a report file, keeping every printable character.
+///
+/// Findings quote the target's own bytes: the `L<n>:` context line comes
+/// straight out of the response body, and parameter names come from the
+/// page's forms and from parameter mining, neither filtered. [`strip_ansi`]
+/// only runs on the `--no-color` path, so on a colour terminal those bytes
+/// were printed verbatim.
+///
+/// Same shape as
+/// [`sanitize_log_message`](crate::utils::log::sanitize_log_message) — CR/LF
+/// become `\r`/`\n`, other C0 bytes become `\xNN` — except that the display
+/// path additionally keeps the payload whitespace listed in
+/// [`is_display_safe_control`]. Returns a borrowed string on the common
+/// (clean) path.
+pub(crate) fn sanitize_display(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.bytes().any(|b| b < 0x20 && !is_display_safe_control(b)) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 0x20 && is_display_safe_control(c as u8) => out.push(c),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// [`sanitize_display`] for a multi-line block, preserving the line
+/// structure — including CRLF, because the `http-request` POC and the
+/// `--include-request` section are raw HTTP that has to stay pasteable.
+pub(crate) fn sanitize_display_block(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for segment in s.split_inclusive('\n') {
+        let (body, eol) = match segment.strip_suffix('\n') {
+            Some(rest) => match rest.strip_suffix('\r') {
+                Some(rest) => (rest, "\r\n"),
+                None => (rest, "\n"),
+            },
+            None => (segment, ""),
+        };
+        out.push_str(&sanitize_display(body));
+        out.push_str(eol);
     }
     out
 }
@@ -176,9 +294,86 @@ mod tests {
     }
 
     #[test]
-    fn strip_ansi_handles_lone_escape() {
-        // Malformed: lone ESC with no '[' — preserved.
-        let input = "\x1bABC";
-        assert_eq!(strip_ansi(input), "\x1bABC");
+    fn strip_ansi_drops_lone_escape() {
+        // A bare ESC introduces nothing on its own, and letting it survive
+        // would re-arm the following byte as an escape introducer downstream.
+        assert_eq!(strip_ansi("\x1bABC"), "BC");
+        assert_eq!(strip_ansi("tail\x1b"), "tail");
+    }
+
+    #[test]
+    fn strip_ansi_removes_osc_sequences() {
+        // OSC 8 hyperlink (BEL-terminated) — a response body can otherwise
+        // make a finding line link anywhere.
+        assert_eq!(strip_ansi("\x1b]8;;http://evil\x07text"), "text");
+        // OSC 0 window title, ST-terminated.
+        assert_eq!(strip_ansi("a\x1b]0;TITLE\x1b\\b"), "ab");
+        // OSC 52 — clipboard write.
+        assert_eq!(strip_ansi("\x1b]52;c;cm0gLXJmIH4=\x07ok"), "ok");
+    }
+
+    #[test]
+    fn strip_ansi_removes_dcs_and_apc_sequences() {
+        assert_eq!(strip_ansi("x\x1bPq#0;2;0;0;0\x1b\\y"), "xy");
+        assert_eq!(strip_ansi("x\x1b_Gf=100\x1b\\y"), "xy");
+        assert_eq!(strip_ansi("x\x1b^pm\x07y"), "xy");
+    }
+
+    #[test]
+    fn strip_ansi_handles_unterminated_osc() {
+        assert_eq!(strip_ansi("\x1b]0;never ends"), "");
+    }
+
+    #[test]
+    fn strip_ansi_is_utf8_safe_after_escape() {
+        // `ESC` followed by a multi-byte char must not slice mid-character.
+        assert_eq!(strip_ansi("\x1b한글"), "글");
+        assert_eq!(strip_ansi("\x1b[한글"), "한글");
+    }
+
+    #[test]
+    fn sanitize_display_keeps_the_whitespace_real_payloads_use() {
+        // `payload::xss_html` ships `<img\x0csrc=x\x0conerror=…>` and
+        // `<svg\x0bonload=…>` as WAF bypasses. Escaping those bytes would
+        // print — and paste — a payload that no longer reproduces.
+        assert_eq!(
+            sanitize_display("<img\x0csrc=x\x0conerror=alert(1)>"),
+            "<img\x0csrc=x\x0conerror=alert(1)>"
+        );
+        assert_eq!(
+            sanitize_display("<svg\x0bonload=alert(1)>"),
+            "<svg\x0bonload=alert(1)>"
+        );
+        assert_eq!(sanitize_display("a\tb"), "a\tb");
+        // …while the bytes that drive or forge a terminal still go.
+        assert_eq!(sanitize_display("a\x0bb\x1bc"), "a\x0bb\\x1bc");
+    }
+
+    #[test]
+    fn sanitize_display_escapes_controls_but_keeps_payload_chars() {
+        // Payload punctuation has to stay readable.
+        assert_eq!(
+            sanitize_display("<svg onload=alert(1)>\"x\""),
+            "<svg onload=alert(1)>\"x\""
+        );
+        // Control bytes become visible text instead of reaching the terminal.
+        assert_eq!(
+            sanitize_display("\x1b]8;;http://evil\x07l"),
+            "\\x1b]8;;http://evil\\x07l"
+        );
+        assert_eq!(sanitize_display("a\rb\nc"), "a\\rb\\nc");
+    }
+
+    #[test]
+    fn sanitize_display_block_keeps_line_structure_and_crlf() {
+        assert_eq!(
+            sanitize_display_block("GET / HTTP/1.1\r\nHost: x\r\n\r\nbody"),
+            "GET / HTTP/1.1\r\nHost: x\r\n\r\nbody"
+        );
+        // Controls inside a line are still escaped.
+        assert_eq!(
+            sanitize_display_block("a\x1b]0;T\x07b\nc"),
+            "a\\x1b]0;T\\x07b\nc"
+        );
     }
 }

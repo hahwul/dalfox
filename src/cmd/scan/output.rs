@@ -738,9 +738,13 @@ pub(crate) async fn render_results(
     } else {
         let mut output = String::new();
         for result in display_results {
+            // The parameter name is target-derived (page forms, parameter
+            // mining) and unfiltered — escape control bytes before it reaches
+            // the terminal or a report file.
             output.push_str(&format!(
                 "Found XSS: {} - {}\n",
-                result.param, result.payload
+                crate::utils::term::sanitize_display(&result.param),
+                crate::utils::term::sanitize_display(&result.payload)
             ));
         }
         output
@@ -749,6 +753,27 @@ pub(crate) async fn render_results(
     let output_write_failed = write_output_or_stdout(args, &output_content);
 
     (final_results, output_write_failed)
+}
+
+/// Create-or-truncate `path` and write `content`, `0600` on Unix.
+///
+/// A report is at least as sensitive as the server's `--log-file` (already
+/// `0600`): under `--include-request` it embeds the raw request, which
+/// carries every `-H` header and the whole cookie jar — the session that made
+/// the target worth scanning. `std::fs::write` left it `0644`, readable by
+/// every local account on the host. The mode only applies at creation, so an
+/// existing file keeps whatever permissions the operator gave it, and the
+/// overwrite-on-rerun behaviour is unchanged.
+fn write_report_file(path: &str, content: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(content.as_bytes())
 }
 
 /// Write a rendered report to `--output`, or to stdout when no file was asked
@@ -793,7 +818,7 @@ fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
         if !file_content.ends_with('\n') {
             file_content.push('\n');
         }
-        match std::fs::write(output_path, &file_content) {
+        match write_report_file(output_path, &file_content) {
             Ok(_) => {
                 if !args.silence {
                     println!("Results written to {}", output_path);
