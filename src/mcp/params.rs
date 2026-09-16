@@ -101,11 +101,11 @@ where
         /// "no cookies" and returns `200`. An argument dict with `null` for
         /// every unset option is what an SDK serializing a dataclass emits, so
         /// the alias would otherwise accept the name and reject the value.
+        //
+        // Only `visit_unit` is needed: `deserialize_any` over JSON delivers
+        // `null` there, and `visit_none` is reachable only through an `Option`
+        // deserializer, which this field is not.
         fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(Vec::new())
-        }
-
-        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
             Ok(Vec::new())
         }
 

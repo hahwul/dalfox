@@ -161,6 +161,60 @@ fn blind_oob_flag_off_bare_and_list() {
     assert_eq!(full.scan.blind_oob_wait(), 12);
 }
 
+/// `oob_config()` is what carries the scan's HTTP posture onto the OAST
+/// channel, so the values it forwards -- and the one it deliberately forwards
+/// *unresolved* -- are worth pinning.
+#[test]
+fn oob_config_forwards_the_scan_http_posture() {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        scan: ScanArgs,
+    }
+
+    // Nothing named: the public mesh, and `insecure` resolved the way every
+    // other consumer resolves it (`None` -> true).
+    let d = TestCli::try_parse_from(["dalfox", "https://e.com", "--blind-oob"]).unwrap();
+    let cfg = d.scan.oob_config();
+    assert_eq!(cfg.servers, crate::oob::DEFAULT_SERVERS);
+    assert_eq!(cfg.secret, None);
+    assert_eq!(cfg.wait_secs, DEFAULT_BLIND_OOB_WAIT_SECS);
+    assert_eq!(cfg.proxy, None);
+    assert!(
+        cfg.insecure,
+        "the scanner's insecure-by-default posture is forwarded as-is;          whether it is *honoured* is decided per server in interactsh"
+    );
+
+    // And explicitly disabled stays disabled.
+    let strict =
+        TestCli::try_parse_from(["dalfox", "https://e.com", "--blind-oob", "--insecure=false"])
+            .unwrap();
+    assert!(!strict.scan.oob_config().insecure);
+
+    let full = TestCli::try_parse_from([
+        "dalfox",
+        "https://e.com",
+        "--blind-oob=my-collab.internal",
+        "--blind-oob-secret",
+        "tok",
+        "--blind-oob-wait",
+        "7",
+        "--proxy",
+        "http://127.0.0.1:8080",
+        "--timeout",
+        "3",
+    ])
+    .unwrap();
+    let cfg = full.scan.oob_config();
+    assert_eq!(cfg.servers, vec!["my-collab.internal".to_string()]);
+    assert_eq!(cfg.secret.as_deref(), Some("tok"));
+    assert_eq!(cfg.wait_secs, 7);
+    assert_eq!(cfg.proxy.as_deref(), Some("http://127.0.0.1:8080"));
+    assert_eq!(cfg.timeout, 3);
+}
+
 #[test]
 fn blind_oob_never_swallows_positional_target() {
     use clap::Parser;

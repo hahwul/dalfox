@@ -560,6 +560,24 @@ mod tests {
     }
 
     #[test]
+    fn an_unparseable_server_falls_back_and_is_never_mesh() {
+        // `url::Url` rejects these outright. The fallback split must still
+        // produce something, and — the property that matters — it must land on
+        // the operator-named side: a host no mesh domain can spell, so a
+        // parse failure can never be the thing that relaxes TLS for `oast.*`.
+        // `"..."` is the other way in: it *parses*, but every character of the
+        // host is a trailing dot, so the normalized host is empty.
+        for server in ["[", "::::", "h ttp://x", "..."] {
+            let (base, host) = split_server(server);
+            assert!(!base.is_empty(), "{server}: still needs a base URL");
+            assert!(
+                !crate::oob::is_default_server(&host),
+                "{server}: an unparseable server is not the public mesh"
+            );
+        }
+    }
+
+    #[test]
     fn split_server_handles_scheme_and_path() {
         assert_eq!(
             split_server("https://OAST.fun/"),
@@ -573,6 +591,28 @@ mod tests {
             split_server("  http://my.collab:1/x "),
             ("http://my.collab:1".to_string(), "my.collab:1".to_string())
         );
+    }
+
+    #[test]
+    fn a_client_builds_with_a_proxy_configured() {
+        // Covers the proxy-resolution arm of `new()`: the `&&` short-circuits
+        // when no proxy is named, so the "is this proxy usable" half only runs
+        // with one present. An unusable proxy string must not count as an
+        // interception either -- it is never applied to the client.
+        let keys = SessionKeys::generate().expect("keygen");
+        for proxy in [
+            Some("http://127.0.0.1:8080".to_string()),
+            Some("socks5://127.0.0.1:9050".to_string()),
+            Some("not a proxy".to_string()),
+            None,
+        ] {
+            let config = OobConfig {
+                proxy,
+                ..test_config()
+            };
+            InteractshClient::new("oast.fun", &config, keys.clone())
+                .expect("a client builds whatever the proxy setting");
+        }
     }
 
     #[test]
