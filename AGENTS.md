@@ -37,7 +37,7 @@ Primary modules:
 - `src/utils/`: shared CLI helpers (banner, color, logging)
 - `src/server/`: async scan API server, split into focused submodules — `mod.rs` (router + `ServerArgs`), `types.rs` (`ScanOptions` + request/response bodies), `handlers.rs` (route handlers), `job_runner.rs` (`run_scan_job`), `auth.rs` (API key), `cors.rs`, `response.rs` (JSON/JSONP rendering), `util.rs` (option validation + logging)
 - `src/job/`: shared job model — `JobStatus` enum, `Job` record, progress counters, retention/cap purging, and bounds helpers (`effective_rate_limit`, `effective_scan_timeout`) used by server + MCP
-- `src/mcp/`: MCP stdio tool server — `mod.rs` keeps the `#[tool_router]` impl with the six tool handlers (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`); `params.rs` holds the `*Params` input structs + serde defaults, `job_runtime.rs` / `pagination.rs` the helpers
+- `src/mcp/`: MCP stdio tool server — `mod.rs` keeps the `#[tool_router]` impl with the six tool handlers (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`); `params.rs` holds the `*Params` input structs + serde defaults, `outputs.rs` the published `outputSchema` mirror types, `job_runtime.rs` / `pagination.rs` the helpers
 
 Top-level commands:
 - `scan`

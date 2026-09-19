@@ -118,14 +118,15 @@ jobs:
   harness-smoke:
     name: Crystal harnesses (server + MCP)
     runs-on: ubuntu-latest
-    # Not blocking for ONE remaining defect: rmcp rejects arguments that fail
-    # schema deserialization with a *successful* result carrying
-    # `isError: true`, while dalfox's own validation of the same class of
-    # mistake returns a JSON-RPC `invalid_params` error. A client that only
-    # inspects `error` reads the first form as a started scan. Fixing it means
-    # taking the tool arguments as raw JSON and hand-rolling deserialization,
-    # so it is tracked rather than rushed. Drop continue-on-error once the two
-    # channels agree.
+    # Not blocking while the REST cancel/capacity group is red: cancelling a
+    # scan frees its capacity slot while the worker thread runs on, so the
+    # harness's 8 sequential create/cancel cycles hit 503 from cycle 4 on. That
+    # is a real deferred defect, not a flake. Drop continue-on-error once it is
+    # fixed — the MCP half of this harness is green and worth gating on.
+    #
+    # (The other long-standing entry here, the isError-vs-JSON-RPC argument
+    # channel split, is fixed: `DalfoxMcp::call_tool` parses arguments up front
+    # and raises `invalid_params` itself.)
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

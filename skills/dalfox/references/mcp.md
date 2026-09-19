@@ -17,6 +17,25 @@ Preferred agent pattern: `preflight_dalfox` → `scan_with_dalfox` → poll `get
 
 Terminal jobs auto-purge after 1 hour.
 
+## Protocol Surface
+
+- **Structured results.** Every tool publishes an `outputSchema` and answers with a
+  `structuredContent` object conforming to it. The same JSON is still in the text
+  content block, so text-parsing clients keep working — but if your client surfaces
+  `structuredContent`, read that: it is already a parsed object and it is the thing the
+  schema validates.
+- **Behaviour hints.** `scan_with_dalfox` and `preflight_dalfox` are `openWorldHint:
+  true` and **not** `readOnlyHint` — preflight sends no attack payloads but does accept
+  `method`/`data` and fire mining probes, so a `POST` preflight can change target state.
+  `delete_scan_dalfox` is `destructiveHint: true`; `get_results_dalfox` and
+  `list_scans_dalfox` are `readOnlyHint: true`.
+- **Server identity.** `initialize` reports `dalfox` plus its own version, and returns
+  `instructions` covering tool order, the finding axes, and the untrusted-content rule.
+- **Optional keys are genuinely optional.** `pagination`, `progress`, `error_message`,
+  `wait_timed_out` and `_untrusted_content_notice` appear only when they apply — the
+  queued acknowledgement from `scan_with_dalfox` is `{scan_id, target, status}` and
+  nothing else. Branch on presence, not on position.
+
 ## scan_with_dalfox — Full Parameters
 
 ```json
@@ -73,7 +92,9 @@ Terminal jobs auto-purge after 1 hour.
 
 **Encoder normalization**: If `"none"` is present anywhere, the list becomes `["none"]` only.
 
-**Unknown field names are refused, not ignored.** A key the tool does not recognise comes back as `isError: true` naming it and listing every accepted one — there is no `scan_id`, so nothing ran. This is deliberate: a misspelled `cookies` used to be dropped silently, and the scan then ran unauthenticated and reported `status: "done"` with zero findings, which is indistinguishable from a real clean result.
+**Unknown field names are refused, not ignored.** A key the tool does not recognise comes back as a JSON-RPC `invalid_params` error (`-32602`) naming it and listing every accepted one — there is no `scan_id`, so nothing ran. This is deliberate: a misspelled `cookies` used to be dropped silently, and the scan then ran unauthenticated and reported `status: "done"` with zero findings, which is indistinguishable from a real clean result.
+
+**Every bad argument uses the JSON-RPC error channel**, not `isError`: a missing or mistyped `target`, an unknown key, a value past its ceiling, an unknown `scan_id`. Watch `error`; a tool result means the tool ran. The message names the offending key and lists every accepted spelling — read it and retry, but note that some hosts do not relay protocol errors back to the model, in which case you will see only a generic failure and should re-check your argument names against `inputSchema`.
 
 **REST spellings are accepted as aliases**, so arguments written against the REST API still work: `url` → `target`, `cookie` → `cookies`, `header` → `headers`, `worker` → `workers`, `blind` → `blind_callback_url`. `cookie` also takes a single `Cookie:`-header string (`"sid=abc; lang=en"`) or `null`. REST's `callback_url` has no alias and is rejected: it is a webhook that would ship scan output to a host of your choosing.
 
@@ -124,7 +145,7 @@ Use this before expensive scans when the user is concerned about request volume.
 ## get_results_dalfox — Pagination & Progress
 
 - `offset` / `limit` for large result sets; `pagination` reports `{total, offset, limit, returned, has_more}`.
-- A page is additionally capped at 4 MiB of findings, because the *target* decides how many findings a scan produces and each can carry 64 KiB of `evidence` plus 64 KiB of `response`. When the budget cuts a page short, `pagination` adds `truncated_by_size: true` and `max_page_bytes`: fewer findings came back than `limit` asked for, and the rest are still retrievable at the next `offset`. An oversized single finding is always emitted alone rather than dropped, so paging never stalls.
+- A page is additionally capped at 2 MiB of findings (the response carries that page twice — as `structuredContent` and as the text block — so the wire cost is a multiple of it), because the *target* decides how many findings a scan produces and each can carry 64 KiB of `evidence` plus 64 KiB of `response`. When the budget cuts a page short, `pagination` adds `truncated_by_size: true` and `max_page_bytes`: fewer findings came back than `limit` asked for, and the rest are still retrievable at the next `offset`. An oversized single finding is always emitted alone rather than dropped, so paging never stalls.
 - Response always includes a `progress` object with `suggested_poll_interval_ms`.
   - Early scan: 1000–3000 ms
   - Near completion: ~1000 ms
@@ -139,6 +160,9 @@ Use this before expensive scans when the user is concerned about request volume.
 
 ## Error Handling in MCP
 
+- Bad arguments — unparseable, unknown key, out of range, non-`http(s)` target,
+  unknown `scan_id` — are JSON-RPC errors (`-32602` `invalid_params`) with an exact
+  message, never a tool result. `isError: true` is reserved for a tool that ran.
 - Out-of-range numbers → `invalid_params` with exact message.
 - Non-`http(s)` target → `invalid_params` (rejected before queueing).
 - Unreachable target in preflight → `reachable: false` + `error_code`.

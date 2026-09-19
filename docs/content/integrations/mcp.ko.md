@@ -164,12 +164,21 @@ claude mcp add dalfox -- dalfox mcp
 `"name=value"` 형태의 항목을, `headers`는 `"Name: Value"` 형태의 전체 줄을
 받으며, `user_agent`는 `User-Agent` 헤더를 덮어씁니다.
 
-도구가 모르는 필드명은 조용히 버려지지 않고 **거부**됩니다. 호출은
-`isError: true`와 함께 문제가 된 키, 그리고 허용되는 키 전체 목록을 담아
-돌아옵니다. 그렇지 않으면 `cookies`를 한 글자만 틀려도 대상이 비인증 상태로
+도구가 모르는 필드명은 조용히 버려지지 않고 **거부**됩니다. 호출은 JSON-RPC
+오류(`-32602`, invalid params)로 돌아오며, 문제가 된 키와 허용되는 키 전체
+목록을 담습니다. 그렇지 않으면 `cookies`를 한 글자만 틀려도 대상이 비인증 상태로
 스캔되고, 아무것도 찾지 못한 채 `status: "done"`으로 끝나 실제 클린 결과와
 구분할 수 없게 됩니다. 거부된 호출에는 `scan_id`가 없으므로 폴링할 대상도
 없고, 실행된 스캔으로 오해할 여지도 없습니다.
+
+잘못된 인자는 모두 같은 채널로 옵니다. `target` 누락, 문자열 자리에 들어온 숫자,
+상한을 넘은 값 모두 마찬가지이므로 클라이언트는 `error`만 보면 됩니다. 도구 결과는
+실제로 실행된 도구(tool)를 위해 남겨 둡니다.
+
+다만 알아둘 트레이드오프가 있습니다. 도구 결과는 항상 모델 컨텍스트에 렌더링되지만,
+JSON-RPC 오류는 호스트가 처리하며 일부 호스트는 모델에 텍스트를 돌려주지 않고 사용자에게
+일반적인 실패만 보여 줍니다. 메시지 자체에는 문제가 된 키와 허용되는 철자 전체가 담겨
+있으므로, 클라이언트가 이를 삼키면 모델은 스스로 고칠 단서를 잃습니다.
 
 그래서 [REST API](../server/) 쪽 철자도 별칭으로 받습니다.
 `target`에 `url`, `cookies`에 `cookie`, `headers`에 `header`, `workers`에
@@ -307,7 +316,7 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 `offset`과 `limit`으로 큰 결과 집합을 페이지 단위로 넘길 수 있고, `pagination`은
 `{total, offset, limit, returned, has_more}`를 보고합니다. 한 페이지는 추가로
-4 MiB로 제한됩니다: 탐지 결과가 몇 건 나올지는 대상이 정하고, 각 건은
+2 MiB로 제한됩니다: 탐지 결과가 몇 건 나올지는 대상이 정하고, 각 건은
 `evidence` 64 KiB에 `response` 64 KiB까지 실을 수 있기 때문입니다. 이 예산으로
 페이지가 잘리면 `pagination`에 `truncated_by_size: true`와 `max_page_bytes`가
 추가됩니다 — `limit`이 요청한 것보다 적게 돌아왔을 뿐, 나머지는 다음
@@ -381,6 +390,34 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 `encoders`, `max_payloads_per_param`, `deep_scan`는 그 자체로 요청을 보내지 않습니다. 뒤이어 실행할 `scan_with_dalfox` 호출을 설명하는 값이며, `estimated_total_requests`가 그 스캔의 확장 폭을 반영하도록 합니다. 실제로 스캔할 때 쓸 값을 그대로 넘기세요.
 
 추정치는 스캔이 파라미터마다 실행하는 두 단계(리플렉션, DOM 검증)를 모두 세며, 각 단계를 파라미터당 페이로드 상한으로 자릅니다. `--dry-run`과 동일한 계산입니다. 다만 하한값입니다: WAF 변형/인코더 확장과 상한 적용 이후 덧붙는 공용 CSP/tech 페이로드는 세지 않습니다.
+
+## 구조화된 결과
+
+모든 도구(tool)는 `tools/list`에 `outputSchema`를 게시하고, `tools/call` 응답에 그 스키마를
+따르는 `structuredContent` 객체를 함께 돌려줍니다. 클라이언트는 문자열을 파싱하는 대신 응답을
+검증하고 바로 분해해서 쓸 수 있습니다. 같은 JSON은 기존처럼 텍스트 콘텐츠 블록으로도 그대로
+나가므로, 지금 텍스트를 읽고 있는 쪽은 아무것도 바꿀 필요가 없습니다.
+
+각 도구(tool)는 표시용 `title`과 표준 동작 힌트도 함께 싣습니다. 클라이언트가 어떤 호출을
+물어보지 않고 해도 되는지 스스로 판단하는 근거입니다:
+
+| 도구(tool) | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+|------|----------------|-------------------|------------------|-----------------|
+| `scan_with_dalfox` | false | false | false | **true** |
+| `preflight_dalfox` | false | false | false | **true** |
+| `get_results_dalfox` | true | — | true | false |
+| `list_scans_dalfox` | true | — | true | false |
+| `cancel_scan_dalfox` | false | false | true | false |
+| `delete_scan_dalfox` | false | **true** | false | false |
+
+`openWorldHint: true`는 네트워크로 제3자 호스트에 도달하는 도구(tool)를 가리키고,
+`destructiveHint: true`는 기록을 영구히 버리는 하나를 가리킵니다. `preflight_dalfox`는
+read-only가 **아닙니다**: 공격 페이로드는 보내지 않지만 `method`와 `data`를 받고 마이닝
+단계가 프로브 요청을 보내므로, `POST` preflight는 대상의 상태를 바꿀 수 있습니다.
+
+`initialize` 핸드셰이크는 서버를 `dalfox`와 그 자신의 버전으로 식별하며, 의도한 도구(tool)
+호출 순서, 탐지 결과의 축을 읽는 법, 그리고 아래의 출처 규칙을 담은 `instructions`를
+돌려줍니다.
 
 ## 일반적인 에이전트 흐름
 
