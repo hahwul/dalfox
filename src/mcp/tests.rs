@@ -3040,3 +3040,163 @@ async fn published_finding_schema_matches_a_real_finding() {
         );
     }
 }
+
+/// Drive the real stdio server over an in-memory duplex and return the
+/// responses to `requests`, keyed by id.
+///
+/// The unit tests above call the tool bodies directly, which means nothing in
+/// `cargo test` exercises `DalfoxMcp::call_tool` — so deleting its
+/// `reject_unparseable_arguments(&request)?` line would leave every Rust test
+/// green and only trip the Crystal harness, which CI runs non-blocking. This
+/// speaks the protocol instead: `serve_server` does its own `initialize`
+/// handshake, so the test writes newline-delimited JSON-RPC exactly as a client
+/// would. No rmcp `client` feature needed — that would unify into the release
+/// build.
+async fn round_trip(requests: &[serde_json::Value]) -> HashMap<i64, serde_json::Value> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let (server_side, client_side) = tokio::io::duplex(1 << 20);
+    let server = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(server_side);
+        if let Ok(running) = rmcp::service::serve_server(DalfoxMcp::new(), (r, w)).await {
+            let _ = running.waiting().await;
+        }
+    });
+
+    let (client_r, mut client_w) = tokio::io::split(client_side);
+    let mut lines = BufReader::new(client_r).lines();
+
+    let mut wanted = 0usize;
+    let mut payload = String::new();
+    for req in requests {
+        if req.get("id").is_some() {
+            wanted += 1;
+        }
+        payload.push_str(&req.to_string());
+        payload.push('\n');
+    }
+    client_w
+        .write_all(payload.as_bytes())
+        .await
+        .expect("write requests");
+    client_w.flush().await.expect("flush");
+
+    let mut out = HashMap::new();
+    let collect = async {
+        while out.len() < wanted {
+            let Some(line) = lines.next_line().await.expect("read line") else {
+                break;
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let msg: serde_json::Value = serde_json::from_str(&line).expect("json-rpc line");
+            if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
+                out.insert(id, msg);
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(30), collect)
+        .await
+        .expect("server answered every request in time");
+
+    drop(client_w);
+    drop(lines);
+    let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    out
+}
+
+fn rpc(id: i64, method: &str, params: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+}
+
+#[tokio::test]
+async fn the_wire_reports_dalfox_publishes_schemas_and_refuses_bad_arguments() {
+    let responses = round_trip(&[
+        rpc(
+            1,
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "dalfox-tests", "version": "0"}
+            }),
+        ),
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        rpc(2, "tools/list", serde_json::json!({})),
+        // Unknown key: the case `deny_unknown_fields` exists for. rmcp's own
+        // extractor would answer this with a *successful* result carrying
+        // `isError: true`, which a client watching `error` reads as a started
+        // scan.
+        rpc(
+            3,
+            "tools/call",
+            serde_json::json!({
+                "name": "scan_with_dalfox",
+                "arguments": {"target": "http://127.0.0.1:1/?q=1", "cookiez": ["a=b"]}
+            }),
+        ),
+        rpc(
+            4,
+            "tools/call",
+            serde_json::json!({"name": "list_scans_dalfox", "arguments": {}}),
+        ),
+    ])
+    .await;
+
+    let init = &responses[&1]["result"];
+    assert_eq!(
+        init["serverInfo"]["name"], "dalfox",
+        "the handshake must identify dalfox, not the MCP runtime it is built on"
+    );
+    assert_eq!(init["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
+    assert!(init["instructions"].is_string(), "server instructions");
+    assert!(init["capabilities"]["tools"].is_object());
+
+    let tools = responses[&2]["result"]["tools"]
+        .as_array()
+        .expect("tools array");
+    assert_eq!(tools.len(), 6);
+    for tool in tools {
+        let name = tool["name"].as_str().expect("tool name");
+        assert!(tool["title"].is_string(), "{name} has no title on the wire");
+        assert!(
+            tool["outputSchema"].is_object(),
+            "{name} publishes no outputSchema on the wire"
+        );
+        assert!(
+            tool["annotations"].is_object(),
+            "{name} has no annotations on the wire"
+        );
+    }
+
+    let refusal = &responses[&3];
+    assert!(
+        refusal.get("result").is_none(),
+        "a refused call must not come back as a result: {refusal}"
+    );
+    assert_eq!(
+        refusal["error"]["code"], -32602,
+        "bad arguments belong on the JSON-RPC error channel: {refusal}"
+    );
+    let message = refusal["error"]["message"].as_str().expect("message");
+    assert!(
+        message.contains("cookiez") && message.contains("cookies"),
+        "the refusal must name the bad key and the accepted spelling: {message}"
+    );
+
+    let listed = &responses[&4]["result"];
+    assert_eq!(listed["isError"], serde_json::json!(false));
+    assert!(
+        listed["structuredContent"].is_object(),
+        "a tool that publishes an outputSchema must answer with structuredContent"
+    );
+    // The text block is what pre-2025-06-18 clients read; losing it would break
+    // them silently.
+    let text = listed["content"][0]["text"].as_str().expect("text block");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(text).expect("text is json"),
+        listed["structuredContent"],
+        "text block and structuredContent must carry the same body"
+    );
+}
