@@ -11,17 +11,17 @@
 //! exactly like a real one. A rejected call is recoverable; a silently
 //! downgraded scan is not.
 //!
-//! The rejection reaches the caller as a tool result with `isError: true` whose
+//! The rejection reaches the caller as a JSON-RPC `invalid_params` error whose
 //! text is serde's own "unknown field `x`, expected one of ..." — it names the
 //! offending key and lists every accepted spelling, including the aliases
-//! below. Note the channel: rmcp deserializes the arguments *before* the tool
-//! body runs, so this arrives as `isError`, while the tool's own validation
-//! (`workers` out of range, unknown encoder) returns a JSON-RPC
-//! `invalid_params` error. Both are loud, but a client that only inspects
-//! `error` sees just the second; that split is a known rmcp-level divergence
-//! tracked against `server_mcp_smoke`, not something this policy introduces.
-//! What matters here is that neither form carries a `scan_id`, so a rejected
-//! call cannot be mistaken for a scan that ran.
+//! below. rmcp's own extractor would have delivered that as a *successful*
+//! result carrying `isError: true`, on a different channel from the tool's own
+//! validation (`workers` out of range, unknown encoder), so a client watching
+//! only `error` would have read a refused scan as a started one. `DalfoxMcp`'s
+//! `call_tool` therefore parses the arguments against these structs before
+//! dispatching and raises `invalid_params` itself — see
+//! `super::check_arguments_for`. Either way no `scan_id` comes back, so a
+//! rejected call cannot be mistaken for a scan that ran.
 //!
 //! `schemars` renders the same policy into the generated tool schema as
 //! `"additionalProperties": false`, so a schema-validating client can catch the

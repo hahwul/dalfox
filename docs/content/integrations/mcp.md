@@ -163,13 +163,23 @@ The block above is an excerpt. Every field the tool accepts, with its default �
 entries, `headers` takes full `"Name: Value"` lines, and `user_agent` overrides
 the `User-Agent` header.
 
-A field name the tool does not recognise is **rejected**: the call comes back
-with `isError: true` and a message naming the offending key and listing every
+A field name the tool does not recognise is **rejected**: the call comes back as a
+JSON-RPC error (`-32602`, invalid params) naming the offending key and listing every
 accepted one. It is not silently dropped — a misspelled `cookies` would
 otherwise scan the target unauthenticated, find nothing, and report
 `status: "done"` with no findings, a clean result indistinguishable from a real
 one. A rejected call carries no `scan_id`, so there is nothing to poll and no
 way to mistake it for a scan that ran.
+
+Every bad argument arrives on that same channel — a missing `target`, a number where a
+string belongs, a value past its ceiling — so a client only has to watch `error`. Tool
+results are reserved for tools that actually ran.
+
+One thing to know about that trade: tool results are always rendered into the model's
+context, whereas a JSON-RPC error is handled by the host, and some hosts show the user a
+generic failure instead of passing the text back to the model. The message still names
+the offending key and lists every accepted spelling — if your client swallows it, the
+model loses a self-correcting hint it would otherwise act on.
 
 Because of that, the [REST API](../server/) spellings are accepted
 as aliases: `url` for `target`, `cookie` for `cookies`, `header` for `headers`,
@@ -311,7 +321,7 @@ discovered parameter is lifted out of the target's own markup.
 
 `offset` and `limit` page through large result sets, and `pagination` reports
 `{total, offset, limit, returned, has_more}`. A page is additionally capped at
-4 MiB of findings: the target decides how many findings a scan produces, and
+2 MiB of findings: the target decides how many findings a scan produces, and
 each one can carry 64 KiB of `evidence` plus 64 KiB of `response`. When the
 budget cuts a page short, `pagination` adds `truncated_by_size: true` and
 `max_page_bytes` — fewer findings came back than `limit` asked for, and the
@@ -386,6 +396,35 @@ Returns reachability, discovered parameters, and an estimated request count.
 `encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with.
 
 The estimate counts both phases the scan runs per parameter — reflection and DOM verification — each truncated to the per-parameter payload cap, matching `--dry-run`. It remains a lower bound: WAF mutation/encoder expansion and the shared CSP/tech payloads appended after the cap are not counted.
+
+## Structured results
+
+Every tool publishes an `outputSchema` in `tools/list` and answers `tools/call` with a
+`structuredContent` object that conforms to it, so a client can validate and destructure
+a response instead of parsing a string. The same JSON is still served in the usual text
+content block, so nothing that reads the text today has to change.
+
+Each tool also carries a display `title` and the standard behaviour hints, which is what
+lets a client decide on its own which calls are safe to make without asking:
+
+| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+|------|----------------|-------------------|------------------|-----------------|
+| `scan_with_dalfox` | false | false | false | **true** |
+| `preflight_dalfox` | false | false | false | **true** |
+| `get_results_dalfox` | true | — | true | false |
+| `list_scans_dalfox` | true | — | true | false |
+| `cancel_scan_dalfox` | false | false | true | false |
+| `delete_scan_dalfox` | false | **true** | false | false |
+
+`openWorldHint: true` marks each tool that reaches a third-party host over the network;
+`destructiveHint: true` marks the one that throws a record away for good. Note that
+`preflight_dalfox` is *not* read-only: it sends no attack payloads, but it accepts
+`method` and `data` and its mining stage fires probe requests, so a `POST` preflight can
+change state on the target.
+
+The `initialize` handshake identifies the server as `dalfox` at its own version and
+returns `instructions` covering the intended tool order, how to read the finding axes,
+and the provenance rule below.
 
 ## Typical agent flow
 

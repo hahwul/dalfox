@@ -17,7 +17,7 @@ use std::fmt;
 /// Internal code uses descriptive variant names; serialization produces the
 /// single-letter abbreviation for compact user-facing output and backward-
 /// compatible JSON (`"V"`, `"A"`, `"R"`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum FindingType {
     /// Vulnerable — dalfox asserts the input is exploitable.
     #[serde(rename = "V")]
@@ -105,7 +105,7 @@ impl fmt::Display for FindingType {
 /// the HTTP method. This is the stable selector for "AST-detected findings":
 /// prefer it over `type == "A"`, which is being absorbed into the confidence
 /// axis (issue #1238).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum FindingMethod {
     /// Payload injected and its bytes located in the response.
     #[serde(rename = "reflection")]
@@ -172,7 +172,7 @@ impl fmt::Display for FindingMethod {
 /// Two levels on purpose: the tier migration derives `type` from this
 /// directly (`high` → `V`, `low` → `R`), so a third level would only defer the
 /// same decision. Ambiguous cases grade `Low` — the conservative direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum Confidence {
     #[serde(rename = "high")]
     High,
@@ -435,7 +435,7 @@ impl ResultBuilder {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub(crate) struct SanitizedResult {
     #[serde(rename = "type")]
     pub result_type: FindingType,

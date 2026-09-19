@@ -2687,3 +2687,356 @@ fn scan_tool_schema_advertises_one_spelling_and_closes_the_object() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// MCP structured-output contract (outputSchema / structuredContent / metadata)
+// ---------------------------------------------------------------------------
+
+/// Deserialize a tool response's `structuredContent` into its declared mirror
+/// type, which carries `deny_unknown_fields`.
+///
+/// This is the drift guard the published `outputSchema` rests on: the schema is
+/// generated from `T`, so a handler that adds, renames or drops a key stops
+/// matching `T` here — a test failure — instead of quietly shipping a schema
+/// that clients validate responses against and reject.
+fn assert_conforms<T: serde::de::DeserializeOwned>(result: &CallToolResult, tool: &str) {
+    let structured = result
+        .structured_content
+        .as_ref()
+        .unwrap_or_else(|| panic!("{tool} returned no structuredContent"));
+    if let Err(e) = serde_json::from_value::<T>(structured.clone()) {
+        panic!("{tool} response does not match its declared outputSchema: {e}\nbody: {structured}");
+    }
+    // The spec asks a structured-output tool to keep serving the serialized
+    // JSON in a text block for clients that predate the field. Losing that
+    // would silently break every consumer reading the text today.
+    assert_eq!(
+        parse_result_json(result),
+        *structured,
+        "{tool}: text content and structuredContent disagree"
+    );
+}
+
+#[test]
+fn every_tool_publishes_title_annotations_and_output_schema() {
+    let tools = DalfoxMcp::tool_router().list_all();
+    let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+    assert_eq!(names.len(), 6, "tool count changed: {names:?}");
+
+    for tool in &tools {
+        let name = tool.name.as_ref();
+        assert!(tool.title.is_some(), "{name} has no display title");
+        assert!(
+            tool.output_schema.is_some(),
+            "{name} publishes no outputSchema, so its result cannot be validated"
+        );
+        let schema = tool.output_schema.as_ref().expect("checked above");
+        assert_eq!(
+            schema.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "{name} outputSchema root must be an object"
+        );
+        // `deny_unknown_fields` is a test-time assertion, not a wire promise:
+        // publishing it would make the next added field a breaking change for
+        // every validating client.
+        assert!(
+            !serde_json::to_string(schema)
+                .expect("schema serializes")
+                .contains("\"additionalProperties\":false"),
+            "{name} outputSchema must not close the world"
+        );
+        let annotations = tool
+            .annotations
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name} has no annotations"));
+        assert!(
+            annotations.read_only_hint.is_some(),
+            "{name} must state whether it changes anything"
+        );
+        assert!(
+            annotations.open_world_hint.is_some(),
+            "{name} must state whether it touches external hosts"
+        );
+    }
+
+    let by_name = |n: &str| {
+        tools
+            .iter()
+            .find(|t| t.name == n)
+            .unwrap_or_else(|| panic!("{n} missing"))
+            .annotations
+            .clone()
+            .expect("annotations")
+    };
+    // The three hints a client actually gates on: a scan reaches out to a
+    // third-party host, deleting a record destroys it, and polling does not.
+    assert_eq!(by_name("scan_with_dalfox").open_world_hint, Some(true));
+    assert_eq!(by_name("delete_scan_dalfox").destructive_hint, Some(true));
+    assert_eq!(by_name("get_results_dalfox").read_only_hint, Some(true));
+    assert_eq!(by_name("get_results_dalfox").open_world_hint, Some(false));
+}
+
+#[test]
+fn server_info_identifies_dalfox_not_the_mcp_runtime() {
+    use rmcp::handler::server::ServerHandler;
+
+    let info = DalfoxMcp::new().get_info();
+    // `Implementation::from_build_env()` — the macro default — resolves
+    // `env!` inside rmcp and announced this server as "rmcp" 3.2.0.
+    assert_eq!(info.server_info.name, "dalfox");
+    assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
+    assert!(info.server_info.title.is_some());
+    assert!(
+        info.capabilities.tools.is_some(),
+        "the tools capability must stay declared"
+    );
+    let instructions = info.instructions.expect("server instructions");
+    // The provenance rule is the one thing a client cannot infer from a tool
+    // schema, and the reason the instructions field is filled at all.
+    assert!(instructions.contains("_untrusted_content_notice"));
+    assert!(instructions.contains("preflight_dalfox"));
+}
+
+#[tokio::test]
+async fn list_scans_result_conforms_to_its_schema() {
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.lock_jobs();
+        jobs.insert(
+            "a".to_string(),
+            test_job(JobStatus::Done, Some(vec![dummy_finding(1)])),
+        );
+        jobs.insert("b".to_string(), test_job(JobStatus::Queued, None));
+    }
+    let result = mcp
+        .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+            status: None,
+            offset: 0,
+            limit: 0,
+        }))
+        .await
+        .expect("list_scans_dalfox");
+    assert_conforms::<outputs::ListScansOut>(&result, "list_scans_dalfox");
+}
+
+#[tokio::test]
+async fn get_results_conforms_in_every_lifecycle_state() {
+    // Each state emits a different set of optional keys — `progress` appears
+    // once the job leaves `queued`, `error_message` only on `error` — so one
+    // state conforming says nothing about the others.
+    for status in [
+        JobStatus::Queued,
+        JobStatus::Running,
+        JobStatus::Done,
+        JobStatus::Cancelled,
+        JobStatus::Error,
+    ] {
+        let mcp = DalfoxMcp::new();
+        let scan_id = format!("job-{status}");
+        {
+            let mut jobs = mcp.lock_jobs();
+            // A real finding, not `vec![]`: `results` is the largest and most
+            // heavily `required` part of the published schema, and an empty
+            // array exercises none of it.
+            let mut job = test_job(status.clone(), Some(vec![dummy_finding(1)]));
+            if status == JobStatus::Error {
+                job.error_message = Some("boom".to_string());
+            }
+            if status != JobStatus::Queued {
+                job.started_at_ms = Some(now_ms());
+            }
+            jobs.insert(scan_id.clone(), job);
+        }
+        let result = mcp
+            .get_results_dalfox(Parameters(get_params(&scan_id)))
+            .await
+            .expect("get_results_dalfox");
+        assert_conforms::<outputs::ScanStatusOut>(&result, &format!("get_results_dalfox/{status}"));
+    }
+}
+
+#[tokio::test]
+async fn scan_ack_cancel_and_delete_conform_to_their_schemas() {
+    let mcp = DalfoxMcp::new();
+    let params = default_scan_params("http://127.0.0.1:1/?q=1");
+    let started = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect("scan_with_dalfox");
+    assert_conforms::<outputs::ScanStatusOut>(&started, "scan_with_dalfox");
+    let scan_id = parse_result_json(&started)["scan_id"]
+        .as_str()
+        .expect("scan_id")
+        .to_string();
+
+    let cancelled = mcp
+        .cancel_scan_dalfox(Parameters(CancelScanDalfoxParams {
+            scan_id: scan_id.clone(),
+        }))
+        .await
+        .expect("cancel_scan_dalfox");
+    assert_conforms::<outputs::CancelScanOut>(&cancelled, "cancel_scan_dalfox");
+
+    let deleted = mcp
+        .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {
+            scan_id: scan_id.clone(),
+        }))
+        .await
+        .expect("delete_scan_dalfox");
+    assert_conforms::<outputs::DeleteScanOut>(&deleted, "delete_scan_dalfox");
+}
+
+#[tokio::test]
+async fn unreachable_preflight_conforms_to_its_schema() {
+    let params = PreflightDalfoxParams {
+        insecure: true,
+        target: "http://127.0.0.1:1/?q=1".to_string(),
+        param: vec![],
+        method: "GET".to_string(),
+        data: None,
+        headers: vec![],
+        cookies: vec![],
+        user_agent: None,
+        timeout: 10,
+        proxy: None,
+        follow_redirects: false,
+        skip_mining: false,
+        skip_discovery: false,
+        encoders: vec!["url".to_string()],
+        max_payloads_per_param: 0,
+        deep_scan: false,
+    };
+    let result = DalfoxMcp::new()
+        .preflight_dalfox(Parameters(params))
+        .await
+        .expect("preflight_dalfox");
+    assert_conforms::<outputs::PreflightOut>(&result, "preflight_dalfox");
+}
+
+#[test]
+fn unparseable_arguments_are_refused_on_the_json_rpc_channel() {
+    // MCP classifies invalid arguments as a *protocol* error, and dalfox's own
+    // validation already raises one. Without the pre-parse gate, arguments that
+    // fail serde are rejected inside rmcp's extractor as a successful result
+    // carrying `isError: true` instead — so a client that watches only `error`
+    // reads a refused scan as a started one. That matters most for the
+    // misspelled-option case, which exists to stop a dropped `cookies` from
+    // turning an authenticated scan into a clean-looking unauthenticated one.
+    let bad: [(&str, serde_json::Value); 4] = [
+        ("scan_with_dalfox", serde_json::json!({})),
+        ("scan_with_dalfox", serde_json::json!({ "target": 42 })),
+        (
+            "scan_with_dalfox",
+            serde_json::json!({ "target": "http://example.com/?q=1", "cookiez": ["a=b"] }),
+        ),
+        (
+            "get_results_dalfox",
+            serde_json::json!({ "scan_id": "x", "offset": "not-a-number" }),
+        ),
+    ];
+    for (tool, args) in bad {
+        let mut request = rmcp::model::CallToolRequestParams::new(tool.to_string());
+        request.arguments = args.as_object().cloned();
+        let err = reject_unparseable_arguments(&request)
+            .expect_err(&format!("{tool} must refuse {args}"));
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(
+            err.message.contains("failed to deserialize parameters"),
+            "{tool}: unexpected message {}",
+            err.message
+        );
+    }
+
+    // Well-formed arguments pass the gate untouched, and an unknown tool is
+    // left for the router to reject so the gate never invents a "tool not
+    // found" of its own.
+    for (tool, args) in [
+        ("list_scans_dalfox", serde_json::json!({})),
+        (
+            "scan_with_dalfox",
+            serde_json::json!({ "target": "http://example.com/?q=1" }),
+        ),
+        ("no_such_tool", serde_json::json!({ "anything": true })),
+    ] {
+        let mut request = rmcp::model::CallToolRequestParams::new(tool.to_string());
+        request.arguments = args.as_object().cloned();
+        assert!(
+            reject_unparseable_arguments(&request).is_ok(),
+            "{tool} must pass the gate"
+        );
+    }
+}
+
+#[test]
+fn the_argument_gate_covers_every_registered_tool() {
+    // `check_arguments_for` matches on tool name, and a name it does not know
+    // falls through to rmcp's extractor — which rejects bad arguments as a
+    // *successful* result carrying `isError: true`. A seventh tool added
+    // without an arm would therefore silently lose the JSON-RPC error channel
+    // for exactly the silent-degradation case `deny_unknown_fields` exists to
+    // catch. Walk the router's own list so the omission fails the build.
+    for tool in DalfoxMcp::new().tool_router.list_all() {
+        assert!(
+            check_arguments_for(tool.name.as_ref(), &None).is_some(),
+            "{} has no arm in check_arguments_for, so its bad arguments would \
+             come back as isError instead of a JSON-RPC error",
+            tool.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn published_finding_schema_matches_a_real_finding() {
+    // `ScanStatusOut.results` is typed as the production `SanitizedResult`,
+    // which has no `deny_unknown_fields`, so `assert_conforms` alone cannot
+    // catch a finding key that stops being emitted. The published schema marks
+    // a dozen of them `required`; if one later gains `skip_serializing_if`,
+    // every validating client rejects every result page. Check the published
+    // contract against a real serialized finding instead.
+    let schema = DalfoxMcp::new()
+        .tool_router
+        .get("get_results_dalfox")
+        .expect("get_results_dalfox is registered")
+        .output_schema
+        .clone()
+        .expect("get_results_dalfox publishes an outputSchema");
+    let finding_schema = schema
+        .get("$defs")
+        .and_then(|d| d.get("SanitizedResult"))
+        .expect("the finding shape is published under $defs");
+    let required: Vec<&str> = finding_schema["required"]
+        .as_array()
+        .expect("required list")
+        .iter()
+        .map(|v| v.as_str().expect("required entry is a string"))
+        .collect();
+    assert!(
+        required.len() >= 12,
+        "the finding schema lost its required keys: {required:?}"
+    );
+
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.lock_jobs();
+        jobs.insert(
+            "finding-job".to_string(),
+            test_job(JobStatus::Done, Some(vec![dummy_finding(7)])),
+        );
+    }
+    let result = mcp
+        .get_results_dalfox(Parameters(get_params("finding-job")))
+        .await
+        .expect("get_results_dalfox");
+    let body = result.structured_content.expect("structuredContent");
+    let finding = body["results"]
+        .as_array()
+        .and_then(|r| r.first())
+        .expect("one finding on the page");
+    for key in required {
+        assert!(
+            finding.get(key).is_some(),
+            "the schema requires `{key}` but a real finding does not carry it; \
+             a validating client would reject every result page"
+        );
+    }
+}
