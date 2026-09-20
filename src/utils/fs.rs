@@ -18,6 +18,23 @@ use std::path::Path;
 /// has a single source of truth. See [`read_bounded`] / [`read_stdin_bounded`].
 pub(crate) const MAX_FILE_READ_BYTES: u64 = 256 << 20;
 
+/// The `io::ErrorKind` every cap-exceeded failure in this module reports.
+///
+/// The bounded readers fold three unrelated failures into one `io::Error` —
+/// the byte cap fired, the path is not a readable regular file, or the bytes
+/// are not UTF-8 — and callers that map an error onto a wire error code (the
+/// scan input path reports `INPUT_TOO_LARGE`) had no way to tell them apart,
+/// so a permission error or a UTF-16 target list was reported to the operator
+/// as "too large". Tagging only the cap failures with a distinct kind lets
+/// [`is_over_cap`] answer that question without matching on message text.
+const OVER_CAP_KIND: std::io::ErrorKind = std::io::ErrorKind::FileTooLarge;
+
+/// Whether `e` came from one of this module's byte caps rather than from a
+/// missing/unreadable path or non-UTF-8 content. See [`OVER_CAP_KIND`].
+pub(crate) fn is_over_cap(e: &std::io::Error) -> bool {
+    e.kind() == OVER_CAP_KIND
+}
+
 /// Read a UTF-8 file with a hard byte cap. Refuses non-regular files
 /// (a symlink that resolves to a regular file is fine, since
 /// `metadata()` follows symlinks). Returns `Err` when the cap is hit
@@ -38,7 +55,7 @@ pub fn read_bounded(path: &Path, max_bytes: u64, label: &str) -> std::io::Result
     // when it's already over the cap so we don't even open the handle.
     if md.len() > max_bytes {
         return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+            OVER_CAP_KIND,
             format!(
                 "{} too large: {} bytes (cap {})",
                 label,
@@ -63,7 +80,7 @@ pub fn read_bounded(path: &Path, max_bytes: u64, label: &str) -> std::io::Result
         })?;
     if buf.len() as u64 > max_bytes {
         return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+            OVER_CAP_KIND,
             format!(
                 "{} exceeded {}-byte cap during read (likely a streaming device)",
                 label, max_bytes
@@ -112,7 +129,7 @@ pub(crate) fn read_stdin_bounded(max_bytes: u64, label: &str) -> std::io::Result
         })?;
     if buf.len() as u64 > max_bytes {
         return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+            OVER_CAP_KIND,
             format!(
                 "{} exceeded {}-byte cap (likely a streaming source)",
                 label, max_bytes
@@ -223,7 +240,7 @@ fn read_bounded_within<R: Read + Send + 'static>(
         let result = read_result.and_then(|()| {
             if buf.len() as u64 > max_bytes {
                 return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
+                    OVER_CAP_KIND,
                     format!(
                         "{} exceeded {}-byte cap (likely a streaming source)",
                         label, max_bytes

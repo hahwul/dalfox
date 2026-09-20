@@ -44,6 +44,10 @@ dalfox scan --input-type file urls.txt
 
 Comments (`#`) and blank lines are ignored. Each URL runs through the full pipeline.
 
+A line that is not a scannable target — `mailto:`, `javascript:`, `tel:`, an `ftp://` URL, a truncated fragment, the kind of thing every `gau` / `katana` / `waybackurls` dump carries — is **skipped with a warning**, not treated as fatal; one stray line in a 50k-URL list no longer costs you the whole run. The count lands in `meta.targets_unparsable` so a report never reads as full coverage of a list it partly discarded. If *nothing* in the list parses, that is an error.
+
+A path you meant as a file but which isn't there (`dalfox scan ./urls.txt`, `-i har capture.har`) is reported as a missing file. It is never quietly reinterpreted as a hostname — that used to produce one DNS failure and an otherwise clean-looking exit 0.
+
 ## Pipe mode
 
 Read from `stdin`, the common case when chaining recon tools:

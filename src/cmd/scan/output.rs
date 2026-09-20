@@ -123,6 +123,9 @@ pub(crate) async fn render_dry_run(
             "dedup_mode": state.dedup.mode,
             "targets_deduplicated": state.dedup.collapsed,
         });
+        if state.unparsable_lines > 0 {
+            meta["targets_unparsable"] = serde_json::json!(state.unparsable_lines);
+        }
         // The resume filter has already been applied to this plan, so the
         // counts above describe what is *left* to scan, not the input list.
         if let Some(sf) = &state.state_file {
@@ -156,6 +159,13 @@ pub(crate) async fn render_dry_run(
                 out,
                 "  Targets (deduped):   {} ({} mode)",
                 state.dedup.collapsed, state.dedup.mode
+            );
+        }
+        if state.unparsable_lines > 0 {
+            let _ = writeln!(
+                out,
+                "  Targets (unparsable): {} list line(s) skipped",
+                state.unparsable_lines
             );
         }
         if state.resumed_skipped > 0 {
@@ -624,6 +634,7 @@ pub(crate) async fn render_results(
         target_summary,
         dedup_mode: state.dedup.mode.to_string(),
         targets_deduplicated: state.dedup.collapsed,
+        targets_unparsable: state.unparsable_lines,
         baseline: baseline_meta,
         resumed: state.state_file.as_ref().map(|sf| {
             serde_json::json!({

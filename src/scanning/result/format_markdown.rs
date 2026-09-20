@@ -88,6 +88,15 @@ impl Result {
                     m.targets_deduplicated, m.dedup_mode
                 );
             }
+            // Same rule as the dedup row: shown only when part of the input
+            // list was actually thrown away.
+            if m.targets_unparsable > 0 {
+                let _ = writeln!(
+                    out,
+                    "| **Targets Unparsable** | {} list line(s) skipped |",
+                    m.targets_unparsable
+                );
+            }
             if let Some(b) = &m.baseline {
                 let cell = if let Some(w) = b.get("warning").and_then(|v| v.as_str()) {
                     format!("disabled — {}", w)

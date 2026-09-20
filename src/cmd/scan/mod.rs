@@ -109,6 +109,9 @@ pub(crate) struct ScanState {
     /// scan-meta envelope so a run that dropped targets is never mistaken for
     /// full coverage of the input list.
     pub(crate) dedup: input::DedupStats,
+    /// Target-list lines that did not parse and were skipped. Reported for the
+    /// same reason as [`input::DedupStats::collapsed`].
+    pub(crate) unparsable_lines: usize,
     /// `--state-file` handle, when resume is on. Written by the scanning loop
     /// as each target reaches a terminal state, and read at meta-envelope time
     /// for the resume block.
@@ -259,8 +262,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Resolve targets: input-type detection, file/stdin/raw-HTTP parsing,
     // dedup, scope + out-of-scope filtering, and --cookie-from-raw. Emits the
     // structured error itself on failure and returns Err for us to propagate.
-    let (mut parsed_targets, dedup) = match input::resolve_targets(args).await {
-        Ok(resolved) => (resolved.targets, resolved.dedup),
+    let (mut parsed_targets, dedup, unparsable_lines) = match input::resolve_targets(args).await {
+        Ok(resolved) => (resolved.targets, resolved.dedup, resolved.unparsable_lines),
         Err(outcome) => return outcome,
     };
 
@@ -488,6 +491,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         spinner_allowed,
         no_color: nc,
         dedup,
+        unparsable_lines,
         state_file,
         resumed_skipped,
     };

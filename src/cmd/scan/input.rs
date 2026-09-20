@@ -5,7 +5,7 @@
 //! on any unrecoverable input problem.
 
 use super::args::{DEFAULT_METHOD, ScanArgs};
-use super::logging::{log_info, log_warn};
+use super::logging::log_info;
 use super::validation::{
     domain_matches_pattern, looks_like_target_list_filename, looks_like_url_input,
 };
@@ -45,6 +45,34 @@ impl Default for DedupStats {
 pub(crate) struct ResolvedTargets {
     pub(crate) targets: Vec<Target>,
     pub(crate) dedup: DedupStats,
+    /// Lines from a target list (file, stdin pipe, `-i file`) that did not
+    /// parse as a target and were skipped. Reported for the same reason as
+    /// [`DedupStats::collapsed`]: a run that discarded part of its input list
+    /// must never read as full coverage of that list.
+    pub(crate) unparsable_lines: usize,
+}
+
+/// How many skipped list lines the warning quotes back before collapsing to a
+/// count. A recon dump can contain thousands; three is enough to recognise the
+/// shape of what was dropped.
+const UNPARSABLE_SAMPLE_LIMIT: usize = 3;
+
+/// Where a target string came from, which decides what a parse failure means.
+///
+/// A target typed on the command line is a direct instruction: if it does not
+/// parse, the operator mistyped the one thing they asked for and the run must
+/// stop. A line harvested from a target list is not — `gau`, `katana`,
+/// `waybackurls` and friends routinely emit `mailto:`, `android-app://`,
+/// `chrome-extension://` and truncated junk alongside the URLs. Aborting the
+/// whole run on the first of those meant a single stray line in a 50k-URL list
+/// scanned nothing at all, which is why list lines are skipped with a warning
+/// instead.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TargetOrigin {
+    /// Typed on the command line — a parse failure is fatal.
+    Argument,
+    /// Read from a target-list file or a stdin pipe — a parse failure is skipped.
+    List,
 }
 
 // Byte budget for any path that slurps a file or stdin into memory.
@@ -114,7 +142,10 @@ pub(crate) async fn resolve_targets(
 
     let input_type = detect_input_type(args, stdin_is_piped, &mut buffered_stdin)?;
 
-    let mut target_strings = Vec::new();
+    // Each string is tagged with where it came from: a parse failure is fatal
+    // for a command-line argument and skipped for a target-list line. See
+    // [`TargetOrigin`].
+    let mut target_strings: Vec<(String, TargetOrigin)> = Vec::new();
 
     if input_type == "auto" {
         // If stdin is piped under auto, read it and merge targets!
@@ -139,7 +170,7 @@ pub(crate) async fn resolve_targets(
                 Ok(crate::utils::fs::StdinRead::Data(buffer)) => {
                     let mut stdin_count = 0;
                     for line in target_list_lines(&buffer) {
-                        target_strings.push(line.to_string());
+                        target_strings.push((line.to_string(), TargetOrigin::List));
                         stdin_count += 1;
                     }
                     if stdin_count > 0 && !args.targets.is_empty() && !args.silence {
@@ -179,7 +210,7 @@ pub(crate) async fn resolve_targets(
 
         for target in &args.targets {
             if target.contains("://") {
-                target_strings.push(target.clone());
+                target_strings.push((target.clone(), TargetOrigin::Argument));
                 continue;
             }
             // Detection only sniffed a prefix, so read the file in full now
@@ -215,37 +246,66 @@ pub(crate) async fn resolve_targets(
                                 target, target
                             );
                         }
-                        target_strings.push(target.clone());
+                        target_strings.push((target.clone(), TargetOrigin::Argument));
                         continue;
                     }
                     // Industry-standard target-list shape (blank lines and
                     // `#` comments skipped, leading BOM dropped) — see
                     // `target_list_lines`.
-                    target_strings.extend(target_list_lines(&content).map(ToString::to_string));
+                    target_strings.extend(
+                        target_list_lines(&content).map(|l| (l.to_string(), TargetOrigin::List)),
+                    );
                 }
                 Some(Err(e)) => {
                     // The file exists but `read_bounded` refused it
                     // (over the cap, non-regular, non-UTF-8). Surface
                     // the specific reason — silently falling through
-                    // to URL would hide a real misconfiguration.
+                    // to URL would hide a real misconfiguration — and
+                    // the code that matches it (see `file_read_error_code`;
+                    // this arm used to report every one of them as
+                    // `INPUT_TOO_LARGE`).
                     if !args.silence {
                         emit_error(
                             &args.format,
-                            crate::cmd::error_codes::INPUT_TOO_LARGE,
+                            file_read_error_code(&e),
                             &format!("Error reading target list {}: {}", target, e),
                         );
                     }
                     return Err(ScanOutcome::Error);
                 }
                 None => {
-                    // Not a file on disk — treat as URL literal.
-                    target_strings.push(target.clone());
+                    // Not a file on disk. An argument the operator clearly
+                    // meant as a path (`./list.txt`, `/tmp/urls`, `out.har`)
+                    // must not silently become a *hostname*: `parse_target`
+                    // happily turns `./urls.txt` into `http://./urls.txt/`,
+                    // the scan records one DNS failure as `skipped`, and — as
+                    // long as any other target resolved — the run exits 0 and
+                    // reads as a clean scan of a list that was never opened.
+                    if names_a_missing_file(target) {
+                        if !args.silence {
+                            emit_error(
+                                &args.format,
+                                crate::cmd::error_codes::FILE_READ_ERROR,
+                                &format!(
+                                    "Target list '{}' does not exist (pass `-i url {}` to scan it as a URL instead)",
+                                    target, target
+                                ),
+                            );
+                        }
+                        return Err(ScanOutcome::Error);
+                    }
+                    // Otherwise it is a bare host/URL literal.
+                    target_strings.push((target.clone(), TargetOrigin::Argument));
                 }
             }
         }
     } else {
         target_strings = match input_type.as_str() {
-            "url" => args.targets.clone(),
+            "url" => args
+                .targets
+                .iter()
+                .map(|t| (t.clone(), TargetOrigin::Argument))
+                .collect(),
             "file" => {
                 if args.targets.is_empty() {
                     if !args.silence {
@@ -262,21 +322,22 @@ pub(crate) async fn resolve_targets(
                 // `har` branches (which honor all of `args.targets`) and giving
                 // no hint that the extra files were ignored. Each file is
                 // individually size-bounded and its lines concatenated.
-                let mut collected: Vec<String> = Vec::new();
+                let mut collected: Vec<(String, TargetOrigin)> = Vec::new();
                 for file_path in &args.targets {
                     match crate::utils::fs::read_bounded(
                         std::path::Path::new(file_path),
                         MAX_TARGET_LIST_BYTES,
                         "target list",
                     ) {
-                        Ok(content) => {
-                            collected.extend(target_list_lines(&content).map(ToString::to_string))
-                        }
+                        Ok(content) => collected.extend(
+                            target_list_lines(&content)
+                                .map(|l| (l.to_string(), TargetOrigin::List)),
+                        ),
                         Err(e) => {
                             if !args.silence {
                                 emit_error(
                                     &args.format,
-                                    crate::cmd::error_codes::FILE_READ_ERROR,
+                                    file_read_error_code(&e),
                                     &format!("Error reading file {}: {}", file_path, e),
                                 );
                             }
@@ -301,7 +362,7 @@ pub(crate) async fn resolve_targets(
                     }
                     return Err(ScanOutcome::Error);
                 }
-                let mut piped_targets = Vec::new();
+                let mut piped_targets: Vec<(String, TargetOrigin)> = Vec::new();
                 // Reuse the stream buffered during auto-detection when present
                 // (auto fell through to pipe); otherwise read stdin now.
                 let buffer = match buffered_stdin.take() {
@@ -328,11 +389,13 @@ pub(crate) async fn resolve_targets(
                 // Same line shape as the auto/file paths above (shared helper)
                 // so `cat targets.txt | dalfox` and `dalfox scan targets.txt`
                 // behave identically.
-                piped_targets.extend(target_list_lines(&buffer).map(ToString::to_string));
+                piped_targets.extend(
+                    target_list_lines(&buffer).map(|l| (l.to_string(), TargetOrigin::List)),
+                );
                 if !args.targets.is_empty() {
                     let before_merge = piped_targets.len();
                     for target in &args.targets {
-                        piped_targets.push(target.clone());
+                        piped_targets.push((target.clone(), TargetOrigin::Argument));
                     }
                     if !args.silence {
                         eprintln!(
@@ -346,22 +409,28 @@ pub(crate) async fn resolve_targets(
             }
             "raw-http" => {
                 // Treat targets as raw HTTP request files or literals; actual parsing happens later
-                args.targets.clone()
+                args.targets
+                    .iter()
+                    .map(|t| (t.clone(), TargetOrigin::Argument))
+                    .collect()
             }
             "har" => {
                 // Each string is a whole HAR document (a stdin buffer or a file
                 // path / literal), expanded to many Targets by parse_har later.
                 if let Some(buf) = buffered_stdin.take() {
                     // Auto-detected HAR on stdin.
-                    vec![buf]
+                    vec![(buf, TargetOrigin::Argument)]
                 } else if !args.targets.is_empty() {
                     // Explicit `-i har file1.har file2.har …` (or HAR literals).
-                    args.targets.clone()
+                    args.targets
+                        .iter()
+                        .map(|t| (t.clone(), TargetOrigin::Argument))
+                        .collect()
                 } else if stdin_is_piped {
                     // Explicit `-i har` reading HAR from a pipe.
                     match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe")
                     {
-                        Ok(buf) => vec![buf],
+                        Ok(buf) => vec![(buf, TargetOrigin::Argument)],
                         Err(e) => {
                             if !args.silence {
                                 emit_error(
@@ -413,12 +482,21 @@ pub(crate) async fn resolve_targets(
     }
 
     let mut parsed_targets = Vec::new();
-    for s in target_strings {
+    // Target-list lines that failed to parse: counted for the meta envelope,
+    // with the first few quoted in the warning. See [`TargetOrigin`].
+    let mut unparsable_lines = 0usize;
+    let mut unparsable_sample: Vec<String> = Vec::new();
+    for (s, origin) in target_strings {
         if input_type == "har" {
             // A single HAR document expands to many Targets. Load it from the
             // detection cache, a file on disk, or treat the string itself as
             // the document (the stdin buffer / a literal).
-            let content = match load_request_source(&s, args, "HAR file") {
+            let content = match load_request_source(
+                &s,
+                args,
+                "HAR file",
+                crate::target_parser::is_har_content,
+            ) {
                 Ok(c) => c,
                 Err(outcome) => return Err(outcome),
             };
@@ -442,7 +520,12 @@ pub(crate) async fn resolve_targets(
             }
         } else if input_type == "raw-http" {
             // Parse raw HTTP from the detection cache, a file, or a literal.
-            let content = match load_request_source(&s, args, "raw HTTP request") {
+            let content = match load_request_source(
+                &s,
+                args,
+                "raw HTTP request",
+                crate::target_parser::is_raw_http_request,
+            ) {
                 Ok(c) => c,
                 Err(outcome) => return Err(outcome),
             };
@@ -519,6 +602,19 @@ pub(crate) async fn resolve_targets(
                     parsed_targets.push(target);
                 }
                 Err(e) => {
+                    // A line from a list is skipped; a target the operator
+                    // typed is fatal. See [`TargetOrigin`].
+                    if origin == TargetOrigin::List {
+                        unparsable_lines += 1;
+                        if unparsable_sample.len() < UNPARSABLE_SAMPLE_LIMIT {
+                            unparsable_sample.push(format!(
+                                "{} ({})",
+                                crate::utils::log::sanitize_log_message(&s),
+                                e
+                            ));
+                        }
+                        continue;
+                    }
                     if !args.silence {
                         emit_error(
                             &args.format,
@@ -532,9 +628,45 @@ pub(crate) async fn resolve_targets(
         }
     }
 
+    if unparsable_lines > 0 {
+        // Always on stderr, for every format: a list whose lines were dropped
+        // is not full coverage of that list, and a `--silence`d JSON consumer
+        // has no other way to learn it. (The count also rides in the scan-meta
+        // envelope as `targets_unparsable`.)
+        eprintln!(
+            "[warn] skipped {} unparsable target-list line(s){}",
+            unparsable_lines,
+            if unparsable_sample.is_empty() {
+                String::new()
+            } else {
+                format!(" — e.g. {}", unparsable_sample.join("; "))
+            }
+        );
+    }
+
+    if parsed_targets.is_empty() && unparsable_lines > 0 {
+        // Every line was junk: this is a malformed input list, not an empty
+        // one, and `NO_TARGETS` would send the operator looking in the wrong
+        // place.
+        //
+        // Deliberately not gated on `!args.silence`, matching the
+        // "all targets filtered out" emit below: `--silence` suppresses scan
+        // log noise, not input-validation errors, and `emit_error` writes to
+        // stderr so the stdout payload a caller is piping stays clean.
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::PARSE_ERROR,
+            &format!(
+                "No target in the input list parsed ({} line(s) skipped)",
+                unparsable_lines
+            ),
+        );
+        return Err(ScanOutcome::Error);
+    }
+
     apply_url_scope_filters(args, &mut parsed_targets);
 
-    apply_out_of_scope_filter(args, &mut parsed_targets);
+    apply_out_of_scope_filter(args, &mut parsed_targets)?;
 
     // Deduplicate targets per `--dedup-urls` (exact / signature / off) to avoid
     // redundant scans (e.g. pipe input with duplicates, or a `gau`/`katana`
@@ -595,6 +727,7 @@ pub(crate) async fn resolve_targets(
     Ok(ResolvedTargets {
         targets: parsed_targets,
         dedup,
+        unparsable_lines,
     })
 }
 
@@ -841,6 +974,65 @@ fn stdin_merge_wait_ms() -> u64 {
         .unwrap_or(STDIN_MERGE_WAIT_MS)
 }
 
+/// Wire error code for a failed bounded file read.
+///
+/// `read_bounded` folds three unrelated failures into one `io::Error` — the
+/// byte cap fired, the path is missing / a directory / unreadable, or the
+/// bytes are not UTF-8 — and the auto-detect path reported all of them as
+/// `INPUT_TOO_LARGE` while the `-i file` path reported all of them as
+/// `FILE_READ_ERROR`. Two codes for the same failure is a wire-contract bug
+/// on its own; telling a Windows operator whose PowerShell-written UTF-16
+/// list won't open that it is "too large" is the worse half of it. Only a
+/// real cap hit keeps `INPUT_TOO_LARGE`.
+fn file_read_error_code(e: &std::io::Error) -> &'static str {
+    if crate::utils::fs::is_over_cap(e) {
+        crate::cmd::error_codes::INPUT_TOO_LARGE
+    } else {
+        crate::cmd::error_codes::FILE_READ_ERROR
+    }
+}
+
+/// Whether a positional argument that is *not* a file on disk was nevertheless
+/// meant as one — a typo'd or moved target list, rather than a bare hostname.
+///
+/// Two signals, neither of which an ordinary target can carry:
+///
+/// * an explicit path prefix the operator typed to mean "this is a file"
+///   (`./`, `../`, `/`, `~`), which [`looks_like_url_input`] already treats as
+///   disqualifying a URL reading;
+/// * a *bare* file name (no path separator) ending in a known target-list
+///   extension — `urls.txt`, `capture.har`, `targets.csv`. None of those
+///   extensions is a real TLD, and this is the same rule that already decides
+///   the ambiguity when the file *does* exist.
+///
+/// Deliberately not applied to a name that carries a path separator without a
+/// prefix: `example.com/robots.txt` and `localhost/admin` are targets, not
+/// paths, and there is no way to tell `lists/urls.txt` from them without
+/// guessing. Those keep the historical URL reading.
+fn names_a_missing_file(s: &str) -> bool {
+    if s.starts_with("./")
+        || s.starts_with("../")
+        || s.starts_with('/')
+        || s.starts_with('~')
+        || (cfg!(windows) && (s.starts_with(".\\") || s.starts_with("..\\")))
+    {
+        return true;
+    }
+    let has_separator = s.contains('/') || (cfg!(windows) && s.contains('\\'));
+    if has_separator {
+        return false;
+    }
+    // `.log` is the one entry in that list that is also a delegated gTLD, so
+    // `status.log` is a legitimate host. Erroring on it would be a behaviour
+    // flip for a valid target shape; the rest of the list (`txt`, `csv`,
+    // `har`, `jsonl`, …) has no TLD that could collide.
+    let is_ambiguous_tld = s
+        .rsplit('.')
+        .next()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("log"));
+    !is_ambiguous_tld && looks_like_target_list_filename(s)
+}
+
 /// Load the source text for a request-bearing input (`raw-http` or `har`):
 /// read the file at `s` (bounded), else treat `s` itself as the document (a
 /// stdin buffer or a CLI literal). Detection only sniffs a prefix, so the full
@@ -851,6 +1043,7 @@ fn load_request_source(
     s: &str,
     args: &ScanArgs,
     label: &str,
+    is_literal: fn(&str) -> bool,
 ) -> std::result::Result<String, ScanOutcome> {
     let p = std::path::Path::new(s);
     if p.exists() {
@@ -860,15 +1053,37 @@ fn load_request_source(
                 if !args.silence {
                     emit_error(
                         &args.format,
-                        crate::cmd::error_codes::INPUT_TOO_LARGE,
+                        file_read_error_code(&e),
                         &format!("Error reading {} {}: {}", label, s, e),
                     );
                 }
                 Err(ScanOutcome::Error)
             }
         }
-    } else {
+    } else if is_literal(s) || s.contains(['\n', '\r']) {
+        // `is_literal` is the *detector* (`is_raw_http_request` demands a
+        // `HTTP/x.y` token and one of eight known methods), while the parser
+        // behind it is deliberately looser — `parse_raw_http_request`
+        // documents the version as optional and accepts any method token. A
+        // multi-line value is a document either way: no path carries a line
+        // break, so accepting one here keeps `-i raw-http $'PURGE /x
+        // HTTP/1.1\nHost: h'` working instead of reporting it as a missing
+        // file.
         Ok(s.to_string())
+    } else {
+        // Neither a file on disk nor recognisable as the document itself. The
+        // fall-through used to hand the *path* to the parser, so a typo'd
+        // `-i har ./capture.har` came back as "invalid HAR JSON: expected
+        // value at line 1 column 1" — a message that sends the operator to
+        // inspect a capture they never opened. Say what actually went wrong.
+        if !args.silence {
+            emit_error(
+                &args.format,
+                crate::cmd::error_codes::FILE_READ_ERROR,
+                &format!("{} '{}' does not exist", label, s),
+            );
+        }
+        Err(ScanOutcome::Error)
     }
 }
 
@@ -1008,7 +1223,17 @@ pub(crate) fn apply_url_scope_filters(args: &ScanArgs, parsed_targets: &mut Vec<
 }
 
 /// Drop targets whose host matches `--out-of-scope` / `--out-of-scope-file`.
-pub(crate) fn apply_out_of_scope_filter(args: &ScanArgs, parsed_targets: &mut Vec<Target>) {
+///
+/// An unreadable `--out-of-scope-file` is fatal, for the same reason
+/// `--cookie-from-raw` is: the operator named the hosts they are *not*
+/// authorised to touch, and continuing means attacking every one of them. The
+/// old behaviour warned through [`log_warn`], which is silent for every
+/// machine-readable format and under `--silence` — so a typo'd path in a CI
+/// job scanned the exclusion list with no trace at all.
+pub(crate) fn apply_out_of_scope_filter(
+    args: &ScanArgs,
+    parsed_targets: &mut Vec<Target>,
+) -> std::result::Result<(), ScanOutcome> {
     // Apply out-of-scope domain filtering (--out-of-scope / --out-of-scope-file)
     {
         let mut oos_domains: Vec<String> = args.out_of_scope.clone();
@@ -1027,10 +1252,15 @@ pub(crate) fn apply_out_of_scope_filter(args: &ScanArgs, parsed_targets: &mut Ve
                     }
                 }
                 Err(e) => {
-                    log_warn(
-                        args,
-                        &format!("failed to read --out-of-scope-file '{}': {}", path, e),
+                    emit_error(
+                        &args.format,
+                        file_read_error_code(&e),
+                        &format!(
+                            "--out-of-scope-file could not be read ({}): {} — refusing to scan without the exclusion list",
+                            path, e
+                        ),
                     );
+                    return Err(ScanOutcome::Error);
                 }
             }
         }
@@ -1054,6 +1284,7 @@ pub(crate) fn apply_out_of_scope_filter(args: &ScanArgs, parsed_targets: &mut Ve
             }
         }
     }
+    Ok(())
 }
 
 /// Apply `--cookie-from-raw`: lift the `Cookie` header out of a saved raw HTTP

@@ -472,6 +472,13 @@ pub(crate) struct SanitizedResult {
     pub response: Option<String>,
 }
 
+/// `skip_serializing_if` predicate: leave a zero count out of the envelope
+/// entirely, so a field that describes an *exceptional* condition only appears
+/// when that condition actually happened.
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
 /// Scan-level metadata envelope, previously only surfaced for JSON/JSONL.
 /// Now also threaded into SARIF (run.properties + driver.properties),
 /// Markdown (as additional summary tables), and TOML (as `[meta]` table).
@@ -499,6 +506,11 @@ pub(crate) struct ScanMetadata {
     /// coverage of that list.
     #[serde(default)]
     pub targets_deduplicated: usize,
+    /// Target-list lines that did not parse as a target and were skipped.
+    /// Omitted when zero (the normal case), so an envelope only carries it
+    /// when part of the input list was actually thrown away.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub targets_unparsable: usize,
     /// `--baseline` diff summary (path, mode, new/known counts, or the reason
     /// the diff was disabled). `None` when `--baseline` was not used, and then
     /// omitted from every rendered envelope.
@@ -648,6 +660,14 @@ impl Result {
             "dedup_mode": &meta.dedup_mode,
             "targets_deduplicated": meta.targets_deduplicated,
         });
+        if meta.targets_unparsable > 0
+            && let serde_json::Value::Object(ref mut map) = value
+        {
+            map.insert(
+                "targets_unparsable".to_string(),
+                serde_json::json!(meta.targets_unparsable),
+            );
+        }
         if let Some(baseline) = &meta.baseline
             && let serde_json::Value::Object(ref mut map) = value
         {

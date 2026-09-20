@@ -115,7 +115,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--exclude-url` | — | Regex pattern(s) of URLs to exclude |
 | `--ignore-param` | — | Parameter name(s) to skip |
 | `--out-of-scope` | — | Wildcard domain patterns to skip |
-| `--out-of-scope-file` | — | File listing out-of-scope domains |
+| `--out-of-scope-file` | — | File listing out-of-scope domains. A path that cannot be read is a fatal `FILE_READ_ERROR` — scanning on without the exclusion list would attack every host it named |
 
 ### Discovery
 

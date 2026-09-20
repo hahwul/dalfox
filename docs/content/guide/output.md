@@ -87,6 +87,7 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `findings_count`
 - `target_summary[]` — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
+- `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
 - `incomplete` — `true` when at least one target was **not fully tested**; today that means its authenticated session died mid-scan (see [Session monitoring](../scanning-modes/)). Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
 

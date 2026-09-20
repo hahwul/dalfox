@@ -114,7 +114,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--exclude-url` | — | 제외할 URL의 정규식 패턴 |
 | `--ignore-param` | — | 건너뛸 파라미터 이름 |
 | `--out-of-scope` | — | 건너뛸 와일드카드 도메인 패턴 |
-| `--out-of-scope-file` | — | 범위 외 도메인을 나열한 파일 |
+| `--out-of-scope-file` | — | 범위 외 도메인을 나열한 파일. 읽을 수 없는 경로는 치명적 오류(`FILE_READ_ERROR`)입니다 — 제외 목록 없이 계속 진행하면 그 목록에 적힌 호스트를 전부 공격하게 됩니다 |
 
 ### 탐색
 
