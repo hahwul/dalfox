@@ -130,6 +130,28 @@ pub(super) fn execution_error(message: impl Into<String>) -> CallToolResult {
     ))])
 }
 
+/// As [`structured`], plus a `resource_link` pointing at the scan the body
+/// describes.
+///
+/// The link is what lets a host offer the findings as an attachment — to this
+/// conversation or another one — instead of requiring the model to re-fetch
+/// and re-quote them. It is additive: the text block and `structuredContent`
+/// are unchanged, and clients too old to know the block type never see it
+/// (see `super::resources::with_link_support`).
+pub(super) fn structured_linking_scan(
+    body: serde_json::Value,
+    scan_id: &str,
+    target: &str,
+) -> CallToolResult {
+    let mut result = structured(body);
+    if super::resources::links_supported() {
+        result
+            .content
+            .push(super::resources::scan_link(scan_id, target));
+    }
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Shared fragments
 // ---------------------------------------------------------------------------

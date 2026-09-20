@@ -3497,3 +3497,204 @@ async fn a_scan_without_a_progress_token_publishes_nothing() {
         "no token was issued, so nothing may be published: {notifications:?}"
     );
 }
+
+#[test]
+fn scan_uris_round_trip_and_reject_strangers() {
+    let uri = resources::scan_uri("abc123");
+    assert_eq!(uri, "dalfox://scan/abc123");
+    assert_eq!(resources::scan_id_from_uri(&uri), Some("abc123"));
+    // The index is not a scan, and neither is a bare prefix — both used to be
+    // the same `strip_prefix` away from addressing a job called "".
+    assert_eq!(resources::scan_id_from_uri(resources::SCANS_URI), None);
+    assert_eq!(resources::scan_id_from_uri("dalfox://scan/"), None);
+    assert_eq!(resources::scan_id_from_uri("file:///etc/passwd"), None);
+}
+
+#[test]
+fn resource_pages_stay_honest_about_what_is_left() {
+    // Retention allows a thousand jobs, so the listing pages. A page that
+    // dropped the tail without a cursor would quietly hide scans a user can
+    // see in list_scans_dalfox.
+    let scans: Vec<(String, String, usize)> = (0..120)
+        .map(|i| (format!("id{i}"), format!("http://example.com/{i}"), i))
+        .collect();
+
+    let first = resources::list_page(None, &scans).expect("first page");
+    // 50 scans plus the index, which rides the first page only.
+    assert_eq!(first.resources.len(), 51);
+    assert_eq!(first.resources[0].uri, resources::SCANS_URI);
+    let cursor = first.next_cursor.clone().expect("more pages follow");
+
+    let second = resources::list_page(
+        Some(rmcp::model::PaginatedRequestParams::default().with_cursor(Some(cursor))),
+        &scans,
+    )
+    .expect("second page");
+    assert_eq!(second.resources.len(), 50);
+    assert_eq!(second.resources[0].uri, resources::scan_uri("id50"));
+
+    let last = resources::list_page(
+        Some(
+            rmcp::model::PaginatedRequestParams::default().with_cursor(second.next_cursor.clone()),
+        ),
+        &scans,
+    )
+    .expect("last page");
+    assert_eq!(last.resources.len(), 20);
+    assert!(
+        last.next_cursor.is_none(),
+        "the final page must not invite another request"
+    );
+
+    // A cursor we never issued is refused rather than silently restarting the
+    // walk from the top.
+    let err = resources::list_page(
+        Some(
+            rmcp::model::PaginatedRequestParams::default().with_cursor(Some("not-a-number".into())),
+        ),
+        &scans,
+    )
+    .expect_err("a foreign cursor is invalid");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+}
+
+#[tokio::test]
+async fn the_wire_serves_scans_as_resources() {
+    let (target, server) = spawn_expiring_target(usize::MAX).await;
+    let responses = round_trip(&[
+        rpc(
+            1,
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "dalfox-tests", "version": "0"}
+            }),
+        ),
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        rpc(
+            2,
+            "tools/call",
+            serde_json::json!({
+                "name": "scan_with_dalfox",
+                "arguments": {
+                    "target": format!("{target}/?q=hello"),
+                    "wait": true,
+                    "wait_timeout_sec": 50,
+                    "max_payloads_per_param": 5,
+                    "skip_mining": true
+                }
+            }),
+        ),
+        rpc(3, "resources/list", serde_json::json!({})),
+        rpc(4, "resources/templates/list", serde_json::json!({})),
+        rpc(
+            5,
+            "resources/read",
+            serde_json::json!({"uri": "dalfox://scans"}),
+        ),
+        rpc(
+            6,
+            "resources/read",
+            serde_json::json!({"uri": "dalfox://nope"}),
+        ),
+    ])
+    .await;
+    server.abort();
+
+    assert!(
+        responses[&1]["result"]["capabilities"]["resources"].is_object(),
+        "a server that serves resources must say so in the handshake"
+    );
+
+    // The scan result carries a handle to itself, so a host can attach the
+    // findings instead of making the model re-quote them.
+    let content = responses[&2]["result"]["content"]
+        .as_array()
+        .expect("content blocks");
+    let link = content
+        .iter()
+        .find(|c| c["type"] == "resource_link")
+        .expect("the scan result links to its own resource");
+    let scan_uri = link["uri"].as_str().expect("link uri").to_string();
+    assert_eq!(
+        scan_uri,
+        format!(
+            "dalfox://scan/{}",
+            responses[&2]["result"]["structuredContent"]["scan_id"]
+                .as_str()
+                .expect("scan_id")
+        )
+    );
+
+    let listed = responses[&3]["result"]["resources"]
+        .as_array()
+        .expect("resources");
+    assert!(
+        listed.iter().any(|r| r["uri"] == "dalfox://scans"),
+        "the index is always listed: {listed:?}"
+    );
+    assert!(
+        listed.iter().any(|r| r["uri"] == scan_uri.as_str()),
+        "the scan that just ran must be listed, not only reachable by template"
+    );
+
+    assert_eq!(
+        responses[&4]["result"]["resourceTemplates"][0]["uriTemplate"],
+        "dalfox://scan/{scan_id}"
+    );
+
+    // The index read is the listing body, so the two can never disagree.
+    let text = responses[&5]["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("index text");
+    let index: serde_json::Value = serde_json::from_str(text).expect("index is json");
+    assert_eq!(index["total"], 1);
+
+    assert!(
+        responses[&6].get("result").is_none(),
+        "an unknown URI must not come back as content: {}",
+        responses[&6]
+    );
+}
+
+#[tokio::test]
+async fn a_pre_2025_client_is_not_sent_a_resource_link() {
+    // A tool result's content array is a closed union on the client side: the
+    // TypeScript and Python SDKs validate every block against the revision
+    // they speak, and one they do not know fails the *whole* result. So a
+    // client on 2024-11-05 — which rmcp still serves — must not be handed a
+    // `resource_link`, however useful it would have been.
+    let (target, server) = spawn_expiring_target(usize::MAX).await;
+    let responses = round_trip(&[
+        rpc(
+            1,
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "dalfox-tests", "version": "0"}
+            }),
+        ),
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        rpc(
+            2,
+            "tools/call",
+            serde_json::json!({
+                "name": "scan_with_dalfox",
+                "arguments": {"target": format!("{target}/?q=hello")}
+            }),
+        ),
+    ])
+    .await;
+    server.abort();
+
+    assert_eq!(responses[&1]["result"]["protocolVersion"], "2024-11-05");
+    let content = responses[&2]["result"]["content"]
+        .as_array()
+        .expect("content blocks");
+    assert!(
+        content.iter().all(|c| c["type"] == "text"),
+        "a 2024-11-05 client must get text only: {content:?}"
+    );
+}

@@ -55,6 +55,7 @@ mod outputs;
 mod pagination;
 mod params;
 mod progress;
+mod resources;
 
 use job_runtime::*;
 use outputs::*;
@@ -757,7 +758,9 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
                 "target": target,
                 "status": JobStatus::Queued
             });
-            return Ok(structured(out));
+            // The ack is where a caller first learns the scan id, so it is
+            // also where the handle to its results belongs.
+            return Ok(structured_linking_scan(out, &scan_id, &target));
         }
 
         // Synchronous agent path: poll until terminal or wait budget expires.
@@ -774,7 +777,7 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
             };
             let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("");
             if matches!(status, "done" | "error" | "cancelled") {
-                return Ok(structured(out));
+                return Ok(structured_linking_scan(out, &scan_id, &target));
             }
             // A wait can hold the call open for `wait_timeout_sec` (300s by
             // default) with nothing on the wire. When the client attached a
@@ -805,7 +808,7 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
         })?;
         out["wait_timed_out"] = serde_json::json!(true);
         out["wait_timeout_sec"] = serde_json::json!(wait_timeout_sec);
-        Ok(structured(out))
+        Ok(structured_linking_scan(out, &scan_id, &target))
     }
 
     /// Build the JSON body for `get_results_dalfox` / wait-mode completion.
@@ -981,7 +984,14 @@ rest are still retrievable at the next offset."
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
         match self.results_json_for_scan(&pid, params.offset, params.limit) {
-            Some(out) => Ok(structured(out)),
+            Some(out) => {
+                let target = out
+                    .get("target")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                Ok(structured_linking_scan(out, &pid, &target))
+            }
             None => Err(ErrorData::invalid_params("scan_id not found", None)),
         }
     }
@@ -1028,8 +1038,21 @@ a failed scan is distinguishable from one that finished with no findings."
             None => None,
         };
 
-        let offset = params.offset;
-        let limit = params.limit;
+        Ok(structured(self.scans_json(
+            filter_status,
+            params.offset,
+            params.limit,
+        )))
+    }
+
+    /// The `list_scans_dalfox` body, shared with the `dalfox://scans` resource
+    /// so the two cannot describe the same jobs differently.
+    fn scans_json(
+        &self,
+        filter_status: Option<JobStatus>,
+        offset: usize,
+        limit: usize,
+    ) -> serde_json::Value {
         // Build the response under the lock but only on the JSON values we need;
         // serialization itself runs after the lock is released. Ordered
         // newest-first and paginated to match the REST `/scans` contract (the
@@ -1084,7 +1107,7 @@ a failed scan is distinguishable from one that finished with no findings."
             (total, end, entries)
         };
 
-        let out = serde_json::json!({
+        serde_json::json!({
             "total": total,
             "scans": entries,
             "pagination": {
@@ -1093,8 +1116,28 @@ a failed scan is distinguishable from one that finished with no findings."
                 "returned": entries.len(),
                 "has_more": end < total,
             }
+        })
+    }
+
+    /// `(scan_id, target, result_count)` for every tracked job, newest first —
+    /// the ordering `resources/list` pages over.
+    fn scan_index(&self) -> Vec<(String, String, usize)> {
+        let jobs = self.lock_jobs();
+        let mut rows: Vec<(&String, &Job)> = jobs.iter().collect();
+        rows.sort_by(|a, b| {
+            b.1.queued_at_ms
+                .cmp(&a.1.queued_at_ms)
+                .then_with(|| a.0.cmp(b.0))
         });
-        Ok(structured(out))
+        rows.into_iter()
+            .map(|(id, job)| {
+                (
+                    id.clone(),
+                    job.target_url.clone(),
+                    job.results.as_ref().map_or(0, |r| r.len()),
+                )
+            })
+            .collect()
     }
 
     /// Preflight check: discover parameters and estimate scan impact without sending attack payloads.
@@ -1558,6 +1601,12 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
         rmcp::model::ServerInfo::new(
             rmcp::model::ServerCapabilities::builder()
                 .enable_tools()
+                // Resources, but deliberately not `listChanged`: declaring it
+                // promises a notification whenever the set moves, and the set
+                // moves on every scan submission and every scan that finishes.
+                // dalfox has no subscriber bookkeeping to make that promise
+                // with, and a client that re-lists on demand loses nothing.
+                .enable_resources()
                 .build(),
         )
         .with_server_info(
@@ -1596,16 +1645,85 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
     ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
         reject_unparseable_arguments(&request)?;
         let token_present = context.meta.get_progress_token().is_some();
-        let progress_context = context.clone();
+        let call_context = context.clone();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        let dispatch = self.tool_router.call(tcc);
+        // Both of these ride a task-local bound around the dispatch rather
+        // than a handler argument: rmcp can inject `RequestContext` into a
+        // `#[tool]` fn, but every handler is also called directly by the unit
+        // tests, so threading it through would rewrite ~40 call sites to say
+        // "no client here". See `progress::with_progress`.
         if !token_present {
-            return self.tool_router.call(tcc).await;
+            return resources::with_link_support(&call_context, dispatch).await;
         }
-        // Bind the progress sink around the whole dispatch so the two tools
-        // that block on real work can publish against this call's token —
-        // see `progress::with_progress` for why it rides a task-local rather
-        // than a handler argument.
-        progress::with_progress(&progress_context, self.tool_router.call(tcc)).await
+        resources::with_link_support(
+            &call_context,
+            progress::with_progress(&call_context, dispatch),
+        )
+        .await
+    }
+
+    /// Publish the scan index plus one entry per tracked scan.
+    ///
+    /// Listing the scans themselves — rather than only the template — is what
+    /// puts real, clickable findings in a host's context picker. Retention
+    /// allows a thousand jobs, so the listing pages; the cursor is the offset
+    /// into the same newest-first order `list_scans_dalfox` uses.
+    async fn list_resources(
+        &self,
+        request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListResourcesResult, ErrorData> {
+        self.purge_expired_jobs();
+        resources::list_page(request, &self.scan_index())
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListResourceTemplatesResult, ErrorData> {
+        Ok(resources::templates())
+    }
+
+    /// Serve a scan, or the index, as JSON.
+    ///
+    /// The bodies are the tool bodies verbatim — including the
+    /// `_untrusted_content_notice` banner, which matters more here than on a
+    /// tool result: a client pastes resource contents into the model's context
+    /// on its own initiative, with no tool description anywhere near them.
+    async fn read_resource(
+        &self,
+        request: rmcp::model::ReadResourceRequestParams,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ReadResourceResponse, ErrorData> {
+        self.purge_expired_jobs();
+        let uri = request.uri.as_str();
+        if uri == resources::SCANS_URI {
+            let body = self.scans_json(None, 0, 0);
+            return Ok(resources::json_contents(uri, &body).into());
+        }
+        if let Some(scan_id) = resources::scan_id_from_uri(uri) {
+            // Offset 0 / limit 0: a resource read has no page parameters, so it
+            // serves the first page the byte budget allows and says so in
+            // `pagination` — the same descriptor get_results_dalfox returns,
+            // which is where a caller goes for the rest.
+            return match self.results_json_for_scan(scan_id, 0, 0) {
+                Some(body) => Ok(resources::json_contents(uri, &body).into()),
+                None => Err(ErrorData::resource_not_found(
+                    format!("no scan with id '{scan_id}' — it may have been purged"),
+                    None,
+                )),
+            };
+        }
+        Err(ErrorData::resource_not_found(
+            format!(
+                "unknown resource '{uri}' — dalfox serves {} and {}",
+                resources::SCANS_URI,
+                resources::SCAN_URI_TEMPLATE
+            ),
+            None,
+        ))
     }
 }
 
