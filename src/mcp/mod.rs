@@ -1694,8 +1694,8 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
     /// wrong in the client UI and useless in a bug report. Spelling the
     /// implementation out here is the only way to get dalfox's own identity
     /// onto the wire.
-    fn get_info(&self) -> rmcp::model::ServerInfo {
-        rmcp::model::ServerInfo::new(
+    fn get_info(&self) -> rmcp::model::ServerConfig {
+        rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()
                 .enable_tools()
                 // Resources, but deliberately not `listChanged`: declaring it
