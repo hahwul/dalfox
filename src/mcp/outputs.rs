@@ -239,7 +239,9 @@ pub(super) struct ScanStatusOut {
     pub finished_at_ms: Option<i64>,
     /// Elapsed scan time in milliseconds; `null` before the scan starts.
     pub duration_ms: Option<i64>,
-    /// Why the scan failed. Present only when `status` is `error`.
+    /// Why the scan did not finish normally. Present on `error`, and on a
+    /// `cancelled` scan that was stopped by its own `scan_timeout` or by the
+    /// client withdrawing the call.
     pub error_message: Option<String>,
     /// Live counters. Present once the job has left `queued`.
     pub progress: Option<ProgressOut>,
@@ -280,8 +282,9 @@ pub(super) struct ScanSummaryOut {
     pub finished_at_ms: Option<i64>,
     /// Elapsed scan time in milliseconds; `null` before the scan starts.
     pub duration_ms: Option<i64>,
-    /// Why the scan failed. Present only on a scan whose `status` is `error`
-    /// (or one cancelled by its own `scan_timeout`).
+    /// Why the scan did not finish normally. Present on `error`, and on a
+    /// `cancelled` scan that was stopped by its own `scan_timeout` or by the
+    /// client withdrawing the call.
     pub error_message: Option<String>,
 }
 
