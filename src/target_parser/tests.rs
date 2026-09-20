@@ -541,3 +541,45 @@ fn redirect_destination_predicate_stays_narrow() {
         );
     }
 }
+
+#[test]
+fn authority_less_schemes_are_rejected_not_rewritten() {
+    // A crawl dump's `mailto:` / `javascript:` / `tel:` lines have no HTTP
+    // authority, so prefixing `http://` invented one from the path:
+    // `mailto:security@corp.example` became a scan of `corp.example` carrying
+    // `mailto`/`security` as basic-auth credentials.
+    for s in [
+        "mailto:security@corp.example",
+        "MAILTO:security@corp.example",
+        "javascript:alert(1)",
+        "tel:+15551234567",
+        "data:text/html,<b>x",
+        "about:blank",
+        "intent:#Intent;end",
+    ] {
+        let err = parse_target(s).expect_err("{s} should be rejected");
+        assert!(
+            err.to_string().contains("unsupported URL scheme"),
+            "{s}: {err}"
+        );
+    }
+}
+
+#[test]
+fn scheme_less_inputs_with_a_colon_still_parse() {
+    // The rejection is a fixed scheme list, not a shape rule, precisely so
+    // these keep working: `user:pass@host` is structurally `scheme:rest`.
+    for (s, host) in [
+        ("user:pass@example.com", "example.com"),
+        ("example.com:8080/x", "example.com"),
+        ("127.0.0.1:8080", "127.0.0.1"),
+        // Container/service hostnames that collide with a listed scheme: a
+        // digit after the colon is a port, never a non-hierarchical URI body.
+        ("data:8080/?q=1", "data"),
+        ("news:3000", "news"),
+        ("market:8080/x", "market"),
+    ] {
+        let t = parse_target(s).unwrap_or_else(|e| panic!("{s} should parse: {e}"));
+        assert_eq!(t.url.host_str(), Some(host), "{s}");
+    }
+}

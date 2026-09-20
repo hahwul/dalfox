@@ -186,7 +186,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `exclude_url` | array | `[]` | Regex patterns of URLs to exclude |
 | `ignore_param` | array | `[]` | Parameter names to skip |
 | `out_of_scope` | array | `[]` | Wildcard domain patterns |
-| `out_of_scope_file` | string | — | File listing out-of-scope hosts |
+| `out_of_scope_file` | string | — | File listing out-of-scope hosts. Unreadable path aborts the scan |
 
 ### Discovery & mining
 

@@ -385,8 +385,13 @@ async fn cookie_from_raw_without_cookie_header_is_fatal() {
 fn load_request_source_reads_existing_file() {
     let p = tmp_file("src", "raw body contents");
     let args = args_from(&["-i", "url", "-S", "https://e.example/"]);
-    let out = load_request_source(p.to_str().unwrap(), &args, "raw HTTP request")
-        .expect("existing file reads");
+    let out = load_request_source(
+        p.to_str().unwrap(),
+        &args,
+        "raw HTTP request",
+        crate::target_parser::is_raw_http_request,
+    )
+    .expect("existing file reads");
     let _ = std::fs::remove_file(&p);
     assert_eq!(out, "raw body contents");
 }
@@ -395,8 +400,13 @@ fn load_request_source_reads_existing_file() {
 fn load_request_source_treats_non_path_as_literal() {
     let args = args_from(&["-i", "url", "-S", "https://e.example/"]);
     let literal = "GET / HTTP/1.1\r\nHost: literal.example\r\n\r\n";
-    let out =
-        load_request_source(literal, &args, "raw HTTP request").expect("literal passes through");
+    let out = load_request_source(
+        literal,
+        &args,
+        "raw HTTP request",
+        crate::target_parser::is_raw_http_request,
+    )
+    .expect("literal passes through");
     assert_eq!(out, literal);
 }
 
@@ -875,4 +885,194 @@ async fn non_cli_scan_args_still_override_with_a_non_default_method() {
     assert!(args.explicit.is_empty());
     let targets = resolve(&args).await.expect("raw http resolves");
     assert_eq!(targets[0].method, "PUT");
+}
+
+// ── resolve_targets: unparsable target-list lines ───────────────────
+
+#[tokio::test]
+async fn file_mode_skips_unparsable_lines_and_keeps_the_rest() {
+    // A recon dump (`gau`, `katana`, `waybackurls`) routinely carries a
+    // `mailto:` / `android-app://` / truncated line next to the URLs. One of
+    // those used to abort the whole run, so a 50k-URL list scanned nothing.
+    let p = tmp_file(
+        "mixed",
+        "https://a.example/1\nftp://bad.example/x\nmailto:who@a.example\nhttps://a.example/2\n",
+    );
+    let args = args_from(&["-i", "file", "-S", p.to_str().unwrap()]);
+    let resolved = resolve_targets(&args).await.expect("resolves");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(resolved.targets.len(), 2);
+    assert_eq!(resolved.unparsable_lines, 2);
+}
+
+#[tokio::test]
+async fn file_mode_with_only_unparsable_lines_is_a_parse_error() {
+    // Nothing usable came out of the list: that is a malformed input file, not
+    // an empty one, so it must not be reported as "No targets specified".
+    let p = tmp_file("all-bad", "ftp://bad.example/x\nmailto:who@a.example\n");
+    let args = args_from(&["-i", "file", "-S", p.to_str().unwrap()]);
+    let err = resolve_targets(&args).await.err();
+    let _ = std::fs::remove_file(&p);
+    assert!(matches!(err, Some(ScanOutcome::Error)));
+}
+
+#[tokio::test]
+async fn a_typed_target_that_does_not_parse_is_still_fatal() {
+    // The leniency is for harvested list lines only. A target the operator
+    // typed is the one thing they asked for; silently skipping it would report
+    // a clean scan of nothing.
+    let args = args_from(&["-i", "url", "-S", "ftp://bad.example/x"]);
+    assert!(resolve(&args).await.is_err());
+}
+
+#[tokio::test]
+async fn auto_mode_skips_unparsable_lines_from_a_list_file() {
+    let p = tmp_file(
+        "auto-mixed.txt",
+        "https://a.example/1\nftp://bad.example/x\n",
+    );
+    let args = args_from(&["-S", p.to_str().unwrap()]);
+    let resolved = resolve_targets(&args).await.expect("resolves");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(resolved.targets.len(), 1);
+    assert_eq!(resolved.unparsable_lines, 1);
+}
+
+// ── resolve_targets: a path-shaped argument that isn't there ────────
+
+#[tokio::test]
+async fn auto_mode_missing_target_list_is_an_error_not_a_hostname() {
+    // `parse_target` turns `./urls.txt` into `http://./urls.txt/`: the run
+    // records one DNS failure as `skipped` and — with any other target
+    // resolving — exits 0, reading as a clean scan of a list never opened.
+    for arg in ["./does-not-exist.txt", "/tmp/dalfox-no-such-list.txt"] {
+        let args = args_from(&["-S", "https://ok.example/", arg]);
+        assert!(
+            resolve(&args).await.is_err(),
+            "{arg} should fail as a missing file"
+        );
+    }
+}
+
+#[tokio::test]
+async fn auto_mode_missing_list_extension_is_an_error() {
+    // No `./` prefix, but a known target-list extension and nothing on disk.
+    // None of those extensions is a real TLD, so this can only be a typo.
+    let args = args_from(&["-S", "dalfox-no-such-list.txt"]);
+    assert!(resolve(&args).await.is_err());
+}
+
+#[tokio::test]
+async fn auto_mode_bare_host_without_a_matching_file_stays_a_url() {
+    // The guard must not swallow the ordinary `dalfox scan example.com` and
+    // `dalfox scan example.com/a?b=1` forms.
+    // `example.com/robots.txt` and `localhost/admin` carry a path separator
+    // without a path *prefix*: there is no way to tell them from a relative
+    // `lists/urls.txt` without guessing, so they keep the URL reading.
+    for arg in [
+        "example.com",
+        "example.com/a?b=1",
+        "127.0.0.1:8080",
+        "example.com/robots.txt",
+        "localhost/admin",
+        // `.log` is a delegated gTLD as well as a list extension.
+        "status.log",
+    ] {
+        let args = args_from(&["-S", arg]);
+        let targets = resolve(&args).await.expect("host literal resolves");
+        assert_eq!(targets.len(), 1, "{arg}");
+        assert!(targets[0].url.host_str().is_some(), "{arg}");
+    }
+}
+
+// ── --out-of-scope-file ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn out_of_scope_file_that_cannot_be_read_is_fatal() {
+    // Continuing means attacking every host the operator listed as off-limits,
+    // and the old warning was invisible for json/jsonl/sarif and under -S.
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--out-of-scope-file",
+        "/tmp/dalfox-no-such-oos-file.txt",
+        "https://example.com/",
+    ]);
+    assert!(resolve(&args).await.is_err());
+}
+
+// ── load_request_source: a missing path is not a document ───────────
+
+#[tokio::test]
+async fn har_mode_missing_file_reports_the_missing_file() {
+    // Previously the path itself was handed to `parse_har`, which answered
+    // "invalid HAR JSON: expected value at line 1 column 1".
+    let args = args_from(&["-i", "har", "-S", "/tmp/dalfox-no-such-capture.har"]);
+    assert!(resolve(&args).await.is_err());
+}
+
+#[tokio::test]
+async fn raw_http_mode_missing_file_reports_the_missing_file() {
+    let args = args_from(&["-i", "raw-http", "-S", "/tmp/dalfox-no-such-request.req"]);
+    assert!(resolve(&args).await.is_err());
+}
+
+#[tokio::test]
+async fn raw_http_literal_looser_than_the_detector_still_parses() {
+    // `is_raw_http_request` wants a `HTTP/x.y` token and one of eight known
+    // methods; `parse_raw_http_request` accepts any method and treats the
+    // version as optional. A multi-line value is a document either way — no
+    // path carries a line break — so the missing-file guard must not reject it.
+    for literal in [
+        "PURGE /x HTTP/1.1\nHost: lit.example\n\n",
+        "GET /x\nHost: lit.example\n\n",
+    ] {
+        let args = args_from(&["-i", "raw-http", "-S", literal]);
+        let targets = resolve(&args).await.expect("literal parses");
+        assert_eq!(targets.len(), 1, "{literal:?}");
+        assert_eq!(targets[0].url.host_str(), Some("lit.example"));
+    }
+}
+
+#[test]
+fn load_request_source_rejects_a_path_that_is_neither_file_nor_document() {
+    let args = args_from(&["-i", "url", "-S", "https://e.example/"]);
+    assert!(
+        load_request_source(
+            "/tmp/dalfox-no-such-request.req",
+            &args,
+            "raw HTTP request",
+            crate::target_parser::is_raw_http_request,
+        )
+        .is_err()
+    );
+}
+
+// ── file-read error codes ───────────────────────────────────────────
+
+#[test]
+fn only_a_real_cap_hit_reports_input_too_large() {
+    use crate::cmd::error_codes;
+    let cap = crate::utils::fs::read_bounded(std::path::Path::new("/dev/null"), 0, "target list");
+    // `/dev/null` is a char device, not a regular file — a read error, not a cap.
+    let not_a_file = cap.expect_err("char device is refused");
+    assert_eq!(
+        file_read_error_code(&not_a_file),
+        error_codes::FILE_READ_ERROR
+    );
+
+    let p = tmp_file("cap", "0123456789");
+    let over = crate::utils::fs::read_bounded(&p, 4, "target list")
+        .expect_err("10 bytes over a 4-byte cap");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(file_read_error_code(&over), error_codes::INPUT_TOO_LARGE);
+
+    let missing = crate::utils::fs::read_bounded(
+        std::path::Path::new("/tmp/dalfox-no-such-file-at-all"),
+        1024,
+        "target list",
+    )
+    .expect_err("missing file");
+    assert_eq!(file_read_error_code(&missing), error_codes::FILE_READ_ERROR);
 }

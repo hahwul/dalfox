@@ -11,6 +11,10 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--state-file` | — | Resume support for mass scans: records each target's terminal state (`completed` / `cancelled` / `error`) and skips the `completed` ones on a re-run. Only `completed` is skipped — Ctrl-C, `--scan-timeout`, and preflight drops are retried. The file's header holds a hash of the scan-affecting config; a mismatch moves the file to `<path>.bak` and starts over. Skipped count lands in `meta.resumed`. CLI only. |
 | `TARGET` (positional) | — | URL, file path, raw HTTP (`-i raw-http`), or HAR file (`-i har` / auto-detected) |
 
+**Target lists are lenient, typed targets are not.** A line from a file / pipe that does not parse as a target (`mailto:`, `javascript:`, `tel:`, `ftp://`, truncated junk — the usual `gau` / `katana` sediment) is skipped with a stderr warning and counted in `meta.targets_unparsable`; one stray line no longer aborts a 50k-URL run. A target typed on the command line still fails the run, and a list where *nothing* parses is a `PARSE_ERROR`.
+
+**A missing file is a missing file.** A path-shaped argument that is not on disk (`./urls.txt`, `/tmp/list`, `capture.har`, `-i raw-http req.txt`) is reported as `FILE_READ_ERROR`, never silently reinterpreted as a hostname. Bare hosts (`example.com`, `example.com/a?b=1`) are unaffected.
+
 **`raw-http`** is powerful: you can feed a complete captured request (from Burp "Copy to file" or `curl -v` output) and dalfox will parse method, path, headers, cookies, and body.
 
 **`har`** scans a whole HAR / proxy export at once: every `log.entries[].request` becomes a target with its URL, method, headers, cookies, and body preserved (deduplicated by URL+method). Auto-detected from file content, or force it with `-i har`; HAR can also be piped on stdin.
@@ -48,7 +52,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--exclude-url` | Regex blacklist (multiple) |
 | `--ignore-param` | Skip these parameter names entirely |
 | `--out-of-scope` | Wildcard domain patterns (e.g. `*.dev.example.com`) |
-| `--out-of-scope-file` | File containing one pattern per line |
+| `--out-of-scope-file` | File containing one pattern per line. Unreadable path = fatal `FILE_READ_ERROR` (never a warning: continuing would scan the excluded hosts) |
 
 ## Discovery & Mining
 

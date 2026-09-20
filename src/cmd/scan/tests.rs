@@ -877,6 +877,7 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         spinner_allowed: false,
         no_color: true,
         dedup: Default::default(),
+        unparsable_lines: 0,
         state_file: None,
         resumed_skipped: 0,
     }

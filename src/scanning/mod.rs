@@ -891,9 +891,17 @@ impl ScanWorkerCtx {
                 // mints no `R`. `reflected_kind.is_some()` responses are handled
                 // by that short-circuit and never reach the budget. The status
                 // rides alongside the body (not on the public `ReflectionBody`)
-                // via the crate-private status-aware fetch; `0` (request error /
-                // sxss) is treated as non-4xx.
+                // via the crate-private status-aware fetch; `0` (a request
+                // error) is treated as non-4xx.
+                //
+                // `--sxss` is excluded for the same reason the DOM phase's
+                // early exit is: verification fans out across secondary
+                // retrieval URLs, so the single injection status is `0` for
+                // every payload and an escaped echo on one retrieval page says
+                // nothing about the rest. Without this the budget it was meant
+                // to stay out of would retire a stored run after 256 payloads.
                 if !self.args.deep_scan
+                    && !self.args.sxss
                     && reflected_kind.is_none()
                     && !(400..500).contains(&status)
                     && reflection_body.as_ref().is_some_and(|b| {
@@ -908,6 +916,7 @@ impl ScanWorkerCtx {
                     reflection_payload,
                     reflected_kind,
                     reflection_body,
+                    status,
                     state,
                 )
                 .await;
@@ -952,6 +961,7 @@ impl ScanWorkerCtx {
         reflection_payload: &str,
         reflected_kind: Option<check_reflection::ReflectionKind>,
         reflection_body: Option<check_reflection::ReflectionBody>,
+        status: u16,
         state: &mut ParamScanState,
     ) {
         {
@@ -970,9 +980,24 @@ impl ScanWorkerCtx {
             // rendered element. Only JS-context evidence upgrades R→V there.
             let body_is_javascript = reflection_body.as_ref().is_some_and(|b| b.js_content_type);
 
-            // AST-based DOM XSS analysis (enabled by default unless skipped)
+            // AST-based DOM XSS analysis (enabled by default unless skipped).
+            //
+            // This is the once-per-parameter seed, and Stage 0 now hands it
+            // over whenever the pre-scan active probe already answered the
+            // reflection question (`param.marker_echoed`) — so the document it
+            // latches onto is the response to an *attack* payload, not to a
+            // benign marker. A 4xx/5xx interstitial is renderable HTML and
+            // passes every other gate (`injection_response_suppressed` filters
+            // content-types and `--ignore-return`, not block statuses), so on a
+            // WAF'd endpoint the first 403 block page would consume the seed
+            // and the application's own document would never be analysed for
+            // that parameter. Only seed from a status that could be the
+            // application answering: 2xx/3xx, or `0` (request error / `--sxss`
+            // retrieval, which is the real page).
+            let status_can_seed_ast = status < 400;
             if !self.args.skip_ast_analysis
                 && !state.ast_analysis_done
+                && status_can_seed_ast
                 && let Some(response_text) = renderable_text
             {
                 state.ast_analysis_done = true;
@@ -1265,6 +1290,7 @@ impl ScanWorkerCtx {
                     verified: dom_verified,
                     response_text,
                     reflected,
+                    live_reflection,
                     status,
                 } = outcome;
                 if dom_verified {
@@ -1370,7 +1396,10 @@ impl ScanWorkerCtx {
                 // first, `should_add == false`) must not be miscounted.
                 if !dom_verified {
                     inert_echo_count = next_inert_echo_count(inert_echo_count, reflected);
-                    blocked_streak = next_blocked_streak(blocked_streak, status, reflected);
+                    // The strict, byte-exact signal — not the widened
+                    // `reflected` that also counts escaped echoes. See
+                    // `DomVerifyOutcome::live_reflection`.
+                    blocked_streak = next_blocked_streak(blocked_streak, status, live_reflection);
                     redirect_streak = next_redirect_streak(redirect_streak, status);
                 }
                 if early_exit.is_none()

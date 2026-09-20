@@ -226,6 +226,10 @@ See `src/cmd/mod.rs` for the canonical list. Common ones:
 
 In JSON output the per-target summary contains `error_code` when the target failed before any payloads were sent.
 
+`meta.targets_unparsable` (present only when non-zero) counts target-list lines
+that could not be parsed and were skipped. Like `meta.targets_deduplicated`, it
+exists so a report is never read as full coverage of the input list.
+
 ## Incomplete Runs (session loss)
 
 `meta.incomplete: true` means at least one target was **not fully tested**.

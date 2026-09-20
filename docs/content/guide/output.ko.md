@@ -86,6 +86,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 - `findings_count`
 - `target_summary[]` — 대상별 상태, 탐지 결과 수, error_code(건너뛴 경우), 그리고 탐지된 경우 WAF/우회 세부 정보
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 타깃 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
+- `targets_unparsable` — 타깃 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/) 참고
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
 - `incomplete` — 하나 이상의 대상이 **완전히 테스트되지 않았을 때** `true`입니다. 현재는 스캔 도중 인증 세션이 끊어진 경우를 뜻합니다([세션 모니터링](../scanning-modes/) 참고). `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
 

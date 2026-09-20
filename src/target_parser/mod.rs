@@ -262,6 +262,41 @@ pub(crate) fn same_host_redirect_policy(max_hops: usize) -> Policy {
     })
 }
 
+/// Absolute-URI schemes that appear in crawl output but have no HTTP
+/// authority, so they must never be rewritten into a target. Only the
+/// authority-less (`scheme:rest`) spellings need listing: anything written
+/// `scheme://…` is already rejected by the generic check in [`parse_target`].
+const NON_FETCHABLE_SCHEMES: &[&str] = &[
+    "about",
+    "bitcoin",
+    "callto",
+    "cid",
+    "data",
+    "fb-messenger",
+    "geo",
+    "intent",
+    "itms-apps",
+    "itms-services",
+    "javascript",
+    "magnet",
+    "mailto",
+    "market",
+    "mid",
+    "msteams",
+    "news",
+    "sms",
+    "skype",
+    "spotify",
+    "tel",
+    "tg",
+    "urn",
+    "viber",
+    "vbscript",
+    "webcal",
+    "whatsapp",
+    "zoommtg",
+];
+
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
     // RFC 3986 schemes are case-insensitive. Previously `HTTP://x` got
     // double-prefixed because the case-sensitive check missed the
@@ -293,6 +328,35 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
                 )
                 .into());
             }
+        }
+        // Non-hierarchical absolute URIs (`mailto:`, `javascript:`, `tel:`, …)
+        // carry no authority at all, so prefixing `http://` invents one out of
+        // the path: `mailto:security@corp.example` became
+        // `http://mailto:security@corp.example/`, i.e. an unrequested scan of
+        // `corp.example` sending `mailto` / `security` as basic-auth
+        // credentials. Crawl dumps (`gau`, `katana`, `waybackurls`) are full of
+        // these lines, and the target-list path now *skips* what it cannot
+        // parse, so rejecting them here drops them instead of minting a target
+        // on a host nobody asked for.
+        //
+        // Matched against a fixed list rather than by shape, because
+        // `scheme:rest` and the scheme-less `user:pass@host` form — which must
+        // keep working — are structurally identical.
+        //
+        // A digit after the colon means `host:port`, not `scheme:rest`, and
+        // several list entries double as ordinary service names on a container
+        // network (`data:8080`, `news:3000`, `market:8080`). No registered
+        // non-hierarchical scheme takes a bare number for its whole body, so
+        // that one test separates the two readings without weakening the
+        // `mailto:` / `javascript:` / `tel:` case.
+        if let Some((prefix, rest)) = lower.split_once(':')
+            && !rest.starts_with(|c: char| c.is_ascii_digit())
+            && NON_FETCHABLE_SCHEMES.contains(&prefix)
+        {
+            return Err(format!(
+                "unsupported URL scheme '{prefix}:' (only http and https are supported)"
+            )
+            .into());
         }
         format!("http://{}", s)
     };

@@ -990,3 +990,46 @@ fn markdown_payload_cell_keeps_waf_bypass_whitespace() {
         "{md:?}"
     );
 }
+
+#[test]
+fn unparsable_target_lines_surface_in_every_envelope() {
+    // A run that discarded part of its input list must never read as full
+    // coverage of that list — the same contract `targets_deduplicated` has.
+    let meta = ScanMetadata {
+        targets_unparsable: 7,
+        ..mk_meta()
+    };
+
+    let json = Result::make_scan_meta_value(&meta);
+    assert_eq!(json["targets_unparsable"], serde_json::json!(7));
+
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(
+        md.contains("| **Targets Unparsable** | 7 list line(s) skipped |"),
+        "markdown meta table missing the row:\n{md}"
+    );
+
+    // Serde carries it into the formats that serialize the struct directly.
+    let serialized = serde_json::to_value(&meta).expect("meta serializes");
+    assert_eq!(serialized["targets_unparsable"], serde_json::json!(7));
+}
+
+#[test]
+fn a_clean_run_carries_no_unparsable_field_at_all() {
+    // Zero is the normal case: it must not add a field to every envelope, and
+    // it must not add a row to the Markdown table.
+    let meta = mk_meta();
+    assert_eq!(meta.targets_unparsable, 0);
+
+    let json = Result::make_scan_meta_value(&meta);
+    assert!(
+        json.get("targets_unparsable").is_none(),
+        "zero must be omitted from the JSON envelope: {json}"
+    );
+
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(!md.contains("Targets Unparsable"), "{md}");
+
+    let serialized = serde_json::to_value(&meta).expect("meta serializes");
+    assert!(serialized.get("targets_unparsable").is_none());
+}

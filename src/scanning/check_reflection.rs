@@ -2494,9 +2494,12 @@ async fn fetch_injection_response_with_client(
                     if classify_reflection(&body.text, payload).is_some() {
                         // `--sxss` fans retrieval across secondary URLs, so a
                         // single injection status is meaningless here; report `0`
-                        // (mirroring `DomVerifyOutcome`'s sxss handling), which
-                        // keeps the reflection-phase inert-echo budget off the
-                        // stored path.
+                        // (mirroring `DomVerifyOutcome`'s sxss handling).
+                        //
+                        // `0` does *not* by itself keep the stored path out of
+                        // the reflection-phase inert-echo budget — that gate
+                        // treats `0` as non-4xx. The caller excludes `--sxss`
+                        // explicitly instead (see `run_reflection_phase`).
                         return FetchedInjection {
                             body: Some(body),
                             status: 0,

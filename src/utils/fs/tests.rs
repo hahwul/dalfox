@@ -325,3 +325,41 @@ fn read_prefix_lossy_tolerates_split_multibyte_char() {
     );
     let _ = std::fs::remove_file(&p);
 }
+
+#[test]
+fn only_the_byte_caps_report_the_over_cap_kind() {
+    // Callers map an error onto a wire error code (`INPUT_TOO_LARGE` vs
+    // `FILE_READ_ERROR`), so the three failures `read_bounded` folds into one
+    // `io::Error` have to stay distinguishable without matching on text.
+    let p = tmp("over-cap");
+    std::fs::write(&p, "0123456789").unwrap();
+    let over = read_bounded(&p, 4, "target list").unwrap_err();
+    assert!(is_over_cap(&over), "cap hit should be tagged: {over}");
+
+    // Not the cap: unreadable, a directory, or non-UTF-8 bytes.
+    let missing = read_bounded(
+        std::path::Path::new("/tmp/dalfox-fs-test-no-such-file"),
+        1024,
+        "target list",
+    )
+    .unwrap_err();
+    assert!(!is_over_cap(&missing), "missing file is not a cap hit");
+
+    let dir = read_bounded(std::path::Path::new("/tmp"), 1024, "target list").unwrap_err();
+    assert!(!is_over_cap(&dir), "directory is not a cap hit");
+
+    std::fs::write(&p, [0x80u8, 0x81]).unwrap();
+    let non_utf8 = read_bounded(&p, 1024, "target list").unwrap_err();
+    assert!(!is_over_cap(&non_utf8), "non-UTF-8 is not a cap hit");
+    let _ = std::fs::remove_file(&p);
+
+    // The streaming side tags its cap the same way.
+    let streamed = read_bounded_within(
+        std::io::Cursor::new(vec![b'x'; 16]),
+        4,
+        "stdin pipe",
+        std::time::Duration::from_secs(5),
+    )
+    .unwrap_err();
+    assert!(is_over_cap(&streamed), "stdin cap hit should be tagged");
+}

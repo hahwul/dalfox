@@ -186,7 +186,7 @@ debug = false
 | `exclude_url` | array | `[]` | 제외할 URL의 정규식 패턴 |
 | `ignore_param` | array | `[]` | 건너뛸 파라미터 이름 |
 | `out_of_scope` | array | `[]` | 와일드카드 도메인 패턴 |
-| `out_of_scope_file` | string | — | 스코프 외 호스트를 나열한 파일 |
+| `out_of_scope_file` | string | — | 스코프 외 호스트를 나열한 파일. 읽을 수 없는 경로면 스캔을 중단합니다 |
 
 ### 탐색 및 마이닝
 

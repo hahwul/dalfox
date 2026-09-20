@@ -951,6 +951,20 @@ pub struct DomVerifyOutcome {
     /// redirects, request errors, and `--sxss` (where it is not meaningfully
     /// observable).
     pub reflected: bool,
+    /// The payload came back **byte-exact** (`classify_reflection`), i.e. the
+    /// server echoed it live rather than escaping it away.
+    ///
+    /// Narrower than [`Self::reflected`] on purpose. `reflected` was widened to
+    /// include pure escaped echoes so the cumulative inert-echo budget can see a
+    /// uniformly-escaping endpoint — but it has a second consumer,
+    /// `next_blocked_streak`, whose contract is "spare a 5xx that reflected the
+    /// payload, because a later variant may still get through". An *escaped*
+    /// echo is exactly the case that cannot get through, and letting it reset
+    /// the streak meant a 5xx error page that HTML-escapes the query never
+    /// tripped `BLOCKED_STREAK_LIMIT` (64) and instead ran to
+    /// `INERT_ECHO_BUDGET` (256) — four times the requests against a server
+    /// that is already erroring.
+    pub live_reflection: bool,
     /// HTTP status of the injection response, or `0` when the request errored
     /// (or for `--sxss`, whose verification fans out across secondary URLs).
     pub status: u16,
@@ -978,6 +992,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
                 verified,
                 response_text,
                 reflected: false,
+                live_reflection: false,
                 status: status_code,
             };
         }
@@ -1032,8 +1047,9 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
         // 5xx: a WAF block page that echoes the payload is a *block*, and a
         // later payload variant may still bypass it, so it must not consume the
         // budget that keeps the bypass surface alive.
-        let reflected = crate::scanning::check_reflection::classify_reflection(&text, payload)
-            .is_some()
+        let live_reflection =
+            crate::scanning::check_reflection::classify_reflection(&text, payload).is_some();
+        let reflected = live_reflection
             || (!(400..500).contains(&status_code)
                 && crate::scanning::check_reflection::is_escaped_echo(&text, payload));
         // Verification uses a *broader* reflection pre-gate: the byte-exact check
@@ -1056,6 +1072,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
                 verified: true,
                 response_text: Some(text),
                 reflected: true,
+                live_reflection,
                 status: status_code,
             };
         }
@@ -1063,6 +1080,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
             verified: false,
             response_text: None,
             reflected,
+            live_reflection,
             status: status_code,
         };
     }
@@ -1153,6 +1171,7 @@ pub async fn check_dom_verification_with_client_outcome(
             verified,
             response_text,
             reflected: false,
+            live_reflection: false,
             status: 0,
         }
     } else if let Ok(resp) = inject_resp {
