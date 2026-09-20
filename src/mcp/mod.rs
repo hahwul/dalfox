@@ -55,6 +55,7 @@ mod outputs;
 mod pagination;
 mod params;
 mod progress;
+mod prompts;
 mod resources;
 
 use job_runtime::*;
@@ -1607,6 +1608,12 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
                 // dalfox has no subscriber bookkeeping to make that promise
                 // with, and a client that re-lists on demand loses nothing.
                 .enable_resources()
+                .enable_prompts()
+                // Completions exist to make the `scan_id` arguments typeable:
+                // a scan id is a 64-character digest nobody transcribes by
+                // hand, and it is the one argument both a prompt and the
+                // resource template ask for.
+                .enable_completions()
                 .build(),
         )
         .with_server_info(
@@ -1725,6 +1732,84 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
             None,
         ))
     }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListPromptsResult, ErrorData> {
+        Ok(prompts::list())
+    }
+
+    async fn get_prompt(
+        &self,
+        request: rmcp::model::GetPromptRequestParams,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::GetPromptResponse, ErrorData> {
+        prompts::get(&request).map(Into::into)
+    }
+
+    /// Complete the `scan_id` both the triage prompt and the scan resource
+    /// template ask for.
+    ///
+    /// A scan id is a 64-character digest: it is the one argument on this
+    /// surface nobody types, and the reason the completions capability is
+    /// declared at all. Values are the ids this process still tracks, newest
+    /// first, filtered by what has been typed so far.
+    async fn complete(
+        &self,
+        request: rmcp::model::CompleteRequestParams,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CompleteResult, ErrorData> {
+        use rmcp::model::Reference;
+        let wants_scan_id = match &request.r#ref {
+            Reference::Prompt(p) => {
+                p.name == prompts::TRIAGE_PROMPT && request.argument.name == prompts::ARG_SCAN_ID
+            }
+            Reference::Resource(r) => {
+                r.uri == resources::SCAN_URI_TEMPLATE && request.argument.name == "scan_id"
+            }
+            // `Reference` is `#[non_exhaustive]`: a revision that adds a third
+            // kind must not make this a compile error, and "nothing to
+            // suggest" is the right answer for one dalfox has never heard of.
+            _ => false,
+        };
+        if !wants_scan_id {
+            // An argument with nothing to suggest gets an empty list, not an
+            // error: the spec treats completion as advisory, and a client
+            // asking about `target` is not doing anything wrong.
+            return Ok(rmcp::model::CompleteResult::default());
+        }
+        self.purge_expired_jobs();
+        let typed = request.argument.value.as_str();
+        let matches: Vec<String> = self
+            .scan_index()
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .filter(|id| id.starts_with(typed))
+            .collect();
+        Ok(completion_of(matches))
+    }
+}
+
+/// Wrap completion values, honouring the spec's 100-value ceiling and
+/// reporting honestly when the list was cut.
+fn completion_of(mut values: Vec<String>) -> rmcp::model::CompleteResult {
+    let total = values.len();
+    let capped = total > rmcp::model::CompletionInfo::MAX_VALUES;
+    values.truncate(rmcp::model::CompletionInfo::MAX_VALUES);
+    // `with_pagination` re-checks the ceiling the truncation above enforces,
+    // so it cannot fail here; falling back to an empty list rather than
+    // unwrapping keeps a future change to that constant from panicking a
+    // live server.
+    rmcp::model::CompleteResult::new(
+        rmcp::model::CompletionInfo::with_pagination(
+            values,
+            Some(total.min(u32::MAX as usize) as u32),
+            capped,
+        )
+        .unwrap_or_default(),
+    )
 }
 
 /// Deserialize a tool call's arguments into that tool's parameter type, purely
