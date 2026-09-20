@@ -50,6 +50,7 @@ use crate::{
 };
 
 // Submodules extracted from the MCP server hub.
+mod call_scope;
 mod job_runtime;
 mod outputs;
 mod pagination;
@@ -800,7 +801,28 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
             if sleep_for.is_zero() {
                 break;
             }
-            tokio::time::sleep(sleep_for).await;
+            tokio::select! {
+                _ = tokio::time::sleep(sleep_for) => {}
+                // The client withdrew the request. For `wait=true` the call
+                // *is* the scan as far as the caller is concerned, so leaving
+                // it running would keep firing attack payloads at a third
+                // party that nobody is waiting on — for as long as its budget
+                // allows. rmcp does not drop a cancelled handler's future, it
+                // only trips this token and discards whatever comes back, so
+                // this is the one place the withdrawal is observable.
+                //
+                // A wait budget that simply *expires* is the opposite case and
+                // is left alone below: there the caller got an answer and was
+                // told the scan continues.
+                _ = call_scope::cancelled() => {
+                    self.cancel_job(&scan_id, "the client cancelled the tool call");
+                    return Ok(structured_linking_scan(
+                        self.results_json_for_scan(&scan_id, 0, 0).unwrap_or(out),
+                        &scan_id,
+                        &target,
+                    ));
+                }
+            }
         }
 
         // Budget exhausted while still non-terminal — leave job running.
@@ -810,6 +832,32 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
         out["wait_timed_out"] = serde_json::json!(true);
         out["wait_timeout_sec"] = serde_json::json!(wait_timeout_sec);
         Ok(structured_linking_scan(out, &scan_id, &target))
+    }
+
+    /// Stop a scan the same way `cancel_scan_dalfox` does, for a caller that
+    /// is not a tool call. No-op on a job that already reached a terminal
+    /// state, so a scan that finished on its own keeps its real outcome.
+    fn cancel_job(&self, scan_id: &str, reason: &str) {
+        let mut jobs = self.lock_jobs();
+        let Some(job) = jobs.get_mut(scan_id) else {
+            return;
+        };
+        job.cancelled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if !job.is_terminal() {
+            job.status = JobStatus::Cancelled;
+            if job.finished_at_ms.is_none() {
+                job.finished_at_ms = Some(now_ms());
+            }
+            if job.error_message.is_none() {
+                job.error_message = Some(reason.to_string());
+            }
+        }
+        drop(jobs);
+        Self::log(
+            "JOB",
+            &format!("cancelled scan_id={} ({})", scan_id, reason),
+        );
     }
 
     /// Build the JSON body for `get_results_dalfox` / wait-mode completion.
@@ -1651,23 +1699,12 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
         reject_unparseable_arguments(&request)?;
-        let token_present = context.meta.get_progress_token().is_some();
         let call_context = context.clone();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        let dispatch = self.tool_router.call(tcc);
-        // Both of these ride a task-local bound around the dispatch rather
-        // than a handler argument: rmcp can inject `RequestContext` into a
-        // `#[tool]` fn, but every handler is also called directly by the unit
-        // tests, so threading it through would rewrite ~40 call sites to say
-        // "no client here". See `progress::with_progress`.
-        if !token_present {
-            return resources::with_link_support(&call_context, dispatch).await;
-        }
-        resources::with_link_support(
-            &call_context,
-            progress::with_progress(&call_context, dispatch),
-        )
-        .await
+        // Everything a handler knows about its caller — the progress token,
+        // the negotiated revision, the cancellation token — is bound here
+        // rather than passed down; see `call_scope`.
+        call_scope::bind(&call_context, self.tool_router.call(tcc)).await
     }
 
     /// Publish the scan index plus one entry per tracked scan.

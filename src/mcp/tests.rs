@@ -3880,3 +3880,247 @@ async fn the_wire_offers_prompts_and_completes_scan_ids() {
         "an argument with nothing to suggest answers empty, not an error"
     );
 }
+
+/// A stateful client over the same in-memory duplex [`round_trip`] uses, for
+/// the tests that have to *sequence* messages — a cancellation only lands if
+/// it arrives after the request it names is registered, which a batch write
+/// cannot guarantee.
+struct WireClient {
+    writer: tokio::io::WriteHalf<tokio::io::DuplexStream>,
+    lines: tokio::io::Lines<tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>,
+    server: tokio::task::JoinHandle<()>,
+}
+
+impl WireClient {
+    /// Serve `DalfoxMcp` over a duplex and complete the handshake.
+    async fn start() -> Self {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let (server_side, client_side) = tokio::io::duplex(1 << 20);
+        let server = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(server_side);
+            if let Ok(running) = rmcp::service::serve_server(DalfoxMcp::new(), (r, w)).await {
+                let _ = running.waiting().await;
+            }
+        });
+        let (client_r, writer) = tokio::io::split(client_side);
+        let mut client = Self {
+            writer,
+            lines: BufReader::new(client_r).lines(),
+            server,
+        };
+        client
+            .send(rpc(
+                1,
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "dalfox-tests", "version": "0"}
+                }),
+            ))
+            .await;
+        client.response(1).await;
+        client
+            .send(serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+            .await;
+        client
+    }
+
+    async fn send(&mut self, message: serde_json::Value) {
+        use tokio::io::AsyncWriteExt;
+        self.writer
+            .write_all(format!("{message}\n").as_bytes())
+            .await
+            .expect("write");
+        self.writer.flush().await.expect("flush");
+    }
+
+    /// Next message off the wire, notifications included.
+    async fn next_message(&mut self) -> serde_json::Value {
+        loop {
+            let line = tokio::time::timeout(Duration::from_secs(60), self.lines.next_line())
+                .await
+                .expect("the server answered in time")
+                .expect("read line")
+                .expect("the connection stayed open");
+            if line.trim().is_empty() {
+                continue;
+            }
+            return serde_json::from_str(&line).expect("json-rpc line");
+        }
+    }
+
+    /// The response to `id`, skipping any notifications that arrive first.
+    async fn response(&mut self, id: i64) -> serde_json::Value {
+        loop {
+            let message = self.next_message().await;
+            if message.get("id").and_then(|v| v.as_i64()) == Some(id) {
+                return message;
+            }
+        }
+    }
+
+    /// The next `notifications/progress` whose message is past the queued
+    /// tick — i.e. the scan is on the wire. That is how these tests know when
+    /// to interrupt, instead of guessing with a sleep.
+    async fn next_running_progress(&mut self) -> serde_json::Value {
+        loop {
+            let message = self.next_message().await;
+            if message["method"] == "notifications/progress"
+                && message["params"]["message"] != "queued"
+            {
+                return message;
+            }
+        }
+    }
+}
+
+impl Drop for WireClient {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
+/// A target that answers every request slowly, so a scan against it is still
+/// running when the test gets around to interrupting it.
+async fn spawn_slow_target(delay: Duration) -> (String, tokio::task::JoinHandle<()>) {
+    use axum::routing::any;
+
+    let app = axum::Router::new().route(
+        "/{*rest}",
+        any(move || async move {
+            sleep(delay).await;
+            (
+                [("content-type", "text/html; charset=utf-8")],
+                "<html><body><div>ok</div><form><input name=q></form></body></html>".to_string(),
+            )
+        }),
+    );
+    let app = app.route(
+        "/",
+        any(move || async move {
+            sleep(delay).await;
+            (
+                [("content-type", "text/html; charset=utf-8")],
+                "<html><body><div>ok</div><form><input name=q></form></body></html>".to_string(),
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind slow target");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    (format!("http://{}", addr), handle)
+}
+
+#[tokio::test]
+async fn cancelling_the_call_stops_the_scan_it_started() {
+    // For `wait=true` the call *is* the scan from the caller's side. rmcp does
+    // not drop a cancelled handler's future — it trips the request's token and
+    // throws the eventual response away — so without watching that token the
+    // scan kept firing payloads at a third-party host that nobody was waiting
+    // on, for as long as its budget allowed.
+    let (target, server) = spawn_slow_target(Duration::from_millis(120)).await;
+    let mut client = WireClient::start().await;
+    client
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "scan_with_dalfox",
+                "arguments": {
+                    "target": format!("{target}/?q=hello"),
+                    "wait": true,
+                    "wait_timeout_sec": 300
+                },
+                // The progress stream is how this test knows the scan is
+                // under way; a sleep would race the handshake.
+                "_meta": {"progressToken": "cancel-me"}
+            }
+        }))
+        .await;
+    let started = client.next_running_progress().await;
+    assert!(
+        started["params"]["progress"].as_f64().is_some(),
+        "the scan is under way before the cancellation is sent: {started}"
+    );
+
+    client
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": 2, "reason": "user pressed escape"}
+        }))
+        .await;
+
+    // The cancelled request gets no response — rmcp drops it — so the scan's
+    // fate is read from the listing instead.
+    let mut status = String::new();
+    for attempt in 0..40 {
+        client
+            .send(rpc(
+                100 + attempt,
+                "tools/call",
+                serde_json::json!({"name": "list_scans_dalfox", "arguments": {}}),
+            ))
+            .await;
+        let listed = client.response(100 + attempt).await;
+        status = listed["result"]["structuredContent"]["scans"][0]["status"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        if status == "cancelled" {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    server.abort();
+    assert_eq!(
+        status, "cancelled",
+        "a withdrawn wait=true call must stop its scan, not leave it running"
+    );
+}
+
+#[tokio::test]
+async fn cancel_job_leaves_a_finished_scan_alone() {
+    // The cancellation path is shared with `cancel_scan_dalfox`: a scan that
+    // already settled keeps its real outcome, so a cancel arriving just after
+    // a scan completed cannot rewrite `done` into `cancelled`.
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.lock_jobs();
+        jobs.insert(
+            "finished".to_string(),
+            test_job(JobStatus::Done, Some(vec![])),
+        );
+        jobs.insert("running".to_string(), test_job(JobStatus::Running, None));
+    }
+    mcp.cancel_job("finished", "the client cancelled the tool call");
+    mcp.cancel_job("running", "the client cancelled the tool call");
+    mcp.cancel_job("no-such-scan", "the client cancelled the tool call");
+
+    let jobs = mcp.lock_jobs();
+    let finished = jobs.get("finished").expect("job");
+    assert_eq!(finished.status, JobStatus::Done);
+    assert!(finished.error_message.is_none());
+    // The flag is still set: the worker of a job that raced to `done` is
+    // already gone, and setting it costs nothing.
+    let running = jobs.get("running").expect("job");
+    assert_eq!(running.status, JobStatus::Cancelled);
+    assert!(running.finished_at_ms.is_some());
+    assert_eq!(
+        running.error_message.as_deref(),
+        Some("the client cancelled the tool call"),
+        "the listing must be able to say why it stopped"
+    );
+    assert!(
+        running.cancelled.load(std::sync::atomic::Ordering::Relaxed),
+        "the running scan's worker must see the flag"
+    );
+}

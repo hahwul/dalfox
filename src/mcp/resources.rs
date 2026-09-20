@@ -169,40 +169,11 @@ fn decode_cursor(cursor: Option<&Cursor>) -> Result<usize, ErrorData> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Client capability gate for `resource_link` content blocks
-// ---------------------------------------------------------------------------
-
-/// First protocol revision that defines the `resource_link` content block.
-const RESOURCE_LINK_SINCE: &str = "2025-06-18";
-
-tokio::task_local! {
-    /// Whether the client on this call can parse a `resource_link`. Bound for
-    /// the duration of one `tools/call`; absent when a handler is invoked
-    /// directly (the unit tests), where the answer is "yes".
-    static LINKS_SUPPORTED: bool;
-}
-
-/// Run `fut` with this request's `resource_link` support recorded.
-///
-/// A tool result is a *union* on the client side: the TypeScript and Python
-/// SDKs validate every content block against the revision they speak, and a
-/// block type they do not know fails the whole result — not just that block.
-/// `resource_link` arrived in 2025-06-18, and rmcp still serves clients that
-/// negotiated 2024-11-05, so the link is attached only where it can be read.
-pub(super) async fn with_link_support<F: std::future::Future>(
-    context: &rmcp::service::RequestContext<rmcp::RoleServer>,
-    fut: F,
-) -> F::Output {
-    // ISO `YYYY-MM-DD` revisions compare lexically the same as
-    // chronologically, which is how rmcp itself gates on them.
-    let supported = context
-        .protocol_version()
-        .is_none_or(|v| v.as_str() >= RESOURCE_LINK_SINCE);
-    LINKS_SUPPORTED.scope(supported, fut).await
-}
-
 /// Whether to attach a `resource_link` to the result being built.
+///
+/// A tool result's content array is a closed union on the client side, and
+/// `resource_link` only arrived in 2025-06-18 — see [`super::call_scope`],
+/// which decides this from the revision the client negotiated.
 pub(super) fn links_supported() -> bool {
-    LINKS_SUPPORTED.try_with(|ok| *ok).unwrap_or(true)
+    super::call_scope::links_supported()
 }

@@ -22,21 +22,17 @@
 //! `message`, which is what a client actually renders next to an
 //! indeterminate bar.
 //!
-//! **The sink is a task-local, not an argument.** rmcp can inject
-//! `RequestContext` straight into a `#[tool]` handler, but every one of those
-//! handlers is also called directly by the unit tests, so threading it through
-//! would have rewritten ~40 call sites to say "no progress here". Binding it
-//! around the router call in `DalfoxMcp::call_tool` instead means an unbound
-//! caller — every test, and every tool that does not report — takes a
-//! `try_with` miss and nothing else, the same no-op shape
-//! [`crate::rate_limit_acquire`] already uses for the per-job rate limiter.
+//! **The sink is asked for, not passed in.** It rides the per-call scope that
+//! `DalfoxMcp::call_tool` binds (see [`super::call_scope`]), so a handler
+//! called directly — every unit test, and every tool that does not report —
+//! takes a `try_with` miss and nothing else.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rmcp::model::{ProgressNotificationParam, ProgressToken};
-use rmcp::service::RequestContext;
 use rmcp::{Peer, RoleServer};
+
+use super::call_scope;
 
 /// Enforces the spec's "the progress value MUST increase with each
 /// notification" rule for one token.
@@ -74,30 +70,14 @@ pub(super) struct ProgressSink {
     gate: MonotonicGate,
 }
 
-tokio::task_local! {
-    /// Bound for the duration of one `tools/call` that carried a progress
-    /// token. Absent everywhere else, which is what makes [`report`] free.
-    static PROGRESS: Arc<ProgressSink>;
-}
-
-/// Run `fut` with a progress sink bound, when the request asked for one.
-///
-/// A request without `_meta.progressToken` — the common case, and every unit
-/// test — gets the future back unchanged, so nothing is allocated and nothing
-/// is sent.
-pub(super) async fn with_progress<F: std::future::Future>(
-    context: &RequestContext<RoleServer>,
-    fut: F,
-) -> F::Output {
-    let Some(token) = context.meta.get_progress_token() else {
-        return fut.await;
-    };
-    let sink = Arc::new(ProgressSink {
-        peer: context.peer.clone(),
-        token,
-        gate: MonotonicGate::default(),
-    });
-    PROGRESS.scope(sink, fut).await
+impl ProgressSink {
+    pub(super) fn new(peer: Peer<RoleServer>, token: ProgressToken) -> Self {
+        Self {
+            peer,
+            token,
+            gate: MonotonicGate::default(),
+        }
+    }
 }
 
 /// Publish one progress notification, if this call carries a token and the
@@ -107,7 +87,7 @@ pub(super) async fn with_progress<F: std::future::Future>(
 /// that has closed, must not turn into a failed scan — the tool's own result is
 /// the contract, and progress is an optional courtesy on top of it.
 pub(super) async fn report(progress: u64, message: impl Into<String>) {
-    let Ok(sink) = PROGRESS.try_with(Arc::clone) else {
+    let Some(sink) = call_scope::progress_sink() else {
         return;
     };
     if !sink.gate.admits(progress) {
@@ -125,7 +105,7 @@ pub(super) async fn report(progress: u64, message: impl Into<String>) {
 /// True when the current tool call asked for progress. Lets a caller skip
 /// building a status line nobody will read.
 pub(super) fn wanted() -> bool {
-    PROGRESS.try_with(|_| ()).is_ok()
+    call_scope::progress_sink().is_some()
 }
 
 /// Publish one tick for a scan, derived from the body
