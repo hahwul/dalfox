@@ -285,22 +285,39 @@ impl DalfoxMcp {
                 // on it the way the CLI's `target_summary[].error_code` is
                 // matched; `Job` has no separate code field, and error_message
                 // is already how panics and timeouts identify themselves.
-                if lost_session && j.error_message.is_none() {
-                    j.error_message = Some(format!(
+                let outcome = if lost_session {
+                    Some(format!(
                         "{}: {}",
                         crate::cmd::error_codes::SESSION_LOST,
                         session_lost.clone().unwrap_or_default()
-                    ));
-                } else if panicked && j.error_message.is_none() {
-                    j.error_message = Some(format!(
+                    ))
+                } else if panicked {
+                    Some(format!(
                         "{} scan worker task(s) panicked; results are partial",
                         worker_panics
-                    ));
-                } else if timed_out && j.error_message.is_none() {
-                    j.error_message = Some(format!(
+                    ))
+                } else if timed_out {
+                    Some(format!(
                         "scan exceeded scan_timeout ({}s); returning partial results",
                         scan_args.scan_timeout
-                    ));
+                    ))
+                } else {
+                    None
+                };
+                // Appended, not dropped, when something already wrote a reason.
+                // A client-cancelled `wait=true` call records why it stopped
+                // *before* the worker winds down, and the old `is_none()` guard
+                // then threw away the one line saying the kept results are
+                // partial because a worker died — the "a panic reads as a clean
+                // scan" shape, one level up.
+                if let Some(note) = outcome {
+                    match &mut j.error_message {
+                        Some(existing) => {
+                            existing.push_str("; ");
+                            existing.push_str(&note);
+                        }
+                        None => j.error_message = Some(note),
+                    }
                 }
                 // finished_at_ms may already be set by cancel_scan_dalfox; preserve it
                 // so we record the moment the user asked to stop, not when the task noticed.
@@ -885,7 +902,11 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
         let (results_slice, pagination) =
             paginate_results(snapshot.results.as_deref(), offset, limit);
         // Sampled before `results_slice` is moved into the response body below.
-        let carries_target_content = results_slice.as_ref().is_some_and(|r| !r.is_empty());
+        // `error_message` counts as target-derived: a scan whose authenticated
+        // session died reports the URL the *origin* redirected it to, so the
+        // banner has to ride along even on a body with no findings at all.
+        let carries_target_content = results_slice.as_ref().is_some_and(|r| !r.is_empty())
+            || snapshot.error_message.is_some();
         let duration_ms =
             crate::job::duration_ms_between(snapshot.started_at_ms, snapshot.finished_at_ms);
         let mut out = serde_json::json!({
@@ -1156,7 +1177,12 @@ a failed scan is distinguishable from one that finished with no findings."
             (total, end, entries)
         };
 
-        serde_json::json!({
+        // Same rule as a findings page: a row's `error_message` can quote the
+        // origin (a session-loss reason carries the `Location` it landed on),
+        // and this listing is read by a model with no tool description
+        // anywhere near it.
+        let carries_target_content = entries.iter().any(|e| e.get("error_message").is_some());
+        let mut out = serde_json::json!({
             "total": total,
             "scans": entries,
             "pagination": {
@@ -1165,7 +1191,23 @@ a failed scan is distinguishable from one that finished with no findings."
                 "returned": entries.len(),
                 "has_more": end < total,
             }
-        })
+        });
+        if carries_target_content {
+            out[UNTRUSTED_CONTENT_KEY] = serde_json::json!(UNTRUSTED_CONTENT_NOTICE);
+        }
+        out
+    }
+
+    /// The body of the `dalfox://scans` resource.
+    ///
+    /// Bounded, unlike the tool it mirrors: `resources/read` takes no page
+    /// parameters, so an unbounded body would serialize every retained job —
+    /// a thousand rows, each carrying a caller-supplied URL of unbounded
+    /// length — into one JSON-RPC message. The `pagination` descriptor it
+    /// comes back with reports the cut, and `list_scans_dalfox` is where the
+    /// rest is.
+    fn scan_index_body(&self) -> serde_json::Value {
+        self.scans_json(None, 0, resources::INDEX_PAGE_SCANS)
     }
 
     /// Every tracked job, newest first — the ordering `resources/list` pages
@@ -1762,7 +1804,7 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
         self.purge_expired_jobs();
         let uri = request.uri.as_str();
         if uri == resources::SCANS_URI {
-            let body = self.scans_json(None, 0, 0);
+            let body = self.scan_index_body();
             return Ok(resources::json_contents(uri, &body).into());
         }
         if let Some(scan_id) = resources::scan_id_from_uri(uri) {

@@ -456,7 +456,9 @@ it found. That is deliberately different from the wait budget simply expiring
 | `dalfox://scan/{scan_id}` | One scan's status, progress and findings — the same body `get_results_dalfox` returns |
 
 `resources/list` returns the index plus one entry per tracked scan (paged with a cursor),
-so a host's context picker shows real scans rather than a template to fill in. Any tool
+so a host's context picker shows real scans rather than a template to fill in. A read of
+the index bounds itself at 200 rows — `resources/read` takes no page parameters, so the
+body says in its `pagination` where it was cut. Any tool
 result that carries a `scan_id` also carries a `resource_link` content block pointing at
 that scan, letting a client attach the findings instead of asking the model to re-quote
 them. The link is omitted for clients that negotiated a protocol revision older than
@@ -485,6 +487,11 @@ Because every tool is async, the agent stays responsive; no long-running tool ca
 ## Authorization & safety
 
 The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
+
+This includes a scan's `error_message`: when an authenticated session dies mid-scan,
+Dalfox reports the URL the *origin* redirected it to, so that field quotes the target
+even on a scan with no findings. Bodies carrying it — a status poll, a `/scans`-style
+listing, the matching resource — carry `_untrusted_content_notice` for that reason.
 
 **Findings are untrusted input to your agent.** Unlike the CLI and the REST API, MCP hands scan output to a model that acts on what it reads, and every quoted byte in a finding was chosen by the target. Dalfox labels those responses with `_untrusted_content_notice`, but the label is a reminder, not a sandbox — keep the scope decision (which target, which proxy, which callback) with the operator, and never let it be changed by something the scanner read off a page.
 

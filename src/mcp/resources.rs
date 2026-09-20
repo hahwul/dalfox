@@ -15,11 +15,14 @@
 //!   individually, so a client's picker shows the real scans rather than a
 //!   template the user has to fill in by hand.
 //!
-//! The bodies are deliberately the tool bodies, byte for byte — including
-//! `_untrusted_content_notice`, which matters more here than anywhere else:
-//! resource contents are pasted into a model's context by the *client*, often
-//! without a tool call in sight, so the provenance warning has to travel with
-//! the bytes rather than sit in the tool description that fetched them.
+//! The bodies are deliberately the tool bodies, byte for byte — which is also
+//! how they carry `_untrusted_content_notice` under exactly the same rule the
+//! tools use: present when the body quotes bytes the target chose (a finding,
+//! a discovered parameter name, the failure reason of a scan whose session
+//! died), absent when it does not. That rule matters more here than anywhere
+//! else, because resource contents are pasted into a model's context by the
+//! *client*, often without a tool call in sight, so the warning has to travel
+//! with the bytes rather than sit in the tool description that fetched them.
 
 use rmcp::model::{
     Annotations, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
@@ -45,6 +48,13 @@ const SCAN_URI_PREFIX: &str = "dalfox://scan/";
 /// the listing pages like any other. The cursor is the offset into the same
 /// newest-first ordering `list_scans_dalfox` uses.
 const RESOURCES_PAGE: usize = 50;
+
+/// Scans carried by one read of [`SCANS_URI`].
+///
+/// A resource read has no page parameters, so the body has to bound itself;
+/// the `pagination` it carries reports the cut. Rows are small (no findings),
+/// which is why this is far larger than the findings page budget.
+pub(super) const INDEX_PAGE_SCANS: usize = 200;
 
 /// The canonical URI for one scan id.
 pub(super) fn scan_uri(scan_id: &str) -> String {

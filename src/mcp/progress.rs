@@ -22,6 +22,18 @@
 //! `message`, which is what a client actually renders next to an
 //! indeterminate bar.
 //!
+//! **A stalled counter still gets a heartbeat.** Dropping a tick whose counter
+//! had not moved would have made this feature silent in precisely the case it
+//! exists for: every worker blocked on a tarpit target bumps `requests_sent`
+//! *before* the send, so it can sit still for a whole `timeout` window while
+//! the scan is at its least obviously alive. It would also have swallowed the
+//! phase transitions — "discovering parameters" to "testing 3/12" — which are
+//! the informative half of a notification. So every poll publishes, and
+//! [`MonotonicGate`] nudges a value that did not beat the last one by a hair.
+//! `progress` is a JSON number, not an integer, so the nudge keeps the spec's
+//! increase rule without lying about the count: it stays the request total to
+//! three decimal places.
+//!
 //! **The sink is asked for, not passed in.** It rides the per-call scope that
 //! `DalfoxMcp::call_tool` binds (see [`super::call_scope`]), so a handler
 //! called directly — every unit test, and every tool that does not report —
@@ -38,28 +50,55 @@ use super::call_scope;
 /// notification" rule for one token.
 ///
 /// The counters here are sampled on a timer, so a tick that lands between two
-/// requests finds the same number as the last one — and a scan waiting on a
-/// slow target produces a long run of those. They are dropped rather than
-/// repeated. Separated from the sink so the rule is testable without a live
-/// peer to send through.
+/// requests finds the same number as the last one — and a scan stuck on a
+/// tarpit target produces a long run of those. Repeating the value is not
+/// allowed and dropping the tick would make the feature silent exactly when it
+/// is needed, so the value is nudged instead: the next notification goes out at
+/// one [`STALL_NUDGE`] above the last. Separated from the sink so the rule is
+/// testable without a live peer to send through.
 #[derive(Default)]
 pub(super) struct MonotonicGate {
-    /// Highest `progress` already published on this token.
+    /// Last `progress` published on this token, as `f64` bits — `f64` has no
+    /// atomic of its own, and the value has to be read-modify-written by
+    /// whichever reporter gets there first.
     last_sent: AtomicU64,
-    /// Set once something has been published, so the opening tick is allowed
-    /// through at `0` while later repeats of `0` are not.
+    /// Set once something has been published, so the opening tick goes out at
+    /// its true value even when that is `0`.
     started: std::sync::atomic::AtomicBool,
 }
 
+/// How far a stalled counter is nudged so the published value still rises.
+/// Small enough that `progress` remains the request count to three decimals.
+const STALL_NUDGE: f64 = 0.001;
+
 impl MonotonicGate {
-    /// Claim `progress` as the next value to publish, or refuse it.
-    pub(super) fn admits(&self, progress: u64) -> bool {
-        // `fetch_max` both records the new high-water mark and reveals the old
-        // one, in one atomic — two concurrent reporters cannot both decide
-        // they are the increase.
-        let previous = self.last_sent.fetch_max(progress, Ordering::Relaxed);
-        let first = !self.started.swap(true, Ordering::Relaxed);
-        first || progress > previous
+    /// The value to publish for `progress`: itself when it beats the last one,
+    /// otherwise the smallest number that does.
+    pub(super) fn next_value(&self, progress: u64) -> f64 {
+        let mut current = self.last_sent.load(Ordering::Relaxed);
+        loop {
+            let previous = f64::from_bits(current);
+            let first = !self.started.load(Ordering::Relaxed);
+            let candidate = if first || progress as f64 > previous {
+                progress as f64
+            } else {
+                previous + STALL_NUDGE
+            };
+            // CAS rather than a plain store: two reporters racing must not
+            // both publish the same nudged value.
+            match self.last_sent.compare_exchange_weak(
+                current,
+                candidate.to_bits(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.started.store(true, Ordering::Relaxed);
+                    return candidate;
+                }
+                Err(observed) => current = observed,
+            }
+        }
     }
 }
 
@@ -80,8 +119,7 @@ impl ProgressSink {
     }
 }
 
-/// Publish one progress notification, if this call carries a token and the
-/// value has actually moved.
+/// Publish one progress notification, if this call carries a token.
 ///
 /// Errors are swallowed on purpose: a client that has gone away, or a transport
 /// that has closed, must not turn into a failed scan — the tool's own result is
@@ -90,10 +128,8 @@ pub(super) async fn report(progress: u64, message: impl Into<String>) {
     let Some(sink) = call_scope::progress_sink() else {
         return;
     };
-    if !sink.gate.admits(progress) {
-        return;
-    }
-    let mut param = ProgressNotificationParam::new(sink.token.clone(), progress as f64);
+    let value = sink.gate.next_value(progress);
+    let mut param = ProgressNotificationParam::new(sink.token.clone(), value);
     param.message = Some(message.into());
     if let Err(e) = sink.peer.notify_progress(param).await {
         // A client that has gone away, or a transport already closing, is not
@@ -112,8 +148,7 @@ pub(super) fn wanted() -> bool {
 /// `results_json_for_scan` just built.
 ///
 /// No notification is sent for the terminal state: the tool's own result is
-/// the completion signal, and repeating the final counters would either
-/// duplicate the last value (which the spec forbids) or inflate it.
+/// the completion signal.
 pub(super) async fn report_scan_status(body: &serde_json::Value) {
     if !wanted() {
         return;
