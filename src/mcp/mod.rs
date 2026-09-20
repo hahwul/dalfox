@@ -1619,6 +1619,13 @@ delete_scan_dalfox once the job is terminal. cancel_scan_dalfox stops a scan tha
 costing more than it is worth; list_scans_dalfox shows what is still tracked. Jobs \
 live in memory only and terminal ones are purged after an hour.
 
+Beyond the tools: a finished scan is also a resource — dalfox://scan/<scan_id>, and \
+dalfox://scans for the index — so findings can be attached rather than re-quoted, and \
+every result carrying a scan_id links to its own. Attach a progressToken to a \
+wait=true scan or to preflight_dalfox to receive notifications/progress while the call \
+is open; cancelling such a call stops the scan itself, not just the wait. The \
+scan_target and triage_findings prompts hold the two workflows above.
+
 Reading results: a finding's `type` is a claim tier (V vulnerable, A AST-detected, \
 R reflected, I informational) and `detection_method` is how it was found — select \
 AST findings by detection_method == \"ast\", not type == \"A\". Only \

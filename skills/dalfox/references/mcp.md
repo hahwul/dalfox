@@ -11,7 +11,7 @@ Preferred agent pattern: `preflight_dalfox` → `scan_with_dalfox` → poll `get
 | `preflight_dalfox` | Parameter discovery + request count estimate, no payloads sent | Yes (fast) | `reachable`, `params_discovered`, `estimated_total_requests`, per-param breakdown |
 | `scan_with_dalfox` | Start async scan | No (returns immediately) | `{scan_id, target, status: "queued"}` |
 | `get_results_dalfox` | Poll status + results (supports offset/limit) | No | Full job with `progress`, `results[]` when done |
-| `list_scans_dalfox` | List all in-memory jobs (filter by status) | No | Array of job summaries |
+| `list_scans_dalfox` | List all in-memory jobs (filter by status) | No | Array of job summaries (`error_message` on a failed one) |
 | `cancel_scan_dalfox` | Signal cancellation (next checkpoint) | No | Job moves to `cancelled` (partial results kept) |
 | `delete_scan_dalfox` | Remove terminal job from memory | No | Job record deleted (running jobs rejected) |
 
@@ -27,8 +27,38 @@ Terminal jobs auto-purge after 1 hour.
 - **Behaviour hints.** `scan_with_dalfox` and `preflight_dalfox` are `openWorldHint:
   true` and **not** `readOnlyHint` — preflight sends no attack payloads but does accept
   `method`/`data` and fire mining probes, so a `POST` preflight can change target state.
-  `delete_scan_dalfox` is `destructiveHint: true`; `get_results_dalfox` and
-  `list_scans_dalfox` are `readOnlyHint: true`.
+  `scan_with_dalfox` and `delete_scan_dalfox` are `destructiveHint: true` (a scan injects
+  payloads into every discovered parameter, and an armed `blind_callback_url` leaves
+  stored ones behind); `get_results_dalfox` and `list_scans_dalfox` are
+  `readOnlyHint: true`.
+- **Progress.** Attach `_meta.progressToken` to a `scan_with_dalfox` call with
+  `wait=true`, or to `preflight_dalfox`, and the server streams
+  `notifications/progress` against it while the call is open. The `progress` number is
+  cumulative requests sent (it only ever rises, which the spec requires); the phase,
+  parameters tested, findings so far and lost requests are in `message`. No notification
+  is sent for the terminal state — the tool result is that signal. A call without a
+  token gets nothing.
+- **Cancellation.** `notifications/cancelled` on a `wait=true` scan stops the scan, not
+  just the wait: the job settles `cancelled` with partial results kept. A wait budget
+  that merely *expires* is the other case and leaves the job running, as
+  `wait_timed_out` says.
+- **Resources.** `dalfox://scans` is the job index (same body as `list_scans_dalfox`)
+  and `dalfox://scan/{scan_id}` is one scan (same body as `get_results_dalfox`). Every
+  tracked scan is also listed individually by `resources/list`, which pages with a
+  cursor. Results that carry a `scan_id` include a `resource_link` content block
+  pointing at that scan, so a host can attach the findings instead of re-fetching them
+  (omitted for clients that negotiated a revision older than 2025-06-18, which cannot
+  parse the block). Resource contents carry `_untrusted_content_notice` for the same
+  reason tool results do.
+- **Prompts.** `scan_target` (argument: `target`) walks the preflight → scan → report
+  flow; `triage_findings` (argument: `scan_id`) reads a finished scan along the
+  `type` / `detection_method` axes. `completion/complete` offers the tracked `scan_id`s
+  for the triage prompt and for the `dalfox://scan/{scan_id}` template.
+- **Tool errors vs protocol errors.** `isError: true` is reserved for a tool that ran
+  and could not answer — today only a preflight whose scan runtime failed to build or
+  whose analysis thread panicked, which report `INTERNAL_ERROR` in a text block and no
+  `structuredContent`. An unreachable target is not one of these: it is an ordinary
+  result carrying `reachable: false`.
 - **Server identity.** `initialize` reports `dalfox` plus its own version, and returns
   `instructions` covering tool order, the finding axes, and the untrusted-content rule.
 - **Optional keys are genuinely optional.** `pagination`, `progress`, `error_message`,
@@ -156,7 +186,9 @@ Use this before expensive scans when the user is concerned about request volume.
 
 `queued` → `running` → `done` | `error` | `cancelled`
 
-`cancel_scan_dalfox` flips an `AtomicBool`; the scan loop checks it at safe points. Partial findings are returned. The response's `cancelled` field is `true` only when the job was `queued`/`running` at the time of the call; cancelling an already-terminal job (`done`/`error`/`cancelled`) is a no-op and returns `cancelled: false` with `previous_status` set to that terminal state.
+`cancel_scan_dalfox` flips an `AtomicBool`; the scan loop checks it at safe points. A
+client-side `notifications/cancelled` on an in-flight `wait=true` call does the same
+thing to that call's own scan. Partial findings are returned. The response's `cancelled` field is `true` only when the job was `queued`/`running` at the time of the call; cancelling an already-terminal job (`done`/`error`/`cancelled`) is a no-op and returns `cancelled: false` with `previous_status` set to that terminal state.
 
 ## Error Handling in MCP
 
@@ -165,7 +197,10 @@ Use this before expensive scans when the user is concerned about request volume.
   message, never a tool result. `isError: true` is reserved for a tool that ran.
 - Out-of-range numbers → `invalid_params` with exact message.
 - Non-`http(s)` target → `invalid_params` (rejected before queueing).
-- Unreachable target in preflight → `reachable: false` + `error_code`.
+- Unreachable target in preflight → `reachable: false` + `error_code`. A preflight that
+  could not run at all (runtime build failure, panicked analysis thread) is different:
+  `isError: true` with an `INTERNAL_ERROR` message and no structured body, so it is never
+  mistaken for "that host is down".
 - Unreachable target in `scan_with_dalfox` → terminal `status: "error"` with
   `error_message` containing `CONNECTION_FAILED` (not `done` with empty
   results), so "unreachable" is distinguishable from "no findings".
