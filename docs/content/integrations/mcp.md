@@ -40,7 +40,7 @@ claude mcp add dalfox -- dalfox mcp
 
 ## Available tools
 
-Six tools are exposed. All are async and non-blocking: submit a scan, poll for results, then move on.
+Six tools are exposed. Scans are async by default: submit one, poll for results, then move on. (`preflight_dalfox` answers in-line, and `scan_with_dalfox` blocks when you pass `wait: true` — both stream progress if you ask for it.)
 
 ### `scan_with_dalfox`
 
@@ -355,7 +355,10 @@ List every tracked scan. Optional filter:
 { "status": "running" }
 ```
 
-Returns `total`, `scans: [{scan_id, target, status, result_count}]`.
+Returns `total`, `scans: [{scan_id, target, status, result_count, queued_at_ms,
+started_at_ms, finished_at_ms, duration_ms}]`, plus `error_message` on a scan that
+failed — without it a row reading `status: "error", result_count: 0` looks exactly like
+a clean one.
 
 ### `cancel_scan_dalfox`
 
@@ -409,22 +412,68 @@ lets a client decide on its own which calls are safe to make without asking:
 
 | Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |------|----------------|-------------------|------------------|-----------------|
-| `scan_with_dalfox` | false | false | false | **true** |
+| `scan_with_dalfox` | false | **true** | false | **true** |
 | `preflight_dalfox` | false | false | false | **true** |
 | `get_results_dalfox` | true | — | true | false |
 | `list_scans_dalfox` | true | — | true | false |
 | `cancel_scan_dalfox` | false | false | true | false |
 | `delete_scan_dalfox` | false | **true** | false | false |
 
-`openWorldHint: true` marks each tool that reaches a third-party host over the network;
-`destructiveHint: true` marks the one that throws a record away for good. Note that
-`preflight_dalfox` is *not* read-only: it sends no attack payloads, but it accepts
-`method` and `data` and its mining stage fires probe requests, so a `POST` preflight can
-change state on the target.
+`openWorldHint: true` marks each tool that reaches a third-party host over the network.
+`destructiveHint: true` marks the two that can leave something changed for good: one
+throws a record away, and the other injects payloads into every discovered parameter —
+including a `POST` body you supplied, and, with `blind_callback_url` set, stored
+`<script src=...>` that stays in the target. Note that `preflight_dalfox` is *not*
+read-only either: it sends no attack payloads, but it accepts `method` and `data` and
+its mining stage fires probe requests, so a `POST` preflight can change state on the
+target.
 
 The `initialize` handshake identifies the server as `dalfox` at its own version and
 returns `instructions` covering the intended tool order, how to read the finding axes,
 and the provenance rule below.
+
+## Progress, resources and prompts
+
+**Progress.** Attach `_meta.progressToken` to a `scan_with_dalfox` call with `wait=true`,
+or to `preflight_dalfox`, and Dalfox streams `notifications/progress` against that token
+while the call is open — so a client shows movement instead of a silent spinner for what
+can be minutes of work. The numeric `progress` is cumulative requests sent (the spec
+requires it to rise on every notification, and that is the one counter that always does);
+`message` carries the phase, parameters tested, findings so far, and requests that never
+reached the target. Nothing is published for the terminal state: the tool's own result is
+that signal.
+
+**Cancellation.** Sending `notifications/cancelled` for an in-flight `wait=true` call
+stops the scan itself, not just the wait — the job settles `cancelled` and keeps whatever
+it found. That is deliberately different from the wait budget simply expiring
+(`wait_timed_out: true`), which leaves the scan running so you can keep polling it.
+
+**Resources.** Scans are addressable, not only callable:
+
+| URI | Contents |
+|-----|----------|
+| `dalfox://scans` | The job index — the same body `list_scans_dalfox` returns |
+| `dalfox://scan/{scan_id}` | One scan's status, progress and findings — the same body `get_results_dalfox` returns |
+
+`resources/list` returns the index plus one entry per tracked scan (paged with a cursor),
+so a host's context picker shows real scans rather than a template to fill in. A read of
+the index bounds itself at 200 rows — `resources/read` takes no page parameters, so the
+body says in its `pagination` where it was cut. Any tool
+result that carries a `scan_id` also carries a `resource_link` content block pointing at
+that scan, letting a client attach the findings instead of asking the model to re-quote
+them. The link is omitted for clients that negotiated a protocol revision older than
+`2025-06-18`, which cannot parse the block type.
+
+**Prompts.** Two workflows are published for a client's prompt menu:
+
+| Prompt | Argument | What it does |
+|--------|----------|--------------|
+| `scan_target` | `target` | Size the scan with preflight, run it, report findings by confidence |
+| `triage_findings` | `scan_id` | Read a finished scan along the `type` / `detection_method` axes and say what was *not* covered |
+
+`completion/complete` fills in the `scan_id` argument — for the triage prompt and for the
+`dalfox://scan/{scan_id}` template — from the scans still tracked, which matters because
+a scan id is a 64-character digest nobody types by hand.
 
 ## Typical agent flow
 
@@ -438,6 +487,11 @@ Because every tool is async, the agent stays responsive; no long-running tool ca
 ## Authorization & safety
 
 The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
+
+This includes a scan's `error_message`: when an authenticated session dies mid-scan,
+Dalfox reports the URL the *origin* redirected it to, so that field quotes the target
+even on a scan with no findings. Bodies carrying it — a status poll, a `/scans`-style
+listing, the matching resource — carry `_untrusted_content_notice` for that reason.
 
 **Findings are untrusted input to your agent.** Unlike the CLI and the REST API, MCP hands scan output to a model that acts on what it reads, and every quoted byte in a finding was chosen by the target. Dalfox labels those responses with `_untrusted_content_notice`, but the label is a reminder, not a sandbox — keep the scope decision (which target, which proxy, which callback) with the operator, and never let it be changed by something the scanner read off a page.
 

@@ -40,7 +40,7 @@ claude mcp add dalfox -- dalfox mcp
 
 ## 사용 가능한 도구(tool)
 
-여섯 개의 도구(tool)가 노출됩니다. 모두 비동기이며 논블로킹입니다. 스캔을 제출하고, 결과를 폴링한 뒤, 다음 작업으로 넘어갑니다.
+여섯 개의 도구(tool)가 노출됩니다. 스캔은 기본적으로 비동기입니다. 스캔을 제출하고, 결과를 폴링한 뒤, 다음 작업으로 넘어갑니다. (`preflight_dalfox`는 그 자리에서 답하고, `scan_with_dalfox`는 `wait: true`를 주면 블로킹합니다 — 둘 다 요청하면 진행률을 스트리밍합니다.)
 
 ### `scan_with_dalfox`
 
@@ -349,7 +349,9 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 { "status": "running" }
 ```
 
-`total`, `scans: [{scan_id, target, status, result_count}]`을 반환합니다.
+`total`, `scans: [{scan_id, target, status, result_count, queued_at_ms, started_at_ms,
+finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_message`가 붙습니다 —
+이것이 없으면 `status: "error", result_count: 0`인 행은 깨끗하게 끝난 스캔과 똑같아 보입니다.
 
 ### `cancel_scan_dalfox`
 
@@ -403,21 +405,66 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 | 도구(tool) | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |------|----------------|-------------------|------------------|-----------------|
-| `scan_with_dalfox` | false | false | false | **true** |
+| `scan_with_dalfox` | false | **true** | false | **true** |
 | `preflight_dalfox` | false | false | false | **true** |
 | `get_results_dalfox` | true | — | true | false |
 | `list_scans_dalfox` | true | — | true | false |
 | `cancel_scan_dalfox` | false | false | true | false |
 | `delete_scan_dalfox` | false | **true** | false | false |
 
-`openWorldHint: true`는 네트워크로 제3자 호스트에 도달하는 도구(tool)를 가리키고,
-`destructiveHint: true`는 기록을 영구히 버리는 하나를 가리킵니다. `preflight_dalfox`는
-read-only가 **아닙니다**: 공격 페이로드는 보내지 않지만 `method`와 `data`를 받고 마이닝
-단계가 프로브 요청을 보내므로, `POST` preflight는 대상의 상태를 바꿀 수 있습니다.
+`openWorldHint: true`는 네트워크로 제3자 호스트에 도달하는 도구(tool)를 가리킵니다.
+`destructiveHint: true`는 무언가를 영구히 바꿔 놓을 수 있는 둘을 가리킵니다. 하나는
+기록을 버리고, 다른 하나는 발견된 모든 파라미터에 페이로드를 주입합니다 — 직접 넘긴
+`POST` 본문도 포함되고, `blind_callback_url`을 설정했다면 대상에 남는 저장형
+`<script src=...>`까지 포함됩니다. `preflight_dalfox` 역시 read-only가 **아닙니다**:
+공격 페이로드는 보내지 않지만 `method`와 `data`를 받고 마이닝 단계가 프로브 요청을
+보내므로, `POST` preflight는 대상의 상태를 바꿀 수 있습니다.
 
 `initialize` 핸드셰이크는 서버를 `dalfox`와 그 자신의 버전으로 식별하며, 의도한 도구(tool)
 호출 순서, 탐지 결과의 축을 읽는 법, 그리고 아래의 출처 규칙을 담은 `instructions`를
 돌려줍니다.
+
+## 진행률, 리소스, 프롬프트
+
+**진행률.** `wait=true`인 `scan_with_dalfox` 호출이나 `preflight_dalfox` 호출에
+`_meta.progressToken`을 붙이면, 호출이 열려 있는 동안 Dalfox가 그 토큰으로
+`notifications/progress`를 흘려보냅니다 — 몇 분이 걸릴 수 있는 작업에서 클라이언트가
+조용한 스피너 대신 실제 움직임을 보여줍니다. 숫자 `progress`는 누적 전송 요청 수입니다
+(스펙은 알림마다 이 값이 증가할 것을 요구하는데, 항상 증가하는 카운터는 이것뿐입니다).
+단계, 테스트한 파라미터 수, 지금까지의 탐지 결과, 대상에 끝내 닿지 못한 요청 수는
+`message`에 담깁니다. 종료 상태에 대해서는 아무것도 보내지 않습니다. 그 신호는 도구(tool)
+호출의 결과 자체입니다.
+
+**취소.** 진행 중인 `wait=true` 호출에 `notifications/cancelled`를 보내면 대기만이 아니라
+스캔 자체가 멈춥니다 — 작업은 `cancelled`로 정리되고 그때까지 찾은 것은 유지됩니다. 대기
+예산이 그냥 만료되는 경우(`wait_timed_out: true`)와는 의도적으로 다릅니다. 그때는 계속
+폴링할 수 있도록 스캔이 살아 있습니다.
+
+**리소스.** 스캔은 호출 대상일 뿐 아니라 주소를 가진 리소스이기도 합니다:
+
+| URI | 내용 |
+|-----|------|
+| `dalfox://scans` | 작업 목록 — `list_scans_dalfox`가 반환하는 것과 같은 본문 |
+| `dalfox://scan/{scan_id}` | 스캔 하나의 상태·진행률·탐지 결과 — `get_results_dalfox`와 같은 본문 |
+
+`resources/list`는 목록과 함께 추적 중인 스캔을 하나씩 돌려줍니다(커서로 페이징). 호스트의
+컨텍스트 선택기에 빈 템플릿이 아니라 실제 스캔이 뜬다는 뜻입니다. 목록 리소스를 읽을 때는
+200행에서 스스로 끊습니다 — `resources/read`에는 페이지 인자가 없으므로, 어디서 잘렸는지는
+본문의 `pagination`이 말해 줍니다. `scan_id`를 담은 도구(tool)
+결과에는 그 스캔을 가리키는 `resource_link` 콘텐츠 블록도 함께 실려서, 모델이 결과를 다시
+인용하게 하는 대신 클라이언트가 탐지 결과를 그대로 첨부할 수 있습니다. 이 블록을 해석하지
+못하는 `2025-06-18` 이전 리비전을 협상한 클라이언트에게는 붙이지 않습니다.
+
+**프롬프트.** 클라이언트의 프롬프트 메뉴에 두 가지 워크플로를 게시합니다:
+
+| 프롬프트 | 인자 | 하는 일 |
+|--------|------|---------|
+| `scan_target` | `target` | preflight로 규모를 재고, 스캔을 돌리고, 확신도 순으로 보고 |
+| `triage_findings` | `scan_id` | 끝난 스캔을 `type` / `detection_method` 축으로 읽고, 무엇이 *커버되지 않았는지*까지 말하기 |
+
+`completion/complete`는 triage 프롬프트와 `dalfox://scan/{scan_id}` 템플릿의 `scan_id`
+인자를 추적 중인 스캔에서 채워 줍니다. scan id는 사람이 손으로 옮겨 적지 않는 64자
+다이제스트라 이게 중요합니다.
 
 ## 일반적인 에이전트 흐름
 
@@ -426,11 +473,16 @@ read-only가 **아닙니다**: 공격 페이로드는 보내지 않지만 `metho
 3. 에이전트가 진행률 객체의 `suggested_poll_interval_ms`를 사용하여 `get_results_dalfox`를 폴링합니다.
 4. `status == "done"`이 되면 에이전트가 탐지 결과를 요약하여 사용자에게 다시 보고합니다.
 
-모든 도구(tool)가 비동기이므로 에이전트는 응답성을 유지합니다. 오래 실행되는 도구(tool) 호출이 대화를 차단하지 않습니다.
+스캔이 비동기이므로 에이전트는 응답성을 유지합니다. 오래 걸리는 작업을 한 번의 호출로 묶고 싶다면 `wait=true`에 진행률 토큰을 함께 붙이세요.
 
 ## 권한 및 안전
 
 MCP 서버는 CLI와 동일한 규칙을 적용합니다: **테스트 권한이 있는 대상만 스캔하세요.** 에이전트의 시스템 프롬프트에서 "모든 스캔 전에 범위를 확인하세요"와 같은 명시적 사용자 확인 단계 뒤에 Dalfox MCP 호출을 두는 것을 고려하세요.
+
+여기에는 스캔의 `error_message`도 포함됩니다. 인증 세션이 스캔 도중 끊기면 Dalfox는
+*오리진*이 리다이렉트한 URL을 그대로 보고하므로, 탐지 결과가 하나도 없는 스캔에서도 그
+필드는 대상이 고른 값을 인용합니다. 그 값을 실어 나르는 본문(상태 폴링, 스캔 목록, 대응
+리소스)에는 같은 이유로 `_untrusted_content_notice`가 붙습니다.
 
 **탐지 결과는 에이전트에게 신뢰할 수 없는 입력입니다.** CLI나 REST API와 달리 MCP는 스캔 출력을 "읽은 대로 행동하는" 모델에게 건네고, 탐지 결과에 인용된 바이트는 전부 대상이 고른 것입니다. Dalfox는 그런 응답에 `_untrusted_content_notice`를 붙이지만 이는 상기시키는 라벨이지 샌드박스가 아닙니다 — 범위 결정(어느 대상, 어느 프록시, 어느 콜백)은 운영자가 쥐고 있어야 하며, 스캐너가 페이지에서 읽어온 무언가가 그것을 바꾸게 두면 안 됩니다.
 
