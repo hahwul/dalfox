@@ -3364,12 +3364,11 @@ fn progress_values_always_rise_even_when_the_counter_does_not() {
     // is never published as a decrease.
     let regressed = gate.next_value(3);
     assert!(regressed > previous, "{previous} → {regressed}");
-    // And the nudge is small enough that the number is still the request
-    // count to three decimals.
-    assert!(
-        (regressed - 7.0).abs() < 0.01,
-        "the nudge must not inflate the count: {regressed}"
-    );
+    // And the nudge is small enough — and exact enough — that the number is
+    // still the request count to three decimals. A float accumulated by
+    // repeated addition would have printed `0.009000000000000001` here.
+    assert_eq!(regressed, 7.001, "the nudge must not inflate the count");
+    assert_eq!(gate.next_value(3), 7.002);
 }
 
 #[test]

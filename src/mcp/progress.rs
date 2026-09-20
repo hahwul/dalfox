@@ -29,10 +29,10 @@
 //! the scan is at its least obviously alive. It would also have swallowed the
 //! phase transitions — "discovering parameters" to "testing 3/12" — which are
 //! the informative half of a notification. So every poll publishes, and
-//! [`MonotonicGate`] nudges a value that did not beat the last one by a hair.
-//! `progress` is a JSON number, not an integer, so the nudge keeps the spec's
-//! increase rule without lying about the count: it stays the request total to
-//! three decimal places.
+//! [`MonotonicGate`] nudges a value that did not beat the last one by a
+//! thousandth. `progress` is a JSON number, not an integer, so the nudge keeps
+//! the spec's increase rule without lying about the count: it stays the request
+//! total to three decimal places.
 //!
 //! **The sink is asked for, not passed in.** It rides the per-call scope that
 //! `DalfoxMcp::call_tool` binds (see [`super::call_scope`]), so a handler
@@ -54,48 +54,42 @@ use super::call_scope;
 /// tarpit target produces a long run of those. Repeating the value is not
 /// allowed and dropping the tick would make the feature silent exactly when it
 /// is needed, so the value is nudged instead: the next notification goes out at
-/// one [`STALL_NUDGE`] above the last. Separated from the sink so the rule is
+/// one thousandth above the last. Separated from the sink so the rule is
 /// testable without a live peer to send through.
 #[derive(Default)]
 pub(super) struct MonotonicGate {
-    /// Last `progress` published on this token, as `f64` bits — `f64` has no
-    /// atomic of its own, and the value has to be read-modify-written by
-    /// whichever reporter gets there first.
-    last_sent: AtomicU64,
+    /// Last published value, in thousandths. Integer arithmetic rather than
+    /// `f64`: repeated nudging of a float accumulates error, and a client
+    /// rendering the raw number would print `0.009000000000000001`.
+    last_milli: AtomicU64,
     /// Set once something has been published, so the opening tick goes out at
     /// its true value even when that is `0`.
     started: std::sync::atomic::AtomicBool,
 }
 
-/// How far a stalled counter is nudged so the published value still rises.
-/// Small enough that `progress` remains the request count to three decimals.
-const STALL_NUDGE: f64 = 0.001;
-
 impl MonotonicGate {
     /// The value to publish for `progress`: itself when it beats the last one,
-    /// otherwise the smallest number that does.
+    /// otherwise the smallest number that does (one thousandth more), so the
+    /// published figure is still the request count to three decimals.
     pub(super) fn next_value(&self, progress: u64) -> f64 {
-        let mut current = self.last_sent.load(Ordering::Relaxed);
+        let desired = progress.saturating_mul(1000);
+        let first = !self.started.swap(true, Ordering::Relaxed);
+        let mut current = self.last_milli.load(Ordering::Relaxed);
         loop {
-            let previous = f64::from_bits(current);
-            let first = !self.started.load(Ordering::Relaxed);
-            let candidate = if first || progress as f64 > previous {
-                progress as f64
+            let candidate = if first {
+                desired
             } else {
-                previous + STALL_NUDGE
+                desired.max(current.saturating_add(1))
             };
             // CAS rather than a plain store: two reporters racing must not
-            // both publish the same nudged value.
-            match self.last_sent.compare_exchange_weak(
+            // both publish the same value.
+            match self.last_milli.compare_exchange_weak(
                 current,
-                candidate.to_bits(),
+                candidate,
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ) {
-                Ok(_) => {
-                    self.started.store(true, Ordering::Relaxed);
-                    return candidate;
-                }
+                Ok(_) => return candidate as f64 / 1000.0,
                 Err(observed) => current = observed,
             }
         }
