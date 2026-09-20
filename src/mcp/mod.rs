@@ -1168,9 +1168,9 @@ a failed scan is distinguishable from one that finished with no findings."
         })
     }
 
-    /// `(scan_id, target, result_count)` for every tracked job, newest first —
-    /// the ordering `resources/list` pages over.
-    fn scan_index(&self) -> Vec<(String, String, usize)> {
+    /// Every tracked job, newest first — the ordering `resources/list` pages
+    /// over, and the order completions offer scan ids in.
+    fn scan_index(&self) -> Vec<resources::ScanRow> {
         let jobs = self.lock_jobs();
         let mut rows: Vec<(&String, &Job)> = jobs.iter().collect();
         rows.sort_by(|a, b| {
@@ -1179,12 +1179,11 @@ a failed scan is distinguishable from one that finished with no findings."
                 .then_with(|| a.0.cmp(b.0))
         });
         rows.into_iter()
-            .map(|(id, job)| {
-                (
-                    id.clone(),
-                    job.target_url.clone(),
-                    job.results.as_ref().map_or(0, |r| r.len()),
-                )
+            .map(|(id, job)| resources::ScanRow {
+                scan_id: id.clone(),
+                target: job.target_url.clone(),
+                status: job.status.clone(),
+                findings: job.results.as_ref().map_or(0, |r| r.len()),
             })
             .collect()
     }
@@ -1841,7 +1840,7 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
         let matches: Vec<String> = self
             .scan_index()
             .into_iter()
-            .map(|(id, _, _)| id)
+            .map(|row| row.scan_id)
             .filter(|id| id.starts_with(typed))
             .collect();
         Ok(completion_of(matches))

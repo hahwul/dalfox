@@ -3526,8 +3526,13 @@ fn resource_pages_stay_honest_about_what_is_left() {
     // Retention allows a thousand jobs, so the listing pages. A page that
     // dropped the tail without a cursor would quietly hide scans a user can
     // see in list_scans_dalfox.
-    let scans: Vec<(String, String, usize)> = (0..120)
-        .map(|i| (format!("id{i}"), format!("http://example.com/{i}"), i))
+    let scans: Vec<resources::ScanRow> = (0..120)
+        .map(|i| resources::ScanRow {
+            scan_id: format!("id{i}"),
+            target: format!("http://example.com/{i}"),
+            status: JobStatus::Done,
+            findings: i,
+        })
         .collect();
 
     let first = resources::list_page(None, &scans).expect("first page");
@@ -3645,9 +3650,18 @@ async fn the_wire_serves_scans_as_resources() {
         listed.iter().any(|r| r["uri"] == "dalfox://scans"),
         "the index is always listed: {listed:?}"
     );
+    let listed_scan = listed
+        .iter()
+        .find(|r| r["uri"] == scan_uri.as_str())
+        .expect("the scan that just ran must be listed, not only reachable by template");
+    // A picker row reading "0 findings" for a scan that has not finished reads
+    // as "clean", which is the confusion this whole surface exists to avoid.
+    let description = listed_scan["description"].as_str().expect("description");
     assert!(
-        listed.iter().any(|r| r["uri"] == scan_uri.as_str()),
-        "the scan that just ran must be listed, not only reachable by template"
+        ["done", "error", "cancelled", "running", "queued"]
+            .iter()
+            .any(|s| description.contains(s)),
+        "a listed scan must say where it got to: {description}"
     );
 
     assert_eq!(

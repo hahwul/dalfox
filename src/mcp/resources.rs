@@ -27,6 +27,8 @@ use rmcp::model::{
 };
 use rmcp::{ErrorData, model::Cursor};
 
+use crate::job::JobStatus;
+
 /// The scan index: every job this process still tracks.
 pub(super) const SCANS_URI: &str = "dalfox://scans";
 
@@ -60,20 +62,42 @@ pub(super) fn scan_id_from_uri(uri: &str) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// One row of the scan index: what `resources/list` needs to describe a job.
+pub(super) struct ScanRow {
+    pub(super) scan_id: String,
+    pub(super) target: String,
+    pub(super) status: JobStatus,
+    pub(super) findings: usize,
+}
+
 /// A `resource_link` content block pointing at one scan.
 ///
 /// Attached to the tool results that carry a scan id so a host can offer the
 /// findings as an attachment instead of relying on the model to re-fetch them.
+/// No status here: the result this rides on already carries the live one, and
+/// the two disagreeing would be worse than saying nothing.
 pub(super) fn scan_link(scan_id: &str, target: &str) -> rmcp::model::ContentBlock {
-    rmcp::model::ContentBlock::ResourceLink(scan_resource(scan_id, target, None))
+    rmcp::model::ContentBlock::ResourceLink(resource_for(
+        scan_id,
+        target,
+        format!("Dalfox scan of {target}"),
+    ))
 }
 
-/// The `Resource` descriptor for one scan.
-fn scan_resource(scan_id: &str, target: &str, findings: Option<usize>) -> Resource {
-    let description = match findings {
-        Some(n) => format!("Dalfox scan of {target} — {n} findings"),
-        None => format!("Dalfox scan of {target}"),
-    };
+/// The `Resource` descriptor for one listed scan.
+///
+/// The status is part of the description because a picker showing
+/// "0 findings" for a scan that is still running reads as "clean", which is
+/// the one confusion this whole surface is built to avoid.
+fn scan_resource(row: &ScanRow) -> Resource {
+    let description = format!(
+        "Dalfox scan of {} — {}, {} findings so far",
+        row.target, row.status, row.findings
+    );
+    resource_for(&row.scan_id, &row.target, description)
+}
+
+fn resource_for(scan_id: &str, target: &str, description: String) -> Resource {
     Resource::new(scan_uri(scan_id), format!("scan_{scan_id}"))
         .with_title(format!("Scan: {target}"))
         .with_description(description)
@@ -98,10 +122,10 @@ fn index_resource() -> Resource {
 
 /// Build one page of `resources/list`.
 ///
-/// `scans` is `(scan_id, target, result_count)` in the order the index uses.
+/// `scans` arrives in the order the index uses (newest first).
 pub(super) fn list_page(
     request: Option<PaginatedRequestParams>,
-    scans: &[(String, String, usize)],
+    scans: &[ScanRow],
 ) -> Result<ListResourcesResult, ErrorData> {
     let cursor = request.and_then(|r| r.cursor);
     let offset = decode_cursor(cursor.as_ref())?;
@@ -113,11 +137,7 @@ pub(super) fn list_page(
     }
     let end = offset.saturating_add(RESOURCES_PAGE).min(scans.len());
     let start = offset.min(scans.len());
-    resources.extend(
-        scans[start..end]
-            .iter()
-            .map(|(id, target, count)| scan_resource(id, target, Some(*count))),
-    );
+    resources.extend(scans[start..end].iter().map(scan_resource));
     Ok(ListResourcesResult {
         resources,
         next_cursor: (end < scans.len()).then(|| Cursor::from(end.to_string())),
