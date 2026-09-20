@@ -3060,6 +3060,15 @@ async fn published_finding_schema_matches_a_real_finding() {
 /// would. No rmcp `client` feature needed — that would unify into the release
 /// build.
 async fn round_trip(requests: &[serde_json::Value]) -> HashMap<i64, serde_json::Value> {
+    round_trip_full(requests).await.0
+}
+
+/// As [`round_trip`], but also returns every server-initiated notification
+/// seen on the way — the only place progress notifications are observable,
+/// since they never appear in a response body.
+async fn round_trip_full(
+    requests: &[serde_json::Value],
+) -> (HashMap<i64, serde_json::Value>, Vec<serde_json::Value>) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let (server_side, client_side) = tokio::io::duplex(1 << 20);
@@ -3089,6 +3098,7 @@ async fn round_trip(requests: &[serde_json::Value]) -> HashMap<i64, serde_json::
     client_w.flush().await.expect("flush");
 
     let mut out = HashMap::new();
+    let mut notifications = Vec::new();
     let collect = async {
         while out.len() < wanted {
             let Some(line) = lines.next_line().await.expect("read line") else {
@@ -3100,17 +3110,19 @@ async fn round_trip(requests: &[serde_json::Value]) -> HashMap<i64, serde_json::
             let msg: serde_json::Value = serde_json::from_str(&line).expect("json-rpc line");
             if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
                 out.insert(id, msg);
+            } else if msg.get("method").is_some() {
+                notifications.push(msg);
             }
         }
     };
-    tokio::time::timeout(Duration::from_secs(30), collect)
+    tokio::time::timeout(Duration::from_secs(60), collect)
         .await
         .expect("server answered every request in time");
 
     drop(client_w);
     drop(lines);
     let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
-    out
+    (out, notifications)
 }
 
 fn rpc(id: i64, method: &str, params: serde_json::Value) -> serde_json::Value {
@@ -3304,5 +3316,184 @@ async fn list_scans_says_why_a_scan_failed() {
     assert!(
         row("clean").get("error_message").is_none(),
         "a scan that simply found nothing carries no failure reason"
+    );
+}
+
+#[test]
+fn progress_values_must_increase() {
+    // The spec requires the progress number to rise on every notification, and
+    // the scan counters are sampled on a timer — a tick that lands between two
+    // requests reads the same number as the one before it. Repeats and
+    // regressions are dropped; the opening tick is allowed through at 0.
+    let gate = progress::MonotonicGate::default();
+    assert!(gate.admits(0), "the first tick publishes even at zero");
+    assert!(!gate.admits(0), "a repeat of the same value is dropped");
+    assert!(gate.admits(7));
+    assert!(!gate.admits(7));
+    assert!(!gate.admits(3), "a counter that went backwards is dropped");
+    assert!(gate.admits(8));
+}
+
+#[test]
+fn progress_status_line_names_the_phase() {
+    let line = |body: serde_json::Value| progress::scan_status_line(&body);
+
+    assert_eq!(
+        line(serde_json::json!({"status": "queued"})),
+        Some((0, "queued".to_string()))
+    );
+
+    // `params_total` stays 0 until discovery and mining settle the parameter
+    // set, which is exactly what tells the two phases apart.
+    let (progress, message) = line(serde_json::json!({
+        "status": "running",
+        "progress": {"requests_sent": 1, "params_total": 0}
+    }))
+    .expect("a running scan reports");
+    assert_eq!(progress, 1);
+    assert_eq!(message, "discovering parameters — 1 request sent");
+
+    let (progress, message) = line(serde_json::json!({
+        "status": "running",
+        "progress": {
+            "requests_sent": 320, "requests_failed": 12,
+            "params_tested": 3, "params_total": 12, "findings_so_far": 2
+        }
+    }))
+    .expect("a running scan reports");
+    assert_eq!(
+        progress, 320,
+        "the value tracks requests, the one monotone counter"
+    );
+    assert_eq!(
+        message,
+        "testing 3/12 parameters — 320 requests sent, 2 findings so far, \
+         12 requests never reached the target"
+    );
+
+    // Terminal states publish nothing: the tool result is the completion
+    // signal, and a repeat of the final counters would break the increase rule.
+    for status in ["done", "error", "cancelled"] {
+        assert_eq!(
+            line(serde_json::json!({"status": status, "progress": {"requests_sent": 9}})),
+            None,
+            "{status} must not emit a progress notification"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_waiting_scan_streams_progress_to_the_clients_token() {
+    // `wait=true` holds the call open for up to 300s with nothing on the wire.
+    // Only the protocol shows this: progress notifications never appear in a
+    // response body, so calling the handler directly cannot observe them.
+    let (target, server) = spawn_expiring_target(usize::MAX).await;
+    let (responses, notifications) = round_trip_full(&[
+        rpc(
+            1,
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "dalfox-tests", "version": "0"}
+            }),
+        ),
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "scan_with_dalfox",
+                "arguments": {
+                    "target": format!("{target}/?q=hello"),
+                    "wait": true,
+                    "wait_timeout_sec": 50,
+                    "max_payloads_per_param": 5,
+                    "skip_mining": true
+                },
+                "_meta": {"progressToken": "scan-1"}
+            }
+        }),
+    ])
+    .await;
+    server.abort();
+
+    let status = responses[&2]["result"]["structuredContent"]["status"]
+        .as_str()
+        .expect("the wait returned a status");
+    assert!(
+        matches!(status, "done" | "error" | "cancelled"),
+        "wait=true must return a terminal scan: {status}"
+    );
+
+    let progress: Vec<&serde_json::Value> = notifications
+        .iter()
+        .filter(|n| n["method"] == "notifications/progress")
+        .collect();
+    assert!(
+        !progress.is_empty(),
+        "a client that attached a progressToken must hear something: {notifications:?}"
+    );
+    let mut last: Option<f64> = None;
+    for note in &progress {
+        assert_eq!(
+            note["params"]["progressToken"], "scan-1",
+            "progress must be published against the client's own token"
+        );
+        assert!(
+            note["params"]["message"].is_string(),
+            "the message carries the phase, which is the part a client renders"
+        );
+        let value = note["params"]["progress"].as_f64().expect("progress value");
+        if let Some(previous) = last {
+            assert!(
+                value > previous,
+                "progress must increase: {previous} then {value}"
+            );
+        }
+        last = Some(value);
+    }
+}
+
+#[tokio::test]
+async fn a_scan_without_a_progress_token_publishes_nothing() {
+    // The sink is bound only when the request carries a token, so the default
+    // path must stay silent — an unsolicited notification against a token the
+    // client never issued is a protocol violation.
+    let (target, server) = spawn_expiring_target(usize::MAX).await;
+    let (_responses, notifications) = round_trip_full(&[
+        rpc(
+            1,
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "dalfox-tests", "version": "0"}
+            }),
+        ),
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        rpc(
+            2,
+            "tools/call",
+            serde_json::json!({
+                "name": "scan_with_dalfox",
+                "arguments": {
+                    "target": format!("{target}/?q=hello"),
+                    "wait": true,
+                    "wait_timeout_sec": 50,
+                    "max_payloads_per_param": 5,
+                    "skip_mining": true
+                }
+            }),
+        ),
+    ])
+    .await;
+    server.abort();
+    assert!(
+        !notifications
+            .iter()
+            .any(|n| n["method"] == "notifications/progress"),
+        "no token was issued, so nothing may be published: {notifications:?}"
     );
 }
