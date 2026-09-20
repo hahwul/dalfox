@@ -2183,6 +2183,51 @@ async fn test_list_scans_handler_returns_all_jobs() {
     assert_eq!(parsed["data"]["scans"].as_array().unwrap().len(), 2);
 }
 
+#[tokio::test]
+async fn test_list_scans_handler_says_why_a_scan_failed() {
+    // `status: "error", result_count: 0` and `status: "done", result_count: 0`
+    // are the same row, so a listing that omits the reason forces a
+    // `GET /scan/{id}` per row just to tell "found nothing" from "never ran".
+    // Kept in step with the MCP `list_scans_dalfox` listing.
+    let state = make_state(None, None, false, false, "cb");
+    {
+        let mut jobs = state.jobs.lock().await;
+        let mut failed = test_job(JobStatus::Error, None, "");
+        failed.error_message = Some("target unreachable: connection failed".to_string());
+        jobs.insert("failed".to_string(), failed);
+        jobs.insert(
+            "clean".to_string(),
+            test_job(JobStatus::Done, Some(vec![]), ""),
+        );
+    }
+
+    let resp = list_scans_handler(State(state), HeaderMap::new(), Query(Map::new()))
+        .await
+        .into_response();
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let row = |id: &str| -> serde_json::Value {
+        parsed["data"]["scans"]
+            .as_array()
+            .expect("scans")
+            .iter()
+            .find(|s| s["scan_id"] == id)
+            .unwrap_or_else(|| panic!("{id} listed"))
+            .clone()
+    };
+    assert!(
+        row("failed")["error_message"]
+            .as_str()
+            .is_some_and(|m| m.contains("unreachable")),
+        "the failed row must carry its reason: {}",
+        row("failed")
+    );
+    assert!(
+        row("clean").get("error_message").is_none(),
+        "a scan that simply found nothing carries no failure reason"
+    );
+}
+
 /// Jobs sharing a `queued_at_ms` millisecond must list in a deterministic
 /// order (scan_id ascending as the tiebreak), not the nondeterministic HashMap
 /// iteration order — otherwise offset/limit pagination over the unstable order

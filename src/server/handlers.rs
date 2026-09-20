@@ -817,7 +817,7 @@ pub(crate) async fn list_scans_handler(
         let entries: Vec<serde_json::Value> = matching[start..end]
             .iter()
             .map(|(id, job)| {
-                serde_json::json!({
+                let mut entry = serde_json::json!({
                     "scan_id": id,
                     "target": job.target_url,
                     "status": job.status,
@@ -826,7 +826,17 @@ pub(crate) async fn list_scans_handler(
                     "started_at_ms": job.started_at_ms,
                     "finished_at_ms": job.finished_at_ms,
                     "duration_ms": job.duration_ms(),
-                })
+                });
+                // A row reading `status: "error", result_count: 0` is shaped
+                // exactly like a clean `done` one, and the listing was the only
+                // place that said nothing about why. Additive, and it keeps
+                // `/scans` in step with `list_scans_dalfox`.
+                if let Some(msg) = job.error_message.as_deref()
+                    && let Some(obj) = entry.as_object_mut()
+                {
+                    obj.insert("error_message".into(), serde_json::json!(msg));
+                }
+                entry
             })
             .collect();
         (total, end, entries)
