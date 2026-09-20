@@ -1675,7 +1675,19 @@ impl rmcp::handler::server::ServerHandler for DalfoxMcp {
             rmcp::model::Implementation::new("dalfox", env!("CARGO_PKG_VERSION"))
                 .with_title("Dalfox XSS Scanner")
                 .with_description(env!("CARGO_PKG_DESCRIPTION"))
-                .with_website_url("https://dalfox.hahwul.com"),
+                .with_website_url("https://dalfox.hahwul.com")
+                // Both served from the project's own docs site, which is where
+                // `website_url` already points. A client that renders neither
+                // ignores the field; one that does gets dalfox's mark instead
+                // of a generic plug icon.
+                .with_icons(vec![
+                    rmcp::model::Icon::new("https://dalfox.hahwul.com/favicon.svg")
+                        .with_mime_type("image/svg+xml")
+                        .with_sizes(vec!["any".to_string()]),
+                    rmcp::model::Icon::new("https://dalfox.hahwul.com/images/logo_solo.png")
+                        .with_mime_type("image/png")
+                        .with_sizes(vec!["512x512".to_string()]),
+                ]),
         )
         .with_instructions(SERVER_INSTRUCTIONS)
     }

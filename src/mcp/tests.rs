@@ -2793,6 +2793,17 @@ fn server_info_identifies_dalfox_not_the_mcp_runtime() {
     assert_eq!(info.server_info.name, "dalfox");
     assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
     assert!(info.server_info.title.is_some());
+    // Icons are served from the project's own docs site — the same host
+    // `website_url` names — so a client that renders one shows dalfox's mark
+    // rather than a generic placeholder.
+    let icons = info.server_info.icons.as_ref().expect("server icons");
+    assert!(
+        icons
+            .iter()
+            .all(|i| i.src.starts_with("https://dalfox.hahwul.com/") && i.mime_type.is_some()),
+        "every icon must be an absolute https URL on the project's own site with a \
+         declared type: {icons:?}"
+    );
     assert!(
         info.capabilities.tools.is_some(),
         "the tools capability must stay declared"
