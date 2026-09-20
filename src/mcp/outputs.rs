@@ -100,6 +100,36 @@ pub(super) fn structured(body: serde_json::Value) -> CallToolResult {
     result
 }
 
+/// Build a tool result for a failure *of the tool itself* — the infrastructure
+/// broke, so the question the caller asked was never answered.
+///
+/// MCP splits failures in two. Bad arguments and unknown tools are protocol
+/// errors on the JSON-RPC channel (see `super::reject_unparseable_arguments`);
+/// a tool that ran and failed reports `isError: true` in an otherwise
+/// successful result, so the model sees the failure as tool output it can
+/// reason about. dalfox's third-party failures — an unreachable target — are
+/// neither: they are the answer, and come back as ordinary structured results
+/// carrying `reachable: false`.
+///
+/// What was left over used to take the `structured` path too: a runtime that
+/// would not build and a panicked worker were serialized as a *successful*
+/// result whose body said `reachable: false` with a prose `error` string
+/// beside it. A caller reading `reachable` then recorded "the target is down"
+/// for a host that was never contacted — the same false-clean shape the rest
+/// of this surface is built to avoid — and a client watching `isError` saw
+/// nothing at all.
+///
+/// No `structuredContent` here on purpose: the published `outputSchema`
+/// describes the answer, and there is no answer. The spec exempts error
+/// results from it for exactly this case.
+pub(super) fn execution_error(message: impl Into<String>) -> CallToolResult {
+    CallToolResult::error(vec![ContentBlock::text(format!(
+        "{}: {}",
+        crate::cmd::error_codes::INTERNAL_ERROR,
+        message.into()
+    ))])
+}
+
 // ---------------------------------------------------------------------------
 // Shared fragments
 // ---------------------------------------------------------------------------
@@ -228,6 +258,9 @@ pub(super) struct ScanSummaryOut {
     pub finished_at_ms: Option<i64>,
     /// Elapsed scan time in milliseconds; `null` before the scan starts.
     pub duration_ms: Option<i64>,
+    /// Why the scan failed. Present only on a scan whose `status` is `error`
+    /// (or one cancelled by its own `scan_timeout`).
+    pub error_message: Option<String>,
 }
 
 /// How much of the scan list this page covers. The match count is the
@@ -313,8 +346,6 @@ pub(super) struct PreflightOut {
     /// Machine-readable reason the target was unreachable, from dalfox's
     /// shared error-code set (e.g. `CONNECTION_FAILED`).
     pub error_code: Option<String>,
-    /// Human-readable reason preflight could not run at all.
-    pub error: Option<String>,
 }
 
 pub(super) fn preflight_schema() -> Arc<JsonObject> {

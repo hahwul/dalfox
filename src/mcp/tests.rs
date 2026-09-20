@@ -2771,6 +2771,13 @@ fn every_tool_publishes_title_annotations_and_output_schema() {
     // The three hints a client actually gates on: a scan reaches out to a
     // third-party host, deleting a record destroys it, and polling does not.
     assert_eq!(by_name("scan_with_dalfox").open_world_hint, Some(true));
+    // A scan injects payloads into every discovered parameter — including a
+    // caller-supplied POST body, and stored `<script src=...>` when
+    // `blind_callback_url` is set — so it can change state on the target it
+    // was pointed at. `destructiveHint` defaults to true in the spec; claiming
+    // `false` here is a promise this tool cannot keep, on precisely the tool a
+    // client is likeliest to auto-approve from its hints.
+    assert_eq!(by_name("scan_with_dalfox").destructive_hint, Some(true));
     assert_eq!(by_name("delete_scan_dalfox").destructive_hint, Some(true));
     assert_eq!(by_name("get_results_dalfox").read_only_hint, Some(true));
     assert_eq!(by_name("get_results_dalfox").open_world_hint, Some(false));
@@ -3198,5 +3205,104 @@ async fn the_wire_reports_dalfox_publishes_schemas_and_refuses_bad_arguments() {
         serde_json::from_str::<serde_json::Value>(text).expect("text is json"),
         listed["structuredContent"],
         "text block and structuredContent must carry the same body"
+    );
+}
+
+#[test]
+fn an_infrastructure_failure_is_flagged_as_a_tool_error() {
+    // The preflight paths that cannot answer at all — the scan runtime failed
+    // to build, the analysis thread panicked — used to serialize a *successful*
+    // result whose body read `reachable: false`. A caller then recorded "that
+    // host is down" for a target dalfox never contacted, and a client watching
+    // `isError` saw a clean call. Both now come back flagged.
+    let result = execution_error("preflight task panicked");
+    assert_eq!(
+        result.is_error,
+        Some(true),
+        "a failure of the tool itself must be flagged"
+    );
+    assert!(
+        result.structured_content.is_none(),
+        "there is no answer to publish against the outputSchema"
+    );
+    let text = parse_text_content(&result);
+    assert!(
+        text.starts_with(crate::cmd::error_codes::INTERNAL_ERROR),
+        "the message must carry the shared error code: {text}"
+    );
+    assert!(text.contains("panicked"), "the cause is named: {text}");
+
+    // And the shape it replaced is gone from the published contract, so no
+    // client is left validating against a `reachable: false` that also means
+    // "never contacted".
+    let schema = DalfoxMcp::new()
+        .tool_router
+        .get("preflight_dalfox")
+        .expect("preflight_dalfox is registered")
+        .output_schema
+        .clone()
+        .expect("preflight publishes an outputSchema");
+    assert!(
+        schema["properties"].get("error").is_none(),
+        "the prose `error` field must not be published any more: {schema:?}"
+    );
+    assert!(
+        schema["properties"].get("reachable").is_some(),
+        "the real answer keeps its field"
+    );
+}
+
+/// Read a result's text content block (the copy every client can read).
+fn parse_text_content(result: &CallToolResult) -> String {
+    result
+        .content
+        .iter()
+        .find_map(|c| c.as_text().map(|t| t.text.clone()))
+        .expect("a text content block")
+}
+
+#[tokio::test]
+async fn list_scans_says_why_a_scan_failed() {
+    // `status: "error", result_count: 0` and `status: "done", result_count: 0`
+    // are the same row. Without the reason, surveying a batch of scans meant
+    // one get_results_dalfox call per row just to tell "found nothing" from
+    // "never ran".
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.lock_jobs();
+        let mut failed = test_job(JobStatus::Error, None);
+        failed.error_message = Some("target unreachable: connection failed".to_string());
+        jobs.insert("failed".to_string(), failed);
+        jobs.insert("clean".to_string(), test_job(JobStatus::Done, Some(vec![])));
+    }
+    let result = mcp
+        .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+            status: None,
+            offset: 0,
+            limit: 0,
+        }))
+        .await
+        .expect("list_scans_dalfox");
+    assert_conforms::<outputs::ListScansOut>(&result, "list_scans_dalfox");
+    let body = result.structured_content.expect("structuredContent");
+    let row = |id: &str| -> serde_json::Value {
+        body["scans"]
+            .as_array()
+            .expect("scans")
+            .iter()
+            .find(|s| s["scan_id"] == id)
+            .unwrap_or_else(|| panic!("{id} listed"))
+            .clone()
+    };
+    assert!(
+        row("failed")["error_message"]
+            .as_str()
+            .is_some_and(|m| m.contains("unreachable")),
+        "the failed row must carry its reason: {}",
+        row("failed")
+    );
+    assert!(
+        row("clean").get("error_message").is_none(),
+        "a scan that simply found nothing carries no failure reason"
     );
 }
