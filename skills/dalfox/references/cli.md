@@ -71,11 +71,15 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 
 Dictionary and DOM mining drop duplicate names and already-discovered query
 slots before probing, so a repeated entry costs no request and cannot inflate
-the reflection ratio. Eligibility for the arbitrary-name sentinel check is still
-measured on the wordlist as loaded, so a heavily filtered list keeps that check.
-When reflection sampling stops a stage early, queued probes stop before sending
-and in-flight ones are drained; the parameters already confirmed are kept unless
-the sentinels show the target echoes names it does not have. Same-named
+the reflection ratio. Remaining names are packed into bounded canary buckets
+(normally 64 names, with an approximately 8 KiB URL budget), so a large list is
+not one request per entry. Reflected canaries identify their own names; an
+ambiguous response is compared with a same-width control and split four ways
+only when needed for metric-only parameters. Eligibility for the arbitrary-name
+sentinel check is still measured on the wordlist as loaded, so a heavily
+filtered list keeps that check. EWMA collapse is evaluated after bucket
+processing: only sentinel-confirmed arbitrary reflection is folded into `any`,
+while a negative sentinel keeps the individual confirmed names. Same-named
 body/header parameters remain separate injection points.
 
 **Common fast-mode combo**: `--skip-mining` (or `--skip-mining-dom`) + explicit `-p` for the params you care about. With `--skip-discovery`, always pass `-p` (bare name is OK for query; use `name:location` for body/header/cookie/json).

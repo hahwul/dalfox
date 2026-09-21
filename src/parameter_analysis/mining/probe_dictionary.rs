@@ -1,4 +1,4 @@
-//! Mining: probe dictionary. See module docs in `mod.rs`.
+//! Mining: dictionary. See module docs in `mod.rs`.
 
 use super::*;
 
@@ -9,26 +9,25 @@ pub async fn probe_dictionary_params(
     semaphore: Arc<Semaphore>,
     pb: Option<ShimmerSpinner>,
 ) {
-    let arc_target = Arc::new(target.clone());
-    let silence = args.silence;
     let client = target.build_client_or_default();
-    // Taken before this stage pushes anything, so a collapse below can drop
-    // what the wordlist mined without touching what discovery already found.
+    // Taken before this stage pushes anything, so a later collapse can drop
+    // only what the wordlist mined without touching Stage 1 discovery.
     let preexisting = snapshot_param_slots(&reflection_params).await;
 
-    // Resolve candidate parameter names (remote, file, or built-ins)
+    // Resolve candidate parameter names (remote, file, or the expanded
+    // built-in list). Remote fetches remain process-cached by provider set.
     let mut params: Vec<String> = Vec::new();
     let mut loaded = false;
 
     if !args.remote_wordlists.is_empty() {
         if let Err(e) = crate::payload::init_remote_wordlists(&args.remote_wordlists).await
-            && !silence
+            && !args.silence
         {
             eprintln!("Error initializing remote wordlists: {}", e);
         }
         // Keyed by this scan's provider set: the cache is process-global, so a
-        // provider-less lookup in the server/MCP daemon could return whatever
-        // wordlist an earlier job with different providers had fetched.
+        // provider-less lookup in a server/MCP daemon must not return a list
+        // fetched by an earlier job with different providers.
         if let Some(words) = crate::payload::get_remote_words_for(&args.remote_wordlists)
             && !words.is_empty()
         {
@@ -46,309 +45,32 @@ pub async fn probe_dictionary_params(
             Ok(content) => {
                 params = content
                     .lines()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty() && !s.starts_with('#'))
+                    .map(ToString::to_string)
                     .collect();
                 loaded = true;
             }
             Err(e) => {
-                // Always surface on stderr — an unreadable
-                // `--mining-dict-word` is a user-supplied input error and
-                // silencing it (because server/MCP pass silence=true to
-                // analyze_parameters) means the operator can't tell why
-                // their custom dictionary did nothing. stderr never
-                // pollutes the stdout JSON/JSONL payload anyway.
+                // Always surface an unreadable user-supplied wordlist on
+                // stderr; machine-readable stdout remains clean.
                 eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
-                let _ = silence; // intentionally unused now
                 return;
             }
         }
     }
 
     if !loaded {
-        params = GF_PATTERNS_PARAMS.iter().map(ToString::to_string).collect();
+        params = crate::payload::mining::built_in_mining_params();
     }
 
-    // Pre-probe eligibility is measured on the *loaded* wordlist, before the
-    // filtering below. The arbitrary-name check is the only thing that finds
-    // the synthetic `any` injection point, and a list that shrinks past the
-    // threshold because its entries are duplicates or already-discovered slots
-    // says nothing about whether this target echoes names it does not have.
-    let sentinel_eligible = params.len() > SENTINEL_PROBE_COUNT * 5;
-
-    // Stable dedup also keeps repeats from manufacturing a high EWMA and
-    // collapsing real, distinct candidates later in the wordlist to `any`.
-    params = unique_query_candidates(params, &reflection_params).await;
-
-    // Sentinel pre-probe: 3 unique random param names. If every one reflects,
-    // the page echoes arbitrary input and the wordlist would just balloon
-    // into Stage 3-6 cost. Skip the wordlist and add a single "any" param
-    // instead — the params discovered before this stage are kept and still
-    // scanned. Skip when the wordlist is small enough that the pre-probe is
-    // more expensive than just running it.
-    let mut arbitrary_names_disproved = false;
-    if sentinel_eligible {
-        if let Some(text) = pre_collapse_query_probe(&client, target).await {
-            if !silence {
-                eprintln!(
-                    "[mining-collapse] sentinel pre-probe collapsed Query mining: \
-                     every random param name reflected; adding single 'any' param"
-                );
-            }
-            collapse_mined_params(
-                &reflection_params,
-                &preexisting,
-                Location::Query,
-                Some(&text),
-            )
-            .await;
-            if let Some(ref pb) = pb {
-                pb.finish_and_clear();
-            }
-            return;
-        }
-        arbitrary_names_disproved = true;
-    }
-
-    if let Some(ref pb) = pb {
-        pb.set_length(params.len() as u64);
-        pb.set_message("Mining dictionary parameters");
-    }
-
-    // EWMA adaptive stats shared across tasks
-    let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
-
-    // Chunked processing bounds memory and allows early collapse exit. Tasks
-    // are spawned AND drained one chunk at a time (see the per-chunk join below)
-    // so the live task count never exceeds CHUNK_SIZE. Accumulating handles for
-    // the whole wordlist (joined only after every chunk) let a multi-million-line
-    // `--mining-dict-word` / `--remote-wordlists` spawn one task per entry up
-    // front — each holding cloned Url/String/Arc state — and blow resident
-    // memory into the tens of GB before any task was awaited.
-    const CHUNK_SIZE: usize = 500;
-    'outer: for param_chunk in params.chunks(CHUNK_SIZE) {
-        {
-            let st = stats.lock().await;
-            if st.collapsed {
-                break 'outer;
-            }
-        }
-        // Per-chunk handles, drained at the end of this chunk (see below).
-        let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
-        for param in param_chunk {
-            // Stop spawning, then drain this chunk below. Breaking the outer
-            // loop here would detach its tasks and discard their metadata.
-            {
-                let st = stats.lock().await;
-                if st.collapsed {
-                    break;
-                }
-            }
-
-            let mut url = target.url.clone();
-            url.query_pairs_mut()
-                .append_pair(param, crate::scanning::markers::bracketed_marker());
-
-            let client_clone = client.clone();
-
-            let data = target.data.clone();
-            let parsed_method = target.parse_method();
-            let target_clone = arc_target.clone();
-            let delay = target.delay;
-            let semaphore_clone = semaphore.clone();
-            let param_name = param.clone();
-            let pb_clone = pb.clone();
-            let stats_clone = stats.clone();
-
-            let handle = tokio::spawn(crate::with_job_scopes(
-                crate::JobScopes::capture(),
-                async move {
-                    let Ok(permit) = semaphore_clone.acquire().await else {
-                        return None;
-                    };
-                    // Collapse may have fired while this task waited for its
-                    // permit. Only requests already in flight may finish.
-                    if stats_clone.lock().await.collapsed {
-                        if let Some(ref pb) = pb_clone {
-                            pb.inc(1);
-                        }
-                        return None;
-                    }
-                    let request = crate::utils::build_request(
-                        &client_clone,
-                        &target_clone,
-                        parsed_method,
-                        url,
-                        data.clone(),
-                    );
-
-                    crate::record_outbound_request().await;
-                    let resp = crate::utils::http::send_counted(request).await;
-
-                    let mut discovered: Option<Param> = None;
-                    if let Ok(r) = resp {
-                        // Skip server error responses (5xx) — debug error pages often
-                        // reflect query params in stack traces, causing false positives.
-                        let status = r.status();
-                        if status.is_server_error() {
-                            let mut st = stats_clone.lock().await;
-                            st.record_attempt();
-                            drop(permit);
-                            if delay > 0 {
-                                sleep(Duration::from_millis(delay)).await;
-                            }
-                            if let Some(ref pb) = pb_clone {
-                                pb.inc(1);
-                            }
-                            return discovered;
-                        }
-                        // Check for redirect reflection: if the response is a 3xx redirect,
-                        // the Location header may contain the reflected marker value.
-                        let is_redirect = status.is_redirection();
-                        let location_has_marker = if is_redirect {
-                            r.headers()
-                                .get("location")
-                                .and_then(|v| v.to_str().ok())
-                                .is_some_and(|loc| {
-                                    crate::scanning::markers::classify_probe_reflection(loc)
-                                        .detected()
-                                })
-                        } else {
-                            false
-                        };
-
-                        if location_has_marker {
-                            // Redirect context: marker reflected in Location header.
-                            let mut st = stats_clone.lock().await;
-                            st.record_attempt();
-                            st.record_reflection();
-                            // Recorded even if a sibling set `collapsed` while
-                            // this request was in flight: the response is paid
-                            // for, and a confirmed collapse folds it anyway.
-                            discovered = Some(Param {
-                                injection_context: Some(
-                                    crate::parameter_analysis::InjectionContext::AttributeUrl(None),
-                                ),
-                                ..Param::new(
-                                    param_name.clone(),
-                                    crate::scanning::markers::bracketed_marker().to_string(),
-                                    crate::parameter_analysis::Location::Query,
-                                )
-                            });
-                            if !silence {
-                                eprintln!(
-                                    "Discovered parameter (redirect): {} (EWMA {:.2}, {}/{})",
-                                    param_name, st.ewma_ratio, st.reflections, st.attempts
-                                );
-                            }
-                            if st.should_collapse() {
-                                st.collapsed = true;
-                                if !silence {
-                                    eprintln!(
-                                        "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
-                                        st.ewma_ratio, st.attempts, st.reflections
-                                    );
-                                }
-                            }
-                        } else if let Ok(text) = crate::utils::http::read_body(r).await {
-                            let mut st = stats_clone.lock().await;
-                            st.record_attempt();
-                            if crate::scanning::markers::classify_probe_reflection(&text).detected()
-                            {
-                                st.record_reflection();
-                                // See the redirect arm: an in-flight response is
-                                // kept regardless of the collapse flag.
-                                discovered = Some(
-                                    Param::new(
-                                        param_name.clone(),
-                                        crate::scanning::markers::bracketed_marker().to_string(),
-                                        crate::parameter_analysis::Location::Query,
-                                    )
-                                    .with_reflection_analysis(&text),
-                                );
-                                if !silence {
-                                    eprintln!(
-                                        "Discovered parameter: {} (EWMA {:.2}, {}/{})",
-                                        param_name, st.ewma_ratio, st.reflections, st.attempts
-                                    );
-                                }
-                                if st.should_collapse() {
-                                    st.collapsed = true;
-                                    if !silence {
-                                        eprintln!(
-                                            "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
-                                            st.ewma_ratio, st.attempts, st.reflections
-                                        );
-                                    }
-                                }
-                            } else {
-                                st.record_non_reflection();
-                            }
-                        }
-                    }
-
-                    if delay > 0 {
-                        sleep(Duration::from_millis(delay)).await;
-                    }
-                    drop(permit);
-                    if let Some(ref pb) = pb_clone {
-                        pb.inc(1);
-                    }
-                    discovered
-                },
-            ));
-
-            handles.push(handle);
-        }
-
-        // Drain THIS chunk's tasks (and flush discovered params) before the next
-        // chunk spawns, keeping the live task/handle count bounded by CHUNK_SIZE.
-        let mut batch: Vec<Param> = Vec::new();
-        for h in handles {
-            if let Ok(opt) = h.await
-                && let Some(p) = opt
-            {
-                batch.push(p);
-            }
-        }
-        if !batch.is_empty() {
-            let mut guard = reflection_params.lock().await;
-            guard.extend(batch);
-        }
-    } // end chunk loop
-
-    // Apply collapse post-processing once (instead of inside tasks mutating aggressively).
-    // Only the Query params *this stage mined* collapse — params discovered via
-    // other channels (Body, Header, Path, JsonBody, …) and the Query params
-    // Stage 1 discovery already confirmed are left alone.
-    let collapsed = stats.lock().await.collapsed;
-    if collapsed {
-        // The EWMA stop is a cost control and always applies — an endpoint that
-        // reflects most of a wordlist would otherwise hand Stage 3-6 hundreds of
-        // near-identical injection points. Replacing what it *did* mine with the
-        // synthetic `any` is a different claim, and only the sentinels can back
-        // it: fold when they reflect, keep the confirmed params when they do not.
-        // `arbitrary_names_disproved` already carries that answer (the pre-probe
-        // ran above); otherwise the wordlist was under the pre-probe threshold,
-        // so ask now — 3 requests to avoid deleting real findings.
-        let confirmed = if arbitrary_names_disproved {
-            None
-        } else {
-            pre_collapse_query_probe(&client, target).await
-        };
-        if let Some(text) = confirmed {
-            collapse_mined_params(
-                &reflection_params,
-                &preexisting,
-                Location::Query,
-                Some(&text),
-            )
-            .await;
-        } else if !silence {
-            eprintln!(
-                "[mining-collapse] high reflection EWMA, but the sentinels did not \
-                 reflect: keeping the mined params instead of folding them into 'any'"
-            );
-        }
-    }
+    let query_ctx = QueryMiningContext {
+        target,
+        args,
+        reflection_params,
+        semaphore,
+        pb,
+        client,
+    };
+    probe_query_candidates(&query_ctx, params, preexisting, "dictionary", None).await;
 }

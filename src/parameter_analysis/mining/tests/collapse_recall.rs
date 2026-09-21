@@ -102,12 +102,12 @@ async fn known_slots_keep_arbitrary_name_coverage() {
 }
 
 /// The reflection EWMA cannot tell "echoes any name" from "these fields all
-/// reflect". Its stop stays (an endpoint reflecting most of a wordlist would
-/// otherwise hand Stage 3-6 hundreds of near-identical injection points), but
-/// replacing the confirmed params with the synthetic `any` needs the sentinels
-/// to agree. They do not here, so the mined params must stay.
+/// reflect". Replacing the confirmed params with the synthetic `any` needs the
+/// sentinels to agree. They do not here, so the mined params must stay. The
+/// bucket engine can identify every reflected candidate in one response, so it
+/// does not discard the tail merely because the EWMA crosses its old stop mark.
 #[tokio::test]
-async fn unconfirmed_ewma_stop_keeps_the_real_params() {
+async fn unconfirmed_high_reflection_keeps_the_real_params() {
     let (target, _requests, server) = selective_server().await;
     let words = (0..20).map(|i| format!("cand_{i}\n")).collect::<String>();
     let wordlist = TempWordlist::new("collapse-recall-ewma", &words);
@@ -131,9 +131,9 @@ async fn unconfirmed_ewma_stop_keeps_the_real_params() {
         !params.iter().any(|p| p.name == "any"),
         "the sentinels never reflected, so `any` is a stand-in for nothing: {names:?}"
     );
-    // Serial (`workers = 1`) probing, so the stop lands on the fifteenth
-    // attempt — the minimum the EWMA collapse requires.
-    assert_eq!(params.len(), 15, "{names:?}");
+    // The sentinel is negative, so a high reflection ratio is not enough to
+    // claim arbitrary-name reflection. Bucketed probing keeps every real hit.
+    assert_eq!(params.len(), 20, "{names:?}");
     assert!(params.iter().all(|p| p.name.starts_with("cand_")));
 }
 
@@ -171,8 +171,8 @@ async fn unprobed_wordlist_confirms_before_folding() {
     );
     assert_eq!(
         requests.load(Ordering::Relaxed),
-        SENTINEL_PROBE_COUNT * 5 + SENTINEL_PROBE_COUNT,
-        "fifteen candidates, then the three confirming sentinels"
+        1 + 1 + SENTINEL_PROBE_COUNT,
+        "one baseline sample, one candidate bucket, then three confirming sentinels"
     );
 }
 
@@ -197,7 +197,7 @@ async fn unprobed_dom_candidates_confirm_before_folding() {
     assert_eq!(names, ["any"], "{names:?}");
     assert_eq!(
         requests.load(Ordering::Relaxed),
-        1 + SENTINEL_PROBE_COUNT * 5 + SENTINEL_PROBE_COUNT,
-        "HTML fetch, fifteen fields, then the three confirming sentinels"
+        1 + 1 + SENTINEL_PROBE_COUNT,
+        "HTML fetch, one candidate bucket, then three confirming sentinels"
     );
 }

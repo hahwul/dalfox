@@ -1993,6 +1993,19 @@ fn one_analysis_applies_identically_to_many_params() {
     }
 }
 
+#[test]
+fn marker_specific_analysis_keeps_batched_contexts_separate() {
+    let body = r#"<script>const js = 'mfirst';</script><div>msecond</div>"#;
+    let js = ReflectionAnalysis::of_with_marker(body, "mfirst");
+    let html = ReflectionAnalysis::of_with_marker(body, "msecond");
+
+    assert_eq!(
+        js.injection_context,
+        InjectionContext::Javascript(Some(DelimiterType::SingleQuote))
+    );
+    assert_eq!(html.injection_context, InjectionContext::Html(None));
+}
+
 /// A server that case-normalizes the reflection (Rails-style `titleize`,
 /// `upcase`, `downcase` template filters) still echoes every special character
 /// raw. Matching the probe markers case-sensitively made
