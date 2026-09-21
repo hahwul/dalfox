@@ -26,6 +26,19 @@ Discovery (`--skip-discovery`) turns off HTML form / link / inline-JS extraction
 
 Remote wordlists (`--remote-wordlists burp,assetnote`) are cached with OnceLock for the lifetime of the process.
 
+Dictionary and DOM query mining use bounded canary buckets (normally 64 names,
+with an approximately 8 KiB URL budget) rather than one request per candidate.
+Reflected canaries identify names directly; a response change without a canary
+reflection is checked with a same-width control and four-way splitting to find
+metric-only parameters. Duplicate/already-known query slots are removed before
+bucket construction. A negative arbitrary-name sentinel keeps the individual
+confirmed names even when the EWMA reflection ratio is high, so a larger
+wordlist is not cut off merely because its first bucket reflects.
+
+When no custom or remote list is selected, the built-in seed preserves the
+historical GF/XSS names and adds an attributed gori-derived set covering common
+API, authentication, pagination, feature-flag, media, and operational names.
+
 ## Scope & Filtering
 
 Use these in order of preference:

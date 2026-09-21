@@ -114,6 +114,19 @@ pub use super::session::{DEFAULT_ON_SESSION_LOSS, ON_SESSION_LOSS_VALUES};
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
 pub const DEFAULT_WORKERS: usize = 50;
+/// Number of query-parameter names carried by one dictionary/DOM mining
+/// request before the positive bucket is split. Bucketing is the main request
+/// reduction lever for large wordlists; 64 stays below common request-line
+/// limits for ordinary parameter names while still amortising one RTT across
+/// many candidates.
+pub const DEFAULT_MINING_BUCKET_SIZE: usize = 64;
+/// Hard ceiling for adaptive query-mining buckets. The current engine starts
+/// at [`DEFAULT_MINING_BUCKET_SIZE`] and never exceeds this value when a
+/// future request-budget heuristic widens the bucket.
+pub const MAX_MINING_BUCKET_SIZE: usize = 128;
+/// Branch factor for positive mining buckets. Four-way splitting reduces the
+/// bisection depth without increasing the request count for a sparse hit.
+pub const MINING_BISECT_WAYS: usize = 4;
 
 /// Worker count preflight analysis runs at when the caller does not ask for one.
 ///

@@ -1266,7 +1266,7 @@ fn test_has_knockout_html_clause_boundary_cases() {
 /// A page with exactly 15 distinct field names that echoes *every* query
 /// parameter. 15 is deliberate: the sentinel pre-probe only runs above
 /// `SENTINEL_PROBE_COUNT * 5`, so this shape slips past it and forces the
-/// adaptive EWMA collapse instead — the branch that was never exercised.
+/// post-bucket adaptive EWMA collapse instead.
 async fn reflect_everything_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
     let echoed: String = params.values().cloned().collect::<Vec<_>>().join(" ");
     let mut form = String::from("<form>");

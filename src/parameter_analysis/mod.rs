@@ -316,12 +316,30 @@ pub(crate) struct ReflectionAnalysis {
 impl ReflectionAnalysis {
     /// Analyze a response body that already contains the reflection marker.
     pub(crate) fn of(body: &str) -> Self {
+        let inner = crate::scanning::markers::inner_marker();
+        let marker = if body.contains(inner) {
+            inner
+        } else {
+            crate::scanning::markers::open_marker()
+        };
+        Self::of_with_marker(body, marker)
+    }
+
+    /// Analyze a response body relative to a specific marker occurrence.
+    ///
+    /// Batched query mining can receive several reflected canaries in one
+    /// response. The shared analysis shape is still useful for the special
+    /// character split, but the injection context and JS breakout must follow
+    /// the canary being turned into a `Param`; otherwise a script reflection
+    /// can incorrectly lend its context to a text or attribute reflection in
+    /// the same response.
+    pub(crate) fn of_with_marker(body: &str, marker: &str) -> Self {
         let (valid_specials, invalid_specials) = classify_special_chars(body);
         Self {
-            injection_context: detect_injection_context(body),
+            injection_context: detect_injection_context_with_marker(body, marker),
             valid_specials,
             invalid_specials,
-            js_breakout: detect_js_breakout(body),
+            js_breakout: detect_js_breakout_with_marker(body, marker),
         }
     }
 }

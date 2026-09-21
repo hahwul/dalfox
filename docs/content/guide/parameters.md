@@ -50,14 +50,27 @@ dalfox https://target.app -W ./params.txt
 dalfox https://target.app --remote-wordlists burp,assetnote
 ```
 
+Dictionary and DOM candidates are tested in bounded query buckets instead of
+one request per name. The default bucket carries up to 64 canaries and stays
+under an approximately 8 KiB request-line budget. Reflected canaries identify
+their own parameter names in one response; when a bucket changes the response
+without reflecting a canary, Dalfox sends a same-width control and recursively
+splits the positive bucket four ways. This keeps a large wordlist broad while
+spending extra requests only on ambiguous, metric-only hits.
+
+With no custom or remote wordlist selected, the built-in seed keeps Dalfox's
+historical XSS-oriented names and adds an attributed, broader Param Miner seed
+covering API, authentication, pagination, feature flags, media, and operational
+names.
+
 ### Auto-collapse
 
 Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this in two ways:
 
 - **Sentinel pre-probe:** Before iterating the wordlist, three random parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic `any` Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (>15 entries) for the pre-probe to pay off.
-- **EWMA collapse:** While iterating, Dalfox watches the rolling reflection ratio. Once it stays ≥85% after at least 15 attempts, mining stops and any Query params already collected are folded into the same `any` placeholder.
+- **EWMA collapse:** After bucket processing, Dalfox watches the rolling reflection ratio. A high ratio (≥85% after at least 15 candidate names) triggers a confirmation check for smaller lists. If the sentinels also reflect, mined Query params are folded into the same `any` placeholder; if they do not, every confirmed candidate is kept. A negative sentinel therefore does not cut coverage from the rest of a large wordlist.
 
-Both routes produce identical downstream state: Stages 5–7 see one Query injection point regardless of which trigger fired.
+The sentinel-confirmed route produces one synthetic Query injection point. A negative sentinel preserves the individual reflected names, while still benefiting from bucketed requests.
 
 ## Pruning the noise
 

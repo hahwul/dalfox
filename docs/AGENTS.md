@@ -76,7 +76,7 @@ This site documents [Dalfox](https://github.com/hahwul/dalfox), a Rust XSS scann
 The canonical high-level contract is documented in `src/lib.rs` (6 stages, Stages 1–6). The runtime flow has one important nuance:
 
 1. Discovery (Stage 1) — query / body / cookie / header / path / fragment / form / parameter-key probes. Bracketed sandwich marker.
-2. Mining (Stage 2) — DOM-input names, dictionary wordlist, JSON body keys. Sentinel pre-probe + EWMA collapse for reflect-everything pages.
+2. Mining (Stage 2) — DOM-input names, dictionary wordlist, JSON body keys. Query candidates use bounded canary buckets and same-width controls; sentinel pre-probe + EWMA collapse handle reflect-everything pages.
 3. Active probing (Stage 3) — per-special-character probes; sets `valid_specials` / `invalid_specials`.
 4. Payload generation (Stage 4) — inside `scanning::run_scanning`.
 5. **Stage 0 fast probe** (inside Stage 4) — single bracketed-marker request that gates whether full payload reflection + DOM verification run for a parameter. Non-reflective params are short-circuited here.

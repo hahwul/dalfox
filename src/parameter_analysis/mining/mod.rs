@@ -9,22 +9,23 @@
 //! `Param` entries that reflect. Each carries the same naive `valid_specials`,
 //! `invalid_specials`, and `injection_context` as Stage 1 output.
 //!
-//! **Side effects:** HTTP requests for DOM/dict/GF mining probes. Uses EWMA-based
-//! collapse detection to short-circuit when a target reflects everything
-//! (sustained ≥85% reflection rate after ≥15 attempts). Filters out 5xx
-//! responses to avoid false positives from debug/error pages.
-//! Query candidates are deduplicated and already-discovered Query slots dropped
-//! before probing; the sentinel pre-probe's eligibility is still measured on the
-//! candidate list as loaded. On collapse, queued dictionary/DOM probes stop
-//! before sending and started workers are drained; folding the mined params into
-//! the synthetic `any` additionally requires the sentinels to confirm that this
-//! target really does echo parameter names it does not have.
+//! **Side effects:** HTTP requests for DOM/dict/GF mining probes. Query
+//! candidates are deduplicated and already-discovered Query slots dropped
+//! before probing, then packed into bounded canary buckets (normally 64 names
+//! per request, with an 8 KiB URL budget). A reflected canary identifies its
+//! own name in one response; response changes without a reflected canary are
+//! compared with a same-width control and split four ways to find metric-only
+//! parameters. This keeps large wordlists broad without one request per entry.
+//! The sentinel pre-probe's eligibility is still measured on the candidate list
+//! as loaded. EWMA collapse is evaluated after bucket processing; folding the
+//! mined params into the synthetic `any` additionally requires the sentinels to
+//! confirm that this target really does echo parameter names it does not have.
+//! Filters out 5xx responses to avoid false positives from debug/error pages.
 //!
 //! **Skippable via:** `--skip-mining`, `--skip-mining-dict`, `--skip-mining-dom`.
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param};
-use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use crate::utils::shimmer::ShimmerSpinner;
 use std::sync::Arc;
@@ -42,6 +43,7 @@ mod probe_dictionary;
 mod probe_graphql;
 mod probe_json;
 mod probe_multipart;
+mod probe_query;
 mod probe_response_id;
 mod probe_xml;
 
@@ -56,6 +58,7 @@ use probe_dictionary::*;
 use probe_graphql::*;
 use probe_json::*;
 use probe_multipart::*;
+use probe_query::*;
 use probe_response_id::*;
 use probe_xml::*;
 

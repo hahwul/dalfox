@@ -6,8 +6,7 @@
 // return-URL params (frequent reflected-XSS / open-redirect sinks), free-text
 // fields (title/message/comment/description), view/format/template selectors,
 // and identity/locale fields. Kept de-duplicated and ordered most-common-first
-// so the EWMA collapse heuristic and any name cap still see the highest-value
-// names early.
+// so the first query buckets start with the highest-value names.
 pub(crate) const GF_PATTERNS_PARAMS: &[&str] = &[
     // --- original gf-patterns xss.json seed ---
     "q",
@@ -160,6 +159,34 @@ pub(crate) const GF_PATTERNS_PARAMS: &[&str] = &[
     "debug",
     "test",
 ];
+
+/// Additional curated names from the gori Param Miner wordlist. Keeping this
+/// as a source asset instead of another giant Rust literal makes updates easy
+/// and lets the loader deduplicate overlaps with the GF seed above while
+/// preserving the high-signal ordering of the existing list.
+const GORI_MINER_PARAMS: &str = include_str!("gori_miner_params.txt");
+
+/// Return the default parameter candidates in stable, de-duplicated order.
+/// The first block preserves Dalfox's historical XSS-oriented priority; the
+/// gori-derived block broadens API, auth, pagination, feature-flag, media,
+/// commerce, and operational parameter coverage without requiring a network
+/// fetch. Remote `burp`/`assetnote` lists still replace this set when selected.
+pub(crate) fn built_in_mining_params() -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut params = Vec::new();
+    for name in GF_PATTERNS_PARAMS {
+        if seen.insert(*name) {
+            params.push((*name).to_string());
+        }
+    }
+    for line in GORI_MINER_PARAMS.lines() {
+        let name = line.trim();
+        if !name.is_empty() && !name.starts_with('#') && seen.insert(name) {
+            params.push(name.to_string());
+        }
+    }
+    params
+}
 
 #[cfg(test)]
 mod tests;

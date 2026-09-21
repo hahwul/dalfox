@@ -43,3 +43,34 @@ fn test_gf_patterns_contains_common_params() {
         );
     }
 }
+
+#[test]
+fn test_built_in_mining_params_extend_and_deduplicate_the_seed() {
+    let params = built_in_mining_params();
+    let unique: std::collections::HashSet<_> = params.iter().collect();
+
+    assert_eq!(params.len(), unique.len());
+    assert!(params.len() > GF_PATTERNS_PARAMS.len());
+    for expected in [
+        "authorization",
+        "api_version",
+        "page_size",
+        "feature",
+        "webhook",
+    ] {
+        assert!(
+            params.iter().any(|param| param == expected),
+            "missing {expected}"
+        );
+    }
+}
+
+#[test]
+fn test_gori_mining_seed_has_no_blank_or_comment_entries() {
+    let params = built_in_mining_params();
+    assert!(
+        params
+            .iter()
+            .all(|param| { !param.is_empty() && param.trim() == param && !param.starts_with('#') })
+    );
+}
