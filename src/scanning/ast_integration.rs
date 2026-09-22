@@ -271,39 +271,20 @@ impl PageSecurityPosture {
         Self::from_csp(target.csp_analysis.as_ref())
     }
 
-    /// Server / MCP variant: the CLI gets its `CspAnalysis` from preflight, and
-    /// these surfaces fetch the page themselves — so they must apply the same
-    /// precedence preflight does, or the identical target grades differently
-    /// depending on which interface ran the scan. Enforcing header, then
-    /// report-only header, then a `<meta http-equiv>` policy.
+    /// Posture straight from a response: enforcing header, then report-only
+    /// header, then a `<meta http-equiv>` policy. The server / MCP runner now
+    /// stores the policy on the target (via the same
+    /// `csp_header_from_response` + `analyze_csp_from` pair) and uses
+    /// [`Self::from_target`] like the CLI; this composition keeps the
+    /// precedence directly testable.
+    #[cfg(test)]
     pub(crate) fn from_response(headers: &reqwest::header::HeaderMap, body: &str) -> Self {
-        let header_csp = headers
-            .get("content-security-policy")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| (false, v.to_string()))
-            .or_else(|| {
-                headers
-                    .get("content-security-policy-report-only")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|v| (true, v.to_string()))
-            });
-
-        let (report_only, policy) = match header_csp {
-            Some(found) => found,
-            // Only look at the document when no header carried a policy —
-            // mirroring preflight, where the meta scan is the fallback.
-            None => match crate::scanning::extract_meta_csp(body) {
-                Some((name, content)) => (
-                    !name.eq_ignore_ascii_case("content-security-policy"),
-                    content,
-                ),
-                None => return Self::default(),
-            },
-        };
-
-        let mut csp = crate::payload::xss_csp_bypass::analyze_csp(&policy);
-        csp.report_only = report_only;
-        Self::from_csp(Some(&csp))
+        match crate::scanning::csp_header_from_response(headers, body) {
+            Some((name, policy)) => Self::from_csp(Some(
+                &crate::payload::xss_csp_bypass::analyze_csp_from(&name, &policy),
+            )),
+            None => Self::default(),
+        }
     }
 }
 

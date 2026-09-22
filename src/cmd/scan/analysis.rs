@@ -647,17 +647,9 @@ async fn run_target_preflight(
             }
             if let Some((hn, hv)) = preflight.csp_header {
                 __preflight_csp_present = true;
-                // Analyze CSP and store on target for bypass payload generation
-                let mut csp = crate::payload::xss_csp_bypass::analyze_csp(&hv);
-                // A report-only CSP enforces nothing — it only emits
-                // violation reports — so `require-trusted-types-for`
-                // there must not drive Trusted Types suppression in
-                // the AST analyzer (that would be a false negative).
-                // Bypass-payload fields stay as parsed.
-                if !hn.eq_ignore_ascii_case("content-security-policy") {
-                    csp.report_only = true;
-                    csp.require_trusted_types_for = false;
-                }
+                // Analyze CSP and store on target for bypass payload
+                // generation (report-only policies are neutralized there).
+                let csp = crate::payload::xss_csp_bypass::analyze_csp_from(&hn, &hv);
                 if crate::DEBUG.load(Ordering::Relaxed) {
                     let class = if csp.is_hardened() {
                         "hardened (nonce/hash-only)"
@@ -745,7 +737,16 @@ async fn run_target_preflight(
                 // `target.waf_extra_delay_ms`. This replaces the old blunt
                 // workers=1 / delay=3000 preset, which throttled far harder
                 // than necessary and was trivially fingerprintable.
-                if args_clone.waf_evasion && !args_clone.silence {
+                // Plain + single-target only, like every other preflight
+                // log line: `cprintln!` writes to stdout, so under
+                // `-f json`/`jsonl`/`sarif`/`toml` this line landed ahead of
+                // the document and broke every parser reading stdout, and a
+                // multi-target run renders one progress line instead.
+                if args_clone.waf_evasion
+                    && !args_clone.silence
+                    && args_clone.format == "plain"
+                    && total_targets_copy == 1
+                {
                     let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                     crate::cprintln!(
                         "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m evasion activated: adaptive jitter + cooldown",
@@ -780,8 +781,9 @@ async fn run_target_preflight(
 }
 
 /// `--detect-outdated-libs` (opt-in): flag known-vulnerable JS libraries on the
-/// landing page as informational (CWE-1104) findings.
-async fn detect_outdated_libs(
+/// landing page as informational (CWE-1104) findings. Shared with the server /
+/// MCP job runner (`job::runner::execute_scan`).
+pub(crate) async fn detect_outdated_libs(
     target: &Target,
     args_clone: &ScanArgs,
     preflight_response_body: Option<&String>,

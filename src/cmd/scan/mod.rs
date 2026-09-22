@@ -43,6 +43,7 @@ mod startup;
 mod state_file;
 mod validation;
 
+pub(crate) use analysis::detect_outdated_libs;
 pub use args::{
     BASELINE_MODE_VALUES, BlindOobArgs, CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES,
     CLI_MAX_RETRY_DELAY_MS, CLI_MAX_SXSS_RETRIES, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS,
@@ -57,6 +58,7 @@ pub use args::{
 };
 pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::log_info;
+pub(crate) use preflight::finish_waf_detection;
 // Shared with `job::normalize_proxy` so REST/MCP refuse the same unroutable
 // proxy values the CLI startup gate does. The CLI wrapper that also rejects
 // empty lives in `validation::validate_proxy_url`.
@@ -120,6 +122,12 @@ pub(crate) struct ScanState {
     /// `completed`. Reported alongside the dedup counts for the same reason:
     /// a partial re-run must never read as full coverage of the input list.
     pub(crate) resumed_skipped: usize,
+    /// Keys ([`output::stream_key`]) of the findings the `--stream-findings`
+    /// printer already rendered. End-of-scan rendering prints the rest:
+    /// findings that never pass through `run_scanning` — the initial AST pass,
+    /// external JS, `--detect-outdated-libs`, OOB callbacks — have no stream
+    /// sender, and used to be printed by neither path.
+    pub(crate) streamed_findings: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 /// Emit a structured error to stderr when format is json/jsonl, otherwise plain eprintln.
@@ -494,6 +502,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         unparsable_lines,
         state_file,
         resumed_skipped,
+        streamed_findings: Arc::new(Mutex::new(std::collections::HashSet::new())),
     };
 
     let oob_session = blind::arm_and_dispatch(args, &host_groups).await;

@@ -171,8 +171,8 @@ async fn unprobed_wordlist_confirms_before_folding() {
     );
     assert_eq!(
         requests.load(Ordering::Relaxed),
-        1 + 1 + SENTINEL_PROBE_COUNT,
-        "one baseline sample, one candidate bucket, then three confirming sentinels"
+        2 + 1 + SENTINEL_PROBE_COUNT,
+        "two baseline samples, one candidate bucket, then three confirming sentinels"
     );
 }
 
@@ -197,7 +197,7 @@ async fn unprobed_dom_candidates_confirm_before_folding() {
     assert_eq!(names, ["any"], "{names:?}");
     assert_eq!(
         requests.load(Ordering::Relaxed),
-        1 + 1 + SENTINEL_PROBE_COUNT,
-        "HTML fetch, one candidate bucket, then three confirming sentinels"
+        1 + 1 + 1 + SENTINEL_PROBE_COUNT,
+        "HTML fetch, stability sample, one candidate bucket, then three confirming sentinels"
     );
 }

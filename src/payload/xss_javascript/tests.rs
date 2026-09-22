@@ -69,3 +69,25 @@ fn small_primitives_carry_no_angle_bracket() {
         );
     }
 }
+
+/// Whitespace ends an unquoted attribute value just like `>` does, so a SMALL
+/// primitive dropped into `<img onerror=PRIMITIVE class=MARKER>` must come
+/// back from the HTML parser as the *whole* handler. `new Function(…)` parsed
+/// as `onerror="new"`, yet the marker class still formed, so the payload
+/// DOM-verified with a PoC that throws a SyntaxError instead of running.
+/// Parsed with the same scraper/html5ever engine the verifier uses.
+#[test]
+fn small_primitives_survive_intact_as_an_unquoted_handler() {
+    let sel = scraper::Selector::parse("img").expect("valid selector");
+    for p in XSS_JAVASCRIPT_PAYLOADS_SMALL {
+        let html = format!("<img src=x onerror={p} class=dalfox>");
+        let frag = crate::utils::html::parse_fragment_bounded(&html);
+        let img = frag.select(&sel).next().expect("img element parses");
+        assert_eq!(
+            img.value().attr("onerror"),
+            Some(*p),
+            "SMALL primitive truncated in an unquoted handler: {html:?}"
+        );
+        assert_eq!(img.value().attr("class"), Some("dalfox"));
+    }
+}

@@ -150,6 +150,8 @@ dalfox scan --input-type raw-http request.txt
 
 이 파일은 표준 raw HTTP 요청(메서드 + 경로 + 헤더 + 빈 줄 + 본문)입니다. Dalfox는 모든 헤더, 쿠키, 본문 파라미터를 보존합니다.
 
+요청 라인에 경로만 있으면(`GET /search HTTP/1.1`) HTTP와 HTTPS 중 무엇으로 보낸 요청인지 알 수 없으므로, Dalfox는 캡처 내용에서 스킴을 정합니다. HTTP/2 `:scheme` 가상 헤더가 가장 우선하고, 그다음 `HTTP/2` / `HTTP/3` 요청 라인이면 HTTPS, 그다음 `Host`가 `:443`으로 끝나면 HTTPS이며, 그 밖에는 `http://`로 스캔합니다. 요청 라인에 절대 URL(`GET https://app/search HTTP/1.1`)이 있으면 그대로 사용합니다.
+
 실시간 프록시 워크플로, 그중에서도 Caido Active Workflows는 전용 [Caido 연동 가이드](../../integrations/caido/)를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.
 
 ## HAR 모드

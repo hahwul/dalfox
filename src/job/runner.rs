@@ -213,67 +213,107 @@ pub(crate) async fn execute_scan(
                             .flatten();
                     let mut session_baseline = None;
 
-                    // Initial AST DOM-XSS pass on the GET response, mirroring
-                    // the CLI flow. Server used to skip this because it
-                    // didn't run preflight, so identical targets reported
-                    // 0 findings via API even when CLI saw multiple
-                    // DOM-XSS sinks (e.g. xss-game level3 with
-                    // location.hash → html). Best-effort fetch — if it
-                    // fails the regular scan path below still runs.
-                    if !args.skip_ast_analysis {
-                        let client = target.build_client_or_default();
-                        // Mirror the CLI preflight: carry the target's
-                        // headers/cookies/User-Agent (so auth/header/UA-gated
-                        // SPAs are analyzed logged-in, matching CLI findings —
-                        // a bare GET dropped them and analyzed the logged-out
-                        // page) and cap the body with `Range: 0-8191` so a large
-                        // response can't buffer unbounded into server memory.
-                        let preflight = crate::utils::build_preflight_request(
-                            &client,
-                            target,
-                            false,
-                            Some(8192),
-                        );
-                        // Count + rate-limit the preflight GET like the CLI
-                        // (record_outbound_request), so it isn't missing from the
-                        // job's requests_sent tally.
-                        crate::record_outbound_request().await;
-                        if let Ok(resp) = preflight.send().await {
-                            // Clone the headers before `read_body` consumes the
-                            // response: the posture needs both them and the
-                            // document (a page can declare its CSP with
-                            // `<meta http-equiv>`), so Trusted Types awareness
-                            // and the confidence grading's CSP signal match what
-                            // the CLI derives from preflight.
-                            let resp_headers = resp.headers().clone();
-                            // Captured before `read_body` consumes the response.
-                            // Under `follow_redirects` this is where the chain
-                            // actually ended, which is the only thing a session
-                            // baseline can meaningfully compare against.
-                            let resp_status = resp.status().as_u16();
-                            let resp_final_url = resp.url().clone();
-                            if let Ok(body) = crate::utils::http::read_body(resp).await {
-                                // Authenticated-state fingerprint, derived from
-                                // this same response so monitoring costs the
-                                // job no extra request (mirrors the CLI).
-                                // `--session-check-url` is the exception: its
-                                // baseline has to come from that endpoint, so
-                                // it falls through to the capture below.
-                                if monitor_session && args.session_check_url.is_none() {
-                                    session_baseline =
-                                        Some(crate::cmd::scan::session::baseline_from_preflight(
-                                            &target.url,
-                                            &resp_final_url,
-                                            resp_status,
-                                            &resp_headers,
-                                            &body,
-                                            session_check_re.as_ref(),
-                                        ));
-                                }
-                                let posture =
-                                    crate::scanning::ast_integration::PageSecurityPosture::from_response(
+                    // Preflight GET, mirroring the CLI flow. The landing page
+                    // feeds everything the CLI's preflight stores on the
+                    // target before any payload is built: WAF fingerprints,
+                    // CSP (bypass payloads + Trusted Types posture for the
+                    // scan-phase AST), stack fingerprints (tech-specific
+                    // payloads), outdated-library findings, the session
+                    // baseline, and the initial AST DOM-XSS pass. The runner
+                    // used to fetch it only for the AST pass and derive none
+                    // of the rest, so `force_waf`, `waf_bypass`,
+                    // `waf_min_confidence` and `detect_outdated_libs` were
+                    // accepted over REST / MCP and silently did nothing, and
+                    // a job scanned a WAF- or CSP-fronted page with fewer
+                    // payloads than the CLI would for the same target.
+                    let client = target.build_client_or_default();
+                    let mut waf_seed = crate::waf::WafDetectionResult::default();
+                    // Mirror the CLI preflight: carry the target's
+                    // headers/cookies/User-Agent (so auth/header/UA-gated
+                    // SPAs are analyzed logged-in, matching CLI findings —
+                    // a bare GET dropped them and analyzed the logged-out
+                    // page) and cap the body with `Range: 0-8191` so a large
+                    // response can't buffer unbounded into server memory.
+                    let preflight =
+                        crate::utils::build_preflight_request(&client, target, false, Some(8192));
+                    // Count + rate-limit the preflight GET like the CLI
+                    // (record_outbound_request), so it isn't missing from the
+                    // job's requests_sent tally.
+                    crate::record_outbound_request().await;
+                    if let Ok(resp) = preflight.send().await {
+                        // Clone the headers before `read_body` consumes the
+                        // response: the posture needs both them and the
+                        // document (a page can declare its CSP with
+                        // `<meta http-equiv>`), so Trusted Types awareness
+                        // and the confidence grading's CSP signal match what
+                        // the CLI derives from preflight.
+                        let resp_headers = resp.headers().clone();
+                        // Captured before `read_body` consumes the response.
+                        // Under `follow_redirects` this is where the chain
+                        // actually ended, which is the only thing a session
+                        // baseline can meaningfully compare against.
+                        let resp_status = resp.status().as_u16();
+                        let resp_final_url = resp.url().clone();
+                        if let Ok(body) = crate::utils::http::read_body(resp).await {
+                            // Authenticated-state fingerprint, derived from
+                            // this same response so monitoring costs the
+                            // job no extra request (mirrors the CLI).
+                            // `--session-check-url` is the exception: its
+                            // baseline has to come from that endpoint, so
+                            // it falls through to the capture below.
+                            if monitor_session && args.session_check_url.is_none() {
+                                session_baseline =
+                                    Some(crate::cmd::scan::session::baseline_from_preflight(
+                                        &target.url,
+                                        &resp_final_url,
+                                        resp_status,
                                         &resp_headers,
                                         &body,
+                                        session_check_re.as_ref(),
+                                    ));
+                            }
+
+                            waf_seed = crate::waf::fingerprint_from_response(
+                                &resp_headers,
+                                Some(&body),
+                                resp_status,
+                            );
+                            let tech = crate::scanning::tech_detect::detect_technologies(
+                                &resp_headers,
+                                Some(&body),
+                            );
+                            if !tech.is_empty() {
+                                target.tech_info = Some(tech);
+                            }
+                            if let Some((name, policy)) =
+                                crate::scanning::csp_header_from_response(&resp_headers, &body)
+                            {
+                                target.csp_analysis = Some(
+                                    crate::payload::xss_csp_bypass::analyze_csp_from(
+                                        &name, &policy,
+                                    ),
+                                );
+                            }
+
+                            crate::cmd::scan::detect_outdated_libs(
+                                target,
+                                args.as_ref(),
+                                Some(&body),
+                                &results,
+                                &findings_count,
+                            )
+                            .await;
+
+                            // Initial AST DOM-XSS pass on the GET response.
+                            // Server used to skip this because it didn't run
+                            // preflight, so identical targets reported 0
+                            // findings via API even when CLI saw multiple
+                            // DOM-XSS sinks (e.g. xss-game level3 with
+                            // location.hash → html).
+                            if !args.skip_ast_analysis {
+                                let posture =
+                                    crate::scanning::ast_integration::PageSecurityPosture::from_target(
+                                        target,
                                     );
                                 let ast_batch =
                                     crate::scanning::ast_integration::run_initial_ast_dom_analysis(
@@ -310,10 +350,26 @@ pub(crate) async fn execute_scan(
                         }
                     }
 
-                    // The AST pass above is skipped entirely under
-                    // `skip_ast_analysis`, and `--session-check-url` needs its
-                    // baseline from that endpoint rather than from the target.
-                    // Either way there is no response to reuse, so pay for one
+                    // Probe / `force_waf` / `waf_min_confidence`, then the
+                    // same target state the CLI preflight sets from them.
+                    let waf =
+                        crate::cmd::scan::finish_waf_detection(waf_seed, target, &client, &args)
+                            .await;
+                    if !waf.is_empty() {
+                        if args.waf_bypass != "off" {
+                            let strategy =
+                                crate::waf::bypass::merge_strategies(&waf.waf_types());
+                            // Pace the injection paths for rate-limiting WAFs.
+                            target.waf_extra_delay_ms = strategy.extra_delay_hint_ms;
+                            target.mutation_stats =
+                                Some(Arc::new(crate::waf::bypass::MutationStats::default()));
+                        }
+                        target.waf_info = Some(waf);
+                    }
+
+                    // `--session-check-url` needs its baseline from that
+                    // endpoint rather than from the target, and a failed
+                    // preflight left nothing to reuse. Either way pay for one
                     // request — but only for a job that actually has a session.
                     if monitor_session && session_baseline.is_none() {
                         session_baseline =

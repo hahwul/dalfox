@@ -96,11 +96,12 @@ async fn duplicate_words_do_not_hide_a_later_real_parameter() {
     let params = params.lock().await;
     let names: Vec<_> = params.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["selected", "hidden"]);
-    // One sentinel pre-probe, one clean baseline sample, and one bucket
-    // carrying both unique candidates.
+    // One sentinel pre-probe, two clean baseline samples (the second decides
+    // whether the page is stable enough for metric-only discovery), and one
+    // bucket carrying both unique candidates.
     // Eligibility is measured on the loaded wordlist, not on what survives
     // dedup, so shrinking the list cannot silently drop that check.
-    assert_eq!(requests.load(Ordering::Relaxed), 3);
+    assert_eq!(requests.load(Ordering::Relaxed), 4);
 }
 
 #[tokio::test]
@@ -134,8 +135,8 @@ async fn dictionary_bucketing_keeps_mined_params_without_detached_requests() {
     );
     assert_eq!(
         count,
-        1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE),
-        "one sentinel + one baseline + eight candidate buckets"
+        1 + 2 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE),
+        "one sentinel + two baseline samples + eight candidate buckets"
     );
     let params = params.lock().await;
     assert!(
@@ -177,8 +178,8 @@ async fn dom_bucketing_keeps_the_full_reflected_candidate_set() {
     server.abort();
     assert_eq!(
         requests.load(Ordering::Relaxed),
-        1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE),
-        "HTML fetch + sentinel + eight candidate buckets"
+        1 + 1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE),
+        "HTML fetch + sentinel + stability sample + eight candidate buckets"
     );
     let params = params.lock().await;
     // The DOM candidate set comes from a HashSet, so only the shape is
@@ -255,7 +256,8 @@ async fn existing_body_slot_does_not_suppress_a_query_candidate() {
             .iter()
             .any(|p| p.name == "hidden" && p.location == Location::Query)
     );
-    assert_eq!(requests.load(Ordering::Relaxed), 2);
+    // Two baseline samples and the one-name bucket.
+    assert_eq!(requests.load(Ordering::Relaxed), 3);
 }
 
 #[tokio::test]
@@ -283,11 +285,12 @@ async fn mining_pipeline_preserves_dictionary_findings_through_dom_bucketing() {
     // pass keeps all 500 reflected fields after its negative sentinel.
     assert_eq!(names.len(), 502, "{names:?}");
     assert!(names[2..].iter().all(|n| n.starts_with("candidate_")));
-    // Dictionary: one sentinel + one baseline + one bucket. DOM: one HTML
-    // fetch + one sentinel + eight candidate buckets.
+    // Dictionary: one sentinel + two baseline samples + one bucket. DOM: one
+    // HTML fetch + one sentinel + one stability sample + eight candidate
+    // buckets.
     assert_eq!(
         requests.load(Ordering::Relaxed),
-        1 + 1 + 1 + 1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE)
+        1 + 2 + 1 + 1 + 1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE)
     );
 }
 
@@ -313,9 +316,11 @@ async fn nonreflecting_prefix_does_not_skip_a_late_hidden_parameter() {
     let params = params.lock().await;
     assert_eq!(params.len(), 1);
     assert_eq!(params[0].name, "hidden");
-    // One failed sentinel, one clean baseline, one mixed bucket, one control,
-    // and four child buckets each paired with a same-width control.
-    assert_eq!(requests.load(Ordering::Relaxed), 12);
+    // One failed sentinel, two clean baseline samples, one mixed bucket, then
+    // the 30 non-reflecting names re-probed together without `hidden` (whose
+    // echo makes any control comparison of the mixed bucket meaningless) and
+    // that child's same-width control.
+    assert_eq!(requests.load(Ordering::Relaxed), 6);
 }
 
 #[tokio::test]
@@ -367,7 +372,7 @@ async fn concurrent_mining_bounds_overshoot_to_active_workers() {
     // overshoot because bucket results are joined before child buckets queue.
     assert_eq!(
         dictionary_requests,
-        1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE)
+        1 + 2 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE)
     );
     let params = Arc::new(Mutex::new(Vec::new()));
     probe_response_id_params(&target, &args, params, semaphore, None).await;
@@ -375,6 +380,6 @@ async fn concurrent_mining_bounds_overshoot_to_active_workers() {
     let dom_requests = requests.load(Ordering::Relaxed);
     assert_eq!(
         dom_requests,
-        1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE)
+        1 + 1 + 1 + 500usize.div_ceil(crate::cmd::scan::DEFAULT_MINING_BUCKET_SIZE)
     );
 }

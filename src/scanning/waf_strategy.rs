@@ -33,6 +33,30 @@ pub(crate) fn compute_waf_strategy(
         }
     })
 }
+/// The CSP a response declares, as `(header name, policy)`: an enforcing
+/// `Content-Security-Policy` header, else a report-only header, else a
+/// `<meta http-equiv>` policy in the document — the precedence the CLI
+/// preflight applies. Used by the server / MCP job runner, which fetches the
+/// page itself, so the same page yields the same policy on every interface.
+pub(crate) fn csp_header_from_response(
+    headers: &reqwest::header::HeaderMap,
+    body: &str,
+) -> Option<(String, String)> {
+    let header = |name: &str, canonical: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| (canonical.to_string(), v.to_string()))
+    };
+    header("content-security-policy", "Content-Security-Policy")
+        .or_else(|| {
+            header(
+                "content-security-policy-report-only",
+                "Content-Security-Policy-Report-Only",
+            )
+        })
+        .or_else(|| extract_meta_csp(body))
+}
 /// Find a CSP declared with `<meta http-equiv>`, returning the equivalent
 /// header name and the policy text. Pages served without a CSP header commonly
 /// carry one this way, and the CLI preflight has always honoured it — this is

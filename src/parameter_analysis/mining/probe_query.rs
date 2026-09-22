@@ -57,21 +57,28 @@ struct QueryTolerance {
 pub(super) struct QueryBaseline {
     fingerprint: QueryFingerprint,
     tolerance: QueryTolerance,
+    /// Two identical clean requests produced the same fingerprint. Only then
+    /// can a response difference be attributed to a candidate name, so
+    /// metric-only discovery (a name that changes the page without echoing
+    /// its canary) runs on stable pages only. A page with a random widget, an
+    /// A/B slot or a render-time footer differs on every request: with exact
+    /// comparison every bucket read as positive, bisected down to single
+    /// names, and each of them was accepted — most of the wordlist as false
+    /// parameters, at roughly three requests per name.
+    stable: bool,
 }
 
 impl QueryBaseline {
     /// Seed a baseline from a response another mining stage already had to
     /// fetch (the DOM miner's HTML request). The comparison starts exact and
-    /// still uses a same-width control before accepting metric-only findings.
+    /// still uses a same-width control before accepting metric-only findings;
+    /// [`calibrate_baseline`] takes the second sample that decides `stable`.
     pub(super) fn from_response(status: u16, body: &str, location: Option<&str>) -> Self {
         Self {
             fingerprint: fingerprint(status, body, location),
             tolerance: QueryTolerance::zero(),
+            stable: false,
         }
-    }
-
-    fn differs(&self, other: QueryFingerprint) -> bool {
-        self.fingerprint.differs(other, self.tolerance)
     }
 }
 
@@ -134,6 +141,23 @@ impl BucketProbe {
             children: Vec::new(),
         }
     }
+
+    /// The bucket's request failed but a clean request did not, so the failure
+    /// belongs to something in the bucket — one name the application chokes
+    /// on (`int(request.GET['page'])` → 500), or the batch as a whole. Retry
+    /// the names in smaller groups instead of discarding every one of them;
+    /// a single name that still fails is dropped, exactly as the old
+    /// one-request-per-name miner lost only that name.
+    fn retry_split(names: Vec<String>) -> Self {
+        Self {
+            resolved_names: 0,
+            response_received: false,
+            reflected_names: 0,
+            non_reflected_names: 0,
+            discovered: Vec::new(),
+            children: split_bucket(names, MINING_BISECT_WAYS),
+        }
+    }
 }
 
 pub(super) struct QueryMiningContext<'a> {
@@ -191,10 +215,11 @@ pub(super) async fn probe_query_candidates(
     }
 
     let candidates = unique_query_candidates(raw_candidates, &ctx.reflection_params).await;
+    // The spinner is shared by every analysis stage after this one, so it is
+    // only cleared on the collapse early-return above (as before bucketing).
+    // Clearing it here and at the end hid the progress of DOM mining and
+    // Stage 3 for the rest of the analysis.
     if candidates.is_empty() {
-        if let Some(ref pb) = ctx.pb {
-            pb.finish_and_clear();
-        }
         return;
     }
 
@@ -206,12 +231,15 @@ pub(super) async fn probe_query_candidates(
     let target = Arc::new(ctx.target.clone());
     let method = target.parse_method();
     let delay = target.delay;
-    let baseline = match baseline_seed {
-        Some(seed) => Some(seed),
-        None => {
-            calibrate_baseline(&target, &ctx.client, &ctx.semaphore, method.clone(), delay).await
-        }
-    };
+    let baseline = calibrate_baseline(
+        &target,
+        &ctx.client,
+        &ctx.semaphore,
+        method.clone(),
+        delay,
+        baseline_seed,
+    )
+    .await;
 
     let bucket_size = initial_bucket_size(&target, &candidates);
     let mut pending: VecDeque<Vec<String>> = initial_buckets(&target, candidates, bucket_size);
@@ -314,24 +342,59 @@ pub(super) async fn probe_query_candidates(
             );
         }
     }
-
-    if let Some(ref pb) = ctx.pb {
-        pb.finish_and_clear();
-    }
 }
 
+/// Fingerprint the untouched request, twice. The first sample is the
+/// baseline (or `seed`, a response the caller already fetched); the second
+/// decides [`QueryBaseline::stable`]. A failed first sample means clean
+/// requests are failing too, so nothing can be attributed to candidates.
 async fn calibrate_baseline(
     target: &Arc<Target>,
     client: &Client,
     semaphore: &Arc<Semaphore>,
     method: reqwest::Method,
     delay: u64,
+    seed: Option<QueryBaseline>,
 ) -> Option<QueryBaseline> {
-    let response =
-        send_query_request(target, client, semaphore, method, delay, target.url.clone()).await?;
+    let first = match seed {
+        Some(seed) => seed.fingerprint,
+        None => {
+            send_query_request(
+                target,
+                client,
+                semaphore,
+                method.clone(),
+                delay,
+                target.url.clone(),
+            )
+            .await?
+            .fingerprint
+        }
+    };
+    let tolerance = QueryTolerance::zero();
+    // Only a *successful* second sample that differs proves the page is
+    // unstable. A failed second sample (transient timeout / 5xx) is not
+    // evidence of instability, so it must not flip `stable` off — doing so
+    // downgraded the whole wordlist to status-only comparison and lost every
+    // body-length-only parameter for the run over one flaky request. Absence
+    // of contrary evidence → assume stable (the full-fingerprint comparison).
+    let stable = match send_query_request(
+        target,
+        client,
+        semaphore,
+        method,
+        delay,
+        target.url.clone(),
+    )
+    .await
+    {
+        Some(second) => !first.differs(second.fingerprint, tolerance),
+        None => true,
+    };
     Some(QueryBaseline {
-        fingerprint: response.fingerprint,
-        tolerance: QueryTolerance::zero(),
+        fingerprint: first,
+        tolerance,
+        stable,
     })
 }
 
@@ -356,10 +419,21 @@ async fn probe_bucket(
         .map(|(name, canary)| (name.clone(), canary.marker.clone()))
         .collect();
     let url = append_query_pairs(target, &pairs);
-    let Some(response) =
-        send_query_request(target, client, semaphore, method.clone(), delay, url).await
+    let Some(response) = send_query_request(
+        target,
+        client,
+        semaphore,
+        method.clone(),
+        delay,
+        url.clone(),
+    )
+    .await
     else {
-        return BucketProbe::failed(names.len());
+        return if names.len() > 1 && baseline.is_some() {
+            BucketProbe::retry_split(names)
+        } else {
+            BucketProbe::failed(names.len())
+        };
     };
 
     let expected_ids: HashSet<String> = canaries.iter().map(|canary| canary.id.clone()).collect();
@@ -369,102 +443,146 @@ async fn probe_bucket(
         .as_deref()
         .map(|location| reflected_ids(location, &expected_ids))
         .unwrap_or_default();
-    let mut reflected_indices = Vec::new();
+    // A redirect echoes one parameter's value. Several of this bucket's
+    // canaries in one `Location` mean the redirect carried the query along
+    // (`lang` redirecting to the same URL minus `lang`, a login wall with
+    // `return_to=<full URL>`), which one name triggered and the others merely
+    // rode — crediting all of them marked every name in the bucket as a
+    // redirect sink. Those names are confirmed in smaller groups instead.
+    let location_attributable = location_ids.len() == 1;
+    let mut reflected_count = 0usize;
     let mut discovered = Vec::new();
-    for (index, canary) in canaries.iter().enumerate() {
-        if !body_ids.contains(&canary.id) && !location_ids.contains(&canary.id) {
-            continue;
-        }
-        reflected_indices.push(index);
-        let param = if location_ids.contains(&canary.id) {
+    let mut ambiguous = Vec::new();
+    let mut remaining = Vec::new();
+    for (name, canary) in names.into_iter().zip(canaries.iter()) {
+        let in_location = location_ids.contains(&canary.id);
+        let param = if in_location && location_attributable {
             Param {
                 injection_context: Some(InjectionContext::AttributeUrl(None)),
                 ..Param::new(
-                    names[index].clone(),
+                    name,
                     crate::scanning::markers::bracketed_marker().to_string(),
                     Location::Query,
                 )
             }
-        } else {
+        } else if body_ids.contains(&canary.id) {
             let analysis = ReflectionAnalysis::of_with_marker(&response.body, &canary.id);
             Param::new(
-                names[index].clone(),
+                name,
                 crate::scanning::markers::bracketed_marker().to_string(),
                 Location::Query,
             )
             .with_analysis(&analysis)
+        } else if in_location {
+            ambiguous.push(name);
+            continue;
+        } else {
+            remaining.push(name);
+            continue;
         };
+        reflected_count += 1;
         discovered.push(param);
     }
 
-    let mut occupied_control_names: HashSet<String> = names.iter().cloned().collect();
-    let remaining: Vec<String> = names
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, name)| (!reflected_indices.contains(&index)).then_some(name))
-        .collect();
+    let mut children = Vec::new();
+    let mut non_reflected_names = 0usize;
+    if !ambiguous.is_empty() {
+        children.extend(split_bucket(ambiguous, MINING_BISECT_WAYS));
+    }
 
-    let mut metric_positive = false;
-    // If calibration failed, a control still gives us a useful candidate-vs-
-    // control comparison. It is better for coverage than silently disabling
-    // metric-only discovery for the whole wordlist.
-    let candidate_differs = baseline.is_none_or(|base| base.differs(response.fingerprint));
-    // A reflection can change the response length even when it is not enough
-    // to cross the baseline tolerance. Ask a same-width control whenever a
-    // bucket has both reflected and unresolved names, so a hidden metric-only
-    // name in the same bucket is not silently skipped.
-    if !remaining.is_empty() && (candidate_differs || !reflected_indices.is_empty()) {
-        // The control carries the SAME width as the candidate request. When
-        // a few names reflected, using only `remaining` here would make a
-        // response that reacts to parameter count look positive at every
-        // bucket, exactly the false-positive class the control is meant to
-        // remove. Match name lengths as well so echo pages do not differ just
-        // because the random control names are longer.
-        let control_canaries: Vec<MiningCanary> =
-            name_lengths.iter().map(|_| fresh_canary()).collect();
-        let control_pairs: Vec<(String, String)> = name_lengths
-            .iter()
-            .zip(control_canaries.iter())
-            .enumerate()
-            .map(|(index, (name_len, canary))| {
-                let name = control_name(*name_len, index, &occupied_control_names);
-                occupied_control_names.insert(name.clone());
-                (name, canary.marker.clone())
-            })
-            .collect();
-        let control_url = append_query_pairs(target, &control_pairs);
-        if let Some(control) =
-            send_query_request(target, client, semaphore, method, delay, control_url).await
-        {
-            let tolerance = baseline
-                .map(|base| base.tolerance)
-                .unwrap_or_else(QueryTolerance::zero);
-            metric_positive = response.fingerprint.differs(control.fingerprint, tolerance);
+    if remaining.is_empty() {
+        // Nothing left to decide.
+    } else if reflected_count > 0 || !children.is_empty() {
+        // Something in this bucket echoed a canary, so the response differs
+        // from any control for that reason alone and the comparison says
+        // nothing about the rest. Re-probe the rest together, without the
+        // echoing names. Accepting them here instead reported a name that did
+        // nothing whenever it shared a bucket with one that reflected.
+        children.push(remaining);
+    } else {
+        // No canary reflected in this bucket; decide the rest by response
+        // shape. `stable` gates whether a body-length change is trusted — on
+        // an unstable page (a random widget varies the body between identical
+        // requests, never the status) only a status change counts. With no
+        // baseline at all (the first calibration request failed transiently)
+        // assume stable and still run a same-width control, rather than
+        // silently disabling metric-only discovery for the whole run, which is
+        // what dropping the control fallback here used to do.
+        let stable = baseline.is_none_or(|b| b.stable);
+        let tolerance = baseline.map_or_else(QueryTolerance::zero, |b| b.tolerance);
+        let same = |a: QueryFingerprint, b: QueryFingerprint| {
+            if stable {
+                !a.differs(b, tolerance)
+            } else {
+                a.status == b.status
+            }
+        };
+        if baseline.is_some_and(|base| same(base.fingerprint, response.fingerprint)) {
+            // The candidate response matches the clean page: nothing moved it.
+            non_reflected_names = remaining.len();
+        } else {
+            // The control carries the SAME width as the candidate request,
+            // name lengths included, so a response that reacts to parameter
+            // count or query length does not look positive at every bucket.
+            let mut occupied_control_names: HashSet<String> = remaining.iter().cloned().collect();
+            let control_pairs: Vec<(String, String)> = name_lengths
+                .iter()
+                .enumerate()
+                .map(|(index, name_len)| {
+                    let name = control_name(*name_len, index, &occupied_control_names);
+                    occupied_control_names.insert(name.clone());
+                    (name, fresh_canary().marker)
+                })
+                .collect();
+            let control_url = append_query_pairs(target, &control_pairs);
+            let control = send_query_request(
+                target,
+                client,
+                semaphore,
+                method.clone(),
+                delay,
+                control_url,
+            )
+            .await
+            .map(|c| c.fingerprint);
+            let metric_positive = control.is_some_and(|c| !same(response.fingerprint, c));
+            // Candidate and control refused alike (both 400 / 414 / an IIS
+            // 404.15 for a query past `maxQueryString`, a WAF 403 on size):
+            // the batch was rejected, not the names judged. Split, so a
+            // server with a 2 KB query limit still gets every name tested.
+            // Needs a baseline status to know the refusal is not the clean
+            // page's own status.
+            let rejected_alike = control.zip(baseline).is_some_and(|(c, base)| {
+                c.status == response.fingerprint.status
+                    && response.fingerprint.status != base.fingerprint.status
+            });
+            if metric_positive && remaining.len() == 1 {
+                // A single name whose response differs from both the clean
+                // page and a same-width control. Send it once more: a real
+                // parameter produces the same response again.
+                let confirmed = send_query_request(target, client, semaphore, method, delay, url)
+                    .await
+                    .is_some_and(|r| same(r.fingerprint, response.fingerprint));
+                if confirmed && let Some(name) = remaining.pop() {
+                    discovered.push(Param::new(
+                        name,
+                        crate::scanning::markers::bracketed_marker().to_string(),
+                        Location::Query,
+                    ));
+                }
+                non_reflected_names = 1;
+            } else if (metric_positive || rejected_alike) && remaining.len() > 1 {
+                children.extend(split_bucket(remaining, MINING_BISECT_WAYS));
+            } else {
+                non_reflected_names = remaining.len();
+            }
         }
     }
 
-    let remaining_len = remaining.len();
-    let (children, non_reflected_names) = if metric_positive {
-        if remaining_len <= 1 {
-            if let Some(name) = remaining.into_iter().next() {
-                discovered.push(Param::new(
-                    name,
-                    crate::scanning::markers::bracketed_marker().to_string(),
-                    Location::Query,
-                ));
-            }
-            (Vec::new(), remaining_len)
-        } else {
-            (split_bucket(remaining, MINING_BISECT_WAYS), 0)
-        }
-    } else {
-        (Vec::new(), remaining_len)
-    };
-
     BucketProbe {
-        resolved_names: reflected_indices.len() + non_reflected_names,
+        resolved_names: reflected_count + non_reflected_names,
         response_received: true,
-        reflected_names: reflected_indices.len(),
+        reflected_names: reflected_count,
         non_reflected_names,
         discovered,
         children,

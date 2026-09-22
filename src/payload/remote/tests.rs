@@ -218,3 +218,42 @@ fn test_sanitize_lines_keeps_inline_hash_and_slashes() {
         vec!["a#b", "http://example.com/x", "<a href=//evil>", "val;ue"]
     );
 }
+
+/// Only a successful response is a list. A provider that moved answers with a
+/// 404 page whose lines were ingested as payloads / wordlist names.
+#[tokio::test]
+async fn fetch_multiple_text_lists_ignores_non_success_responses() {
+    use axum::{Router, http::StatusCode, routing::get};
+
+    let app = Router::new()
+        .route("/ok", get(|| async { "alpha\nbeta\n" }))
+        .route(
+            "/gone",
+            get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    "<html>\n<h1>404 Not Found</h1>\n</html>\n",
+                )
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let client = build_remote_client(&RemoteFetchOptions::default()).expect("client");
+    let text = fetch_multiple_text_lists(
+        &client,
+        &[format!("http://{addr}/ok"), format!("http://{addr}/gone")],
+    )
+    .await;
+    server.abort();
+
+    let lines = sanitize_lines(&text);
+    assert!(lines.contains(&"alpha".to_string()));
+    assert!(
+        !lines.iter().any(|l| l.contains("404")),
+        "an error page must not become list entries: {lines:?}"
+    );
+}

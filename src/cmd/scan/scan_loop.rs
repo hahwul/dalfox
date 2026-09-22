@@ -157,20 +157,19 @@ pub(crate) async fn run_scan_loop(
         let printer_nc = nc;
         let include_request = args.include_request;
         let include_response = args.include_response;
+        let streamed = state.streamed_findings.clone();
         let handle = tokio::spawn(async move {
-            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             while let Some(result) = rx.recv().await {
                 // Deduplicate on (type, url, param, payload) so the same
                 // finding emitted along two code paths (e.g. JS-context V
-                // upgrade and DOM verification) only prints once.
-                let key = format!(
-                    "{}|{}|{}|{}",
-                    result.result_type.short(),
-                    result.data,
-                    result.param,
-                    result.payload,
-                );
-                if !seen.insert(key) {
+                // upgrade and DOM verification) only prints once. The set is
+                // shared with end-of-scan rendering, which prints whatever
+                // never came through here.
+                if !streamed
+                    .lock()
+                    .await
+                    .insert(super::output::stream_key(&result))
+                {
                     continue;
                 }
                 // Emit the same POC + tree block the end-of-scan path
@@ -615,6 +614,25 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                             target.url, args_clone.scan_timeout,
                         );
                     }
+                    // A per-parameter worker that panicked is caught inside
+                    // `run_scanning`, so this task returns normally and the
+                    // target read `clean` (exit 0) and was recorded
+                    // `completed` in `--state-file` — never retried — with
+                    // that parameter's payloads never sent. Record it the way
+                    // a panicked target task is recorded below; REST / MCP
+                    // already settle such a job as `error`.
+                    let worker_panicked = scan_report.worker_panics > 0;
+                    if worker_panicked {
+                        eprintln!(
+                            "[scan] {} worker task(s) panicked while scanning {}; target marked failed",
+                            scan_report.worker_panics,
+                            crate::utils::log::sanitize_log_message(target.url.as_str()),
+                        );
+                        skipped_targets_target.lock().await.insert(
+                            target.url.to_string(),
+                            crate::cmd::error_codes::INTERNAL_ERROR,
+                        );
+                    }
                     if let Some((tx, done_rx)) = __scan_spinner {
                         let _ = tx.send(());
                         let _ = done_rx.await;
@@ -654,7 +672,9 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     // identical command would skip this target forever with
                     // most of its parameters never tested.
                     if let Some(sf) = &state_file_target {
-                        let outcome = if timed_out
+                        let outcome = if worker_panicked {
+                            super::state_file::TargetOutcome::Error
+                        } else if timed_out
                             || cancel_flag_inner.load(Ordering::Relaxed)
                             || session_died
                             || scan_report.limit_stopped

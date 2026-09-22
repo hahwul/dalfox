@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::time::{Duration, sleep};
 
+mod bucket_attribution;
 mod collapse_recall;
 mod request_efficiency;
 

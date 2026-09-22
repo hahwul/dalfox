@@ -476,6 +476,18 @@ async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> String {
         let client = client.clone();
         set.spawn(async move {
             match client.get(&url).send().await {
+                // A moved or failing provider answers with an HTML 404 / 503 or
+                // a login page, and every non-comment line of that page used
+                // to be ingested as a payload or wordlist entry — cached for
+                // the provider set, with the fetch still reported as a success.
+                Ok(resp) if !resp.status().is_success() => {
+                    eprintln!(
+                        "[remote] {} returned HTTP {}; ignoring it",
+                        url,
+                        resp.status()
+                    );
+                    None
+                }
                 Ok(resp) => match crate::utils::http::read_body(resp).await {
                     Ok(text) => Some(text),
                     Err(e) => {

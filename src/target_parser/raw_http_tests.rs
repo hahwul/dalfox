@@ -323,3 +323,67 @@ fn raw_http_parse_does_not_carry_a_bom_into_the_method() {
         "host must still come from the Host header"
     );
 }
+
+/// An origin-form request line carries no scheme. A proxy capture of an
+/// HTTPS page records `:scheme: https` (HTTP/2 copy) or an `HTTP/2` request
+/// line with a bare `Host: app`; both used to be scanned over `http://`.
+#[test]
+fn raw_http_origin_form_takes_the_scheme_from_http2_hints() {
+    let cases = [
+        // `:scheme` is the request's own statement.
+        (
+            "GET /x HTTP/1.1\r\n:scheme: https\r\nHost: app.test\r\n\r\n",
+            "https://app.test/x",
+        ),
+        (
+            "GET /x HTTP/2\r\n:scheme: http\r\nHost: app.test\r\n\r\n",
+            "http://app.test/x",
+        ),
+        // HTTP/2 and HTTP/3 are TLS in every browser.
+        (
+            "GET /x HTTP/2\r\nHost: app.test\r\n\r\n",
+            "https://app.test/x",
+        ),
+        (
+            "GET /x HTTP/3\r\nHost: app.test\r\n\r\n",
+            "https://app.test/x",
+        ),
+        // `:authority` stands in for a missing Host.
+        (
+            "GET /x HTTP/2\r\n:authority: app.test\r\n:scheme: https\r\n\r\n",
+            "https://app.test/x",
+        ),
+        // A copy-as-HTTP/2 capture may carry `:authority` with no version
+        // token and no `:scheme` — the pseudo-header itself is the h2 (TLS)
+        // signal, so it is HTTPS, not http.
+        (
+            "GET /x\r\n:authority: app.test\r\n\r\n",
+            "https://app.test/x",
+        ),
+        // An explicit `:scheme: http` still wins over the h2 signal (h2c).
+        (
+            "GET /x\r\n:authority: app.test\r\n:scheme: http\r\n\r\n",
+            "http://app.test/x",
+        ),
+        // Unchanged: HTTP/1.1 with no hint stays http, `:443` stays https.
+        (
+            "GET /x HTTP/1.1\r\nHost: app.test\r\n\r\n",
+            "http://app.test/x",
+        ),
+        (
+            "GET /x HTTP/1.1\r\nHost: app.test:443\r\n\r\n",
+            "https://app.test/x",
+        ),
+    ];
+    for (raw, want) in cases {
+        let t = parse_raw_http_request(raw).expect("should parse");
+        assert_eq!(t.url.as_str(), want, "{raw:?}");
+        assert!(
+            !t.headers
+                .iter()
+                .any(|(k, _)| k.is_empty() || k.starts_with(':')),
+            "pseudo-headers are never forwarded: {:?}",
+            t.headers
+        );
+    }
+}

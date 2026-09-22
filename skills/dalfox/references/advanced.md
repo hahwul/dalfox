@@ -30,8 +30,12 @@ Dictionary and DOM query mining use bounded canary buckets (normally 64 names,
 with an approximately 8 KiB URL budget) rather than one request per candidate.
 Reflected canaries identify names directly; a response change without a canary
 reflection is checked with a same-width control and four-way splitting to find
-metric-only parameters. Duplicate/already-known query slots are removed before
-bucket construction. A negative arbitrary-name sentinel keeps the individual
+metric-only parameters. Metric-only hits need a stable page (two identical
+clean requests match; otherwise only a status change counts) and a repeat of
+the single name; names sharing a bucket with a reflected one are re-probed
+without it; a failed or size-refused bucket is split and retried, not dropped;
+several canaries in one redirect `Location` are confirmed in smaller groups.
+Duplicate/already-known query slots are removed before bucket construction. A negative arbitrary-name sentinel keeps the individual
 confirmed names even when the EWMA reflection ratio is high, so a larger
 wordlist is not cut off merely because its first bucket reflects.
 

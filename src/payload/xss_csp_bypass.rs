@@ -99,6 +99,21 @@ impl CspAnalysis {
     }
 }
 
+/// Analyze a policy read from the response header (or `<meta http-equiv>`)
+/// named `header_name`. A `Content-Security-Policy-Report-Only` policy enforces
+/// nothing, so it is marked [`CspAnalysis::report_only`] and its
+/// `require-trusted-types-for` is dropped — letting it drive Trusted Types
+/// suppression in the AST analyzer would be a false negative. The bypass-payload
+/// fields stay as parsed. Every surface that reads a policy goes through this.
+pub(crate) fn analyze_csp_from(header_name: &str, csp_value: &str) -> CspAnalysis {
+    let mut analysis = analyze_csp(csp_value);
+    if !header_name.eq_ignore_ascii_case("content-security-policy") {
+        analysis.report_only = true;
+        analysis.require_trusted_types_for = false;
+    }
+    analysis
+}
+
 /// Parse a CSP header value into an analysis struct.
 pub(crate) fn analyze_csp(csp_value: &str) -> CspAnalysis {
     let mut analysis = CspAnalysis::default();
