@@ -226,6 +226,9 @@ pub(super) struct ScanStatusOut {
     pub target: String,
     /// Lifecycle state. `done`, `error` and `cancelled` are terminal.
     pub status: JobStatus,
+    /// Whether a terminal job's worker has finished draining and the record is
+    /// safe to delete. Absent on the immediate queued acknowledgement.
+    pub settled: Option<bool>,
     /// Findings for this page. `null` until the scan reaches a terminal state.
     pub results: Option<Vec<SanitizedResult>>,
     /// Page descriptor for `results`. Absent on the queued acknowledgement.
@@ -272,6 +275,9 @@ pub(super) struct ScanSummaryOut {
     pub target: String,
     /// Lifecycle state.
     pub status: JobStatus,
+    /// Whether the job is terminal and its worker has finished draining. A
+    /// cancelled row can be terminal while this is still `false`.
+    pub settled: bool,
     /// Findings recorded so far; `0` until the scan completes.
     pub result_count: usize,
     /// When the job was accepted (epoch milliseconds).
@@ -420,7 +426,8 @@ pub(super) struct DeleteScanOut {
     /// Always `true`; a scan that could not be deleted returns an error
     /// instead.
     pub deleted: bool,
-    /// The terminal state the scan was in when it was removed.
+    /// The terminal state the scan was in when it was removed. A cancelled
+    /// scan is removable only after its worker has finished draining.
     pub previous_status: JobStatus,
 }
 

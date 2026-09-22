@@ -1186,6 +1186,88 @@ async fn test_delete_scan_rejects_running_job() {
 }
 
 #[tokio::test]
+async fn test_delete_scan_rejects_a_cancelled_job_while_worker_drains() {
+    // Cancellation stamps a terminal status before the worker has stopped. The
+    // record must stay in the map until that worker releases its lease, or a
+    // cancel -> delete loop can hide live work from MAX_ACTIVE_SCANS_MCP.
+    let mcp = DalfoxMcp::new();
+    let lease = {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        let mut job = test_job(JobStatus::Cancelled, Some(vec![]));
+        // Exercise the distinction between strict explicit deletion and the
+        // retention-only grace reclamation: even a wedged-looking worker must
+        // not be deleted while it still owns the record.
+        job.finished_at_ms = Some(now_ms() - (crate::job::WORKER_DRAIN_GRACE_SECS + 1) * 1000);
+        let lease = job.issue_worker_lease();
+        jobs.insert("cancel-draining-del".to_string(), job);
+        lease
+    };
+
+    let err = mcp
+        .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {
+            scan_id: "cancel-draining-del".to_string(),
+        }))
+        .await
+        .expect_err("delete must wait for a cancelled worker to drain");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(err.message.contains("draining"));
+    assert!(
+        mcp.jobs
+            .lock()
+            .expect("jobs mutex poisoned")
+            .contains_key("cancel-draining-del")
+    );
+
+    drop(lease);
+
+    let result = mcp
+        .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {
+            scan_id: "cancel-draining-del".to_string(),
+        }))
+        .await
+        .expect("delete must succeed after the worker releases its lease");
+    let body = parse_result_json(&result);
+    assert_eq!(body["deleted"], true);
+    assert!(
+        !mcp.jobs
+            .lock()
+            .expect("jobs mutex poisoned")
+            .contains_key("cancel-draining-del")
+    );
+}
+
+#[tokio::test]
+async fn test_get_results_exposes_worker_drain_state() {
+    let mcp = DalfoxMcp::new();
+    let lease = {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        let mut job = test_job(JobStatus::Cancelled, Some(vec![]));
+        let lease = job.issue_worker_lease();
+        jobs.insert("cancel-draining-status".to_string(), job);
+        lease
+    };
+
+    let draining = mcp
+        .get_results_dalfox(Parameters(get_params("cancel-draining-status")))
+        .await
+        .expect("draining status should be readable");
+    let body = parse_result_json(&draining);
+    assert_eq!(body["status"], "cancelled");
+    assert_eq!(body["settled"], false);
+    assert_eq!(body["progress"]["suggested_poll_interval_ms"], 1000);
+
+    drop(lease);
+
+    let settled = mcp
+        .get_results_dalfox(Parameters(get_params("cancel-draining-status")))
+        .await
+        .expect("settled status should be readable");
+    let body = parse_result_json(&settled);
+    assert_eq!(body["settled"], true);
+    assert_eq!(body["progress"]["suggested_poll_interval_ms"], 0);
+}
+
+#[tokio::test]
 async fn test_delete_scan_rejects_unknown_id() {
     let mcp = DalfoxMcp::new();
     let err = mcp
@@ -2894,6 +2976,26 @@ async fn scan_ack_cancel_and_delete_conform_to_their_schemas() {
         .await
         .expect("cancel_scan_dalfox");
     assert_conforms::<outputs::CancelScanOut>(&cancelled, "cancel_scan_dalfox");
+
+    // Cancellation publishes the terminal status before the background worker
+    // has necessarily released its lease. Delete must wait for that drain so a
+    // rapid cancel -> delete -> submit sequence cannot evade the active cap.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let worker_alive = mcp
+                .jobs
+                .lock()
+                .expect("jobs mutex poisoned")
+                .get(&scan_id)
+                .is_some_and(Job::worker_alive);
+            if !worker_alive {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("cancelled scan worker must release its lease");
 
     let deleted = mcp
         .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {

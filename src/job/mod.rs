@@ -533,7 +533,7 @@ impl Job {
         )
     }
 
-    /// Terminal **and** nobody is still writing to it.
+    /// Whether this terminal job's worker has released the record.
     ///
     /// `is_terminal` alone is not a safe eviction test: cancelling stamps
     /// `status = Cancelled` and `finished_at_ms` the moment the user asks, but
@@ -541,11 +541,23 @@ impl Job {
     /// final status to reconcile, and (REST) a terminal webhook to fire. Evict
     /// the entry in that window and `jobs.get_mut(&id)` comes back `None`: the
     /// results are dropped on the floor, the webhook never fires, and a `GET`
-    /// on the scan_id the client is holding 404s. Automatic retention therefore
-    /// waits for the lease; an explicit `DELETE ?purge=1` still wins, because
-    /// that is the caller asking for exactly this.
+    /// on the scan_id the client is holding 404s. Explicit MCP deletion uses
+    /// this strict predicate; it must not use the broader retention predicate.
+    pub(crate) fn is_settled(&self) -> bool {
+        self.is_terminal() && !self.worker_alive()
+    }
+
+    /// Whether automatic retention may reclaim this terminal job.
+    ///
+    /// This is deliberately broader than [`Job::is_settled`]: a worker that
+    /// has held a terminal job past the drain grace is considered wedged, so
+    /// retention may reclaim its map entry and capacity slot. Explicit MCP
+    /// deletion must stay strict and use `is_settled`, otherwise a live worker
+    /// can lose the record it still needs to write partial results into. REST
+    /// `DELETE ?purge=1` remains a separate, explicit force-purge escape hatch
+    /// for callers that accept dropping a draining record.
     pub(crate) fn is_evictable(&self) -> bool {
-        self.is_terminal() && (!self.worker_alive() || self.drain_window_expired())
+        self.is_settled() || (self.is_terminal() && self.drain_window_expired())
     }
 
     /// True when this job went terminal more than [`WORKER_DRAIN_GRACE_SECS`]
@@ -623,12 +635,12 @@ pub(crate) fn purge_expired_jobs(jobs: &mut HashMap<String, Job>, retention_secs
 /// with nothing bounding the total. This is the bound. Callers apply it while
 /// admitting a new scan, since that is where the jobs lock is already held.
 ///
-/// Only *settled* jobs are evicted: a queued/running job still has a worker
-/// writing to it, and dropping its entry would strand that worker and lose the
-/// caller's scan_id. Terminal-but-draining jobs (a cancel stamps the terminal
-/// state immediately while the worker winds down) are held back the same way —
-/// see [`Job::is_evictable`]. If every job is active, the map simply stays over
-/// the cap until they settle.
+/// Settled jobs are preferred: a queued/running job still has a worker writing
+/// to it, and dropping its entry would strand that worker and lose the caller's
+/// scan_id. Terminal-but-draining jobs (a cancel stamps the terminal state
+/// immediately while the worker winds down) are held back until the drain
+/// grace expires — see [`Job::is_evictable`]. If every job is active, the map
+/// simply stays over the cap until they settle or a wedged worker ages out.
 pub(crate) fn enforce_retention_cap(jobs: &mut HashMap<String, Job>, cap: usize) {
     if cap == 0 || jobs.len() <= cap {
         return;

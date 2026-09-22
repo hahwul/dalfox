@@ -267,6 +267,7 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
   "scan_id": "9f2c…",
   "target": "…",
   "status": "running",
+  "settled": false,
   "progress": {
     "params_total": 10,
     "params_tested": 4,
@@ -284,6 +285,7 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 {
   "scan_id": "9f2c…",
   "status": "done",
+  "settled": true,
   "results": [
     {
       "type": "V",
@@ -325,7 +327,10 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 `progress.estimated_completion_pct`와 `params_tested`는 발견된 각 파라미터가
 완료될 때마다 실시간으로 증가합니다. 따라서 폴링 간격을 조절하는 데 사용할 수 있습니다 —
-`suggested_poll_interval_ms`를 따르세요.
+`suggested_poll_interval_ms`를 따르세요. 전체 상태 응답에는 `settled`도 담깁니다.
+종료된 worker가 아직 정리 중이면 `false`이고, 레코드를 삭제해도 안전해지면
+`true`가 됩니다. `settled: true`가 될 때까지는 0이 아닌 폴링 간격을 따르고,
+그 뒤에 `delete_scan_dalfox`를 호출하세요.
 
 대상에 도달할 수 없으면(DNS 실패, 연결 거부, TLS 오류, 타임아웃) 스캔은 빈
 `results`와 함께 `done`으로 끝나는 대신 `CONNECTION_FAILED`를 포함하는
@@ -363,7 +368,7 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 
 ### `delete_scan_dalfox`
 
-추적 중인 스캔을 메모리에서 영구적으로 제거합니다. 종료된 스캔(`done`, `error`, `cancelled`)만 삭제할 수 있습니다. 실행 중이거나 대기 중인 스캔은 먼저 취소해야 합니다. 종료된 스캔은 1시간 후 자동으로 정리되기도 합니다.
+추적 중인 스캔을 메모리에서 영구적으로 제거합니다. 종료된 스캔(`done`, `error`, `cancelled`) 중 worker가 정리를 끝낸 경우에만 삭제할 수 있습니다. 실행 중이거나 대기 중인 스캔은 먼저 취소해야 합니다. 취소 직후 삭제에서 worker가 정리 중이라는 오류가 나오면 스캔 상태를 조회하고 잠시 후 다시 삭제해야 합니다. 종료된 스캔은 1시간 후 자동으로 정리되기도 합니다.
 
 ```json
 { "scan_id": "9f2c…" }
@@ -471,7 +476,8 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 1. 에이전트가 `preflight_dalfox`를 호출하여 대상을 확인하고 파라미터 수를 셉니다.
 2. 에이전트가 `scan_with_dalfox`를 호출하여 `scan_id`를 받습니다.
 3. 에이전트가 진행률 객체의 `suggested_poll_interval_ms`를 사용하여 `get_results_dalfox`를 폴링합니다.
-4. `status == "done"`이 되면 에이전트가 탐지 결과를 요약하여 사용자에게 다시 보고합니다.
+4. 상태가 종료되었고 `settled == true`가 되면 에이전트가
+   `delete_scan_dalfox`를 호출할 수 있습니다. 그 뒤 탐지 결과를 요약하여 사용자에게 다시 보고합니다.
 
 스캔이 비동기이므로 에이전트는 응답성을 유지합니다. 오래 걸리는 작업을 한 번의 호출로 묶고 싶다면 `wait=true`에 진행률 토큰을 함께 붙이세요.
 

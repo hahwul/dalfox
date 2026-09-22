@@ -272,6 +272,7 @@ Response (in progress):
   "scan_id": "9f2c…",
   "target": "…",
   "status": "running",
+  "settled": false,
   "progress": {
     "params_total": 10,
     "params_tested": 4,
@@ -289,6 +290,7 @@ Response (done):
 {
   "scan_id": "9f2c…",
   "status": "done",
+  "settled": true,
   "results": [
     {
       "type": "V",
@@ -330,7 +332,11 @@ budget is emitted alone rather than dropped, so paging always advances.
 
 `progress.estimated_completion_pct` and `params_tested` advance live as each
 discovered parameter finishes, so they are usable for pacing polls — honor
-`suggested_poll_interval_ms`.
+`suggested_poll_interval_ms`. Full status responses also include `settled`:
+it is `false` while a terminal worker is still draining and becomes `true` when
+the record is safe to delete. A terminal response that is not yet settled
+keeps a non-zero suggested poll interval; wait for `settled: true` before
+calling `delete_scan_dalfox`.
 
 If the target can't be reached (DNS failure, connection refused, TLS error,
 timeout) the scan ends as `status: "error"` with `error_message` containing
@@ -370,7 +376,7 @@ Abort a queued or running scan:
 
 ### `delete_scan_dalfox`
 
-Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) can be deleted; running or queued scans must be cancelled first. Terminal scans are also auto-purged after 1 hour.
+Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) whose worker has finished draining can be deleted; running or queued scans must be cancelled first. If deletion reports a draining worker after cancellation, poll the scan and retry after a short delay. Terminal scans are also auto-purged after 1 hour.
 
 ```json
 { "scan_id": "9f2c…" }
@@ -480,7 +486,8 @@ a scan id is a 64-character digest nobody types by hand.
 1. Agent calls `preflight_dalfox` to confirm the target and count parameters.
 2. Agent calls `scan_with_dalfox`, receives a `scan_id`.
 3. Agent polls `get_results_dalfox` using `suggested_poll_interval_ms` from the progress object.
-4. Once `status == "done"`, the agent summarises findings and reports back to the user.
+4. Once the status is terminal and `settled == true`, the agent may call
+   `delete_scan_dalfox`; it then summarises findings and reports back to the user.
 
 Because every tool is async, the agent stays responsive; no long-running tool call blocks the conversation.
 

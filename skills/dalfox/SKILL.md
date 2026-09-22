@@ -69,7 +69,7 @@ If the number is huge or `reachable == false`, report back to the user before se
      Bare `-p name` is fine for query params (synthesized if discovery was skipped). Use `name:location` for body/header/cookie/json (`-p user:body`). GraphQL `variables` and XML/SOAP bodies are auto-detected as `graphql`/`xml` injection points from a matching `-d` body (or raw-http/har). Cap volume with `--max-payloads-per-param`.
 3. Poll only when not using `wait=true`.
 4. Present findings using the rules in `references/results.md` (lead with V, surface `type_description` and `inject_type`).
-5. Clean up: `delete_scan_dalfox` (MCP) or just let the process end (CLI). Terminal jobs auto-expire after 1 h.
+5. Clean up: `delete_scan_dalfox` (MCP) or just let the process end (CLI). For MCP, delete only after the status reports `settled: true`; after cancellation, retry once the worker has drained. Terminal jobs auto-expire after 1 h.
 
 ### C. Authenticated / Proxied / Blind XSS
 
