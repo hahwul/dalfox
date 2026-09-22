@@ -1,5 +1,76 @@
 use super::*;
 
+/// Whether some element in `html` carries the scan's class **or** id marker as a
+/// real attribute — matching the marker half of
+/// `check_dom_verification::is_marker_element` (`class` split on ASCII
+/// whitespace, `id` trimmed, both case-insensitive) and parsing with the same
+/// `scraper`/html5ever engine the verifier uses.
+///
+/// This is the *necessary prerequisite* for a `[V]` promotion, not the whole
+/// gate: the verifier additionally requires either a surviving on*/script sink
+/// on that element (`element_carries_surviving_sink`, issue #1118) or a
+/// presence-only structural vector (base-href / object / iframe-`javascript:`).
+/// Both of those need the marker to first exist as a real attribute — exactly
+/// what the three bugs below break — so this is the property to lock in here.
+/// The sink-co-survival half is exercised separately (see the synthesis
+/// handler-parse tests); it is deliberately *not* asserted here because a
+/// structural vector such as `<iframe src=javascript:… class=…>` carries no
+/// on*/script sink yet is a legitimate finding.
+fn marker_survives_as_attribute(html: &str) -> bool {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+    let frag = crate::utils::html::parse_fragment_bounded(html);
+    let sel = scraper::Selector::parse("*").expect("valid universal selector");
+    frag.select(&sel).any(|el| {
+        let v = el.value();
+        let class_hit = v.attr("class").is_some_and(|c| {
+            c.split_ascii_whitespace()
+                .any(|t| t.eq_ignore_ascii_case(class_marker))
+        });
+        let id_hit = v
+            .attr("id")
+            .is_some_and(|i| i.trim().eq_ignore_ascii_case(id_marker));
+        class_hit || id_hit
+    })
+}
+
+/// Regression guard for three parser-level payload defects that let a
+/// marker-carrying payload reflect but never DOM-verify:
+///   * a JS primitive whose `>` (e.g. an arrow function's `=>`) closes the
+///     unquoted event-handler attribute early, spilling the marker into text;
+///   * a fully `/`-separated tag (`<svg/onload=X/class=Y>`) folding the trailing
+///     `/class=Y` into the unquoted handler value so no `class` attribute forms;
+///   * a non-whitespace "separator" (a vertical tab U+000B) that merges the
+///     whole tag into one bogus name with no attributes.
+///
+/// All three land the marker somewhere other than a real `class`/`id`
+/// attribute (as text, or folded into another attribute's value), so it can
+/// never match the verifier's marker selector. Every marker-carrying catalog
+/// entry must, in at least one of the contexts it is dropped into (HTML text,
+/// or a single-/double-quoted attribute value), parse to an element whose
+/// marker is a genuine `class`/`id` attribute. (Whether that element also
+/// carries an executing sink is a separate gate — see the helper doc.)
+#[test]
+fn every_dynamic_html_marker_payload_keeps_a_real_marker_attribute() {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+    for p in get_dynamic_xss_html_payloads() {
+        if !(p.contains(class_marker) || p.contains(id_marker)) {
+            continue; // marker-less shapes are [R]-only by design.
+        }
+        let contexts = [
+            format!("<div>{p}</div>"),        // HTML text / body injection
+            format!("<input value='{p}'>"),   // single-quoted attribute value
+            format!("<input value=\"{p}\">"), // double-quoted attribute value
+        ];
+        assert!(
+            contexts.iter().any(|c| marker_survives_as_attribute(c)),
+            "payload carries a marker but it never parses as a real class/id \
+             attribute in any injection context (cannot DOM-verify): {p:?}"
+        );
+    }
+}
+
 #[test]
 fn test_get_dynamic_xss_html_payloads_non_empty() {
     let payloads = get_dynamic_xss_html_payloads();

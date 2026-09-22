@@ -50,3 +50,22 @@ fn test_payloads_contain_execution_primitives() {
         .any(|p| p.contains("alert") || p.contains("prompt") || p.contains("confirm"));
     assert!(has_exec, "payloads should contain execution primitives");
 }
+
+#[test]
+fn small_primitives_carry_no_angle_bracket() {
+    // The SMALL list feeds *unquoted* HTML event-handler attributes
+    // (`<img onerror=PRIMITIVE>`) and unquoted `javascript:` URL values. A `<`
+    // or `>` inside such a primitive is fatal: `>` closes the tag early
+    // (e.g. the `>` in an arrow function's `=>` truncates the handler to `(()=`
+    // and drops the trailing marker), and `<` can start a stray tag. Keep every
+    // SMALL primitive angle-free so it survives the unquoted-attribute contexts
+    // it is dropped into. Richer primitives that need `<`/`>` (arrow functions,
+    // template-string DOM sinks) belong in `XSS_JAVASCRIPT_PAYLOADS`, which is
+    // only used in JS/script contexts where those bytes are safe.
+    for p in XSS_JAVASCRIPT_PAYLOADS_SMALL {
+        assert!(
+            !p.contains('<') && !p.contains('>'),
+            "SMALL primitive must be angle-free for unquoted-attribute use: {p:?}"
+        );
+    }
+}
