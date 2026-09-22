@@ -205,6 +205,10 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/sca
 curl -X DELETE -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
+종료된 레코드를 제거하려면 `?purge=1`을 붙이세요. 이는 명시적인 강제 삭제
+경로입니다. MCP의 안전한 삭제와 달리 취소된 worker가 아직 정리 중이면 부분
+결과나 종료 webhook을 버릴 수 있습니다.
+
 ### 프리플라이트 (공격 없음)
 
 ```bash

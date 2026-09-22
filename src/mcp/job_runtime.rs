@@ -69,6 +69,9 @@ pub(super) fn mark_job_error_sync(
 /// JSON serialization or computation runs.
 pub(super) struct JobSnapshot {
     pub(super) status: JobStatus,
+    /// True only when the job is terminal and its worker has released the
+    /// record. A terminal status alone is not enough after cancellation.
+    pub(super) settled: bool,
     pub(super) target_url: String,
     pub(super) results: Option<Arc<Vec<SanitizedResult>>>,
     pub(super) progress: crate::job::JobProgress,

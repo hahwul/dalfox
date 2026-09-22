@@ -352,10 +352,15 @@ fn cancelled_job_with_a_live_worker_is_not_evictable() {
         !job.is_evictable(),
         "retention must not collect a job a worker is still writing to"
     );
+    assert!(
+        !job.is_settled(),
+        "explicit deletion must wait for the lease"
+    );
 
     // Worker finishes (or panics): the lease drops and the entry is collectable.
     drop(lease);
     assert!(!job.worker_alive());
+    assert!(job.is_settled());
     assert!(job.is_evictable());
 }
 
@@ -447,6 +452,10 @@ fn a_wedged_worker_stops_holding_its_slot_after_the_drain_grace() {
     assert!(
         job.is_evictable(),
         "and its map entry must become collectable"
+    );
+    assert!(
+        !job.is_settled(),
+        "retention grace must not make explicit deletion unsafe"
     );
 }
 

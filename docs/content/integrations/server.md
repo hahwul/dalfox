@@ -208,6 +208,10 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/sca
 curl -X DELETE -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
+To remove a terminal record, append `?purge=1`. This is an explicit force-purge
+escape hatch: unlike MCP's safe delete, it may discard partial results or a
+terminal webhook if the cancelled worker is still draining.
+
 ### Preflight (no attack)
 
 ```bash
