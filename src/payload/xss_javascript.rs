@@ -1,13 +1,19 @@
 // inHTML, inAttr, ETC
 pub(crate) const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
-    "alert(1)",                      // alert
-    "prompt`1`",                     // prompt with backtick
-    "confirm(1)",                    // confirm
-    "(_=prompt,_(1))",               // prompt with bypass technique
-    "(((confirm)))``",               // confirm with bypass technique
-    "[2].find(alert)",               // alert with bypass technique
-    "top[\"al\"+\"\\ert\"](1)",      // alert with bypass technique2
-    "(()=>alert(1))()",              // arrow function IIFE
+    "alert(1)",                 // alert
+    "prompt`1`",                // prompt with backtick
+    "confirm(1)",               // confirm
+    "(_=prompt,_(1))",          // prompt with bypass technique
+    "(((confirm)))``",          // confirm with bypass technique
+    "[2].find(alert)",          // alert with bypass technique
+    "top[\"al\"+\"\\ert\"](1)", // alert with bypass technique2
+    // Comma-operator indirect call. NOTE: this list feeds unquoted HTML
+    // event-handler attributes (`<img onerror=PRIMITIVE>`), so a primitive must
+    // contain no `>` — an arrow-function form like `(()=>alert(1))()` closes the
+    // tag at the `>` in `=>`, truncating the handler to `(()=` and losing both
+    // the sink and the trailing marker. The arrow IIFE lives in
+    // `XSS_JAVASCRIPT_PAYLOADS` (JS/script contexts) where `>` is safe instead.
+    "(0,alert)(1)",                  // comma-operator indirect call ('>'-free)
     "window?.alert?.(1)",            // optional chaining
     "globalThis.alert(1)",           // globalThis reference
     "self['ale'+'rt'](1)",           // self + string concat

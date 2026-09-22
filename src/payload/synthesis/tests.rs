@@ -210,6 +210,36 @@ fn attribute_context_survives_space_stripping() {
 }
 
 #[test]
+fn html_context_slash_template_verifies_as_marker_element() {
+    // A server that strips literal spaces collapses the space-separated tag
+    // shapes, so synthesis also emits a space-free `/`-separated tag for the
+    // HTML-text context. The handler value MUST be quoted: an unquoted
+    // `<svg/onload=alert(1)/class=MARKER>` folds the trailing `/class=MARKER`
+    // into the onload value, so no `class` attribute forms and the payload can
+    // never DOM-verify. Confirm a space-free slash tag is emitted AND that,
+    // parsed the way the verifier does, its marker is a real `class` attribute
+    // on an element carrying the surviving sink.
+    let ctx = InjectionContext::Html(None);
+    let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
+    let class = crate::scanning::markers::class_marker();
+    let slash_tag = payloads
+        .iter()
+        .find(|p| !p.contains(' ') && p.contains("/onload=") && p.contains(class))
+        .expect("a space-free slash-separated HTML tag payload must be emitted");
+    let doc = scraper::Html::parse_document(&format!("<div>{slash_tag}</div>"));
+    let sel = scraper::Selector::parse(&format!(".{class}")).unwrap();
+    let el = doc.select(&sel).next().unwrap_or_else(|| {
+        panic!("class marker must parse as a real attribute (not swallowed): {slash_tag:?}")
+    });
+    assert!(
+        el.value()
+            .attrs()
+            .any(|(n, v)| n.len() >= 3 && n.starts_with("on") && v.contains("alert")),
+        "slash-tag marker element must carry a surviving on* handler: {slash_tag:?}"
+    );
+}
+
+#[test]
 fn paren_blocked_falls_back_to_backtick_call() {
     // With `(`/`)` stripped, the only surviving execution primitive is the
     // tagged-template call `alert`1``.
