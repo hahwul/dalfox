@@ -552,13 +552,17 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
     let uri = parts
         .next()
         .ok_or("invalid request line: missing request-target")?;
-    // HTTP version is optional for our purposes
-    let _http_version = parts.next().unwrap_or("");
+    // HTTP version is optional; for origin-form it hints at the scheme below.
+    let http_version = parts.next().unwrap_or("");
 
     // 2) Headers (until blank line)
     let mut headers_vec: Vec<(String, String)> = Vec::new();
     let mut cookies_vec: Vec<(String, String)> = Vec::new();
     let mut host_header: Option<String> = None;
+    // HTTP/2 pseudo-headers from a copy-as-HTTP/2 capture. Never forwarded
+    // (they are not HTTP/1.1 headers), but they say where the request went.
+    let mut pseudo_scheme: Option<String> = None;
+    let mut pseudo_authority: Option<String> = None;
     let mut user_agent: Option<String> = None;
 
     // Collect raw header lines first (simple unfold; folded headers are uncommon and deprecated)
@@ -572,6 +576,15 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
     }
 
     for h in header_raw {
+        if let Some((pseudo, value)) = h.strip_prefix(':').and_then(|p| p.split_once(':')) {
+            let value = value.trim();
+            if pseudo.trim().eq_ignore_ascii_case("scheme") {
+                pseudo_scheme = Some(value.to_ascii_lowercase());
+            } else if pseudo.trim().eq_ignore_ascii_case("authority") && !value.is_empty() {
+                pseudo_authority = Some(value.to_string());
+            }
+            continue;
+        }
         if let Some((name, value)) = h.split_once(':') {
             let name_trim = name.trim().to_string();
             let value_trim = value.trim().to_string();
@@ -643,13 +656,33 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
         // absolute-form URI in request line
         Url::parse(uri)?
     } else {
-        // origin-form; need Host header
-        let host = host_header.ok_or("missing Host header for origin-form request")?;
-        // Heuristic: default to http, but if :443 present, assume https
-        let scheme = if host.ends_with(":443") {
-            "https"
-        } else {
-            "http"
+        // origin-form; need Host header (or an HTTP/2 `:authority`)
+        // A `:authority` at all is itself an HTTP/2+ signal (hence TLS), so
+        // note it before `.or()` consumes it into `host`.
+        let had_pseudo_authority = pseudo_authority.is_some();
+        let host = host_header
+            .or(pseudo_authority)
+            .ok_or("missing Host header for origin-form request")?;
+        // An origin-form request line carries no scheme, so everything here is
+        // a hint. A `:scheme` pseudo-header is the request's own statement.
+        // Failing that, any HTTP/2+ signal — an `HTTP/2`/`HTTP/3` request line
+        // *or* a `:scheme`/`:authority` pseudo-header (a copy-as-HTTP/2 capture
+        // may carry the pseudo-headers but no version token) — means TLS:
+        // browsers only speak those over TLS, and a proxy capture of an HTTPS
+        // site records exactly that shape with a bare `Host: app`, so defaulting
+        // to `http` scanned a redirect (or nothing) instead of the captured
+        // page. Otherwise default to http, unless the Host names port 443.
+        let version = http_version.to_ascii_uppercase();
+        let http2_signal = version.starts_with("HTTP/2")
+            || version.starts_with("HTTP/3")
+            || pseudo_scheme.is_some()
+            || had_pseudo_authority;
+        let scheme = match pseudo_scheme.as_deref() {
+            Some("https") => "https",
+            Some("http") => "http",
+            _ if http2_signal => "https",
+            _ if host.ends_with(":443") => "https",
+            _ => "http",
         };
         let base = format!("{}://{}", scheme, host);
         // An origin-form request-target is an absolute path on `host`, so it is

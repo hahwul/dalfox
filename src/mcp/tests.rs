@@ -4448,3 +4448,81 @@ async fn the_scan_index_resource_bounds_itself() {
         body["pagination"]
     );
 }
+
+/// `results` is stored only when a scan settles, so a running scan's row must
+/// carry the live tally — not "0 findings so far", which reads as clean.
+#[test]
+fn scan_index_reports_live_findings_for_a_running_scan() {
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        let running = test_job(JobStatus::Running, None);
+        running
+            .progress
+            .findings_so_far
+            .store(7, std::sync::atomic::Ordering::Relaxed);
+        jobs.insert("running".to_string(), running);
+    }
+    let rows = mcp.scan_index();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].findings, 7);
+}
+
+/// `preflight_dalfox` used to ignore the request's cancellation token: a
+/// withdrawn preflight against a slow target kept mining it and kept emitting
+/// progress for a request the client had already dropped, holding a preflight
+/// permit the whole time. The withdrawal now stops the analysis.
+#[tokio::test]
+async fn cancelling_a_preflight_call_stops_the_analysis() {
+    let (target, server) = spawn_slow_target(Duration::from_millis(400)).await;
+    let mut client = WireClient::start().await;
+    client
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "preflight_dalfox",
+                "arguments": {"target": format!("{target}/?q=hello")},
+                "_meta": {"progressToken": "pf-cancel"}
+            }
+        }))
+        .await;
+    // Wait until the analysis is on the wire (past the "queued"/first tick).
+    let started = client.next_running_progress().await;
+    assert!(
+        started["params"]["progress"].as_f64().is_some(),
+        "{started}"
+    );
+
+    client
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": 7, "reason": "user pressed escape"}
+        }))
+        .await;
+
+    // A follow-up preflight still succeeds: the permit the cancelled call held
+    // was released, and the server is responsive rather than wedged.
+    let (target2, server2) = spawn_slow_target(Duration::from_millis(0)).await;
+    client
+        .send(rpc(
+            8,
+            "tools/call",
+            serde_json::json!({
+                "name": "preflight_dalfox",
+                "arguments": {"target": format!("{target2}/?q=1")}
+            }),
+        ))
+        .await;
+    let resp = client.response(8).await;
+    server.abort();
+    server2.abort();
+    assert!(
+        resp["result"]["structuredContent"]["reachable"]
+            .as_bool()
+            .unwrap_or(false),
+        "a follow-up preflight must still run after a cancelled one freed its permit: {resp}"
+    );
+}

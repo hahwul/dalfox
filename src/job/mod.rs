@@ -765,25 +765,18 @@ where
 
 pub async fn send_reachability_probe(target: &Target) -> bool {
     let client = target.build_client_or_default();
-    let mut req = client.request(target.parse_method(), target.url.clone());
-    for (k, v) in &target.headers {
-        req = req.header(k, v);
-    }
-    if !target.cookies.is_empty() {
-        let cookie_header = target
-            .cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-        req = req.header("Cookie", cookie_header);
-    }
-    if let Some(ua) = target.effective_user_agent() {
-        req = req.header("User-Agent", ua);
-    }
-    if let Some(body) = &target.data {
-        req = req.body(body.clone());
-    }
+    // Same builder as every scan request. Hand-rolled with reqwest's appending
+    // `.header()`, the probe sent `User-Agent` twice (a job's UA lives in both
+    // `target.headers` and `target.user_agent`) and a second `Cookie` next to
+    // a caller-supplied one — the probe is the job's first request, and it did
+    // not look like the rest of the scan.
+    let req = crate::utils::build_request(
+        &client,
+        target,
+        target.parse_method(),
+        target.url.clone(),
+        target.data.clone(),
+    );
     req.send().await.is_ok()
 }
 

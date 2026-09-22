@@ -1185,3 +1185,171 @@ fn preflight_accepts_a_documented_subset_of_the_scan_options() {
         );
     }
 }
+
+/// The server / MCP runner derives the same target state from its preflight
+/// GET that the CLI preflight does. It used to use that response for the
+/// initial AST pass only, so a REST/MCP job never fingerprinted a WAF (and
+/// `force_waf` / `waf_bypass` were silent no-ops), never analysed the page's
+/// CSP (no CSP-bypass payloads, no Trusted Types posture for the scan-phase
+/// AST), never fingerprinted the stack, and ignored `detect_outdated_libs`.
+#[tokio::test]
+async fn execute_scan_derives_waf_csp_tech_and_outdated_libs_like_the_cli() {
+    use axum::{Router, http::HeaderMap, response::IntoResponse, routing::get};
+
+    async fn page() -> impl IntoResponse {
+        let mut h = HeaderMap::new();
+        h.insert("cf-ray", "8a1b2c3d4e5f-ICN".parse().unwrap());
+        h.insert("server", "cloudflare".parse().unwrap());
+        h.insert(
+            "content-security-policy",
+            "script-src 'self'".parse().unwrap(),
+        );
+        h.insert("content-type", "text/html".parse().unwrap());
+        (
+            h,
+            r#"<html><head><script src="/static/jquery-1.7.2.min.js"></script></head><body>ok</body></html>"#,
+        )
+    }
+
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, Router::new().route("/", get(page))).await;
+    });
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        detect_outdated_libs: true,
+        silence: true,
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+
+    let waf = target.waf_info.as_ref().expect("passive WAF fingerprint");
+    assert!(
+        waf.waf_types()
+            .iter()
+            .any(|t| matches!(t, crate::waf::WafType::Cloudflare)),
+        "cf-ray/server headers must fingerprint Cloudflare: {waf:?}"
+    );
+    assert!(
+        target.mutation_stats.is_some(),
+        "bypass is on by default, so mutation stats are tracked"
+    );
+    let csp = target.csp_analysis.as_ref().expect("CSP analysed");
+    assert!(!csp.report_only && !csp.missing_script_src);
+    let results = run.results.lock().await;
+    assert!(
+        results.iter().any(|r| r.cwe == "CWE-1104"),
+        "detect_outdated_libs must report jQuery 1.7.2"
+    );
+}
+
+/// `force_waf` needs no fingerprint at all; `waf_bypass=off` keeps detection
+/// but must not arm the bypass state.
+#[tokio::test]
+async fn execute_scan_honours_force_waf_and_waf_bypass_off() {
+    use axum::{Router, routing::get};
+
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            Router::new().route("/", get(|| async { "plain" })),
+        )
+        .await;
+    });
+
+    for (bypass, armed) in [("auto", true), ("off", false)] {
+        let mut target =
+            crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+        let args = Arc::new(crate::cmd::scan::ScanArgs {
+            skip_discovery: true,
+            skip_mining: true,
+            skip_waf_probe: true,
+            force_waf: Some("akamai".to_string()),
+            waf_bypass: bypass.to_string(),
+            silence: true,
+            ..Default::default()
+        });
+        let progress = JobProgress::default();
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+
+        let waf = target.waf_info.as_ref().expect("forced WAF recorded");
+        assert!(
+            waf.waf_types()
+                .iter()
+                .any(|t| matches!(t, crate::waf::WafType::Akamai)),
+            "force_waf must be honoured (waf_bypass={bypass})"
+        );
+        assert_eq!(
+            target.mutation_stats.is_some(),
+            armed,
+            "bypass state armed only when waf_bypass != off (waf_bypass={bypass})"
+        );
+        assert_eq!(
+            crate::scanning::compute_waf_strategy(&target, &args).is_some(),
+            armed
+        );
+    }
+}
+
+/// The reachability probe goes out like any other scan request: one
+/// `User-Agent` (a job's UA is in both `target.headers` and
+/// `target.user_agent`) and one `Cookie` (a caller's `Cookie` header wins over
+/// the composed jar, as everywhere else).
+#[tokio::test]
+async fn reachability_probe_sends_each_header_once() {
+    use axum::{Router, http::HeaderMap, routing::get};
+    use std::sync::Mutex as StdMutex;
+
+    let seen: Arc<StdMutex<Vec<(usize, usize)>>> = Arc::new(StdMutex::new(Vec::new()));
+    let seen_handler = seen.clone();
+    let app = Router::new().route(
+        "/",
+        get(move |headers: HeaderMap| {
+            let seen = seen_handler.clone();
+            async move {
+                seen.lock().unwrap().push((
+                    headers.get_all("user-agent").iter().count(),
+                    headers.get_all("cookie").iter().count(),
+                ));
+                "ok"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+    target.headers = vec![
+        ("User-Agent".to_string(), "job-agent".to_string()),
+        ("Cookie".to_string(), "sid=hdr".to_string()),
+    ];
+    target.user_agent = Some("job-agent".to_string());
+    target.cookies = vec![("theme".to_string(), "dark".to_string())];
+
+    assert!(send_reachability_probe(&target).await);
+    server.abort();
+    assert_eq!(*seen.lock().unwrap(), vec![(1, 1)]);
+}

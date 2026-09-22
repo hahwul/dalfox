@@ -150,6 +150,8 @@ dalfox scan --input-type raw-http request.txt
 
 The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves every header, cookie, and body parameter.
 
+A request line with a bare path (`GET /search HTTP/1.1`) does not say whether the request went over HTTP or HTTPS, so Dalfox takes the scheme from the capture: an HTTP/2 `:scheme` pseudo-header wins, then an `HTTP/2` / `HTTP/3` request line means HTTPS, then a `Host` ending in `:443`; anything else is scanned over `http://`. An absolute URL in the request line (`GET https://app/search HTTP/1.1`) is used as is.
+
 For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../../integrations/caido/)**. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
 
 ## HAR mode

@@ -438,6 +438,47 @@ const INCOMPLETE_FAILURE_RATIO: f64 = 0.10;
 /// the flag needs a third before it claims the run was not really scanned.
 const INCOMPLETE_MIN_FAILURES: u64 = 3;
 
+/// The per-finding blocks of the plain report.
+///
+/// `streamed` is the set the `--stream-findings` printer recorded when it ran.
+/// The findings it emitted mid-scan are not rendered again — that produced the
+/// duplicate POC headers users reported — but everything it never saw (the
+/// initial AST pass, external JS, outdated libs, OOB callbacks, none of which
+/// go through `run_scanning`) is rendered here. Skipping every block whenever
+/// streaming was on counted those findings in the summary line and showed them
+/// nowhere.
+pub(crate) fn render_plain_finding_blocks(
+    args: &ScanArgs,
+    display_results: &[Result],
+    streamed: Option<&std::collections::HashSet<String>>,
+) -> String {
+    let mut output = String::new();
+    for result in display_results {
+        if streamed.is_some_and(|s| s.contains(&stream_key(result))) {
+            continue;
+        }
+        output.push_str(&render_finding_block(
+            result,
+            &args.poc_type,
+            args.include_request,
+            args.include_response,
+        ));
+    }
+    output
+}
+
+/// Identity the `--stream-findings` printer dedups on and records, so the
+/// end-of-scan renderer can tell which findings it already printed.
+pub(crate) fn stream_key(result: &Result) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        result.result_type.short(),
+        result.data,
+        result.param,
+        result.payload,
+    )
+}
+
 pub(crate) async fn render_results(
     args: &ScanArgs,
     state: &ScanState,
@@ -730,21 +771,12 @@ pub(crate) async fn render_results(
             );
         }
 
-        // When the streaming printer ran (`stream_findings_enabled`), every
-        // finding has already been emitted mid-scan with its full block —
-        // re-rendering here would produce the duplicate POC headers users
-        // reported. Skip per-finding rendering in that case and let the
-        // summary line above stand alone.
-        if !stream_findings_enabled {
-            for result in display_results {
-                output.push_str(&render_finding_block(
-                    result,
-                    &args.poc_type,
-                    args.include_request,
-                    args.include_response,
-                ));
-            }
-        }
+        let streamed = state.streamed_findings.lock().await;
+        output.push_str(&render_plain_finding_blocks(
+            args,
+            display_results,
+            stream_findings_enabled.then_some(&*streamed),
+        ));
         output
     } else {
         let mut output = String::new();
@@ -906,6 +938,25 @@ pub(crate) async fn derive_outcome(
         && !state.session_lost.lock().await.is_empty()
     {
         return ScanOutcome::Error;
+    }
+
+    // A target whose per-parameter worker panicked was recorded
+    // `INTERNAL_ERROR` in `skipped_targets` (scan_loop) — it was not fully
+    // tested. On a single-target run `all_unreachable` above already caught
+    // it, but with a healthy sibling that check is false, so an empty report
+    // would fall through to Clean (exit 0): the "a panic reads as a clean
+    // scan" class, unfixed for the *aggregate* code. Escalate here. Gated on
+    // no findings for the same reason as the session-loss block: a run that
+    // confirmed a `V` elsewhere should still exit 1, not 2 — `meta.incomplete`
+    // and the per-target INTERNAL_ERROR entry carry the partial-ness either way.
+    if final_results.is_empty() {
+        let skipped = state.skipped_targets.lock().await;
+        if skipped
+            .values()
+            .any(|code| *code == crate::cmd::error_codes::INTERNAL_ERROR)
+        {
+            return ScanOutcome::Error;
+        }
     }
 
     // A requested `--output` file that couldn't be written is a hard failure,

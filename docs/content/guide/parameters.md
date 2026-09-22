@@ -58,6 +58,16 @@ without reflecting a canary, Dalfox sends a same-width control and recursively
 splits the positive bucket four ways. This keeps a large wordlist broad while
 spending extra requests only on ambiguous, metric-only hits.
 
+Attribution stays per name. Metric-only hits are trusted only when two
+identical clean requests return the same response; on a page whose body varies
+between requests (a rotating widget, a render-time footer) only a status-code
+change counts, and a single name is re-sent once before it is accepted. The
+names left in a bucket where another name reflected are re-probed without it.
+A bucket whose request fails, or that the server refuses the same way as its
+control (a query-length limit, for example), is split and retried instead of
+dropped, and names that show up together in one redirect `Location` are
+confirmed in smaller groups rather than all credited to the redirect.
+
 With no custom or remote wordlist selected, the built-in seed keeps Dalfox's
 historical XSS-oriented names and adds an attributed, broader Param Miner seed
 covering API, authentication, pagination, feature flags, media, and operational

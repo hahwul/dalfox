@@ -880,6 +880,7 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         unparsable_lines: 0,
         state_file: None,
         resumed_skipped: 0,
+        streamed_findings: Arc::new(Mutex::new(std::collections::HashSet::new())),
     }
 }
 
@@ -2828,4 +2829,229 @@ fn test_output_report_file_is_created_private() {
     assert_eq!(std::fs::metadata(&path).unwrap().len(), first_len);
 
     let _ = std::fs::remove_file(&path);
+}
+
+/// A scan worker that panicked is swallowed by `run_scanning`'s join loop and
+/// only surfaces as `ScanRunReport::worker_panics`. The CLI ignored it: the
+/// target read `clean`, the run exited 0, and `--state-file` recorded it
+/// `completed`, so every resume skipped a parameter that was never tested.
+#[tokio::test]
+async fn a_worker_panic_fails_the_target_instead_of_reading_clean() {
+    let app = Router::new().route(
+        "/",
+        get(
+            |axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>| async move {
+                let echo: String = q.values().cloned().collect();
+                (
+                    [("content-type", "text/html")],
+                    format!("<html><body>{echo}</body></html>"),
+                )
+            },
+        ),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let dir = std::env::temp_dir();
+    let tag = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let out = dir.join(format!("dalfox-worker-panic-{tag}.json"));
+    let state = dir.join(format!("dalfox-worker-panic-{tag}.jsonl"));
+    let target = format!(
+        "http://{addr}/?{}=1",
+        crate::scanning::TEST_WORKER_PANIC_PARAM
+    );
+    let args = ScanArgs {
+        input_type: "url".to_string(),
+        format: "json".to_string(),
+        output: Some(out.to_string_lossy().to_string()),
+        state_file: Some(state.to_string_lossy().to_string()),
+        silence: true,
+        targets: vec![target],
+        // Query discovery has to run: it is what turns the URL's parameter
+        // into a scan worker.
+        skip_mining: true,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        insecure: Some(true),
+        ..ScanArgs::default()
+    };
+    let outcome = super::run_scan(&args).await;
+    server.abort();
+
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).expect("report written"))
+            .expect("valid JSON");
+    let summary = &report["meta"]["target_summary"][0];
+    let recorded = std::fs::read_to_string(&state).unwrap_or_default();
+    let _ = std::fs::remove_file(&out);
+    let _ = std::fs::remove_file(&state);
+
+    assert_ne!(summary["status"], "clean", "{summary}");
+    assert_eq!(
+        summary["error_code"],
+        crate::cmd::error_codes::INTERNAL_ERROR,
+        "{summary}"
+    );
+    assert!(
+        !matches!(outcome, ScanOutcome::Clean),
+        "a panicked scan must not exit 0"
+    );
+    assert!(
+        recorded.contains("\"error\"") && !recorded.contains("\"completed\""),
+        "the target must be retried on resume: {recorded}"
+    );
+}
+
+/// `--dry-run` (and the REST / MCP preflight, which runs as one) promises not
+/// to send attack payloads; the WAF provocation probe carries a `<script>`.
+#[tokio::test]
+async fn finish_waf_detection_sends_no_provocation_probe_on_a_dry_run() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let app = Router::new().route(
+        "/",
+        get(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                "ok"
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let target = parse_target(&format!("http://{addr}/")).expect("target");
+    let client = target.build_client_or_default();
+
+    for (dry_run, expected_hits) in [(true, 0), (false, 1)] {
+        hits.store(0, std::sync::atomic::Ordering::Relaxed);
+        let args = ScanArgs {
+            dry_run,
+            ..ScanArgs::default()
+        };
+        super::finish_waf_detection(Default::default(), &target, &client, &args).await;
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::Relaxed),
+            expected_hits,
+            "dry_run={dry_run}"
+        );
+    }
+    server.abort();
+}
+
+/// With `--stream-findings`, only what the streaming printer already emitted is
+/// left out of the end-of-scan output. Findings produced outside
+/// `run_scanning` (initial AST pass, outdated libs, OOB callbacks) never reach
+/// the printer and were printed by neither path.
+#[test]
+fn stream_findings_end_of_scan_renders_what_the_printer_never_saw() {
+    let make = |ty: FindingType, param: &str| {
+        ScanResult::builder(ty)
+            .inject_type("inHTML")
+            .method("GET")
+            .data("https://example.com/?q=1")
+            .param(param)
+            .payload("<b>x</b>")
+            .cwe("CWE-79")
+            .severity("High")
+            .message_id(0)
+            .message_str("m")
+            .build()
+    };
+    let streamed = make(FindingType::Verified, "streamedparam");
+    let unstreamed = make(FindingType::AstDetected, "astparam");
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(super::output::stream_key(&streamed));
+    let args = default_scan_args();
+    let results = vec![streamed, unstreamed];
+
+    let out = super::output::render_plain_finding_blocks(&args, &results, Some(&seen));
+    assert!(out.contains("[POC][A]"), "{out}");
+    assert!(!out.contains("[POC][V]"), "{out}");
+
+    // Streaming off: every block is rendered.
+    let out = super::output::render_plain_finding_blocks(&args, &results, None);
+    assert!(
+        out.contains("[POC][A]") && out.contains("[POC][V]"),
+        "{out}"
+    );
+}
+
+/// The aggregate exit code must also escalate: a panicked-but-empty target
+/// alongside a healthy sibling used to fall through to Clean (exit 0), because
+/// `all_unreachable` only fires when *every* target is skipped. That is the
+/// "a panic reads as a clean scan" class, for the whole-run code.
+#[tokio::test]
+async fn a_worker_panic_alongside_a_healthy_target_still_fails_the_run() {
+    // `/safe` never reflects, so the healthy target scans clean (0 findings)
+    // and the run's report is empty — the escalation is not masked by a finding
+    // elsewhere (which would correctly exit 1 instead). `/echo` reflects so the
+    // panic param becomes a scannable worker that then panics.
+    let app = Router::new()
+        .route(
+            "/safe",
+            get(|| async { ([("content-type", "text/html")], "<html><body>ok</body></html>") }),
+        )
+        .route(
+            "/echo",
+            get(
+                |axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>| async move {
+                    let echo: String = q.values().cloned().collect();
+                    (
+                        [("content-type", "text/html")],
+                        format!("<html><body>{echo}</body></html>"),
+                    )
+                },
+            ),
+        );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    // A healthy target (a param that does not reflect → clean, 0 findings) and
+    // a target whose worker panics.
+    let healthy = format!("http://{addr}/safe?x=1");
+    let panicky = format!(
+        "http://{addr}/echo?{}=1",
+        crate::scanning::TEST_WORKER_PANIC_PARAM
+    );
+    let args = ScanArgs {
+        input_type: "url".to_string(),
+        format: "json".to_string(),
+        silence: true,
+        targets: vec![healthy, panicky],
+        skip_mining: true,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        insecure: Some(true),
+        ..ScanArgs::default()
+    };
+    let outcome = super::run_scan(&args).await;
+    server.abort();
+    assert_eq!(
+        outcome,
+        ScanOutcome::Error,
+        "a run with a panicked target must not exit 0 just because a sibling was clean"
+    );
 }
