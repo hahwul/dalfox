@@ -5436,6 +5436,11 @@ fn numeric_coercion_clears_taint() {
             "numeric result reported as DOM XSS: {code} -> {found:?}"
         );
     }
+    // A page-local function under a built-in's name is no coercion.
+    let found = analyzer
+        .analyze("function Number(v){ return v } var p=location.hash; el.innerHTML = Number(p);")
+        .expect("parses");
+    assert!(!found.is_empty(), "shadowed Number() must not clear taint");
     // The coercion must wrap the source: a sibling tainted operand still flows.
     let found = analyzer
         .analyze("var p=location.hash; el.innerHTML = parseInt(p) + p;")

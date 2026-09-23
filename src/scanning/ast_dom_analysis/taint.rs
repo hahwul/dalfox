@@ -70,6 +70,8 @@ impl<'a> DomXssVisitor<'a> {
         if let Some(func_name) = self.get_expr_string(&call.callee)
             && (self.sanitizers.contains(func_name.as_str())
                 || Self::is_likely_sanitizer_name(&func_name))
+            && !(NUMERIC_COERCIONS.contains(&func_name.as_str())
+                && self.function_summaries.contains_key(&func_name))
         {
             return (false, None);
         }
