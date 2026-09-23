@@ -2050,3 +2050,53 @@ fn test_body_has_probe_marker_is_case_insensitive() {
     assert!(body_has_probe_marker(&open.to_ascii_uppercase()));
     assert!(!body_has_probe_marker("nothing reflected here"));
 }
+
+/// Part of `--sxss` support: when the write endpoint does not echo the probe
+/// (the common "saved" / redirect / JSON-ack stored sink), the active probe
+/// records every special character as filtered. The adaptive prune would then
+/// drop every `<`/`>`/quote payload before the retrieval URL is ever checked.
+/// Under `--sxss` that verdict — derived from a page that never rendered the
+/// value — is discarded so the full payload set still runs.
+#[tokio::test]
+async fn sxss_discards_the_no_echo_special_char_verdict() {
+    use axum::{Router, routing::post};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    // A write endpoint that never echoes the submitted value.
+    let app = Router::new().route("/save", post(|| async { "saved" }));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/save")).unwrap();
+    target.method = "POST".to_string();
+    target.data = Some("c=seed".to_string());
+    target.workers = 1;
+    let mut param = probe_param("c", Location::Body);
+    param.injection_context = Some(InjectionContext::Html(None));
+    target.reflection_params.push(param);
+
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/save"));
+
+    analyze_parameters(&mut target, &args, None).await;
+
+    let c = target
+        .reflection_params
+        .iter()
+        .find(|p| p.name == "c")
+        .expect("param c survives analysis");
+    // The all-invalid verdict from the non-echoing write is cleared, not kept.
+    assert!(
+        c.invalid_specials.as_ref().is_none_or(|v| v.is_empty()),
+        "no-echo special-char verdict must be discarded under --sxss, got {:?}",
+        c.invalid_specials
+    );
+}

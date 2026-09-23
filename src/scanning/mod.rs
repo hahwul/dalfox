@@ -668,31 +668,130 @@ impl ScanWorkerCtx {
             return;
         }
 
-        // Save a reference copy for the HPP phase (only first 5 payloads)
-        // before the reflection phase consumes `reflection_payloads`. Gate on
-        // the same condition `run_hpp_phase` checks (Query location) so we don't
-        // clone payloads for params whose HPP phase would immediately return.
-        let hpp_payloads: Vec<String> =
-            if self.args.hpp && param.location == crate::parameter_analysis::Location::Query {
-                reflection_payloads.iter().take(5).cloned().collect()
-            } else {
-                vec![]
+        // Under `--sxss`, snapshot this parameter's retrieval pages once, before
+        // it injects anything, so the reflection/DOM phases can tell a payload
+        // *this* parameter stored from one another parameter left there earlier
+        // (see `check_reflection::SXSS_BASELINE`). Captured after the Stage-0
+        // probe so that probe is not itself baseline-gated.
+        let sxss_baseline = if self.args.sxss {
+            Some(std::sync::Arc::new(
+                crate::scanning::check_reflection::capture_sxss_baseline(
+                    self.client.as_ref(),
+                    &self.target,
+                    &param,
+                    &self.args,
+                )
+                .await,
+            ))
+        } else {
+            None
+        };
+
+        let phases = async {
+            // Stored-XSS store-probe (baseline-gated). Stage 0 above is
+            // deliberately *not* baseline-gated, so a sibling field that never
+            // stores still passes it on the marker the storing field left on the
+            // retrieval page during analysis — and then runs the whole payload
+            // catalog, every payload correctly refused but each refusal paying
+            // the full retrieval retry/backoff loop (measured at tens of
+            // thousands of requests for one non-storing field). Re-probe the
+            // marker now, inside the baseline scope: the credit gate returns a
+            // hit only when *this* field's own injection raised the marker's
+            // occurrence above the pre-injection baseline, i.e. this field
+            // actually stores. If it does not, skip the catalog entirely.
+            // `--deep-scan` keeps the catalog (it must not depend on this gate).
+            // Non-`--sxss` scans keep the per-payload retries; `--sxss` decides
+            // below from the store-probe (a synchronous sink skips them, a
+            // write-behind sink keeps them).
+            let mut sxss_skip_payload_retries = false;
+            if self.args.sxss && !self.args.deep_scan {
+                let outcome = check_reflection::sxss_store_probe(
+                    self.client.as_ref(),
+                    &self.target,
+                    &param,
+                    &self.args,
+                )
+                .await;
+                if !outcome.stored {
+                    crate::dbg_log!(
+                        "sxss store-probe (param={}): injection did not raise the marker count above the baseline — field does not store here, skipping the payload catalog",
+                        param.name
+                    );
+                    self.flush_results(&mut state.local_results).await;
+                    return;
+                }
+                // Only skip the per-payload retrieval retries when the store was
+                // visible on the first pass. A write-behind sink (store visible
+                // only after a wait) keeps the full retries so a delayed payload
+                // is not missed.
+                sxss_skip_payload_retries = outcome.synchronous;
+                if !sxss_skip_payload_retries {
+                    crate::dbg_log!(
+                        "sxss store-probe (param={}): store is write-behind — keeping per-payload retrieval retries",
+                        param.name
+                    );
+                }
+            }
+
+            // Save a reference copy for the HPP phase (only first 5 payloads)
+            // before the reflection phase consumes `reflection_payloads`. Gate on
+            // the same condition `run_hpp_phase` checks (Query location) so we don't
+            // clone payloads for params whose HPP phase would immediately return.
+            let hpp_payloads: Vec<String> =
+                if self.args.hpp && param.location == crate::parameter_analysis::Location::Query {
+                    reflection_payloads.iter().take(5).cloned().collect()
+                } else {
+                    vec![]
+                };
+
+            let payload_phases = async {
+                if let PhaseFlow::Abort = self
+                    .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
+                    .await
+                {
+                    self.flush_results(&mut state.local_results).await;
+                    return;
+                }
+                if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await
+                {
+                    self.flush_results(&mut state.local_results).await;
+                    return;
+                }
+                self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
+
+                self.flush_results(&mut state.local_results).await;
             };
 
-        if let PhaseFlow::Abort = self
-            .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
-            .await
-        {
-            self.flush_results(&mut state.local_results).await;
-            return;
-        }
-        if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await {
-            self.flush_results(&mut state.local_results).await;
-            return;
-        }
-        self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
+            // Under `--sxss` with a *synchronous* sink, disable the per-payload
+            // retrieval retries for the payload phases only (the store-probe
+            // above kept them): the store-probe confirmed the sink stores on the
+            // first pass, so a non-stored payload no longer pays the backoff
+            // loop. A write-behind sink keeps the retries. See
+            // `check_reflection::SXSS_SKIP_PAYLOAD_RETRIES`.
+            if sxss_skip_payload_retries {
+                crate::scanning::check_reflection::SXSS_SKIP_PAYLOAD_RETRIES
+                    .scope(true, payload_phases)
+                    .await;
+            } else {
+                payload_phases.await;
+            }
+        };
 
-        self.flush_results(&mut state.local_results).await;
+        // The baseline is a task-local, and task-locals do not cross
+        // `tokio::spawn`. Everything that consults the credit gate
+        // (`check_reflection::sxss_injection_credited`) must run inside this
+        // scope on the same task: the gate fails *open* when the baseline is
+        // missing, so a spawn inside the reflection/DOM phases would silently
+        // bring back the wrong-field stored-XSS finding. Guarded by
+        // `sxss_credit_gate_always_sees_a_baseline_during_the_phases`.
+        match sxss_baseline {
+            Some(baseline) => {
+                crate::scanning::check_reflection::SXSS_BASELINE
+                    .scope(baseline, phases)
+                    .await
+            }
+            None => phases.await,
+        }
     }
 
     /// Stage 0 fast probe: detect whether the param reflects at all before

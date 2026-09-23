@@ -1422,3 +1422,50 @@ async fn test_check_form_discovery_caps_get_form_fields() {
          (plus the single JSON-body probe), got {probed}"
     );
 }
+
+/// Under `--sxss`, form fields are kept even when the write response does not
+/// echo the probe (a stored sink answers "saved"), carrying the form URLs the
+/// stored-XSS stages resolve their check URLs from. Without `--sxss` the same
+/// non-echoing form still yields nothing.
+#[tokio::test]
+async fn test_check_form_discovery_keeps_unreflected_fields_only_when_asked() {
+    use axum::{Router, response::Html, routing::get};
+    let app = Router::new()
+        .route(
+            "/",
+            get(|| async { Html(r#"<form action="/save" method="post"><input name="c"></form>"#) }),
+        )
+        .route("/save", axum::routing::post(|| async { Html("saved") }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let target = crate::target_parser::parse_target(&format!("http://{addr}/")).expect("target");
+
+    for keep in [false, true] {
+        let params = Arc::new(Mutex::new(Vec::new()));
+        check_form_discovery_with(&target, params.clone(), Arc::new(Semaphore::new(4)), keep).await;
+        let params = params.lock().await;
+        let body: Vec<_> = params
+            .iter()
+            .filter(|p| p.location == Location::Body)
+            .collect();
+        if keep {
+            assert_eq!(body.len(), 1, "{params:?}");
+            assert_eq!(body[0].name, "c");
+            assert_eq!(
+                body[0].form_action_url.as_deref(),
+                Some(format!("http://{addr}/save").as_str())
+            );
+            assert_eq!(
+                body[0].form_origin_url.as_deref(),
+                Some(format!("http://{addr}/").as_str())
+            );
+        } else {
+            assert!(params.is_empty(), "{params:?}");
+        }
+    }
+}
