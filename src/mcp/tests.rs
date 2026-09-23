@@ -4380,24 +4380,40 @@ async fn a_cancelled_call_does_not_hide_a_worker_panic() {
     let mut args = default_scan_args(&format!("{target}/?q=1"));
     // The second reason: a budget the scan cannot meet against this target.
     args.scan_timeout = 1;
+    let requests_sent = mcp
+        .lock_jobs()
+        .get("racing")
+        .expect("job")
+        .progress
+        .requests_sent
+        .clone();
 
     let runner = {
         let mcp = mcp.clone();
         tokio::spawn(async move { mcp.run_job("racing".to_string(), Arc::new(args)).await })
     };
-    // Stand in for the client's cancellation, which writes its reason while
-    // the worker is still winding down.
+    // The job now counts reachability inside its scan budget, and cancellation
+    // can stop that gate. Wait until reachability has completed and the
+    // preflight GET has started so this still exercises the timeout/cancel race
+    // during the slower discovery phase.
+    let mut reached_preflight = false;
     for _ in 0..200 {
         let running = {
             let jobs = mcp.lock_jobs();
             jobs.get("racing")
                 .is_some_and(|j| j.status == JobStatus::Running)
         };
-        if running {
+        let preflight_started = requests_sent.load(std::sync::atomic::Ordering::Relaxed) >= 2;
+        if running && preflight_started {
+            reached_preflight = true;
             break;
         }
         sleep(Duration::from_millis(10)).await;
     }
+    assert!(
+        reached_preflight,
+        "the scan should reach its preflight GET before this cancellation race"
+    );
     mcp.cancel_job("racing", "the client cancelled the tool call");
     let _ = tokio::time::timeout(Duration::from_secs(60), runner).await;
     server.abort();

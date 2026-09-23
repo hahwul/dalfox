@@ -329,18 +329,20 @@ pub(crate) async fn run_scan_job(
         );
     }
 
-    // Reachability gate. A parseable-but-unreachable target (connection
-    // refused, DNS failure, TLS error, timeout) otherwise runs the full
-    // pipeline and finishes `done` with 0 findings — indistinguishable from
-    // "scanned, found no XSS". /preflight already probes reachability and
-    // returns reachable:false; mirror that here so /scan clients can tell the
-    // two apart. Any HTTP response (including 4xx/5xx) counts as reachable.
-    if !send_reachability_probe(&target).await {
+    // The shared execution path performs the reachability gate inside the
+    // job's request-counter and rate-limiter scopes, before any scan work.
+    let run = crate::job::runner::execute_scan(
+        &mut target,
+        &args,
+        &progress,
+        &cancel_flag,
+        &|msg: &str| log(&state, "WRN", &format!("id={} {}", job_id, msg)),
+    )
+    .await;
+
+    if run.reachability_failed {
         // The target is fully hydrated here, so deliver the terminal webhook
-        // through its proxy/TLS/redirect-aware client — matching the done /
-        // cancelled paths. Without this, the unreachable/error webhook went out
-        // on a bare default client and silently failed whenever the callback
-        // host was only reachable via the scan's configured proxy.
+        // through its proxy/TLS-aware client just like other job errors.
         let cb_client = target.build_client_or_default();
         mark_job_error(
             &state,
@@ -352,17 +354,6 @@ pub(crate) async fn run_scan_job(
         .await;
         return;
     }
-
-    // The scan itself — shared verbatim with the MCP runtime; only the warning
-    // sink differs, so the job id is bound into it here.
-    let run = crate::job::runner::execute_scan(
-        &mut target,
-        &args,
-        &progress,
-        &cancel_flag,
-        &|msg: &str| log(&state, "WRN", &format!("id={} {}", job_id, msg)),
-    )
-    .await;
 
     let results = run.results.clone();
     let timed_out = run.timed_out;

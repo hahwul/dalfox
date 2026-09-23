@@ -78,6 +78,8 @@ pub(crate) fn hydrate_target(url: &str, args: &ScanArgs) -> Result<Target, Strin
 /// store. `results` is the live accumulator the scan wrote into.
 pub(crate) struct ScanRun {
     pub(crate) results: Arc<Mutex<Vec<ScanResult>>>,
+    /// The reachability request failed before any scan work began.
+    pub(crate) reachability_failed: bool,
     /// The whole-scan wall-clock budget expired (`scan_timeout`).
     pub(crate) timed_out: bool,
     /// The cancellation flag was set — by the caller, or by the budget above.
@@ -158,12 +160,40 @@ pub(crate) async fn execute_scan(
     // session was gone — either before the scan began or by the time it ended.
     // Carries the signal that fired, verbatim into `error_message`.
     let mut session_lost: Option<String> = None;
+    let reachability_failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reachability_failed_for_scan = reachability_failed.clone();
     let scan_fut = crate::with_job_rate_limiter(
         args.rate_limit,
         crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
         crate::REQUEST_FAILURE_COUNT_JOB.scope(progress.requests_failed.clone(), async {
             crate::WAF_CONSECUTIVE_BLOCKS_JOB
                 .scope(job_waf_consecutive.clone(), async {
+                    // Reachability belongs to this scoped phase: its request
+                    // must count toward live job progress and share the same
+                    // rate-limit budget as preflight and scan requests. A
+                    // cancelled job must not send the preliminary request.
+                    if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    match crate::job::send_job_reachability_probe(
+                        target,
+                        progress,
+                        cancel_flag.as_ref(),
+                    )
+                    .await
+                    {
+                        Some(true) => {}
+                        Some(false) => {
+                            reachability_failed_for_scan
+                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                            return;
+                        }
+                        None => return,
+                    }
+                    if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+
                     // Remote payload / wordlist fetch. Inside the budget on
                     // purpose: `scan_timeout` is a promise about the whole job,
                     // and both front ends used to do this fetch *before*
@@ -486,6 +516,7 @@ pub(crate) async fn execute_scan(
     }
     ScanRun {
         results,
+        reachability_failed: reachability_failed.load(std::sync::atomic::Ordering::Relaxed),
         worker_panics: scan_report.worker_panics,
         timed_out,
         was_cancelled,
