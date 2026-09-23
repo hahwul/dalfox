@@ -188,7 +188,7 @@ fn a_downgrade_after_this_runs_completion_is_not_deduped_against_the_loaded_outc
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
         sf.record(&target, TargetOutcome::Completed);
-        sf.downgrade_completed(target_identity(&target));
+        sf.downgrade_completed(sf.identity(&target));
     }
 
     let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
@@ -214,9 +214,9 @@ fn a_downgrade_leaves_retryable_outcomes_alone() {
     for _ in 0..4 {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
         sf.record(&down, TargetOutcome::Error);
-        sf.downgrade_completed(target_identity(&down));
+        sf.downgrade_completed(sf.identity(&down));
         // Nothing on record at all: nothing to downgrade either.
-        sf.downgrade_completed(target_identity(&never));
+        sf.downgrade_completed(sf.identity(&never));
     }
 
     let contents = read(&path);
@@ -594,18 +594,31 @@ fn credential_headers_are_recognised_by_name() {
         "authorization",
         "Proxy-Authorization",
         "X-Api-Key",
+        "Partner-Api-Key",
         "X-Auth-Token",
         "X-CSRF-Token",
-        "X-Session-Id",
+        "X-XSRF-Token",
+        "X-Session-Token",
+        "X-Client-Session-Id",
         "X-Amz-Security-Token",
+        "X-Access-Key",
+        "X-JWT-Assertion",
     ] {
         assert!(is_credential_header(name), "{name}");
     }
+    // Ordinary headers that merely contain a credential-ish word.
     for name in [
         "User-Agent",
         "Accept-Language",
         "X-Forwarded-For",
         "X-Tenant",
+        "X-Author",
+        "Author",
+        "X-Authority",
+        "Oauth-Scope",
+        "X-Session-Lang",
+        "X-Signature-Version",
+        "Tokenizer-Mode",
     ] {
         assert!(!is_credential_header(name), "{name}");
     }
@@ -656,8 +669,10 @@ fn credential_values_do_not_change_the_hash_but_names_do() {
     );
 }
 
+// Run-wide credentials (-H / --cookies) rotate on re-login and are left out;
+// the same header inside an imported capture defines a distinct request.
 #[test]
-fn target_identity_ignores_credential_values_only() {
+fn target_identity_ignores_only_run_wide_credential_values() {
     let t = |cookie: &str, auth: &str, tenant: &str| {
         let mut t = test_target("http://example.test/a?q=1", "GET");
         t.cookies = vec![("sid".to_string(), cookie.to_string())];
@@ -665,8 +680,30 @@ fn target_identity_ignores_credential_values_only() {
             ("Authorization".to_string(), auth.to_string()),
             ("X-Tenant".to_string(), tenant.to_string()),
         ];
-        target_identity(&t)
+        t
     };
-    assert_eq!(t("a", "Bearer a", "acme"), t("b", "Bearer b", "acme"));
-    assert_ne!(t("a", "Bearer a", "acme"), t("a", "Bearer a", "other"));
+    let cli_for = |cookie: &str, auth: &str| {
+        CliCredentials::from_args(&ScanArgs {
+            headers: vec![format!("Authorization: {auth}")],
+            cookies: vec![format!("sid={cookie}")],
+            ..Default::default()
+        })
+    };
+    let (a, b) = (cli_for("a", "Bearer a"), cli_for("b", "Bearer b"));
+    assert_eq!(
+        target_identity(&t("a", "Bearer a", "acme"), &a),
+        target_identity(&t("b", "Bearer b", "acme"), &b),
+        "rotated run-wide credentials keep the identity"
+    );
+    assert_ne!(
+        target_identity(&t("a", "Bearer a", "acme"), &a),
+        target_identity(&t("a", "Bearer a", "other"), &a),
+    );
+    // No run-wide credentials: the capture's own values count.
+    let none = CliCredentials::default();
+    assert_ne!(
+        target_identity(&t("a", "Bearer tenant-a", "acme"), &none),
+        target_identity(&t("a", "Bearer tenant-b", "acme"), &none),
+        "captures differing only by Authorization are distinct requests"
+    );
 }

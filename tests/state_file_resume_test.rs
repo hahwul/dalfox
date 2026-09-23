@@ -806,46 +806,116 @@ async fn rotating_session_credentials_resumes_instead_of_rescanning() {
     }
 }
 
-// Same rule for a raw HTTP capture re-exported after re-login: the Cookie and
-// Authorization values change, nothing else does.
+// A raw HTTP capture: run-wide `-H` / `--cookies` credentials layered on top
+// still rotate freely, but a credential *inside* the capture is part of that
+// request — a capture with a different `Authorization` is a different request
+// and is scanned again.
 #[tokio::test]
-async fn a_raw_http_capture_with_rotated_session_resumes() {
+async fn a_raw_http_capture_resumes_on_run_wide_rotation_only() {
     let _serial = serial().await;
     let (base, hits, server) = spawn_app().await;
     let state = unique_temp_path("resume-raw-rotate", "jsonl");
     let capture = unique_temp_path("resume-raw-rotate-input", "http");
     let host = base.trim_start_matches("http://").to_string();
-    let capture_for = |session: &str, tenant: &str| {
+    let capture_for = |captured_auth: &str| {
         format!(
-            "GET {base}/a?q=1 HTTP/1.1\r\nHost: {host}\r\nCookie: sid={session}\r\nAuthorization: Bearer {session}\r\nX-Tenant: {tenant}\r\n\r\n"
+            "GET {base}/a?q=1 HTTP/1.1\r\nHost: {host}\r\nX-Api-Key: {captured_auth}\r\nX-Tenant: acme\r\n\r\n"
         )
     };
-    let args_for = |out: &Path| ScanArgs {
+    let args_for = |out: &Path, session: &str| ScanArgs {
         input_type: "raw-http".to_string(),
         targets: vec![capture.to_string_lossy().to_string()],
+        headers: vec![format!("Authorization: Bearer {session}")],
+        cookies: vec![format!("sid={session}")],
         ..lean_args(&[], out, &state)
     };
 
-    std::fs::write(&capture, capture_for("first", "acme")).expect("write capture");
+    std::fs::write(&capture, capture_for("key-1")).expect("write capture");
     let out1 = unique_temp_path("resume-raw-rotate1", "json");
-    run_scan(&args_for(&out1)).await;
+    run_scan(&args_for(&out1, "first")).await;
     let after_first = hits.load(Ordering::Relaxed);
     assert!(after_first > 0);
 
-    std::fs::write(&capture, capture_for("second", "acme")).expect("rewrite capture");
     let out2 = unique_temp_path("resume-raw-rotate2", "json");
-    run_scan(&args_for(&out2)).await;
-    assert_eq!(hits.load(Ordering::Relaxed), after_first);
+    run_scan(&args_for(&out2, "second")).await;
+    assert_eq!(
+        hits.load(Ordering::Relaxed),
+        after_first,
+        "rotated run-wide credentials must not force a rescan"
+    );
     assert_eq!(read_meta(&out2)["resumed"]["targets_skipped_completed"], 1);
 
-    std::fs::write(&capture, capture_for("second", "other")).expect("rewrite capture");
+    std::fs::write(&capture, capture_for("key-2")).expect("rewrite capture");
     let out3 = unique_temp_path("resume-raw-rotate3", "json");
-    run_scan(&args_for(&out3)).await;
+    run_scan(&args_for(&out3, "second")).await;
     server.abort();
-    assert!(hits.load(Ordering::Relaxed) > after_first);
+    assert!(
+        hits.load(Ordering::Relaxed) > after_first,
+        "a capture with a different credential is a different request"
+    );
     assert_eq!(read_meta(&out3)["resumed"]["targets_skipped_completed"], 0);
 
     for p in [&state, &capture, &out1, &out2, &out3] {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+// Two captured requests that differ only by `Authorization` (tenant A vs
+// tenant B, the usual authz-testing shape) are distinct requests: each gets
+// its own identity, so one's completion can never skip the other.
+#[tokio::test]
+async fn captures_differing_only_by_authorization_keep_separate_identities() {
+    let _serial = serial().await;
+    let (base, hits, server) = spawn_app().await;
+    let state = unique_temp_path("resume-har-tenants", "jsonl");
+    let har = unique_temp_path("resume-har-tenants-input", "har");
+    let entry = |tenant: &str| {
+        format!(
+            r#"{{"request":{{"method":"GET","url":"{base}/a?q=1","headers":[{{"name":"Authorization","value":"Bearer {tenant}"}}],"cookies":[]}}}}"#
+        )
+    };
+    let write_har = |tenants: &[&str]| {
+        let entries: Vec<String> = tenants.iter().map(|t| entry(t)).collect();
+        std::fs::write(
+            &har,
+            format!(
+                r#"{{"log":{{"version":"1.2","entries":[{}]}}}}"#,
+                entries.join(",")
+            ),
+        )
+        .expect("write HAR");
+    };
+    let args_for = |out: &Path| ScanArgs {
+        input_type: "har".to_string(),
+        targets: vec![har.to_string_lossy().to_string()],
+        dedup_urls: Some("off".to_string()),
+        ..lean_args(&[], out, &state)
+    };
+
+    write_har(&["tenant-a", "tenant-b"]);
+    let out1 = unique_temp_path("resume-har-tenants1", "json");
+    run_scan(&args_for(&out1)).await;
+    let hashes: std::collections::HashSet<String> = std::fs::read_to_string(&state)
+        .expect("state file")
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v["request_hash"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(hashes.len(), 2, "one identity per tenant capture");
+    let after_first = hits.load(Ordering::Relaxed);
+
+    // A third tenant is new work; the two recorded ones are skipped.
+    write_har(&["tenant-a", "tenant-b", "tenant-c"]);
+    let out2 = unique_temp_path("resume-har-tenants2", "json");
+    run_scan(&args_for(&out2)).await;
+    server.abort();
+    assert_eq!(read_meta(&out2)["resumed"]["targets_skipped_completed"], 2);
+    assert!(
+        hits.load(Ordering::Relaxed) > after_first,
+        "tenant-c must be scanned"
+    );
+
+    for p in [&state, &har, &out1, &out2] {
         let _ = std::fs::remove_file(p);
     }
 }
