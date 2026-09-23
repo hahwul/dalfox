@@ -1064,6 +1064,14 @@ fn xml_dtd_entities_and_malformed_tails_recover_dom_verification() {
         ),
         payload = payload
     );
+    let xhtml_with_entity_before_payload = format!(
+        concat!(
+            "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" ",
+            "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>&nbsp;{payload}</body></html>"
+        ),
+        payload = payload
+    );
     let malformed_xhtml = format!(
         "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}<broken></body></html>"
     );
@@ -1078,6 +1086,7 @@ fn xml_dtd_entities_and_malformed_tails_recover_dom_verification() {
 
     for (content_type, body) in [
         ("application/xhtml+xml", xhtml_with_dtd_and_unknown_entity),
+        ("application/xhtml+xml", xhtml_with_entity_before_payload),
         ("application/xhtml+xml", malformed_xhtml),
         ("image/svg+xml", svg_with_dtd),
     ] {

@@ -49,15 +49,20 @@ pub(crate) fn parse_xml_document(xml: &str) -> XmlDocument<'_> {
         Err(error) => {
             crate::dbg_log!("XML parse failed; using bounded recovery parsing: {error}");
             let error_offset = xml_error_offset(xml, &error);
-            let allow_active_root = matches!(
+            // XHTML public DTDs define entities such as `&nbsp;` that
+            // roxmltree does not expand. The browser can still parse content
+            // after those references, so recover those documents over the
+            // complete body instead of dropping the suffix at the error.
+            let recover_complete_body = matches!(
                 error,
                 roxmltree::Error::UnknownEntityReference(_, _) | roxmltree::Error::DtdDetected
             );
-            XmlDocument::Recovered(recover_xml(
-                &xml[..error_offset.min(xml.len())],
-                allow_active_root,
-                false,
-            ))
+            let recovery_source = if recover_complete_body {
+                xml
+            } else {
+                &xml[..error_offset.min(xml.len())]
+            };
+            XmlDocument::Recovered(recover_xml(recovery_source, recover_complete_body, false))
         }
     }
 }
