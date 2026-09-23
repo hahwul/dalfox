@@ -1133,6 +1133,18 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     if let Some(ua) = args.user_agent.as_ref().filter(|ua| !ua.is_empty()) {
         target.headers.push(("User-Agent".to_string(), ua.clone()));
         target.user_agent = Some(ua.clone());
+    } else if let Some(ua) = args.headers.iter().rev().find_map(|header| {
+        let (name, value) = header.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("user-agent")
+            .then(|| value.trim().to_string())
+    }) {
+        // `-H` is an explicit header override too. Imported raw-HTTP/HAR
+        // requests carry their captured UA separately, so without updating
+        // this field the common request builder replaces the CLI header with
+        // the captured value. Keep the last CLI `-H User-Agent` and let an
+        // explicit `--user-agent` take precedence above.
+        target.user_agent = Some(ua);
     } else if target.user_agent.is_none() {
         target.user_agent = Some("".to_string());
     }

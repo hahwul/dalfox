@@ -428,6 +428,8 @@ fn apply_request_cli_overrides_only_overrides_explicit_flags() {
         "k=v",
         "-H",
         "X-Extra: yes",
+        "-H",
+        "User-Agent: Header/7",
         "--user-agent",
         "Agent/9",
         "--cookies",
@@ -452,7 +454,28 @@ fn apply_request_cli_overrides_only_overrides_explicit_flags() {
             .any(|(k, v)| k == "User-Agent" && v == "Agent/9")
     );
     assert_eq!(target.user_agent.as_deref(), Some("Agent/9"));
+    assert_eq!(target.effective_user_agent(), Some("Agent/9"));
     assert!(target.cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
+}
+
+#[test]
+fn apply_request_cli_header_overrides_imported_user_agent() {
+    let mut target = crate::target_parser::parse_raw_http_request(
+        "GET /p HTTP/1.1\r\nHost: ov.example\r\nUser-Agent: captured-agent\r\n\r\n",
+    )
+    .expect("raw request parses");
+    let args = args_from(&[
+        "-i",
+        "raw-http",
+        "-S",
+        "-H",
+        "User-Agent: cli-agent",
+        "ignored.example",
+    ]);
+
+    apply_request_cli_overrides(&mut target, &args);
+
+    assert_eq!(target.effective_user_agent(), Some("cli-agent"));
 }
 
 #[test]
