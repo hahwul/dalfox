@@ -18,11 +18,15 @@ pub(crate) async fn run_ast_dom_analysis(
     target: &Target,
     param: &Param,
     response_text: &str,
+    xml_response: bool,
     ast_seen: &mut HashSet<String>,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
-    let (js_blocks, script_element_ids) =
-        crate::scanning::ast_integration::extract_js_and_script_ids(response_text);
+    let (js_blocks, script_element_ids) = if xml_response {
+        crate::scanning::ast_integration::extract_js_and_script_ids_from_xml(response_text)
+    } else {
+        crate::scanning::ast_integration::extract_js_and_script_ids(response_text)
+    };
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
     for js_code in js_blocks {
         let findings =

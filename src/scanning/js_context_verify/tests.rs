@@ -221,6 +221,23 @@ fn detects_jsonp_callback_alert_payload() {
 }
 
 #[test]
+fn javascript_body_evidence_accepts_only_a_payload_introduced_sink_call() {
+    let payload = "alert(1);foo";
+    assert!(has_javascript_body_evidence(
+        payload,
+        "alert(1);foo({\"data\":1})"
+    ));
+    assert!(!has_javascript_body_evidence(
+        payload,
+        "const q = \"alert(1);foo\";"
+    ));
+    assert!(!has_javascript_body_evidence(
+        "harmless",
+        "alert(1);foo({})"
+    ));
+}
+
+#[test]
 fn jsonp_fallback_skipped_when_script_block_present() {
     // A real `<script>` block is present, so the JSONP fallback shouldn't
     // run. Prevents accidental escalation when an HTML page has

@@ -393,12 +393,9 @@ pub(crate) fn content_type_primary(ct: &str) -> Option<String> {
     Some(primary)
 }
 
-/// Allow-list check for HTML-ish content types.
-/// Accepts:
-/// - text/html
-/// - application/xhtml+xml
-/// - text/xml, application/xml
-/// - application/rss+xml, application/atom+xml
+/// Allow-list check for response types that use an HTML document parser.
+/// XHTML is included because its namespace-aware XML document has active HTML
+/// elements; generic XML, feeds, and SVG use different parsers/types.
 #[inline]
 pub(crate) fn is_htmlish_content_type(ct: &str) -> bool {
     let Some(primary) = content_type_primary(ct) else {
@@ -407,14 +404,80 @@ pub(crate) fn is_htmlish_content_type(ct: &str) -> bool {
     if primary == "text/html" {
         return true;
     }
-    matches!(
-        primary.as_str(),
-        "application/xhtml+xml"
-            | "text/xml"
-            | "application/xml"
-            | "application/rss+xml"
-            | "application/atom+xml"
-    )
+    primary == "application/xhtml+xml"
+}
+
+/// Whether the supplied MIME type uses an XML parser when navigated.
+#[inline]
+pub(crate) fn is_xml_content_type(ct: &str) -> bool {
+    let Some(primary) = content_type_primary(ct) else {
+        return false;
+    };
+    primary == "application/xml"
+        || primary == "text/xml"
+        || primary
+            .split_once('/')
+            .is_some_and(|(_, subtype)| subtype.ends_with("+xml"))
+}
+
+/// Whether the bytes would create an active markup document when opened as a
+/// top-level browser navigation. Content-Type alone is insufficient for
+/// missing/invalid types, while XML types must be parsed as XML rather than
+/// recovered as HTML by scraper.
+pub(crate) fn response_has_markup_document(ct: &str, body: &str) -> bool {
+    match content_type_primary(ct).as_deref() {
+        Some("text/html") => true,
+        Some(primary) if is_xml_content_type(primary) => {
+            let document = crate::utils::xml::parse_xml_document(body);
+            crate::utils::xml::document_has_markup_for_content_type(primary, body, &document)
+        }
+        Some("unknown/unknown" | "application/unknown" | "*/*") => body_sniffs_as_html(body),
+        Some(_) => false,
+        None => body_sniffs_as_html(body),
+    }
+}
+
+/// Match the HTML signatures used when a browsing context sniffs a response
+/// with no valid supplied MIME type. In particular, a JSON object containing
+/// `<svg…>` later in a string is not sniffed as HTML, and a bare `<svg>` is not
+/// one of the HTML signatures.
+fn body_sniffs_as_html(body: &str) -> bool {
+    const SIGNATURES: &[&[u8]] = &[
+        b"<!doctype html",
+        b"<html",
+        b"<head",
+        b"<script",
+        b"<iframe",
+        b"<h1",
+        b"<div",
+        b"<font",
+        b"<table",
+        b"<a",
+        b"<style",
+        b"<title",
+        b"<b",
+        b"<body",
+        b"<br",
+        b"<p",
+        b"<!--",
+    ];
+    let header = &body.as_bytes()[..body.len().min(1445)];
+    let mut start = 0;
+    while header
+        .get(start)
+        .is_some_and(|byte| matches!(*byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0c))
+    {
+        start += 1;
+    }
+    let header = &header[start..];
+    SIGNATURES.iter().any(|signature| {
+        header
+            .get(..signature.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(signature))
+            && header
+                .get(signature.len())
+                .is_some_and(|byte| matches!(*byte, b' ' | b'>'))
+    })
 }
 
 /// True when a response Content-Type declares an executable-JavaScript body
@@ -425,8 +488,10 @@ pub(crate) fn is_htmlish_content_type(ct: &str) -> bool {
 /// payload that executes *as JavaScript* (e.g. a JSONP callback name) is
 /// exploitable there.
 ///
-/// Deliberately excludes `text/plain` and empty/missing types, which browsers
-/// content-sniff into HTML when `X-Content-Type-Options: nosniff` is absent.
+/// Deliberately excludes `text/plain` and empty/missing types: the former is
+/// never parsed as HTML for a top-level navigation, while the latter can only
+/// be classified after checking whether its body matches an HTML sniffing
+/// signature.
 #[inline]
 pub(crate) fn is_javascript_content_type(ct: &str) -> bool {
     let Some(primary) = content_type_primary(ct) else {
@@ -446,11 +511,11 @@ pub(crate) fn is_javascript_content_type(ct: &str) -> bool {
 /// even when they are not directly HTML documents.
 ///
 /// This is intentionally broader than `is_htmlish_content_type` because
-/// browser-executable or browser-consumed responses such as JSONP, raw JSON
-/// fragments, and SVG documents can still surface XSS gadgets or reflective
-/// payloads that Dalfox should analyze during preflight.
+/// JSONP, raw JSON fragments, SVG, generic XML, and plain-text endpoints are
+/// useful scan surfaces. Later finding gates decide whether the response can
+/// execute in the relevant browser context.
 pub(crate) fn is_xss_scannable_content_type(ct: &str) -> bool {
-    if is_htmlish_content_type(ct) {
+    if is_htmlish_content_type(ct) || is_xml_content_type(ct) {
         return true;
     }
 
@@ -468,8 +533,8 @@ pub(crate) fn is_xss_scannable_content_type(ct: &str) -> bool {
             | "text/ecmascript"
             | "application/x-javascript"
             | "image/svg+xml"
-            // text/plain may render as HTML when X-Content-Type-Options is absent
-            // and the response contains HTML-like content (content-type sniffing).
+            // Plain-text endpoints remain useful scan surfaces; body-aware
+            // finding gates suppress them as markup documents.
             | "text/plain"
     )
 }
@@ -479,16 +544,18 @@ pub(crate) fn is_xss_scannable_content_type(ct: &str) -> bool {
 /// script, so a payload reflected into the body is not exploitable as
 /// reflected XSS regardless of the injection context inside it.
 ///
-/// Deliberately a tight deny-list of structured-data / binary types
+/// Deliberately a tight deny-list of structured-data / XML / binary types
 /// (`application/json`, `text/csv`, `application/octet-stream`, fonts, raw
 /// media) rather than the inverse of the HTML allow-list, because the grey
 /// zone must stay *scannable* to avoid false negatives:
 ///   * `application/javascript` / `text/javascript` — a reflected callback
 ///     name is executable when the response is loaded via `<script src>`
 ///     (JSONP injection), so these are NOT inert.
-///   * `text/plain` — browsers content-sniff it as HTML when
-///     `X-Content-Type-Options: nosniff` is absent, so it is NOT inert.
-///   * empty / missing Content-Type — also sniffable, NOT inert.
+///   * `text/plain` is handled after reading the body so browser behavior stays
+///     explicit at the caller; a supplied text/plain type is never sniffed into
+///     HTML, regardless of `X-Content-Type-Options`.
+///   * empty / missing Content-Type is body-dependent: recognized HTML
+///     signatures are sniffed as HTML, while JSON and ordinary text are not.
 pub(crate) fn content_type_is_inert_data(ct: &str) -> bool {
     let Some(primary) = content_type_primary(ct) else {
         return false;

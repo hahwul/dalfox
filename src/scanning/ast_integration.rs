@@ -55,6 +55,171 @@ pub(crate) fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<Str
     (js_blocks, script_ids)
 }
 
+/// Extract executable inline JavaScript from a well-formed XML document.
+/// Unlike html5ever, this preserves XML's case-sensitive element and
+/// attribute names, and only considers elements in active XHTML/SVG
+/// namespaces. The caller is responsible for checking the response MIME type
+/// and XML document validity before using this path.
+pub(crate) fn extract_js_and_script_ids_from_xml(xml: &str) -> (Vec<String>, HashSet<String>) {
+    extract_js_and_script_ids_from_xml_document(crate::utils::xml::parse_xml_document(xml))
+}
+
+fn extract_js_and_script_ids_from_xml_document(
+    document: crate::utils::xml::XmlDocument<'_>,
+) -> (Vec<String>, HashSet<String>) {
+    const XHTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
+    const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
+
+    let mut js_blocks = Vec::new();
+    let mut script_ids = HashSet::new();
+    let mut seen = HashSet::new();
+
+    match document {
+        crate::utils::xml::XmlDocument::Parsed(document) => {
+            for node in document.descendants().filter(|node| {
+                node.is_element()
+                    && matches!(
+                        node.tag_name().namespace(),
+                        Some(XHTML_NAMESPACE | SVG_NAMESPACE)
+                    )
+            }) {
+                let tag = node.tag_name();
+                if tag.name() == "script" {
+                    if let Some(id) = node.attribute("id") {
+                        let trimmed = id.trim();
+                        if !trimmed.is_empty() {
+                            script_ids.insert(trimmed.to_string());
+                        }
+                    }
+                    let has_external_source = node.attribute("src").is_some()
+                        || node
+                            .attributes()
+                            .any(|attr| attr.name() == "href" && attr.namespace().is_some());
+                    let script_type = node.attribute("type").unwrap_or("");
+                    if !has_external_source && xml_script_type_is_javascript(script_type) {
+                        let code: String = node
+                            .descendants()
+                            .filter(|child| child.is_text())
+                            .filter_map(|child| child.text())
+                            .collect();
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
+                }
+
+                for attr in node.attributes() {
+                    let name = attr.name();
+                    let value = attr.value().trim();
+                    if value.is_empty() {
+                        continue;
+                    }
+                    let code = if name.starts_with("on") && name.len() > 2 {
+                        Some(value.to_string())
+                    } else if name == "href"
+                        && (attr.namespace().is_none()
+                            || attr.namespace() == Some("http://www.w3.org/1999/xlink"))
+                        && value
+                            .get(..11)
+                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
+                    {
+                        Some(value[11..].trim().to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(code) = code {
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
+                }
+            }
+        }
+        crate::utils::xml::XmlDocument::Recovered(document)
+            if crate::utils::xml::recovered_xml_has_active_markup(&document) =>
+        {
+            for node in document
+                .document
+                .root_element()
+                .descendent_elements()
+                .filter(|node| crate::utils::xml::recovered_element_is_active_xml(&document, *node))
+            {
+                if !crate::utils::xml::recovered_xml_element_is_complete(&document, node) {
+                    continue;
+                }
+                let element = node.value();
+                if element.name() == "script" {
+                    if let Some(id) = element.attr("id") {
+                        let trimmed = id.trim();
+                        if !trimmed.is_empty() {
+                            script_ids.insert(trimmed.to_string());
+                        }
+                    }
+                    if element.attr("src").is_none() && script_type_is_javascript(element) {
+                        let code: String = node.text().collect();
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
+                }
+
+                for (name, value) in element.attrs() {
+                    let value = value.trim();
+                    let code = if name.starts_with("on") && name.len() > 2 {
+                        Some(value.to_string())
+                    } else if name == "href"
+                        && value
+                            .get(..11)
+                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
+                    {
+                        Some(value[11..].trim().to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(code) = code {
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
+                }
+            }
+        }
+        crate::utils::xml::XmlDocument::Recovered(_) => {}
+    }
+
+    (js_blocks, script_ids)
+}
+
+fn xml_script_type_is_javascript(script_type: &str) -> bool {
+    let script_type = script_type
+        .trim_matches(|c| matches!(c, '\t' | '\n' | '\u{000C}' | '\r' | ' '))
+        .to_ascii_lowercase();
+    matches!(
+        script_type.as_str(),
+        "" | "module"
+            | "application/ecmascript"
+            | "application/javascript"
+            | "application/x-ecmascript"
+            | "application/x-javascript"
+            | "text/ecmascript"
+            | "text/javascript"
+            | "text/javascript1.0"
+            | "text/javascript1.1"
+            | "text/javascript1.2"
+            | "text/javascript1.3"
+            | "text/javascript1.4"
+            | "text/javascript1.5"
+            | "text/jscript"
+            | "text/livescript"
+            | "text/x-ecmascript"
+            | "text/x-javascript"
+    )
+}
+
 /// Extract JS blocks (inline `<script>` bodies, `on*` handler bodies, and
 /// `javascript:` href bodies) from an already-parsed document. Factored out of
 /// [`extract_javascript_from_html`] so [`extract_js_and_script_ids`] can reuse
@@ -1109,13 +1274,48 @@ pub(crate) fn build_ast_dom_xss_result(
 /// CLI does — they previously skipped it because they didn't run the
 /// preflight step that produced the response body, so identical
 /// targets produced 0 findings via API but multiple via CLI.
+#[cfg(test)]
 pub(crate) fn run_initial_ast_dom_analysis(
     response_text: &str,
     target_url: &str,
     target_method: &str,
     posture: PageSecurityPosture,
 ) -> Vec<crate::scanning::result::Result> {
-    let (js_blocks, script_element_ids) = extract_js_and_script_ids(response_text);
+    run_initial_ast_dom_analysis_for_response(
+        response_text,
+        "text/html",
+        target_url,
+        target_method,
+        posture,
+    )
+}
+
+/// Run initial-page AST analysis only when the response is a browser-active
+/// markup document. `text/html` and sniffable unknown types use the HTML
+/// parser; XML response types use the namespace-aware XML extractor.
+pub(crate) fn run_initial_ast_dom_analysis_for_response(
+    response_text: &str,
+    content_type: &str,
+    target_url: &str,
+    target_method: &str,
+    posture: PageSecurityPosture,
+) -> Vec<crate::scanning::result::Result> {
+    let (js_blocks, script_element_ids) = if crate::utils::is_xml_content_type(content_type) {
+        let document = crate::utils::xml::parse_xml_document(response_text);
+        if !crate::utils::xml::document_has_markup_for_content_type(
+            content_type,
+            response_text,
+            &document,
+        ) {
+            return Vec::new();
+        }
+        extract_js_and_script_ids_from_xml_document(document)
+    } else {
+        if !crate::utils::response_has_markup_document(content_type, response_text) {
+            return Vec::new();
+        }
+        extract_js_and_script_ids(response_text)
+    };
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();
     for js_code in js_blocks {
         let findings = analyze_javascript_for_dom_xss_with_html_context(

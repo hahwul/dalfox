@@ -2902,6 +2902,50 @@ fn generate_param_jobs_total_tasks_matches_payload_counts() {
 }
 
 #[test]
+fn xml_namespace_payloads_are_scoped_small_and_keep_verifiers_ahead_of_caps() {
+    let mut param = req_param("q", "seed", Location::Query);
+    param.injection_context = Some(InjectionContext::Html(None));
+    param.xml_namespace_candidate = Some("image/svg+xml; charset=utf-8".to_string());
+    param.valid_specials = Some(vec!['<', '>', '"', '\'']);
+    let target = target_with_params(vec![param]);
+    let mut args = integration_scan_args(true);
+    args.max_payloads_per_param = 1;
+    let shared = vec!["<shared-csp-payload>".to_string()];
+    let (jobs, _) = super::generate_param_jobs(&target, &args, None, &shared);
+    let (_, reflection, dom) = &jobs[0];
+    let marker = crate::scanning::markers::class_marker();
+
+    assert_eq!(reflection.len(), 1);
+    assert!(
+        reflection[0].starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""),
+        "image/svg+xml should try the SVG namespace verifier before the cap"
+    );
+    assert!(reflection[0].contains(&format!("class=\"{marker}\"")));
+    assert!(reflection[0].contains("onload=\"alert(1)\""));
+    assert!(
+        dom.is_empty(),
+        "the reflection response verifies XML payloads directly"
+    );
+    assert!(
+        !reflection
+            .iter()
+            .chain(dom)
+            .any(|payload| payload == "<shared-csp-payload>"),
+        "inert XML candidates should not regain the full shared catalog"
+    );
+
+    let mut html_param = req_param("q", "seed", Location::Query);
+    html_param.injection_context = Some(InjectionContext::Html(None));
+    let html_target = target_with_params(vec![html_param]);
+    let (html_jobs, _) = super::generate_param_jobs(&html_target, &args, None, &[]);
+    assert_ne!(
+        html_jobs[0].1,
+        crate::scanning::payload_families::get_xml_namespace_payloads("image/svg+xml"),
+        "XML namespace payloads must not replace or bloat the normal HTML family"
+    );
+}
+
+#[test]
 fn generate_param_jobs_respects_max_payloads_per_param() {
     let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
     let mut args = integration_scan_args(true);

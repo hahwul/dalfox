@@ -1124,6 +1124,47 @@ async fn active_probe_does_not_record_an_echo_from_an_inert_content_type() {
     );
 }
 
+#[tokio::test]
+async fn active_probe_marks_reflected_unnamespaced_xml_for_small_namespace_family() {
+    use axum::{Router, extract::Query, response::IntoResponse, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn xml_echo(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let value = p.get("x").cloned().unwrap_or_default();
+        (
+            [("content-type", "text/xml; charset=utf-8")],
+            format!("<root>{value}</root>"),
+        )
+    }
+
+    let app = Router::new().route("/xml", get(xml_echo));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/xml?x=1")).unwrap();
+    let mut param = probe_param("x", Location::Query);
+    param.injection_context = Some(InjectionContext::Html(None));
+    let res = active_probe_param(&target, param, Arc::new(Semaphore::new(8))).await;
+
+    assert!(
+        !res.marker_echoed,
+        "an unnamespaced XML echo is not yet an executable markup document"
+    );
+    assert_eq!(
+        res.xml_namespace_candidate.as_deref(),
+        Some("text/xml; charset=utf-8"),
+        "retain the echoed parameter for the small namespace-activating payload family"
+    );
+}
+
 /// Path parameters keep their Stage-0 probe: the path suppressions
 /// (`should_suppress_path_reflection_with_body`, the non-2xx error-page rule)
 /// need the body, which this cheap content-type check cannot stand in for.

@@ -196,6 +196,33 @@ async fn vuln_jsonp_callback(Query(p): Query<HashMap<String, String>>) -> impl I
     )
 }
 
+/// Echoes an HTML-looking value inside a JSON response. Navigation renders the
+/// JSON data as text; it does not feed the embedded markup to an HTML parser.
+async fn safe_json_html_echo(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )],
+        serde_json::json!({ "q": q }).to_string(),
+    )
+}
+
+/// HTML gadget served without a Content-Type so the browser's MIME sniffing
+/// selects the HTML parser. Preflight must keep the GET body even when both
+/// HEAD and GET omit the header, allowing initial AST analysis to find it.
+async fn missing_ct_dom_html() -> impl IntoResponse {
+    let mut response = Html(
+        "<!doctype html><html><body><script>document.body.innerHTML=location.hash</script></body></html>",
+    )
+    .into_response();
+    response
+        .headers_mut()
+        .remove(axum::http::header::CONTENT_TYPE);
+    response
+}
+
 /// Inert-JSONP fixture: reflects the param into a *string literal* of a
 /// `application/javascript` body, with quotes escaped, so neither an HTML tag
 /// nor a callback-name injection executes. A browser runs the body as script
@@ -510,6 +537,8 @@ async fn start_test_server() -> SocketAddr {
         .route("/js/inline-event", get(vuln_inline_event))
         .route("/safe/js-apos-encoded", get(safe_js_apos_encoded))
         .route("/safe/js-string-appjs", get(safe_js_string_literal_appjs))
+        .route("/safe/json-html", get(safe_json_html_echo))
+        .route("/missing-ct-dom", get(missing_ct_dom_html))
         .route("/jsonp", get(vuln_jsonp_callback))
         // Reflected: CSS
         .route("/css/style", get(vuln_css_style))
@@ -911,6 +940,41 @@ async fn test_appjs_string_literal_no_false_v() {
 }
 
 #[tokio::test]
+async fn test_deep_scan_does_not_verify_html_echoed_as_json() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.deep_scan = true;
+    args.targets = vec![format!("http://{addr}/safe/json-html?q=test")];
+    let findings = run_scan_and_collect(args).await;
+
+    assert!(
+        findings.is_empty(),
+        "deep scan must not parse an application/json body as HTML: {:?}",
+        findings
+            .iter()
+            .map(|f| (f["type"].as_str(), f["evidence"].as_str()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_missing_content_type_html_reaches_initial_ast_analysis() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.skip_discovery = true;
+    args.skip_ast_analysis = false;
+    args.skip_xss_scanning = true;
+    args.targets = vec![format!("http://{addr}/missing-ct-dom")];
+    let findings = run_scan_and_collect(args).await;
+
+    assert_has_type(
+        &findings,
+        "A",
+        "HTML sniffed from a missing Content-Type must reach initial AST analysis",
+    );
+}
+
+#[tokio::test]
 async fn test_inert_js_apos_encoded_reflection_is_not_reported() {
     // Mirrors brutelogic c1 / c5: server HTML-encodes `'` and `<` before
     // reflecting into a JS string. Inside <script> entities don't decode,
@@ -1240,5 +1304,57 @@ async fn test_partial_reflection_hex_extract() {
         "[hex-extract] expected >{} requests, got {}",
         PARTIAL_REFLECTION_BASELINE_REQUESTS,
         count
+    );
+}
+
+#[tokio::test]
+async fn deep_xml_response_survives_and_verifies_namespace_payload() {
+    use axum::{extract::Query, response::IntoResponse};
+
+    async fn deep_xml_echo(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let value = params.get("q").cloned().unwrap_or_default();
+        let mut body = format!("<root>{value}{}", "<n>".repeat(10_000));
+        body.push_str(&"</n>".repeat(10_000));
+        body.push_str("</root>");
+        ([("content-type", "application/xml; charset=utf-8")], body)
+    }
+
+    let app = Router::new().route("/xml", get(deep_xml_echo));
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind XML fixture listener");
+    let addr = listener.local_addr().expect("XML fixture address");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve XML fixture");
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/xml?q=seed")];
+    let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let output = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/scratch")
+        .join(format!("deep_xml_scan_{id}.json"));
+    std::fs::create_dir_all(output.parent().expect("scratch directory"))
+        .expect("create target scratch directory");
+    args.output = Some(output.to_string_lossy().into_owned());
+
+    let _guard = SCAN_LOCK.lock().await;
+    dalfox::REQUEST_COUNT.store(0, Ordering::Relaxed);
+    scan::run_scan(&args).await;
+    let requests = dalfox::REQUEST_COUNT.load(Ordering::Relaxed);
+
+    let results: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&output).expect("read deep XML scan output"))
+            .expect("parse deep XML scan output");
+    let _ = std::fs::remove_file(&output);
+    let findings = results["findings"].as_array().expect("findings array");
+    assert!(
+        requests <= 21,
+        "inert unnamespaced XML should use the small verifier set, sent {requests} requests"
+    );
+    assert!(
+        findings.iter().any(|finding| finding["type"] == "V"),
+        "namespaced XML payload should verify on the response; got {findings:?}"
     );
 }

@@ -497,6 +497,7 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     true
 }
 
+#[cfg(test)]
 pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     if !payload_has_any_marker(payload) {
         return false;
@@ -724,25 +725,6 @@ impl DomEvidenceKind {
             DomEvidenceKind::InlineHandlerBreakout => "inline handler JS breakout",
         }
     }
-
-    /// True when this evidence is derived from HTML-parsing the response body
-    /// (a DOM marker, a `javascript:` URL in an attribute, an injected element
-    /// carrying a sink handler, or a breakout of an existing `on*` handler).
-    ///
-    /// Such evidence only confirms exploitability when a browser actually parses
-    /// the body as markup. A response served as executable JavaScript
-    /// (`application/javascript`, JSONP) is run as script and never HTML-parsed,
-    /// so an HTML tag reflected into it is inert — only [`Self::JsContext`]
-    /// evidence (the payload runs as JavaScript) confirms XSS there.
-    pub(crate) fn requires_html_rendering(&self) -> bool {
-        match self {
-            DomEvidenceKind::Marker
-            | DomEvidenceKind::ExecutableUrl
-            | DomEvidenceKind::HtmlStructural
-            | DomEvidenceKind::InlineHandlerBreakout => true,
-            DomEvidenceKind::JsContext => false,
-        }
-    }
 }
 
 /// Returns the evidence kind that confirms the payload is exploitable, or
@@ -783,10 +765,342 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
             return Some(DomEvidenceKind::HtmlStructural);
         }
     }
-    if needs_js && crate::scanning::js_context_verify::has_js_context_evidence(payload, text) {
+    if needs_js
+        && crate::scanning::js_context_verify::has_inline_script_context_evidence(payload, text)
+    {
         return Some(DomEvidenceKind::JsContext);
     }
     if needs_js && has_inline_handler_breakout_evidence(payload, text) {
+        return Some(DomEvidenceKind::InlineHandlerBreakout);
+    }
+    None
+}
+
+fn classify_dom_evidence_in_recovered_xml(
+    payload: &str,
+    text: &str,
+    document: &scraper::Html,
+) -> Option<DomEvidenceKind> {
+    let needs_markers = payload_has_any_marker(payload);
+    let needs_attrs = payload_is_executable_url_protocol(payload);
+    let needs_html_struct = payload.contains('<')
+        && crate::scanning::js_context_verify::payload_carries_js_sink(payload)
+        && body_looks_html_renderable(text);
+    let needs_js = crate::scanning::js_context_verify::payload_carries_js_sink(payload);
+    if !needs_markers && !needs_attrs && !needs_html_struct && !needs_js {
+        return None;
+    }
+    if needs_markers && has_marker_evidence_in_doc(payload, document) {
+        return Some(DomEvidenceKind::Marker);
+    }
+    if needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, document) {
+        return Some(DomEvidenceKind::ExecutableUrl);
+    }
+    if needs_html_struct && has_html_structural_evidence_in_doc(payload, document) {
+        return Some(DomEvidenceKind::HtmlStructural);
+    }
+    if needs_js
+        && crate::scanning::js_context_verify::has_inline_script_context_evidence(payload, text)
+    {
+        return Some(DomEvidenceKind::JsContext);
+    }
+    if needs_js && has_inline_handler_breakout_evidence(payload, text) {
+        return Some(DomEvidenceKind::InlineHandlerBreakout);
+    }
+    None
+}
+
+/// Classify evidence using the browser's response parser for the supplied
+/// Content-Type. JavaScript responses are parsed as JavaScript (preserving
+/// callable JSONP sinks); HTML, sniffable unknown-type responses, XHTML, and
+/// SVG are parsed as markup only when their browser document is active.
+pub(crate) fn classify_dom_evidence_for_response(
+    payload: &str,
+    text: &str,
+    content_type: &str,
+) -> Option<DomEvidenceKind> {
+    if crate::utils::is_javascript_content_type(content_type) {
+        return crate::scanning::js_context_verify::has_javascript_body_evidence(payload, text)
+            .then_some(DomEvidenceKind::JsContext);
+    }
+    match crate::utils::content_type_primary(content_type).as_deref() {
+        Some("application/xhtml+xml") => {
+            classify_xml_response(payload, text, "http://www.w3.org/1999/xhtml", "html")
+        }
+        Some("image/svg+xml") => {
+            classify_xml_response(payload, text, "http://www.w3.org/2000/svg", "svg")
+        }
+        Some(primary) if crate::utils::is_xml_content_type(primary) => {
+            classify_xml_response_with_active_namespaces(payload, text)
+        }
+        _ if crate::utils::response_has_markup_document(content_type, text) => {
+            classify_dom_evidence(payload, text)
+        }
+        _ => None,
+    }
+}
+
+/// Classify a body that has already passed the response-type gate in the
+/// reflection fetcher. `ReflectionBody` retains the executable-JavaScript bit
+/// because its public shape cannot carry the entire response header map.
+pub(crate) fn classify_dom_evidence_for_reflection_body(
+    payload: &str,
+    text: &str,
+    javascript_body: bool,
+    xml_body: bool,
+) -> Option<DomEvidenceKind> {
+    if javascript_body {
+        return crate::scanning::js_context_verify::has_javascript_body_evidence(payload, text)
+            .then_some(DomEvidenceKind::JsContext);
+    }
+    if xml_body {
+        return classify_xml_response_with_active_namespaces(payload, text);
+    }
+    classify_dom_evidence(payload, text)
+}
+
+fn classify_xml_response(
+    payload: &str,
+    text: &str,
+    namespace: &str,
+    root_name: &str,
+) -> Option<DomEvidenceKind> {
+    match crate::utils::xml::parse_xml_document(text) {
+        crate::utils::xml::XmlDocument::Parsed(document) => {
+            let root = document.root_element().tag_name();
+            (root.namespace() == Some(namespace) && root.name() == root_name)
+                .then(|| classify_dom_evidence_in_xml(payload, &document))
+                .flatten()
+        }
+        crate::utils::xml::XmlDocument::Recovered(document)
+            if crate::utils::xml::recovered_xml_root_is(text, &document, namespace, root_name)
+                && crate::utils::xml::recovered_xml_has_executable_markup_before_error(
+                    &document,
+                ) =>
+        {
+            classify_dom_evidence_in_recovered_xml(
+                payload,
+                document.source_prefix(),
+                &document.document,
+            )
+        }
+        crate::utils::xml::XmlDocument::Recovered(_) => None,
+    }
+}
+
+fn classify_xml_response_with_active_namespaces(
+    payload: &str,
+    text: &str,
+) -> Option<DomEvidenceKind> {
+    match crate::utils::xml::parse_xml_document(text) {
+        crate::utils::xml::XmlDocument::Parsed(document) => document_has_active_markup(&document)
+            .then(|| classify_dom_evidence_in_xml(payload, &document))
+            .flatten(),
+        crate::utils::xml::XmlDocument::Recovered(document)
+            if crate::utils::xml::recovered_xml_has_executable_markup_before_error(&document) =>
+        {
+            classify_dom_evidence_in_recovered_xml(
+                payload,
+                document.source_prefix(),
+                &document.document,
+            )
+        }
+        crate::utils::xml::XmlDocument::Recovered(_) => None,
+    }
+}
+
+fn document_has_active_markup(document: &roxmltree::Document<'_>) -> bool {
+    document.descendants().any(|node| xml_node_is_active(node))
+}
+
+fn xml_node_is_active(node: roxmltree::Node<'_, '_>) -> bool {
+    matches!(
+        node.tag_name().namespace(),
+        Some("http://www.w3.org/1999/xhtml" | "http://www.w3.org/2000/svg")
+    )
+}
+
+fn xml_node_is_hidden_input(node: roxmltree::Node<'_, '_>) -> bool {
+    node.tag_name().namespace() == Some("http://www.w3.org/1999/xhtml")
+        && node.tag_name().name() == "input"
+        && node
+            .attribute("type")
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("hidden"))
+}
+
+fn xml_node_is_marker(node: roxmltree::Node<'_, '_>, flags: &MarkerFlags) -> bool {
+    let class_has = |marker: &str| {
+        node.attribute("class")
+            .is_some_and(|classes| classes.split_ascii_whitespace().any(|c| c == marker))
+    };
+    let id_is = |marker: &str| node.attribute("id").is_some_and(|id| id.trim() == marker);
+    (flags.class && class_has(crate::scanning::markers::class_marker()))
+        || (flags.legacy_class && class_has("dalfox"))
+        || (flags.id && id_is(crate::scanning::markers::id_marker()))
+        || (flags.legacy_id && id_is("dalfox"))
+}
+
+fn xml_node_text(node: roxmltree::Node<'_, '_>) -> String {
+    node.descendants()
+        .filter(|child| child.is_text())
+        .filter_map(|child| child.text())
+        .collect()
+}
+
+fn xml_script_type_is_javascript(node: roxmltree::Node<'_, '_>) -> bool {
+    let Some(script_type) = node.attribute("type") else {
+        return true;
+    };
+    matches!(
+        script_type.trim().to_ascii_lowercase().as_str(),
+        "" | "module"
+            | "application/ecmascript"
+            | "application/javascript"
+            | "application/x-ecmascript"
+            | "application/x-javascript"
+            | "text/ecmascript"
+            | "text/javascript"
+            | "text/javascript1.0"
+            | "text/javascript1.1"
+            | "text/javascript1.2"
+            | "text/javascript1.3"
+            | "text/javascript1.4"
+            | "text/javascript1.5"
+            | "text/jscript"
+            | "text/livescript"
+            | "text/x-ecmascript"
+            | "text/x-javascript"
+    )
+}
+
+fn xml_node_carries_sink(node: roxmltree::Node<'_, '_>) -> bool {
+    if node
+        .attributes()
+        .any(|attr| attr.name().starts_with("on") && value_carries_js_sink(attr.value()))
+    {
+        return true;
+    }
+    node.tag_name().name() == "script"
+        && xml_script_type_is_javascript(node)
+        && value_carries_js_sink(&xml_node_text(node))
+}
+
+fn xml_node_has_payload_structural_sink(
+    node: roxmltree::Node<'_, '_>,
+    payload: &str,
+    decoded_payload: &str,
+) -> bool {
+    if xml_node_is_hidden_input(node) {
+        return false;
+    }
+    if node.attributes().any(|attr| {
+        let name = attr.name();
+        name.starts_with("on")
+            && name.len() > 2
+            && name[2..].bytes().all(|b| b.is_ascii_alphabetic())
+            && value_carries_js_sink(attr.value().trim())
+            && (payload.contains(attr.value().trim())
+                || decoded_payload.contains(attr.value().trim()))
+    }) {
+        return true;
+    }
+    node.tag_name().name() == "script" && xml_script_type_is_javascript(node) && {
+        let script = xml_node_text(node);
+        let trimmed = script.trim();
+        !trimmed.is_empty()
+            && (payload.contains(trimmed) || decoded_payload.contains(trimmed))
+            && crate::scanning::js_context_verify::has_javascript_body_evidence(trimmed, trimmed)
+    }
+}
+
+fn classify_dom_evidence_in_xml(
+    payload: &str,
+    document: &roxmltree::Document<'_>,
+) -> Option<DomEvidenceKind> {
+    let mut elements = document
+        .descendants()
+        .filter(|node| node.is_element() && xml_node_is_active(*node));
+    let flags = MarkerFlags::from_payload(payload);
+    if flags.any() {
+        let nodes: Vec<_> = elements
+            .clone()
+            .filter(|node| xml_node_is_marker(*node, &flags))
+            .collect();
+        let class_ok = (!flags.class && !flags.legacy_class)
+            || nodes.iter().any(|node| {
+                let class = node.attribute("class").unwrap_or("");
+                class.split_ascii_whitespace().any(|c| {
+                    (flags.class && c == crate::scanning::markers::class_marker())
+                        || (flags.legacy_class && c == "dalfox")
+                })
+            });
+        let id_ok = (!flags.id && !flags.legacy_id)
+            || nodes.iter().any(|node| {
+                let id = node.attribute("id").unwrap_or("").trim();
+                (flags.id && id == crate::scanning::markers::id_marker())
+                    || (flags.legacy_id && id == "dalfox")
+            });
+        let needs_sink = payload_marker_element_carries_sink(payload)
+            || payload_is_bare_attribute_handler_injection(payload);
+        let marker_has_sink = nodes.iter().any(|node| xml_node_carries_sink(*node));
+        let hidden_only_with_sink = !nodes.is_empty()
+            && nodes.iter().all(|node| xml_node_is_hidden_input(*node))
+            && marker_has_sink;
+        if class_ok && id_ok && !hidden_only_with_sink && (!needs_sink || marker_has_sink) {
+            return Some(DomEvidenceKind::Marker);
+        }
+    }
+
+    if payload_is_executable_url_protocol(payload) {
+        let payload_trimmed = payload.trim();
+        if elements.clone().any(|node| {
+            let tag = node.tag_name().name();
+            node.attributes().any(|attr| {
+                tag == tag.to_ascii_lowercase()
+                    && attr.name() == attr.name().to_ascii_lowercase()
+                    && is_executable_url_attribute(tag, attr.name())
+                    && attribute_value_executes_payload(attr.value(), payload_trimmed)
+            })
+        }) {
+            return Some(DomEvidenceKind::ExecutableUrl);
+        }
+    }
+
+    if payload.contains('<') && crate::scanning::js_context_verify::payload_carries_js_sink(payload)
+    {
+        let decoded = decode_html_entities(payload);
+        if elements
+            .clone()
+            .any(|node| xml_node_has_payload_structural_sink(node, payload, &decoded))
+        {
+            return Some(DomEvidenceKind::HtmlStructural);
+        }
+    }
+
+    if crate::scanning::js_context_verify::payload_carries_js_sink(payload)
+        && elements.clone().any(|node| {
+            node.tag_name().name() == "script"
+                && xml_script_type_is_javascript(node)
+                && crate::scanning::js_context_verify::has_javascript_body_evidence(
+                    payload,
+                    &xml_node_text(node),
+                )
+        })
+    {
+        return Some(DomEvidenceKind::JsContext);
+    }
+
+    if crate::scanning::js_context_verify::payload_carries_js_sink(payload)
+        && elements.any(|node| {
+            node.attributes().any(|attr| {
+                attr.name().starts_with("on")
+                    && crate::scanning::js_context_verify::handler_payload_hits_sink(
+                        attr.value(),
+                        payload,
+                    )
+            })
+        })
+    {
         return Some(DomEvidenceKind::InlineHandlerBreakout);
     }
     None
@@ -850,7 +1164,8 @@ fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
     false
 }
 
-/// Backward-compat boolean view used by callers that don't need the kind.
+/// Test-only boolean view for evidence fixtures that don't need the kind.
+#[cfg(test)]
 pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
     classify_dom_evidence(payload, text).is_some()
 }
@@ -883,7 +1198,7 @@ async fn verify_sxss_dom(
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
-) -> (bool, Option<String>) {
+) -> (bool, Option<String>, Option<DomEvidenceKind>) {
     let check_urls =
         crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args);
     let retries = args.sxss_retries.max(1) as u64;
@@ -920,18 +1235,20 @@ async fn verify_sxss_dom(
                     .unwrap_or("");
                 if let Ok(text) = crate::utils::http::read_body(resp).await {
                     saw_any_body = true;
-                    if crate::utils::is_htmlish_content_type(ct)
-                        && crate::scanning::check_reflection::classify_reflection(&text, payload)
-                            .is_some()
+                    if crate::scanning::check_reflection::classify_reflection(&text, payload)
+                        .is_some()
                         // Credit the stored payload to this parameter only when its
                         // injection increased the payload's occurrence over the
                         // pre-injection baseline — a copy another parameter stored
                         // earlier is already in the retrieval page (see
                         // `check_reflection::SXSS_BASELINE`).
-                        && crate::scanning::check_reflection::sxss_injection_credited(&text, payload)
-                        && has_dom_evidence(payload, &text)
+                        && crate::scanning::check_reflection::sxss_injection_credited(
+                            &text, payload,
+                        )
+                        && let Some(evidence_kind) =
+                            classify_dom_evidence_for_response(payload, &text, ct)
                     {
-                        return (true, Some(text));
+                        return (true, Some(text), Some(evidence_kind));
                     }
                 }
             }
@@ -944,7 +1261,7 @@ async fn verify_sxss_dom(
             break 'retry;
         }
     }
-    (false, None)
+    (false, None, None)
 }
 
 /// Richer result of a single DOM-verification injection (issue #1156).
@@ -990,6 +1307,15 @@ pub struct DomVerifyOutcome {
     pub status: u16,
 }
 
+/// Internal typed companion used by the scan worker to preserve the parser
+/// evidence that actually verified a response without changing the public
+/// `DomVerifyOutcome` shape.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct DomVerifyEvidenceOutcome {
+    pub(crate) outcome: DomVerifyOutcome,
+    pub(crate) evidence_kind: Option<DomEvidenceKind>,
+}
+
 /// Verify DOM evidence from a normal (non-stored) injection response.
 ///
 /// Special-case for 3xx responses: browsers do not render the response body
@@ -998,7 +1324,7 @@ pub struct DomVerifyOutcome {
 /// "DOM evidence" inside it is structurally a false positive. We still inspect
 /// `Location:` (an executable-URL protocol there is a real sink) but skip
 /// body-based DOM verification entirely.
-async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyOutcome {
+async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyEvidenceOutcome {
     let status = resp.status();
     let status_code = status.as_u16();
     let headers = resp.headers().clone();
@@ -1008,38 +1334,34 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
             && let Ok(loc_str) = location.to_str()
             && let Some((verified, response_text)) = check_redirect_location(loc_str, payload)
         {
-            return DomVerifyOutcome {
-                verified,
-                response_text,
-                reflected: false,
-                live_reflection: false,
-                status: status_code,
+            return DomVerifyEvidenceOutcome {
+                outcome: DomVerifyOutcome {
+                    verified,
+                    response_text,
+                    reflected: false,
+                    live_reflection: false,
+                    status: status_code,
+                },
+                evidence_kind: None,
             };
         }
-        return DomVerifyOutcome {
-            status: status_code,
-            ..Default::default()
+        return DomVerifyEvidenceOutcome {
+            outcome: DomVerifyOutcome {
+                status: status_code,
+                ..Default::default()
+            },
+            evidence_kind: None,
         };
     }
 
-    // A response served as executable JavaScript (JSONP) is run as script and
-    // never HTML-parsed, so HTML-parse-derived evidence (a DOM marker, a
-    // `javascript:` attribute, an injected element/handler) found inside it is
-    // inert. Only JS-context evidence — the payload runs as JavaScript, the
-    // genuine JSONP-callback case — confirms XSS there. `text/plain` and empty
-    // content-types stay eligible for HTML-parse evidence (browsers sniff them).
-    let js_body_inert_to_markup = crate::utils::is_javascript_content_type(
-        headers
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or(""),
-    );
+    let content_type = headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
 
-    // Both HTML and non-HTML (JSONP, JSON with HTML) content types are accepted
-    // as long as there is reflection + qualifying DOM evidence in the response.
-    // `reflected` is computed independently of the evidence check so an inert
-    // echo (payload present, but not executable) is still reported as reflected
-    // for the DOM-phase early-exit signal.
+    // `reflected` is computed independently of the browser-parser check so an
+    // inert echo (payload present, but not executable) can still feed the
+    // DOM-phase early-exit signal.
     if let Ok(text) = crate::utils::http::read_body(resp).await {
         // The signal the DOM-phase inert-echo early exit budgets against.
         //
@@ -1084,30 +1406,39 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyO
         // so an inert marker echo yields no finding.
         let reflected_for_evidence =
             reflected || crate::scanning::check_reflection::payload_marker_present(&text, payload);
-        let verified = reflected_for_evidence
-            && classify_dom_evidence(payload, &text)
-                .is_some_and(|kind| !(js_body_inert_to_markup && kind.requires_html_rendering()));
-        if verified {
-            return DomVerifyOutcome {
-                verified: true,
-                response_text: Some(text),
-                reflected: true,
-                live_reflection,
-                status: status_code,
+        let evidence_kind = reflected_for_evidence
+            .then(|| classify_dom_evidence_for_response(payload, &text, content_type))
+            .flatten();
+        if let Some(evidence_kind) = evidence_kind {
+            return DomVerifyEvidenceOutcome {
+                outcome: DomVerifyOutcome {
+                    verified: true,
+                    response_text: Some(text),
+                    reflected: true,
+                    live_reflection,
+                    status: status_code,
+                },
+                evidence_kind: Some(evidence_kind),
             };
         }
-        return DomVerifyOutcome {
-            verified: false,
-            response_text: None,
-            reflected,
-            live_reflection,
-            status: status_code,
+        return DomVerifyEvidenceOutcome {
+            outcome: DomVerifyOutcome {
+                verified: false,
+                response_text: None,
+                reflected,
+                live_reflection,
+                status: status_code,
+            },
+            evidence_kind: None,
         };
     }
 
-    DomVerifyOutcome {
-        status: status_code,
-        ..Default::default()
+    DomVerifyEvidenceOutcome {
+        outcome: DomVerifyOutcome {
+            status: status_code,
+            ..Default::default()
+        },
+        evidence_kind: None,
     }
 }
 
@@ -1154,8 +1485,22 @@ pub async fn check_dom_verification_with_client_outcome(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
 ) -> DomVerifyOutcome {
+    check_dom_verification_with_evidence(client, target, param, payload, args)
+        .await
+        .outcome
+}
+
+/// Scan-worker entry point that also carries the typed parser evidence for the
+/// finding label. The public outcome API above remains unchanged.
+pub(crate) async fn check_dom_verification_with_evidence(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> DomVerifyEvidenceOutcome {
     if args.skip_xss_scanning {
-        return DomVerifyOutcome::default();
+        return DomVerifyEvidenceOutcome::default();
     }
 
     // Apply pre-encoding if the parameter requires it.
@@ -1186,18 +1531,22 @@ pub async fn check_dom_verification_with_client_outcome(
         // reflected/status signals are not meaningfully observable from the
         // single injection above, so leave them at their conservative defaults
         // (the DOM-phase early exit therefore never engages under --sxss).
-        let (verified, response_text) = verify_sxss_dom(client, target, param, payload, args).await;
-        DomVerifyOutcome {
-            verified,
-            response_text,
-            reflected: false,
-            live_reflection: false,
-            status: 0,
+        let (verified, response_text, evidence_kind) =
+            verify_sxss_dom(client, target, param, payload, args).await;
+        DomVerifyEvidenceOutcome {
+            outcome: DomVerifyOutcome {
+                verified,
+                response_text,
+                reflected: false,
+                live_reflection: false,
+                status: 0,
+            },
+            evidence_kind,
         }
     } else if let Ok(resp) = inject_resp {
         verify_normal_dom(resp, payload).await
     } else {
-        DomVerifyOutcome::default()
+        DomVerifyEvidenceOutcome::default()
     }
 }
 

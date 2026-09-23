@@ -98,10 +98,6 @@ fn test_content_type_primary_invalid_inputs() {
 fn test_is_htmlish_content_type_allow_list() {
     assert!(is_htmlish_content_type("text/html"));
     assert!(is_htmlish_content_type("application/xhtml+xml"));
-    assert!(is_htmlish_content_type("application/xml; charset=utf-8"));
-    assert!(is_htmlish_content_type("text/xml"));
-    assert!(is_htmlish_content_type("application/rss+xml"));
-    assert!(is_htmlish_content_type("application/atom+xml"));
 }
 
 #[test]
@@ -109,7 +105,164 @@ fn test_is_htmlish_content_type_deny_list() {
     assert!(!is_htmlish_content_type("application/json"));
     assert!(!is_htmlish_content_type("text/plain"));
     assert!(!is_htmlish_content_type("image/svg+xml"));
+    assert!(!is_htmlish_content_type("application/xml; charset=utf-8"));
+    assert!(!is_htmlish_content_type("text/xml"));
+    assert!(!is_htmlish_content_type("application/rss+xml"));
+    assert!(!is_htmlish_content_type("application/atom+xml"));
     assert!(!is_htmlish_content_type("invalid"));
+}
+
+#[test]
+fn response_has_markup_document_follows_browser_parser_type() {
+    let html = "<!doctype html><html><body><script>alert(1)</script></body></html>";
+    let xhtml = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><script>alert(1)</script></body></html>";
+    let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>";
+
+    assert!(response_has_markup_document(
+        "text/html; charset=utf-8",
+        html
+    ));
+    assert!(response_has_markup_document(
+        "application/xhtml+xml; charset=utf-8",
+        xhtml
+    ));
+    assert!(response_has_markup_document(
+        "image/svg+xml; charset=utf-8",
+        svg
+    ));
+
+    for content_type in [
+        "application/json",
+        "application/javascript",
+        "text/plain",
+        "text/plain; charset=utf-8",
+        "text/plain; charset=windows-1252",
+        "text/csv",
+        "image/png",
+    ] {
+        assert!(
+            !response_has_markup_document(content_type, html),
+            "{content_type} must not be parsed as an HTML document"
+        );
+    }
+}
+
+#[test]
+fn response_has_markup_document_sniffs_only_unknown_types_and_valid_xml_documents() {
+    let html = "  \n<!DOCTYPE html><html><script>alert(1)</script></html>";
+    let json = r#"{"q":"<script>alert(1)</script>"}"#;
+    let bare_svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>";
+    let valid_xhtml = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body /></html>";
+    let valid_svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><script /></svg>";
+
+    assert!(response_has_markup_document("", html));
+    assert!(response_has_markup_document("not a mime type", html));
+    for unknown_type in ["unknown/unknown", "application/unknown", "*/*"] {
+        assert!(response_has_markup_document(unknown_type, html));
+    }
+    assert!(!response_has_markup_document("", json));
+    assert!(!response_has_markup_document("", bare_svg));
+    assert!(!response_has_markup_document(
+        "",
+        "<script\t>alert(1)</script>"
+    ));
+    assert!(!response_has_markup_document(
+        "",
+        "<script\n>alert(1)</script>"
+    ));
+    assert!(!response_has_markup_document(
+        "application/xhtml+xml",
+        "<html><body><script>alert(1)</script></body></html>"
+    ));
+    assert!(!response_has_markup_document(
+        "application/xhtml+xml",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><script>alert(1)</body></html>"
+    ));
+    assert!(response_has_markup_document(
+        "application/xhtml+xml",
+        valid_xhtml
+    ));
+    assert!(response_has_markup_document("image/svg+xml", valid_svg));
+    let namespaced_xhtml =
+        "<doc xmlns:h=\"http://www.w3.org/1999/xhtml\"><h:script>alert(1)</h:script></doc>";
+    let namespaced_svg = "<doc xmlns:s=\"http://www.w3.org/2000/svg\"><s:svg><s:script>alert(1)</s:script></s:svg></doc>";
+    for xml_type in [
+        "application/xml",
+        "text/xml; charset=utf-8",
+        "application/atom+xml",
+    ] {
+        assert!(response_has_markup_document(xml_type, namespaced_xhtml));
+        assert!(response_has_markup_document(xml_type, namespaced_svg));
+        assert!(!response_has_markup_document(
+            xml_type,
+            "<doc><script>alert(1)</script></doc>"
+        ));
+    }
+    assert!(!response_has_markup_document(
+        "image/svg+xml",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</svg>"
+    ));
+}
+
+#[test]
+fn xml_doctypes_and_recovery_documents_keep_browser_active_markup() {
+    let xhtml_doctype = concat!(
+        "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" ",
+        "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>&nbsp;</body></html>"
+    );
+    let svg_doctype = concat!(
+        "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" ",
+        "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"
+    );
+    let malformed_xhtml = concat!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>",
+        "<script>alert(1)</script><broken></body></html>"
+    );
+
+    assert!(response_has_markup_document(
+        "application/xhtml+xml",
+        xhtml_doctype
+    ));
+    assert!(response_has_markup_document("image/svg+xml", svg_doctype));
+    assert!(response_has_markup_document(
+        "application/xhtml+xml",
+        malformed_xhtml
+    ));
+}
+
+#[test]
+fn xml_response_types_at_ten_thousand_depth_use_bounded_recovery() {
+    let deep = "<n>".repeat(10_000);
+    let close = "</n>".repeat(10_000);
+    let fixtures = [
+        (
+            "application/xml",
+            format!(
+                "<root><script xmlns=\"http://www.w3.org/1999/xhtml\">alert(1)</script>{deep}{close}</root>"
+            ),
+        ),
+        (
+            "application/xhtml+xml",
+            format!(
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><script>alert(1)</script>{deep}{close}</body></html>"
+            ),
+        ),
+        (
+            "image/svg+xml",
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script>{deep}{close}</svg>"
+            ),
+        ),
+    ];
+
+    for (content_type, body) in fixtures {
+        assert!(
+            response_has_markup_document(content_type, &body),
+            "{content_type} should use its active markup prefix after depth overflow"
+        );
+    }
 }
 
 #[test]
@@ -134,6 +287,8 @@ fn test_is_xss_scannable_content_type_allow_list() {
     assert!(is_xss_scannable_content_type("text/html"));
     assert!(is_xss_scannable_content_type("application/json"));
     assert!(is_xss_scannable_content_type("application/javascript"));
+    assert!(is_xss_scannable_content_type("application/xml"));
+    assert!(is_xss_scannable_content_type("application/atom+xml"));
     assert!(is_xss_scannable_content_type(
         "text/javascript; charset=utf-8"
     ));
@@ -173,6 +328,8 @@ fn test_content_type_is_inert_data_keeps_executable_and_sniffable() {
     assert!(!content_type_is_inert_data("text/html"));
     assert!(!content_type_is_inert_data("application/xhtml+xml"));
     assert!(!content_type_is_inert_data("image/svg+xml"));
+    assert!(!content_type_is_inert_data("application/xml"));
+    assert!(!content_type_is_inert_data("application/atom+xml"));
     assert!(!content_type_is_inert_data("application/javascript"));
     assert!(!content_type_is_inert_data(
         "text/javascript; charset=utf-8"
@@ -599,13 +756,14 @@ fn test_a_typeless_response_is_still_treated_as_live() {
 
 #[test]
 fn test_content_type_is_never_markup_keeps_live_types_live() {
-    // A genuinely executable or renderable type must stay scannable. JSONP is
-    // the one that would hurt — `application/javascript` executes via
-    // `<script src>` regardless of any response header.
+    // A type whose body may contain active markup must reach the body-aware
+    // gate. XML is conditional on namespace and well-formedness.
     for ct in [
         "text/html",
         "application/xhtml+xml",
         "image/svg+xml",
+        "application/xml",
+        "application/atom+xml",
         "application/javascript",
         "text/javascript",
     ] {

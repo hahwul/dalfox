@@ -55,7 +55,10 @@ async fn xhtml_handler(Query(params): Query<HashMap<String, String>>) -> impl In
     (
         StatusCode::OK,
         [("content-type", "application/xhtml+xml")],
-        format!("<html><body>{}</body></html>", q),
+        format!(
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{}</body></html>",
+            q
+        ),
     )
 }
 
@@ -530,7 +533,7 @@ async fn test_check_dom_verification_marker_survives_case_fold() {
 #[tokio::test]
 async fn test_check_dom_verification_accepts_xhtml_content_type() {
     let payload = format!(
-        "<img src=x onerror=alert(1) id={}>",
+        "<img src=\"x\" onerror=\"alert(1)\" id=\"{}\" />",
         crate::scanning::markers::id_marker()
     );
     let addr = start_mock_server("stored").await;
@@ -541,7 +544,7 @@ async fn test_check_dom_verification_accepts_xhtml_content_type() {
     let (found, _) = check_dom_verification(&target, &param, &payload, &args).await;
     assert!(
         found,
-        "application/xhtml+xml should be treated as HTML-like"
+        "well-formed XHTML with an executable payload should verify"
     );
 }
 
@@ -566,8 +569,9 @@ async fn test_check_dom_verification_rejects_non_html_without_marker() {
 }
 
 #[tokio::test]
-async fn test_check_dom_verification_accepts_non_html_with_marker() {
-    // Non-HTML responses WITH marker evidence should pass (JSONP/JSON XSS cases)
+async fn test_check_dom_verification_rejects_json_with_marker() {
+    // Marker-like HTML inside a JSON string is data in a top-level navigation.
+    let _counter_lock = crate::REQUEST_COUNTER_TEST_LOCK.lock().await;
     let payload = format!(
         "<script class={}>alert(1)</script>",
         crate::scanning::markers::class_marker()
@@ -579,8 +583,8 @@ async fn test_check_dom_verification_accepts_non_html_with_marker() {
 
     let (found, _body) = check_dom_verification(&target, &param, &payload, &args).await;
     assert!(
-        found,
-        "non-HTML responses with marker evidence should pass DOM verification for JSONP/JSON XSS"
+        !found,
+        "JSON is not parsed as HTML even when its string contains marker markup"
     );
 }
 
@@ -943,21 +947,6 @@ fn test_has_marker_evidence_entity_encoded_sink() {
     );
 }
 
-/// The evidence kinds derived from HTML-parsing the response body require the
-/// browser to actually render it as markup; JS-context evidence does not. This
-/// mapping gates the JSONP content-type false positive — HTML-parse evidence
-/// found in a `application/javascript` body is inert (the body runs as script).
-#[test]
-fn test_dom_evidence_kind_requires_html_rendering() {
-    use super::DomEvidenceKind::*;
-    assert!(Marker.requires_html_rendering());
-    assert!(ExecutableUrl.requires_html_rendering());
-    assert!(HtmlStructural.requires_html_rendering());
-    assert!(InlineHandlerBreakout.requires_html_rendering());
-    // JS-context evidence is valid on a JS body (the payload runs as script).
-    assert!(!JsContext.requires_html_rendering());
-}
-
 /// A JSONP-callback payload reflected as the callable identifier of a JS body
 /// (`callback=…` → `…({"data":1})`) must classify as JS-context evidence — the
 /// genuine JSONP XSS — and NOT rely on an HTML marker.
@@ -966,11 +955,223 @@ fn test_jsonp_callback_payload_yields_js_context_evidence() {
     for payload in crate::scanning::get_jsonp_callback_payloads() {
         let body = format!("{payload}({{\"data\":1}})");
         assert_eq!(
-            classify_dom_evidence(&payload, &body),
+            classify_dom_evidence_for_response(&payload, &body, "application/javascript"),
             Some(super::DomEvidenceKind::JsContext),
             "JSONP payload {payload:?} should verify via JS-context AST in body {body:?}"
         );
     }
+}
+
+#[test]
+fn response_type_gates_dom_evidence_before_html_parsing() {
+    let class_marker = crate::scanning::markers::class_marker();
+    let payload = format!("<svg class=\"{class_marker}\" onload=\"alert(1)\" />");
+    let marked_html = format!("<html><body>{payload}</body></html>");
+    let json = format!("{{\"echo\":\"{}\"}}", payload.replace('"', "\\\""));
+
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &json, "application/json"),
+        None
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &json, ""),
+        None,
+        "an unknown-type JSON body does not match an HTML sniff signature"
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &marked_html, "text/plain; charset=utf-8"),
+        None,
+        "a supplied text/plain stays plain text, with or without nosniff"
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &marked_html, "text/csv"),
+        None
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &marked_html, "application/xml"),
+        None
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &marked_html, "text/html"),
+        Some(DomEvidenceKind::Marker)
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(&payload, &marked_html, ""),
+        Some(DomEvidenceKind::Marker),
+        "an HTML sniff signature without Content-Type remains eligible"
+    );
+}
+
+#[test]
+fn response_type_gates_require_well_formed_xhtml_and_svg() {
+    let marker = crate::scanning::markers::class_marker();
+    let xhtml_payload = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"{marker}\" onload=\"alert(1)\" />"
+    );
+    let xhtml =
+        format!("<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{xhtml_payload}</body></html>");
+    let malformed_xhtml = xhtml.replace("</body>", "");
+    let svg_payload = format!("<svg class=\"{marker}\" onload=\"alert(1)\" />");
+    let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{svg_payload}</svg>");
+    let malformed_svg = svg.replace("</svg>", "");
+
+    assert!(
+        classify_dom_evidence_for_response(
+            &xhtml_payload,
+            &xhtml,
+            "application/xhtml+xml; charset=utf-8"
+        )
+        .is_some()
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(
+            &xhtml_payload,
+            &malformed_xhtml,
+            "application/xhtml+xml"
+        ),
+        None
+    );
+    assert!(classify_dom_evidence_for_response(&svg_payload, &svg, "image/svg+xml").is_some());
+    assert_eq!(
+        classify_dom_evidence_for_response(&svg_payload, &malformed_svg, "image/svg+xml"),
+        None
+    );
+
+    let case_sensitive_payload = format!("<SCRIPT class=\"{marker}\" ONLOAD=\"alert(1)\" />");
+    let case_sensitive_xhtml = format!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{case_sensitive_payload}</body></html>"
+    );
+    assert_eq!(
+        classify_dom_evidence_for_response(
+            &case_sensitive_payload,
+            &case_sensitive_xhtml,
+            "application/xhtml+xml"
+        ),
+        None,
+        "XML tag and event attribute names are case-sensitive"
+    );
+}
+
+#[test]
+fn xml_dtd_entities_and_malformed_tails_recover_dom_verification() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class=\"{marker}\">alert(1)</script>");
+    let xhtml_with_dtd_and_unknown_entity = format!(
+        concat!(
+            "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" ",
+            "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}&nbsp;</body></html>"
+        ),
+        payload = payload
+    );
+    let xhtml_with_entity_before_payload = format!(
+        concat!(
+            "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" ",
+            "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>&nbsp;{payload}</body></html>"
+        ),
+        payload = payload
+    );
+    let malformed_xhtml = format!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}<broken></body></html>"
+    );
+    let svg_with_dtd = format!(
+        concat!(
+            "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" ",
+            "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{payload}</svg>"
+        ),
+        payload = payload
+    );
+
+    for (content_type, body) in [
+        ("application/xhtml+xml", xhtml_with_dtd_and_unknown_entity),
+        ("application/xhtml+xml", xhtml_with_entity_before_payload),
+        ("application/xhtml+xml", malformed_xhtml),
+        ("image/svg+xml", svg_with_dtd),
+    ] {
+        assert_eq!(
+            classify_dom_evidence_for_response(&payload, &body, content_type),
+            Some(DomEvidenceKind::Marker),
+            "{content_type} should preserve the executable marker before parser recovery"
+        );
+    }
+}
+
+#[test]
+fn xml_dom_verification_at_ten_thousand_nesting_levels_does_not_recurse() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class=\"{marker}\">alert(1)</script>");
+    let open = "<n>".repeat(10_000);
+    let close = "</n>".repeat(10_000);
+    let cases = [
+        (
+            "application/xml",
+            format!(
+                "<root><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"{marker}\" onload=\"alert(1)\"/>{open}{close}</root>"
+            ),
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"{marker}\" onload=\"alert(1)\"/>"
+            ),
+        ),
+        (
+            "application/xhtml+xml",
+            format!(
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}{open}{close}</body></html>"
+            ),
+            payload.clone(),
+        ),
+        (
+            "image/svg+xml",
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{payload}{open}{close}</svg>"),
+            payload,
+        ),
+    ];
+
+    for (content_type, body, expected_payload) in cases {
+        assert_eq!(
+            classify_dom_evidence_for_response(&expected_payload, &body, content_type),
+            Some(DomEvidenceKind::Marker),
+            "{content_type} should verify before the deeply nested tail"
+        );
+    }
+}
+
+#[test]
+fn xml_script_body_from_payload_is_verified_as_executable() {
+    let payload = "<script>alert(1)</script>";
+    let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{payload}</svg>");
+    let xml_doc = roxmltree::Document::parse(&svg).expect("well-formed fixture");
+    let script_node = xml_doc
+        .descendants()
+        .find(|node| node.is_element() && node.tag_name().name() == "script")
+        .expect("script element");
+    assert!(xml_node_is_active(script_node));
+    assert_eq!(xml_node_text(script_node), "alert(1)");
+    assert!(xml_node_has_payload_structural_sink(
+        script_node,
+        payload,
+        payload
+    ));
+    assert_eq!(
+        classify_dom_evidence_for_response(payload, &svg, "image/svg+xml"),
+        Some(DomEvidenceKind::HtmlStructural)
+    );
+
+    let xhtml =
+        format!("<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}</body></html>");
+    assert_eq!(
+        classify_dom_evidence_for_response(payload, &xhtml, "application/xhtml+xml"),
+        Some(DomEvidenceKind::HtmlStructural)
+    );
+
+    let data_block = payload.replace("<script>", "<script type=\"application/json\">");
+    let svg_data_block = format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{data_block}</svg>");
+    assert_eq!(
+        classify_dom_evidence_for_response(&data_block, &svg_data_block, "image/svg+xml"),
+        None,
+        "script data blocks are not executable XML evidence"
+    );
 }
 
 /// Issue #1118: the public entry point used by the scan worker
