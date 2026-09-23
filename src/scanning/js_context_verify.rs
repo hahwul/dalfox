@@ -590,6 +590,26 @@ fn any_payload_occurrence_hits_sink(src: &str, payload: &str) -> bool {
     })
 }
 
+/// True when `payload`, reflected into an inline `on*` handler body, produces a
+/// JS sink call of its own — i.e. it broke out of any string literal the
+/// server's template wrapped it in. `handler` is the attribute value as the
+/// browser sees it (entities already decoded by the HTML parser).
+///
+/// The handler is parsed as a function body, as the browser compiles it, so a
+/// top-level `return` in the server's template does not read as a parse error.
+pub(crate) fn handler_payload_hits_sink(handler: &str, payload: &str) -> bool {
+    const PREFIX: &str = "function __dlx_handler(){\n";
+    if payload.is_empty() {
+        return false;
+    }
+    let src = format!("{PREFIX}{handler}\n}}");
+    handler.match_indices(payload).any(|(start, _)| {
+        let start = PREFIX.len() + start;
+        let end = start + payload.len();
+        script_block_has_sink_call_in_range(&src, start as u32, end as u32)
+    })
+}
+
 /// Maximum body size (bytes) for which we attempt full-body JS parsing as a
 /// JSONP-context fallback. Large transpiled bundles are skipped to keep
 /// per-payload overhead bounded.

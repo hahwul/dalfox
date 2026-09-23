@@ -518,3 +518,25 @@ fn poisoned_sink_cache_still_serves_lookups() {
         "a poisoned cache must not break the parse-and-insert path"
     );
 }
+
+#[test]
+fn handler_payload_hits_sink_requires_string_breakout() {
+    assert!(handler_payload_hits_sink(
+        "startTimer(''-alert(1)-'')",
+        "'-alert(1)-'"
+    ));
+    assert!(handler_payload_hits_sink(
+        "return go(''-alert(1)-'')",
+        "'-alert(1)-'"
+    ));
+    // Inside the template's string: inert.
+    assert!(!handler_payload_hits_sink(
+        "startTimer('\"-alert(1)-\"')",
+        "\"-alert(1)-\""
+    ));
+    assert!(!handler_payload_hits_sink(
+        "startTimer('<svg onload=alert(1)>')",
+        "<svg onload=alert(1)>"
+    ));
+    assert!(!handler_payload_hits_sink("startTimer('x')", ""));
+}

@@ -275,6 +275,24 @@ pub(crate) fn get_js_breakout_payloads() -> Vec<String> {
     }
     payloads
 }
+/// String-literal breakouts (`'-alert(1)-'`) for a JS reflection whose quote
+/// delimiter is known. Empty when it is not: the unquoted forms are already
+/// covered by [`get_jsonp_callback_payloads`].
+pub(crate) fn get_js_expression_breakout_payloads(
+    delim: Option<&crate::parameter_analysis::DelimiterType>,
+) -> Vec<String> {
+    use crate::parameter_analysis::DelimiterType;
+    let wrap: fn(&str) -> String = match delim {
+        Some(DelimiterType::SingleQuote) => |js| format!("'-{js}-'"),
+        Some(DelimiterType::DoubleQuote) => |js| format!("\"-{js}-\""),
+        Some(DelimiterType::Backtick) => |js| format!("${{{js}}}"),
+        _ => return Vec::new(),
+    };
+    crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL
+        .iter()
+        .map(|js| wrap(js))
+        .collect()
+}
 /// JSONP-callback payloads: reflected as the *callable identifier* of a
 /// `application/javascript` (JSONP) response — `callback=…` echoed into
 /// `…({"data":1})`. Each is executable JavaScript that calls a visible sink and
@@ -361,8 +379,14 @@ pub(crate) fn get_dom_payloads_for_context(
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     match &param.injection_context {
         // JS context: script breakout payloads with markers for DOM verification
-        Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => {
-            let base_payloads = get_js_breakout_payloads();
+        Some(crate::parameter_analysis::InjectionContext::Javascript(delim)) => {
+            // Expression breakouts first: the `</script>` tag breakouts below
+            // are inert when the reflection sits in an `on*` handler (no
+            // `<script>` to close), where ending the string literal is the
+            // only way to reach the sink. They verify only through the AST
+            // checks (JS-context / inline-handler breakout).
+            let mut base_payloads = get_js_expression_breakout_payloads(delim.as_ref());
+            base_payloads.extend(get_js_breakout_payloads());
             let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
             Ok(out)
         }

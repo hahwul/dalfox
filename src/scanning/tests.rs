@@ -445,6 +445,27 @@ fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
 }
 
 #[test]
+fn test_get_dom_payloads_javascript_context_carries_string_breakouts() {
+    use crate::parameter_analysis::DelimiterType;
+    let args = default_scan_args();
+    for (delim, want) in [
+        (DelimiterType::SingleQuote, "'-alert(1)-'"),
+        (DelimiterType::DoubleQuote, "\"-alert(1)-\""),
+        (DelimiterType::Backtick, "${alert(1)}"),
+    ] {
+        let param = Param {
+            injection_context: Some(InjectionContext::Javascript(Some(delim))),
+            ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
+        };
+        let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
+        assert!(
+            payloads.iter().any(|p| p == want),
+            "JS context must carry the `{want}` string breakout"
+        );
+    }
+}
+
+#[test]
 fn test_get_dom_payloads_html_context_includes_encoded_variants() {
     let param = Param {
         injection_context: Some(InjectionContext::Html(None)),
@@ -1327,6 +1348,99 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
         "V finding must carry a DomEvidenceKind label from classify_dom_evidence; got {:?}",
         labels
     );
+}
+
+/// A reflection inside a server `on*` handler's single-quoted JS argument.
+/// `/inert` JS-escapes then HTML-escapes the input, so nothing can close the
+/// string: no payload may verify (the inline-handler check used to accept a
+/// `</script><svg onload=alert(1)>` payload sitting inside the string).
+/// `/vuln` only HTML-escapes; the browser decodes `&#x27;` at attribute-parse
+/// time (xss-game L4), so a string breakout must verify — which needs the JS
+/// DOM catalog to carry `'-alert(1)-'`-style payloads, not only `</script>`
+/// tag breakouts that are inert in a handler.
+#[tokio::test]
+async fn test_run_scanning_inline_handler_string_reflection_verifies_only_real_breakout() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    fn html_escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#x27;")
+    }
+    async fn inert(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default();
+        let js = q.replace('\\', "\\\\").replace('\'', "\\'");
+        Html(format!(
+            "<img src=x onload=\"startTimer('{}')\">",
+            html_escape(&js)
+        ))
+    }
+    async fn vuln(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default();
+        Html(format!(
+            "<img src=x onload=\"startTimer('{}')\">",
+            html_escape(&q)
+        ))
+    }
+
+    let app = Router::new()
+        .route("/inert", get(inert))
+        .route("/vuln", get(vuln));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    for (path, expect_verified) in [("inert", false), ("vuln", true)] {
+        let mut target = parse_target(&format!("http://{addr}/{path}?q=a")).expect("parse_target");
+        target.reflection_params.push(Param {
+            injection_context: Some(InjectionContext::Javascript(Some(
+                crate::parameter_analysis::DelimiterType::SingleQuote,
+            ))),
+            // What discovery records for both routes: the HTML-escaped
+            // characters come back encoded, so the reflection phase's adaptive
+            // payloads drop every quote-bearing breakout and only the DOM phase
+            // can verify.
+            invalid_specials: Some(vec!['\'', '"', '<', '>', '&']),
+            valid_specials: Some(vec!['(', ')', '-', '+', ';', '/', '=', '`']),
+            ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+        });
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(integration_scan_args(false)),
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        let guard = results.lock().await;
+        let verified: Vec<_> = guard
+            .iter()
+            .filter(|r| matches!(r.result_type, FindingType::Verified))
+            .map(|r| r.payload.clone())
+            .collect();
+        if expect_verified {
+            assert!(
+                verified
+                    .iter()
+                    .any(|p| p.starts_with("'-") && p.ends_with("-'")),
+                "/{path}: a string breakout must verify; got {verified:?}"
+            );
+        } else {
+            assert!(
+                verified.is_empty(),
+                "/{path}: inert reflection verified: {verified:?}"
+            );
+        }
+    }
 }
 
 /// Issue #1156 — a self-/canonical-link-style echo that reflects every payload
