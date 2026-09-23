@@ -275,6 +275,9 @@ pub(crate) fn get_js_breakout_payloads() -> Vec<String> {
     }
     payloads
 }
+/// Number of joiner forms [`get_js_expression_breakout_payloads`] emits per
+/// primitive for a quote delimiter.
+const JS_EXPRESSION_JOINERS: usize = 5;
 /// String-literal breakouts for a JS reflection whose quote delimiter is
 /// known. Empty when it is not: the unquoted forms are already covered by
 /// [`get_jsonp_callback_payloads`].
@@ -307,6 +310,30 @@ pub(crate) fn get_js_expression_breakout_payloads(
         out.push(format!("{q}:{js},{q}"));
     }
     out
+}
+/// True when discovery saw the JS string's delimiter quote reflected only
+/// JS-escaped (`'` → `\'`, `Param::escaped_specials`). A raw-quote string
+/// breakout can never close that string, so a `</script>` tag breakout is the
+/// likely exploit and the string breakouts should run after it.
+///
+/// `invalid_specials` is deliberately not consulted: it is measured on the
+/// entity-decoded reflection, and a quote that comes back as `&#39;` is dead in
+/// a `<script>` block but live again in an `on*` handler, where the browser
+/// decodes it before the JS runs.
+fn js_string_needs_tag_breakout(
+    param: &Param,
+    delim: Option<&crate::parameter_analysis::DelimiterType>,
+) -> bool {
+    use crate::parameter_analysis::DelimiterType;
+    let quote = match delim {
+        Some(DelimiterType::SingleQuote) => '\'',
+        Some(DelimiterType::DoubleQuote) => '"',
+        _ => return false,
+    };
+    param
+        .escaped_specials
+        .as_deref()
+        .is_some_and(|e| e.contains(&quote))
 }
 /// JSONP-callback payloads: reflected as the *callable identifier* of a
 /// `application/javascript` (JSONP) response — `callback=…` echoed into
@@ -395,14 +422,29 @@ pub(crate) fn get_dom_payloads_for_context(
     match &param.injection_context {
         // JS context: script breakout payloads with markers for DOM verification
         Some(crate::parameter_analysis::InjectionContext::Javascript(delim)) => {
-            // Expression breakouts first: the `</script>` tag breakouts below
-            // are inert when the reflection sits in an `on*` handler (no
-            // `<script>` to close), where ending the string literal is the
-            // only way to reach the sink. They verify only through the AST
-            // checks (JS-context / inline-handler breakout).
-            let mut base_payloads = get_js_expression_breakout_payloads(delim.as_ref());
-            base_payloads.extend(get_js_breakout_payloads());
-            let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
+            // String-literal breakouts: the `</script>` tag breakouts are inert
+            // when the reflection sits in an `on*` handler (no `<script>` to
+            // close), where ending the string is the only way to reach the
+            // sink. Sent raw only: they verify through the AST checks, which
+            // look for the as-sent payload, so encoded variants are wasted
+            // requests.
+            let mut expression = get_js_expression_breakout_payloads(delim.as_ref());
+            let tags = crate::encoding::apply_encoders_to_payloads(
+                &get_js_breakout_payloads(),
+                &args.encoders,
+            );
+            // Only the first primitive's form of each joiner leads (that is
+            // what verifies a handler breakout); the primitive variants follow
+            // the tag breakouts, so a `</script>`-exploitable string pays a
+            // handful of extra requests, not the whole family. When discovery
+            // saw the quote JS-escaped, no raw-quote breakout can work, so the
+            // tag breakouts go first outright.
+            let tail = expression.split_off(expression.len().min(JS_EXPRESSION_JOINERS));
+            let out: Vec<String> = if js_string_needs_tag_breakout(param, delim.as_ref()) {
+                tags.into_iter().chain(expression).chain(tail).collect()
+            } else {
+                expression.into_iter().chain(tags).chain(tail).collect()
+            };
             Ok(out)
         }
         // Known non-JS contexts: use locally generated payloads only (exclude remote) to avoid large cross-product

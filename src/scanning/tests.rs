@@ -492,6 +492,49 @@ fn test_get_dom_payloads_javascript_context_carries_string_breakouts() {
 }
 
 #[test]
+fn test_get_dom_payloads_javascript_string_breakouts_are_raw_and_bounded_ahead_of_tags() {
+    use crate::parameter_analysis::DelimiterType;
+    let args = default_scan_args();
+    let expression = get_js_expression_breakout_payloads(Some(&DelimiterType::DoubleQuote));
+    let dom = |escaped: Option<Vec<char>>| {
+        let param = Param {
+            injection_context: Some(InjectionContext::Javascript(Some(
+                DelimiterType::DoubleQuote,
+            ))),
+            escaped_specials: escaped,
+            ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
+        };
+        get_dom_payloads(&param, &args).expect("dom payload generation")
+    };
+
+    // Raw only: each string breakout is sent once, never through the encoders.
+    let payloads = dom(None);
+    for e in &expression {
+        assert_eq!(payloads.iter().filter(|p| *p == e).count(), 1, "`{e}`");
+    }
+    let tags =
+        crate::encoding::apply_encoders_to_payloads(&get_js_breakout_payloads(), &args.encoders);
+    assert_eq!(
+        payloads.len(),
+        get_jsonp_callback_payloads().len() + expression.len() + tags.len(),
+        "only the tag breakouts go through the encoders"
+    );
+
+    // A `</script>`-exploitable string must reach the tag breakouts after at
+    // most one form per joiner (the JSONP verifiers lead the whole list).
+    let jsonp = get_jsonp_callback_payloads().len();
+    let first_tag = payloads
+        .iter()
+        .position(|p| p.contains("</script>"))
+        .expect("tag breakouts present");
+    assert!(first_tag <= jsonp + 5, "tag breakouts start at {first_tag}");
+
+    // A JS-escaped delimiter quote defeats every raw-quote breakout.
+    let payloads = dom(Some(vec!['"']));
+    assert!(payloads[jsonp].contains("</script>"));
+}
+
+#[test]
 fn test_get_dom_payloads_html_context_includes_encoded_variants() {
     let param = Param {
         injection_context: Some(InjectionContext::Html(None)),
