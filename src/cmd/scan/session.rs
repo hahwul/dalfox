@@ -81,6 +81,10 @@ pub(crate) struct SessionBaseline {
     /// login-form signal over this many bytes of the probe body so both sides
     /// look at the same region.
     pub(crate) body_len: usize,
+    /// Whether the response sample reached the end of the representation.
+    /// Range responses and body-cap truncation cannot prove a configured
+    /// marker is absent.
+    pub(crate) body_complete: bool,
     /// Whether `--session-check` matched the baseline. `None` when the flag
     /// wasn't given. `Some(false)` means the marker is wrong or on a different
     /// page — every later probe would report a loss, so this is caught up front
@@ -104,6 +108,7 @@ pub(crate) struct SessionProbe {
     pub(crate) status: u16,
     pub(crate) landing: String,
     pub(crate) body: String,
+    pub(crate) body_complete: bool,
 }
 
 /// Verdict from comparing a [`SessionProbe`] against its [`SessionBaseline`].
@@ -180,6 +185,12 @@ pub(crate) fn baseline_from_preflight(
         landing: resolve_landing(request_url, Some(final_url), status, headers),
         has_login_form: has_login_form(body),
         body_len: body.len(),
+        body_complete: response_body_complete(
+            status,
+            headers,
+            body.len(),
+            crate::utils::http::MAX_RESPONSE_BODY_BYTES,
+        ),
         check_marker_present: check_re.map(|re| re.is_match(body)),
         captured_at: Instant::now(),
     }
@@ -208,6 +219,7 @@ pub(crate) async fn baseline_from_check_url(
         landing: probe.landing,
         has_login_form: has_login_form(&probe.body),
         body_len: probe.body.len(),
+        body_complete: probe.body_complete,
         check_marker_present: check_re.map(|re| re.is_match(&probe.body)),
         captured_at: Instant::now(),
     })
@@ -232,7 +244,7 @@ pub(crate) async fn baseline_from_check_url(
 /// The caller records this as `SESSION_LOST` rather than only logging it, so
 /// the structured output and exit code agree with the warning.
 pub(crate) fn baseline_warning(baseline: &SessionBaseline) -> Option<String> {
-    if baseline.check_marker_present == Some(false) {
+    if baseline.body_complete && baseline.check_marker_present == Some(false) {
         return Some(format!(
             "--session-check pattern did not match the baseline response (HTTP {}, {} bytes from {}) — the marker is wrong, is on a different page, or the credentials are already invalid",
             baseline.status, baseline.body_len, baseline.landing
@@ -323,10 +335,12 @@ pub(crate) async fn probe_session(
     let body = crate::utils::http::read_body_capped(resp, PROBE_BODY_CAP_BYTES)
         .await
         .unwrap_or_default();
+    let body_complete = response_body_complete(status, &headers, body.len(), PROBE_BODY_CAP_BYTES);
     Some(SessionProbe {
         status,
         landing: resolve_landing(&probe_url, Some(&final_url), status, &headers),
         body,
+        body_complete,
     })
 }
 
@@ -382,6 +396,11 @@ pub(crate) fn classify(
 ) -> SessionState {
     if let Some(re) = check_re {
         return if re.is_match(&probe.body) {
+            SessionState::Alive
+        } else if !probe.body_complete {
+            // A marker outside this response sample is not evidence that the
+            // session changed. This errs toward another scan rather than a
+            // false SESSION_LOST based on a partial page.
             SessionState::Alive
         } else {
             SessionState::Lost(format!(
@@ -440,6 +459,47 @@ pub(crate) fn classify(
     }
 
     SessionState::Alive
+}
+
+/// Whether a capped response sample covers the complete representation.
+/// Ordinary responses are complete when the cap was not reached; a 206 is
+/// complete only when its byte range begins at zero and includes the full
+/// representation. Malformed or absent Content-Range metadata stays unknown.
+fn response_body_complete(
+    status: u16,
+    headers: &reqwest::header::HeaderMap,
+    body_len: usize,
+    cap: usize,
+) -> bool {
+    if status == reqwest::StatusCode::PARTIAL_CONTENT.as_u16() {
+        let Some(value) = headers
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+        else {
+            return false;
+        };
+        let Some(range) = value.strip_prefix("bytes ") else {
+            return false;
+        };
+        let Some((span, total)) = range.split_once('/') else {
+            return false;
+        };
+        let Some((start, end)) = span.split_once('-') else {
+            return false;
+        };
+        let (Ok(start), Ok(end), Ok(total)) = (
+            start.parse::<u64>(),
+            end.parse::<u64>(),
+            total.parse::<u64>(),
+        ) else {
+            return false;
+        };
+        return start == 0
+            && end < total
+            && end.saturating_add(1) >= total
+            && body_len as u64 > end;
+    }
+    body_len < cap
 }
 
 /// The longest prefix of `s` that is at most `n` bytes and ends on a `char`

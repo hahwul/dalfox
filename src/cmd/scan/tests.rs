@@ -16,7 +16,9 @@ use crate::scanning::result::{FindingType, Result as ScanResult};
 use crate::target_parser::{Target, parse_target};
 use crate::waf::bypass::{MutationStats, MutationType};
 use axum::Router;
-use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::body::Body;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::response::Response;
 use axum::routing::get;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1414,6 +1416,110 @@ async fn test_a_run_that_lost_most_of_its_requests_is_not_a_clean_bill_of_health
         "a run that lost 148 of 170 requests must not report a trustworthy clean, got {}",
         v["meta"]
     );
+}
+
+#[tokio::test]
+async fn a_transport_incomplete_empty_scan_does_not_exit_clean() {
+    let mut args = default_scan_args();
+    args.silence = true;
+    let urls = vec!["https://example.com".to_string()];
+    let requests = crate::cmd::scan::output::RequestTally {
+        sent: 170,
+        failed: 148,
+    };
+    let path = temp_out_path("incomplete_exit_code");
+    args.output = Some(path.clone());
+    let state = make_scan_state(vec![]);
+    let (results, output_write_failed) = render_results(
+        &args,
+        &state,
+        &urls,
+        std::time::Duration::from_millis(7),
+        requests,
+        false,
+        None,
+    )
+    .await;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(report["meta"]["incomplete"], true);
+
+    let outcome = super::output::derive_outcome(
+        &args,
+        &urls,
+        &state,
+        &results,
+        requests,
+        output_write_failed,
+    )
+    .await;
+    assert_eq!(
+        outcome,
+        ScanOutcome::Error,
+        "an empty report marked incomplete because most requests failed must not exit with the clean code"
+    );
+}
+
+#[tokio::test]
+async fn a_later_scan_does_not_inherit_request_failures_from_an_earlier_run() {
+    use std::sync::atomic::Ordering;
+
+    struct FailureCountGuard(u64);
+    impl Drop for FailureCountGuard {
+        fn drop(&mut self) {
+            crate::REQUEST_FAILURE_COUNT.store(self.0, Ordering::Relaxed);
+        }
+    }
+
+    let previous_failures = crate::REQUEST_FAILURE_COUNT.swap(100, Ordering::Relaxed);
+    let _failure_guard = FailureCountGuard(previous_failures);
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                [("content-type", "text/html; charset=utf-8")],
+                "<html><body>healthy</body></html>",
+            )
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let path = temp_out_path("stale_request_failures");
+    let args = ScanArgs {
+        input_type: "url".to_string(),
+        targets: vec![format!("http://{addr}/?q=1")],
+        format: "json".to_string(),
+        output: Some(path.clone()),
+        silence: true,
+        skip_xss_scanning: true,
+        skip_discovery: true,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        insecure: Some(true),
+        ..ScanArgs::default()
+    };
+
+    let outcome = super::run_scan(&args).await;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    server.abort();
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(
+        report["meta"]["failed_requests"], 0,
+        "a healthy scan must report only failures from this run"
+    );
+    assert_eq!(report["meta"]["incomplete"], false);
+    assert_eq!(outcome, ScanOutcome::Clean);
 }
 
 #[tokio::test]
@@ -2973,6 +3079,72 @@ async fn a_worker_panic_fails_the_target_instead_of_reading_clean() {
         recorded.contains("\"error\"") && !recorded.contains("\"completed\""),
         "the target must be retried on resume: {recorded}"
     );
+}
+
+#[tokio::test]
+async fn a_session_marker_beyond_the_preflight_range_does_not_fail_the_scan() {
+    let marker = "signed-in-marker";
+    let full_body = format!(
+        "{}{}",
+        "x".repeat(crate::cmd::scan::preflight::PREFLIGHT_BODY_BYTES),
+        marker
+    );
+    let full_len = full_body.len();
+    let app = Router::new().route(
+        "/",
+        axum::routing::any(move |headers: HeaderMap| {
+            let full_body = full_body.clone();
+            async move {
+                if headers.contains_key(axum::http::header::RANGE) {
+                    Response::builder()
+                        .status(StatusCode::PARTIAL_CONTENT)
+                        .header("content-type", "text/html")
+                        .header("content-range", format!("bytes 0-8191/{full_len}"))
+                        .body(Body::from(
+                            full_body[..crate::cmd::scan::preflight::PREFLIGHT_BODY_BYTES]
+                                .to_string(),
+                        ))
+                        .expect("partial response")
+                } else {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "text/html")
+                        .body(Body::from(full_body))
+                        .expect("full response")
+                }
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let path = temp_out_path("partial_session_marker");
+    let args = ScanArgs {
+        targets: vec![format!("http://{addr}/?q=1")],
+        session_check: Some(marker.to_string()),
+        skip_xss_scanning: true,
+        skip_discovery: true,
+        skip_mining: true,
+        output: Some(path.clone()),
+        ..default_scan_args()
+    };
+    let outcome = super::run_scan(&args).await;
+    server.abort();
+
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    let _ = std::fs::remove_file(path);
+    assert_eq!(
+        outcome,
+        ScanOutcome::Clean,
+        "the check marker is present on the full response, outside the preflight Range sample"
+    );
+    assert_eq!(report["meta"]["incomplete"], false);
+    assert_eq!(report["meta"]["target_summary"][0]["status"], "clean");
 }
 
 /// `--dry-run` (and the REST / MCP preflight, which runs as one) promises not

@@ -210,6 +210,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     }
     let __dalfox_scan_start = std::time::Instant::now();
     crate::REQUEST_COUNT.store(0, Ordering::Relaxed);
+    crate::REQUEST_FAILURE_COUNT.store(0, Ordering::Relaxed);
 
     // SIGINT (Ctrl-C) handler: dogfood found that long scans ignored the
     // signal entirely, requiring SIGTERM/SIGKILL to stop. Plumb a shared
@@ -333,7 +334,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             );
         }
         let before = parsed_targets.len();
-        parsed_targets.retain(|t| !sf.is_completed(t.url.as_str(), &t.method));
+        parsed_targets.retain(|t| !sf.is_completed(t));
         resumed_skipped = before - parsed_targets.len();
         // Report both numbers when they differ: a file holding 5000
         // completions that matches 3 of this run's targets means the input
@@ -510,11 +511,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Targets entering preflight, so the ones it drops can be told apart from
     // the ones that go on to be scanned. Only materialized when `--state-file`
     // is on — on a 50k-URL list this is two strings per target.
-    let pre_preflight_keys: Vec<(String, String)> = if state.state_file.is_some() {
+    let pre_preflight_keys: Vec<state_file::TargetIdentity> = if state.state_file.is_some() {
         host_groups
             .values()
             .flatten()
-            .map(|t| (t.url.to_string(), t.method.clone()))
+            .map(state_file::target_identity)
             .collect()
     } else {
         Vec::new()
@@ -534,14 +535,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         && !args.dry_run
         && !args.only_discovery
     {
-        let survived: std::collections::HashSet<String> = host_groups
+        let survived: std::collections::HashSet<state_file::TargetIdentity> = host_groups
             .values()
             .flatten()
-            .map(|t| state_file::target_key(t.url.as_str(), &t.method))
+            .map(state_file::target_identity)
             .collect();
-        for (url, method) in &pre_preflight_keys {
-            if !survived.contains(&state_file::target_key(url, method)) {
-                sf.record(url, method, state_file::TargetOutcome::Error);
+        for identity in &pre_preflight_keys {
+            if !survived.contains(identity) {
+                sf.record_identity(identity.clone(), state_file::TargetOutcome::Error);
             }
         }
     }
@@ -613,6 +614,18 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         sent: crate::REQUEST_COUNT.load(Ordering::Relaxed),
         failed: crate::REQUEST_FAILURE_COUNT.load(Ordering::Relaxed),
     };
+    // `scan_loop` knows about explicit interruption, session loss, and worker
+    // failures, but request-level transport failures are tallied globally.
+    // When that tally makes the report incomplete, none of the targets can be
+    // safely reused on resume; append a retryable outcome after their normal
+    // per-target records so the latest state wins.
+    if requests.is_incomplete()
+        && let Some(sf) = &state.state_file
+    {
+        for identity in &pre_preflight_keys {
+            sf.record_identity(identity.clone(), state_file::TargetOutcome::Cancelled);
+        }
+    }
     let (final_results, output_write_failed) = output::render_results(
         args,
         &state,
@@ -642,6 +655,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         &all_target_urls,
         &state,
         &final_results,
+        requests,
         output_write_failed,
     )
     .await

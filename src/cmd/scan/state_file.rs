@@ -9,27 +9,30 @@
 //! Shape of the file (JSONL, one object per line):
 //!
 //! ```text
-//! {"dalfox_state":1,"version":"3.1.0","config_hash":"…","created":"…"}
-//! {"target":"https://x/?a=1","method":"GET","outcome":"completed","at":"…"}
+//! {"dalfox_state":2,"version":"3.1.0","config_hash":"…","created":"…"}
+//! {"target":"https://x/?a=1","method":"GET","request_hash":"…","outcome":"completed","at":"…"}
 //! ```
 //!
 //! Design notes:
 //!
-//! - **Append-only.** One line is written per target as it finishes, so a hard
-//!   kill can at worst tear the final line — which [`load`] skips. Nothing is
-//!   ever rewritten in place, so there is no window where the file is invalid.
-//!   Lines are flushed but not `fsync`ed: that survives `kill -9` (the page
-//!   cache outlives the process), not a machine crash, which is the right
-//!   trade for a progress log written once per target.
-//! - **Only `completed` is skipped.** `cancelled` (SIGINT / `--scan-timeout`)
-//!   and `error` (preflight skip) targets are retried on the next run, because
-//!   how much of them was actually covered is unknown.
+//! - **Append-only.** A line is written whenever a target reaches a terminal
+//!   state. A late run-wide transport-loss check can append a retryable state
+//!   after the per-target record. A hard kill can at worst tear the final line
+//!   — which [`load`] skips. Nothing is rewritten in place, so there is no
+//!   window where the file is invalid. Lines are flushed but not `fsync`ed:
+//!   that survives `kill -9` (the page cache outlives the process), not a
+//!   machine crash, which is the right trade for a progress log.
+//! - **Only `completed` is skipped.** `cancelled` (SIGINT / `--scan-timeout`,
+//!   dead session, or severe transport loss) and `error` (preflight skip)
+//!   targets are retried on the next run, because how much of them was actually
+//!   covered is unknown.
 //! - **A configuration change starts fresh.** The header carries a hash of the
 //!   scan-affecting configuration; when it does not match, the prior results
 //!   are not comparable, so the file is reset rather than silently skipping
 //!   targets under settings that never tested them (see [`config_hash`]).
 
 use super::args::ScanArgs;
+use crate::target_parser::Target;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -40,11 +43,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Bumped only if the record schema changes incompatibly. A file written by a
 /// newer format is treated like a mismatched config hash: reset, never
 /// misread.
-pub(crate) const STATE_FORMAT_VERSION: u32 = 1;
+pub(crate) const STATE_FORMAT_VERSION: u32 = 2;
 
-/// Upper bound on a state file we will read back. One record is ~120 bytes, so
-/// 256 MiB is past two million targets while still failing fast on a path that
-/// resolves to something unbounded.
+/// Upper bound on a state file we will read back. Typical records are a couple
+/// hundred bytes, so 256 MiB holds around a million targets while still failing
+/// fast on a path that resolves to something unbounded.
 pub(crate) const MAX_STATE_FILE_BYTES: u64 = 256 << 20;
 
 /// Terminal state of one target, as recorded in the state file.
@@ -52,8 +55,8 @@ pub(crate) const MAX_STATE_FILE_BYTES: u64 = 256 << 20;
 pub(crate) enum TargetOutcome {
     /// Scanned to the end. The only outcome a later run skips.
     Completed,
-    /// Cut short — Ctrl-C, `--scan-timeout`, or a dead session — so coverage
-    /// is unknown and the target is retried.
+    /// Cut short — Ctrl-C, `--scan-timeout`, a dead session, or severe
+    /// transport loss — so coverage is unknown and the target is retried.
     Cancelled,
     /// Never scanned: dropped during preflight (unreachable, content-type
     /// mismatch, per-host cap). Also retried.
@@ -70,11 +73,33 @@ impl TargetOutcome {
     }
 }
 
-/// Cross-run identity of a target: the same `url|method` pair the `exact`
-/// dedup mode keys on (`input::dedup_targets`), so "one target" means the same
-/// thing to resume as it does to dedup.
-pub(crate) fn target_key(url: &str, method: &str) -> String {
-    format!("{}|{}", url, method)
+/// Cross-run identity of a target. Raw HTTP and HAR inputs carry request data
+/// that can change independently of `ScanArgs` (body, headers, cookies, and
+/// user-agent), so the URL/method key alone can silently reuse a completion
+/// for a different captured request. Store only its digest to keep credentials
+/// and request bodies out of the state file.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct TargetIdentity {
+    pub(crate) target: String,
+    pub(crate) method: String,
+    pub(crate) request_hash: String,
+}
+
+pub(crate) fn target_identity(target: &Target) -> TargetIdentity {
+    use sha2::{Digest, Sha256};
+
+    let request_shape = serde_json::to_vec(&(
+        &target.data,
+        &target.headers,
+        &target.cookies,
+        &target.user_agent,
+    ))
+    .expect("target request fields serialize");
+    TargetIdentity {
+        target: target.url.to_string(),
+        method: target.method.clone(),
+        request_hash: hex::encode(Sha256::digest(request_shape)),
+    }
 }
 
 /// Hash of the configuration that decides *what a completed target was tested
@@ -186,19 +211,20 @@ struct Header {
 struct Record {
     target: String,
     method: String,
+    request_hash: String,
     outcome: String,
     at: String,
 }
 
 /// What reading an existing state file produced.
 struct Loaded {
-    completed: HashSet<String>,
-    /// Terminal state already on record per target key, including the
+    completed: HashSet<TargetIdentity>,
+    /// Terminal state already on record per target identity, including the
     /// non-reusable ones. Used to suppress a re-record of an outcome the file
     /// already carries, which is what bounds the file's growth: without it a
     /// permanently unreachable host adds one `error` line per run until the
     /// file crosses the read cap and the campaign can no longer be resumed.
-    prior: std::collections::HashMap<String, String>,
+    prior: std::collections::HashMap<TargetIdentity, String>,
     /// Set when the file could not be resumed from and has to be started over;
     /// carries the operator-facing reason.
     reset: Option<String>,
@@ -278,24 +304,30 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
         )));
     }
 
-    let mut completed = HashSet::new();
     let mut prior = std::collections::HashMap::new();
     let mut corrupt_lines = 0usize;
     for line in lines {
         match serde_json::from_str::<Record>(line) {
             Ok(r) => {
-                let key = target_key(&r.target, &r.method);
-                // Only completions are reusable; `cancelled` / `error` targets
-                // are retried. Both go into `prior` — the later runs need to
-                // know a target's recorded outcome to avoid re-appending it.
-                if r.outcome == TargetOutcome::Completed.as_str() {
-                    completed.insert(key.clone());
-                }
+                let key = TargetIdentity {
+                    target: r.target,
+                    method: r.method,
+                    request_hash: r.request_hash,
+                };
+                // The last record wins. A target can be marked completed in
+                // one run and cancelled/error in a later attempt; retaining
+                // any earlier completion would make the next run skip it.
                 prior.insert(key, r.outcome);
             }
             Err(_) => corrupt_lines += 1,
         }
     }
+
+    let completed = prior
+        .iter()
+        .filter(|(_, outcome)| *outcome == TargetOutcome::Completed.as_str())
+        .map(|(key, _)| key.clone())
+        .collect();
 
     Ok(Loaded {
         completed,
@@ -309,8 +341,8 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
 /// the append handle this run records into.
 pub(crate) struct StateFile {
     path: String,
-    completed: HashSet<String>,
-    prior: std::collections::HashMap<String, String>,
+    completed: HashSet<TargetIdentity>,
+    prior: std::collections::HashMap<TargetIdentity, String>,
     /// `None` when this run must not write — a preview mode, or once a write
     /// has failed (the warning is emitted once and the scan continues, rather
     /// than repeating per target).
@@ -428,25 +460,30 @@ impl StateFile {
         self.completed.len()
     }
 
-    pub(crate) fn is_completed(&self, url: &str, method: &str) -> bool {
-        self.completed.contains(&target_key(url, method))
+    pub(crate) fn is_completed(&self, target: &Target) -> bool {
+        self.completed.contains(&target_identity(target))
     }
 
     /// Append one terminal-state record. Best-effort by design: a scan that is
     /// producing findings must not be aborted because the progress log hit a
     /// full disk, so the first failure warns and the rest are silent.
-    pub(crate) fn record(&self, url: &str, method: &str, outcome: TargetOutcome) {
+    pub(crate) fn record(&self, target: &Target, outcome: TargetOutcome) {
+        self.record_identity(target_identity(target), outcome);
+    }
+
+    pub(crate) fn record_identity(&self, identity: TargetIdentity, outcome: TargetOutcome) {
         // Nothing to say when the file already records this exact outcome for
         // this target. Retried targets are the common case — a host that is
         // down stays down — and re-appending an identical `error` line every
         // run is what would eventually push the file past the read cap and
         // strand the campaign.
-        if self.prior.get(&target_key(url, method)).map(String::as_str) == Some(outcome.as_str()) {
+        if self.prior.get(&identity).map(String::as_str) == Some(outcome.as_str()) {
             return;
         }
         let record = Record {
-            target: url.to_string(),
-            method: method.to_string(),
+            target: identity.target,
+            method: identity.method,
+            request_hash: identity.request_hash,
             outcome: outcome.as_str().to_string(),
             at: chrono::Local::now().to_rfc3339(),
         };

@@ -8,6 +8,7 @@ fn baseline(status: u16, landing: &str, has_login_form: bool) -> SessionBaseline
         landing: landing.to_string(),
         has_login_form,
         body_len: 8192,
+        body_complete: true,
         check_marker_present: None,
         captured_at: Instant::now(),
     }
@@ -18,6 +19,7 @@ fn probe(status: u16, landing: &str, body: &str) -> SessionProbe {
         status,
         landing: landing.to_string(),
         body: body.to_string(),
+        body_complete: true,
     }
 }
 
@@ -369,6 +371,49 @@ fn a_session_check_marker_missing_from_the_baseline_is_flagged_up_front() {
 
     b.check_marker_present = Some(true);
     assert!(baseline_warning(&b).is_none());
+}
+
+#[test]
+fn an_absent_marker_in_a_partial_preflight_body_is_not_a_lost_session() {
+    let request = url::Url::parse("https://app.test/dashboard").unwrap();
+    let headers = reqwest::header::HeaderMap::new();
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let sampled_body = "x".repeat(crate::cmd::scan::preflight::PREFLIGHT_BODY_BYTES);
+    let b = baseline_from_preflight(
+        &request,
+        &request,
+        206,
+        &headers,
+        &sampled_body,
+        Some(&check_re),
+    );
+
+    assert_eq!(b.check_marker_present, Some(false));
+    assert!(!b.body_complete);
+    assert!(
+        baseline_warning(&b).is_none(),
+        "a 206 preflight only sampled the first 8192 bytes; a missing marker there is not proof that credentials are invalid"
+    );
+}
+
+#[test]
+fn an_absent_marker_in_a_partial_probe_is_not_a_lost_session() {
+    let mut b = baseline(200, "https://app.test/dashboard", false);
+    b.check_marker_present = Some(true);
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let mut p = probe(206, "https://app.test/dashboard", "partial response");
+    p.body_complete = false;
+
+    assert_eq!(
+        classify(&b, &p, Some(&check_re), false),
+        SessionState::Alive
+    );
+
+    p.body_complete = true;
+    assert!(matches!(
+        classify(&b, &p, Some(&check_re), false),
+        SessionState::Lost(_)
+    ));
 }
 
 #[test]

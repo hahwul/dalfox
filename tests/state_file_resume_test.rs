@@ -13,13 +13,14 @@
 use axum::Router;
 use axum::extract::Query;
 use axum::http::{HeaderMap, HeaderValue};
-use axum::routing::get;
+use axum::routing::{any, get};
 use dalfox::cmd::scan::{ScanArgs, ScanOutcome, run_scan};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 fn html_headers() -> HeaderMap {
@@ -75,6 +76,61 @@ async fn spawn_app() -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) 
         let _ = axum::serve(listener, app).await;
     });
     (format!("http://{}", addr), hits, handle)
+}
+
+/// A tiny HTTP server that answers preflight (`q=1`) and drops injection
+/// requests while `drop_injections` is set. The closed sockets exercise real
+/// transport failures, which the scanner counts toward `meta.incomplete`.
+async fn spawn_drop_injections_app() -> (
+    String,
+    Arc<AtomicUsize>,
+    Arc<AtomicBool>,
+    tokio::task::JoinHandle<()>,
+) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let drop_injections = Arc::new(AtomicBool::new(true));
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server_hits = hits.clone();
+    let server_drop = drop_injections.clone();
+    let handle = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            let hits = server_hits.clone();
+            let drop_injections = server_drop.clone();
+            tokio::spawn(async move {
+                let mut request = vec![0; 8192];
+                let Ok(n) = socket.read(&mut request).await else {
+                    return;
+                };
+                if n == 0 {
+                    return;
+                }
+                hits.fetch_add(1, Ordering::Relaxed);
+                let request = String::from_utf8_lossy(&request[..n]);
+                let request_line = request.lines().next().unwrap_or_default();
+                let is_preflight = request_line.contains("q=1 ");
+                if !is_preflight && drop_injections.load(Ordering::Relaxed) {
+                    return; // Drop the socket without a response.
+                }
+
+                let body = b"<html><body>static page</body></html>";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                if socket.write_all(response.as_bytes()).await.is_err() {
+                    return;
+                }
+                if !request_line.starts_with("HEAD ") {
+                    let _ = socket.write_all(body).await;
+                }
+            });
+        }
+    });
+    (format!("http://{addr}"), hits, drop_injections, handle)
 }
 
 fn unique_temp_path(prefix: &str, ext: &str) -> PathBuf {
@@ -255,6 +311,172 @@ async fn changing_a_scan_affecting_flag_rescans_everything() {
     let _ = std::fs::remove_file(&state);
     let _ = std::fs::remove_file(&out1);
     let _ = std::fs::remove_file(&out2);
+}
+
+// Raw HTTP and HAR targets carry request data inside the input file rather
+// than ScanArgs. Rewriting a capture can change which body parameters Dalfox
+// tests while leaving its URL, method, input path, and config hash unchanged.
+#[tokio::test]
+async fn changing_a_raw_http_body_does_not_reuse_the_old_completion() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let route_hits = hits.clone();
+    let app = Router::new().route(
+        "/submit",
+        any(move |request: axum::extract::Request| {
+            let hits = route_hits.clone();
+            async move {
+                hits.fetch_add(1, Ordering::Relaxed);
+                let body = axum::body::to_bytes(request.into_body(), 1024 * 1024)
+                    .await
+                    .expect("read request body");
+                (
+                    [("content-type", "text/html; charset=utf-8")],
+                    format!(
+                        "<html><body>{}</body></html>",
+                        String::from_utf8_lossy(&body)
+                    ),
+                )
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let state = unique_temp_path("resume-raw-http-body", "jsonl");
+    let capture = unique_temp_path("resume-raw-http-input", "http");
+    let output1 = unique_temp_path("resume-raw-http-run1", "json");
+    let output2 = unique_temp_path("resume-raw-http-run2", "json");
+    let capture_for = |name: &str| {
+        format!(
+            "POST http://{addr}/submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n{name}=1"
+        )
+    };
+    std::fs::write(&capture, capture_for("old")).expect("write first request capture");
+
+    let args = ScanArgs {
+        input_type: "raw-http".to_string(),
+        format: "json".to_string(),
+        output: Some(output1.to_string_lossy().to_string()),
+        state_file: Some(state.to_string_lossy().to_string()),
+        targets: vec![capture.to_string_lossy().to_string()],
+        skip_discovery: true,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        max_payloads_per_param: 1,
+        insecure: Some(true),
+        silence: true,
+        ..ScanArgs::default()
+    };
+    let _ = run_scan(&args).await;
+    let after_first = hits.load(Ordering::Relaxed);
+    assert!(
+        after_first > 0,
+        "the first capture must reach the local app"
+    );
+    let header_before: serde_json::Value = serde_json::from_str(
+        std::fs::read_to_string(&state)
+            .expect("state file written")
+            .lines()
+            .next()
+            .expect("state header"),
+    )
+    .expect("state header JSON");
+
+    std::fs::write(&capture, capture_for("new")).expect("rewrite request capture");
+    let changed_args = ScanArgs {
+        output: Some(output2.to_string_lossy().to_string()),
+        ..args
+    };
+    let _ = run_scan(&changed_args).await;
+    server.abort();
+
+    let meta = read_meta(&output2);
+    let header_after: serde_json::Value = serde_json::from_str(
+        std::fs::read_to_string(&state)
+            .expect("state file remains readable")
+            .lines()
+            .next()
+            .expect("state header"),
+    )
+    .expect("state header JSON");
+    assert_eq!(header_after["config_hash"], header_before["config_hash"]);
+    assert_eq!(
+        meta["resumed"]["targets_skipped_completed"], 0,
+        "a changed body parameter must reach the scanner again: {meta}"
+    );
+    assert!(
+        hits.load(Ordering::Relaxed) > after_first,
+        "the changed request must be sent to the app rather than skipped"
+    );
+
+    let _ = std::fs::remove_file(state);
+    let _ = std::fs::remove_file(capture);
+    let _ = std::fs::remove_file(output1);
+    let _ = std::fs::remove_file(output2);
+}
+
+#[tokio::test]
+async fn transport_incomplete_targets_are_retried_on_resume() {
+    let (base, hits, drop_injections, server) = spawn_drop_injections_app().await;
+    let target = format!("{base}/?q=1");
+    let out = unique_temp_path("incomplete-resume", "json");
+    let state = unique_temp_path("incomplete-resume", "jsonl");
+    let mut args = lean_args(std::slice::from_ref(&target), &out, &state);
+    args.param = vec!["q".to_string()];
+    args.skip_discovery = true;
+    args.skip_mining = true;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = true;
+    args.skip_reflection_header = true;
+    args.skip_reflection_cookie = true;
+    args.skip_reflection_path = true;
+    args.skip_waf_probe = true;
+    args.skip_ast_analysis = true;
+    args.timeout = 2;
+    args.max_payloads_per_param = 10;
+
+    let first = run_scan(&args).await;
+    let first_report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).expect("first report"))
+            .expect("valid JSON");
+    assert_eq!(
+        first_report["meta"]["incomplete"],
+        true,
+        "expected injection requests to fail; hit count {}, report {}",
+        hits.load(Ordering::Relaxed),
+        first_report
+    );
+    assert!(first_report["meta"]["failed_requests"].as_u64().unwrap() >= 3);
+    assert_eq!(first, ScanOutcome::Error);
+
+    let before_resume = hits.load(Ordering::Relaxed);
+    drop_injections.store(false, Ordering::Relaxed);
+    let second = run_scan(&args).await;
+    let second_report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).expect("second report"))
+            .expect("valid JSON");
+    assert_eq!(
+        second_report["meta"]["resumed"]["targets_skipped_completed"], 0,
+        "transport-incomplete coverage must not be written as a reusable completion"
+    );
+    assert!(
+        hits.load(Ordering::Relaxed) > before_resume,
+        "resume must issue requests for the incomplete target"
+    );
+    assert_eq!(second, ScanOutcome::Clean);
+
+    server.abort();
+    let _ = std::fs::remove_file(out);
+    let _ = std::fs::remove_file(state);
 }
 
 // `--dry-run` prices out a *different* flag set against the same state file —
