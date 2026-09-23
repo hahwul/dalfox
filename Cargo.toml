@@ -100,6 +100,9 @@ assets = [
     { source = "target/completions/dalfox.fish", dest = "/usr/share/fish/vendor_completions.d/dalfox.fish", mode = "644" },
 ]
 
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+
 [package.metadata.generate-rpm]
 license = "MIT"
 summary = "Powerful open-source XSS scanner"

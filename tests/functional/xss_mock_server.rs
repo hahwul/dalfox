@@ -62,6 +62,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::prelude::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::mock_case_loader::{self, MockCase};
 use dalfox::cmd::scan::{self, ScanArgs};
@@ -959,16 +960,39 @@ async fn start_mock_server_v2() -> (SocketAddr, AppState) {
     let addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                // Keep server alive for the duration of the test
-                tokio::time::sleep(Duration::from_secs(300)).await;
-            })
-            .await
-            .ok();
+        axum::serve(listener, app).await.ok();
     });
 
     (addr, state)
+}
+
+#[tokio::test(start_paused = true)]
+async fn mock_server_stays_alive_past_five_minutes() {
+    let (addr, _) = start_mock_server_v2().await;
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(301)).await;
+    tokio::task::yield_now().await;
+
+    let mut stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("mock server should still accept connections after five minutes");
+    stream
+        .write_all(
+            format!(
+                "GET /query/193?query=fixture-sentinel HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .expect("request should be written");
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .expect("mock response should be readable");
+    let response = String::from_utf8_lossy(&response);
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert!(response.contains("fixture-sentinel"));
 }
 
 /// Load query mock cases grouped by source TOML file name (category).
