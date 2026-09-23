@@ -55,6 +55,119 @@ pub(crate) fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<Str
     (js_blocks, script_ids)
 }
 
+/// [`extract_js_and_script_ids`] plus the [`ReflectedMarkup`] of the same
+/// parse, for a response whose request carried a scan marker in the tested
+/// parameter.
+///
+/// [`ReflectedMarkup`]: crate::scanning::ast_dom_analysis::ReflectedMarkup
+pub(crate) fn extract_js_script_ids_and_reflected_markup(
+    html: &str,
+) -> (
+    Vec<String>,
+    HashSet<String>,
+    crate::scanning::ast_dom_analysis::ReflectedMarkup,
+) {
+    let document = crate::utils::html::parse_document_bounded(html);
+    let js_blocks = js_blocks_from_document(&document);
+    let script_ids = script_element_ids_from_document(&document);
+    let markup = reflected_markup_from_document(&document, html);
+    (js_blocks, script_ids, markup)
+}
+
+/// [`ReflectedMarkup`] of a probe response, or `None` when it has no script
+/// to read it back or no slot carries a marker. Used by the pre-scan active
+/// probe, whose response is not otherwise kept.
+///
+/// [`ReflectedMarkup`]: crate::scanning::ast_dom_analysis::ReflectedMarkup
+pub(crate) fn reflected_markup_from_html(
+    html: &str,
+) -> Option<crate::scanning::ast_dom_analysis::ReflectedMarkup> {
+    let has_script = html
+        .as_bytes()
+        .windows(7)
+        .any(|w| w.eq_ignore_ascii_case(b"<script"));
+    if !has_script || !carries_scan_marker(html) {
+        return None;
+    }
+    let document = crate::utils::html::parse_document_bounded(html);
+    Some(reflected_markup_from_document(&document, html)).filter(|m| !m.is_empty())
+}
+
+/// Whether `s` carries one of this process's scan markers. They are
+/// session-random, so a page cannot contain one unless it reflected it.
+fn carries_scan_marker(s: &str) -> bool {
+    use crate::scanning::markers;
+    s.contains("dlx")
+        && [
+            markers::open_marker(),
+            markers::inner_marker(),
+            markers::class_marker(),
+            markers::id_marker(),
+        ]
+        .iter()
+        .any(|m| s.contains(m))
+        || s.contains(markers::close_marker())
+}
+
+/// Custom-property declarations (`--name: value`) in CSS text whose value
+/// carries a scan marker.
+fn marker_css_custom_properties(css: &str, out: &mut HashSet<String>) {
+    for decl in css.split([';', '{', '}']) {
+        let Some((name, value)) = decl.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.starts_with("--") && carries_scan_marker(value) {
+            out.insert(name.to_string());
+        }
+    }
+}
+
+/// The slots of `document` (parsed from `raw`) that carry a scan marker:
+/// attributes and text of elements with an `id`, and CSS custom properties.
+/// See [`ReflectedMarkup`](crate::scanning::ast_dom_analysis::ReflectedMarkup).
+fn reflected_markup_from_document(
+    document: &Html,
+    raw: &str,
+) -> crate::scanning::ast_dom_analysis::ReflectedMarkup {
+    let mut markup = crate::scanning::ast_dom_analysis::ReflectedMarkup::default();
+    // Markers are alphanumeric, so entity encoding cannot hide one from the
+    // raw text: no marker there means no slot to find.
+    if !carries_scan_marker(raw) {
+        return markup;
+    }
+    for element in document
+        .root_element()
+        .descendants()
+        .filter_map(scraper::ElementRef::wrap)
+    {
+        let el = element.value();
+        if let Some(style) = el.attr("style") {
+            marker_css_custom_properties(style, &mut markup.css_custom_properties);
+        }
+        if el.name() == "style" {
+            let css: String = element.text().collect();
+            marker_css_custom_properties(&css, &mut markup.css_custom_properties);
+        }
+        let Some(id) = el.attr("id").map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        for (name, value) in el.attrs() {
+            if carries_scan_marker(value) {
+                markup
+                    .attrs
+                    .entry(id.to_string())
+                    .or_default()
+                    .insert(name.to_ascii_lowercase());
+            }
+        }
+        if carries_scan_marker(&element.text().collect::<String>()) {
+            markup.text.insert(id.to_string());
+        }
+    }
+    markup
+}
+
 /// Extract JS blocks (inline `<script>` bodies, `on*` handler bodies, and
 /// `javascript:` href bodies) from an already-parsed document. Factored out of
 /// [`extract_javascript_from_html`] so [`extract_js_and_script_ids`] can reuse
@@ -374,6 +487,9 @@ pub(crate) fn grade_ast_finding(
 
     if source_is_url_carried(source) {
         reasons.push("URL-carried source");
+    } else if source.starts_with("markup:") {
+        // The pre-scan saw this request's marker in the slot being read.
+        reasons.push("reads back markup the server filled from the parameter");
     } else if bootstrapped_from_url {
         // The page seeds this non-URL source from a query parameter itself, so
         // no attacker-controlled driver page is needed after all — a link is
@@ -982,7 +1098,13 @@ pub(crate) fn analyze_javascript_for_dom_xss(
     String,
     String,
 )> {
-    analyze_javascript_for_dom_xss_with_html_context(js_code, _url, &HashSet::new(), false)
+    analyze_javascript_for_dom_xss_with_html_context(
+        js_code,
+        _url,
+        &HashSet::new(),
+        &Default::default(),
+        false,
+    )
 }
 
 /// Same as `analyze_javascript_for_dom_xss`, but supplies the AST analyzer
@@ -998,6 +1120,7 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     js_code: &str,
     _url: &str,
     script_element_ids: &HashSet<String>,
+    reflected_markup: &crate::scanning::ast_dom_analysis::ReflectedMarkup,
     trusted_types_enforced: bool,
 ) -> Vec<(
     crate::scanning::ast_dom_analysis::DomXssVulnerability,
@@ -1006,6 +1129,7 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
 )> {
     let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new()
         .with_script_element_ids(script_element_ids.clone())
+        .with_reflected_markup(reflected_markup.clone())
         .with_trusted_types_enforced(trusted_types_enforced);
 
     match analyzer.analyze(js_code) {
@@ -1122,6 +1246,7 @@ pub(crate) fn run_initial_ast_dom_analysis(
             &js_code,
             target_url,
             &script_element_ids,
+            &Default::default(),
             posture.trusted_types_enforced,
         );
         for (vuln, payload, description) in findings {

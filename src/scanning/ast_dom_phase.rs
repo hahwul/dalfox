@@ -21,8 +21,14 @@ pub(crate) async fn run_ast_dom_analysis(
     ast_seen: &mut HashSet<String>,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
-    let (js_blocks, script_element_ids) =
-        crate::scanning::ast_integration::extract_js_and_script_ids(response_text);
+    // The response carries this request's marker in `param`, so the markup
+    // slots holding it are proven reflections (see `ReflectedMarkup`).
+    let (js_blocks, script_element_ids, mut reflected_markup) =
+        crate::scanning::ast_integration::extract_js_script_ids_and_reflected_markup(response_text);
+    // …and the slots the pre-scan probe proved, when Stage 0 was skipped.
+    if let Some(probed) = &param.reflected_markup {
+        reflected_markup.merge(probed);
+    }
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
     for js_code in js_blocks {
         let findings =
@@ -30,6 +36,7 @@ pub(crate) async fn run_ast_dom_analysis(
                 &js_code,
                 target.url.as_str(),
                 &script_element_ids,
+                &reflected_markup,
                 posture.trusted_types_enforced,
             );
         for (vuln, payload, description) in findings {
@@ -252,6 +259,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 &body,
                 target.url.as_str(),
                 &script_element_ids,
+                &Default::default(),
                 trusted_types_enforced,
             );
 

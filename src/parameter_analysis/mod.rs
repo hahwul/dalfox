@@ -192,6 +192,16 @@ pub struct Param {
     /// starts out `false`, i.e. gets the pre-existing behaviour.
     #[serde(default, skip)]
     pub marker_echoed: bool,
+    /// Page slots (element attributes / text, CSS custom properties) that
+    /// held the pre-scan probe's marker, when that probe echoed on a page with
+    /// script. The AST phase reads it as proof that the page's JS reading
+    /// those slots reads this parameter: Stage 0 is skipped when the probe
+    /// echoed, and the attack response it analyses instead has usually broken
+    /// out of the very slot it would need to prove. Scan-internal, like
+    /// `marker_echoed`.
+    #[serde(default, skip)]
+    pub reflected_markup:
+        Option<std::sync::Arc<crate::scanning::ast_dom_analysis::ReflectedMarkup>>,
     /// Explicitly distinguishes a cookie parameter from an HTTP header when
     /// both locations carry the same name. `None` preserves the legacy
     /// target-based inference for params created by older callers.
@@ -233,6 +243,7 @@ impl Param {
             escaped_specials: None,
             js_breakout: None,
             marker_echoed: false,
+            reflected_markup: None,
             is_cookie: None,
         }
     }
@@ -848,6 +859,13 @@ pub async fn active_probe_param(
     // act on.
     param.marker_echoed =
         batched.actionable && batched.text.as_deref().is_some_and(body_has_probe_marker);
+    if param.marker_echoed {
+        param.reflected_markup = batched
+            .text
+            .as_deref()
+            .and_then(crate::scanning::ast_integration::reflected_markup_from_html)
+            .map(std::sync::Arc::new);
+    }
     let batched_response = batched.text;
 
     let mut valid: Vec<char> = Vec::new();

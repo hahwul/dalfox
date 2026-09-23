@@ -5499,3 +5499,108 @@ fn numeric_coercion_polyfill_is_not_an_override() {
         "an overridden built-in stays overridden when copied"
     );
 }
+
+fn markup(
+    attrs: &[(&str, &[&str])],
+    text: &[&str],
+    css: &[&str],
+) -> crate::scanning::ast_dom_analysis::ReflectedMarkup {
+    let mut m = crate::scanning::ast_dom_analysis::ReflectedMarkup::default();
+    for (id, names) in attrs {
+        m.attrs.insert(
+            id.to_string(),
+            names.iter().map(|n| n.to_string()).collect(),
+        );
+    }
+    m.text = text.iter().map(|s| s.to_string()).collect();
+    m.css_custom_properties = css.iter().map(|s| s.to_string()).collect();
+    m
+}
+
+/// Server-reflected markup read back by the page is a source — but only for
+/// the slots the pre-scan proved carry the marker.
+#[test]
+fn reflected_markup_reads_are_sources() {
+    let cases: [(&str, crate::scanning::ast_dom_analysis::ReflectedMarkup); 5] = [
+        (
+            "document.getElementById('target').innerHTML = document.getElementById('target').dataset.content;",
+            markup(&[("target", &["data-content"])], &[], &[]),
+        ),
+        (
+            "var probe = document.getElementById('probe'); var out = document.getElementById('out');
+             new MutationObserver(function () { out.innerHTML = '<b>' + probe.dataset.userName + '</b>'; }).observe(probe, {attributes: true});",
+            markup(&[("probe", &["data-user-name"])], &[], &[]),
+        ),
+        (
+            "document.getElementById('out').innerHTML = document.getElementById('ns').textContent;",
+            markup(&[], &["ns"], &[]),
+        ),
+        (
+            "var el = document.querySelector('#cfg'); document.body.innerHTML = el.getAttribute('title');",
+            markup(&[("cfg", &["title"])], &[], &[]),
+        ),
+        (
+            "var style = getComputedStyle(document.body); var p = style.getPropertyValue('--theme').trim(); new Function(p)();",
+            markup(&[], &[], &["--theme"]),
+        ),
+    ];
+    for (code, m) in cases {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(m)
+            .analyze(code)
+            .expect("parses");
+        assert!(
+            found.iter().any(|v| v.source.starts_with("markup:")),
+            "reflected slot read must be a source: {code} -> {found:?}"
+        );
+    }
+}
+
+/// Benign lookalikes: the same component idioms with no marker proven in the
+/// slot being read stay clean. The attribute/property name never decides.
+#[test]
+fn unreflected_markup_reads_stay_clean() {
+    let cases: [(&str, crate::scanning::ast_dom_analysis::ReflectedMarkup); 6] = [
+        // No reflection anywhere: the ordinary `data-template` component.
+        (
+            "var el = document.getElementById('tpl'); el.innerHTML = el.dataset.template;",
+            markup(&[], &[], &[]),
+        ),
+        // Marker in a different attribute of the same element.
+        (
+            "var el = document.getElementById('tpl'); el.innerHTML = el.dataset.template;",
+            markup(&[("tpl", &["title"])], &[], &[]),
+        ),
+        // Marker on a different element.
+        (
+            "document.getElementById('a').innerHTML = document.getElementById('b').dataset.x;",
+            markup(&[("a", &["data-x"])], &[], &[]),
+        ),
+        // Reading reflected text back through innerHTML returns the server's
+        // escaped serialization, not the decoded value.
+        (
+            "document.getElementById('out').innerHTML = document.getElementById('ns').innerHTML;",
+            markup(&[], &["ns"], &[]),
+        ),
+        // A custom property that is not the reflected one.
+        (
+            "new Function(getComputedStyle(document.body).getPropertyValue('--other'))();",
+            markup(&[], &[], &["--theme"]),
+        ),
+        // A dynamic id cannot be matched to the pre-scan.
+        (
+            "var id = 'target'; document.body.innerHTML = document.getElementById(id).dataset.content;",
+            markup(&[("target", &["data-content"])], &[], &[]),
+        ),
+    ];
+    for (code, m) in cases {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(m)
+            .analyze(code)
+            .expect("parses");
+        assert!(
+            found.is_empty(),
+            "unproven slot read reported: {code} -> {found:?}"
+        );
+    }
+}

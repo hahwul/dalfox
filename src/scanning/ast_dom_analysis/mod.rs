@@ -35,10 +35,13 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+pub use reflected_markup::ReflectedMarkup;
+
 mod async_flow;
 mod bindings;
 mod bound_calls;
 mod events;
+mod reflected_markup;
 mod resolve;
 mod script_element;
 mod sinks;
@@ -415,6 +418,10 @@ struct DomXssVisitor<'a> {
     /// never bound to a variable. Populated by the HTML pre-scan in
     /// `ast_integration::extract_script_element_ids`.
     script_element_ids: HashSet<String>,
+    /// Page slots that carry this scan's marker (see [`ReflectedMarkup`]).
+    reflected_markup: ReflectedMarkup,
+    /// Variables bound to an element in [`Self::reflected_markup`], by `id`.
+    reflected_element_vars: HashMap<String, String>,
     /// Callback parameters currently bound to a `fetch()` `Response`
     /// object — the first `.then(resp => …)` of a fetch chain. While such
     /// a parameter is in scope, `resp.text()` / `resp.json()` read the
@@ -726,6 +733,8 @@ impl<'a> DomXssVisitor<'a> {
             idb_request_vars: HashSet::new(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),
+            reflected_markup: ReflectedMarkup::default(),
+            reflected_element_vars: HashMap::new(),
             response_object_vars: HashSet::new(),
             branch_depth: 0,
             recursion_depth: Rc::new(Cell::new(0)),
@@ -736,6 +745,10 @@ impl<'a> DomXssVisitor<'a> {
     }
     fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
         self.script_element_ids = ids;
+        self
+    }
+    fn with_reflected_markup(mut self, markup: ReflectedMarkup) -> Self {
+        self.reflected_markup = markup;
         self
     }
     /// Mark that the page enforces `require-trusted-types-for 'script'`, so a
@@ -769,6 +782,9 @@ pub struct AstDomAnalyzer {
     /// (see `ast_integration::extract_script_element_ids`). Empty when
     /// the caller has no HTML context.
     script_element_ids: HashSet<String>,
+    /// Slots of the analysed response that carry this scan's marker (see
+    /// [`ReflectedMarkup`]). Empty when the caller has no HTML context.
+    reflected_markup: ReflectedMarkup,
     /// Whether the response CSP enforces `require-trusted-types-for 'script'`.
     /// Threaded into the visitor to gate strict-default-policy suppression.
     /// Off by default — preserving pre-Trusted-Types behaviour for callers
@@ -787,6 +803,14 @@ impl AstDomAnalyzer {
     /// recognised as a JS-eval sink even when the lookup is inline.
     pub(crate) fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
         self.script_element_ids = ids;
+        self
+    }
+
+    /// Attach the marker-carrying slots of the analysed response so reads of
+    /// them (`el.dataset.x`, `getAttribute`, `textContent`, CSS custom
+    /// properties) count as sources.
+    pub(crate) fn with_reflected_markup(mut self, markup: ReflectedMarkup) -> Self {
+        self.reflected_markup = markup;
         self
     }
 
@@ -830,6 +854,7 @@ impl AstDomAnalyzer {
         }
 
         let script_element_ids = self.script_element_ids.clone();
+        let reflected_markup = self.reflected_markup.clone();
         let trusted_types_enforced = self.trusted_types_enforced;
 
         // Fast path: a script this small can't nest a parser-recursion vector
@@ -837,7 +862,12 @@ impl AstDomAnalyzer {
         // so parse it inline and skip the thread-spawn cost the common small
         // inline `<script>` block would otherwise pay on every call.
         if source_code.len() <= INLINE_PARSE_BYTES {
-            return Self::analyze_on_stack(source_code, script_element_ids, trusted_types_enforced);
+            return Self::analyze_on_stack(
+                source_code,
+                script_element_ids,
+                reflected_markup,
+                trusted_types_enforced,
+            );
         }
 
         // Larger input may carry a deep multi-byte statement/assignment chain
@@ -849,7 +879,12 @@ impl AstDomAnalyzer {
             let handle = std::thread::Builder::new()
                 .stack_size(ANALYZE_STACK_BYTES)
                 .spawn_scoped(scope, move || {
-                    Self::analyze_on_stack(source_code, script_element_ids, trusted_types_enforced)
+                    Self::analyze_on_stack(
+                        source_code,
+                        script_element_ids,
+                        reflected_markup,
+                        trusted_types_enforced,
+                    )
                 });
             match handle {
                 // A panic inside the parse/walk (not a stack overflow, which
@@ -872,6 +907,7 @@ impl AstDomAnalyzer {
     fn analyze_on_stack(
         source_code: &str,
         script_element_ids: HashSet<String>,
+        reflected_markup: ReflectedMarkup,
         trusted_types_enforced: bool,
     ) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();
@@ -886,6 +922,7 @@ impl AstDomAnalyzer {
 
         let mut visitor = DomXssVisitor::new(source_code)
             .with_script_element_ids(script_element_ids)
+            .with_reflected_markup(reflected_markup)
             .with_trusted_types_enforced(trusted_types_enforced);
         visitor.walk_statements(&ret.program.body);
 
