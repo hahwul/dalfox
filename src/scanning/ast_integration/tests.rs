@@ -131,6 +131,47 @@ fn xml_ast_extraction_preserves_xml_names_and_active_namespaces() {
 }
 
 #[test]
+fn xml_ast_analysis_recovers_active_scripts_before_ten_thousand_deep_tail() {
+    let deep_open = "<n>".repeat(10_000);
+    let deep_close = "</n>".repeat(10_000);
+    let code = "document.body.innerHTML=location.hash;";
+    let xhtml_ns = "http://www.w3.org/1999/xhtml";
+    let svg_ns = "http://www.w3.org/2000/svg";
+    let fixtures = [
+        (
+            "application/xml",
+            format!(
+                "<root><script xmlns=\"{xhtml_ns}\">{code}</script>{deep_open}{deep_close}</root>"
+            ),
+        ),
+        (
+            "application/xhtml+xml",
+            format!(
+                "<html xmlns=\"{xhtml_ns}\"><body><script>{code}</script>{deep_open}{deep_close}</body></html>"
+            ),
+        ),
+        (
+            "image/svg+xml",
+            format!("<svg xmlns=\"{svg_ns}\"><script>{code}</script>{deep_open}{deep_close}</svg>"),
+        ),
+    ];
+
+    for (content_type, body) in fixtures {
+        let results = run_initial_ast_dom_analysis_for_response(
+            &body,
+            content_type,
+            "https://example.com/",
+            "GET",
+            PageSecurityPosture::default(),
+        );
+        assert!(
+            !results.is_empty(),
+            "{content_type} should recover the executable script before deeply nested markup"
+        );
+    }
+}
+
+#[test]
 fn external_script_discovery_skips_data_blocks() {
     let html = r#"
         <script type="application/json" src="/data.json"></script>

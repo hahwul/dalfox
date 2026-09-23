@@ -420,9 +420,6 @@ pub(crate) fn is_xml_content_type(ct: &str) -> bool {
             .is_some_and(|(_, subtype)| subtype.ends_with("+xml"))
 }
 
-const XHTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
-const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
-
 /// Whether the bytes would create an active markup document when opened as a
 /// top-level browser navigation. Content-Type alone is insufficient for
 /// missing/invalid types, while XML types must be parsed as XML rather than
@@ -430,33 +427,14 @@ const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 pub(crate) fn response_has_markup_document(ct: &str, body: &str) -> bool {
     match content_type_primary(ct).as_deref() {
         Some("text/html") => true,
-        Some("application/xhtml+xml") => xml_root_is(body, XHTML_NAMESPACE, "html"),
-        Some("image/svg+xml") => xml_root_is(body, SVG_NAMESPACE, "svg"),
-        Some(primary) if is_xml_content_type(primary) => xml_has_active_markup(body),
+        Some(primary) if is_xml_content_type(primary) => {
+            let document = crate::utils::xml::parse_xml_document(body);
+            crate::utils::xml::document_has_markup_for_content_type(primary, body, &document)
+        }
         Some("unknown/unknown" | "application/unknown" | "*/*") => body_sniffs_as_html(body),
         Some(_) => false,
         None => body_sniffs_as_html(body),
     }
-}
-
-fn xml_root_is(body: &str, namespace: &str, local_name: &str) -> bool {
-    let Ok(document) = roxmltree::Document::parse(body) else {
-        return false;
-    };
-    let root = document.root_element().tag_name();
-    root.namespace() == Some(namespace) && root.name() == local_name
-}
-
-fn xml_has_active_markup(body: &str) -> bool {
-    let Ok(document) = roxmltree::Document::parse(body) else {
-        return false;
-    };
-    document.descendants().any(|node| {
-        matches!(
-            node.tag_name().namespace(),
-            Some(XHTML_NAMESPACE | SVG_NAMESPACE)
-        )
-    })
 }
 
 /// Match the HTML signatures used when a browsing context sniffs a response

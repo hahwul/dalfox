@@ -205,6 +205,67 @@ fn response_has_markup_document_sniffs_only_unknown_types_and_valid_xml_document
 }
 
 #[test]
+fn xml_doctypes_and_recovery_documents_keep_browser_active_markup() {
+    let xhtml_doctype = concat!(
+        "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" ",
+        "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>&nbsp;</body></html>"
+    );
+    let svg_doctype = concat!(
+        "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" ",
+        "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"
+    );
+    let malformed_xhtml = concat!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>",
+        "<script>alert(1)</script><broken></body></html>"
+    );
+
+    assert!(response_has_markup_document(
+        "application/xhtml+xml",
+        xhtml_doctype
+    ));
+    assert!(response_has_markup_document("image/svg+xml", svg_doctype));
+    assert!(response_has_markup_document(
+        "application/xhtml+xml",
+        malformed_xhtml
+    ));
+}
+
+#[test]
+fn xml_response_types_at_ten_thousand_depth_use_bounded_recovery() {
+    let deep = "<n>".repeat(10_000);
+    let close = "</n>".repeat(10_000);
+    let fixtures = [
+        (
+            "application/xml",
+            format!(
+                "<root><script xmlns=\"http://www.w3.org/1999/xhtml\">alert(1)</script>{deep}{close}</root>"
+            ),
+        ),
+        (
+            "application/xhtml+xml",
+            format!(
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><script>alert(1)</script>{deep}{close}</body></html>"
+            ),
+        ),
+        (
+            "image/svg+xml",
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script>{deep}{close}</svg>"
+            ),
+        ),
+    ];
+
+    for (content_type, body) in fixtures {
+        assert!(
+            response_has_markup_document(content_type, &body),
+            "{content_type} should use its active markup prefix after depth overflow"
+        );
+    }
+}
+
+#[test]
 fn test_is_javascript_content_type() {
     // Executable-JavaScript bodies: run as script, never HTML-parsed.
     assert!(is_javascript_content_type("application/javascript"));

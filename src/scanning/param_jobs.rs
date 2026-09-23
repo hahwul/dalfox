@@ -90,13 +90,29 @@ pub(crate) fn generate_param_jobs(
         if !param_is_http_scannable(param) {
             continue;
         }
-        let mut reflection_payloads = if let Some(context) = &param.injection_context {
+        let xml_namespace_payloads = param
+            .xml_namespace_candidate
+            .as_deref()
+            .map(get_xml_namespace_payloads);
+        let xml_namespace_probe_only =
+            xml_namespace_payloads.is_some() && !args.deep_scan && !args.only_custom_payload;
+        let mut reflection_payloads = if xml_namespace_probe_only {
+            xml_namespace_payloads.clone().unwrap_or_default()
+        } else if let Some(context) = &param.injection_context {
             crate::scanning::xss_common::get_dynamic_payloads(context, args)
                 .unwrap_or_else(|_| vec![])
         } else {
             get_fallback_reflection_payloads(args).unwrap_or_else(|_| vec![])
         };
-        let mut dom_payloads = get_dom_payloads(param, args).unwrap_or_else(|_| vec![]);
+        let mut dom_payloads = if xml_namespace_probe_only {
+            Vec::new()
+        } else {
+            get_dom_payloads(param, args).unwrap_or_else(|_| vec![])
+        };
+        if !xml_namespace_probe_only && let Some(xml_payloads) = &xml_namespace_payloads {
+            reflection_payloads.splice(0..0, xml_payloads.clone());
+            dom_payloads.splice(0..0, xml_payloads.clone());
+        }
 
         // Issue #1075: prepend filter-constrained synthesized payloads to the
         // reflection set when active probing produced a character profile for
@@ -113,6 +129,7 @@ pub(crate) fn generate_param_jobs(
         // of these higher-signal synthesized payloads — intentional, since the
         // user asked for few payloads and these are the ones most likely to fire.
         if !args.only_custom_payload
+            && !xml_namespace_probe_only
             && let Some(context) = &param.injection_context
             && (param.invalid_specials.is_some() || param.valid_specials.is_some())
         {
@@ -233,7 +250,7 @@ pub(crate) fn generate_param_jobs(
         // Append shared payloads (CSP bypass + tech-specific) AFTER the cap so
         // the safety cap can never trim these few, high-value payloads. They
         // still get the same WAF-bypass expansion as the base set.
-        if !args.only_custom_payload && !shared_payloads.is_empty() {
+        if !args.only_custom_payload && !xml_namespace_probe_only && !shared_payloads.is_empty() {
             let mut shared_refl: Vec<String> = shared_payloads.to_vec();
             let mut shared_dom: Vec<String> = shared_payloads.to_vec();
             if let Some(strategy) = waf_strategy {

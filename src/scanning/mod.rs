@@ -664,7 +664,7 @@ impl ScanWorkerCtx {
 
         // If probe found no reflection and not in deep_scan, skip heavy
         // payload loops for this param.
-        if !probe_reflected && !self.args.deep_scan {
+        if !probe_reflected && !self.args.deep_scan && param.xml_namespace_candidate.is_none() {
             self.flush_results(&mut state.local_results).await;
             return;
         }

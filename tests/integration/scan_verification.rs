@@ -1306,3 +1306,55 @@ async fn test_partial_reflection_hex_extract() {
         count
     );
 }
+
+#[tokio::test]
+async fn deep_xml_response_survives_and_verifies_namespace_payload() {
+    use axum::{extract::Query, response::IntoResponse};
+
+    async fn deep_xml_echo(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let value = params.get("q").cloned().unwrap_or_default();
+        let mut body = format!("<root>{value}{}", "<n>".repeat(10_000));
+        body.push_str(&"</n>".repeat(10_000));
+        body.push_str("</root>");
+        ([("content-type", "application/xml; charset=utf-8")], body)
+    }
+
+    let app = Router::new().route("/xml", get(deep_xml_echo));
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind XML fixture listener");
+    let addr = listener.local_addr().expect("XML fixture address");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve XML fixture");
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/xml?q=seed")];
+    let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let output = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/scratch")
+        .join(format!("deep_xml_scan_{id}.json"));
+    std::fs::create_dir_all(output.parent().expect("scratch directory"))
+        .expect("create target scratch directory");
+    args.output = Some(output.to_string_lossy().into_owned());
+
+    let _guard = SCAN_LOCK.lock().await;
+    dalfox::REQUEST_COUNT.store(0, Ordering::Relaxed);
+    scan::run_scan(&args).await;
+    let requests = dalfox::REQUEST_COUNT.load(Ordering::Relaxed);
+
+    let results: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&output).expect("read deep XML scan output"))
+            .expect("parse deep XML scan output");
+    let _ = std::fs::remove_file(&output);
+    let findings = results["findings"].as_array().expect("findings array");
+    assert!(
+        requests <= 21,
+        "inert unnamespaced XML should use the small verifier set, sent {requests} requests"
+    );
+    assert!(
+        findings.iter().any(|finding| finding["type"] == "V"),
+        "namespaced XML payload should verify on the response; got {findings:?}"
+    );
+}

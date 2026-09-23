@@ -1053,6 +1053,82 @@ fn response_type_gates_require_well_formed_xhtml_and_svg() {
 }
 
 #[test]
+fn xml_dtd_entities_and_malformed_tails_recover_dom_verification() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class=\"{marker}\">alert(1)</script>");
+    let xhtml_with_dtd_and_unknown_entity = format!(
+        concat!(
+            "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" ",
+            "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">",
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}&nbsp;</body></html>"
+        ),
+        payload = payload
+    );
+    let malformed_xhtml = format!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}<broken></body></html>"
+    );
+    let svg_with_dtd = format!(
+        concat!(
+            "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" ",
+            "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\">{payload}</svg>"
+        ),
+        payload = payload
+    );
+
+    for (content_type, body) in [
+        ("application/xhtml+xml", xhtml_with_dtd_and_unknown_entity),
+        ("application/xhtml+xml", malformed_xhtml),
+        ("image/svg+xml", svg_with_dtd),
+    ] {
+        assert_eq!(
+            classify_dom_evidence_for_response(&payload, &body, content_type),
+            Some(DomEvidenceKind::Marker),
+            "{content_type} should preserve the executable marker before parser recovery"
+        );
+    }
+}
+
+#[test]
+fn xml_dom_verification_at_ten_thousand_nesting_levels_does_not_recurse() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class=\"{marker}\">alert(1)</script>");
+    let open = "<n>".repeat(10_000);
+    let close = "</n>".repeat(10_000);
+    let cases = [
+        (
+            "application/xml",
+            format!(
+                "<root><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"{marker}\" onload=\"alert(1)\"/>{open}{close}</root>"
+            ),
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"{marker}\" onload=\"alert(1)\"/>"
+            ),
+        ),
+        (
+            "application/xhtml+xml",
+            format!(
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>{payload}{open}{close}</body></html>"
+            ),
+            payload.clone(),
+        ),
+        (
+            "image/svg+xml",
+            format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{payload}{open}{close}</svg>"),
+            payload,
+        ),
+    ];
+
+    for (content_type, body, expected_payload) in cases {
+        assert_eq!(
+            classify_dom_evidence_for_response(&expected_payload, &body, content_type),
+            Some(DomEvidenceKind::Marker),
+            "{content_type} should verify before the deeply nested tail"
+        );
+    }
+}
+
+#[test]
 fn xml_script_body_from_payload_is_verified_as_executable() {
     let payload = "<script>alert(1)</script>";
     let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\">{payload}</svg>");

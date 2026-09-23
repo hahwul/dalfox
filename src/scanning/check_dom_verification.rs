@@ -776,6 +776,40 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
     None
 }
 
+fn classify_dom_evidence_in_recovered_xml(
+    payload: &str,
+    text: &str,
+    document: &scraper::Html,
+) -> Option<DomEvidenceKind> {
+    let needs_markers = payload_has_any_marker(payload);
+    let needs_attrs = payload_is_executable_url_protocol(payload);
+    let needs_html_struct = payload.contains('<')
+        && crate::scanning::js_context_verify::payload_carries_js_sink(payload)
+        && body_looks_html_renderable(text);
+    let needs_js = crate::scanning::js_context_verify::payload_carries_js_sink(payload);
+    if !needs_markers && !needs_attrs && !needs_html_struct && !needs_js {
+        return None;
+    }
+    if needs_markers && has_marker_evidence_in_doc(payload, document) {
+        return Some(DomEvidenceKind::Marker);
+    }
+    if needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, document) {
+        return Some(DomEvidenceKind::ExecutableUrl);
+    }
+    if needs_html_struct && has_html_structural_evidence_in_doc(payload, document) {
+        return Some(DomEvidenceKind::HtmlStructural);
+    }
+    if needs_js
+        && crate::scanning::js_context_verify::has_inline_script_context_evidence(payload, text)
+    {
+        return Some(DomEvidenceKind::JsContext);
+    }
+    if needs_js && has_inline_handler_breakout_evidence(payload, text) {
+        return Some(DomEvidenceKind::InlineHandlerBreakout);
+    }
+    None
+}
+
 /// Classify evidence using the browser's response parser for the supplied
 /// Content-Type. JavaScript responses are parsed as JavaScript (preserving
 /// callable JSONP sinks); HTML, sniffable unknown-type responses, XHTML, and
@@ -831,21 +865,48 @@ fn classify_xml_response(
     namespace: &str,
     root_name: &str,
 ) -> Option<DomEvidenceKind> {
-    let document = roxmltree::Document::parse(text).ok()?;
-    let root = document.root_element().tag_name();
-    (root.namespace() == Some(namespace) && root.name() == root_name)
-        .then(|| classify_dom_evidence_in_xml(payload, &document))
-        .flatten()
+    match crate::utils::xml::parse_xml_document(text) {
+        crate::utils::xml::XmlDocument::Parsed(document) => {
+            let root = document.root_element().tag_name();
+            (root.namespace() == Some(namespace) && root.name() == root_name)
+                .then(|| classify_dom_evidence_in_xml(payload, &document))
+                .flatten()
+        }
+        crate::utils::xml::XmlDocument::Recovered(document)
+            if crate::utils::xml::recovered_xml_root_is(text, &document, namespace, root_name)
+                && crate::utils::xml::recovered_xml_has_executable_markup_before_error(
+                    &document,
+                ) =>
+        {
+            classify_dom_evidence_in_recovered_xml(
+                payload,
+                document.source_prefix(),
+                &document.document,
+            )
+        }
+        crate::utils::xml::XmlDocument::Recovered(_) => None,
+    }
 }
 
 fn classify_xml_response_with_active_namespaces(
     payload: &str,
     text: &str,
 ) -> Option<DomEvidenceKind> {
-    let document = roxmltree::Document::parse(text).ok()?;
-    document_has_active_markup(&document)
-        .then(|| classify_dom_evidence_in_xml(payload, &document))
-        .flatten()
+    match crate::utils::xml::parse_xml_document(text) {
+        crate::utils::xml::XmlDocument::Parsed(document) => document_has_active_markup(&document)
+            .then(|| classify_dom_evidence_in_xml(payload, &document))
+            .flatten(),
+        crate::utils::xml::XmlDocument::Recovered(document)
+            if crate::utils::xml::recovered_xml_has_executable_markup_before_error(&document) =>
+        {
+            classify_dom_evidence_in_recovered_xml(
+                payload,
+                document.source_prefix(),
+                &document.document,
+            )
+        }
+        crate::utils::xml::XmlDocument::Recovered(_) => None,
+    }
 }
 
 fn document_has_active_markup(document: &roxmltree::Document<'_>) -> bool {

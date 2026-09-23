@@ -61,75 +61,134 @@ pub(crate) fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<Str
 /// namespaces. The caller is responsible for checking the response MIME type
 /// and XML document validity before using this path.
 pub(crate) fn extract_js_and_script_ids_from_xml(xml: &str) -> (Vec<String>, HashSet<String>) {
+    extract_js_and_script_ids_from_xml_document(crate::utils::xml::parse_xml_document(xml))
+}
+
+fn extract_js_and_script_ids_from_xml_document(
+    document: crate::utils::xml::XmlDocument<'_>,
+) -> (Vec<String>, HashSet<String>) {
     const XHTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
     const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 
-    let Ok(document) = roxmltree::Document::parse(xml) else {
-        return (Vec::new(), HashSet::new());
-    };
     let mut js_blocks = Vec::new();
     let mut script_ids = HashSet::new();
     let mut seen = HashSet::new();
 
-    for node in document.descendants().filter(|node| {
-        node.is_element()
-            && matches!(
-                node.tag_name().namespace(),
-                Some(XHTML_NAMESPACE | SVG_NAMESPACE)
-            )
-    }) {
-        let tag = node.tag_name();
-        if tag.name() == "script" {
-            if let Some(id) = node.attribute("id") {
-                let trimmed = id.trim();
-                if !trimmed.is_empty() {
-                    script_ids.insert(trimmed.to_string());
+    match document {
+        crate::utils::xml::XmlDocument::Parsed(document) => {
+            for node in document.descendants().filter(|node| {
+                node.is_element()
+                    && matches!(
+                        node.tag_name().namespace(),
+                        Some(XHTML_NAMESPACE | SVG_NAMESPACE)
+                    )
+            }) {
+                let tag = node.tag_name();
+                if tag.name() == "script" {
+                    if let Some(id) = node.attribute("id") {
+                        let trimmed = id.trim();
+                        if !trimmed.is_empty() {
+                            script_ids.insert(trimmed.to_string());
+                        }
+                    }
+                    let has_external_source = node.attribute("src").is_some()
+                        || node
+                            .attributes()
+                            .any(|attr| attr.name() == "href" && attr.namespace().is_some());
+                    let script_type = node.attribute("type").unwrap_or("");
+                    if !has_external_source && xml_script_type_is_javascript(script_type) {
+                        let code: String = node
+                            .descendants()
+                            .filter(|child| child.is_text())
+                            .filter_map(|child| child.text())
+                            .collect();
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
                 }
-            }
-            let has_external_source = node.attribute("src").is_some()
-                || node
-                    .attributes()
-                    .any(|attr| attr.name() == "href" && attr.namespace().is_some());
-            let script_type = node.attribute("type").unwrap_or("");
-            if !has_external_source && xml_script_type_is_javascript(script_type) {
-                let code: String = node
-                    .descendants()
-                    .filter(|child| child.is_text())
-                    .filter_map(|child| child.text())
-                    .collect();
-                let key = code.trim().to_string();
-                if !key.is_empty() && seen.insert(key) {
-                    js_blocks.push(code);
-                }
-            }
-        }
 
-        for attr in node.attributes() {
-            let name = attr.name();
-            let value = attr.value().trim();
-            if value.is_empty() {
-                continue;
-            }
-            let code = if name.starts_with("on") && name.len() > 2 {
-                Some(value.to_string())
-            } else if name == "href"
-                && (attr.namespace().is_none()
-                    || attr.namespace() == Some("http://www.w3.org/1999/xlink"))
-                && value
-                    .get(..11)
-                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
-            {
-                Some(value[11..].trim().to_string())
-            } else {
-                None
-            };
-            if let Some(code) = code {
-                let key = code.trim().to_string();
-                if !key.is_empty() && seen.insert(key) {
-                    js_blocks.push(code);
+                for attr in node.attributes() {
+                    let name = attr.name();
+                    let value = attr.value().trim();
+                    if value.is_empty() {
+                        continue;
+                    }
+                    let code = if name.starts_with("on") && name.len() > 2 {
+                        Some(value.to_string())
+                    } else if name == "href"
+                        && (attr.namespace().is_none()
+                            || attr.namespace() == Some("http://www.w3.org/1999/xlink"))
+                        && value
+                            .get(..11)
+                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
+                    {
+                        Some(value[11..].trim().to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(code) = code {
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
                 }
             }
         }
+        crate::utils::xml::XmlDocument::Recovered(document)
+            if crate::utils::xml::recovered_xml_has_active_markup(&document) =>
+        {
+            for node in document
+                .document
+                .root_element()
+                .descendent_elements()
+                .filter(|node| crate::utils::xml::recovered_element_is_active_xml(&document, *node))
+            {
+                if !crate::utils::xml::recovered_xml_element_is_complete(&document, node) {
+                    continue;
+                }
+                let element = node.value();
+                if element.name() == "script" {
+                    if let Some(id) = element.attr("id") {
+                        let trimmed = id.trim();
+                        if !trimmed.is_empty() {
+                            script_ids.insert(trimmed.to_string());
+                        }
+                    }
+                    if element.attr("src").is_none() && script_type_is_javascript(element) {
+                        let code: String = node.text().collect();
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
+                }
+
+                for (name, value) in element.attrs() {
+                    let value = value.trim();
+                    let code = if name.starts_with("on") && name.len() > 2 {
+                        Some(value.to_string())
+                    } else if name == "href"
+                        && value
+                            .get(..11)
+                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
+                    {
+                        Some(value[11..].trim().to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(code) = code {
+                        let key = code.trim().to_string();
+                        if !key.is_empty() && seen.insert(key) {
+                            js_blocks.push(code);
+                        }
+                    }
+                }
+            }
+        }
+        crate::utils::xml::XmlDocument::Recovered(_) => {}
     }
 
     (js_blocks, script_ids)
@@ -1241,12 +1300,20 @@ pub(crate) fn run_initial_ast_dom_analysis_for_response(
     target_method: &str,
     posture: PageSecurityPosture,
 ) -> Vec<crate::scanning::result::Result> {
-    if !crate::utils::response_has_markup_document(content_type, response_text) {
-        return Vec::new();
-    }
     let (js_blocks, script_element_ids) = if crate::utils::is_xml_content_type(content_type) {
-        extract_js_and_script_ids_from_xml(response_text)
+        let document = crate::utils::xml::parse_xml_document(response_text);
+        if !crate::utils::xml::document_has_markup_for_content_type(
+            content_type,
+            response_text,
+            &document,
+        ) {
+            return Vec::new();
+        }
+        extract_js_and_script_ids_from_xml_document(document)
     } else {
+        if !crate::utils::response_has_markup_document(content_type, response_text) {
+            return Vec::new();
+        }
         extract_js_and_script_ids(response_text)
     };
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();

@@ -14,6 +14,7 @@ pub mod rate_limit;
 pub mod scan_id;
 pub mod shimmer;
 pub mod term;
+pub(crate) mod xml;
 
 /// Largest permit count `tokio::sync::Semaphore::new` accepts; it asserts
 /// above this. Taken from tokio's own public constant rather than hand-copying
