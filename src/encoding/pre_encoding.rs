@@ -107,7 +107,32 @@ pub(crate) fn apply_param_encoding(
             .apply(payload)
             .unwrap_or_else(|_| payload.to_string());
     }
+    // A path segment gets one more percent-encoding layer on the wire than the
+    // multi-URL encoding itself carries: `build_injected_url` escapes every
+    // `%` in the segment to `%25`. Detection accounts for that (the path
+    // probe URL-encodes N-1 times, then escapes `%`), so a `2url` path param is
+    // one that decodes *two* layers in total. Applying the full N rounds here
+    // and letting the segment escape add another sent N+1 layers — the app
+    // then reflected `%3C…` instead of `<…`, and every payload for a param
+    // just classified as multi-decoding missed.
+    if param.location == crate::parameter_analysis::Location::Path
+        && let Some(rounds) = match pre_encoding_type(&param.pre_encoding) {
+            Some(PreEncodingType::DoubleUrl) => Some(1),
+            Some(PreEncodingType::TripleUrl) => Some(2),
+            _ => None,
+        }
+    {
+        let mut encoded = payload.to_string();
+        for _ in 0..rounds {
+            encoded = url_encode(&encoded);
+        }
+        return encoded;
+    }
     apply_pre_encoding(payload, &param.pre_encoding)
+}
+
+fn pre_encoding_type(pre_encoding: &Option<String>) -> Option<PreEncodingType> {
+    pre_encoding.as_deref().and_then(PreEncodingType::parse)
 }
 
 /// A single pre-encoding probe: the encoding type and a function that

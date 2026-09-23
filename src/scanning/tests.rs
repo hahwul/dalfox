@@ -4068,3 +4068,58 @@ fn test_dom_phase_early_exit_redirect_streak_disabled_under_deep_scan() {
         REDIRECT_STREAK_LIMIT * 10
     ));
 }
+
+/// A path segment the app URL-decodes a second time behind a `<>` filter is
+/// classified `2url` by active probing; the scan must then reach it. The
+/// multi-URL pre-encoding used to be applied in full *and* escaped again by
+/// the path-segment encoder, so every payload arrived one layer short of
+/// decoded and the param read clean.
+#[tokio::test]
+async fn path_param_classified_2url_is_scanned_with_matching_layers() {
+    use axum::{Router, extract::Path, response::Html, routing::get};
+    use std::net::Ipv4Addr;
+    async fn double_decode(Path(seg): Path<String>) -> Html<String> {
+        let filtered: String = seg.chars().filter(|c| *c != '<' && *c != '>').collect();
+        let decoded = urlencoding::decode(&filtered)
+            .map(|c| c.into_owned())
+            .unwrap_or(filtered);
+        Html(format!("<html><body><div>{decoded}</div></body></html>"))
+    }
+    let app = Router::new().route("/a/{seg}", get(double_decode));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+
+    let mut target = parse_target(&format!("http://{addr}/a/b")).expect("parse_target");
+    let mut param = crate::parameter_analysis::active_probe_param(
+        &target,
+        Param::new(
+            "path_segment_1".to_string(),
+            "b".to_string(),
+            Location::Path,
+        ),
+        Arc::new(tokio::sync::Semaphore::new(4)),
+    )
+    .await;
+    assert_eq!(param.pre_encoding.as_deref(), Some("2url"));
+    param.injection_context = Some(InjectionContext::Html(None));
+    target.reflection_params.push(param);
+
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    let guard = results.lock().await;
+    assert!(
+        guard.iter().any(|r| r.param == "path_segment_1"),
+        "a 2url path param must produce a finding; got {} results",
+        guard.len()
+    );
+}

@@ -114,3 +114,38 @@ fn test_encode_consistency() {
         );
     }
 }
+
+#[test]
+fn multi_url_path_param_decodes_back_to_the_payload_on_the_wire() {
+    // An `Nurl` path param is one whose segment is percent-decoded N times in
+    // total (once by the server's router, N-1 more by the app) — that is what
+    // the path detection probe measures. The as-sent segment must therefore
+    // carry exactly N layers once `build_injected_url` escapes its `%`.
+    use crate::parameter_analysis::{Location, Param};
+    let payload = "<svg/onload=alert(1)>";
+    let base = url::Url::parse("https://ex.com/a/b").unwrap();
+    for (enc, decodes) in [("2url", 2), ("3url", 3)] {
+        let mut param = Param::new(
+            "path_segment_1".to_string(),
+            "b".to_string(),
+            Location::Path,
+        );
+        param.pre_encoding = Some(enc.to_string());
+        let sent = crate::scanning::url_inject::build_injected_url(
+            &base,
+            &param,
+            &apply_param_encoding(payload, &param),
+        );
+        let mut seg = sent.rsplit('/').next().unwrap().to_string();
+        for _ in 0..decodes {
+            seg = urlencoding::decode(&seg).unwrap().into_owned();
+        }
+        assert_eq!(seg, payload, "{enc}: sent {sent}");
+    }
+
+    // Query params are unchanged: the query builder preserves `%XX`, so the
+    // full N rounds are exactly N layers there.
+    let mut q = Param::new("q".to_string(), String::new(), Location::Query);
+    q.pre_encoding = Some("2url".to_string());
+    assert_eq!(apply_param_encoding("<", &q), "%253C");
+}
