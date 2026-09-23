@@ -32,12 +32,12 @@ use crate::common::create_test_scan_args;
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Serializes every call to `scan::run_scan` in this binary. `run_scan`
-/// resets the process-wide `REQUEST_COUNT` atomic at startup
-/// (`src/cmd/scan.rs`), so any two overlapping scans race on that reset
-/// — a `run_scan_and_count` assertion would observe `count = 0` if a
-/// neighbouring `run_scan_and_collect` re-entered `run_scan` between
-/// its store/load. See issue #939 (reproduced on Ubuntu CI).
-static SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// resets the process-wide `REQUEST_COUNT` atomic at startup, so any two
+/// overlapping scans race on that reset — a `run_scan_and_count` assertion
+/// would observe `count = 0` if a neighbouring `run_scan_and_collect`
+/// re-entered `run_scan` between its store/load. See issue #939 (reproduced on
+/// Ubuntu CI). The lock is shared with the `functional` scans in this binary.
+use crate::common::RUN_SCAN_LOCK as SCAN_LOCK;
 
 // ===========================================================================
 // Vulnerable endpoint handlers

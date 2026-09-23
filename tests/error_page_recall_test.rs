@@ -29,6 +29,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 
+/// `run_scan` resets and then reads the process-global request and failure
+/// counters that decide `meta.incomplete` and the exit code, so two scans in
+/// flight in this binary read each other's tallies. Every test that scans holds
+/// this lock for its whole run.
+static RUN_SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn html_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -132,15 +138,22 @@ async fn spawn_app() -> (String, tokio::task::JoinHandle<()>) {
 
 fn unique_temp_path(prefix: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
+    // `nanos` alone is not unique: the clock is coarser than that on macOS and
+    // Windows, so two tests starting in the same tick got the same path and one
+    // read the other's truncated (empty) output file. The sequence number makes
+    // the name unique within the process.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time")
         .as_nanos();
     path.push(format!(
-        "dalfox-{}-{}-{}.json",
+        "dalfox-{}-{}-{}-{}.json",
         prefix,
         std::process::id(),
-        nanos
+        nanos,
+        seq
     ));
     path
 }
@@ -196,6 +209,7 @@ fn summarize(findings: &[serde_json::Value]) -> Vec<String> {
 /// `--deep-scan`, which disables the cut, verified it.
 #[tokio::test]
 async fn error_page_rawtext_sink_is_verified_not_merely_reflected() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app().await;
     let out = unique_temp_path("error-page-rawtext");
     let mut args = base_args(&format!("{}/boom?name=test", base), &out);
@@ -230,6 +244,7 @@ async fn error_page_rawtext_sink_is_verified_not_merely_reflected() {
 /// gone before the payload stages ever saw it.
 #[tokio::test]
 async fn reflect_everything_page_keeps_the_parameter_the_target_really_has() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app().await;
     let out = unique_temp_path("reflect-everything");
     // Mining must run: the dictionary stage is what probes the sentinels and

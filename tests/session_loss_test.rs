@@ -24,6 +24,12 @@ const SIGNED_IN: &str = "<html><body><h1>Signed in as alice</h1></body></html>";
 const LOGGED_OUT: &str = "<html><body>session expired</body></html>";
 const LOGIN_MARKUP: &str = "<form><input type=\"password\" name=\"pw\"></form>";
 
+/// `run_scan` resets and then reads the process-global request and failure
+/// counters that decide `meta.incomplete` and the exit code, so two scans in
+/// flight in this binary read each other's tallies. Every test that scans holds
+/// this lock for its whole run.
+static RUN_SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn html_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -141,15 +147,22 @@ async fn spawn_app(healthy_hits: usize) -> (String, tokio::task::JoinHandle<()>)
 
 fn unique_temp_path(prefix: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
+    // `nanos` alone is not unique: the clock is coarser than that on macOS and
+    // Windows, so two tests starting in the same tick got the same path and one
+    // read the other's truncated (empty) output file. The sequence number makes
+    // the name unique within the process.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time")
         .as_nanos();
     path.push(format!(
-        "dalfox-{}-{}-{}.json",
+        "dalfox-{}-{}-{}-{}.json",
         prefix,
         std::process::id(),
-        nanos
+        nanos,
+        seq
     ));
     path
 }
@@ -188,6 +201,7 @@ fn read_meta(path: &Path) -> serde_json::Value {
 
 #[tokio::test]
 async fn session_loss_marks_the_target_incomplete_and_fails_the_exit_code() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(1).await;
     let out = unique_temp_path("session-lost");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -224,6 +238,7 @@ async fn session_loss_marks_the_target_incomplete_and_fails_the_exit_code() {
 
 #[tokio::test]
 async fn a_live_session_leaves_the_run_clean() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-alive");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -242,6 +257,7 @@ async fn a_live_session_leaves_the_run_clean() {
 
 #[tokio::test]
 async fn session_check_regex_drives_the_verdict_when_supplied() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
 
     // The probe endpoint answers 200 with a perfectly ordinary page — every
@@ -276,6 +292,7 @@ async fn session_check_regex_drives_the_verdict_when_supplied() {
 // signal would fire immediately and, under the default `abort`, kill the scan.
 #[tokio::test]
 async fn a_login_shaped_check_url_is_not_mistaken_for_a_logout() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-login-shaped-url");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -297,6 +314,7 @@ async fn a_login_shaped_check_url_is_not_mistaken_for_a_logout() {
 // but must NOT turn the exit code red, or the flag would be pointless.
 #[tokio::test]
 async fn on_session_loss_continue_reports_but_does_not_fail_the_run() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(1).await;
     let out = unique_temp_path("session-continue");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -320,6 +338,7 @@ async fn on_session_loss_continue_reports_but_does_not_fail_the_run() {
 // finishes (and discovers the loss) before the second is dispatched.
 #[tokio::test]
 async fn abort_skips_the_remaining_targets_for_that_host() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(2).await;
     let out = unique_temp_path("session-abort-group");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -358,6 +377,7 @@ async fn abort_skips_the_remaining_targets_for_that_host() {
 // about sessions in the envelope.
 #[tokio::test]
 async fn scans_without_credentials_are_untouched_by_session_monitoring() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-off");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -379,6 +399,7 @@ async fn scans_without_credentials_are_untouched_by_session_monitoring() {
 // into the scan when the first probe tries to compile it.
 #[tokio::test]
 async fn an_invalid_session_check_regex_fails_fast() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let out = unique_temp_path("session-bad-regex");
     let mut args = lean_args("http://127.0.0.1:1/?q=1", &out);
     args.session_check = Some("(unclosed".to_string());
@@ -392,6 +413,7 @@ async fn an_invalid_session_check_regex_fails_fast() {
 
 #[tokio::test]
 async fn a_relative_session_check_url_fails_fast() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let out = unique_temp_path("session-bad-url");
     let mut args = lean_args("http://127.0.0.1:1/?q=1", &out);
     args.session_check_url = Some("/me".to_string());
@@ -407,6 +429,7 @@ async fn a_relative_session_check_url_fails_fast() {
 // redirect, and aborts a scan nobody was logged out of.
 #[tokio::test]
 async fn a_followed_redirect_onto_a_login_shaped_path_is_not_a_logout() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-followed-redirect");
     let mut args = lean_args(&format!("{}/redirect-home?q=1", base), &out);
@@ -434,6 +457,7 @@ async fn a_followed_redirect_onto_a_login_shaped_path_is_not_a_logout() {
 // SESSION_LOST, `incomplete: true` and exit 2 on a session that was never lost.
 #[tokio::test]
 async fn an_unfollowed_redirect_onto_an_auth_shaped_path_is_not_a_logout() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-unfollowed-redirect");
     let args = lean_args(&format!("{}/redirect-home?q=1", base), &out);
@@ -459,6 +483,7 @@ async fn an_unfollowed_redirect_onto_an_auth_shaped_path_is_not_a_logout() {
 // `--follow-redirects` either — is still an unusable baseline.
 #[tokio::test]
 async fn an_unfollowed_redirect_onto_the_login_page_is_still_a_logout() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-unfollowed-login-redirect");
     let args = lean_args(&format!("{}/redirect-login?q=1", base), &out);
@@ -488,6 +513,7 @@ async fn an_unfollowed_redirect_onto_the_login_page_is_still_a_logout() {
 // SESSION_LOST on any SPA shell with its login form below the fold.
 #[tokio::test]
 async fn login_markup_past_the_preflight_range_budget_is_not_a_logout() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-range-asymmetry");
     let args = lean_args(&format!("{}/big-shell?q=1", base), &out);
@@ -511,6 +537,7 @@ async fn login_markup_past_the_preflight_range_budget_is_not_a_logout() {
 // That must still reach the envelope and the exit code, not just stderr.
 #[tokio::test]
 async fn credentials_already_stale_at_preflight_are_reported_not_just_logged() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-stale-at-preflight");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -542,6 +569,7 @@ async fn credentials_already_stale_at_preflight_are_reported_not_just_logged() {
 // has to be caught at preflight and named for what it is.
 #[tokio::test]
 async fn a_session_check_marker_absent_from_the_baseline_is_named_as_such() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(0).await;
     let out = unique_temp_path("session-marker-typo");
     let mut args = lean_args(&format!("{}/?q=1", base), &out);
@@ -573,6 +601,7 @@ async fn a_session_check_marker_absent_from_the_baseline_is_named_as_such() {
 // broken job. `meta.incomplete` carries the incompleteness for both codes.
 #[tokio::test]
 async fn a_run_with_findings_still_exits_one_after_a_session_loss() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (base, server) = spawn_app(1).await;
     let out = unique_temp_path("session-lost-with-findings");
     let mut args = lean_args(&format!("{}/reflect?q=1", base), &out);
@@ -661,10 +690,12 @@ async fn assert_big_logout_is_session_lost(logout_status: StatusCode) {
 // sample must not be taken as proof the session is alive.
 #[tokio::test]
 async fn a_large_login_page_served_as_200_is_session_lost() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     assert_big_logout_is_session_lost(StatusCode::OK).await;
 }
 
 #[tokio::test]
 async fn a_large_login_page_served_as_401_is_session_lost() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     assert_big_logout_is_session_lost(StatusCode::UNAUTHORIZED).await;
 }

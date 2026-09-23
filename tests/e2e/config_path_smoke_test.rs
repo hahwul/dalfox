@@ -5,11 +5,20 @@ use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn unique_temp_dir(label: &str) -> PathBuf {
+    // `nanos` alone is not unique: the clock is coarser than that on macOS and
+    // Windows, so two tests starting in the same tick got the same path and one
+    // read the other's truncated (empty) output file. The sequence number makes
+    // the name unique within the process.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time moved backwards")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("dalfox-{label}-{nanos}"));
+    let dir = std::env::temp_dir().join(format!(
+        "dalfox-{label}-{}-{nanos}-{seq}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create test temp directory");
     dir
 }

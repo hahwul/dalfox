@@ -30,6 +30,9 @@ fn test_into_scan_args_respects_explicit_input_type() {
 
 #[tokio::test]
 async fn test_run_file_executes_scan_path_without_panic() {
+    // This ends in `run_scan`, which resets the global request
+    // counters another test's scan may be reading.
+    let _serial = crate::REQUEST_COUNTER_TEST_LOCK.lock().await;
     let path = std::env::temp_dir().join(format!(
         "dalfox-file-test-{}.txt",
         crate::utils::make_scan_id("file-run")
