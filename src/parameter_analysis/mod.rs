@@ -192,6 +192,11 @@ pub struct Param {
     /// starts out `false`, i.e. gets the pre-existing behaviour.
     #[serde(default, skip)]
     pub marker_echoed: bool,
+    /// Explicitly distinguishes a cookie parameter from an HTTP header when
+    /// both locations carry the same name. `None` preserves the legacy
+    /// target-based inference for params created by older callers.
+    #[serde(skip)]
+    pub is_cookie: Option<bool>,
 }
 
 impl Param {
@@ -228,7 +233,15 @@ impl Param {
             escaped_specials: None,
             js_breakout: None,
             marker_echoed: false,
+            is_cookie: None,
         }
+    }
+
+    /// Set the wire location for a `Header` param when discovery already knows
+    /// whether it came from the Cookie header or a named request header.
+    pub(crate) fn with_cookie_identity(mut self, is_cookie: bool) -> Self {
+        self.is_cookie = Some(is_cookie);
+        self
     }
 
     /// Fill in the analysis fields every reflection probe derives from the
@@ -1133,6 +1146,16 @@ pub async fn analyze_parameters(
     args: &ScanArgs,
     multi_pb: Option<Arc<MultiProgress>>,
 ) {
+    // CLI `-d` bodies are present on both `ScanArgs` and `Target`, but imported
+    // raw-HTTP/HAR requests carry their body only on `Target`. The body mining
+    // strategies consume `ScanArgs.data`, so give them the captured body when
+    // there was no explicit CLI body override.
+    let mut effective_args = args.clone();
+    if effective_args.data.is_none() {
+        effective_args.data.clone_from(&target.data);
+    }
+    let args = &effective_args;
+
     let pb = if let Some(ref mp) = multi_pb {
         let bar = mp.add(ProgressBar::new_spinner());
         // The message changes as mining moves between sources, and indicatif
@@ -1280,9 +1303,10 @@ pub async fn analyze_parameters(
 }
 
 /// The `-p name:<type>` label for a param's location, matching the `-p`
-/// spec grammar. `Location::Header` resolves to `"cookie"` when the name is one
-/// of the target's cookies, else `"header"`. Single source of truth shared by
-/// `filter_params` and `ensure_explicit_params`.
+/// spec grammar. `Location::Header` uses explicit discovery identity when
+/// available and falls back to target-cookie membership for synthesized
+/// legacy params. Single source of truth shared by `filter_params` and
+/// `ensure_explicit_params`.
 fn param_type_label(p: &Param, target: &Target) -> &'static str {
     match p.location {
         Location::Query => "query",
@@ -1294,7 +1318,9 @@ fn param_type_label(p: &Param, target: &Target) -> &'static str {
         Location::Path => "path",
         Location::Fragment => "fragment",
         Location::Header => {
-            if target.cookies.iter().any(|(n, _)| n == &p.name) {
+            if p.is_cookie
+                .unwrap_or_else(|| target.cookies.iter().any(|(n, _)| n == &p.name))
+            {
                 "cookie"
             } else {
                 "header"
@@ -1376,14 +1402,19 @@ fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], targe
             if already {
                 continue;
             }
-            push_synthesized_param(params, name, location);
+            let is_cookie = matches!(type_str, "cookie")
+                .then_some(true)
+                .or_else(|| (type_str == "header").then_some(false));
+            push_synthesized_param(params, name, location, is_cookie);
         } else {
             // Bare name: keep any filtered matches; only synthesize when none.
             if params.iter().any(|p| p.name == name) {
                 continue;
             }
             let location = infer_location_for_bare_param(name, target);
-            push_synthesized_param(params, name, location);
+            let is_cookie = (location == Location::Header)
+                .then(|| target.cookies.iter().any(|(n, _)| n == name));
+            push_synthesized_param(params, name, location, is_cookie);
         }
     }
 }
@@ -1433,12 +1464,19 @@ fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: 
         {
             continue;
         }
-        push_synthesized_param(params, &name, location);
+        push_synthesized_param(params, &name, location, None);
     }
 }
 
-fn push_synthesized_param(params: &mut Vec<Param>, name: &str, location: Location) {
-    params.push(Param::new(name.to_string(), String::new(), location));
+fn push_synthesized_param(
+    params: &mut Vec<Param>,
+    name: &str,
+    location: Location,
+    is_cookie: Option<bool>,
+) {
+    let mut param = Param::new(name.to_string(), String::new(), location);
+    param.is_cookie = is_cookie;
+    params.push(param);
 }
 
 /// Infer a wire location for a bare `-p name` when discovery did not seed it.

@@ -102,18 +102,18 @@ pub async fn check_discovery(
 }
 
 /// Collapse duplicate `Param` entries that share the same identity
-/// (name, location, effective wire name, pre-encoding pipeline). When
-/// two entries describe the same wire slot, merge their metadata in
-/// place: keep the entry with the richer `injection_context` /
-/// `valid_specials` / `invalid_specials` / `framework_sink`, and union
+/// (name, location, effective wire name, pre-encoding pipeline, and
+/// header-versus-cookie identity). When two entries describe the same wire
+/// slot, merge their metadata in place: keep the entry with the richer
+/// `injection_context` / `valid_specials` / `invalid_specials` /
+/// `framework_sink`, and union
 /// the special-character sets so later payload generation sees the
 /// widest valid surface either probe observed.
 ///
-/// `(name, location, effective_wire_name, pre_encoding_pipeline)` is
-/// the smallest set of fields that meaningfully distinguishes one
-/// injection point from another at scan time — same name in a query
-/// vs body slot is two different sinks, but two pushes of `?query=`
-/// from the URL and from a `<form>` echo are not.
+/// These fields are the smallest set that meaningfully distinguishes one
+/// injection point from another at scan time — same name in a query vs body
+/// slot, or in a header vs cookie, is two different sinks, but two pushes of
+/// `?query=` from the URL and from a `<form>` echo are not.
 pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
     use std::collections::HashSet;
 
@@ -128,11 +128,12 @@ pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
             .map(|p| format!("{:?}", p))
             .unwrap_or_default();
         format!(
-            "{}|{:?}|{}|{}",
+            "{}|{:?}|{}|{}|{:?}",
             p.name,
             p.location,
             p.effective_wire_name(),
-            pipe
+            pipe,
+            p.is_cookie
         )
     };
 

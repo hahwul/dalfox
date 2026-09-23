@@ -44,6 +44,7 @@ pub async fn probe_dictionary_params(
         ) {
             Ok(content) => {
                 params = content
+                    .trim_start_matches('\u{feff}')
                     .lines()
                     .map(str::trim)
                     .filter(|s| !s.is_empty() && !s.starts_with('#'))

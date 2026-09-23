@@ -1,6 +1,7 @@
 //! Discovery surface: form. See the module docs in `mod.rs`.
 
 use super::*;
+use std::collections::HashSet;
 
 /// Discover POST form parameters by parsing HTML forms from the GET response.
 pub async fn check_form_discovery(
@@ -253,15 +254,39 @@ pub async fn check_form_discovery(
                 let mut test_url = form_url.clone();
                 // Build query: set all fields, replace target field with test value
                 {
-                    let mut pairs = test_url.query_pairs_mut();
-                    pairs.clear();
+                    let mut pairs: Vec<(String, String)> = test_url
+                        .query_pairs()
+                        .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                        .collect();
+                    let action_names: HashSet<String> =
+                        pairs.iter().map(|(name, _)| name.clone()).collect();
                     for (n, v) in &fields {
-                        if n == field_name {
-                            pairs.append_pair(n, test_value);
+                        let value = if n == field_name {
+                            test_value.to_string()
                         } else {
-                            pairs.append_pair(n, v);
+                            v.clone()
+                        };
+                        if action_names.contains(n) {
+                            // Like the scan sender, replace every existing
+                            // occurrence of a tested key so an earlier page
+                            // query value cannot hide the probe from
+                            // first-value servers.
+                            for (action_name, action_value) in &mut pairs {
+                                if action_name == n {
+                                    *action_value = value.clone();
+                                }
+                            }
+                        } else {
+                            pairs.push((n.clone(), value));
                         }
                     }
+                    // A browser GET form replaces the action URL's query.
+                    // Dalfox crafts this probe URL directly: retain unrelated
+                    // static action params such as `mode=search`, replacing
+                    // colliding keys and appending only new field names.
+                    let mut query = test_url.query_pairs_mut();
+                    query.clear();
+                    query.extend_pairs(&pairs);
                 }
                 let m = reqwest::Method::GET;
                 let rb = crate::utils::build_request(&client, target, m, test_url.clone(), None);

@@ -414,14 +414,18 @@ pub(crate) async fn preflight_and_analyze_target(
         // Check headers
         for (k, v) in &target.headers {
             if v.contains(marker.as_str()) {
-                marker_params.push(Param::new(k.clone(), v.clone(), Location::Header));
+                marker_params.push(
+                    Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(false),
+                );
             }
         }
 
         // Check cookies
         for (k, v) in &target.cookies {
             if v.contains(marker.as_str()) {
-                marker_params.push(Param::new(k.clone(), v.clone(), Location::Header));
+                marker_params.push(
+                    Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(true),
+                );
             }
         }
 
