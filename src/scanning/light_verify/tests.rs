@@ -114,6 +114,12 @@ async fn reflect_json(Json(payload): Json<HashMap<String, String>>) -> Html<Stri
     Html(format!("<html><body>{}</body></html>", val))
 }
 
+async fn reflect_json_body(
+    Json(payload): Json<HashMap<String, String>>,
+) -> Json<HashMap<String, String>> {
+    Json(payload)
+}
+
 async fn reflect_multipart(body: String) -> Html<String> {
     Html(format!("<html><body>{}</body></html>", body))
 }
@@ -128,6 +134,7 @@ async fn start_mock_server(class_marker: &str) -> SocketAddr {
         .route("/header", get(reflect_header))
         .route("/body", post(reflect_body))
         .route("/json", post(reflect_json))
+        .route("/json-body", post(reflect_json_body))
         .route("/multipart", post(reflect_multipart))
         .with_state(TestState {
             class_marker: class_marker.to_string(),
@@ -373,6 +380,29 @@ async fn test_verify_dom_xss_light_location_json_body() {
 
     assert!(verified);
     assert!(response.expect("response").contains(&payload));
+}
+
+#[tokio::test]
+async fn test_verify_dom_xss_light_does_not_parse_json_response_as_html() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    let target = make_target(addr, "/json-body", Some("POST"), Some("{\"q\":\"seed\"}"));
+    let param = make_param(Location::JsonBody, "q");
+    let payload = format!("<img class={} src=x onerror=1>", marker);
+    let client = test_client();
+
+    let (verified, response, _note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+
+    assert!(
+        !verified,
+        "application/json is not parsed as an HTML document"
+    );
+    let response = response.expect("response");
+    assert!(
+        response.contains(&payload),
+        "unexpected response: {response:?}"
+    );
 }
 
 #[tokio::test]

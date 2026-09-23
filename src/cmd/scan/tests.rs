@@ -20,7 +20,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
-use axum::routing::get;
+use axum::routing::{any, get};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
@@ -810,7 +810,7 @@ async fn test_preflight_content_type_reads_http_csp_header() {
     args.skip_waf_probe = true; // avoid extra request in test
     let preflight = match preflight_content_type(&target, &args).await {
         PreflightOutcome::WithContentType(r) => r,
-        PreflightOutcome::NoContentType(_) => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::NoContentType { .. } => panic!("preflight should return a Content-Type"),
         PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
     };
     handle.abort();
@@ -832,7 +832,7 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
     args.skip_waf_probe = true;
     let preflight = match preflight_content_type(&target, &args).await {
         PreflightOutcome::WithContentType(r) => r,
-        PreflightOutcome::NoContentType(_) => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::NoContentType { .. } => panic!("preflight should return a Content-Type"),
         PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
     };
     handle.abort();
@@ -846,6 +846,50 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
             .response_body
             .expect("body expected")
             .contains("http-equiv")
+    );
+}
+
+#[tokio::test]
+async fn preflight_keeps_sniffable_body_when_content_type_is_missing() {
+    let _counter_lock = RUN_SCAN_LOCK.lock().await;
+    let body = "<!doctype html><html><body><script>document.body.innerHTML=location.hash</script></body></html>";
+    let app = Router::new().route(
+        "/",
+        any(move || async move { Response::new(Body::from(body)) }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("local addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let target = parse_target(&format!("http://{addr}/")).expect("valid target");
+    let mut args = default_scan_args();
+    args.skip_waf_probe = true;
+
+    let PreflightOutcome::NoContentType {
+        response_body,
+        response_content_type,
+        ..
+    } = preflight_content_type(&target, &args).await
+    else {
+        panic!("the fixture intentionally omits Content-Type");
+    };
+    handle.abort();
+
+    assert_eq!(response_content_type, "");
+    let body = response_body.expect("GET body must be retained without Content-Type");
+    let ast = crate::scanning::ast_integration::run_initial_ast_dom_analysis_for_response(
+        &body,
+        &response_content_type,
+        target.url.as_str(),
+        "GET",
+        crate::scanning::ast_integration::PageSecurityPosture::default(),
+    );
+    assert!(
+        !ast.is_empty(),
+        "sniffable HTML should still reach AST analysis"
     );
 }
 
@@ -868,7 +912,7 @@ async fn test_preflight_enforcing_meta_csp_beats_report_only_header() {
     args.skip_waf_probe = true;
     let preflight = match preflight_content_type(&target, &args).await {
         PreflightOutcome::WithContentType(r) => r,
-        PreflightOutcome::NoContentType(_) => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::NoContentType { .. } => panic!("preflight should return a Content-Type"),
         PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
     };
     handle.abort();

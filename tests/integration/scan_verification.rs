@@ -196,6 +196,33 @@ async fn vuln_jsonp_callback(Query(p): Query<HashMap<String, String>>) -> impl I
     )
 }
 
+/// Echoes an HTML-looking value inside a JSON response. Navigation renders the
+/// JSON data as text; it does not feed the embedded markup to an HTML parser.
+async fn safe_json_html_echo(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )],
+        serde_json::json!({ "q": q }).to_string(),
+    )
+}
+
+/// HTML gadget served without a Content-Type so the browser's MIME sniffing
+/// selects the HTML parser. Preflight must keep the GET body even when both
+/// HEAD and GET omit the header, allowing initial AST analysis to find it.
+async fn missing_ct_dom_html() -> impl IntoResponse {
+    let mut response = Html(
+        "<!doctype html><html><body><script>document.body.innerHTML=location.hash</script></body></html>",
+    )
+    .into_response();
+    response
+        .headers_mut()
+        .remove(axum::http::header::CONTENT_TYPE);
+    response
+}
+
 /// Inert-JSONP fixture: reflects the param into a *string literal* of a
 /// `application/javascript` body, with quotes escaped, so neither an HTML tag
 /// nor a callback-name injection executes. A browser runs the body as script
@@ -510,6 +537,8 @@ async fn start_test_server() -> SocketAddr {
         .route("/js/inline-event", get(vuln_inline_event))
         .route("/safe/js-apos-encoded", get(safe_js_apos_encoded))
         .route("/safe/js-string-appjs", get(safe_js_string_literal_appjs))
+        .route("/safe/json-html", get(safe_json_html_echo))
+        .route("/missing-ct-dom", get(missing_ct_dom_html))
         .route("/jsonp", get(vuln_jsonp_callback))
         // Reflected: CSS
         .route("/css/style", get(vuln_css_style))
@@ -907,6 +936,41 @@ async fn test_appjs_string_literal_no_false_v() {
             .iter()
             .map(|f| (f["type"].as_str(), f["evidence"].as_str()))
             .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_deep_scan_does_not_verify_html_echoed_as_json() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.deep_scan = true;
+    args.targets = vec![format!("http://{addr}/safe/json-html?q=test")];
+    let findings = run_scan_and_collect(args).await;
+
+    assert!(
+        findings.is_empty(),
+        "deep scan must not parse an application/json body as HTML: {:?}",
+        findings
+            .iter()
+            .map(|f| (f["type"].as_str(), f["evidence"].as_str()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_missing_content_type_html_reaches_initial_ast_analysis() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.skip_discovery = true;
+    args.skip_ast_analysis = false;
+    args.skip_xss_scanning = true;
+    args.targets = vec![format!("http://{addr}/missing-ct-dom")];
+    let findings = run_scan_and_collect(args).await;
+
+    assert_has_type(
+        &findings,
+        "A",
+        "HTML sniffed from a missing Content-Type must reach initial AST analysis",
     );
 }
 

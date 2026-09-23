@@ -271,6 +271,7 @@ pub(crate) async fn preflight_and_analyze_target(
         csp_present: __preflight_csp_present,
         csp_header: __preflight_csp_header,
         response_body: preflight_response_body,
+        response_content_type: preflight_response_content_type,
     } = run_target_preflight(
         &mut target,
         &args_clone,
@@ -451,6 +452,7 @@ pub(crate) async fn preflight_and_analyze_target(
         &target,
         &args_clone,
         preflight_response_body.as_ref(),
+        &preflight_response_content_type,
         &results_clone,
         &findings_count_clone,
     )
@@ -537,6 +539,8 @@ pub(crate) struct PreflightCapture {
     pub(crate) csp_header: Option<(String, String)>,
     /// The landing-page body, reused by the AST DOM pass so it is fetched once.
     pub(crate) response_body: Option<String>,
+    /// Content-Type paired with `response_body`, taken from the GET response.
+    pub(crate) response_content_type: String,
 }
 
 /// Fetch the landing page once and derive everything the later phases need from
@@ -563,6 +567,7 @@ async fn run_target_preflight(
     let mut __preflight_csp_present = false;
     let mut __preflight_csp_header: Option<(String, String)> = None;
     let mut preflight_response_body: Option<String> = None;
+    let mut preflight_response_content_type = String::new();
     // Preflight probe: fetch the landing page for content-type, CSP,
     // WAF, and tech detection, and capture the body (which feeds the
     // initial AST DOM-XSS pass and outdated-lib detection below).
@@ -617,7 +622,13 @@ async fn run_target_preflight(
             // still work. The session baseline is the one piece
             // that must survive: the target still gets scanned, so
             // it still has a session that can die mid-run.
-            PreflightOutcome::NoContentType(baseline) => {
+            PreflightOutcome::NoContentType {
+                session_baseline: baseline,
+                response_body,
+                response_content_type,
+            } => {
+                preflight_response_body = response_body;
+                preflight_response_content_type = response_content_type;
                 if let Some(baseline) = baseline {
                     record_session_baseline(
                         args_clone,
@@ -635,6 +646,7 @@ async fn run_target_preflight(
 
         if let Some(preflight) = __preflight_info {
             preflight_response_body = preflight.response_body;
+            preflight_response_content_type = preflight.response_content_type;
             // Authenticated-state fingerprint for mid-scan
             // session-loss detection. Present only when the target
             // carries credentials (or the operator asked for a
@@ -781,6 +793,7 @@ async fn run_target_preflight(
         csp_present: __preflight_csp_present,
         csp_header: __preflight_csp_header,
         response_body: preflight_response_body,
+        response_content_type: preflight_response_content_type,
     })
 }
 
@@ -833,6 +846,7 @@ async fn run_initial_ast_pass(
     target: &Target,
     args_clone: &ScanArgs,
     preflight_response_body: Option<&String>,
+    response_content_type: &str,
     results_clone: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     findings_count_clone: &Arc<std::sync::atomic::AtomicUsize>,
 ) {
@@ -844,8 +858,9 @@ async fn run_initial_ast_pass(
     if !args_clone.skip_ast_analysis
         && let Some(response_text) = preflight_response_body
     {
-        let ast_batch = crate::scanning::ast_integration::run_initial_ast_dom_analysis(
+        let ast_batch = crate::scanning::ast_integration::run_initial_ast_dom_analysis_for_response(
             response_text,
+            response_content_type,
             target.url.as_str(),
             &target.method,
             crate::scanning::ast_integration::PageSecurityPosture::from_target(target),
@@ -859,7 +874,9 @@ async fn run_initial_ast_pass(
             guard.extend(ast_batch);
             findings_count_clone.fetch_add(added, Ordering::Relaxed);
         }
-        if args_clone.analyze_external_js {
+        if args_clone.analyze_external_js
+            && crate::utils::response_has_markup_document(response_content_type, response_text)
+        {
             let ext_client = target.build_client_or_default();
             let ext_batch = crate::scanning::fetch_and_analyze_external_js(
                 &ext_client,

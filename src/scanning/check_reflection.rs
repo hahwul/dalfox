@@ -2293,6 +2293,7 @@ fn injection_response_suppressed(
         // the HTML-ish types (don't open up JSON/JS/raster, which render
         // as data).
         let executes_as_markup = crate::utils::is_htmlish_content_type(content_type)
+            || crate::utils::is_xml_content_type(content_type)
             || crate::utils::content_type_primary(content_type).as_deref() == Some("image/svg+xml");
         if !content_type.is_empty() && !executes_as_markup {
             crate::dbg_log!(
@@ -2305,6 +2306,32 @@ fn injection_response_suppressed(
     }
 
     false
+}
+
+/// Whether a non-redirect response body can execute markup or JavaScript in a
+/// browser. JavaScript is kept for the separate JS-AST/JSONP verifier; other
+/// types must resolve to an active markup document (including valid XHTML/SVG
+/// and HTML-sniffable responses with no usable Content-Type).
+fn response_body_supports_xss(content_type: &str, body: &str) -> bool {
+    crate::utils::is_javascript_content_type(content_type)
+        || crate::utils::response_has_markup_document(content_type, body)
+}
+
+/// HPP produces an R finding directly, so require evidence in a parser that
+/// can execute the reflected payload before classifying it as an XSS echo.
+fn hpp_response_has_executable_reflection(payload: &str, content_type: &str, body: &str) -> bool {
+    if crate::utils::is_javascript_content_type(content_type) {
+        crate::scanning::js_context_verify::has_javascript_body_evidence(payload, body)
+    } else if crate::utils::is_xml_content_type(content_type) {
+        crate::scanning::check_dom_verification::classify_dom_evidence_for_response(
+            payload,
+            body,
+            content_type,
+        )
+        .is_some()
+    } else {
+        crate::utils::response_has_markup_document(content_type, body)
+    }
 }
 
 /// A fetched injection response body paired with the HTTP status it came from.
@@ -2321,6 +2348,7 @@ fn injection_response_suppressed(
 struct FetchedInjection {
     body: Option<ReflectionBody>,
     status: u16,
+    xml_content_type: bool,
 }
 
 tokio::task_local! {
@@ -2567,6 +2595,7 @@ async fn fetch_injection_response(
         return FetchedInjection {
             body: None,
             status: 0,
+            xml_content_type: false,
         };
     }
     let client = target.build_client_or_default();
@@ -2585,6 +2614,7 @@ async fn fetch_injection_response_with_client(
         return FetchedInjection {
             body: None,
             status: 0,
+            xml_content_type: false,
         };
     }
 
@@ -2649,19 +2679,20 @@ async fn fetch_injection_response_with_client(
             param: &Param,
             payload: &str,
             args: &crate::cmd::scan::ScanArgs,
-        ) -> Option<ReflectionBody> {
+        ) -> Option<(ReflectionBody, bool)> {
             let status_code = resp.status().as_u16();
             if injection_response_suppressed(status_code, resp.headers(), param, args) {
                 return None;
             }
-            let is_js_content_type = crate::utils::is_javascript_content_type(
-                resp.headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or(""),
-            );
+            let content_type = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let is_js_content_type = crate::utils::is_javascript_content_type(&content_type);
             let text = crate::utils::http::read_body(resp).await.ok()?;
-            if text.is_empty() {
+            if text.is_empty() || !response_body_supports_xss(&content_type, &text) {
                 return None;
             }
             if should_suppress_path_reflection_with_body(
@@ -2677,10 +2708,13 @@ async fn fetch_injection_response_with_client(
                 );
                 return None;
             }
-            Some(ReflectionBody::rendered(text).with_js_content_type(is_js_content_type))
+            Some((
+                ReflectionBody::rendered(text).with_js_content_type(is_js_content_type),
+                crate::utils::is_xml_content_type(&content_type),
+            ))
         }
 
-        let inject_body: Option<ReflectionBody> = match inject_resp {
+        let inject_body: Option<(ReflectionBody, bool)> = match inject_resp {
             Ok(resp) => {
                 // Mirror the normal path's WAF accounting on the stored-write
                 // response before consuming the body: a 403/406/503 stored-write
@@ -2698,7 +2732,7 @@ async fn fetch_injection_response_with_client(
         let check_urls = resolve_sxss_check_urls(target, param, args);
         let retries = args.sxss_retries.max(1) as u64;
         let skip_payload_retries = sxss_payload_retries_skipped();
-        let mut fallback_body: Option<ReflectionBody> = None;
+        let mut fallback_body: Option<(ReflectionBody, bool)> = None;
         // Attempt-major so an early exit can consider the *whole* first pass
         // over the check URLs, not just one URL: retries exist for
         // propagation delay, and delay affects every retrieval URL alike.
@@ -2732,8 +2766,8 @@ async fn fetch_injection_response_with_client(
                     && let Some(body) = gated_body(resp, param, payload, args).await
                 {
                     saw_any_body = true;
-                    if classify_reflection(&body.text, payload).is_some()
-                        && sxss_injection_credited(&body.text, payload)
+                    if classify_reflection(&body.0.text, payload).is_some()
+                        && sxss_injection_credited(&body.0.text, payload)
                     {
                         // `--sxss` fans retrieval across secondary URLs, so a
                         // single injection status is meaningless here; report `0`
@@ -2744,8 +2778,9 @@ async fn fetch_injection_response_with_client(
                         // treats `0` as non-4xx. The caller excludes `--sxss`
                         // explicitly instead (see `run_reflection_phase`).
                         return FetchedInjection {
-                            body: Some(body),
+                            body: Some(body.0),
                             status: 0,
+                            xml_content_type: body.1,
                         };
                     }
                     if fallback_body.is_none() {
@@ -2770,33 +2805,40 @@ async fn fetch_injection_response_with_client(
         // renders the stored value (e.g. POST /comments returns the rendered
         // /comments page). Without this check we'd miss the entire class
         // of sinks where the write-response is the rendered view.
-        if let Some(body) = inject_body.as_ref()
+        if let Some((body, is_xml)) = inject_body.as_ref()
             && classify_reflection(&body.text, payload).is_some()
             && sxss_injection_credited(&body.text, payload)
         {
             return FetchedInjection {
-                body: inject_body,
+                body: inject_body.map(|(body, _)| body),
                 status: 0,
+                xml_content_type: *is_xml,
             };
         }
+        let (body, xml_content_type) = fallback_body
+            .or(inject_body)
+            .map_or((None, false), |(body, is_xml)| (Some(body), is_xml));
         FetchedInjection {
-            body: fallback_body.or(inject_body),
+            body,
             status: 0,
+            xml_content_type,
         }
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
             let status_code = resp.status().as_u16();
 
-            // Capture whether the body is served as executable JavaScript before
-            // `read_body` consumes the response, so the returned `ReflectionBody`
-            // can tell R→V upgraders that HTML-parse evidence is inert here.
-            let is_js_content_type = crate::utils::is_javascript_content_type(
-                resp.headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or(""),
-            );
+            // Capture the response parser type before `read_body` consumes the
+            // response. The returned body is retained only for browser-active
+            // markup documents or executable-JavaScript/JSONP responses.
+            let content_type = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let is_js_content_type = crate::utils::is_javascript_content_type(&content_type);
+            let xml_content_type = crate::utils::is_xml_content_type(&content_type);
 
             // Adaptive WAF accounting (per-worker streak + cooldown + telemetry).
             apply_injection_waf_accounting(status_code, target, args, streak).await;
@@ -2807,6 +2849,7 @@ async fn fetch_injection_response_with_client(
                 return FetchedInjection {
                     body: None,
                     status: status_code,
+                    xml_content_type: false,
                 };
             }
             // Check for redirect context: if the response is a 3xx redirect,
@@ -2837,10 +2880,18 @@ async fn fetch_injection_response_with_client(
                 return FetchedInjection {
                     body: Some(ReflectionBody::redirect_location(status_code, location)),
                     status: status_code,
+                    xml_content_type: false,
                 };
             }
             match crate::utils::http::read_body(resp).await {
                 Ok(body) => {
+                    if !response_body_supports_xss(&content_type, &body) {
+                        return FetchedInjection {
+                            body: None,
+                            status: status_code,
+                            xml_content_type: false,
+                        };
+                    }
                     // Body-aware Path suppression for 4xx/5xx: keep the
                     // finding when the marker reflects somewhere other than
                     // URL-valued attributes (genuine error-page XSS, e.g. a
@@ -2861,6 +2912,7 @@ async fn fetch_injection_response_with_client(
                         return FetchedInjection {
                             body: None,
                             status: status_code,
+                            xml_content_type: false,
                         };
                     }
                     FetchedInjection {
@@ -2868,6 +2920,7 @@ async fn fetch_injection_response_with_client(
                             ReflectionBody::rendered(body).with_js_content_type(is_js_content_type),
                         ),
                         status: status_code,
+                        xml_content_type,
                     }
                 }
                 Err(e) => {
@@ -2879,6 +2932,7 @@ async fn fetch_injection_response_with_client(
                     FetchedInjection {
                         body: None,
                         status: status_code,
+                        xml_content_type: false,
                     }
                 }
             }
@@ -2887,6 +2941,7 @@ async fn fetch_injection_response_with_client(
             FetchedInjection {
                 body: None,
                 status: 0,
+                xml_content_type: false,
             }
         }
     }
@@ -2931,7 +2986,7 @@ pub async fn check_reflection_with_response_tracked(
     // The public contract returns only `(kind, body)`. The status-aware path
     // computes the same values plus the injection status; drop the status here
     // so this signature and return type stay byte-for-byte compatible.
-    let (kind, body, _status) =
+    let (kind, body, _status, _xml_content_type) =
         check_reflection_with_response_status(client, target, param, payload, args, streak).await;
     (kind, body)
 }
@@ -2951,8 +3006,12 @@ pub(crate) async fn check_reflection_with_response_status(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
-) -> (Option<ReflectionKind>, Option<ReflectionBody>, u16) {
-    let FetchedInjection { body, status } = match client {
+) -> (Option<ReflectionKind>, Option<ReflectionBody>, u16, bool) {
+    let FetchedInjection {
+        body,
+        status,
+        xml_content_type,
+    } = match client {
         Some(client) => {
             fetch_injection_response_with_client(client, target, param, payload, args, streak).await
         }
@@ -2970,9 +3029,9 @@ pub(crate) async fn check_reflection_with_response_status(
             Some(_) if args.sxss && !sxss_injection_credited(&body.text, payload) => None,
             other => other,
         };
-        (kind, Some(body), status)
+        (kind, Some(body), status, xml_content_type)
     } else {
-        (None, None, status)
+        (None, None, status, xml_content_type)
     }
 }
 
@@ -2998,7 +3057,7 @@ async fn check_reflection(
 pub async fn check_reflection_with_hpp_url(
     client: &Client,
     target: &Target,
-    _param: &Param,
+    param: &Param,
     payload: &str,
     hpp_url: &str,
     args: &crate::cmd::scan::ScanArgs,
@@ -3033,8 +3092,8 @@ pub async fn check_reflection_with_hpp_url(
     }
 
     if let Ok(resp) = inject_resp {
-        // Skip processing if the status code is in the ignore_return list
-        if !args.ignore_return.is_empty() && args.ignore_return.contains(&resp.status().as_u16()) {
+        let status_code = resp.status().as_u16();
+        if injection_response_suppressed(status_code, resp.headers(), param, args) {
             return (None, None);
         }
         if resp.status().is_redirection()
@@ -3049,7 +3108,16 @@ pub async fn check_reflection_with_hpp_url(
         // the one site that bypassed `read_body`'s 16 MiB cap, so an attacker-
         // controlled target could drive RSS far past the intended workers × cap
         // bound (verified: a 200 MB body pushed peak RSS to ~1.2 GiB).
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         if let Ok(text) = crate::utils::http::read_body(resp).await {
+            if !hpp_response_has_executable_reflection(payload, &content_type, &text) {
+                return (None, None);
+            }
             let kind = classify_reflection(&text, payload);
             let kind = match kind {
                 Some(_) if is_in_safe_context_decoded(&text, payload) => None,

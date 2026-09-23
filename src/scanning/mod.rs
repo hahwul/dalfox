@@ -107,7 +107,7 @@ pub(crate) use waf_strategy::*;
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
-use crate::scanning::check_dom_verification::check_dom_verification_with_client_outcome;
+use crate::scanning::check_dom_verification::check_dom_verification_with_evidence;
 use crate::scanning::check_reflection::check_reflection_with_response_tracked;
 use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
@@ -544,6 +544,7 @@ impl ScanWorkerCtx {
         Option<check_reflection::ReflectionKind>,
         Option<check_reflection::ReflectionBody>,
         u16,
+        bool,
     ) {
         let _permit = self.req_budget.acquire().await;
         check_reflection::check_reflection_with_response_status(
@@ -563,9 +564,9 @@ impl ScanWorkerCtx {
         &self,
         param: &Param,
         payload: &str,
-    ) -> crate::scanning::check_dom_verification::DomVerifyOutcome {
+    ) -> crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome {
         let _permit = self.req_budget.acquire().await;
-        check_dom_verification_with_client_outcome(
+        check_dom_verification_with_evidence(
             self.client.as_ref(),
             &self.target,
             param,
@@ -838,25 +839,35 @@ impl ScanWorkerCtx {
         let probe_payloads: [&str; 1] = [crate::scanning::markers::bracketed_marker()];
         let mut probe_reflected = false;
         let mut probe_response_text: Option<String> = None;
+        let mut probe_response_is_javascript = false;
+        let mut probe_response_is_xml = false;
         for pp in probe_payloads {
             if self.cancelled() {
                 break;
             }
-            let (kind, response_text) = check_reflection_with_response_tracked(
-                Some(client),
-                &self.target,
-                param,
-                pp,
-                &self.args,
-                waf_streak,
-            )
-            .await;
+            let (kind, response_text, _, xml_content_type) =
+                check_reflection::check_reflection_with_response_status(
+                    Some(client),
+                    &self.target,
+                    param,
+                    pp,
+                    &self.args,
+                    waf_streak,
+                )
+                .await;
             // Only a browser-rendered body may seed AST analysis / probe
             // classification; the 3xx `Location:` stand-in is not a document.
-            let response_text = response_text.and_then(|b| b.renderable.then_some(b.text));
+            let (response_text, is_javascript, is_xml) = match response_text {
+                Some(body) if body.renderable => {
+                    (Some(body.text), body.js_content_type, xml_content_type)
+                }
+                _ => (None, false, false),
+            };
             if kind.is_some() {
                 probe_reflected = true;
                 probe_response_text = response_text;
+                probe_response_is_javascript = is_javascript;
+                probe_response_is_xml = is_xml;
                 break;
             } else if let Some(ref text) = response_text {
                 // Even if safe-context suppressed the reflection kind,
@@ -866,10 +877,14 @@ impl ScanWorkerCtx {
                 if crate::scanning::markers::classify_probe_reflection(text).detected() {
                     probe_reflected = true;
                     probe_response_text = response_text;
+                    probe_response_is_javascript = is_javascript;
+                    probe_response_is_xml = is_xml;
                     break;
                 }
                 // Keep one response for AST analysis below.
                 probe_response_text = response_text;
+                probe_response_is_javascript = is_javascript;
+                probe_response_is_xml = is_xml;
             }
         }
 
@@ -878,18 +893,21 @@ impl ScanWorkerCtx {
             && let Some(ref response_text) = probe_response_text
         {
             state.ast_analysis_done = true;
-            let ast_findings = run_ast_dom_analysis(
-                client,
-                &self.target,
-                param,
-                response_text,
-                &mut state.ast_seen,
-            )
-            .await;
-            for f in &ast_findings {
-                self.stream_finding(f);
+            if !probe_response_is_javascript {
+                let ast_findings = run_ast_dom_analysis(
+                    client,
+                    &self.target,
+                    param,
+                    response_text,
+                    probe_response_is_xml,
+                    &mut state.ast_seen,
+                )
+                .await;
+                for f in &ast_findings {
+                    self.stream_finding(f);
+                }
+                state.local_results.extend(ast_findings);
             }
-            state.local_results.extend(ast_findings);
         }
 
         // If probe found no reflection, try a numeric-only probe to detect
@@ -972,7 +990,7 @@ impl ScanWorkerCtx {
                     .map(|p| self.fetch_reflection(param, p, waf_streak)),
             )
             .await;
-            for (reflection_payload, (reflected_kind, reflection_body, status)) in
+            for (reflection_payload, (reflected_kind, reflection_body, status, xml_content_type)) in
                 reflection_payloads[i..end].iter().zip(fetched)
             {
                 self.inc_progress(1);
@@ -1015,7 +1033,7 @@ impl ScanWorkerCtx {
                     reflection_payload,
                     reflected_kind,
                     reflection_body,
-                    status,
+                    (status, xml_content_type),
                     state,
                 )
                 .await;
@@ -1060,9 +1078,10 @@ impl ScanWorkerCtx {
         reflection_payload: &str,
         reflected_kind: Option<check_reflection::ReflectionKind>,
         reflection_body: Option<check_reflection::ReflectionBody>,
-        status: u16,
+        status_and_xml_content_type: (u16, bool),
         state: &mut ParamScanState,
     ) {
+        let (status, xml_content_type) = status_and_xml_content_type;
         {
             // Everything downstream of here infers execution from the body
             // (AST sinks, the static V upgrade), so it may only ever see a
@@ -1100,18 +1119,21 @@ impl ScanWorkerCtx {
                 && let Some(response_text) = renderable_text
             {
                 state.ast_analysis_done = true;
-                let ast_findings = run_ast_dom_analysis(
-                    self.client.as_ref(),
-                    &self.target,
-                    param,
-                    response_text,
-                    &mut state.ast_seen,
-                )
-                .await;
-                for f in &ast_findings {
-                    self.stream_finding(f);
+                if !body_is_javascript {
+                    let ast_findings = run_ast_dom_analysis(
+                        self.client.as_ref(),
+                        &self.target,
+                        param,
+                        response_text,
+                        xml_content_type,
+                        &mut state.ast_seen,
+                    )
+                    .await;
+                    for f in &ast_findings {
+                        self.stream_finding(f);
+                    }
+                    state.local_results.extend(ast_findings);
                 }
-                state.local_results.extend(ast_findings);
             }
 
             if let Some(kind) = reflected_kind {
@@ -1131,12 +1153,13 @@ impl ScanWorkerCtx {
                 // can prove that genuine V.
                 let dom_evidence_kind = renderable_text
                     .and_then(|body| {
-                        crate::scanning::check_dom_verification::classify_dom_evidence(
+                        crate::scanning::check_dom_verification::classify_dom_evidence_for_reflection_body(
                             reflection_payload,
                             body,
+                            body_is_javascript,
+                            xml_content_type,
                         )
-                    })
-                    .filter(|kind| !(body_is_javascript && kind.requires_html_rendering()));
+                    });
 
                 // An inert HTML echo into a JS body is not a finding. Lock the
                 // param's reflection slot (so the reflection phase stops here
@@ -1387,6 +1410,10 @@ impl ScanWorkerCtx {
                 if state.dom_found_locally {
                     continue;
                 }
+                let crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome {
+                    outcome,
+                    evidence_kind,
+                } = outcome;
                 let crate::scanning::check_dom_verification::DomVerifyOutcome {
                     verified: dom_verified,
                     response_text,
@@ -1429,15 +1456,8 @@ impl ScanWorkerCtx {
 
                         // Determine which evidence path proved exploitability
                         // so the V finding's message reflects the route.
-                        let evidence_label = response_text
-                            .as_deref()
-                            .and_then(|body| {
-                                crate::scanning::check_dom_verification::classify_dom_evidence(
-                                    dom_payload,
-                                    body,
-                                )
-                            })
-                            .map_or("DOM evidence", |k| k.label());
+                        let evidence_label =
+                            evidence_kind.map_or("DOM evidence", |kind| kind.label());
 
                         // DOM-verified => Vulnerability
                         let mut result =
