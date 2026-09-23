@@ -647,6 +647,13 @@ const DOM_SANITIZERS: &[&str] = &[
     "htmlEncode",
     "sanitizeHTML",
     "validator.escape",
+    // Numeric coercions: the result is always a number (or NaN), which cannot
+    // carry markup, so `innerHTML = 'Page ' + parseInt(p)` is inert.
+    "parseInt",
+    "parseFloat",
+    "Number",
+    "Number.parseInt",
+    "Number.parseFloat",
 ];
 
 static STATIC_SOURCES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
