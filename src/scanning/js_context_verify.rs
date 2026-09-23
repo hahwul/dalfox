@@ -82,15 +82,43 @@ pub(crate) fn payload_carries_js_sink(payload: &str) -> bool {
 fn script_block_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?is)<script\b[^>]*>(.*?)</script\s*>").expect("valid script block regex")
+        Regex::new(r"(?is)(<script\b[^>]*>)(.*?)</script\s*>").expect("valid script block regex")
     })
 }
 
-/// Iterate `<script>` block contents in the HTML response.
-fn script_blocks(html: &str) -> impl Iterator<Item = &str> {
+/// Iterate `<script>` blocks in the HTML response as `(open_tag, body)`.
+fn script_blocks(html: &str) -> impl Iterator<Item = (&str, &str)> {
     script_block_re()
         .captures_iter(html)
-        .filter_map(|cap| cap.get(1).map(|m| m.as_str()))
+        .filter_map(|cap| Some((cap.get(1)?.as_str(), cap.get(2)?.as_str())))
+}
+
+/// Apply HTML's script-type rules to a raw `<script …>` open tag: false for
+/// data blocks the browser never runs (`type="text/template"`,
+/// `application/json`, `application/ld+json`, …). Babel-standalone blocks
+/// (`text/babel`, `text/jsx`) are not JS to the browser but an in-page loader
+/// transpiles and runs them, so they count as executing.
+fn open_tag_is_javascript(open_tag: &str) -> bool {
+    // Cheap path for the common attribute-less / type-less tag.
+    if !open_tag
+        .as_bytes()
+        .windows(4)
+        .any(|w| w.eq_ignore_ascii_case(b"type") || w.eq_ignore_ascii_case(b"lang"))
+    {
+        return true;
+    }
+    let fragment = scraper::Html::parse_fragment(&format!("{open_tag}</script>"));
+    fragment
+        .select(crate::scanning::selectors::script())
+        .next()
+        .is_none_or(|el| {
+            let el = el.value();
+            crate::scanning::ast_integration::script_type_is_javascript(el)
+                || el.attr("type").is_some_and(|t| {
+                    let t = t.trim();
+                    t.eq_ignore_ascii_case("text/babel") || t.eq_ignore_ascii_case("text/jsx")
+                })
+        })
 }
 
 /// Soft cap on cached entries. Beyond this we drop a quarter of the cache
@@ -628,9 +656,12 @@ pub(crate) fn has_js_context_evidence(payload: &str, html: &str) -> bool {
         return false;
     }
     let mut saw_block = false;
-    for block in script_blocks(html) {
+    for (open_tag, block) in script_blocks(html) {
         saw_block = true;
-        if any_payload_occurrence_hits_sink(block, payload) {
+        if block.contains(payload)
+            && open_tag_is_javascript(open_tag)
+            && any_payload_occurrence_hits_sink(block, payload)
+        {
             return true;
         }
     }

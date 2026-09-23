@@ -520,6 +520,49 @@ fn poisoned_sink_cache_still_serves_lookups() {
 }
 
 #[test]
+fn non_executable_script_types_are_not_js_context_evidence() {
+    // Data blocks the browser never runs: a breakout inside them is inert.
+    let payload = "';alert(1)//";
+    for open in [
+        "<script type='text/template'>",
+        "<script type=\"application/json\">",
+        "<script type=\"application/ld+json\">",
+        "<script TYPE=\" text/x-template \">",
+        "<script language=\"vbscript\">",
+    ] {
+        let html = format!("<html>{open}var a='{payload}';</script></html>");
+        assert!(
+            !has_js_context_evidence(payload, &html),
+            "`{open}` never executes but was verified"
+        );
+    }
+    let payload = "\"];alert(1)//";
+    let html = format!("<script type=\"application/json\">[\"{payload}\"]</script>");
+    assert!(!has_js_context_evidence(payload, &html));
+}
+
+#[test]
+fn executable_script_types_stay_js_context_evidence() {
+    let payload = "';alert(1)//";
+    for open in [
+        "<script>",
+        "<script type=\"\">",
+        "<script type=\"module\">",
+        "<script type=\"text/javascript\">",
+        "<script type=\"Application/JavaScript\" nonce=\"x\">",
+        "<script language=\"javascript\">",
+        "<script type=\"text/babel\">",
+        "<script defer src=\"/a.js\" data-x=\"y\">",
+    ] {
+        let html = format!("<html>{open}var a='{payload}';</script></html>");
+        assert!(
+            has_js_context_evidence(payload, &html),
+            "`{open}` executes but was not verified"
+        );
+    }
+}
+
+#[test]
 fn handler_payload_hits_sink_requires_string_breakout() {
     assert!(handler_payload_hits_sink(
         "startTimer(''-alert(1)-'')",

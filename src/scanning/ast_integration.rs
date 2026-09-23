@@ -126,7 +126,7 @@ fn js_blocks_from_document(document: &Html) -> Vec<String> {
 /// HTML's script preparation rules use a MIME *essence match*, not a
 /// Content-Type parser: parameters such as `; charset=utf-8` are invalid here.
 /// https://html.spec.whatwg.org/multipage/scripting.html#prepare-the-script-element
-fn script_type_is_javascript(element: &scraper::node::Element) -> bool {
+pub(crate) fn script_type_is_javascript(element: &scraper::node::Element) -> bool {
     let script_type = match element.attr("type") {
         Some("") => return true,
         Some(value) => value
