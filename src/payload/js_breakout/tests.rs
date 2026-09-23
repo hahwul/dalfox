@@ -323,3 +323,35 @@ fn template_expression_nesting_is_capped_too() {
     let prefix = "`${".repeat(1_000);
     assert!(compute_js_breakout(&prefix).is_empty());
 }
+
+// ===== enclosing_js_quote =====
+
+#[test]
+fn enclosing_js_quote_picks_innermost_delimiter() {
+    // A quote inside a template literal is text; the template encloses.
+    assert_eq!(enclosing_js_quote("foo(`a '"), Some('`'));
+    assert_eq!(enclosing_js_quote("var s = 'a \"b "), Some('\''));
+    assert_eq!(enclosing_js_quote("var s = \"a 'b "), Some('"'));
+    // A string inside a `${…}` expression, and back in the template after it.
+    assert_eq!(enclosing_js_quote("`a ${f('"), Some('\''));
+    assert_eq!(enclosing_js_quote("`a ${f('x')} "), Some('`'));
+    // Closed strings, escapes and comments leave code.
+    assert_eq!(enclosing_js_quote("var a = 'x\\'y'; f("), None);
+    assert_eq!(enclosing_js_quote("// don't\nvar a = "), None);
+}
+
+#[test]
+fn enclosing_js_quote_skips_regex_literals() {
+    // The quote-escaping idiom must not open a phantom string.
+    assert_eq!(
+        enclosing_js_quote("s = s.replace(/\"/g, '&quot;'); var t = \""),
+        Some('"')
+    );
+    assert_eq!(
+        enclosing_js_quote("if (/[\"/]/.test(x)) {} var t = '"),
+        Some('\'')
+    );
+    // Division is not a regex: `a / 2 / "` leaves a double-quoted string open.
+    assert_eq!(enclosing_js_quote("x = a / 2 / \""), Some('"'));
+    assert_eq!(enclosing_js_quote("return /'/.test(s) ? `"), Some('`'));
+}

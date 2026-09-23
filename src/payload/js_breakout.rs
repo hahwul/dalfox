@@ -199,6 +199,146 @@ pub(crate) fn compute_js_breakout(prefix: &str) -> String {
     out
 }
 
+/// The quote character (`'`, `"` or `` ` ``) of the JS string or template
+/// literal that is still open at the end of `prefix`, or `None` when `prefix`
+/// ends in code or a comment.
+///
+/// This is the *innermost enclosing* delimiter: in `` foo(`a 'x `` the `'` is
+/// literal text inside the template, so the answer is `` ` ``, where a
+/// "closest quote before the marker" guess says `'`. Unlike
+/// [`compute_js_breakout`] it recognises regex literals (by the preceding
+/// token, the usual heuristic), because quote-escaping idioms such as
+/// `s.replace(/"/g, '&quot;')` are common in the code before a reflection and
+/// would otherwise leave the scan inside a phantom string.
+pub(crate) fn enclosing_js_quote(prefix: &str) -> Option<char> {
+    const KEYWORDS_BEFORE_REGEX: &[&str] = &[
+        "return",
+        "typeof",
+        "case",
+        "do",
+        "else",
+        "in",
+        "of",
+        "new",
+        "delete",
+        "void",
+        "throw",
+        "instanceof",
+        "yield",
+        "await",
+    ];
+    let chars: Vec<char> = prefix.chars().collect();
+    // Is a `/` at `i` (in code) the start of a regex literal? Decided by the
+    // previous significant character or keyword.
+    let regex_starts_at = |i: usize| -> bool {
+        let mut j = i;
+        while j > 0 && chars[j - 1].is_whitespace() {
+            j -= 1;
+        }
+        if j == 0 {
+            return true;
+        }
+        let prev = chars[j - 1];
+        if prev.is_alphanumeric() || prev == '_' || prev == '$' {
+            let end = j;
+            while j > 0
+                && (chars[j - 1].is_alphanumeric() || chars[j - 1] == '_' || chars[j - 1] == '$')
+            {
+                j -= 1;
+            }
+            let word: String = chars[j..end].iter().collect();
+            return KEYWORDS_BEFORE_REGEX.contains(&word.as_str());
+        }
+        !matches!(prev, ')' | ']' | '\'' | '"' | '`' | '.')
+    };
+    let mut state = State::Code;
+    // `true` for a `${` expression brace, `false` for an ordinary `{`.
+    let mut braces: Vec<bool> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match state {
+            State::Code => match c {
+                '\'' => state = State::Single,
+                '"' => state = State::Double,
+                '`' => state = State::Template,
+                '{' => braces.push(false),
+                '}' => {
+                    if braces.pop() == Some(true) {
+                        state = State::Template;
+                    }
+                }
+                '/' if chars.get(i + 1) == Some(&'/') => {
+                    state = State::Line;
+                    i += 1;
+                }
+                '/' if chars.get(i + 1) == Some(&'*') => {
+                    state = State::Block;
+                    i += 1;
+                }
+                '/' if regex_starts_at(i) => {
+                    // Skip to the closing `/`, honouring escapes and `[…]`
+                    // classes. A line break (or the end of the prefix) means
+                    // it was not a regex after all; resume after the `/`.
+                    let mut j = i + 1;
+                    let mut in_class = false;
+                    while j < chars.len() && chars[j] != '\n' {
+                        match chars[j] {
+                            '\\' => j += 1,
+                            '[' => in_class = true,
+                            ']' => in_class = false,
+                            '/' if !in_class => break,
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    if j < chars.len() && chars[j] == '/' {
+                        i = j;
+                    }
+                }
+                _ => {}
+            },
+            State::Single | State::Double => {
+                let close = if state == State::Single { '\'' } else { '"' };
+                if c == '\\' {
+                    i += 1;
+                } else if c == close || c == '\n' {
+                    state = State::Code;
+                }
+            }
+            State::Template => {
+                if c == '\\' {
+                    i += 1;
+                } else if c == '`' {
+                    state = State::Code;
+                } else if c == '$' && chars.get(i + 1) == Some(&'{') {
+                    braces.push(true);
+                    state = State::Code;
+                    i += 1;
+                }
+            }
+            State::Line => {
+                if c == '\n' {
+                    state = State::Code;
+                }
+            }
+            State::Block => {
+                if c == '*' && chars.get(i + 1) == Some(&'/') {
+                    state = State::Code;
+                    i += 1;
+                }
+            }
+        }
+        i += 1;
+    }
+    match state {
+        State::Single => Some('\''),
+        State::Double => Some('"'),
+        State::Template => Some('`'),
+        _ => None,
+    }
+}
+
 /// Representative structural shells (openers preceding the reflected string),
 /// covering the common reflection sinks: bare string, inside a call, inside an
 /// array, and one/two levels of array/object nesting inside a call.

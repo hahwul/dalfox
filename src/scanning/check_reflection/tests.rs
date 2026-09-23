@@ -3157,3 +3157,13 @@ fn resolve_sxss_check_urls_keeps_a_same_host_tls_upgrade() {
         urls.iter().map(|u| u.as_str()).collect::<Vec<_>>()
     );
 }
+
+/// The script range starts after the open tag's real `>`: an attribute value
+/// holding `>` is not script content.
+#[test]
+fn test_script_block_ranges_skip_quoted_gt_in_open_tag() {
+    let html = r#"<script data-x="a>b">var x=1;</script>"#;
+    let ranges = script_block_ranges(html);
+    assert_eq!(ranges.len(), 1);
+    assert_eq!(&html[ranges[0].0..ranges[0].1], "var x=1;");
+}

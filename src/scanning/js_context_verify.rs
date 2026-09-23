@@ -82,7 +82,11 @@ pub(crate) fn payload_carries_js_sink(payload: &str) -> bool {
 fn script_block_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?is)(<script\b[^>]*>)(.*?)</script\s*>").expect("valid script block regex")
+        Regex::new(&format!(
+            r"(?is)({})(.*?)</script\s*>",
+            crate::utils::html::SCRIPT_OPEN_TAG_PATTERN
+        ))
+        .expect("valid script block regex")
     })
 }
 

@@ -5450,3 +5450,52 @@ fn numeric_coercion_clears_taint() {
         "uncoerced operand must still be reported"
     );
 }
+
+/// Overriding a numeric built-in through an assignment (a global property or
+/// a plain binding) shadows it as surely as a `function parseInt(){}`
+/// declaration: the name is no longer a coercion and taint must flow.
+#[test]
+fn numeric_coercion_overridden_by_assignment_does_not_clear_taint() {
+    let analyzer = AstDomAnalyzer::new();
+    for code in [
+        "window.parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = parseInt(p);",
+        "globalThis.parseFloat = (v) => v; var p=location.hash; el.innerHTML = parseFloat(p);",
+        "self.Number = function(v){ return v }; var p=location.hash; el.innerHTML = Number(p);",
+        "Number.parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = Number.parseInt(p);",
+        "parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = parseInt(p);",
+        "var parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = parseInt(p);",
+    ] {
+        let found = analyzer.analyze(code).expect("parses");
+        assert!(
+            !found.is_empty(),
+            "overridden coercion cleared taint: {code}"
+        );
+    }
+}
+
+/// A polyfill that assigns the real built-in (or keeps it via `||`) does not
+/// override it: the coercion still clears taint.
+#[test]
+fn numeric_coercion_polyfill_is_not_an_override() {
+    let analyzer = AstDomAnalyzer::new();
+    for code in [
+        "if (Number.parseInt === undefined) { Number.parseInt = window.parseInt; } el.innerHTML = 'Page ' + Number.parseInt(location.hash.slice(1));",
+        "if (!Number.parseFloat) Number.parseFloat = parseFloat; el.innerHTML = Number.parseFloat(location.hash.slice(1));",
+        "window.parseInt = window.parseInt || function(v){ return v }; el.innerHTML = parseInt(location.hash.slice(1));",
+        "Number.parseInt = Number.parseInt ?? (v => v); el.innerHTML = Number.parseInt(location.hash.slice(1));",
+    ] {
+        let found = analyzer.analyze(code).expect("parses");
+        assert!(
+            found.is_empty(),
+            "polyfill read as an override: {code} -> {found:?}"
+        );
+    }
+    // Assigning a built-in that was itself overridden inherits the override.
+    let found = analyzer
+        .analyze("parseInt = function(v){ return v }; Number.parseInt = parseInt; el.innerHTML = Number.parseInt(location.hash);")
+        .expect("parses");
+    assert!(
+        !found.is_empty(),
+        "an overridden built-in stays overridden when copied"
+    );
+}

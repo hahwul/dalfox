@@ -511,14 +511,13 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Targets entering preflight, so the ones it drops can be told apart from
     // the ones that go on to be scanned. Only materialized when `--state-file`
     // is on — on a 50k-URL list this is two strings per target.
-    let pre_preflight_keys: Vec<state_file::TargetIdentity> = if state.state_file.is_some() {
-        host_groups
+    let pre_preflight_keys: Vec<state_file::TargetIdentity> = match &state.state_file {
+        Some(sf) => host_groups
             .values()
             .flatten()
-            .map(state_file::target_identity)
-            .collect()
-    } else {
-        Vec::new()
+            .map(|t| sf.identity(t))
+            .collect(),
+        None => Vec::new(),
     };
 
     // Preflight + parameter analysis for every target (bounded concurrency);
@@ -538,7 +537,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         let survived: std::collections::HashSet<state_file::TargetIdentity> = host_groups
             .values()
             .flatten()
-            .map(state_file::target_identity)
+            .map(|t| sf.identity(t))
             .collect();
         for identity in &pre_preflight_keys {
             if !survived.contains(identity) {

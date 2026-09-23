@@ -130,6 +130,44 @@ fn skip_to_gt(bytes: &[u8], from: usize) -> usize {
     bytes.len()
 }
 
+/// Regex fragment matching a whole `<script …>` open tag. A `>` inside a
+/// quoted attribute value does not end the tag, so `<script data-x="a>b">` is
+/// matched in full instead of stopping at `a>` (which left `b">` as the start
+/// of the script body). A quote only opens a value right after `=`, as in the
+/// HTML tokenizer; an unterminated quote falls back to the first `>`.
+pub(crate) const SCRIPT_OPEN_TAG_PATTERN: &str =
+    r#"<script\b(?:[^>=]|=\s*"[^"]*"|=\s*'[^']*'|=)*>"#;
+
+/// Offset just past the `>` that ends the open tag whose `<` is at `lt`, or
+/// `None` when the tag never ends. The positional counterpart of
+/// [`SCRIPT_OPEN_TAG_PATTERN`]: a quote opens an attribute value only right
+/// after `=`, and a `>` inside that value does not end the tag.
+pub(crate) fn open_tag_end(html: &str, lt: usize) -> Option<usize> {
+    let bytes = html.as_bytes();
+    let mut i = lt + 1;
+    let mut after_eq = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if after_eq && (b == b'"' || b == b'\'') {
+            match bytes[i + 1..].iter().position(|&c| c == b) {
+                Some(rel) => i += rel + 1,
+                // Unterminated value: fall back to the first `>`, like the
+                // regex form.
+                None => return html[lt..].find('>').map(|rel| lt + rel + 1),
+            }
+            after_eq = false;
+        } else if b == b'>' {
+            return Some(i + 1);
+        } else if b == b'=' {
+            after_eq = true;
+        } else if !b.is_ascii_whitespace() {
+            after_eq = false;
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Whether the tag that ends at `gt_end` (offset just past its `>`) was
 /// self-closing (`<div/>`).
 fn tag_is_self_closing(bytes: &[u8], gt_end: usize) -> bool {

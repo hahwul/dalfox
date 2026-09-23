@@ -380,3 +380,28 @@ fn parse_fragment_bounded_leaves_ordinary_fragments_intact() {
         "an ordinary fragment must parse identically"
     );
 }
+
+#[test]
+fn open_tag_end_skips_gt_inside_quoted_attribute_value() {
+    let html = r#"<script data-x="a>b" type='c>d'>body</script>"#;
+    let end = open_tag_end(html, 0).expect("tag ends");
+    assert_eq!(&html[end..end + 4], "body");
+    // A quote outside value position is part of the attribute name, as in the
+    // HTML tokenizer, so it does not swallow the `>`.
+    let html = r#"<script a"b>body</script>"#;
+    assert_eq!(&html[open_tag_end(html, 0).unwrap()..][..4], "body");
+    // Unterminated value: fall back to the first `>`.
+    let html = r#"<script a="b>body"#;
+    assert_eq!(&html[open_tag_end(html, 0).unwrap()..], "body");
+    assert_eq!(open_tag_end("<script a=b", 0), None);
+}
+
+#[test]
+fn script_open_tag_pattern_spans_quoted_gt() {
+    let re = regex::Regex::new(&format!("(?i)^{SCRIPT_OPEN_TAG_PATTERN}")).unwrap();
+    let html = r#"<script data-x="a>b" type="text/template">x</script>"#;
+    assert_eq!(
+        re.find(html).unwrap().as_str(),
+        r#"<script data-x="a>b" type="text/template">"#
+    );
+}

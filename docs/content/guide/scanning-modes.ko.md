@@ -122,7 +122,7 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 | `cancelled` | Ctrl-C, `--scan-timeout` 만료, 스캔 도중 세션 끊김, 심각한 전송 손실(`meta.incomplete`) | 재시도 |
 | `error` | 프리플라이트에서 제외됨 — 도달 불가, content-type 불일치, `--max-targets-per-host` 상한 | 재시도 |
 
-대상의 식별자는 URL, 메서드, 그리고 요청에 실리는 데이터(본문, 헤더, 쿠키, user-agent)의 해시입니다. raw HTTP·HAR 입력에 캡처된 값뿐 아니라 `-H`, `--cookies`, `--user-agent`로 준 값도 포함되므로, 캡처가 바뀌거나 자격 증명이 교체되면 다시 스캔합니다. 파일에는 해시만 저장되고 값 자체는 기록되지 않습니다. 같은 플래그로 실행하면 식별자도 같으므로, 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라 URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
+대상의 식별자는 URL, 메서드, 그리고 요청에 실리는 데이터(본문, 헤더, 쿠키, user-agent)의 해시입니다. raw HTTP·HAR 입력에 캡처된 값뿐 아니라 `-H`, `--cookies`, `--user-agent`로 준 값도 포함되므로, 캡처가 바뀌면 다시 스캔합니다. **실행 전체에 적용되는 자격 증명 값은 제외됩니다**: `--cookies`와 `--cookie-from-raw`의 모든 쿠키 값, 그리고 `-H`로 준 `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key` / `*-Api-Key`, `X-Auth-Token` / `*-Token`, `X-CSRF-Token` / `X-XSRF-Token`, `*-Session-Id` / `X-Session-Token`, `X-Access-Key`, `X-JWT-Assertion`의 값입니다. 이 플래그들은 모든 대상에 적용되고 다시 로그인할 때 갱신하는 값이므로, 세션을 교체해도 다시 스캔하지 않고 이어서 진행합니다. 헤더나 쿠키를 추가·삭제하면 여전히 다시 스캔합니다. 반면 raw HTTP·HAR 캡처 **안에** 들어 있는 자격 증명은 식별자에 포함됩니다. `Authorization`만 다른 두 캡처(테넌트 A와 B)는 서로 다른 요청이므로 따로 기록됩니다. 같은 플래그로 다른 *계정*을 넘겨도 이어서 진행되므로, 계정마다 별도의 `--state-file`을 쓰세요. 파일에는 해시만 저장되고 값 자체는 기록되지 않습니다. 같은 플래그로 실행하면 식별자도 같으므로, 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라 URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
 
 **설정이 바뀌면 처음부터 다시 시작합니다.** 파일 헤더에는 스캔에 영향을 주는 설정의 해시가 들어 있습니다. 해시가 맞지 않으면 기록된 대상들은 이번 실행과 다른 설정에서 검사된 것이므로, Dalfox는 기존 파일을 `scan.state.bak`으로 옮기고 새 파일로 시작한 뒤 전부 다시 스캔합니다:
 
@@ -130,9 +130,9 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 Warning: scan configuration changed since 'scan.state' was written (recorded a5f8…, now 6447…) — starting fresh (previous state kept at 'scan.state.bak')
 ```
 
-덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 만료된 세션 쿠키를 갈아끼우고 인증 스캔을 이어가는 경우가 바로 이 경로를 타는데, 그것 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 기존 파일을 그 자리에서 덮어쓰거나 지우지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
+덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 초기화 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 기존 파일을 그 자리에서 덮어쓰거나 지우지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
 
-출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--silence`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--cookies` / `--headers` 등이 여기에 해당합니다.
+출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--silence`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--headers` / `--cookies`의 헤더·쿠키 *이름*(과 자격 증명이 아닌 헤더 값) 등이 여기에 해당합니다. 실행 전체에 적용되는 자격 증명 값과 `--cookie-from-raw` 경로는 위에서 설명한 대로 해시에 들어가지 않습니다.
 
 파일은 append-only JSONL입니다. 헤더 한 줄 뒤에 대상당 한 줄이 붙습니다. 강제 종료로 잘릴 수 있는 것은 마지막 줄 하나뿐이고, 그 줄은 읽을 때 건너뛰되 앞의 온전한 기록은 모두 그대로 유효합니다. 지난 실행과 결과가 같은 대상은 다시 기록하지 않으므로, 계속 죽어 있는 호스트 때문에 파일이 실행마다 커지지 않습니다.
 

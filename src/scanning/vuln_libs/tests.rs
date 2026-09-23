@@ -332,3 +332,10 @@ fn current_libraries_across_dataset_are_safe() {
         libs(body)
     );
 }
+
+/// A `>` inside a quoted attribute before `src` must not hide the script URL.
+#[test]
+fn detects_script_src_after_quoted_gt_attribute() {
+    let body = r#"<script data-x="a>b" src="/assets/js/jquery-1.7.2.min.js"></script>"#;
+    assert!(libs(body).iter().any(|v| v.library == "jQuery"));
+}

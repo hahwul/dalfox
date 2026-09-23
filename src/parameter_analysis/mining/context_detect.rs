@@ -80,9 +80,9 @@ pub(crate) fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option
     // `<script` (case-insensitive) never matches a closing `</script>` tag (the
     // char after `<` is `/`, not `s`), so the last match is a real opener.
     let open_tag = rfind_ascii_case_insensitive(text.as_bytes(), mp, b"<script")?;
-    // Script content begins just after the `>` that ends the opening tag.
-    let gt = text[open_tag..mp].find('>')?;
-    let content_start = open_tag + gt + 1;
+    // Script content begins just after the `>` that ends the opening tag (a
+    // `>` inside a quoted attribute value does not end it).
+    let content_start = crate::utils::html::open_tag_end(text, open_tag).filter(|&e| e <= mp)?;
     let prefix = &text[content_start..mp];
     // Guard the multi-`<script>` edge: if a `</script>` closes between this
     // opener and the marker, the marker isn't inside this script body — bail to
@@ -119,15 +119,28 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
     // Parse HTML and locate marker via element text/attributes/script
     let document = crate::utils::html::parse_document_bounded(text);
 
-    // Heuristic to infer surrounding quote delimiter around the first marker.
-    // Picks the *closest* opening quote before the marker (the one that
-    // actually contains it). Includes backtick template literals so a marker
-    // reflected inside `` `…` `` is reported as Backtick rather than falling
-    // back to None — the breakout payload (`${…}`) is different from `'/`"`.
+    // Infer the quote delimiter around the first marker in JS source. The
+    // string/template literal actually enclosing the marker comes from a
+    // lexical scan (`enclosing_js_quote`): in `` foo(`a 'MARKER' b`) `` the
+    // `'` is template text and the delimiter is the backtick, whose breakout
+    // (`${…}`) differs from `'`/`"`'s. When the scan finds no enclosing
+    // string, fall back to the *closest* opening quote before the marker.
+    // Includes backtick template literals so a marker reflected inside
+    // `` `…` `` is reported as Backtick rather than falling back to None.
     fn infer_quote_delimiter(text: &str, marker: &str) -> Option<DelimiterType> {
         let pos = text.find(marker)?;
         let before = &text[..pos];
         let after = &text[pos + marker.len()..];
+
+        if let Some(q) = crate::payload::js_breakout::enclosing_js_quote(before)
+            && after.contains(q)
+        {
+            return Some(match q {
+                '\'' => DelimiterType::SingleQuote,
+                '"' => DelimiterType::DoubleQuote,
+                _ => DelimiterType::Backtick,
+            });
+        }
 
         let candidates: [(char, DelimiterType); 3] = [
             ('"', DelimiterType::DoubleQuote),

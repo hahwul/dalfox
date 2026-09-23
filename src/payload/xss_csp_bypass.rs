@@ -105,13 +105,65 @@ impl CspAnalysis {
 /// `require-trusted-types-for` is dropped — letting it drive Trusted Types
 /// suppression in the AST analyzer would be a false negative. The bypass-payload
 /// fields stay as parsed. Every surface that reads a policy goes through this.
+///
+/// `csp_value` may be a comma-separated policy *list* (repeated header lines,
+/// or a header plus `<meta>` policies — see `select_csp_policy`). Each policy
+/// is analysed on its own and the results are combined with
+/// [`merge_policies`]: the browser enforces every policy, so something is only
+/// permitted when all of them permit it.
 pub(crate) fn analyze_csp_from(header_name: &str, csp_value: &str) -> CspAnalysis {
-    let mut analysis = analyze_csp(csp_value);
+    let mut analysis = csp_value
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(analyze_csp)
+        .reduce(merge_policies)
+        .unwrap_or_else(|| analyze_csp(csp_value));
     if !header_name.eq_ignore_ascii_case("content-security-policy") {
         analysis.report_only = true;
         analysis.require_trusted_types_for = false;
     }
     analysis
+}
+
+/// Combine the analyses of two policies enforced together. A script-execution
+/// permission survives only when *both* policies grant it (a policy with no
+/// `script-src` / `default-src` grants everything), while a restriction from
+/// either one applies. Fields that only seed bypass payloads (nonces, hashes,
+/// whitelisted hosts, `strict-dynamic`) are unioned: an extra candidate
+/// payload costs a request, a dropped one costs a finding.
+fn merge_policies(a: CspAnalysis, b: CspAnalysis) -> CspAnalysis {
+    let both = |x: &CspAnalysis, y: &CspAnalysis, f: fn(&CspAnalysis) -> bool| {
+        (x.missing_script_src || f(x)) && (y.missing_script_src || f(y))
+    };
+    let missing_script_src = a.missing_script_src && b.missing_script_src;
+    let permits = |f: fn(&CspAnalysis) -> bool| !missing_script_src && both(&a, &b, f);
+    let mut whitelisted_domains = a.whitelisted_domains.clone();
+    for d in &b.whitelisted_domains {
+        if !whitelisted_domains.contains(d) {
+            whitelisted_domains.push(d.clone());
+        }
+    }
+    CspAnalysis {
+        report_only: a.report_only && b.report_only,
+        has_unsafe_inline: permits(|p| p.has_unsafe_inline),
+        has_unsafe_eval: permits(|p| p.has_unsafe_eval),
+        allows_data_scheme: permits(|p| p.allows_data_scheme),
+        allows_blob_scheme: permits(|p| p.allows_blob_scheme),
+        has_strict_dynamic: a.has_strict_dynamic || b.has_strict_dynamic,
+        missing_base_uri: a.missing_base_uri && b.missing_base_uri,
+        missing_object_src: a.missing_object_src && b.missing_object_src,
+        missing_script_src,
+        whitelisted_domains,
+        nonce_values: [a.nonce_values, b.nonce_values].concat(),
+        hash_values: [a.hash_values, b.hash_values].concat(),
+        require_trusted_types_for: a.require_trusted_types_for || b.require_trusted_types_for,
+        trusted_types: match (a.trusted_types, b.trusted_types) {
+            // A policy name must be allowed by every `trusted-types` directive.
+            (Some(x), Some(y)) => Some(x.into_iter().filter(|n| y.contains(n)).collect()),
+            (x, y) => x.or(y),
+        },
+    }
 }
 
 /// Parse a CSP header value into an analysis struct.

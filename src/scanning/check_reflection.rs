@@ -851,11 +851,11 @@ fn script_block_ranges(html: &str) -> Vec<(usize, usize)> {
         if ranges.len() >= MAX_SCRIPT_RANGES {
             break;
         }
-        // Find the end of the opening tag '>'
-        let Some(rel) = html[start..].find('>') else {
+        // Find the end of the opening tag (quote-aware: a `>` inside a
+        // quoted attribute value does not end it).
+        let Some(content_start) = crate::utils::html::open_tag_end(html, start) else {
             break;
         };
-        let content_start = start + rel + 1;
         match find_ascii_case_insensitive(bytes, close, content_start) {
             Some(end) => {
                 ranges.push((content_start, end));

@@ -43,13 +43,14 @@ pub(crate) fn csp_header_from_response(
 ) -> Option<(String, String)> {
     select_csp_policy(headers, || extract_meta_csp(body))
 }
-/// Pick the one policy dalfox analyses from a response's headers and its
-/// `<meta http-equiv>` policy (`meta` is only evaluated when needed):
+/// Pick the policy dalfox analyses from a response's headers and its
+/// `<meta http-equiv>` policies (`meta` is only evaluated when needed):
 ///
-/// 1. an enforcing `Content-Security-Policy` header,
-/// 2. an enforcing `<meta>` policy,
-/// 3. a `Content-Security-Policy-Report-Only` header,
-/// 4. a report-only `<meta>` policy.
+/// 1. every enforcing policy — each `Content-Security-Policy` header line and
+///    each enforcing `<meta>` — returned together as one comma-separated
+///    policy list under `Content-Security-Policy`,
+/// 2. otherwise a `Content-Security-Policy-Report-Only` header,
+/// 3. otherwise a report-only `<meta>` policy.
 ///
 /// Enforcing beats report-only across *both* sources. A report-only policy
 /// restricts nothing, so letting a report-only header shadow an enforcing meta
@@ -57,63 +58,87 @@ pub(crate) fn csp_header_from_response(
 /// in the document read as unprotected: inline script treated as allowed and
 /// `require-trusted-types-for` ignored — the same failure #1268 fixed between
 /// two meta tags.
+///
+/// Enforcing policies are *all* kept because the browser enforces every one of
+/// them: a script runs only if each policy allows it. Reading just the first
+/// header missed a `script-src` or `require-trusted-types-for` sent in a second
+/// header (or in a `<meta>` next to a header). The comma join is the serialized
+/// policy-list form HTTP itself uses when it folds repeated header lines, and
+/// [`analyze_csp_from`](crate::payload::xss_csp_bypass::analyze_csp_from)
+/// splits it back into policies.
 pub(crate) fn select_csp_policy(
     headers: &reqwest::header::HeaderMap,
     meta: impl FnOnce() -> Option<(String, String)>,
 ) -> Option<(String, String)> {
     const ENFORCING: &str = "Content-Security-Policy";
     const REPORT_ONLY: &str = "Content-Security-Policy-Report-Only";
-    let header = |name: &str| {
-        headers
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .map(|v| (name.to_string(), v.to_string()))
-    };
-    if let Some(enforcing) = header(ENFORCING) {
-        return Some(enforcing);
-    }
+    let mut enforcing: Vec<String> = headers
+        .get_all(ENFORCING)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .collect();
     let meta = meta();
     if let Some(m) = meta.as_ref()
         && m.0 == ENFORCING
     {
-        return meta;
+        enforcing.push(m.1.clone());
     }
-    header(REPORT_ONLY).or(meta)
+    if !enforcing.is_empty() {
+        return Some((ENFORCING.to_string(), enforcing.join(", ")));
+    }
+    headers
+        .get(REPORT_ONLY)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| (REPORT_ONLY.to_string(), v.to_string()))
+        .or(meta)
 }
-/// Find a CSP declared with `<meta http-equiv>`, returning the equivalent
+/// Find the CSP declared with `<meta http-equiv>`, returning the equivalent
 /// header name and the policy text. Pages served without a CSP header commonly
 /// carry one this way, and the CLI preflight has always honoured it — this is
 /// that logic, shared so the server / MCP surfaces cannot analyse a different
 /// policy than the CLI does for the same page.
+///
+/// Every enforcing meta policy applies, so several are joined into one
+/// comma-separated policy list (see [`select_csp_policy`]).
 pub(crate) fn extract_meta_csp(html: &str) -> Option<(String, String)> {
     let doc = crate::utils::html::parse_document_bounded(html);
-    // Prefer an ENFORCING `Content-Security-Policy` meta over a report-only one,
-    // mirroring the header path's enforcing-over-report-only `.or_else`. A page
-    // may carry both (report-only for telemetry, enforcing for protection), and
-    // their document order is arbitrary — returning whichever appears first
-    // could hand back the report-only policy, which downstream marks
-    // `report_only = true` and zeroes `require_trusted_types_for`. That drops
-    // the real enforcing policy: a TT-hardened enforcing meta would then be
-    // ignored and its (neutralised) DOM findings surface as false positives.
+    // Prefer ENFORCING `Content-Security-Policy` metas over a report-only one,
+    // mirroring the header path. A page may carry both (report-only for
+    // telemetry, enforcing for protection), and their document order is
+    // arbitrary — returning whichever appears first could hand back the
+    // report-only policy, which downstream marks `report_only = true` and
+    // zeroes `require_trusted_types_for`. That drops the real enforcing
+    // policy: a TT-hardened enforcing meta would then be ignored and its
+    // (neutralised) DOM findings surface as false positives.
+    let mut enforcing: Vec<String> = Vec::new();
     let mut report_only: Option<(String, String)> = None;
     for el in doc.select(crate::scanning::selectors::meta_csp()) {
+        // Browsers only honour a CSP `<meta>` that is a child of `<head>`; one
+        // in the body (a reflected or user-authored one included) is ignored.
+        let in_head = el
+            .parent()
+            .and_then(|p| p.value().as_element().map(|e| e.name() == "head"))
+            .unwrap_or(false);
+        if !in_head {
+            continue;
+        }
         let http_equiv = el
             .value()
             .attr("http-equiv")
             .unwrap_or("")
             .to_ascii_lowercase();
-        let content = el.value().attr("content").unwrap_or("");
+        let content = el.value().attr("content").unwrap_or("").trim();
         if content.is_empty() {
             continue;
         }
         match http_equiv.as_str() {
-            "content-security-policy" => {
-                // Enforcing policy wins outright.
-                return Some(("Content-Security-Policy".to_string(), content.to_string()));
-            }
+            "content-security-policy" => enforcing.push(content.to_string()),
             "content-security-policy-report-only" => {
-                // Remember the first report-only, but keep scanning for an
-                // enforcing policy which takes precedence.
+                // Remember the first report-only; any enforcing policy still
+                // takes precedence.
                 report_only.get_or_insert_with(|| {
                     (
                         "Content-Security-Policy-Report-Only".to_string(),
@@ -123,6 +148,9 @@ pub(crate) fn extract_meta_csp(html: &str) -> Option<(String, String)> {
             }
             _ => continue,
         }
+    }
+    if !enforcing.is_empty() {
+        return Some(("Content-Security-Policy".to_string(), enforcing.join(", ")));
     }
     report_only
 }

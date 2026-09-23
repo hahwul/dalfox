@@ -630,3 +630,17 @@ fn handler_breakout_joiner_forms_hit_sink() {
         );
     }
 }
+
+/// A `>` inside a quoted attribute of the `<script>` open tag does not end the
+/// tag. The block regex used to stop there, so the body began with `b">` and
+/// never parsed — a real breakout read as no JS evidence (silent clean).
+#[test]
+fn script_open_tag_with_quoted_gt_keeps_the_body_intact() {
+    let payload = "\";alert(1)//";
+    let html = format!(r#"<script data-x="a>b">var q="{payload}";</script>"#);
+    assert!(has_js_context_evidence(payload, &html));
+    // …and the attributes after the quoted `>` still decide the script type:
+    // a data block never runs.
+    let html = format!(r#"<script data-x="a>b" type="text/template">var q="{payload}";</script>"#);
+    assert!(!has_js_context_evidence(payload, &html));
+}

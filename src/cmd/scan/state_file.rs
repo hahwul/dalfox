@@ -78,6 +78,10 @@ impl TargetOutcome {
 /// user-agent), so the URL/method key alone can silently reuse a completion
 /// for a different captured request. Store only its digest to keep credentials
 /// and request bodies out of the state file.
+///
+/// Credential *values* supplied run-wide (see [`CliCredentials`]) are left
+/// out; everything else — names, other values, user-agent, body, and the
+/// credentials inside an imported capture — counts.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct TargetIdentity {
     pub(crate) target: String,
@@ -85,16 +89,101 @@ pub(crate) struct TargetIdentity {
     pub(crate) request_hash: String,
 }
 
-pub(crate) fn target_identity(target: &Target) -> TargetIdentity {
+/// Headers whose value is a credential that rotates on re-authentication.
+/// A curated list plus a few anchored suffixes, not substring matching:
+/// `X-Author`, `Oauth-Scope`, `X-Session-Lang` or `Tokenizer-Mode` carry
+/// ordinary values that can change what the server renders.
+pub(crate) fn is_credential_header(name: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+        "x-xsrf-token",
+        "x-session-token",
+        "x-access-key",
+        "x-jwt-assertion",
+    ];
+    const SUFFIXES: &[&str] = &["-api-key", "-token", "-session-id"];
+    let name = name.trim().to_ascii_lowercase();
+    EXACT.contains(&name.as_str()) || SUFFIXES.iter().any(|s| name.ends_with(s))
+}
+
+/// Credentials the operator supplied for the whole run: credential headers
+/// from `-H`, every `--cookies` pair, and the cookies of the
+/// `--cookie-from-raw` file. These apply to every target and rotate on
+/// re-login — refreshing them before resuming tests the same requests with
+/// the same payloads — so their *values* are left out of a target's identity.
+///
+/// Credentials inside an imported raw-HTTP / HAR capture are different: two
+/// captures that differ only by `Authorization` (tenant A vs tenant B) are
+/// distinct requests, and collapsing them would let one's completion skip the
+/// other. Those values stay hashed. A value is dropped only when that exact
+/// name/value pair came from a run-wide source.
+#[derive(Debug, Default)]
+pub(crate) struct CliCredentials {
+    /// `(lowercased header name, value)`.
+    headers: HashSet<(String, String)>,
+    cookies: HashSet<(String, String)>,
+}
+
+impl CliCredentials {
+    pub(crate) fn from_args(args: &ScanArgs) -> Self {
+        let mut creds = CliCredentials::default();
+        for h in &args.headers {
+            if let Some((n, v)) = h.split_once(':')
+                && is_credential_header(n)
+            {
+                creds
+                    .headers
+                    .insert((n.trim().to_ascii_lowercase(), v.trim().to_string()));
+            }
+        }
+        for c in &args.cookies {
+            creds.cookies.extend(crate::job::split_cookie_pairs(c));
+        }
+        // Already read (and validated) by target resolution; a read failure
+        // here only means those values keep counting.
+        if let Some(path) = &args.cookie_from_raw
+            && let Ok(content) = crate::utils::fs::read_bounded(
+                std::path::Path::new(path),
+                crate::utils::fs::MAX_FILE_READ_BYTES,
+                "raw cookie file",
+            )
+        {
+            creds
+                .cookies
+                .extend(super::input::cookie_pairs_from_raw_http(&content));
+        }
+        creds
+    }
+}
+
+pub(crate) fn target_identity(target: &Target, cli: &CliCredentials) -> TargetIdentity {
     use sha2::{Digest, Sha256};
 
-    let request_shape = serde_json::to_vec(&(
-        &target.data,
-        &target.headers,
-        &target.cookies,
-        &target.user_agent,
-    ))
-    .expect("target request fields serialize");
+    let headers: Vec<(&str, &str)> = target
+        .headers
+        .iter()
+        .map(|(n, v)| {
+            let run_wide = cli
+                .headers
+                .contains(&(n.trim().to_ascii_lowercase(), v.trim().to_string()));
+            (n.as_str(), if run_wide { "" } else { v.as_str() })
+        })
+        .collect();
+    let cookies: Vec<(&str, &str)> = target
+        .cookies
+        .iter()
+        .map(|(n, v)| {
+            let run_wide = cli.cookies.contains(&(n.clone(), v.clone()));
+            (n.as_str(), if run_wide { "" } else { v.as_str() })
+        })
+        .collect();
+    let request_shape = serde_json::to_vec(&(&target.data, &headers, &cookies, &target.user_agent))
+        .expect("target request fields serialize");
     TargetIdentity {
         target: target.url.to_string(),
         method: target.method.clone(),
@@ -125,6 +214,9 @@ pub(crate) fn target_identity(target: &Target) -> TargetIdentity {
 ///   findings already made. The two preview modes never write records at all.
 ///   `limit` and `limit_result_type` are deliberately *not* here: `--limit`
 ///   stops the scan early, so it decides coverage.
+/// - **Run-wide credential values** (values of credential `headers`, every
+///   `cookies` value, `cookie_from_raw`'s path) — see [`CliCredentials`].
+///   Names stay hashed.
 /// - **Pacing** (`timeout`, `scan_timeout`, `delay`, `rate_limit`, `retries`,
 ///   `retry_delay`, `workers`, `max_concurrent_targets`) — how fast requests
 ///   go out and how long one is waited on, not which are sent. Raising these
@@ -169,6 +261,30 @@ pub(crate) fn config_hash(args: &ScanArgs) -> String {
     a.retry_delay = d.retry_delay;
     a.workers = d.workers;
     a.max_concurrent_targets = d.max_concurrent_targets;
+    // Credentials — rotated on re-authentication, the normal step before
+    // resuming (see [`is_credential_header`]). Names stay: adding or dropping
+    // a header or cookie still starts fresh. `--cookie-from-raw` is a path to
+    // a re-exported request; its cookie names reach every target's identity.
+    a.headers = args
+        .headers
+        .iter()
+        .map(|h| match h.split_once(':') {
+            Some((n, _)) if is_credential_header(n) => format!("{}:", n.trim()),
+            _ => h.clone(),
+        })
+        .collect();
+    a.cookies = args
+        .cookies
+        .iter()
+        .map(|c| {
+            crate::job::split_cookie_pairs(c)
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .collect();
+    a.cookie_from_raw = d.cookie_from_raw.clone();
 
     // Provenance, not configuration: `explicit` records *which* flags were
     // typed, and every value it could influence is already hashed on its own
@@ -341,6 +457,8 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
 /// the append handle this run records into.
 pub(crate) struct StateFile {
     path: String,
+    /// Run-wide credentials, left out of every target's identity.
+    cli_credentials: CliCredentials,
     completed: HashSet<TargetIdentity>,
     /// Latest outcome on record per target: loaded from the file at open and
     /// updated on every append this run makes, so a dedup check or a later
@@ -390,6 +508,7 @@ impl StateFile {
 
         let mut state = StateFile {
             path: path.to_string(),
+            cli_credentials: CliCredentials::from_args(args),
             completed: loaded.completed,
             prior: Mutex::new(loaded.prior),
             handle: Mutex::new(None),
@@ -464,15 +583,20 @@ impl StateFile {
         self.completed.len()
     }
 
+    /// This run's identity for `target` (see [`target_identity`]).
+    pub(crate) fn identity(&self, target: &Target) -> TargetIdentity {
+        target_identity(target, &self.cli_credentials)
+    }
+
     pub(crate) fn is_completed(&self, target: &Target) -> bool {
-        self.completed.contains(&target_identity(target))
+        self.completed.contains(&self.identity(target))
     }
 
     /// Append one terminal-state record. Best-effort by design: a scan that is
     /// producing findings must not be aborted because the progress log hit a
     /// full disk, so the first failure warns and the rest are silent.
     pub(crate) fn record(&self, target: &Target, outcome: TargetOutcome) {
-        self.record_identity(target_identity(target), outcome);
+        self.record_identity(self.identity(target), outcome);
     }
 
     pub(crate) fn record_identity(&self, identity: TargetIdentity, outcome: TargetOutcome) {

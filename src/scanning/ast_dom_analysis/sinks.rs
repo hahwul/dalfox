@@ -14,6 +14,22 @@ impl<'a> DomXssVisitor<'a> {
             None
         };
 
+        // An assignment over a numeric built-in shadows it like a
+        // `function parseInt(){}` declaration does.
+        let assigned_name = match &assign.left {
+            AssignmentTarget::StaticMemberExpression(member) => self.get_member_string(member),
+            AssignmentTarget::AssignmentTargetIdentifier(id) => Some(id.name.to_string()),
+            _ => None,
+        };
+        // A polyfill that assigns a built-in back (`Number.parseInt =
+        // window.parseInt`, `window.parseInt = window.parseInt || …`) keeps it.
+        if let Some(name) = assigned_name {
+            let name = strip_global_object(&name);
+            if NUMERIC_COERCIONS.contains(&name) && !self.is_builtin_coercion(&assign.right) {
+                self.overridden_coercions.insert(name.to_string());
+            }
+        }
+
         // Check if we're assigning to a sink property
         match &assign.left {
             AssignmentTarget::StaticMemberExpression(member) => {
@@ -1244,5 +1260,36 @@ impl<'a> DomXssVisitor<'a> {
         let saved_field_taints = self.field_taints.clone();
         self.walk_function_literal_body(params, statements);
         self.field_taints = saved_field_taints;
+    }
+}
+
+/// `window.parseInt` → `parseInt`; other names unchanged.
+fn strip_global_object(name: &str) -> &str {
+    ["window.", "globalThis.", "self.", "top."]
+        .iter()
+        .find_map(|p| name.strip_prefix(p))
+        .unwrap_or(name)
+}
+
+impl<'a> DomXssVisitor<'a> {
+    /// Whether `expr` evaluates to a genuine numeric built-in: a reference to
+    /// one the page has not overridden, or `X || fallback` / `X ?? fallback`
+    /// whose `X` is one (the fallback only runs where the built-in is missing).
+    fn is_builtin_coercion(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::ParenthesizedExpression(p) => self.is_builtin_coercion(&p.expression),
+            Expression::LogicalExpression(l)
+                if matches!(l.operator, LogicalOperator::Or | LogicalOperator::Coalesce) =>
+            {
+                self.is_builtin_coercion(&l.left)
+            }
+            Expression::Identifier(_) | Expression::StaticMemberExpression(_) => {
+                self.get_expr_string(expr).is_some_and(|n| {
+                    let n = strip_global_object(&n);
+                    NUMERIC_COERCIONS.contains(&n) && !self.overridden_coercions.contains(n)
+                })
+            }
+            _ => false,
+        }
     }
 }

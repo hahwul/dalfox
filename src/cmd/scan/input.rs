@@ -1299,6 +1299,26 @@ pub(crate) fn apply_out_of_scope_filter(
     Ok(())
 }
 
+/// The cookies in every `Cookie:` header of a saved raw HTTP request, as
+/// `--cookie-from-raw` applies them. Shared with the `--state-file` identity,
+/// which has to recognise those same pairs.
+pub(crate) fn cookie_pairs_from_raw_http(content: &str) -> Vec<(String, String)> {
+    let mut cookies = Vec::new();
+    for line in content.lines() {
+        // HTTP header names are case-insensitive (RFC 7230 §3.2; HTTP/2
+        // mandates lowercase), so match `Cookie`/`cookie`/`COOKIE` alike and
+        // tolerate arbitrary spacing after the colon. Delegate value splitting
+        // to the shared `split_cookie_pairs` so this parses identically to the
+        // server / preflight cookie paths.
+        if let Some((name, value)) = line.split_once(':')
+            && name.trim().eq_ignore_ascii_case("cookie")
+        {
+            cookies.extend(crate::job::split_cookie_pairs(value));
+        }
+    }
+    cookies
+}
+
 /// Apply `--cookie-from-raw`: lift the `Cookie` header out of a saved raw HTTP
 /// request and attach it to every resolved target.
 ///
@@ -1332,19 +1352,7 @@ fn load_cookies_from_raw_http(
         }
     };
 
-    let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
-    for line in content.lines() {
-        // HTTP header names are case-insensitive (RFC 7230 §3.2; HTTP/2
-        // mandates lowercase), so match `Cookie`/`cookie`/`COOKIE` alike and
-        // tolerate arbitrary spacing after the colon. Delegate value splitting
-        // to the shared `split_cookie_pairs` so this parses identically to the
-        // server / preflight cookie paths.
-        if let Some((name, value)) = line.split_once(':')
-            && name.trim().eq_ignore_ascii_case("cookie")
-        {
-            cookies_from_raw.extend(crate::job::split_cookie_pairs(value));
-        }
-    }
+    let cookies_from_raw = cookie_pairs_from_raw_http(&content);
 
     if cookies_from_raw.is_empty() {
         emit_error(
