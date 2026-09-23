@@ -23,6 +23,19 @@ Dalfox will:
 
 Only findings that survive both steps are reported as SXSS.
 
+The write endpoint does not need to echo what you submit. Dalfox keeps a stored
+field even when the submit response just says "saved", and it does not use that
+non-rendering response to decide which characters the sink filters — so a
+form-backed stored sink is tested with the full payload set rather than skipped.
+
+Every parameter is sent the same payloads, and a stored sink keeps whatever it
+is given, so once one field has stored a payload the retrieval page shows it for
+the rest of the scan. To keep findings on the right field, before a parameter
+injects anything Dalfox snapshots the retrieval page(s) once; a payload is
+credited to that parameter only when its injection makes the payload appear
+*more* often than the snapshot already showed. A copy another field stored
+earlier is already in the snapshot, so it is never mis-credited.
+
 ## Choosing the retrieval URL
 
 Pick the page the stored value **reads** from. Examples:

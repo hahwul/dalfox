@@ -2323,6 +2323,80 @@ struct FetchedInjection {
     status: u16,
 }
 
+tokio::task_local! {
+    /// Snapshot of a stored-XSS parameter's retrieval bodies, captured once at
+    /// the start of that parameter's scan — before it has injected anything.
+    ///
+    /// Under `--sxss` every parameter is sent the same payload catalog, and a
+    /// stored sink keeps what it was given, so once one parameter has stored a
+    /// payload the retrieval page shows it for the rest of the scan. Without a
+    /// baseline, that leftover element is credited to every later parameter — a
+    /// Verified finding on a parameter the application never stores. A payload
+    /// is credited here only when it appears *more* times in a post-injection
+    /// body than in this baseline, so a copy some other parameter stored earlier
+    /// (already in the baseline) is never mis-attributed. Set only around the
+    /// reflection/DOM phases; unset for the Stage-0 probe and every non-`--sxss`
+    /// path, where a reflection is credited on its own (fail-open).
+    pub(crate) static SXSS_BASELINE: std::sync::Arc<Vec<String>>;
+}
+
+/// Occurrences of `payload` — or one of its decode variants — in `body`. Mirrors
+/// the variant set [`classify_reflection`] matches on, so a server that URL- or
+/// entity-decodes stored input before rendering is counted the same way it is
+/// classified.
+fn reflection_occurrences(body: &str, payload: &str) -> usize {
+    payload_variants(payload)
+        .iter()
+        .filter(|v| !v.is_empty())
+        .map(|v| body.matches(v.as_str()).count())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Under `--sxss`, whether `body` shows `payload` more than the parameter's
+/// pre-injection baseline did — i.e. *this* parameter's injection is what put it
+/// there. Outside a baseline scope (the Stage-0 probe, and every non-`--sxss`
+/// path) it is always true, preserving the prior credit-on-reflection behaviour.
+pub(crate) fn sxss_injection_credited(body: &str, payload: &str) -> bool {
+    match SXSS_BASELINE.try_with(|snapshot| {
+        snapshot
+            .iter()
+            .map(|b| reflection_occurrences(b, payload))
+            .max()
+            .unwrap_or(0)
+    }) {
+        Ok(baseline) => reflection_occurrences(body, payload) > baseline,
+        Err(_) => true,
+    }
+}
+
+/// Capture the pre-injection baseline for `param`'s stored-XSS retrieval URLs:
+/// one GET of each candidate the reflection/DOM phases will later read, so a
+/// payload already present before this parameter injects is not credited to it.
+/// One request per candidate URL, once per parameter.
+pub(crate) async fn capture_sxss_baseline(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    args: &crate::cmd::scan::ScanArgs,
+) -> Vec<String> {
+    let mut bodies = Vec::new();
+    for url in resolve_sxss_check_urls(target, param, args) {
+        let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+        let request = crate::utils::build_request(client, target, method, url, None);
+        crate::record_outbound_request().await;
+        match request.send().await {
+            Ok(resp) => {
+                if let Ok(text) = crate::utils::http::read_body(resp).await {
+                    bodies.push(text);
+                }
+            }
+            Err(_) => crate::tick_request_failure(),
+        }
+    }
+    bodies
+}
+
 async fn fetch_injection_response(
     target: &Target,
     param: &Param,
@@ -2491,7 +2565,9 @@ async fn fetch_injection_response_with_client(
                 if let Ok(resp) = sent
                     && let Some(body) = gated_body(resp, param, payload, args).await
                 {
-                    if classify_reflection(&body.text, payload).is_some() {
+                    if classify_reflection(&body.text, payload).is_some()
+                        && sxss_injection_credited(&body.text, payload)
+                    {
                         // `--sxss` fans retrieval across secondary URLs, so a
                         // single injection status is meaningless here; report `0`
                         // (mirroring `DomVerifyOutcome`'s sxss handling).
@@ -2517,6 +2593,7 @@ async fn fetch_injection_response_with_client(
         // of sinks where the write-response is the rendered view.
         if let Some(body) = inject_body.as_ref()
             && classify_reflection(&body.text, payload).is_some()
+            && sxss_injection_credited(&body.text, payload)
         {
             return FetchedInjection {
                 body: inject_body,
@@ -2706,6 +2783,12 @@ pub(crate) async fn check_reflection_with_response_status(
         let kind = classify_reflection(&body.text, payload);
         let kind = match kind {
             Some(_) if is_in_safe_context_decoded(&body.text, payload) => None,
+            // Under `--sxss` a body only counts when this parameter's injection
+            // increased the payload's occurrence over the pre-injection baseline
+            // (see `SXSS_BASELINE`). The per-URL loop above already prefers a
+            // credited body, so this catches the case where only the uncredited
+            // fallback body survived — a payload another parameter stored.
+            Some(_) if args.sxss && !sxss_injection_credited(&body.text, payload) => None,
             other => other,
         };
         (kind, Some(body), status)

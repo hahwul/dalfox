@@ -668,31 +668,61 @@ impl ScanWorkerCtx {
             return;
         }
 
-        // Save a reference copy for the HPP phase (only first 5 payloads)
-        // before the reflection phase consumes `reflection_payloads`. Gate on
-        // the same condition `run_hpp_phase` checks (Query location) so we don't
-        // clone payloads for params whose HPP phase would immediately return.
-        let hpp_payloads: Vec<String> =
-            if self.args.hpp && param.location == crate::parameter_analysis::Location::Query {
-                reflection_payloads.iter().take(5).cloned().collect()
-            } else {
-                vec![]
-            };
+        // Under `--sxss`, snapshot this parameter's retrieval pages once, before
+        // it injects anything, so the reflection/DOM phases can tell a payload
+        // *this* parameter stored from one another parameter left there earlier
+        // (see `check_reflection::SXSS_BASELINE`). Captured after the Stage-0
+        // probe so that probe is not itself baseline-gated.
+        let sxss_baseline = if self.args.sxss {
+            Some(std::sync::Arc::new(
+                crate::scanning::check_reflection::capture_sxss_baseline(
+                    self.client.as_ref(),
+                    &self.target,
+                    &param,
+                    &self.args,
+                )
+                .await,
+            ))
+        } else {
+            None
+        };
 
-        if let PhaseFlow::Abort = self
-            .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
-            .await
-        {
-            self.flush_results(&mut state.local_results).await;
-            return;
-        }
-        if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await {
-            self.flush_results(&mut state.local_results).await;
-            return;
-        }
-        self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
+        let phases = async {
+            // Save a reference copy for the HPP phase (only first 5 payloads)
+            // before the reflection phase consumes `reflection_payloads`. Gate on
+            // the same condition `run_hpp_phase` checks (Query location) so we don't
+            // clone payloads for params whose HPP phase would immediately return.
+            let hpp_payloads: Vec<String> =
+                if self.args.hpp && param.location == crate::parameter_analysis::Location::Query {
+                    reflection_payloads.iter().take(5).cloned().collect()
+                } else {
+                    vec![]
+                };
 
-        self.flush_results(&mut state.local_results).await;
+            if let PhaseFlow::Abort = self
+                .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
+                .await
+            {
+                self.flush_results(&mut state.local_results).await;
+                return;
+            }
+            if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await {
+                self.flush_results(&mut state.local_results).await;
+                return;
+            }
+            self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
+
+            self.flush_results(&mut state.local_results).await;
+        };
+
+        match sxss_baseline {
+            Some(baseline) => {
+                crate::scanning::check_reflection::SXSS_BASELINE
+                    .scope(baseline, phases)
+                    .await
+            }
+            None => phases.await,
+        }
     }
 
     /// Stage 0 fast probe: detect whether the param reflects at all before

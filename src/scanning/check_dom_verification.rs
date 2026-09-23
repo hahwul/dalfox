@@ -918,6 +918,12 @@ async fn verify_sxss_dom(
                     && crate::utils::is_htmlish_content_type(ct)
                     && crate::scanning::check_reflection::classify_reflection(&text, payload)
                         .is_some()
+                    // Credit the stored payload to this parameter only when its
+                    // injection increased the payload's occurrence over the
+                    // pre-injection baseline — a copy another parameter stored
+                    // earlier is already in the retrieval page (see
+                    // `check_reflection::SXSS_BASELINE`).
+                    && crate::scanning::check_reflection::sxss_injection_credited(&text, payload)
                     && has_dom_evidence(payload, &text)
                 {
                     return (true, Some(text));

@@ -4692,3 +4692,110 @@ fn test_extract_meta_csp_ignores_meta_outside_head() {
         Some("object-src 'none'")
     );
 }
+
+/// End-to-end for `--sxss` per-parameter marker attribution. Two body fields
+/// (`c`, `name`) are injected at a stored sink. Which fields the sink keeps is
+/// varied; a field is credited with a Verified finding only when the retrieval
+/// page shows an element *this field* produced. Because every field is sent the
+/// same payload catalog, a shared marker would let one field's stored element
+/// satisfy another's verification — the cross-attribution this guards against.
+#[tokio::test]
+async fn sxss_credits_only_the_fields_that_actually_store() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use tokio::time::{Duration, sleep};
+
+    async fn run_case(store_fields: &'static [&'static str]) -> Vec<(String, String)> {
+        let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+        let write = store.clone();
+        let read = store.clone();
+        let app = Router::new()
+            .route(
+                "/save",
+                axum::routing::post(move |body: String| {
+                    let store = write.clone();
+                    async move {
+                        for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                            if store_fields.contains(&k.as_ref()) {
+                                store.lock().unwrap().push(v.into_owned());
+                            }
+                        }
+                        Html("saved")
+                    }
+                }),
+            )
+            .route(
+                "/view",
+                get(move || {
+                    let store = read.clone();
+                    async move {
+                        Html(format!(
+                            "<html><body>{}</body></html>",
+                            store.lock().unwrap().join("<hr>")
+                        ))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        sleep(Duration::from_millis(20)).await;
+
+        let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+        target.workers = 1;
+        for name in ["c", "name"] {
+            target.reflection_params.push(Param {
+                injection_context: Some(InjectionContext::Html(None)),
+                form_action_url: Some(format!("http://{addr}/save")),
+                form_origin_url: Some(format!("http://{addr}/page")),
+                ..Param::new(name.to_string(), "x".to_string(), Location::Body)
+            });
+        }
+        let mut args = integration_scan_args(false);
+        args.sxss = true;
+        args.sxss_url = Some(format!("http://{addr}/view"));
+        args.max_payloads_per_param = 40;
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(args),
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        server.abort();
+        let out: Vec<(String, String)> = results
+            .lock()
+            .await
+            .iter()
+            .filter(|r| r.result_type == FindingType::Verified)
+            .map(|r| (r.param.clone(), r.payload.clone()))
+            .collect();
+        out
+    }
+
+    // Only `c` stores: `name` must not be credited with `c`'s stored element.
+    let only_c = run_case(&["c"]).await;
+    assert!(
+        only_c.iter().all(|(p, _)| p == "c"),
+        "a field the sink never stores must not be credited: {only_c:?}"
+    );
+    assert!(
+        only_c.iter().any(|(p, _)| p == "c"),
+        "the storing field must be verified: {only_c:?}"
+    );
+
+    // Both store: each is credited (the baseline delta sees each field's own
+    // injection raise the payload's occurrence on the retrieval page).
+    let both = run_case(&["c", "name"]).await;
+    for field in ["c", "name"] {
+        assert!(
+            both.iter().any(|(p, _)| p == field),
+            "both storing fields must be verified, missing {field}: {both:?}"
+        );
+    }
+}

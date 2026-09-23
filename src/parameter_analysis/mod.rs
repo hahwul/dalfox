@@ -1263,6 +1263,21 @@ pub async fn analyze_parameters(
             probed.push(res);
         }
     }
+    if args.sxss {
+        // The active probe judges special characters from the *write*
+        // response. A stored sink that does not render the value there (the
+        // common "saved" / redirect / JSON-ack shape) comes back with no marker
+        // at all, which the probe records as "every special is filtered" — and
+        // the adaptive prune then drops every `<`/`>`/quote payload before the
+        // retrieval URL is ever checked. That verdict describes a page that
+        // never showed the value, not the one that renders it, so discard it
+        // and let the full payload set run (the same `None` the multi-URL-decode
+        // detection above uses for "the filter verdict does not apply").
+        for p in probed.iter_mut().filter(|p| !p.marker_echoed) {
+            p.valid_specials = None;
+            p.invalid_specials = None;
+        }
+    }
     target.reflection_params = probed;
 
     // Logging parameter analysis (stderr). When an indicatif spinner is active,
