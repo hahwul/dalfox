@@ -586,3 +586,87 @@ fn an_unwritable_path_is_an_error_not_a_silent_no_op() {
 
     let _ = std::fs::remove_dir(&dir);
 }
+
+#[test]
+fn credential_headers_are_recognised_by_name() {
+    for name in [
+        "Cookie",
+        "authorization",
+        "Proxy-Authorization",
+        "X-Api-Key",
+        "X-Auth-Token",
+        "X-CSRF-Token",
+        "X-Session-Id",
+        "X-Amz-Security-Token",
+    ] {
+        assert!(is_credential_header(name), "{name}");
+    }
+    for name in [
+        "User-Agent",
+        "Accept-Language",
+        "X-Forwarded-For",
+        "X-Tenant",
+    ] {
+        assert!(!is_credential_header(name), "{name}");
+    }
+}
+
+// Re-authenticating before a resume rotates credential values; that must not
+// reset the campaign. Adding a credential (a new name) still does.
+#[test]
+fn credential_values_do_not_change_the_hash_but_names_do() {
+    let with = |headers: &[&str], cookies: &[&str], raw: Option<&str>| {
+        config_hash(&ScanArgs {
+            headers: headers.iter().map(|s| s.to_string()).collect(),
+            cookies: cookies.iter().map(|s| s.to_string()).collect(),
+            cookie_from_raw: raw.map(str::to_string),
+            ..Default::default()
+        })
+    };
+    let base = with(
+        &["Authorization: Bearer a", "X-Tenant: acme"],
+        &["sid=a; lang=en"],
+        Some("req1.txt"),
+    );
+    assert_eq!(
+        base,
+        with(
+            &["Authorization: Bearer b", "X-Tenant: acme"],
+            &["sid=b; lang=ko"],
+            Some("req2.txt"),
+        )
+    );
+    assert_ne!(
+        base,
+        with(
+            &["Authorization: Bearer a", "X-Tenant: other"],
+            &["sid=a; lang=en"],
+            Some("req1.txt"),
+        ),
+        "a non-credential header value counts"
+    );
+    assert_ne!(
+        base,
+        with(
+            &["Authorization: Bearer a", "X-Tenant: acme"],
+            &["sid=a; lang=en; csrf=x"],
+            Some("req1.txt"),
+        ),
+        "an added cookie counts"
+    );
+}
+
+#[test]
+fn target_identity_ignores_credential_values_only() {
+    let t = |cookie: &str, auth: &str, tenant: &str| {
+        let mut t = test_target("http://example.test/a?q=1", "GET");
+        t.cookies = vec![("sid".to_string(), cookie.to_string())];
+        t.headers = vec![
+            ("Authorization".to_string(), auth.to_string()),
+            ("X-Tenant".to_string(), tenant.to_string()),
+        ];
+        target_identity(&t)
+    };
+    assert_eq!(t("a", "Bearer a", "acme"), t("b", "Bearer b", "acme"));
+    assert_ne!(t("a", "Bearer a", "acme"), t("a", "Bearer a", "other"));
+}

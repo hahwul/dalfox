@@ -740,3 +740,112 @@ async fn without_the_flag_nothing_is_recorded_or_skipped() {
     let _ = std::fs::remove_file(&out1);
     let _ = std::fs::remove_file(&out2);
 }
+
+// Refreshing a session before resuming is the normal re-auth step: new
+// `--cookies` / `Authorization` values test the same requests with the same
+// payloads, so the completions stay valid. Names still count.
+#[tokio::test]
+async fn rotating_session_credentials_resumes_instead_of_rescanning() {
+    let _serial = serial().await;
+    let (base, hits, server) = spawn_app().await;
+    let state = unique_temp_path("resume-rotate", "jsonl");
+    let targets = vec![format!("{}/a?q=1", base)];
+    let raw_cookie = |value: &str| {
+        let p = unique_temp_path("resume-rotate-raw", "http");
+        std::fs::write(
+            &p,
+            format!("GET / HTTP/1.1\r\nHost: x\r\nCookie: jar={value}\r\n\r\n"),
+        )
+        .expect("write raw cookie file");
+        p
+    };
+    let with_creds = |out: &Path, session: &str, raw: &Path| {
+        let mut a = lean_args(&targets, out, &state);
+        a.cookies = vec![format!("sid={session}; lang=en")];
+        a.headers = vec![
+            format!("Authorization: Bearer {session}"),
+            "X-Tenant: acme".to_string(),
+        ];
+        a.cookie_from_raw = Some(raw.to_string_lossy().to_string());
+        a
+    };
+
+    let raw1 = raw_cookie("one");
+    let out1 = unique_temp_path("resume-rotate1", "json");
+    run_scan(&with_creds(&out1, "first", &raw1)).await;
+    let after_first = hits.load(Ordering::Relaxed);
+    assert_eq!(
+        outcomes(&state),
+        vec![(targets[0].clone(), "completed".to_string())]
+    );
+
+    let raw2 = raw_cookie("two");
+    let out2 = unique_temp_path("resume-rotate2", "json");
+    run_scan(&with_creds(&out2, "second", &raw2)).await;
+    assert_eq!(
+        hits.load(Ordering::Relaxed),
+        after_first,
+        "rotated credentials must not force a rescan"
+    );
+    assert_eq!(read_meta(&out2)["resumed"]["targets_skipped_completed"], 1);
+
+    // A non-credential header value can change what the server renders.
+    let out3 = unique_temp_path("resume-rotate3", "json");
+    let mut changed = with_creds(&out3, "second", &raw2);
+    changed.headers[1] = "X-Tenant: other".to_string();
+    run_scan(&changed).await;
+    server.abort();
+    assert!(
+        hits.load(Ordering::Relaxed) > after_first,
+        "a changed non-credential header must rescan"
+    );
+    assert_eq!(read_meta(&out3)["resumed"]["targets_skipped_completed"], 0);
+
+    for p in [&state, &raw1, &raw2, &out1, &out2, &out3] {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+// Same rule for a raw HTTP capture re-exported after re-login: the Cookie and
+// Authorization values change, nothing else does.
+#[tokio::test]
+async fn a_raw_http_capture_with_rotated_session_resumes() {
+    let _serial = serial().await;
+    let (base, hits, server) = spawn_app().await;
+    let state = unique_temp_path("resume-raw-rotate", "jsonl");
+    let capture = unique_temp_path("resume-raw-rotate-input", "http");
+    let host = base.trim_start_matches("http://").to_string();
+    let capture_for = |session: &str, tenant: &str| {
+        format!(
+            "GET {base}/a?q=1 HTTP/1.1\r\nHost: {host}\r\nCookie: sid={session}\r\nAuthorization: Bearer {session}\r\nX-Tenant: {tenant}\r\n\r\n"
+        )
+    };
+    let args_for = |out: &Path| ScanArgs {
+        input_type: "raw-http".to_string(),
+        targets: vec![capture.to_string_lossy().to_string()],
+        ..lean_args(&[], out, &state)
+    };
+
+    std::fs::write(&capture, capture_for("first", "acme")).expect("write capture");
+    let out1 = unique_temp_path("resume-raw-rotate1", "json");
+    run_scan(&args_for(&out1)).await;
+    let after_first = hits.load(Ordering::Relaxed);
+    assert!(after_first > 0);
+
+    std::fs::write(&capture, capture_for("second", "acme")).expect("rewrite capture");
+    let out2 = unique_temp_path("resume-raw-rotate2", "json");
+    run_scan(&args_for(&out2)).await;
+    assert_eq!(hits.load(Ordering::Relaxed), after_first);
+    assert_eq!(read_meta(&out2)["resumed"]["targets_skipped_completed"], 1);
+
+    std::fs::write(&capture, capture_for("second", "other")).expect("rewrite capture");
+    let out3 = unique_temp_path("resume-raw-rotate3", "json");
+    run_scan(&args_for(&out3)).await;
+    server.abort();
+    assert!(hits.load(Ordering::Relaxed) > after_first);
+    assert_eq!(read_meta(&out3)["resumed"]["targets_skipped_completed"], 0);
+
+    for p in [&state, &capture, &out1, &out2, &out3] {
+        let _ = std::fs::remove_file(p);
+    }
+}

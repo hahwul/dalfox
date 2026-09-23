@@ -78,6 +78,9 @@ impl TargetOutcome {
 /// user-agent), so the URL/method key alone can silently reuse a completion
 /// for a different captured request. Store only its digest to keep credentials
 /// and request bodies out of the state file.
+///
+/// Credential *values* are left out (see [`is_credential_header`]): header and
+/// cookie names, other header values, the user-agent and the body all count.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct TargetIdentity {
     pub(crate) target: String,
@@ -85,16 +88,59 @@ pub(crate) struct TargetIdentity {
     pub(crate) request_hash: String,
 }
 
+/// Headers whose value is a credential that rotates on re-authentication:
+/// `Cookie`, `Authorization`, `Proxy-Authorization`, and names that spell out
+/// a token, session, secret, API key, CSRF token or signature.
+///
+/// Refreshing a session before resuming an interrupted authenticated scan is
+/// the normal step, and it tests the same requests with the same payloads; if
+/// the new value counted, every completion would be thrown away and the whole
+/// campaign rescanned. What *would* change coverage still counts: a header or
+/// cookie added or removed (its name), a different non-credential header value
+/// (`Accept-Language`, `X-Forwarded-For`, …), user-agent, method or body. The
+/// cost is that switching to a different *account* with the same cookie names
+/// resumes too — pass a fresh `--state-file` for a second identity.
+pub(crate) fn is_credential_header(name: &str) -> bool {
+    const EXACT: &[&str] = &["cookie", "authorization", "proxy-authorization"];
+    const PARTS: &[&str] = &[
+        "token",
+        "auth",
+        "session",
+        "secret",
+        "csrf",
+        "xsrf",
+        "api-key",
+        "apikey",
+        "api_key",
+        "signature",
+    ];
+    let name = name.trim().to_ascii_lowercase();
+    EXACT.contains(&name.as_str()) || PARTS.iter().any(|p| name.contains(p))
+}
+
+/// A `Name: value` header with a credential value reduced to `Name:`.
+fn header_without_credential(name: &str, value: &str) -> (String, String) {
+    let value = if is_credential_header(name) {
+        String::new()
+    } else {
+        value.to_string()
+    };
+    (name.to_string(), value)
+}
+
 pub(crate) fn target_identity(target: &Target) -> TargetIdentity {
     use sha2::{Digest, Sha256};
 
-    let request_shape = serde_json::to_vec(&(
-        &target.data,
-        &target.headers,
-        &target.cookies,
-        &target.user_agent,
-    ))
-    .expect("target request fields serialize");
+    let headers: Vec<(String, String)> = target
+        .headers
+        .iter()
+        .map(|(n, v)| header_without_credential(n, v))
+        .collect();
+    // Cookie values are session state; the names say which cookies were sent.
+    let cookie_names: Vec<&str> = target.cookies.iter().map(|(n, _)| n.as_str()).collect();
+    let request_shape =
+        serde_json::to_vec(&(&target.data, &headers, &cookie_names, &target.user_agent))
+            .expect("target request fields serialize");
     TargetIdentity {
         target: target.url.to_string(),
         method: target.method.clone(),
@@ -125,6 +171,9 @@ pub(crate) fn target_identity(target: &Target) -> TargetIdentity {
 ///   findings already made. The two preview modes never write records at all.
 ///   `limit` and `limit_result_type` are deliberately *not* here: `--limit`
 ///   stops the scan early, so it decides coverage.
+/// - **Credential values** (`headers` / `cookies` values of credential
+///   headers and every cookie, `cookie_from_raw`'s path) — see
+///   [`is_credential_header`]. Names stay hashed.
 /// - **Pacing** (`timeout`, `scan_timeout`, `delay`, `rate_limit`, `retries`,
 ///   `retry_delay`, `workers`, `max_concurrent_targets`) — how fast requests
 ///   go out and how long one is waited on, not which are sent. Raising these
@@ -169,6 +218,33 @@ pub(crate) fn config_hash(args: &ScanArgs) -> String {
     a.retry_delay = d.retry_delay;
     a.workers = d.workers;
     a.max_concurrent_targets = d.max_concurrent_targets;
+    // Credentials — rotated on re-authentication, the normal step before
+    // resuming (see [`is_credential_header`]). Names stay: adding or dropping
+    // a header or cookie still starts fresh. `--cookie-from-raw` is a path to
+    // a re-exported request; its cookie names reach every target's identity.
+    a.headers = args
+        .headers
+        .iter()
+        .map(|h| match h.split_once(':') {
+            Some((n, v)) => {
+                let (n, v) = header_without_credential(n.trim(), v.trim());
+                format!("{n}: {v}")
+            }
+            None => h.clone(),
+        })
+        .collect();
+    a.cookies = args
+        .cookies
+        .iter()
+        .map(|c| {
+            crate::job::split_cookie_pairs(c)
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .collect();
+    a.cookie_from_raw = d.cookie_from_raw.clone();
 
     // Provenance, not configuration: `explicit` records *which* flags were
     // typed, and every value it could influence is already hashed on its own
