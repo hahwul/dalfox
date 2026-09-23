@@ -5695,3 +5695,46 @@ fn decoded_literal_without_proof_stays_clean() {
         assert!(found.is_empty(), "{code} -> {found:?}");
     }
 }
+
+fn sent(value: &str) -> crate::scanning::ast_dom_analysis::PageMarkup {
+    let mut m = crate::scanning::ast_dom_analysis::PageMarkup::default();
+    m.sent_value = Some(value.to_string());
+    m
+}
+
+/// The AST pass is often seeded by an attack payload with no marker; a
+/// literal that decodes to exactly what this request sent is the same proof.
+#[test]
+fn decoded_literal_matching_the_sent_value_is_a_source() {
+    let code = "var content = decodeURIComponent('%27%29%3Balert%281%29//'); document.getElementById('app').innerHTML = content;";
+    let found = AstDomAnalyzer::new()
+        .with_reflected_markup(sent("');alert(1)//"))
+        .analyze(code)
+        .expect("parses");
+    assert!(
+        found.iter().any(|v| v.source.starts_with("markup:")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn decoded_literal_not_matching_the_sent_value_stays_clean() {
+    for (code, value) in [
+        // A short sent value matches constants by accident.
+        (
+            "document.body.innerHTML = decodeURIComponent('%3Cb%3Ea%3C%2Fb%3E');",
+            "a",
+        ),
+        // A constant that is not what was sent.
+        (
+            "document.body.innerHTML = decodeURIComponent('%3Cb%3EHello%3C%2Fb%3E');",
+            "');alert(1)//",
+        ),
+    ] {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(sent(value))
+            .analyze(code)
+            .expect("parses");
+        assert!(found.is_empty(), "{code} -> {found:?}");
+    }
+}

@@ -27,6 +27,11 @@ pub struct PageMarkup {
     /// CSS custom property names (`--x`) declared with a value carrying a
     /// marker, in a `<style>` block or a `style` attribute.
     pub(crate) css_custom_properties: HashSet<String>,
+    /// The value the tested parameter carried in the request that produced
+    /// this response. A string literal that decodes to it is the server's
+    /// copy of the parameter even when the value carries no marker (an attack
+    /// payload such as `');alert(1)//`).
+    pub(crate) sent_value: Option<String>,
 }
 
 impl PageMarkup {
@@ -47,6 +52,9 @@ impl PageMarkup {
         self.form_ids.extend(other.form_ids.iter().cloned());
         self.css_custom_properties
             .extend(other.css_custom_properties.iter().cloned());
+        if self.sent_value.is_none() {
+            self.sent_value = other.sent_value.clone();
+        }
     }
 }
 
@@ -65,7 +73,7 @@ fn dataset_attr_name(prop: &str) -> String {
 }
 
 impl<'a> DomXssVisitor<'a> {
-    /// The `id` of the reflected element `expr` resolves to: an inline
+    /// The `id` of the element `expr` resolves to: an inline
     /// `document.getElementById('id')` / `querySelector('#id')` with a literal
     /// argument, or a variable bound to one.
     pub(super) fn reflected_element_id(&self, expr: &Expression<'a>) -> Option<String> {
@@ -95,8 +103,8 @@ impl<'a> DomXssVisitor<'a> {
             }
             _ => None,
         }?;
-        let m = &self.reflected_markup;
-        (m.attrs.contains_key(&id) || m.text.contains(&id)).then_some(id)
+        // Every caller then checks the specific slot (`attrs[id]`, `text`).
+        Some(id)
     }
 
     /// Source label when `member` reads a reflected slot: `el.dataset.x` or
@@ -204,13 +212,14 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Source label when `call` percent-decodes a string literal carrying this
-    /// scan's marker: `decodeURIComponent('…')` where the server wrote the
-    /// parameter, percent-encoded, into the script. The encoding leaves no
-    /// raw breakout for the reflection engine to see, and the alphanumeric
-    /// marker survives it, so its presence proves the literal is the
-    /// parameter. A literal that reaches a sink undecoded is left to the
-    /// reflection engine, which already sees it.
+    /// Source label when `call` percent-decodes a string literal that is the
+    /// server's copy of the parameter: `decodeURIComponent('…')` where the
+    /// server wrote it, percent-encoded, into the script. The encoding leaves
+    /// no raw breakout for the reflection engine to see. Proof is either this
+    /// scan's marker in the literal (alphanumeric, so it survives encoding) or
+    /// the literal decoding to the value this very request sent. A literal
+    /// that reaches a sink undecoded is left to the reflection engine, which
+    /// already sees it.
     pub(super) fn decoded_reflected_literal_source(
         &self,
         call: &CallExpression<'a>,
@@ -223,7 +232,16 @@ impl<'a> DomXssVisitor<'a> {
             return None;
         }
         let literal = Self::extract_static_string_argument(call, 0)?;
-        crate::scanning::markers::carries_scan_marker(&literal)
+        let decoded = urlencoding::decode(&literal).map(|d| d.into_owned()).ok();
+        let is_sent_value = self
+            .reflected_markup
+            .sent_value
+            .as_deref()
+            // A short value (`1`, `a`) could match a constant by accident.
+            .filter(|v| v.len() >= 8)
+            .zip(decoded.as_deref())
+            .is_some_and(|(sent, decoded)| decoded.contains(sent));
+        (crate::scanning::markers::carries_scan_marker(&literal) || is_sent_value)
             .then(|| format!("markup:{name}(<reflected string>)"))
     }
 }

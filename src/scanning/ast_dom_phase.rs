@@ -10,6 +10,10 @@ pub(crate) const MAX_EXTERNAL_JS_FILES: usize = 16;
 pub(crate) const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
 /// Run AST-based DOM XSS static analysis on the given response HTML.
 ///
+/// `injected` is the value `param` carried in the request that produced
+/// `response_text`; it lets the analyzer recognise the page's own copy of it
+/// (see `PageMarkup::sent_value`).
+///
 /// Extracts JavaScript blocks, analyses each for DOM XSS flows, performs
 /// lightweight runtime verification, and returns any findings.  De-duplicates
 /// against `ast_seen` (shared across calls for the same parameter).
@@ -18,6 +22,7 @@ pub(crate) async fn run_ast_dom_analysis(
     target: &Target,
     param: &Param,
     response_text: &str,
+    injected: &str,
     ast_seen: &mut HashSet<String>,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
@@ -29,6 +34,7 @@ pub(crate) async fn run_ast_dom_analysis(
     if let Some(probed) = &param.reflected_markup {
         reflected_markup.merge(probed);
     }
+    reflected_markup.sent_value = Some(injected.to_string());
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
     for js_code in js_blocks {
         let findings =

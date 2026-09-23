@@ -784,6 +784,7 @@ impl ScanWorkerCtx {
                 &self.target,
                 param,
                 response_text,
+                crate::scanning::markers::bracketed_marker(),
                 &mut state.ast_seen,
             )
             .await;
@@ -1006,6 +1007,7 @@ impl ScanWorkerCtx {
                     &self.target,
                     param,
                     response_text,
+                    reflection_payload,
                     &mut state.ast_seen,
                 )
                 .await;
