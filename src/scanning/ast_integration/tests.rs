@@ -1655,3 +1655,22 @@ fn reflected_markup_flow_is_found_and_graded_reachable() {
     assert_eq!(grade, crate::scanning::result::Confidence::High, "{reason}");
     assert!(run(&page("static")).is_empty());
 }
+
+/// Form ids are collected on every page (no marker needed), and a
+/// `form.action` finding gets a `javascript:` payload, the only scheme a form
+/// submission navigates to and runs.
+#[test]
+fn form_ids_prescan_and_form_action_payload() {
+    let (_, _, markup) = extract_js_script_ids_and_reflected_markup(
+        r#"<form id="f"></form><form></form><div id="d"></div><script>1</script>"#,
+    );
+    assert!(markup.form_ids.contains("f"));
+    assert!(!markup.form_ids.contains("d"));
+    assert!(markup.is_empty(), "form ids are not reflected slots");
+
+    let (payload, _) = generate_dom_xss_poc("URLSearchParams.get(query)", "form.action");
+    assert!(
+        payload.starts_with("query=javascript:alert(1)"),
+        "{payload}"
+    );
+}

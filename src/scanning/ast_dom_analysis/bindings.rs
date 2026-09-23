@@ -130,6 +130,12 @@ impl<'a> DomXssVisitor<'a> {
             self.script_element_vars.remove(var_name);
         }
 
+        if self.expr_resolves_to_form(init) {
+            self.form_element_vars.insert(var_name.to_string());
+        } else {
+            self.form_element_vars.remove(var_name);
+        }
+
         // `var probe = document.getElementById('probe')` on an element whose
         // markup reflects the parameter (see `reflected_markup`).
         match self.reflected_element_id(init) {

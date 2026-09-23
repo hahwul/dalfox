@@ -200,8 +200,7 @@ pub struct Param {
     /// out of the very slot it would need to prove. Scan-internal, like
     /// `marker_echoed`.
     #[serde(default, skip)]
-    pub reflected_markup:
-        Option<std::sync::Arc<crate::scanning::ast_dom_analysis::ReflectedMarkup>>,
+    pub reflected_markup: Option<std::sync::Arc<crate::scanning::ast_dom_analysis::PageMarkup>>,
     /// Explicitly distinguishes a cookie parameter from an HTTP header when
     /// both locations carry the same name. `None` preserves the legacy
     /// target-based inference for params created by older callers.

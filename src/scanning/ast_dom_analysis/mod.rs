@@ -35,7 +35,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-pub use reflected_markup::ReflectedMarkup;
+pub use reflected_markup::PageMarkup;
 
 mod async_flow;
 mod bindings;
@@ -418,10 +418,12 @@ struct DomXssVisitor<'a> {
     /// never bound to a variable. Populated by the HTML pre-scan in
     /// `ast_integration::extract_script_element_ids`.
     script_element_ids: HashSet<String>,
-    /// Page slots that carry this scan's marker (see [`ReflectedMarkup`]).
-    reflected_markup: ReflectedMarkup,
+    /// Page slots that carry this scan's marker (see [`PageMarkup`]).
+    reflected_markup: PageMarkup,
     /// Variables bound to an element in [`Self::reflected_markup`], by `id`.
     reflected_element_vars: HashMap<String, String>,
+    /// Variables bound to a `<form>` element (see `expr_resolves_to_form`).
+    form_element_vars: HashSet<String>,
     /// Callback parameters currently bound to a `fetch()` `Response`
     /// object — the first `.then(resp => …)` of a fetch chain. While such
     /// a parameter is in scope, `resp.text()` / `resp.json()` read the
@@ -733,8 +735,9 @@ impl<'a> DomXssVisitor<'a> {
             idb_request_vars: HashSet::new(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),
-            reflected_markup: ReflectedMarkup::default(),
+            reflected_markup: PageMarkup::default(),
             reflected_element_vars: HashMap::new(),
+            form_element_vars: HashSet::new(),
             response_object_vars: HashSet::new(),
             branch_depth: 0,
             recursion_depth: Rc::new(Cell::new(0)),
@@ -747,7 +750,7 @@ impl<'a> DomXssVisitor<'a> {
         self.script_element_ids = ids;
         self
     }
-    fn with_reflected_markup(mut self, markup: ReflectedMarkup) -> Self {
+    fn with_reflected_markup(mut self, markup: PageMarkup) -> Self {
         self.reflected_markup = markup;
         self
     }
@@ -783,8 +786,8 @@ pub struct AstDomAnalyzer {
     /// the caller has no HTML context.
     script_element_ids: HashSet<String>,
     /// Slots of the analysed response that carry this scan's marker (see
-    /// [`ReflectedMarkup`]). Empty when the caller has no HTML context.
-    reflected_markup: ReflectedMarkup,
+    /// [`PageMarkup`]). Empty when the caller has no HTML context.
+    reflected_markup: PageMarkup,
     /// Whether the response CSP enforces `require-trusted-types-for 'script'`.
     /// Threaded into the visitor to gate strict-default-policy suppression.
     /// Off by default — preserving pre-Trusted-Types behaviour for callers
@@ -809,7 +812,7 @@ impl AstDomAnalyzer {
     /// Attach the marker-carrying slots of the analysed response so reads of
     /// them (`el.dataset.x`, `getAttribute`, `textContent`, CSS custom
     /// properties) count as sources.
-    pub(crate) fn with_reflected_markup(mut self, markup: ReflectedMarkup) -> Self {
+    pub(crate) fn with_reflected_markup(mut self, markup: PageMarkup) -> Self {
         self.reflected_markup = markup;
         self
     }
@@ -907,7 +910,7 @@ impl AstDomAnalyzer {
     fn analyze_on_stack(
         source_code: &str,
         script_element_ids: HashSet<String>,
-        reflected_markup: ReflectedMarkup,
+        reflected_markup: PageMarkup,
         trusted_types_enforced: bool,
     ) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();

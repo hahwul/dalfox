@@ -12,9 +12,14 @@
 
 use super::*;
 
-/// Slots of one response that carry a scan marker, keyed by element `id`.
+/// What the HTML pre-scan learned about the analysed response's elements:
+/// the slots that carry a scan marker (keyed by element `id`), and the ids of
+/// its `<form>` elements.
 #[derive(Debug, Clone, Default)]
-pub struct ReflectedMarkup {
+pub struct PageMarkup {
+    /// `id`s of `<form>` elements, so `getElementById('f').action = …` is
+    /// known to write a real form's action. Not marker-gated.
+    pub(crate) form_ids: HashSet<String>,
     /// `id` → lowercased names of the attributes whose value carries a marker.
     pub(crate) attrs: HashMap<String, HashSet<String>>,
     /// `id`s of elements whose text content carries a marker.
@@ -24,13 +29,14 @@ pub struct ReflectedMarkup {
     pub(crate) css_custom_properties: HashSet<String>,
 }
 
-impl ReflectedMarkup {
+impl PageMarkup {
+    /// No slot carries a marker (form ids do not count).
     pub(crate) fn is_empty(&self) -> bool {
         self.attrs.is_empty() && self.text.is_empty() && self.css_custom_properties.is_empty()
     }
 
     /// Add every slot `other` proved.
-    pub(crate) fn merge(&mut self, other: &ReflectedMarkup) {
+    pub(crate) fn merge(&mut self, other: &PageMarkup) {
         for (id, names) in &other.attrs {
             self.attrs
                 .entry(id.clone())
@@ -38,6 +44,7 @@ impl ReflectedMarkup {
                 .extend(names.iter().cloned());
         }
         self.text.extend(other.text.iter().cloned());
+        self.form_ids.extend(other.form_ids.iter().cloned());
         self.css_custom_properties
             .extend(other.css_custom_properties.iter().cloned());
     }
@@ -155,5 +162,68 @@ impl<'a> DomXssVisitor<'a> {
                 .then(|| format!("markup:{name}")),
             _ => None,
         }
+    }
+
+    /// Whether `expr` resolves to a `<form>` element: a variable bound to one,
+    /// `document.getElementById('id')` for a form id the pre-scan saw,
+    /// `document.forms[…]` / `document.forms.name`,
+    /// `document.createElement('form')`, or `querySelector('form…')`.
+    pub(super) fn expr_resolves_to_form(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::Identifier(id) => self.form_element_vars.contains(id.name.as_str()),
+            Expression::ParenthesizedExpression(p) => self.expr_resolves_to_form(&p.expression),
+            Expression::StaticMemberExpression(m) => {
+                matches!(&m.object, Expression::StaticMemberExpression(inner)
+                    if self.get_member_string(inner).as_deref() == Some("document.forms"))
+            }
+            Expression::ComputedMemberExpression(m) => {
+                matches!(&m.object, Expression::StaticMemberExpression(inner)
+                    if self.get_member_string(inner).as_deref() == Some("document.forms"))
+            }
+            Expression::CallExpression(call) => {
+                let Some(method) = self.get_callee_property_name(&call.callee) else {
+                    return false;
+                };
+                let Some(arg) = Self::extract_static_string_argument(call, 0) else {
+                    return false;
+                };
+                match method.as_str() {
+                    "getElementById" => self.reflected_markup.form_ids.contains(&arg),
+                    "createElement" => arg.eq_ignore_ascii_case("form"),
+                    "querySelector" => {
+                        let sel = arg.trim().to_ascii_lowercase();
+                        sel == "form"
+                            || sel
+                                .strip_prefix("form")
+                                .is_some_and(|rest| rest.starts_with(['#', '.', '[', ':']))
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Source label when `call` percent-decodes a string literal carrying this
+    /// scan's marker: `decodeURIComponent('…')` where the server wrote the
+    /// parameter, percent-encoded, into the script. The encoding leaves no
+    /// raw breakout for the reflection engine to see, and the alphanumeric
+    /// marker survives it, so its presence proves the literal is the
+    /// parameter. A literal that reaches a sink undecoded is left to the
+    /// reflection engine, which already sees it.
+    pub(super) fn decoded_reflected_literal_source(
+        &self,
+        call: &CallExpression<'a>,
+    ) -> Option<String> {
+        let Expression::Identifier(callee) = &call.callee else {
+            return None;
+        };
+        let name = callee.name.as_str();
+        if !matches!(name, "decodeURIComponent" | "decodeURI" | "unescape") {
+            return None;
+        }
+        let literal = Self::extract_static_string_argument(call, 0)?;
+        crate::scanning::markers::carries_scan_marker(&literal)
+            .then(|| format!("markup:{name}(<reflected string>)"))
     }
 }

@@ -22,7 +22,7 @@ pub(crate) async fn run_ast_dom_analysis(
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
     // The response carries this request's marker in `param`, so the markup
-    // slots holding it are proven reflections (see `ReflectedMarkup`).
+    // slots holding it are proven reflections (see `PageMarkup`).
     let (js_blocks, script_element_ids, mut reflected_markup) =
         crate::scanning::ast_integration::extract_js_script_ids_and_reflected_markup(response_text);
     // …and the slots the pre-scan probe proved, when Stage 0 was skipped.

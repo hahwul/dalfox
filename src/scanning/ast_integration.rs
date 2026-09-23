@@ -48,6 +48,7 @@ pub(crate) fn extract_javascript_from_html(html: &str) -> Vec<String> {
 /// both for the same response body; calling the two extractors separately
 /// parsed the full response through html5ever twice. Sharing one parse tree
 /// yields byte-identical results at half the HTML-parse cost.
+#[cfg(test)]
 pub(crate) fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<String>) {
     let document = crate::utils::html::parse_document_bounded(html);
     let js_blocks = js_blocks_from_document(&document);
@@ -55,17 +56,17 @@ pub(crate) fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<Str
     (js_blocks, script_ids)
 }
 
-/// [`extract_js_and_script_ids`] plus the [`ReflectedMarkup`] of the same
+/// [`extract_js_and_script_ids`] plus the [`PageMarkup`] of the same
 /// parse, for a response whose request carried a scan marker in the tested
 /// parameter.
 ///
-/// [`ReflectedMarkup`]: crate::scanning::ast_dom_analysis::ReflectedMarkup
+/// [`PageMarkup`]: crate::scanning::ast_dom_analysis::PageMarkup
 pub(crate) fn extract_js_script_ids_and_reflected_markup(
     html: &str,
 ) -> (
     Vec<String>,
     HashSet<String>,
-    crate::scanning::ast_dom_analysis::ReflectedMarkup,
+    crate::scanning::ast_dom_analysis::PageMarkup,
 ) {
     let document = crate::utils::html::parse_document_bounded(html);
     let js_blocks = js_blocks_from_document(&document);
@@ -74,14 +75,14 @@ pub(crate) fn extract_js_script_ids_and_reflected_markup(
     (js_blocks, script_ids, markup)
 }
 
-/// [`ReflectedMarkup`] of a probe response, or `None` when it has no script
+/// [`PageMarkup`] of a probe response, or `None` when it has no script
 /// to read it back or no slot carries a marker. Used by the pre-scan active
 /// probe, whose response is not otherwise kept.
 ///
-/// [`ReflectedMarkup`]: crate::scanning::ast_dom_analysis::ReflectedMarkup
+/// [`PageMarkup`]: crate::scanning::ast_dom_analysis::PageMarkup
 pub(crate) fn reflected_markup_from_html(
     html: &str,
-) -> Option<crate::scanning::ast_dom_analysis::ReflectedMarkup> {
+) -> Option<crate::scanning::ast_dom_analysis::PageMarkup> {
     let has_script = html
         .as_bytes()
         .windows(7)
@@ -93,21 +94,7 @@ pub(crate) fn reflected_markup_from_html(
     Some(reflected_markup_from_document(&document, html)).filter(|m| !m.is_empty())
 }
 
-/// Whether `s` carries one of this process's scan markers. They are
-/// session-random, so a page cannot contain one unless it reflected it.
-fn carries_scan_marker(s: &str) -> bool {
-    use crate::scanning::markers;
-    s.contains("dlx")
-        && [
-            markers::open_marker(),
-            markers::inner_marker(),
-            markers::class_marker(),
-            markers::id_marker(),
-        ]
-        .iter()
-        .any(|m| s.contains(m))
-        || s.contains(markers::close_marker())
-}
+use crate::scanning::markers::carries_scan_marker;
 
 /// Custom-property declarations (`--name: value`) in CSS text whose value
 /// carries a scan marker.
@@ -125,12 +112,22 @@ fn marker_css_custom_properties(css: &str, out: &mut HashSet<String>) {
 
 /// The slots of `document` (parsed from `raw`) that carry a scan marker:
 /// attributes and text of elements with an `id`, and CSS custom properties.
-/// See [`ReflectedMarkup`](crate::scanning::ast_dom_analysis::ReflectedMarkup).
+/// See [`PageMarkup`](crate::scanning::ast_dom_analysis::PageMarkup).
 fn reflected_markup_from_document(
     document: &Html,
     raw: &str,
-) -> crate::scanning::ast_dom_analysis::ReflectedMarkup {
-    let mut markup = crate::scanning::ast_dom_analysis::ReflectedMarkup::default();
+) -> crate::scanning::ast_dom_analysis::PageMarkup {
+    let mut markup = crate::scanning::ast_dom_analysis::PageMarkup::default();
+    for form in document.select(selectors::form()) {
+        if let Some(id) = form
+            .value()
+            .attr("id")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            markup.form_ids.insert(id.to_string());
+        }
+    }
     // Markers are alphanumeric, so entity encoding cannot hide one from the
     // raw text: no marker there means no slot to find.
     if !carries_scan_marker(raw) {
@@ -606,6 +603,21 @@ pub(crate) fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String)
     );
     let attr_url_payload = format!("data:text/javascript,alert(1)/*{}*/", marker);
     let js_eval_payload = format!("alert(1)/*{}*/", marker);
+    // A form action navigates on submit: only a `javascript:` URL runs there
+    // (a top-level `data:` navigation is blocked).
+    if sink == "form.action" {
+        let js_url = format!("javascript:alert(1)//{marker}");
+        let payload = if source.contains("location.hash") {
+            format!("#{js_url}")
+        } else if let Some(param_name) = extract_search_param_key(source) {
+            format!("{param_name}={js_url}")
+        } else if source.contains("location.search") {
+            format!("xss={js_url}")
+        } else {
+            js_url
+        };
+        return (payload, format!("DOM-based XSS via {} to {}", source, sink));
+    }
     let html_payload = format!("<img src=x onerror=alert(1) class={}>", marker);
 
     // Generate payload based on the source type
@@ -1120,7 +1132,7 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     js_code: &str,
     _url: &str,
     script_element_ids: &HashSet<String>,
-    reflected_markup: &crate::scanning::ast_dom_analysis::ReflectedMarkup,
+    reflected_markup: &crate::scanning::ast_dom_analysis::PageMarkup,
     trusted_types_enforced: bool,
 ) -> Vec<(
     crate::scanning::ast_dom_analysis::DomXssVulnerability,
@@ -1239,14 +1251,16 @@ pub(crate) fn run_initial_ast_dom_analysis(
     target_method: &str,
     posture: PageSecurityPosture,
 ) -> Vec<crate::scanning::result::Result> {
-    let (js_blocks, script_element_ids) = extract_js_and_script_ids(response_text);
+    // An unmarked body: the markup only contributes element facts (form ids).
+    let (js_blocks, script_element_ids, page_markup) =
+        extract_js_script_ids_and_reflected_markup(response_text);
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();
     for js_code in js_blocks {
         let findings = analyze_javascript_for_dom_xss_with_html_context(
             &js_code,
             target_url,
             &script_element_ids,
-            &Default::default(),
+            &page_markup,
             posture.trusted_types_enforced,
         );
         for (vuln, payload, description) in findings {
