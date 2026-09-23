@@ -97,7 +97,7 @@ pub(crate) async fn run_ast_dom_analysis(
                 // also claim it "needs runtime confirmation" (#1238).
                 .message_str(description.clone())
                 .build();
-            ast_result.location = format!("{:?}", param.location);
+            ast_result.set_injection_point(target, param);
             // A URL-surface source got its POC URL from
             // `build_dom_xss_poc_url`, which already placed the payload in the
             // fragment / query / path — synthesizing `?param=payload` on top

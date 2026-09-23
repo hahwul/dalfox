@@ -49,39 +49,42 @@ fn informational_block_defaults_tag_when_inject_type_empty() {
 
 #[test]
 fn poc_location_tag_header_cookie_is_case_insensitive() {
-    assert_eq!(poc_location_tag("Header", "Cookie"), Some("cookie"));
-    assert_eq!(poc_location_tag("Header", "cookie"), Some("cookie"));
-    assert_eq!(poc_location_tag("Header", "COOKIE"), Some("cookie"));
+    assert_eq!(poc_location_tag("Header", "Cookie", false), Some("cookie"));
+    assert_eq!(poc_location_tag("Header", "cookie", false), Some("cookie"));
+    assert_eq!(poc_location_tag("Header", "COOKIE", false), Some("cookie"));
 }
 
 #[test]
 fn poc_location_tag_header_non_cookie() {
-    assert_eq!(poc_location_tag("Header", "X-Foo"), Some("hdr"));
-    assert_eq!(poc_location_tag("Header", "Authorization"), Some("hdr"));
+    assert_eq!(poc_location_tag("Header", "X-Foo", false), Some("hdr"));
+    assert_eq!(
+        poc_location_tag("Header", "Authorization", false),
+        Some("hdr")
+    );
 }
 
 #[test]
 fn poc_location_tag_body_variants() {
-    assert_eq!(poc_location_tag("Body", "q"), Some("body"));
-    assert_eq!(poc_location_tag("JsonBody", "q"), Some("body"));
-    assert_eq!(poc_location_tag("MultipartBody", "q"), Some("body"));
+    assert_eq!(poc_location_tag("Body", "q", false), Some("body"));
+    assert_eq!(poc_location_tag("JsonBody", "q", false), Some("body"));
+    assert_eq!(poc_location_tag("MultipartBody", "q", false), Some("body"));
 }
 
 #[test]
 fn poc_location_tag_path_and_fragment() {
-    assert_eq!(poc_location_tag("Path", "seg"), Some("path"));
-    assert_eq!(poc_location_tag("Fragment", "f"), Some("frag"));
+    assert_eq!(poc_location_tag("Path", "seg", false), Some("path"));
+    assert_eq!(poc_location_tag("Fragment", "f", false), Some("frag"));
 }
 
 #[test]
 fn poc_location_tag_query_and_empty_return_none() {
-    assert_eq!(poc_location_tag("", "q"), None);
-    assert_eq!(poc_location_tag("Query", "q"), None);
+    assert_eq!(poc_location_tag("", "q", false), None);
+    assert_eq!(poc_location_tag("Query", "q", false), None);
 }
 
 #[test]
 fn poc_location_tag_unknown_returns_none() {
-    assert_eq!(poc_location_tag("UnknownLocation", "q"), None);
+    assert_eq!(poc_location_tag("UnknownLocation", "q", false), None);
 }
 
 #[test]
@@ -104,10 +107,10 @@ fn poc_location_in_url_false_for_side_channel_locations() {
 #[test]
 fn poc_location_tag_graphql_and_xml() {
     assert_eq!(
-        poc_location_tag("GraphqlBody", "variables.n"),
+        poc_location_tag("GraphqlBody", "variables.n", false),
         Some("graphql")
     );
-    assert_eq!(poc_location_tag("XmlBody", "msg"), Some("xml"));
+    assert_eq!(poc_location_tag("XmlBody", "msg", false), Some("xml"));
 }
 
 #[test]
@@ -282,7 +285,7 @@ fn shell_argv(command: &str) -> Vec<String> {
 fn curl_poc_tokenizes_exactly_despite_hostile_param_names() {
     for param in HOSTILE_PARAMS {
         for (location, flag) in [
-            ("Body", "--data"),
+            ("Body", "--data-urlencode"),
             ("MultipartBody", "--form-string"),
             ("Header", "-H"),
         ] {
@@ -290,6 +293,13 @@ fn curl_poc_tokenizes_exactly_despite_hostile_param_names() {
             let rendered = render_curl_poc(&r, "http://h:8899/x");
             let argv = shell_argv(&rendered);
             let sep = if location == "Header" { ": " } else { "=" };
+            // `--data-urlencode` encodes only the content; the name part is
+            // passed through, so the POC pre-encodes it.
+            let name = if location == "Body" {
+                urlencoding::encode(param).into_owned()
+            } else {
+                param.to_string()
+            };
             assert_eq!(
                 argv,
                 vec![
@@ -297,7 +307,7 @@ fn curl_poc_tokenizes_exactly_despite_hostile_param_names() {
                     "-X".to_string(),
                     "POST".to_string(),
                     flag.to_string(),
-                    format!("{}{}{}", param, sep, r.payload),
+                    format!("{}{}{}", name, sep, r.payload),
                     "http://h:8899/x".to_string(),
                 ],
                 "param {param:?} at {location} rendered as {rendered:?}"
@@ -478,7 +488,7 @@ fn finding_block_keeps_waf_bypass_whitespace_in_the_poc() {
     r.payload = "<img\u{c}src=x\u{c}onerror=alert(1)>".to_string();
     let block = render_finding_block(&r, "curl", false, false);
     assert!(
-        block.contains("--data 'q=<img\u{c}src=x\u{c}onerror=alert(1)>'"),
+        block.contains("--data-urlencode 'q=<img\u{c}src=x\u{c}onerror=alert(1)>'"),
         "{block:?}"
     );
     // The `Payload:` tree line keeps them too.
@@ -486,4 +496,88 @@ fn finding_block_keeps_waf_bypass_whitespace_in_the_poc() {
         block.contains("Payload:\u{1b}[0m \u{1b}[38;5;247m<img\u{c}src=x\u{c}onerror=alert(1)>"),
         "{block:?}"
     );
+}
+
+// ---- POCs must reproduce the request the scan actually sent ---------------
+
+/// A finding shaped exactly as the scan records it: `data` is the as-sent URL
+/// and `location` the param's wire location.
+fn wire_finding(location: &str, data: &str, param: &str, payload: &str) -> Result {
+    let mut r = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method(if matches!(location, "Query" | "Path" | "Header") {
+            "GET"
+        } else {
+            "POST"
+        })
+        .data(data)
+        .param(param)
+        .payload(payload)
+        .build();
+    r.location = location.to_string();
+    r
+}
+
+#[test]
+fn path_poc_is_the_as_sent_url_without_a_duplicated_segment() {
+    use crate::parameter_analysis::{Location, Param};
+    // `build_injected_url` percent-encodes `<`, `>`, `"` and spaces in the
+    // segment, so the raw payload never appears in `data`. The old rewrite
+    // took that as "payload not visible" and appended it as an extra segment.
+    let base = url::Url::parse("https://ex.com/a/b/c").unwrap();
+    let param = Param::new(
+        "path_segment_1".to_string(),
+        "b".to_string(),
+        Location::Path,
+    );
+    for payload in ["<svg onload=alert(1)>", "\"><img src=x onerror=alert(1)>"] {
+        let sent = crate::scanning::url_inject::build_injected_url(&base, &param, payload);
+        let r = wire_finding("Path", &sent, "path_segment_1", payload);
+        for poc_type in ["plain", "curl", "httpie"] {
+            let out = generate_poc(&r, poc_type);
+            assert!(out.contains(&sent), "{poc_type}: {out}");
+            assert!(
+                !out.contains(&format!("{sent}/")),
+                "{poc_type} POC appended a second payload segment: {out}"
+            );
+        }
+    }
+}
+
+#[test]
+fn side_channel_pocs_send_the_pre_encoded_wire_value() {
+    // A header / cookie / body param behind a size-limited WAF window is sent
+    // with the `wafpad` prefix; the raw payload alone is what the WAF blocks.
+    let pad = crate::encoding::pre_encoding::waf_window_pad();
+    let payload = "<svg onload=alert(1)>";
+    let wire = format!("{pad}{payload}");
+    for (location, param, needle) in [
+        ("Header", "X-Q", format!("X-Q: {wire}")),
+        ("Header", "sid", format!("sid={wire}")),
+        ("Body", "q", format!("q={wire}")),
+        ("MultipartBody", "q", format!("q={wire}")),
+        ("JsonBody", "q", format!("{{\"q\":\"{wire}\"}}")),
+    ] {
+        let mut r = wire_finding(location, "https://ex.com/p", param, payload);
+        r.wire_payload = Some(wire.clone());
+        r.cookie_param = param == "sid";
+        let curl = generate_poc(&r, "curl");
+        assert!(curl.contains(&needle), "curl {location}: {curl}");
+        let httpie = generate_poc(&r, "httpie");
+        assert!(httpie.contains(&wire), "httpie {location}: {httpie}");
+    }
+}
+
+#[test]
+fn curl_body_poc_urlencodes_the_field_value() {
+    // `--data` is sent verbatim: `&` split the field, `+` became a space and
+    // `%XX` was decoded by the server. The scan sends the value through a form
+    // serializer, so the POC has to encode it too.
+    let r = wire_finding("Body", "https://ex.com/p", "a b", "&#x3c;x+y%41");
+    let out = generate_poc(&r, "curl");
+    assert!(
+        out.contains("--data-urlencode 'a%20b=&#x3c;x+y%41'"),
+        "got: {out}"
+    );
+    assert!(!out.contains("--data '"), "got: {out}");
 }

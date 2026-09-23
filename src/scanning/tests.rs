@@ -2398,6 +2398,92 @@ fn build_request_text_body_renders_pre_encoded_value() {
 }
 
 #[test]
+fn build_request_text_query_renders_the_as_sent_url() {
+    // The request POC must show the URL `build_url_inject_request` sends: the
+    // pre-encoded value (base64("PAY") == "UEFZ"), not the raw payload the
+    // server would never decode back into the sink.
+    let mut param = req_param("q", "seed", Location::Query);
+    param.pre_encoding = Some("base64".to_string());
+    let target = target_for("https://example.com/s?q=seed&x=1");
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(req.starts_with("GET /s?q=UEFZ&x=1 "), "req:\n{req}");
+
+    // A nested-field param (`qs.move_url`, base64-of-JSON inside `qs`) is sent
+    // under its wire name with the whole pipeline applied, not as a new
+    // `qs.move_url=<raw>` pair.
+    let pipeline = crate::encoding::pipeline::EncodingPipeline::new(vec![
+        crate::encoding::pipeline::EncodingStep::JsonField {
+            pointer: "/u".to_string(),
+            template: serde_json::json!({"u": "x"}),
+        },
+        crate::encoding::pipeline::EncodingStep::Base64,
+    ]);
+    let nested = Param {
+        wire_name: Some("qs".to_string()),
+        pre_encoding_pipeline: Some(pipeline.clone()),
+        ..req_param("qs.u", "x", Location::Query)
+    };
+    let target = target_for("https://example.com/s?qs=eyJ1IjoieCJ9");
+    let req = super::build_request_text(&target, &nested, "PAY");
+    let sent = crate::scanning::url_inject::build_injected_url(
+        &target.url,
+        &nested,
+        &pipeline.apply("PAY").unwrap(),
+    );
+    let sent = url::Url::parse(&sent).unwrap();
+    assert!(
+        req.starts_with(&format!("GET /s?{} ", sent.query().unwrap())),
+        "req:\n{req}"
+    );
+    assert!(!req.contains("qs.u="), "display name leaked, req:\n{req}");
+}
+
+#[test]
+fn build_request_text_path_renders_pre_encoded_value() {
+    // `2url` pre-encoding: the segment carries the double-encoded payload.
+    let mut param = req_param("path_segment_1", "b", Location::Path);
+    param.pre_encoding = Some("2url".to_string());
+    let target = target_for("https://example.com/a/b/c");
+    let req = super::build_request_text(&target, &param, "<x>");
+    let sent = crate::scanning::url_inject::build_injected_url(
+        &target.url,
+        &param,
+        &crate::encoding::pre_encoding::apply_param_encoding("<x>", &param),
+    );
+    let sent = url::Url::parse(&sent).unwrap();
+    assert!(
+        req.starts_with(&format!("GET {} ", sent.path())),
+        "req:\n{req}"
+    );
+    assert!(req.contains("%25253C"), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_header_and_cookie_render_pre_encoded_value() {
+    // A header / cookie param behind a size-limited WAF window is sent with
+    // the `wafpad` prefix; without it the pasted request is the one the WAF
+    // blocked.
+    let pad = crate::encoding::pre_encoding::waf_window_pad();
+    let mut header = req_param("X-Q", "", Location::Header);
+    header.pre_encoding = Some("wafpad".to_string());
+    let target = target_for("https://example.com/");
+    let req = super::build_request_text(&target, &header, "<x>");
+    assert!(req.contains(&format!("\r\nX-Q: {pad}<x>")), "req:\n{req}");
+
+    let mut cookie = req_param("sid", "abc", Location::Header);
+    cookie.pre_encoding = Some("wafpad".to_string());
+    let target = Target {
+        cookies: vec![("sid".to_string(), "abc".to_string())],
+        ..target_for("https://example.com/")
+    };
+    let req = super::build_request_text(&target, &cookie, "<x>");
+    assert!(
+        req.contains(&format!("\r\nCookie: sid={pad}<x>")),
+        "req:\n{req}"
+    );
+}
+
+#[test]
 fn build_request_text_multipart_renders_pre_encoded_value() {
     // Same contract for a multipart field: the boundary-framed part carries the
     // pre-encoded value, mirroring `build_multipart_request`.

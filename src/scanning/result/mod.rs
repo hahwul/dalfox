@@ -253,6 +253,24 @@ pub struct Result {
     /// rendering hint — never serialized.
     #[serde(skip)]
     pub poc_url_complete: bool,
+    /// The injected value exactly as it went on the wire, when that differs
+    /// from `payload` — i.e. after the param's pre-encoding (base64 / multi-URL
+    /// / WAF window-pad / nested pipeline) was applied. `payload` stays the raw
+    /// vector the reflection is matched against; the `curl` / `httpie` POCs
+    /// for side-channel locations (header, cookie, body) must send this value
+    /// instead, or a pasted POC omits the encoding the finding depended on.
+    /// `None` when no pre-encoding applied. Internal rendering hint — never
+    /// serialized.
+    #[serde(skip)]
+    pub wire_payload: Option<String>,
+    /// True when this `Header`-located param is one of the target's cookies,
+    /// which the scan injects into the `Cookie` header as `name=value`
+    /// (`url_inject::param_is_cookie`) rather than as a header of its own
+    /// name. The `curl` / `httpie` POCs need it to emit a cookie instead of a
+    /// `name: value` header the application never reads. Internal rendering
+    /// hint — never serialized.
+    #[serde(skip)]
+    pub cookie_param: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -306,6 +324,17 @@ pub(crate) fn bound_evidence_body(body: String, payload: &str) -> String {
 }
 
 impl Result {
+    /// Record where `param` travels on the wire: the `location` label and,
+    /// for a header-located cookie param, the `cookie_param` POC hint.
+    pub(crate) fn set_injection_point(
+        &mut self,
+        target: &crate::target_parser::Target,
+        param: &crate::parameter_analysis::Param,
+    ) {
+        self.location = format!("{:?}", param.location);
+        self.cookie_param = crate::scanning::url_inject::param_is_cookie(target, param);
+    }
+
     /// Start building a finding. `result_type` is the only required field;
     /// every other field starts empty (`""` / `0` / `None`) and is filled in
     /// with the chained setters on [`ResultBuilder`], finishing with
@@ -339,6 +368,8 @@ impl Result {
                 location: String::new(),
                 new_since_baseline: None,
                 poc_url_complete: false,
+                wire_payload: None,
+                cookie_param: false,
                 request: None,
                 response: None,
             },

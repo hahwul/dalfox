@@ -6,61 +6,26 @@ use super::*;
 
 pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     use crate::parameter_analysis::Location;
+    // The scan applies `apply_param_encoding` to every injected value before it
+    // goes on the wire (see `check_reflection`/`check_dom_verification`), so a
+    // param that requires pre-encoding (e.g. an auto-detected base64 field) is
+    // sent encoded and the server decodes it back to the raw payload. Every arm
+    // below must embed that same encoded value, or a pasted request would carry
+    // un-encoded bytes the sink never reflects. A param with no pre-encoding
+    // gets the raw payload back unchanged.
+    let field_value = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
     let url = match param.location {
-        Location::Query => {
-            // Show the request against the actual sink URL — form action when
-            // the param came from form discovery, otherwise target.url. The
-            // displayed PoC must match the URL that scanning actually hits.
+        Location::Query | Location::Path => {
+            // Render the exact URL `build_url_inject_request` sends: the same
+            // base (form action for a form-discovered query param) and the
+            // same `build_injected_url`, so the PoC carries the wire name of a
+            // nested-field param (not its display name), the key-injection
+            // shape, and the pre-encoded value. A hand-rolled copy of the
+            // query/path rewrite here had drifted on all three.
             let base = crate::scanning::url_inject::effective_query_base(&target.url, param);
-            let mut pairs: Vec<(String, String)> = base
-                .query_pairs()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-            let mut found = false;
-            for pair in &mut pairs {
-                if pair.0 == param.name {
-                    pair.1 = payload.to_string();
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                pairs.push((param.name.clone(), payload.to_string()));
-            }
-            let query = url::form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&pairs)
-                .finish();
-            let mut url = base;
-            url.set_query(Some(&query));
-            url
-        }
-        Location::Path => {
-            // Inject into a specific path segment (param.name pattern: path_segment_{idx})
-            let mut url = target.url.clone();
-            if let Some(idx_str) = param.name.strip_prefix("path_segment_")
-                && let Ok(idx) = idx_str.parse::<usize>()
-            {
-                let original_path = url.path();
-                let mut segments: Vec<&str> = if original_path == "/" {
-                    Vec::new()
-                } else {
-                    original_path
-                        .trim_matches('/')
-                        .split('/')
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                };
-                if idx < segments.len() {
-                    segments[idx] = payload;
-                    let new_path = if segments.is_empty() {
-                        "/".to_string()
-                    } else {
-                        format!("/{}", segments.join("/"))
-                    };
-                    url.set_path(&new_path);
-                }
-            }
-            url
+            let injected =
+                crate::scanning::url_inject::build_injected_url(&base, param, &field_value);
+            url::Url::parse(&injected).unwrap_or(base)
         }
         Location::Body
         | Location::JsonBody
@@ -77,14 +42,6 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
     let method = crate::scanning::url_inject::effective_method(&target.method, param);
     // Body-bearing locations always send a body; synthesize one when the
     // target has no original `data`, so the displayed PoC isn't an empty POST.
-    // The scan applies `apply_param_encoding` to every injected value before it
-    // goes on the wire (see `check_reflection`/`check_dom_verification`), so a
-    // param that requires pre-encoding (e.g. an auto-detected base64 field) is
-    // sent encoded and the server decodes it back to the raw payload. For the
-    // body-scalar locations the PoC must embed that same encoded value, or a
-    // pasted request would carry un-encoded bytes the sink never reflects. A
-    // param with no pre-encoding gets the raw payload back unchanged.
-    let field_value = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
     let (body, content_type): (Option<String>, Option<String>) = match param.location {
         Location::Body => {
             let body = crate::scanning::url_inject::urlencoded_body(
@@ -125,9 +82,12 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
         // injection point). For these, `apply_param_encoding` (already computed
         // as `field_value`) runs that pipeline on the raw `payload` and yields
         // the complete body — exactly what goes on the wire.
-        Location::GraphqlBody => (Some(field_value), Some("application/json".to_string())),
+        Location::GraphqlBody => (
+            Some(field_value.clone()),
+            Some("application/json".to_string()),
+        ),
         Location::XmlBody => (
-            Some(field_value),
+            Some(field_value.clone()),
             Some(crate::scanning::url_inject::xml_request_content_type(
                 target,
             )),
@@ -189,7 +149,7 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
         buf.push_str("\r\n");
         buf.push_str(&param.name);
         buf.push_str(": ");
-        buf.push_str(payload);
+        buf.push_str(&field_value);
     }
     // Body injectors always set their own `Content-Type` on the wire; a
     // Query/Path injector re-sends the original body verbatim and passes
@@ -206,7 +166,7 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
         buf.push_str("\r\nCookie: ");
         buf.push_str(&param.name);
         buf.push('=');
-        buf.push_str(payload);
+        buf.push_str(&field_value);
         if let Some(rest) =
             crate::utils::compose_cookie_header_excluding(&target.cookies, Some(&param.name))
             && !rest.is_empty()

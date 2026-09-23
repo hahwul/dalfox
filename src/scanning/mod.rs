@@ -1186,7 +1186,9 @@ impl ScanWorkerCtx {
                         .message_id(606)
                         .message_str(poc_msg)
                         .build();
-                    result.location = format!("{:?}", param.location);
+                    result.set_injection_point(&self.target, param);
+                    result.wire_payload =
+                        (poc_payload != reflection_payload).then_some(poc_payload);
                     result.request =
                         Some(build_request_text(&self.target, param, reflection_payload));
                     // Report the observed text even when it isn't renderable:
@@ -1372,7 +1374,8 @@ impl ScanWorkerCtx {
                                     evidence_label, param.name, dom_payload
                                 ))
                                 .build();
-                        result.location = format!("{:?}", param.location);
+                        result.set_injection_point(&self.target, param);
+                        result.wire_payload = (poc_payload != *dom_payload).then_some(poc_payload);
                         result.request = Some(build_request_text(&self.target, param, dom_payload));
                         result.response = response_text
                             .map(|t| crate::scanning::result::bound_evidence_body(t, dom_payload));
@@ -1514,7 +1517,7 @@ impl ScanWorkerCtx {
                                     reflection_note, param.name, hpp_payload, pos_label
                                 ))
                                 .build();
-                        result.location = format!("{:?}", param.location);
+                        result.set_injection_point(&self.target, param);
                         result.response = response_text
                             .map(|t| crate::scanning::result::bound_evidence_body(t, hpp_payload));
                         self.stream_finding(&result);
