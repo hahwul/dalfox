@@ -763,22 +763,250 @@ where
     }
 }
 
-pub async fn send_reachability_probe(target: &Target) -> bool {
+fn build_reachability_request(target: &Target) -> reqwest::RequestBuilder {
     let client = target.build_client_or_default();
-    // Same builder as every scan request. Hand-rolled with reqwest's appending
-    // `.header()`, the probe sent `User-Agent` twice (a job's UA lives in both
-    // `target.headers` and `target.user_agent`) and a second `Cookie` next to
-    // a caller-supplied one — the probe is the job's first request, and it did
-    // not look like the rest of the scan.
-    let req = crate::utils::build_request(
-        &client,
-        target,
-        target.parse_method(),
-        target.url.clone(),
-        target.data.clone(),
-    );
-    req.send().await.is_ok()
+    // Reachability is a preflight check, so mirror the CLI's bodyless HEAD
+    // instead of sending the caller's scan method/body (which can perform a
+    // write before scanning starts). Use the shared preflight builder to keep
+    // the configured headers, cookies, and User-Agent intact.
+    crate::utils::build_preflight_request(&client, target, true, None)
+}
+
+pub async fn send_reachability_probe(target: &Target) -> bool {
+    send_reachability_probe_inner(target, None, None)
+        .await
+        .unwrap_or(false)
+}
+
+/// Reachability probe for a running job. The request is counted only after it
+/// gets its rate-limit slot, so live progress represents issued requests
+/// rather than work still waiting in the limiter.
+pub(crate) async fn send_job_reachability_probe(
+    target: &Target,
+    progress: &JobProgress,
+    cancel_flag: &AtomicBool,
+) -> Option<bool> {
+    send_reachability_probe_inner(target, Some(progress), Some(cancel_flag)).await
+}
+
+async fn send_reachability_probe_inner(
+    target: &Target,
+    progress: Option<&JobProgress>,
+    cancel_flag: Option<&AtomicBool>,
+) -> Option<bool> {
+    // CLI preflight waits for the configured per-target delay before its first
+    // HEAD. Agent-facing scans share that target setting, so the reachability
+    // gate has to honor it too.
+    if target.delay > 0 {
+        let delay = tokio::time::sleep(std::time::Duration::from_millis(target.delay));
+        if let Some(cancel_flag) = cancel_flag {
+            tokio::select! {
+                _ = delay => {},
+                _ = wait_for_cancellation(cancel_flag) => return None,
+            }
+        } else {
+            delay.await;
+        }
+    }
+
+    // Match the CLI's preflight retry for transient connect/timeout errors.
+    // Count each actual attempt in job progress, but only report a failed
+    // logical probe if its retry budget is exhausted.
+    const MAX_ATTEMPTS: u32 = 2;
+    const RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(200);
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        if cancel_flag.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+            return None;
+        }
+        if let Some(cancel_flag) = cancel_flag {
+            tokio::select! {
+                _ = crate::rate_limit_acquire() => {},
+                _ = wait_for_cancellation(cancel_flag) => return None,
+            }
+        } else {
+            crate::rate_limit_acquire().await;
+        }
+        if let Some(progress) = progress {
+            progress
+                .requests_sent
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        let response = if let Some(cancel_flag) = cancel_flag {
+            tokio::select! {
+                response = build_reachability_request(target).send() => Some(response),
+                _ = wait_for_cancellation(cancel_flag) => None,
+            }
+        } else {
+            Some(build_reachability_request(target).send().await)
+        };
+        let response = response?;
+        if cancel_flag.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+            return None;
+        }
+
+        match response {
+            Ok(_) => return Some(true),
+            Err(error) => {
+                let transient = error.is_connect() || error.is_timeout();
+                if transient && attempt < MAX_ATTEMPTS {
+                    if let Some(cancel_flag) = cancel_flag {
+                        tokio::select! {
+                            _ = tokio::time::sleep(RETRY_BACKOFF) => {},
+                            _ = wait_for_cancellation(cancel_flag) => return None,
+                        }
+                    } else {
+                        tokio::time::sleep(RETRY_BACKOFF).await;
+                    }
+                    continue;
+                }
+                if let Some(progress) = progress {
+                    progress
+                        .requests_failed
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                return Some(false);
+            }
+        }
+    }
+
+    Some(false)
+}
+
+async fn wait_for_cancellation(cancel_flag: &AtomicBool) {
+    while !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod reachability_probe_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn job_probe_retries_transient_timeout_as_a_paced_bodyless_head() {
+        use axum::{Router, extract::State, routing::any};
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        type RequestLog = Arc<Mutex<Vec<(String, String, tokio::time::Instant)>>>;
+
+        async fn record(
+            State(log): State<RequestLog>,
+            request: axum::http::Request<axum::body::Body>,
+        ) -> axum::response::Html<&'static str> {
+            let (parts, body) = request.into_parts();
+            let at = tokio::time::Instant::now();
+            let body = axum::body::to_bytes(body, 4096).await.unwrap_or_default();
+            let first_request = {
+                let mut log = log.lock().await;
+                let first_request = log.is_empty();
+                log.push((
+                    parts.method.to_string(),
+                    String::from_utf8_lossy(&body).into_owned(),
+                    at,
+                ));
+                first_request
+            };
+            if first_request {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            }
+            axum::response::Html("<html><body>ok</body></html>")
+        }
+
+        let log: RequestLog = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/", any(record))
+            .with_state(log.clone());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind target listener");
+        let addr = listener.local_addr().expect("target address");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let mut target =
+            crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+        target.method = "POST".to_string();
+        target.data = Some("side-effect=1".to_string());
+        target.timeout = 1;
+        target.delay = 300;
+        let progress = JobProgress::default();
+        let cancel_flag = AtomicBool::new(false);
+
+        let started = tokio::time::Instant::now();
+        let reachable = crate::with_job_rate_limiter(1, async {
+            send_job_reachability_probe(&target, &progress, &cancel_flag).await
+        })
+        .await;
+        server.abort();
+
+        assert_eq!(
+            reachable,
+            Some(true),
+            "one transient timeout should be retried"
+        );
+        let log = log.lock().await;
+        assert_eq!(log.len(), 2, "both actual attempts should be recorded");
+        assert!(
+            log.iter()
+                .all(|(method, body, _)| method == "HEAD" && body.is_empty())
+        );
+        assert!(
+            log[0].2.duration_since(started) >= std::time::Duration::from_millis(250),
+            "the initial reachability probe must honor the configured delay"
+        );
+        assert!(
+            log[1].2.duration_since(log[0].2) >= std::time::Duration::from_millis(900),
+            "the retry must pass through the per-job rate limiter"
+        );
+        assert_eq!(
+            progress
+                .requests_sent
+                .load(std::sync::atomic::Ordering::Relaxed),
+            2
+        );
+        assert_eq!(
+            progress
+                .requests_failed
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "a retried probe that succeeds is not a failed logical request"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_during_reachability_delay_sends_no_request() {
+        let mut target =
+            crate::target_parser::parse_target("http://127.0.0.1:9/").expect("valid target");
+        target.delay = 5000;
+        let progress = JobProgress::default();
+        let requests_sent = progress.requests_sent.clone();
+        let requests_failed = progress.requests_failed.clone();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_for_task = cancel_flag.clone();
+        let probe = tokio::spawn(async move {
+            send_job_reachability_probe(&target, &progress, &cancel_for_task).await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), probe)
+                .await
+                .expect("cancellation must not wait for the full target delay")
+                .expect("probe task should finish"),
+            None
+        );
+        assert_eq!(requests_sent.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(
+            requests_failed.load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+    }
+}

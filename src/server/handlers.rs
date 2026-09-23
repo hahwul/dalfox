@@ -988,8 +988,9 @@ pub(crate) async fn preflight_handler(
                 let mut target = hydrate_preflight_target(&target_url, &opts, timeout_secs)
                     .map_err(PreflightError::BadUrl)?;
 
-                // Reachability probe via the target's HTTP stack so proxy,
-                // headers, User-Agent, and method match what a real scan sends.
+                // Reachability uses a bodyless HEAD probe through the hydrated
+                // target client, preserving proxy, TLS, headers, and User-Agent
+                // without sending the caller's scan method/body before scanning.
                 if !send_reachability_probe(&target).await {
                     return Ok(serde_json::json!({
                         "target": target_url,
