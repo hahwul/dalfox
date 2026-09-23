@@ -33,29 +33,52 @@ pub(crate) fn compute_waf_strategy(
         }
     })
 }
-/// The CSP a response declares, as `(header name, policy)`: an enforcing
-/// `Content-Security-Policy` header, else a report-only header, else a
-/// `<meta http-equiv>` policy in the document — the precedence the CLI
-/// preflight applies. Used by the server / MCP job runner, which fetches the
-/// page itself, so the same page yields the same policy on every interface.
+/// The CSP a response declares, as `(header name, policy)`. Used by the
+/// server / MCP job runner, which fetches the page itself; the CLI preflight
+/// applies the same [`select_csp_policy`] precedence, so the same page yields
+/// the same policy on every interface.
 pub(crate) fn csp_header_from_response(
     headers: &reqwest::header::HeaderMap,
     body: &str,
 ) -> Option<(String, String)> {
-    let header = |name: &str, canonical: &str| {
+    select_csp_policy(headers, || extract_meta_csp(body))
+}
+/// Pick the one policy dalfox analyses from a response's headers and its
+/// `<meta http-equiv>` policy (`meta` is only evaluated when needed):
+///
+/// 1. an enforcing `Content-Security-Policy` header,
+/// 2. an enforcing `<meta>` policy,
+/// 3. a `Content-Security-Policy-Report-Only` header,
+/// 4. a report-only `<meta>` policy.
+///
+/// Enforcing beats report-only across *both* sources. A report-only policy
+/// restricts nothing, so letting a report-only header shadow an enforcing meta
+/// policy (the old header-then-meta order) made a page whose protection lives
+/// in the document read as unprotected: inline script treated as allowed and
+/// `require-trusted-types-for` ignored — the same failure #1268 fixed between
+/// two meta tags.
+pub(crate) fn select_csp_policy(
+    headers: &reqwest::header::HeaderMap,
+    meta: impl FnOnce() -> Option<(String, String)>,
+) -> Option<(String, String)> {
+    const ENFORCING: &str = "Content-Security-Policy";
+    const REPORT_ONLY: &str = "Content-Security-Policy-Report-Only";
+    let header = |name: &str| {
         headers
             .get(name)
             .and_then(|v| v.to_str().ok())
-            .map(|v| (canonical.to_string(), v.to_string()))
+            .map(|v| (name.to_string(), v.to_string()))
     };
-    header("content-security-policy", "Content-Security-Policy")
-        .or_else(|| {
-            header(
-                "content-security-policy-report-only",
-                "Content-Security-Policy-Report-Only",
-            )
-        })
-        .or_else(|| extract_meta_csp(body))
+    if let Some(enforcing) = header(ENFORCING) {
+        return Some(enforcing);
+    }
+    let meta = meta();
+    if let Some(m) = meta.as_ref()
+        && m.0 == ENFORCING
+    {
+        return meta;
+    }
+    header(REPORT_ONLY).or(meta)
 }
 /// Find a CSP declared with `<meta http-equiv>`, returning the equivalent
 /// header name and the policy text. Pages served without a CSP header commonly

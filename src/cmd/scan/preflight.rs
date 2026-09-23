@@ -226,22 +226,6 @@ pub(crate) async fn preflight_content_type(
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(ToString::to_string);
-    let mut csp_header = head_headers
-        .get("content-security-policy")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| ("Content-Security-Policy".to_string(), v.to_string()))
-        .or_else(|| {
-            head_headers
-                .get("content-security-policy-report-only")
-                .and_then(|v| v.to_str().ok())
-                .map(|v| {
-                    (
-                        "Content-Security-Policy-Report-Only".to_string(),
-                        v.to_string(),
-                    )
-                })
-        });
-
     // Technology detection accumulator
     let mut tech_result = crate::scanning::tech_detect::TechDetectionResult::default();
 
@@ -311,16 +295,18 @@ pub(crate) async fn preflight_content_type(
             // Technology/framework detection from GET response
             tech_result =
                 crate::scanning::tech_detect::detect_technologies(&get_headers, Some(&body));
-
-            // Only parse CSP if not already found. Shared with
-            // `PageSecurityPosture::from_response`, which the server / MCP
-            // surfaces use — a page that declares its policy in the document
-            // must be analysed identically on every interface.
-            if csp_header.is_none() {
-                csp_header = crate::scanning::extract_meta_csp(&body);
-            }
         }
     }
+
+    // Header policy from the HEAD response, `<meta>` policy from the GET
+    // body, combined with the precedence the server / MCP surfaces use
+    // (`csp_header_from_response`) — a page must be analysed identically on
+    // every interface.
+    let csp_header = crate::scanning::select_csp_policy(&head_headers, || {
+        response_body
+            .as_deref()
+            .and_then(crate::scanning::extract_meta_csp)
+    });
 
     let waf_result = finish_waf_detection(waf_result, target, &client, args).await;
 

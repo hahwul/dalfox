@@ -846,6 +846,39 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
     );
 }
 
+/// A report-only header must not shadow an enforcing `<meta>` policy: the CLI
+/// preflight analyses the policy the browser actually enforces.
+#[tokio::test]
+async fn test_preflight_enforcing_meta_csp_beats_report_only_header() {
+    let html = "<html><head><meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'self'\"></head><body>ok</body></html>";
+    let (url, handle) = spawn_preflight_server(
+        Some((
+            "content-security-policy-report-only",
+            "script-src 'unsafe-inline'",
+        )),
+        html,
+    )
+    .await;
+
+    let target = parse_target(&url).expect("valid target");
+    let mut args = default_scan_args();
+    args.skip_waf_probe = true;
+    let preflight = match preflight_content_type(&target, &args).await {
+        PreflightOutcome::WithContentType(r) => r,
+        PreflightOutcome::NoContentType(_) => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
+    };
+    handle.abort();
+
+    assert_eq!(
+        preflight.csp_header,
+        Some((
+            "Content-Security-Policy".to_string(),
+            "script-src 'self'".to_string()
+        ))
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Shared fixtures for the POC / output rendering tests below.
 // ─────────────────────────────────────────────────────────────────────────
