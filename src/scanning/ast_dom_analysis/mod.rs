@@ -333,6 +333,10 @@ struct DomXssVisitor<'a> {
     sanitizers: &'static HashSet<&'static str>,
     /// Function summaries used for lightweight inter-procedural taint tracking
     function_summaries: HashMap<String, FunctionSummary>,
+    /// Numeric built-ins (see [`NUMERIC_COERCIONS`]) the page overrides by
+    /// assignment — `window.parseInt = …`, `Number.parseInt = …`,
+    /// `parseInt = …` — so the name no longer coerces to a number.
+    overridden_coercions: HashSet<String>,
     /// Track `instanceVar -> ClassName` for class instance method summary resolution.
     instance_classes: HashMap<String, String>,
     /// `"Class.field" -> constructor parameter index`, for fields a class
@@ -702,6 +706,7 @@ impl<'a> DomXssVisitor<'a> {
             sinks: &*STATIC_SINKS,
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
+            overridden_coercions: HashSet::new(),
             instance_classes: HashMap::new(),
             class_ctor_param_fields: HashMap::new(),
             class_getter_fields: HashMap::new(),

@@ -71,7 +71,8 @@ impl<'a> DomXssVisitor<'a> {
             && (self.sanitizers.contains(func_name.as_str())
                 || Self::is_likely_sanitizer_name(&func_name))
             && !(NUMERIC_COERCIONS.contains(&func_name.as_str())
-                && self.function_summaries.contains_key(&func_name))
+                && (self.function_summaries.contains_key(&func_name)
+                    || self.overridden_coercions.contains(&func_name)))
         {
             return (false, None);
         }

@@ -14,6 +14,23 @@ impl<'a> DomXssVisitor<'a> {
             None
         };
 
+        // An assignment over a numeric built-in shadows it like a
+        // `function parseInt(){}` declaration does.
+        let assigned_name = match &assign.left {
+            AssignmentTarget::StaticMemberExpression(member) => self.get_member_string(member),
+            AssignmentTarget::AssignmentTargetIdentifier(id) => Some(id.name.to_string()),
+            _ => None,
+        };
+        if let Some(name) = assigned_name {
+            let name = ["window.", "globalThis.", "self.", "top."]
+                .iter()
+                .find_map(|p| name.strip_prefix(p))
+                .unwrap_or(&name);
+            if NUMERIC_COERCIONS.contains(&name) {
+                self.overridden_coercions.insert(name.to_string());
+            }
+        }
+
         // Check if we're assigning to a sink property
         match &assign.left {
             AssignmentTarget::StaticMemberExpression(member) => {

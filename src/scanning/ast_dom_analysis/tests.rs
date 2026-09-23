@@ -5450,3 +5450,25 @@ fn numeric_coercion_clears_taint() {
         "uncoerced operand must still be reported"
     );
 }
+
+/// Overriding a numeric built-in through an assignment (a global property or
+/// a plain binding) shadows it as surely as a `function parseInt(){}`
+/// declaration: the name is no longer a coercion and taint must flow.
+#[test]
+fn numeric_coercion_overridden_by_assignment_does_not_clear_taint() {
+    let analyzer = AstDomAnalyzer::new();
+    for code in [
+        "window.parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = parseInt(p);",
+        "globalThis.parseFloat = (v) => v; var p=location.hash; el.innerHTML = parseFloat(p);",
+        "self.Number = function(v){ return v }; var p=location.hash; el.innerHTML = Number(p);",
+        "Number.parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = Number.parseInt(p);",
+        "parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = parseInt(p);",
+        "var parseInt = function(v){ return v }; var p=location.hash; el.innerHTML = parseInt(p);",
+    ] {
+        let found = analyzer.analyze(code).expect("parses");
+        assert!(
+            !found.is_empty(),
+            "overridden coercion cleared taint: {code}"
+        );
+    }
+}
