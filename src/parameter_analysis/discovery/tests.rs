@@ -67,6 +67,110 @@ async fn start_discovery_mock_server() -> SocketAddr {
     addr
 }
 
+async fn reflect_last_query_value(uri: Uri) -> String {
+    uri.query()
+        .into_iter()
+        .flat_map(|query| url::form_urlencoded::parse(query.as_bytes()))
+        .filter(|(name, _)| name == "q")
+        .last()
+        .map(|(_, value)| value.into_owned())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn query_discovery_reaches_last_value_duplicate_parameters() {
+    // Some servers use the last occurrence of a repeated query key. Since the
+    // scanner represents that key as one named parameter, its payload sender
+    // must mutate every occurrence or only the first receives the payload.
+    let app = Router::new().route("/", any(reflect_last_query_value));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/?q=first&q=last")).unwrap();
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_query_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(1)),
+    )
+    .await;
+
+    let params = reflection_params.lock().await;
+    let param = params
+        .iter()
+        .find(|param| param.name == "q" && param.location == Location::Query)
+        .expect("query discovery should find the repeated q parameter")
+        .clone();
+    drop(params);
+
+    // Exercise the same sender the reflection and verification phases use,
+    // including any pre-encoding discovery attached to the parameter. A
+    // successful discovery alone is insufficient if scan payloads still land
+    // only in the duplicate occurrence this server ignores.
+    let target = Arc::new(target);
+    let client = target.build_client_or_default();
+    let payload = crate::encoding::pre_encoding::apply_param_encoding("PAY", &param);
+    let response =
+        crate::scanning::url_inject::build_inject_request(&client, &target, &param, &payload)
+            .send()
+            .await
+            .expect("scan injection request should reach the mock server");
+    let reflected = response.text().await.expect("read mock response");
+    assert_eq!(
+        reflected, "PAY",
+        "the scanner payload must replace the value consumed by last-value servers"
+    );
+}
+
+async fn reflect_only_double_slash_path(uri: Uri) -> String {
+    if uri.path().contains("//") {
+        format!("<body>{}</body>", uri.path())
+    } else {
+        "<body>no matching route</body>".to_string()
+    }
+}
+
+#[tokio::test]
+async fn path_discovery_preserves_empty_route_segments() {
+    // Repeated slashes are empty path segments and can be part of a route.
+    // This sink responds only on paths retaining the original `//`, so a
+    // discovery request that flattens the path misses both path parameters.
+    let app = Router::new().route("/{*rest}", any(reflect_only_double_slash_path));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/a//b/")).unwrap();
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_path_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(1)),
+    )
+    .await;
+
+    let params = reflection_params.lock().await;
+    assert_eq!(
+        params
+            .iter()
+            .filter(|param| param.location == Location::Path)
+            .count(),
+        2,
+        "both non-empty path segments should be probed on the original route"
+    );
+}
+
 #[tokio::test]
 async fn test_check_query_discovery_discovers_reflection_and_extends_batch() {
     let addr = start_discovery_mock_server().await;
