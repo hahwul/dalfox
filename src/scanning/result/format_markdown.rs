@@ -5,20 +5,55 @@
 
 use super::*;
 
-/// Neutralize the Markdown structure characters in a value that came off the
-/// target — a parameter name (page forms / parameter mining apply no filter),
-/// a URL, an evidence string.
+/// Neutralize Markdown syntax in ordinary text that came off the target — a
+/// parameter name (page forms / parameter mining apply no filter), a URL, or
+/// an evidence string.
 ///
-/// `|` ends a table cell, and a newline ends the whole table: a name like
-/// `q| forged |\n\n## FORGED HEADING\n\nx` used to close the row and open a
-/// real heading, so the report's own structure could be written by the page
-/// it was reporting on. Control bytes go through the same
+/// Pipes and newlines must not change the table or document structure, while
+/// the inline syntax characters must not turn target text into explicit links,
+/// emphasis, or raw HTML. Control bytes go through the same
 /// [`sanitize_display`](crate::utils::term::sanitize_display) rule the
-/// terminal renderer uses — so `cat report.md` is covered too, and the
-/// payload whitespace dalfox's own WAF bypasses rely on (`\x0b`, `\x0c`)
-/// still round-trips out of the Payload cell.
+/// terminal renderer uses.
 fn md_cell(value: &str) -> String {
-    crate::utils::term::sanitize_display(value).replace('|', "\\|")
+    let value = crate::utils::term::sanitize_display(value);
+    let mut out = String::with_capacity(value.len() + 8);
+    for ch in value.chars() {
+        if matches!(
+            ch,
+            '\\' | '`' | '*' | '_' | '[' | ']' | '!' | '<' | '>' | '#' | '~' | '|'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Render exact payload/parameter text in an inline code span. A fixed
+/// one-backtick span can be closed by a target-derived parameter name (or by a
+/// generated payload containing a backtick), leaving the rest active Markdown.
+/// Escape table pipes separately, as Markdown tables split them before parsing
+/// inline code spans.
+fn md_code_cell(value: &str) -> String {
+    let body = crate::utils::term::sanitize_display(value).replace('|', "\\|");
+    let mut longest = 0usize;
+    let mut run = 0usize;
+    for ch in body.chars() {
+        if ch == '`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    let fence = "`".repeat(longest + 1);
+    let padding =
+        if !body.trim_matches(' ').is_empty() && (body.starts_with(' ') || body.ends_with(' ')) {
+            " "
+        } else {
+            ""
+        };
+    format!("{fence}{padding}{body}{padding}{fence}")
 }
 
 /// Pick a fence long enough to contain `body`. A response echoed under
@@ -222,14 +257,19 @@ impl Result {
                     } else {
                         "Reflection"
                     },
-                    md_cell(&result.param),
+                    md_code_cell(&result.param),
                     md_cell(&result.inject_type)
                 );
 
                 out.push_str("| Field | Value |\n");
                 out.push_str("|-------|-------|\n");
                 let _ = writeln!(out, "| **Type** | {} |", result.result_type);
-                let _ = writeln!(out, "| **Parameter** | `{}` |", md_cell(&result.param));
+                let _ = writeln!(
+                    out,
+                    "| **Type Description** | {} |",
+                    md_cell(result.result_type.long_description())
+                );
+                let _ = writeln!(out, "| **Parameter** | {} |", md_code_cell(&result.param));
                 let _ = writeln!(out, "| **Method** | {} |", md_cell(&result.method));
                 let _ = writeln!(
                     out,
@@ -263,7 +303,7 @@ impl Result {
                 let _ = writeln!(out, "| **Severity** | {} |", md_cell(&result.severity));
                 let _ = writeln!(out, "| **CWE** | {} |", md_cell(&result.cwe));
                 let _ = writeln!(out, "| **URL** | {} |", md_cell(&result.data));
-                let _ = writeln!(out, "| **Payload** | `{}` |", md_cell(&result.payload));
+                let _ = writeln!(out, "| **Payload** | {} |", md_code_cell(&result.payload));
 
                 if !result.evidence.is_empty() {
                     let _ = writeln!(out, "| **Evidence** | {} |", md_cell(&result.evidence));

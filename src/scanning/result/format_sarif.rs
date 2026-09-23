@@ -82,6 +82,7 @@ impl Result {
                 // Build properties bag
                 let mut properties = json!({
                     "type": r.result_type,
+                    "type_description": r.result_type.long_description(),
                     "inject_type": r.inject_type,
                     "method": r.method,
                     "param": r.param,
