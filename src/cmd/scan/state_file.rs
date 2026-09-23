@@ -342,7 +342,11 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
 pub(crate) struct StateFile {
     path: String,
     completed: HashSet<TargetIdentity>,
-    prior: std::collections::HashMap<TargetIdentity, String>,
+    /// Latest outcome on record per target: loaded from the file at open and
+    /// updated on every append this run makes, so a dedup check or a later
+    /// downgrade compares against what the file's *last* line says, not
+    /// against what it said before this run started.
+    prior: Mutex<std::collections::HashMap<TargetIdentity, String>>,
     /// `None` when this run must not write — a preview mode, or once a write
     /// has failed (the warning is emitted once and the scan continues, rather
     /// than repeating per target).
@@ -387,7 +391,7 @@ impl StateFile {
         let mut state = StateFile {
             path: path.to_string(),
             completed: loaded.completed,
-            prior: loaded.prior,
+            prior: Mutex::new(loaded.prior),
             handle: Mutex::new(None),
             write_failed: AtomicBool::new(false),
             silence: args.silence,
@@ -472,25 +476,32 @@ impl StateFile {
     }
 
     pub(crate) fn record_identity(&self, identity: TargetIdentity, outcome: TargetOutcome) {
-        // Nothing to say when the file already records this exact outcome for
-        // this target. Retried targets are the common case — a host that is
-        // down stays down — and re-appending an identical `error` line every
-        // run is what would eventually push the file past the read cap and
-        // strand the campaign.
-        if self.prior.get(&identity).map(String::as_str) == Some(outcome.as_str()) {
-            return;
-        }
-        let record = Record {
-            target: identity.target,
-            method: identity.method,
-            request_hash: identity.request_hash,
-            outcome: outcome.as_str().to_string(),
-            at: chrono::Local::now().to_rfc3339(),
-        };
-        let Ok(line) = serde_json::to_string(&record) else {
-            return;
-        };
+        self.append(identity, outcome, |_| true);
+    }
 
+    /// Downgrade a target to `cancelled` after a run-wide transport-loss check,
+    /// but only when its latest recorded outcome is `completed` — the one a
+    /// later run would skip. A target already on record as `error` or
+    /// `cancelled` is retried anyway; re-labelling it would only alternate
+    /// `error`/`cancelled` lines on every run of a permanently unreachable
+    /// host and grow the file without bound.
+    pub(crate) fn downgrade_completed(&self, identity: TargetIdentity) {
+        self.append(identity, TargetOutcome::Cancelled, |latest| {
+            latest == Some(TargetOutcome::Completed.as_str())
+        });
+    }
+
+    /// Append `outcome` for `identity` when `should_write` accepts the latest
+    /// recorded outcome and it differs from `outcome`.
+    fn append(
+        &self,
+        identity: TargetIdentity,
+        outcome: TargetOutcome,
+        should_write: impl FnOnce(Option<&str>) -> bool,
+    ) {
+        // The handle lock is held for the whole check-then-append, so two
+        // records for one target cannot both pass the check against a stale
+        // latest outcome.
         let mut guard = match self.handle.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
@@ -498,15 +509,44 @@ impl StateFile {
         let Some(file) = guard.as_mut() else {
             return;
         };
+        let mut prior = match self.prior.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let latest = prior.get(&identity).map(String::as_str);
+        // Nothing to say when the file already ends on this exact outcome for
+        // this target. Retried targets are the common case — a host that is
+        // down stays down — and re-appending an identical `error` line every
+        // run is what would eventually push the file past the read cap and
+        // strand the campaign.
+        if latest == Some(outcome.as_str()) || !should_write(latest) {
+            return;
+        }
+        let record = Record {
+            target: identity.target.clone(),
+            method: identity.method.clone(),
+            request_hash: identity.request_hash.clone(),
+            outcome: outcome.as_str().to_string(),
+            at: chrono::Local::now().to_rfc3339(),
+        };
+        let Ok(line) = serde_json::to_string(&record) else {
+            return;
+        };
+
         // One `writeln!` of a sub-4KiB line on an O_APPEND handle, under this
         // lock, so concurrent per-target tasks cannot interleave a record.
-        if let Err(e) = writeln!(file, "{}", line).and_then(|_| file.flush()) {
-            *guard = None;
-            if !self.write_failed.swap(true, Ordering::Relaxed) && !self.silence {
-                eprintln!(
-                    "Warning: --state-file '{}' stopped recording ({}); the scan continues but is no longer resumable from this point",
-                    self.path, e
-                );
+        match writeln!(file, "{}", line).and_then(|_| file.flush()) {
+            Ok(()) => {
+                prior.insert(identity, outcome.as_str().to_string());
+            }
+            Err(e) => {
+                *guard = None;
+                if !self.write_failed.swap(true, Ordering::Relaxed) && !self.silence {
+                    eprintln!(
+                        "Warning: --state-file '{}' stopped recording ({}); the scan continues but is no longer resumable from this point",
+                        self.path, e
+                    );
+                }
             }
         }
     }

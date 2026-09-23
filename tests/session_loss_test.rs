@@ -602,3 +602,69 @@ async fn a_run_with_findings_still_exits_one_after_a_session_loss() {
         "findings outrank the session loss for the exit code"
     );
 }
+
+/// A probe endpoint that answers authenticated once (the baseline) and then
+/// serves an ~84 KB login page with `logout_status`. The body runs past the
+/// probe's 64 KiB read cap, so every post-logout sample is partial.
+async fn spawn_big_logout_app(logout_status: StatusCode) -> (String, tokio::task::JoinHandle<()>) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let login_page = format!(
+        "<html><body>{}{}</body></html>",
+        "<p>Please sign in to continue.</p>".repeat(2500),
+        LOGIN_MARKUP
+    );
+    assert!(login_page.len() > 80_000);
+    let app = Router::new()
+        .route("/", get(|| async { (html_headers(), SIGNED_IN) }))
+        .route(
+            "/expire-big",
+            get(move || {
+                let hits = hits.clone();
+                let login_page = login_page.clone();
+                async move {
+                    if hits.fetch_add(1, Ordering::SeqCst) < 1 {
+                        (StatusCode::OK, html_headers(), SIGNED_IN.to_string())
+                    } else {
+                        (logout_status, html_headers(), login_page)
+                    }
+                }
+            }),
+        );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{}", addr), handle)
+}
+
+async fn assert_big_logout_is_session_lost(logout_status: StatusCode) {
+    let (base, server) = spawn_big_logout_app(logout_status).await;
+    let out = unique_temp_path("session-big-logout");
+    let mut args = lean_args(&format!("{}/?q=1", base), &out);
+    args.session_check_url = Some(format!("{}/expire-big", base));
+    args.session_check = Some("Signed in as alice".to_string());
+
+    let outcome = run_scan(&args).await;
+    server.abort();
+    let meta = read_meta(&out);
+    let _ = std::fs::remove_file(&out);
+
+    assert_eq!(
+        meta["target_summary"][0]["error_code"], "SESSION_LOST",
+        "HTTP {logout_status}: a login page larger than the probe cap is still a logout: {meta}"
+    );
+    assert_eq!(outcome, ScanOutcome::Error);
+}
+
+// The marker is absent from a probe sample cut at the read cap. That partial
+// sample must not be taken as proof the session is alive.
+#[tokio::test]
+async fn a_large_login_page_served_as_200_is_session_lost() {
+    assert_big_logout_is_session_lost(StatusCode::OK).await;
+}
+
+#[tokio::test]
+async fn a_large_login_page_served_as_401_is_session_lost() {
+    assert_big_logout_is_session_lost(StatusCode::UNAUTHORIZED).await;
+}

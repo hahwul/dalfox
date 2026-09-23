@@ -23,6 +23,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+/// `run_scan` resets and reads the process-global request and failure counters
+/// that decide `meta.incomplete` and the exit code. Two scans in flight in
+/// this binary would read each other's tallies, so every test that scans holds
+/// this lock for its whole run.
+static RUN_SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
+    RUN_SCAN_LOCK.lock().await
+}
+
 fn html_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -199,6 +209,7 @@ fn outcomes(state: &Path) -> Vec<(String, String)> {
 // because every target was recorded `completed`.
 #[tokio::test]
 async fn a_second_run_reissues_no_request_for_completed_targets() {
+    let _serial = serial().await;
     let (base, hits, server) = spawn_app().await;
     let state = unique_temp_path("resume-state", "jsonl");
     let targets = vec![format!("{}/a?q=1", base), format!("{}/b?q=1", base)];
@@ -245,6 +256,7 @@ async fn a_second_run_reissues_no_request_for_completed_targets() {
 // tested, so it is recorded `error` and re-requested on the next run.
 #[tokio::test]
 async fn a_preflight_dropped_target_is_recorded_error_and_retried() {
+    let _serial = serial().await;
     let (base, hits, server) = spawn_app().await;
     let state = unique_temp_path("resume-error", "jsonl");
     let targets = vec![format!("{}/a?q=1", base), format!("{}/pdf?q=1", base)];
@@ -284,6 +296,7 @@ async fn a_preflight_dropped_target_is_recorded_error_and_retried() {
 // scanned again.
 #[tokio::test]
 async fn changing_a_scan_affecting_flag_rescans_everything() {
+    let _serial = serial().await;
     let (base, hits, server) = spawn_app().await;
     let state = unique_temp_path("resume-rehash", "jsonl");
     let targets = vec![format!("{}/a?q=1", base)];
@@ -318,6 +331,7 @@ async fn changing_a_scan_affecting_flag_rescans_everything() {
 // tests while leaving its URL, method, input path, and config hash unchanged.
 #[tokio::test]
 async fn changing_a_raw_http_body_does_not_reuse_the_old_completion() {
+    let _serial = serial().await;
     let hits = Arc::new(AtomicUsize::new(0));
     let route_hits = hits.clone();
     let app = Router::new().route(
@@ -426,6 +440,7 @@ async fn changing_a_raw_http_body_does_not_reuse_the_old_completion() {
 
 #[tokio::test]
 async fn transport_incomplete_targets_are_retried_on_resume() {
+    let _serial = serial().await;
     let (base, hits, drop_injections, server) = spawn_drop_injections_app().await;
     let target = format!("{base}/?q=1");
     let out = unique_temp_path("incomplete-resume", "json");
@@ -479,11 +494,101 @@ async fn transport_incomplete_targets_are_retried_on_resume() {
     let _ = std::fs::remove_file(state);
 }
 
+// The same target stays transport-incomplete across resumes. Run 2 loads a
+// `cancelled` line, completes the target, then downgrades it again; that
+// downgrade must not be deduplicated against the loaded `cancelled`, or run 3
+// skips the target and reports a clean scan with zero requests.
+#[tokio::test]
+async fn a_target_that_stays_transport_incomplete_is_never_skipped() {
+    let _serial = serial().await;
+    let (base, hits, _drop_injections, server) = spawn_drop_injections_app().await;
+    let target = format!("{base}/?q=1");
+    let out = unique_temp_path("incomplete-thrice", "json");
+    let state = unique_temp_path("incomplete-thrice", "jsonl");
+    let mut args = lean_args(std::slice::from_ref(&target), &out, &state);
+    args.param = vec!["q".to_string()];
+    args.retries = 0;
+    args.timeout = 2;
+    args.max_payloads_per_param = 10;
+
+    for run in 1..=3 {
+        let before = hits.load(Ordering::Relaxed);
+        let outcome = run_scan(&args).await;
+        let meta = read_meta(&out);
+        assert_eq!(
+            meta["resumed"]["targets_skipped_completed"],
+            0,
+            "run {run}: a transport-incomplete target must not be skipped: {meta}\nstate: {:?}",
+            outcomes(&state)
+        );
+        assert!(
+            hits.load(Ordering::Relaxed) > before,
+            "run {run}: the target has to be requested again"
+        );
+        assert_eq!(meta["incomplete"], true, "run {run}: {meta}");
+        assert_eq!(outcome, ScanOutcome::Error, "run {run}");
+        let recorded = outcomes(&state);
+        assert_eq!(
+            recorded.last().map(|(_, o)| o.as_str()),
+            Some("cancelled"),
+            "run {run}: the latest line must be retryable: {recorded:?}"
+        );
+    }
+
+    server.abort();
+    let _ = std::fs::remove_file(out);
+    let _ = std::fs::remove_file(state);
+}
+
+// A target that never gets past preflight records `error` once. When a sibling
+// target makes the run transport-incomplete, the run-wide downgrade must not
+// add a `cancelled` line for it on top, or an unreachable host alternates
+// `error`/`cancelled` and grows the file on every run.
+#[tokio::test]
+async fn an_unreachable_target_does_not_grow_the_state_file_per_run() {
+    let _serial = serial().await;
+    let (base, _hits, _drop_injections, server) = spawn_drop_injections_app().await;
+    // Bind then drop, so the port refuses connections.
+    let dead = {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        listener.local_addr().expect("addr")
+    };
+    let dead_target = format!("http://{dead}/?q=1");
+    let targets = vec![format!("{base}/?q=1"), dead_target.clone()];
+    let out = unique_temp_path("unreachable-bounded", "json");
+    let state = unique_temp_path("unreachable-bounded", "jsonl");
+    let mut args = lean_args(&targets, &out, &state);
+    args.param = vec!["q".to_string()];
+    args.retries = 0;
+    args.timeout = 2;
+    args.max_payloads_per_param = 10;
+
+    for run in 1..=3 {
+        run_scan(&args).await;
+        assert_eq!(read_meta(&out)["incomplete"], true, "run {run}");
+    }
+    server.abort();
+
+    let dead_lines: Vec<_> = outcomes(&state)
+        .into_iter()
+        .filter(|(t, _)| *t == dead_target)
+        .collect();
+    assert_eq!(
+        dead_lines,
+        vec![(dead_target.clone(), "error".to_string())],
+        "one `error` line, not one or two per run"
+    );
+
+    let _ = std::fs::remove_file(out);
+    let _ = std::fs::remove_file(state);
+}
+
 // `--dry-run` prices out a *different* flag set against the same state file —
 // the hash will not match. It must not cost the operator the campaign: the
 // preview reads the file and leaves it exactly as it found it.
 #[tokio::test]
 async fn a_dry_run_never_writes_or_resets_the_state_file() {
+    let _serial = serial().await;
     let (base, _hits, server) = spawn_app().await;
     let state = unique_temp_path("resume-dryrun", "jsonl");
     let targets = vec![format!("{}/a?q=1", base)];
@@ -518,6 +623,7 @@ async fn a_dry_run_never_writes_or_resets_the_state_file() {
 // state file that does not exist yet should stay a no-op on disk.
 #[tokio::test]
 async fn a_dry_run_does_not_create_a_missing_state_file() {
+    let _serial = serial().await;
     let (base, _hits, server) = spawn_app().await;
     let state = unique_temp_path("resume-dryrun-new", "jsonl");
     let out = unique_temp_path("resume-dryrun-new-out", "json");
@@ -537,6 +643,7 @@ async fn a_dry_run_does_not_create_a_missing_state_file() {
 // this feature exists to prevent, so it cannot be a warning.
 #[tokio::test]
 async fn an_unusable_state_file_path_fails_before_any_request() {
+    let _serial = serial().await;
     let (base, hits, server) = spawn_app().await;
     // A directory can never be opened as a state file.
     let mut dir = std::env::temp_dir();
@@ -568,6 +675,7 @@ async fn an_unusable_state_file_path_fails_before_any_request() {
 // consumer cannot tell a resumed partial enumeration from a complete one.
 #[tokio::test]
 async fn only_discovery_discloses_the_resume_skip() {
+    let _serial = serial().await;
     let (base, _hits, server) = spawn_app().await;
     let state = unique_temp_path("resume-discovery", "jsonl");
     let targets = vec![format!("{}/a?q=1", base), format!("{}/b?q=1", base)];
@@ -602,6 +710,7 @@ async fn only_discovery_discloses_the_resume_skip() {
 // scans exactly as the first did.
 #[tokio::test]
 async fn without_the_flag_nothing_is_recorded_or_skipped() {
+    let _serial = serial().await;
     let (base, hits, server) = spawn_app().await;
     let targets = vec![format!("{}/a?q=1", base)];
     let state = unique_temp_path("resume-absent", "jsonl");

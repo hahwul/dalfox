@@ -617,13 +617,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // `scan_loop` knows about explicit interruption, session loss, and worker
     // failures, but request-level transport failures are tallied globally.
     // When that tally makes the report incomplete, none of the targets can be
-    // safely reused on resume; append a retryable outcome after their normal
-    // per-target records so the latest state wins.
+    // safely reused on resume; downgrade each `completed` record this run left
+    // so the latest line is retryable. Targets already recorded `error` or
+    // `cancelled` are retried anyway and are left alone.
     if requests.is_incomplete()
         && let Some(sf) = &state.state_file
     {
         for identity in &pre_preflight_keys {
-            sf.record_identity(identity.clone(), state_file::TargetOutcome::Cancelled);
+            sf.downgrade_completed(identity.clone());
         }
     }
     let (final_results, output_write_failed) = output::render_results(

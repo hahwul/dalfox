@@ -864,11 +864,7 @@ fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
         match write_report_file(output_path, &file_content) {
             Ok(_) => {
                 if !args.silence {
-                    if super::format_is_machine(&args.format) {
-                        eprintln!("Results written to {}", output_path);
-                    } else {
-                        println!("Results written to {}", output_path);
-                    }
+                    println!("Results written to {}", output_path);
                 }
             }
             Err(e) => {

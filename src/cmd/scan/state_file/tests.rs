@@ -171,6 +171,65 @@ fn the_last_recorded_outcome_controls_resume() {
     let _ = std::fs::remove_file(&path);
 }
 
+// A retried target whose previous line was `cancelled` completes, then the
+// run-wide transport-loss check downgrades it again. The dedup must compare
+// against the `completed` line this run just wrote, not the `cancelled` one it
+// loaded — otherwise the downgrade is dropped as a duplicate and the next run
+// skips a target whose coverage is unknown.
+#[test]
+fn a_downgrade_after_this_runs_completion_is_not_deduped_against_the_loaded_outcome() {
+    let path = scratch("downgrade-after-retry");
+    let args = args_with(&path);
+    let target = test_target("https://a.test/", "GET");
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.record(&target, TargetOutcome::Cancelled);
+    }
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+        sf.record(&target, TargetOutcome::Completed);
+        sf.downgrade_completed(target_identity(&target));
+    }
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(
+        !sf.is_completed(&target),
+        "the downgrade must land after this run's completion: {}",
+        read(&path)
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// The downgrade only rewrites a `completed` record. A target that is down on
+// every run records `error`; re-labelling it `cancelled` each time would
+// alternate two lines per run forever.
+#[test]
+fn a_downgrade_leaves_retryable_outcomes_alone() {
+    let path = scratch("downgrade-bounded");
+    let args = args_with(&path);
+    let down = test_target("https://down.test/", "GET");
+    let never = test_target("https://never.test/", "GET");
+
+    for _ in 0..4 {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.record(&down, TargetOutcome::Error);
+        sf.downgrade_completed(target_identity(&down));
+        // Nothing on record at all: nothing to downgrade either.
+        sf.downgrade_completed(target_identity(&never));
+    }
+
+    let contents = read(&path);
+    assert_eq!(
+        contents.lines().count(),
+        2,
+        "header + one `error` line, not one or two per run: {contents}"
+    );
+    assert!(!contents.contains("cancelled"), "{contents}");
+
+    let _ = std::fs::remove_file(&path);
+}
+
 // A hard kill can leave the final line half-written. That line is skipped, and
 // every complete record before it still counts — losing the whole file to one
 // torn tail would defeat the point of an append-only log.

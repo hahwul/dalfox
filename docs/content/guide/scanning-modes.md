@@ -122,7 +122,7 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 | `cancelled` | Ctrl-C, `--scan-timeout` expiry, a session that died mid-scan, or severe transport loss (`meta.incomplete`) | Retried |
 | `error` | Dropped during preflight — unreachable, content-type mismatch, `--max-targets-per-host` cap | Retried |
 
-A target's resume identity includes its URL, method, and a hash of request-specific data carried by raw HTTP and HAR inputs (body, headers, cookies, and user-agent). The hash keeps those values out of the state file while ensuring a changed capture is scanned again. For ordinary URL targets, this is the URL plus method, so one state file can back a shell loop of per-URL invocations as easily as a single `--input-type file` run.
+A target's resume identity is its URL, its method, and a hash of the request data it is sent with: body, headers, cookies, and user-agent. That covers data captured in raw HTTP and HAR inputs as well as `-H`, `--cookies`, and `--user-agent`, so a changed capture or a rotated credential is scanned again. Only the hash is stored; the values never reach the state file. Invocations with the same flags produce the same identity, so one state file can back a shell loop of per-URL invocations as easily as a single `--input-type file` run.
 
 **A configuration change starts over.** The file's header carries a hash of the scan-affecting configuration; when it does not match, the recorded targets were tested under settings this run does not use. Dalfox moves the old file to `scan.state.bak`, starts a new one, and scans everything:
 

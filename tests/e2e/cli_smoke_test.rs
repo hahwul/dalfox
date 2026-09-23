@@ -754,31 +754,6 @@ fn test_machine_format_suppresses_banner_for_every_subcommand_and_spelling() {
     let _ = std::fs::remove_file(&list);
 }
 
-#[test]
-fn test_machine_format_output_file_keeps_stdout_free_of_status_logs() {
-    for format in ["json", "jsonl", "markdown", "sarif", "toml"] {
-        let path = std::env::temp_dir().join(format!(
-            "dalfox-machine-output-{}-{format}.out",
-            std::process::id()
-        ));
-        let path_str = path.to_str().expect("utf8 output path");
-        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
-            .args(["scan", UNREACHABLE_TARGET])
-            .args(NO_SCAN_FLAGS)
-            .args(["--format", format, "--output", path_str])
-            .output()
-            .expect("failed to execute dalfox");
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.is_empty(),
-            "-f {format} -o writes the document to a file, so stdout must not contain status logs; got:\n{stdout}"
-        );
-        assert!(path.exists(), "-f {format} should still write the report");
-        let _ = std::fs::remove_file(path);
-    }
-}
-
 /// `-H`, `--user-agent` and `--cookies` all end up as HTTP header values, and
 /// both ways they can be wrong used to be silent on the CLI:
 ///

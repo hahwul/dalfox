@@ -91,6 +91,11 @@ pub(crate) struct SessionBaseline {
     /// (see [`baseline_warning`]) instead of aborting the scan at the first
     /// probe.
     pub(crate) check_marker_present: Option<bool>,
+    /// Byte offset where the `--session-check` match ended in the baseline
+    /// body. Lets [`classify`] judge a partial probe: a sample that already
+    /// runs well past where the marker used to be and still lacks it is a
+    /// changed page, not a cut-off one.
+    pub(crate) check_marker_end: Option<usize>,
     /// When this baseline was captured, for [`PRE_DISPATCH_MIN_AGE_SECS`].
     ///
     /// (There is deliberately no "came from `--session-check-url`" flag. A
@@ -192,6 +197,7 @@ pub(crate) fn baseline_from_preflight(
             crate::utils::http::MAX_RESPONSE_BODY_BYTES,
         ),
         check_marker_present: check_re.map(|re| re.is_match(body)),
+        check_marker_end: check_re.and_then(|re| re.find(body)).map(|m| m.end()),
         captured_at: Instant::now(),
     }
 }
@@ -221,6 +227,9 @@ pub(crate) async fn baseline_from_check_url(
         body_len: probe.body.len(),
         body_complete: probe.body_complete,
         check_marker_present: check_re.map(|re| re.is_match(&probe.body)),
+        check_marker_end: check_re
+            .and_then(|re| re.find(&probe.body))
+            .map(|m| m.end()),
         captured_at: Instant::now(),
     })
 }
@@ -367,9 +376,11 @@ fn resolve_landing(
 
 /// Compare a probe against its baseline.
 ///
-/// `check_re` (`--session-check`) is authoritative when present: the operator
-/// told us exactly what an authenticated response looks like, so nothing is
-/// inferred on top of it. Otherwise three signals are consulted, each chosen
+/// `check_re` (`--session-check`) is authoritative when present and the probe
+/// body is complete: the operator told us exactly what an authenticated
+/// response looks like, so nothing is inferred on top of it. When the marker is
+/// absent from a partial body, or no marker was given, three signals are
+/// consulted, each chosen
 /// because it is hard to trip accidentally on a normal page:
 ///
 /// 1. the status moved into 401/403 from something else,
@@ -395,20 +406,31 @@ pub(crate) fn classify(
     waf_detected: bool,
 ) -> SessionState {
     if let Some(re) = check_re {
-        return if re.is_match(&probe.body) {
-            SessionState::Alive
-        } else if !probe.body_complete {
-            // A marker outside this response sample is not evidence that the
-            // session changed. This errs toward another scan rather than a
-            // false SESSION_LOST based on a partial page.
-            SessionState::Alive
-        } else {
-            SessionState::Lost(format!(
+        if re.is_match(&probe.body) {
+            return SessionState::Alive;
+        }
+        // A partial sample still answers the question when it covers the
+        // marker's baseline position with room to spare (2x absorbs dynamic
+        // content ahead of it). That is the logout serving a large login page
+        // as a 200: nothing else below would see it once the login form sits
+        // past the baseline's byte budget. A 206 is excluded because its
+        // sample need not start at byte zero.
+        let covers_marker_position = probe.status != 206
+            && baseline
+                .check_marker_end
+                .is_some_and(|end| probe.body.len() >= end.saturating_mul(2));
+        if probe.body_complete || covers_marker_position {
+            return SessionState::Lost(format!(
                 "--session-check pattern /{}/ no longer matches the response body (HTTP {})",
                 re.as_str(),
                 probe.status
-            ))
-        };
+            ));
+        }
+        // The marker is absent from a partial sample (a 206, or a body cut at
+        // the probe cap). Its absence proves nothing on its own — it may sit
+        // past the cut — but it does not prove the session alive either: a
+        // logout that serves a large login page lands here too. Fall through
+        // to the status / landing / login-form signals below.
     }
 
     let status_flipped = probe.status != baseline.status;
