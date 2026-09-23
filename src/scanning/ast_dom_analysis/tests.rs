@@ -5472,3 +5472,30 @@ fn numeric_coercion_overridden_by_assignment_does_not_clear_taint() {
         );
     }
 }
+
+/// A polyfill that assigns the real built-in (or keeps it via `||`) does not
+/// override it: the coercion still clears taint.
+#[test]
+fn numeric_coercion_polyfill_is_not_an_override() {
+    let analyzer = AstDomAnalyzer::new();
+    for code in [
+        "if (Number.parseInt === undefined) { Number.parseInt = window.parseInt; } el.innerHTML = 'Page ' + Number.parseInt(location.hash.slice(1));",
+        "if (!Number.parseFloat) Number.parseFloat = parseFloat; el.innerHTML = Number.parseFloat(location.hash.slice(1));",
+        "window.parseInt = window.parseInt || function(v){ return v }; el.innerHTML = parseInt(location.hash.slice(1));",
+        "Number.parseInt = Number.parseInt ?? (v => v); el.innerHTML = Number.parseInt(location.hash.slice(1));",
+    ] {
+        let found = analyzer.analyze(code).expect("parses");
+        assert!(
+            found.is_empty(),
+            "polyfill read as an override: {code} -> {found:?}"
+        );
+    }
+    // Assigning a built-in that was itself overridden inherits the override.
+    let found = analyzer
+        .analyze("parseInt = function(v){ return v }; Number.parseInt = parseInt; el.innerHTML = Number.parseInt(location.hash);")
+        .expect("parses");
+    assert!(
+        !found.is_empty(),
+        "an overridden built-in stays overridden when copied"
+    );
+}
