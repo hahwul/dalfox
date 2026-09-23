@@ -557,8 +557,9 @@ pub(crate) fn build_hpp_urls(
 }
 
 /// Build an `application/x-www-form-urlencoded` body that carries `value` for
-/// `name`, replacing the existing value when the param is already present and
-/// appending it otherwise.
+/// `name`, replacing every matching occurrence when the param is already
+/// present and appending it otherwise. Updating all duplicates ensures both
+/// first-value and last-value servers receive the payload.
 ///
 /// This is the single source of truth for form-body injection. It was
 /// previously copy-pasted (byte-identical) across the reflection check, light
@@ -574,7 +575,9 @@ pub(crate) fn build_hpp_urls(
 /// user.
 pub(crate) fn param_is_cookie(target: &Target, param: &Param) -> bool {
     matches!(param.location, Location::Header)
-        && target.cookies.iter().any(|(name, _)| name == &param.name)
+        && param
+            .is_cookie
+            .unwrap_or_else(|| target.cookies.iter().any(|(name, _)| name == &param.name))
 }
 
 /// Build a request injecting `value` into a [`Location::Header`] parameter,
@@ -634,7 +637,6 @@ pub(crate) fn urlencoded_body(data: Option<&str>, name: &str, value: &str) -> St
                 if pair.0 == name {
                     pair.1 = value.to_string();
                     found = true;
-                    break;
                 }
             }
             if !found {

@@ -76,6 +76,7 @@ pub async fn check_cookie_discovery(
                             cookie_value,
                             crate::parameter_analysis::Location::Header,
                         )
+                        .with_cookie_identity(true)
                         .with_reflection_analysis(&text),
                     );
                 }

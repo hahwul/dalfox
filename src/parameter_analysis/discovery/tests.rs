@@ -77,6 +77,68 @@ async fn reflect_last_query_value(uri: Uri) -> String {
         .unwrap_or_default()
 }
 
+async fn reflect_x_dual_header(headers: HeaderMap) -> String {
+    headers
+        .get("x-dual")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string()
+}
+
+#[tokio::test]
+async fn same_named_header_and_cookie_keep_distinct_injection_locations() {
+    // Headers and cookies share Location::Header in the parameter model. If a
+    // target carries both with the same name, inferring cookie-ness from the
+    // target alone misroutes the reflected header payload into Cookie.
+    let app = Router::new().route("/", any(reflect_x_dual_header));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/")).expect("target parses");
+    target
+        .headers
+        .push(("X-Dual".to_string(), "header-seed".to_string()));
+    target
+        .cookies
+        .push(("X-Dual".to_string(), "cookie-seed".to_string()));
+
+    let args = default_scan_args();
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(2));
+    check_header_discovery(&target, &args, reflection_params.clone(), semaphore.clone()).await;
+    check_cookie_discovery(&target, &args, reflection_params.clone(), semaphore).await;
+    {
+        let mut params = reflection_params.lock().await;
+        dedupe_reflection_params(&mut params);
+    }
+
+    let param = reflection_params
+        .lock()
+        .await
+        .iter()
+        .find(|param| param.name == "X-Dual" && param.location == Location::Header)
+        .expect("header reflection should be discovered")
+        .clone();
+    let target = Arc::new(target);
+    let client = target.build_client_or_default();
+    let response =
+        crate::scanning::url_inject::build_inject_request(&client, &target, &param, "PAY")
+            .send()
+            .await
+            .expect("injection request should reach the mock server");
+    assert_eq!(
+        response.text().await.expect("read response"),
+        "PAY",
+        "the payload must be sent in the header slot that discovery found"
+    );
+}
+
 #[tokio::test]
 async fn query_discovery_reaches_last_value_duplicate_parameters() {
     // Some servers use the last occurrence of a repeated query key. Since the
@@ -1074,6 +1136,84 @@ async fn discover_form_params(page: SocketAddr) -> Vec<Param> {
     )
     .await;
     reflection_params.lock().await.clone()
+}
+
+async fn reflect_get_form_route_state(uri: Uri) -> String {
+    let pairs: Vec<(String, String)> = uri
+        .query()
+        .into_iter()
+        .flat_map(|query| url::form_urlencoded::parse(query.as_bytes()))
+        .map(|(name, value)| (name.into_owned(), value.into_owned()))
+        .collect();
+    let mode = pairs
+        .iter()
+        .find(|(name, _)| name == "mode")
+        .map(|(_, value)| value.as_str());
+    if mode == Some("search") {
+        pairs
+            .iter()
+            .filter(|(name, _)| name == "q")
+            .map(|(_, value)| value.as_str())
+            .next_back()
+            .unwrap_or("missing q")
+            .to_string()
+    } else {
+        "missing route state".to_string()
+    }
+}
+
+#[tokio::test]
+async fn get_form_discovery_preserves_action_query_for_probe_and_injection() {
+    // A GET form submits its controls alongside the query already present in
+    // its action URL. Clearing that query sends the probe to a different
+    // route, so discovery misses a field that the browser and scan sender can
+    // reach.
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind form listener");
+    let addr = listener.local_addr().expect("local addr");
+    let html = "<form action=\"/search?mode=search\" method=\"GET\"><input name=\"q\" value=\"seed\"></form>";
+    let app = Router::new()
+        .route("/", any(move || async move { html.to_string() }))
+        .route("/{*rest}", any(reflect_get_form_route_state));
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/")).expect("target parses");
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_form_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+
+    let param = reflection_params
+        .lock()
+        .await
+        .iter()
+        .find(|param| param.name == "q" && param.location == Location::Query)
+        .expect("GET form discovery should find q when action state is retained")
+        .clone();
+    assert!(
+        param
+            .form_action_url
+            .as_deref()
+            .is_some_and(|action| { action.contains("?mode=search") })
+    );
+
+    // Verify the ordinary payload request takes the same action URL and keeps
+    // the route-state query that made discovery possible.
+    let target = Arc::new(target);
+    let client = target.build_client_or_default();
+    let response =
+        crate::scanning::url_inject::build_inject_request(&client, &target, &param, "PAY")
+            .send()
+            .await
+            .expect("scan injection request should reach the form action");
+    assert_eq!(response.text().await.expect("read response"), "PAY");
 }
 
 #[tokio::test]

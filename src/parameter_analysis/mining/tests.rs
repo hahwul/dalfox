@@ -892,6 +892,49 @@ async fn test_probe_dictionary_params_discovers_with_custom_wordlist() {
 }
 
 #[tokio::test]
+async fn custom_wordlist_strips_a_leading_utf8_bom() {
+    async fn reflect_secret(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        Html(format!(
+            "<html><body>{}</body></html>",
+            params.get("secret").map(String::as_str).unwrap_or("")
+        ))
+    }
+
+    let app = Router::new().route("/r", get(reflect_secret));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    let target = parse_target(&format!("http://{addr}/r")).expect("target parses");
+    let wordlist = TempWordlist::new("bom-wordlist", "\u{feff}secret\n");
+    let mut args = default_scan_args();
+    args.mining_dict_word = Some(wordlist.as_str());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    probe_dictionary_params(
+        &target,
+        &args,
+        reflection_params.clone(),
+        Arc::new(tokio::sync::Semaphore::new(1)),
+        None,
+    )
+    .await;
+
+    let params = reflection_params.lock().await;
+    assert!(
+        params
+            .iter()
+            .any(|param| param.name == "secret" && param.location == Location::Query),
+        "a BOM-prefixed custom wordlist must still probe its first name, got {:?}",
+        params.iter().map(|param| &param.name).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
 async fn test_probe_dictionary_params_sentinel_pre_probe_collapses() {
     let addr = start_reflect_all_server().await;
     let target =
@@ -973,6 +1016,130 @@ async fn test_probe_body_params_discovers_reflected_form_field() {
         "expected a body param discovered, got {:?}",
         params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
+}
+
+async fn reflect_last_form_q(body: axum::body::Bytes) -> Html<String> {
+    let pairs: Vec<(String, String)> = form_urlencoded::parse(&body)
+        .map(|(name, value)| (name.into_owned(), value.into_owned()))
+        .collect();
+    let last = pairs
+        .iter()
+        .filter(|(name, _)| name == "q")
+        .map(|(_, value)| value.as_str())
+        .next_back()
+        .unwrap_or("");
+    Html(format!("<html><body>{last}</body></html>"))
+}
+
+#[tokio::test]
+async fn body_discovery_payload_reaches_last_duplicate_form_value() {
+    // Discovery substitutes every duplicate form key. The actual scan sender
+    // must do the same for applications that read the last occurrence.
+    let app = Router::new().route("/b", axum::routing::post(reflect_last_form_q));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/b")).expect("target parses");
+    target.data = Some("q=first&q=last".to_string());
+    let mut args = default_scan_args();
+    args.data = target.data.clone();
+
+    let client = target.build_client_or_default();
+    let control = client
+        .post(target.url.clone())
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body("q=first&q=control")
+        .send()
+        .await
+        .expect("control request should reach the test server");
+    assert_eq!(
+        control.text().await.expect("read control response"),
+        "<html><body>control</body></html>"
+    );
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    probe_body_params(
+        &target,
+        &args,
+        reflection_params.clone(),
+        Arc::new(tokio::sync::Semaphore::new(1)),
+        None,
+    )
+    .await;
+    let param = reflection_params
+        .lock()
+        .await
+        .iter()
+        .find(|param| param.name == "q" && param.location == Location::Body)
+        .expect("body discovery should find q using its all-duplicate probe")
+        .clone();
+
+    let target = Arc::new(target);
+    let client = target.build_client_or_default();
+    let response =
+        crate::scanning::url_inject::build_inject_request(&client, &target, &param, "PAY")
+            .send()
+            .await
+            .expect("scan injection request should reach the mock server");
+    let reflected = response.text().await.expect("read response");
+    assert_eq!(
+        reflected, "<html><body>PAY</body></html>",
+        "the last-value body parameter must receive the scan payload"
+    );
+}
+
+#[tokio::test]
+async fn imported_raw_http_and_har_bodies_are_mined_without_cli_data() {
+    // Request imports store their captured body on Target, not ScanArgs.data.
+    // The analysis stage must pass that body into the body miners or both
+    // import paths silently scan a POST without ever testing its fields.
+    let addr = start_body_reflect_server().await;
+    let url = format!("http://{}:{}/b", addr.ip(), addr.port());
+    let raw = format!(
+        "POST {url} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nuser=alice&token=t",
+        addr.ip(),
+        addr.port()
+    );
+    let raw_target =
+        crate::target_parser::parse_raw_http_request(&raw).expect("raw request parses");
+
+    let har = format!(
+        r#"{{"log":{{"entries":[{{"request":{{"method":"POST","url":"{url}","headers":[{{"name":"Content-Type","value":"application/x-www-form-urlencoded"}}],"postData":{{"mimeType":"application/x-www-form-urlencoded","text":"user=alice&token=t"}}}}}}]}}}}"#
+    );
+    let har_target = crate::target_parser::parse_har(&har)
+        .expect("HAR parses")
+        .into_iter()
+        .next()
+        .expect("HAR has one request");
+
+    for mut target in [raw_target, har_target] {
+        let mut args = default_scan_args();
+        args.skip_discovery = true;
+        args.skip_mining = true;
+        assert!(args.data.is_none(), "test must not pass a CLI body");
+
+        crate::parameter_analysis::analyze_parameters(&mut target, &args, None).await;
+
+        assert!(
+            target
+                .reflection_params
+                .iter()
+                .any(|param| param.location == Location::Body && param.name == "user"),
+            "imported {} body field was never tested: {:?}",
+            target.method,
+            target
+                .reflection_params
+                .iter()
+                .map(|param| (&param.name, &param.location))
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 async fn reflect_json_handler(body: axum::body::Bytes) -> Html<String> {

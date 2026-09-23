@@ -153,6 +153,7 @@ pub async fn check_header_discovery(
                             header_value,
                             crate::parameter_analysis::Location::Header,
                         )
+                        .with_cookie_identity(false)
                         .with_reflection_analysis(&text)
                         .with_framework_sink(&text),
                     );

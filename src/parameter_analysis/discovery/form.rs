@@ -254,7 +254,10 @@ pub async fn check_form_discovery(
                 // Build query: set all fields, replace target field with test value
                 {
                     let mut pairs = test_url.query_pairs_mut();
-                    pairs.clear();
+                    // A GET form appends its serialized controls to the
+                    // action URL's existing query. Keep static route state
+                    // such as `?mode=search`; clearing it probes a different
+                    // endpoint than either the browser or the scan sender.
                     for (n, v) in &fields {
                         if n == field_name {
                             pairs.append_pair(n, test_value);
