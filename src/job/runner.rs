@@ -228,6 +228,9 @@ pub(crate) async fn execute_scan(
                     // payloads than the CLI would for the same target.
                     let client = target.build_client_or_default();
                     let mut waf_seed = crate::waf::WafDetectionResult::default();
+                    // The landing page's own status, the WAF probe's baseline
+                    // (see `fingerprint_with_probe`).
+                    let mut baseline_status: Option<u16> = None;
                     // Mirror the CLI preflight: carry the target's
                     // headers/cookies/User-Agent (so auth/header/UA-gated
                     // SPAs are analyzed logged-in, matching CLI findings —
@@ -253,6 +256,7 @@ pub(crate) async fn execute_scan(
                         // actually ended, which is the only thing a session
                         // baseline can meaningfully compare against.
                         let resp_status = resp.status().as_u16();
+                        baseline_status = Some(resp_status);
                         let resp_final_url = resp.url().clone();
                         if let Ok(body) = crate::utils::http::read_body(resp).await {
                             // Authenticated-state fingerprint, derived from
@@ -353,7 +357,13 @@ pub(crate) async fn execute_scan(
                     // Probe / `force_waf` / `waf_min_confidence`, then the
                     // same target state the CLI preflight sets from them.
                     let waf =
-                        crate::cmd::scan::finish_waf_detection(waf_seed, target, &client, &args)
+                        crate::cmd::scan::finish_waf_detection(
+                            waf_seed,
+                            baseline_status,
+                            target,
+                            &client,
+                            &args,
+                        )
                             .await;
                     if !waf.is_empty() {
                         if args.waf_bypass != "off" {

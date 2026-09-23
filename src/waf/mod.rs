@@ -274,9 +274,16 @@ pub(crate) fn fingerprint_from_response(
 /// origin getting misread as `WafType::Unknown(HTTP 405)`, and (2)
 /// missing WAFs that only inspect POST bodies. Auth (headers, UA,
 /// cookies) is preserved via `apply_headers_ua_cookies`.
+///
+/// `baseline_status` is the status the same target returned to an
+/// *unprovoked* request (the preflight landing fetch), when known. A probe
+/// that gets that same blocking status tells us nothing about the payload —
+/// an auth wall answers 403 and a maintenance page 503 to everything — so the
+/// status-only `Unknown(HTTP …)` inference is skipped for it.
 pub async fn fingerprint_with_probe(
     target: &crate::target_parser::Target,
     client: &reqwest::Client,
+    baseline_status: Option<u16>,
 ) -> WafDetectionResult {
     // Append the provocation marker to the URL query. Keeping the
     // existing query intact means routing/host-header checks behave
@@ -318,9 +325,11 @@ pub async fn fingerprint_with_probe(
     // mutations against benign rate-limited backends and produced
     // garbage results.
     let is_plain_rate_limit = status == 429 && headers.get("retry-after").is_some();
+    let page_always_returns_it = baseline_status == Some(status);
     if result.is_empty()
         && (status == 403 || status == 406 || status == 429 || status == 503)
         && !is_plain_rate_limit
+        && !page_always_returns_it
     {
         result.detected.push(WafFingerprint {
             waf_type: WafType::Unknown(format!("HTTP {}", status)),

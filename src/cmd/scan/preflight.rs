@@ -236,6 +236,7 @@ pub(crate) async fn preflight_content_type(
     // detection too, use `--skip-waf-probe` (no provocation request)
     // or just don't read the `waf` field.
     let mut waf_result = crate::waf::fingerprint_from_response(&head_headers, None, head_status);
+    let mut baseline_status = Some(head_status);
 
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
@@ -246,6 +247,7 @@ pub(crate) async fn preflight_content_type(
     crate::record_outbound_request().await;
     if let Ok(get_resp) = get_req.send().await {
         let get_status = get_resp.status().as_u16();
+        baseline_status = Some(get_status);
         let get_headers = get_resp.headers().clone();
         // Captured before `read_body` consumes the response. Under
         // `--follow-redirects` this is where the chain actually ended, which is
@@ -308,7 +310,9 @@ pub(crate) async fn preflight_content_type(
             .and_then(crate::scanning::extract_meta_csp)
     });
 
-    let waf_result = finish_waf_detection(waf_result, target, &client, args).await;
+    // The landing page's own status is the probe's baseline: a probe that
+    // merely gets the same blocking status back is not evidence of a WAF.
+    let waf_result = finish_waf_detection(waf_result, baseline_status, target, &client, args).await;
 
     match ct_opt {
         Some(ct) => PreflightOutcome::WithContentType(PreflightResult {
@@ -335,6 +339,7 @@ pub(crate) async fn preflight_content_type(
 /// bypass mutation, extra encoder or pacing hint.
 pub(crate) async fn finish_waf_detection(
     mut waf_result: crate::waf::WafDetectionResult,
+    baseline_status: Option<u16>,
     target: &crate::target_parser::Target,
     client: &reqwest::Client,
     args: &ScanArgs,
@@ -344,7 +349,8 @@ pub(crate) async fn finish_waf_detection(
     // dry run): the probe carries a `<script>` payload, and a dry run promises
     // to report what would be scanned without sending attack payloads.
     if args.waf_bypass != "off" && !args.skip_waf_probe && !args.dry_run {
-        let probe_result = crate::waf::fingerprint_with_probe(target, client).await;
+        let probe_result =
+            crate::waf::fingerprint_with_probe(target, client, baseline_status).await;
         crate::waf::merge_results(&mut waf_result, probe_result);
     }
 
