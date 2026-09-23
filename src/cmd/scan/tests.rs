@@ -16,13 +16,20 @@ use crate::scanning::result::{FindingType, Result as ScanResult};
 use crate::target_parser::{Target, parse_target};
 use crate::waf::bypass::{MutationStats, MutationType};
 use axum::Router;
-use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::body::Body;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::response::Response;
 use axum::routing::get;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+
+/// `run_scan` zeroes and then reads the process-global request and failure
+/// counters that decide `meta.incomplete` and the exit code. Every lib test
+/// that calls it holds this lock, so one scan cannot read another's tally.
+static RUN_SCAN_LOCK: Mutex<()> = Mutex::const_new(());
 
 fn default_scan_args() -> ScanArgs {
     ScanArgs {
@@ -1414,6 +1421,113 @@ async fn test_a_run_that_lost_most_of_its_requests_is_not_a_clean_bill_of_health
         "a run that lost 148 of 170 requests must not report a trustworthy clean, got {}",
         v["meta"]
     );
+}
+
+#[tokio::test]
+async fn a_transport_incomplete_empty_scan_does_not_exit_clean() {
+    let mut args = default_scan_args();
+    args.silence = true;
+    let urls = vec!["https://example.com".to_string()];
+    let requests = crate::cmd::scan::output::RequestTally {
+        sent: 170,
+        failed: 148,
+    };
+    let path = temp_out_path("incomplete_exit_code");
+    args.output = Some(path.clone());
+    let state = make_scan_state(vec![]);
+    let (results, output_write_failed) = render_results(
+        &args,
+        &state,
+        &urls,
+        std::time::Duration::from_millis(7),
+        requests,
+        false,
+        None,
+    )
+    .await;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(report["meta"]["incomplete"], true);
+
+    let outcome = super::output::derive_outcome(
+        &args,
+        &urls,
+        &state,
+        &results,
+        requests,
+        output_write_failed,
+    )
+    .await;
+    assert_eq!(
+        outcome,
+        ScanOutcome::Error,
+        "an empty report marked incomplete because most requests failed must not exit with the clean code"
+    );
+}
+
+#[tokio::test]
+async fn a_later_scan_does_not_inherit_request_failures_from_an_earlier_run() {
+    use std::sync::atomic::Ordering;
+    let _serial = RUN_SCAN_LOCK.lock().await;
+
+    // A stale tally left by an earlier run, far above anything a real scan
+    // (or a foreign lib test ticking the global concurrently) could add. The
+    // assertion is only that it did not survive into this run's report, so
+    // unrelated failures elsewhere in the binary cannot flip it.
+    const STALE_FAILURES: u64 = 1 << 40;
+    crate::REQUEST_FAILURE_COUNT.store(STALE_FAILURES, Ordering::Relaxed);
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                [("content-type", "text/html; charset=utf-8")],
+                "<html><body>healthy</body></html>",
+            )
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let path = temp_out_path("stale_request_failures");
+    let args = ScanArgs {
+        input_type: "url".to_string(),
+        targets: vec![format!("http://{addr}/?q=1")],
+        format: "json".to_string(),
+        output: Some(path.clone()),
+        silence: true,
+        skip_xss_scanning: true,
+        skip_discovery: true,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        insecure: Some(true),
+        ..ScanArgs::default()
+    };
+
+    let outcome = super::run_scan(&args).await;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    server.abort();
+    let _ = std::fs::remove_file(&path);
+
+    let failed = report["meta"]["failed_requests"]
+        .as_u64()
+        .expect("failed_requests");
+    assert!(
+        failed < STALE_FAILURES,
+        "a scan must report only failures from this run, got {failed}"
+    );
+    // The exit code is deliberately not asserted: other lib tests tick the
+    // global counters while this scan runs, which could legitimately push a
+    // two-request scan over the incomplete threshold.
+    let _ = outcome;
 }
 
 #[tokio::test]
@@ -2897,6 +3011,7 @@ fn test_output_report_file_is_created_private() {
 /// `completed`, so every resume skipped a parameter that was never tested.
 #[tokio::test]
 async fn a_worker_panic_fails_the_target_instead_of_reading_clean() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let app = Router::new().route(
         "/",
         get(
@@ -2973,6 +3088,73 @@ async fn a_worker_panic_fails_the_target_instead_of_reading_clean() {
         recorded.contains("\"error\"") && !recorded.contains("\"completed\""),
         "the target must be retried on resume: {recorded}"
     );
+}
+
+#[tokio::test]
+async fn a_session_marker_beyond_the_preflight_range_does_not_fail_the_scan() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let marker = "signed-in-marker";
+    let full_body = format!(
+        "{}{}",
+        "x".repeat(crate::cmd::scan::preflight::PREFLIGHT_BODY_BYTES),
+        marker
+    );
+    let full_len = full_body.len();
+    let app = Router::new().route(
+        "/",
+        axum::routing::any(move |headers: HeaderMap| {
+            let full_body = full_body.clone();
+            async move {
+                if headers.contains_key(axum::http::header::RANGE) {
+                    Response::builder()
+                        .status(StatusCode::PARTIAL_CONTENT)
+                        .header("content-type", "text/html")
+                        .header("content-range", format!("bytes 0-8191/{full_len}"))
+                        .body(Body::from(
+                            full_body[..crate::cmd::scan::preflight::PREFLIGHT_BODY_BYTES]
+                                .to_string(),
+                        ))
+                        .expect("partial response")
+                } else {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "text/html")
+                        .body(Body::from(full_body))
+                        .expect("full response")
+                }
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let path = temp_out_path("partial_session_marker");
+    let args = ScanArgs {
+        targets: vec![format!("http://{addr}/?q=1")],
+        session_check: Some(marker.to_string()),
+        skip_xss_scanning: true,
+        skip_discovery: true,
+        skip_mining: true,
+        output: Some(path.clone()),
+        ..default_scan_args()
+    };
+    let outcome = super::run_scan(&args).await;
+    server.abort();
+
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("report written"))
+            .expect("valid JSON");
+    let _ = std::fs::remove_file(path);
+    assert_eq!(
+        outcome,
+        ScanOutcome::Clean,
+        "the check marker is present on the full response, outside the preflight Range sample"
+    );
+    assert_eq!(report["meta"]["incomplete"], false);
+    assert_eq!(report["meta"]["target_summary"][0]["status"], "clean");
 }
 
 /// `--dry-run` (and the REST / MCP preflight, which runs as one) promises not
@@ -3059,6 +3241,7 @@ fn stream_findings_end_of_scan_renders_what_the_printer_never_saw() {
 /// "a panic reads as a clean scan" class, for the whole-run code.
 #[tokio::test]
 async fn a_worker_panic_alongside_a_healthy_target_still_fails_the_run() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     // `/safe` never reflects, so the healthy target scans clean (0 findings)
     // and the run's report is empty — the escalation is not masked by a finding
     // elsewhere (which would correctly exit 1 instead). `/echo` reflects so the

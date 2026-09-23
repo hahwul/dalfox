@@ -418,7 +418,7 @@ impl RequestTally {
     /// signal. Requiring a floor on the absolute count too keeps the flag
     /// meaningful on short runs while still catching a small run that lost
     /// nearly everything (5 sent, 5 failed is 5 failures, not noise).
-    fn is_incomplete(&self) -> bool {
+    pub(crate) fn is_incomplete(&self) -> bool {
         self.failed >= INCOMPLETE_MIN_FAILURES && self.failure_ratio() >= INCOMPLETE_FAILURE_RATIO
     }
 }
@@ -900,6 +900,7 @@ pub(crate) async fn derive_outcome(
     all_target_urls: &[String],
     state: &ScanState,
     final_results: &[Result],
+    requests: RequestTally,
     output_write_failed: bool,
 ) -> ScanOutcome {
     // A scan where every supplied target failed reachability checks
@@ -964,6 +965,13 @@ pub(crate) async fn derive_outcome(
     // didn't get them. Report it via the exit code so scripts don't read it as a
     // clean/successful pass.
     if output_write_failed {
+        return ScanOutcome::Error;
+    }
+
+    // The result envelope already marks severe transport loss as incomplete.
+    // Keep the CLI exit status consistent: with no finding, a run that failed
+    // to deliver enough requests did not establish a clean result.
+    if final_results.is_empty() && requests.is_incomplete() {
         return ScanOutcome::Error;
     }
 

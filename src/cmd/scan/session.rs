@@ -81,12 +81,21 @@ pub(crate) struct SessionBaseline {
     /// login-form signal over this many bytes of the probe body so both sides
     /// look at the same region.
     pub(crate) body_len: usize,
+    /// Whether the response sample reached the end of the representation.
+    /// Range responses and body-cap truncation cannot prove a configured
+    /// marker is absent.
+    pub(crate) body_complete: bool,
     /// Whether `--session-check` matched the baseline. `None` when the flag
     /// wasn't given. `Some(false)` means the marker is wrong or on a different
     /// page — every later probe would report a loss, so this is caught up front
     /// (see [`baseline_warning`]) instead of aborting the scan at the first
     /// probe.
     pub(crate) check_marker_present: Option<bool>,
+    /// Byte offset where the `--session-check` match ended in the baseline
+    /// body. Lets [`classify`] judge a partial probe: a sample that already
+    /// runs well past where the marker used to be and still lacks it is a
+    /// changed page, not a cut-off one.
+    pub(crate) check_marker_end: Option<usize>,
     /// When this baseline was captured, for [`PRE_DISPATCH_MIN_AGE_SECS`].
     ///
     /// (There is deliberately no "came from `--session-check-url`" flag. A
@@ -104,6 +113,7 @@ pub(crate) struct SessionProbe {
     pub(crate) status: u16,
     pub(crate) landing: String,
     pub(crate) body: String,
+    pub(crate) body_complete: bool,
 }
 
 /// Verdict from comparing a [`SessionProbe`] against its [`SessionBaseline`].
@@ -180,7 +190,14 @@ pub(crate) fn baseline_from_preflight(
         landing: resolve_landing(request_url, Some(final_url), status, headers),
         has_login_form: has_login_form(body),
         body_len: body.len(),
+        body_complete: response_body_complete(
+            status,
+            headers,
+            body.len(),
+            crate::utils::http::MAX_RESPONSE_BODY_BYTES,
+        ),
         check_marker_present: check_re.map(|re| re.is_match(body)),
+        check_marker_end: check_re.and_then(|re| re.find(body)).map(|m| m.end()),
         captured_at: Instant::now(),
     }
 }
@@ -208,7 +225,11 @@ pub(crate) async fn baseline_from_check_url(
         landing: probe.landing,
         has_login_form: has_login_form(&probe.body),
         body_len: probe.body.len(),
+        body_complete: probe.body_complete,
         check_marker_present: check_re.map(|re| re.is_match(&probe.body)),
+        check_marker_end: check_re
+            .and_then(|re| re.find(&probe.body))
+            .map(|m| m.end()),
         captured_at: Instant::now(),
     })
 }
@@ -232,7 +253,7 @@ pub(crate) async fn baseline_from_check_url(
 /// The caller records this as `SESSION_LOST` rather than only logging it, so
 /// the structured output and exit code agree with the warning.
 pub(crate) fn baseline_warning(baseline: &SessionBaseline) -> Option<String> {
-    if baseline.check_marker_present == Some(false) {
+    if baseline.body_complete && baseline.check_marker_present == Some(false) {
         return Some(format!(
             "--session-check pattern did not match the baseline response (HTTP {}, {} bytes from {}) — the marker is wrong, is on a different page, or the credentials are already invalid",
             baseline.status, baseline.body_len, baseline.landing
@@ -323,10 +344,12 @@ pub(crate) async fn probe_session(
     let body = crate::utils::http::read_body_capped(resp, PROBE_BODY_CAP_BYTES)
         .await
         .unwrap_or_default();
+    let body_complete = response_body_complete(status, &headers, body.len(), PROBE_BODY_CAP_BYTES);
     Some(SessionProbe {
         status,
         landing: resolve_landing(&probe_url, Some(&final_url), status, &headers),
         body,
+        body_complete,
     })
 }
 
@@ -353,9 +376,11 @@ fn resolve_landing(
 
 /// Compare a probe against its baseline.
 ///
-/// `check_re` (`--session-check`) is authoritative when present: the operator
-/// told us exactly what an authenticated response looks like, so nothing is
-/// inferred on top of it. Otherwise three signals are consulted, each chosen
+/// `check_re` (`--session-check`) is authoritative when present and the probe
+/// body is complete: the operator told us exactly what an authenticated
+/// response looks like, so nothing is inferred on top of it. When the marker is
+/// absent from a partial body, or no marker was given, three signals are
+/// consulted, each chosen
 /// because it is hard to trip accidentally on a normal page:
 ///
 /// 1. the status moved into 401/403 from something else,
@@ -381,15 +406,31 @@ pub(crate) fn classify(
     waf_detected: bool,
 ) -> SessionState {
     if let Some(re) = check_re {
-        return if re.is_match(&probe.body) {
-            SessionState::Alive
-        } else {
-            SessionState::Lost(format!(
+        if re.is_match(&probe.body) {
+            return SessionState::Alive;
+        }
+        // A partial sample still answers the question when it covers the
+        // marker's baseline position with room to spare (2x absorbs dynamic
+        // content ahead of it). That is the logout serving a large login page
+        // as a 200: nothing else below would see it once the login form sits
+        // past the baseline's byte budget. A 206 is excluded because its
+        // sample need not start at byte zero.
+        let covers_marker_position = probe.status != 206
+            && baseline
+                .check_marker_end
+                .is_some_and(|end| probe.body.len() >= end.saturating_mul(2));
+        if probe.body_complete || covers_marker_position {
+            return SessionState::Lost(format!(
                 "--session-check pattern /{}/ no longer matches the response body (HTTP {})",
                 re.as_str(),
                 probe.status
-            ))
-        };
+            ));
+        }
+        // The marker is absent from a partial sample (a 206, or a body cut at
+        // the probe cap). Its absence proves nothing on its own — it may sit
+        // past the cut — but it does not prove the session alive either: a
+        // logout that serves a large login page lands here too. Fall through
+        // to the status / landing / login-form signals below.
     }
 
     let status_flipped = probe.status != baseline.status;
@@ -440,6 +481,47 @@ pub(crate) fn classify(
     }
 
     SessionState::Alive
+}
+
+/// Whether a capped response sample covers the complete representation.
+/// Ordinary responses are complete when the cap was not reached; a 206 is
+/// complete only when its byte range begins at zero and includes the full
+/// representation. Malformed or absent Content-Range metadata stays unknown.
+fn response_body_complete(
+    status: u16,
+    headers: &reqwest::header::HeaderMap,
+    body_len: usize,
+    cap: usize,
+) -> bool {
+    if status == reqwest::StatusCode::PARTIAL_CONTENT.as_u16() {
+        let Some(value) = headers
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+        else {
+            return false;
+        };
+        let Some(range) = value.strip_prefix("bytes ") else {
+            return false;
+        };
+        let Some((span, total)) = range.split_once('/') else {
+            return false;
+        };
+        let Some((start, end)) = span.split_once('-') else {
+            return false;
+        };
+        let (Ok(start), Ok(end), Ok(total)) = (
+            start.parse::<u64>(),
+            end.parse::<u64>(),
+            total.parse::<u64>(),
+        ) else {
+            return false;
+        };
+        return start == 0
+            && end < total
+            && end.saturating_add(1) >= total
+            && body_len as u64 > end;
+    }
+    body_len < cap
 }
 
 /// The longest prefix of `s` that is at most `n` bytes and ends on a `char`

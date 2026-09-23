@@ -8,7 +8,9 @@ fn baseline(status: u16, landing: &str, has_login_form: bool) -> SessionBaseline
         landing: landing.to_string(),
         has_login_form,
         body_len: 8192,
+        body_complete: true,
         check_marker_present: None,
+        check_marker_end: None,
         captured_at: Instant::now(),
     }
 }
@@ -18,6 +20,7 @@ fn probe(status: u16, landing: &str, body: &str) -> SessionProbe {
         status,
         landing: landing.to_string(),
         body: body.to_string(),
+        body_complete: true,
     }
 }
 
@@ -369,6 +372,138 @@ fn a_session_check_marker_missing_from_the_baseline_is_flagged_up_front() {
 
     b.check_marker_present = Some(true);
     assert!(baseline_warning(&b).is_none());
+}
+
+#[test]
+fn an_absent_marker_in_a_partial_preflight_body_is_not_a_lost_session() {
+    let request = url::Url::parse("https://app.test/dashboard").unwrap();
+    let headers = reqwest::header::HeaderMap::new();
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let sampled_body = "x".repeat(crate::cmd::scan::preflight::PREFLIGHT_BODY_BYTES);
+    let b = baseline_from_preflight(
+        &request,
+        &request,
+        206,
+        &headers,
+        &sampled_body,
+        Some(&check_re),
+    );
+
+    assert_eq!(b.check_marker_present, Some(false));
+    assert!(!b.body_complete);
+    assert!(
+        baseline_warning(&b).is_none(),
+        "a 206 preflight only sampled the first 8192 bytes; a missing marker there is not proof that credentials are invalid"
+    );
+}
+
+#[test]
+fn an_absent_marker_in_a_partial_probe_is_not_a_lost_session() {
+    let mut b = baseline(200, "https://app.test/dashboard", false);
+    b.check_marker_present = Some(true);
+    b.check_marker_end = Some(20);
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let mut p = probe(206, "https://app.test/dashboard", "partial response");
+    p.body_complete = false;
+
+    assert_eq!(
+        classify(&b, &p, Some(&check_re), false),
+        SessionState::Alive
+    );
+
+    p.body_complete = true;
+    assert!(matches!(
+        classify(&b, &p, Some(&check_re), false),
+        SessionState::Lost(_)
+    ));
+}
+
+/// An authenticated page larger than the probe cap with its marker past the
+/// cut: the sample is partial and nothing else changed, so it stays alive.
+#[test]
+fn a_marker_past_the_probe_cap_on_an_unchanged_page_is_alive() {
+    let mut b = baseline(200, "https://app.test/dashboard", false);
+    b.check_marker_present = Some(true);
+    b.check_marker_end = Some(PROBE_BODY_CAP_BYTES + 100);
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let mut p = probe(
+        200,
+        "https://app.test/dashboard",
+        &"x".repeat(PROBE_BODY_CAP_BYTES),
+    );
+    p.body_complete = false;
+
+    assert_eq!(
+        classify(&b, &p, Some(&check_re), false),
+        SessionState::Alive
+    );
+}
+
+/// ~84 KB login page on logout, capped at the probe budget, so the sample is
+/// partial. The login form sits past the baseline byte budget, so only the
+/// marker position can tell. Before the fix a partial sample returned Alive.
+fn big_login_page() -> String {
+    let mut body = "<html><body>".to_string();
+    body.push_str(&"<p>welcome back, please sign in</p>".repeat(1200));
+    body.push_str("<form><input type=\"password\" name=\"pw\"></form></body></html>");
+    assert!(body.len() > 40_000);
+    body
+}
+
+fn capped_probe(status: u16, landing: &str) -> SessionProbe {
+    let full = big_login_page();
+    let mut body = full.clone();
+    body.push_str(&"y".repeat(PROBE_BODY_CAP_BYTES));
+    body.truncate(PROBE_BODY_CAP_BYTES);
+    SessionProbe {
+        status,
+        landing: landing.to_string(),
+        body,
+        body_complete: false,
+    }
+}
+
+#[test]
+fn a_large_login_page_served_as_200_is_a_lost_session() {
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let request = url::Url::parse("https://app.test/dashboard").unwrap();
+    let b = baseline_from_preflight(
+        &request,
+        &request,
+        200,
+        &reqwest::header::HeaderMap::new(),
+        "<html><body>hi <span>signed-in-marker</span></body></html>",
+        Some(&check_re),
+    );
+    let p = capped_probe(200, "https://app.test/dashboard");
+
+    assert!(
+        lost_reason(&classify(&b, &p, Some(&check_re), false)).contains("session-check"),
+        "a partial sample far past the marker's baseline position is a real miss"
+    );
+}
+
+#[test]
+fn a_large_login_page_served_as_401_is_a_lost_session() {
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let mut b = baseline(200, "https://app.test/dashboard", false);
+    b.check_marker_present = Some(true);
+    // Marker position unknown or beyond reach: only the status can tell.
+    b.check_marker_end = Some(PROBE_BODY_CAP_BYTES);
+    let p = capped_probe(401, "https://app.test/dashboard");
+
+    assert!(lost_reason(&classify(&b, &p, Some(&check_re), false)).contains("401"));
+}
+
+#[test]
+fn a_redirect_to_login_with_a_partial_body_is_a_lost_session() {
+    let check_re = regex::Regex::new("signed-in-marker").unwrap();
+    let mut b = baseline(200, "https://app.test/dashboard", false);
+    b.check_marker_present = Some(true);
+    b.check_marker_end = Some(PROBE_BODY_CAP_BYTES);
+    let p = capped_probe(200, "https://app.test/login");
+
+    assert!(lost_reason(&classify(&b, &p, Some(&check_re), false)).contains("login URL"));
 }
 
 #[test]

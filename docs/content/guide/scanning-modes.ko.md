@@ -119,10 +119,10 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 | 기록된 상태 | 언제 | 다음 실행 |
 |------------|------|----------|
 | `completed` | 세션이 살아 있는 상태로 끝까지 스캔됨 | 건너뜀 |
-| `cancelled` | Ctrl-C, `--scan-timeout` 만료, 스캔 도중 세션 끊김 | 재시도 |
+| `cancelled` | Ctrl-C, `--scan-timeout` 만료, 스캔 도중 세션 끊김, 심각한 전송 손실(`meta.incomplete`) | 재시도 |
 | `error` | 프리플라이트에서 제외됨 — 도달 불가, content-type 불일치, `--max-targets-per-host` 상한 | 재시도 |
 
-대상의 식별자는 URL + 메서드로, `--dedup-urls exact`가 쓰는 키와 같습니다. 그래서 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라, URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
+대상의 식별자는 URL, 메서드, 그리고 요청에 실리는 데이터(본문, 헤더, 쿠키, user-agent)의 해시입니다. raw HTTP·HAR 입력에 캡처된 값뿐 아니라 `-H`, `--cookies`, `--user-agent`로 준 값도 포함되므로, 캡처가 바뀌거나 자격 증명이 교체되면 다시 스캔합니다. 파일에는 해시만 저장되고 값 자체는 기록되지 않습니다. 같은 플래그로 실행하면 식별자도 같으므로, 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라 URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
 
 **설정이 바뀌면 처음부터 다시 시작합니다.** 파일 헤더에는 스캔에 영향을 주는 설정의 해시가 들어 있습니다. 해시가 맞지 않으면 기록된 대상들은 이번 실행과 다른 설정에서 검사된 것이므로, Dalfox는 기존 파일을 `scan.state.bak`으로 옮기고 새 파일로 시작한 뒤 전부 다시 스캔합니다:
 

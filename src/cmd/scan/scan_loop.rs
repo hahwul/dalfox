@@ -491,11 +491,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
             // `cancelled`, not `completed`: this target was never
             // tested, so a later run must pick it up again.
             if let Some(sf) = &state_file_group {
-                sf.record(
-                    target.url.as_str(),
-                    &target.method,
-                    super::state_file::TargetOutcome::Cancelled,
-                );
+                sf.record(&target, super::state_file::TargetOutcome::Cancelled);
             }
             drop(permit);
             continue;
@@ -535,11 +531,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                             crate::cmd::error_codes::SESSION_LOST,
                         );
                         if let Some(sf) = &state_file_target {
-                            sf.record(
-                                target.url.as_str(),
-                                &target.method,
-                                super::state_file::TargetOutcome::Cancelled,
-                            );
+                            sf.record(&target, super::state_file::TargetOutcome::Cancelled);
                         }
                         drop(permit);
                         return;
@@ -683,7 +675,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                         } else {
                             super::state_file::TargetOutcome::Completed
                         };
-                        sf.record(target.url.as_str(), &target.method, outcome);
+                        sf.record(&target, outcome);
                     }
                 } else if let Some(sf) = &state_file_target {
                     // `--skip-xss-scanning`: the injection stage is off, but
@@ -693,11 +685,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     // of redoing every target while looking resumable. Safe
                     // because `skip_xss_scanning` is part of the config hash:
                     // a later run that does scan does not reuse these.
-                    sf.record(
-                        target.url.as_str(),
-                        &target.method,
-                        super::state_file::TargetOutcome::Completed,
-                    );
+                    sf.record(&target, super::state_file::TargetOutcome::Completed);
                 }
                 drop(permit);
             });

@@ -39,6 +39,20 @@ fn args_with(path: &std::path::Path) -> ScanArgs {
     }
 }
 
+fn test_target(url: &str, method: &str) -> crate::target_parser::Target {
+    let mut target = crate::target_parser::Target::for_url(url::Url::parse(url).unwrap());
+    target.method = method.to_string();
+    target
+}
+
+fn record(sf: &StateFile, url: &str, method: &str, outcome: TargetOutcome) {
+    sf.record(&test_target(url, method), outcome);
+}
+
+fn is_completed(sf: &StateFile, url: &str, method: &str) -> bool {
+    sf.is_completed(&test_target(url, method))
+}
+
 #[test]
 fn new_file_gets_a_header_and_no_completions() {
     let path = scratch("new");
@@ -64,18 +78,52 @@ fn completed_targets_are_skipped_on_the_next_run() {
 
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://a.test/?q=1", "GET", TargetOutcome::Completed);
-        sf.record("https://b.test/?q=1", "POST", TargetOutcome::Completed);
+        record(&sf, "https://a.test/?q=1", "GET", TargetOutcome::Completed);
+        record(&sf, "https://b.test/?q=1", "POST", TargetOutcome::Completed);
     }
 
     let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
     assert_eq!(sf.completed_count(), 2);
-    assert!(sf.is_completed("https://a.test/?q=1", "GET"));
-    assert!(sf.is_completed("https://b.test/?q=1", "POST"));
+    assert!(is_completed(&sf, "https://a.test/?q=1", "GET"));
+    assert!(is_completed(&sf, "https://b.test/?q=1", "POST"));
     // The method is part of the identity: the same URL under another method is
     // a different target and must still be scanned.
-    assert!(!sf.is_completed("https://a.test/?q=1", "POST"));
-    assert!(!sf.is_completed("https://c.test/?q=1", "GET"));
+    assert!(!is_completed(&sf, "https://a.test/?q=1", "POST"));
+    assert!(!is_completed(&sf, "https://c.test/?q=1", "GET"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn changed_raw_http_request_body_is_not_skipped_as_completed() {
+    let path = scratch("raw-http-body");
+    let first = crate::target_parser::parse_raw_http_request(
+        "POST http://example.test/submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nold=1",
+    )
+    .expect("parse first capture");
+    let changed = crate::target_parser::parse_raw_http_request(
+        "POST http://example.test/submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nnew=1",
+    )
+    .expect("parse changed capture");
+    assert_eq!(first.url, changed.url);
+    assert_eq!(first.method, changed.method);
+    assert_ne!(first.data, changed.data);
+
+    let args = args_with(&path);
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.record(&first, TargetOutcome::Completed);
+    }
+    assert!(
+        !read(&path).contains("old=1"),
+        "the state file must fingerprint raw request data without persisting its contents"
+    );
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(
+        !sf.is_completed(&changed),
+        "a captured request with a different body can test different parameters and must not reuse the prior completion"
+    );
 
     let _ = std::fs::remove_file(&path);
 }
@@ -90,16 +138,94 @@ fn cancelled_and_error_targets_are_retried() {
 
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://a.test/", "GET", TargetOutcome::Cancelled);
-        sf.record("https://b.test/", "GET", TargetOutcome::Error);
-        sf.record("https://c.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Cancelled);
+        record(&sf, "https://b.test/", "GET", TargetOutcome::Error);
+        record(&sf, "https://c.test/", "GET", TargetOutcome::Completed);
     }
 
     let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
     assert_eq!(sf.completed_count(), 1);
-    assert!(!sf.is_completed("https://a.test/", "GET"));
-    assert!(!sf.is_completed("https://b.test/", "GET"));
-    assert!(sf.is_completed("https://c.test/", "GET"));
+    assert!(!is_completed(&sf, "https://a.test/", "GET"));
+    assert!(!is_completed(&sf, "https://b.test/", "GET"));
+    assert!(is_completed(&sf, "https://c.test/", "GET"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn the_last_recorded_outcome_controls_resume() {
+    let path = scratch("latest-outcome");
+    let args = args_with(&path);
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Cancelled);
+    }
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(
+        !is_completed(&sf, "https://a.test/", "GET"),
+        "a later cancelled/error record means the most recent attempt has unknown coverage"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// A retried target whose previous line was `cancelled` completes, then the
+// run-wide transport-loss check downgrades it again. The dedup must compare
+// against the `completed` line this run just wrote, not the `cancelled` one it
+// loaded — otherwise the downgrade is dropped as a duplicate and the next run
+// skips a target whose coverage is unknown.
+#[test]
+fn a_downgrade_after_this_runs_completion_is_not_deduped_against_the_loaded_outcome() {
+    let path = scratch("downgrade-after-retry");
+    let args = args_with(&path);
+    let target = test_target("https://a.test/", "GET");
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.record(&target, TargetOutcome::Cancelled);
+    }
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+        sf.record(&target, TargetOutcome::Completed);
+        sf.downgrade_completed(target_identity(&target));
+    }
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(
+        !sf.is_completed(&target),
+        "the downgrade must land after this run's completion: {}",
+        read(&path)
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// The downgrade only rewrites a `completed` record. A target that is down on
+// every run records `error`; re-labelling it `cancelled` each time would
+// alternate two lines per run forever.
+#[test]
+fn a_downgrade_leaves_retryable_outcomes_alone() {
+    let path = scratch("downgrade-bounded");
+    let args = args_with(&path);
+    let down = test_target("https://down.test/", "GET");
+    let never = test_target("https://never.test/", "GET");
+
+    for _ in 0..4 {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.record(&down, TargetOutcome::Error);
+        sf.downgrade_completed(target_identity(&down));
+        // Nothing on record at all: nothing to downgrade either.
+        sf.downgrade_completed(target_identity(&never));
+    }
+
+    let contents = read(&path);
+    assert_eq!(
+        contents.lines().count(),
+        2,
+        "header + one `error` line, not one or two per run: {contents}"
+    );
+    assert!(!contents.contains("cancelled"), "{contents}");
 
     let _ = std::fs::remove_file(&path);
 }
@@ -114,7 +240,7 @@ fn a_torn_final_line_is_skipped_and_earlier_records_survive() {
 
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://a.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
     }
     {
         use std::io::Write;
@@ -127,7 +253,7 @@ fn a_torn_final_line_is_skipped_and_earlier_records_survive() {
 
     let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
     assert_eq!(sf.corrupt_lines, 1);
-    assert!(sf.is_completed("https://a.test/", "GET"));
+    assert!(is_completed(&sf, "https://a.test/", "GET"));
     assert!(sf.reset_reason.is_none(), "a torn tail is not a reset");
 
     let _ = std::fs::remove_file(&path);
@@ -143,7 +269,7 @@ fn a_changed_configuration_resets_the_file() {
 
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://a.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
     }
 
     let changed = ScanArgs {
@@ -209,14 +335,14 @@ fn a_read_only_open_never_touches_the_file() {
     let args = args_with(&path);
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://a.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
     }
     let before = read(&path);
 
     // Same configuration: completions are still visible to the preview.
     let sf = StateFile::open_read_only(path.to_str().unwrap(), &args).expect("opens read-only");
-    assert!(sf.is_completed("https://a.test/", "GET"));
-    sf.record("https://b.test/", "GET", TargetOutcome::Completed);
+    assert!(is_completed(&sf, "https://a.test/", "GET"));
+    record(&sf, "https://b.test/", "GET", TargetOutcome::Completed);
     drop(sf);
     assert_eq!(read(&path), before, "a preview may not write records");
 
@@ -246,8 +372,8 @@ fn a_repeated_outcome_is_not_appended_again() {
 
     for _ in 0..5 {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://down.test/", "GET", TargetOutcome::Error);
-        sf.record("https://slow.test/", "GET", TargetOutcome::Cancelled);
+        record(&sf, "https://down.test/", "GET", TargetOutcome::Error);
+        record(&sf, "https://slow.test/", "GET", TargetOutcome::Cancelled);
     }
 
     let contents = read(&path);
@@ -261,11 +387,11 @@ fn a_repeated_outcome_is_not_appended_again() {
     // never learn that a retried target finally completed.
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://slow.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://slow.test/", "GET", TargetOutcome::Completed);
     }
     let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
-    assert!(sf.is_completed("https://slow.test/", "GET"));
-    assert!(!sf.is_completed("https://down.test/", "GET"));
+    assert!(is_completed(&sf, "https://slow.test/", "GET"));
+    assert!(!is_completed(&sf, "https://down.test/", "GET"));
 
     let _ = std::fs::remove_file(&path);
 }
@@ -420,11 +546,11 @@ fn records_from_later_runs_are_appended_to_the_same_file() {
 
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
-        sf.record("https://a.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
     }
     {
         let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
-        sf.record("https://b.test/", "GET", TargetOutcome::Completed);
+        record(&sf, "https://b.test/", "GET", TargetOutcome::Completed);
     }
 
     let contents = read(&path);
