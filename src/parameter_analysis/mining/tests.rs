@@ -125,6 +125,24 @@ fn test_detect_injection_context_script_backtick_wins_over_earlier_quote() {
     );
 }
 
+/// A quote inside a template literal is template text: the enclosing
+/// delimiter is the backtick, so `${…}` is the breakout that gets sent. The
+/// closest-quote guess picked SingleQuote and the finding stayed R.
+#[test]
+fn test_detect_injection_context_quote_inside_template_literal() {
+    let marker = crate::scanning::markers::open_marker();
+    let handler = format!("<button onclick=\"foo(`a '{}' b`)\">x</button>", marker);
+    assert_eq!(
+        detect_injection_context(&handler),
+        InjectionContext::Javascript(Some(DelimiterType::Backtick))
+    );
+    let script = format!("<script>var s = `a \"{}\" b`;</script>", marker);
+    assert_eq!(
+        detect_injection_context(&script),
+        InjectionContext::Javascript(Some(DelimiterType::Backtick))
+    );
+}
+
 #[test]
 fn test_detect_injection_context_script_unquoted_with_document_quotes() {
     // When marker is in an unquoted JS expression, but the surrounding HTML

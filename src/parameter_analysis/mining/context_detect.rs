@@ -119,15 +119,28 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
     // Parse HTML and locate marker via element text/attributes/script
     let document = crate::utils::html::parse_document_bounded(text);
 
-    // Heuristic to infer surrounding quote delimiter around the first marker.
-    // Picks the *closest* opening quote before the marker (the one that
-    // actually contains it). Includes backtick template literals so a marker
-    // reflected inside `` `…` `` is reported as Backtick rather than falling
-    // back to None — the breakout payload (`${…}`) is different from `'/`"`.
+    // Infer the quote delimiter around the first marker in JS source. The
+    // string/template literal actually enclosing the marker comes from a
+    // lexical scan (`enclosing_js_quote`): in `` foo(`a 'MARKER' b`) `` the
+    // `'` is template text and the delimiter is the backtick, whose breakout
+    // (`${…}`) differs from `'`/`"`'s. When the scan finds no enclosing
+    // string, fall back to the *closest* opening quote before the marker.
+    // Includes backtick template literals so a marker reflected inside
+    // `` `…` `` is reported as Backtick rather than falling back to None.
     fn infer_quote_delimiter(text: &str, marker: &str) -> Option<DelimiterType> {
         let pos = text.find(marker)?;
         let before = &text[..pos];
         let after = &text[pos + marker.len()..];
+
+        if let Some(q) = crate::payload::js_breakout::enclosing_js_quote(before)
+            && after.contains(q)
+        {
+            return Some(match q {
+                '\'' => DelimiterType::SingleQuote,
+                '"' => DelimiterType::DoubleQuote,
+                _ => DelimiterType::Backtick,
+            });
+        }
 
         let candidates: [(char, DelimiterType); 3] = [
             ('"', DelimiterType::DoubleQuote),
