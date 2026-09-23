@@ -3231,6 +3231,52 @@ fn stream_findings_end_of_scan_renders_what_the_printer_never_saw() {
     );
 }
 
+/// One page-level DOM sink is re-found by every parameter's AST pass (and by the
+/// initial pass), each copy carrying its own `param`. The final report folds them
+/// into one finding; the streamer must fold them the same way, or it prints one
+/// block per parameter live and the folded survivor once more at the end.
+#[test]
+fn stream_findings_folds_ast_duplicates_like_the_final_report() {
+    let evidence = "http://t/dom:1:16 - DOM-based XSS via location.hash to document.write (Source: location.hash, Sink: document.write)";
+    let make = |ty: FindingType, param: &str, msg: &str| {
+        ScanResult::builder(ty)
+            .inject_type("DOM-XSS")
+            .method("GET")
+            .data("http://t/dom#%3Cimg%3E")
+            .param(param)
+            .payload("#<img>")
+            .evidence(evidence)
+            .cwe("CWE-79")
+            .severity("Medium")
+            .message_id(0)
+            .message_str(msg)
+            .build()
+    };
+    let initial = make(FindingType::AstDetected, "hash", "initial pass");
+    let from_a = make(FindingType::AstDetected, "a", "param a");
+    let from_b = make(FindingType::AstDetected, "b", "param b");
+
+    // The printer inserts each streamed finding's key and skips repeats.
+    let mut seen = std::collections::HashSet::new();
+    assert!(seen.insert(super::output::stream_key(&from_a)));
+    assert!(
+        !seen.insert(super::output::stream_key(&from_b)),
+        "a second parameter's copy of the same AST finding must not print again"
+    );
+
+    let final_results = dedupe_ast_results(vec![initial, from_a, from_b]);
+    assert_eq!(final_results.len(), 1);
+    let args = default_scan_args();
+    let out = super::output::render_plain_finding_blocks(&args, &final_results, Some(&seen));
+    assert!(out.is_empty(), "survivor was already streamed: {out}");
+
+    // A stronger survivor than what was streamed is still shown at the end.
+    let upgraded = make(FindingType::Verified, "a", "verified");
+    let final_results = dedupe_ast_results(vec![make(FindingType::AstDetected, "a", "m"), upgraded]);
+    let out = super::output::render_plain_finding_blocks(&args, &final_results, Some(&seen));
+    assert!(out.contains("[POC][V]"), "{out}");
+}
+
 /// The aggregate exit code must also escalate: a panicked-but-empty target
 /// alongside a healthy sibling used to fall through to Clean (exit 0), because
 /// `all_unreachable` only fires when *every* target is skipped. That is the

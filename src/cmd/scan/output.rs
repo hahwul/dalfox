@@ -469,7 +469,18 @@ pub(crate) fn render_plain_finding_blocks(
 
 /// Identity the `--stream-findings` printer dedups on and records, so the
 /// end-of-scan renderer can tell which findings it already printed.
+///
+/// AST findings use the same fingerprint as [`super::postprocess::dedupe_ast_results`]
+/// (plus the type): one page-level sink is re-found by every parameter's AST
+/// pass with that parameter's name on it, and the final report folds those
+/// into a single finding. Keying them by `param` printed one block per
+/// parameter live and then the folded survivor a further time at the end. The
+/// type stays in the key so a stronger survivor (an `A` upgraded to `V`) is
+/// still shown at the end.
 pub(crate) fn stream_key(result: &Result) -> String {
+    if let Some(ast_key) = super::postprocess::ast_dedup_key(result) {
+        return format!("{}|ast|{}", result.result_type.short(), ast_key);
+    }
     format!(
         "{}|{}|{}|{}",
         result.result_type.short(),

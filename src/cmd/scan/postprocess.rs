@@ -40,6 +40,20 @@ fn result_priority(result: &Result) -> u8 {
     type_score * 10 + severity_score
 }
 
+/// Evidence-centric fingerprint [`dedupe_ast_results`] collapses AST findings
+/// on, so duplicates across stages (initial pass, and once per parameter in the
+/// scan loop) fold into one. `None` for non-AST findings, which are never
+/// merged. Shared with the `--stream-findings` printer so the live output folds
+/// the same duplicates the final report does.
+pub(crate) fn ast_dedup_key(result: &Result) -> Option<String> {
+    (result.message_id == 0).then(|| {
+        format!(
+            "{}|{}|{}",
+            result.inject_type, result.method, result.evidence
+        )
+    })
+}
+
 // AST findings can be produced in multiple scan stages (preflight/probe/reflection loop).
 // Keep one strongest result per equivalent AST fingerprint to reduce duplicate noise.
 pub(crate) fn dedupe_ast_results(results: Vec<Result>) -> Vec<Result> {
@@ -47,17 +61,10 @@ pub(crate) fn dedupe_ast_results(results: Vec<Result>) -> Vec<Result> {
     let mut ast_index_by_key: HashMap<String, usize> = HashMap::new();
 
     for result in results {
-        if result.message_id != 0 {
+        let Some(key) = ast_dedup_key(&result) else {
             out.push(result);
             continue;
-        }
-
-        // Use evidence-centric fingerprint so duplicates across stages
-        // (preflight/probe/reflection loop) collapse into one.
-        let key = format!(
-            "{}|{}|{}",
-            result.inject_type, result.method, result.evidence
-        );
+        };
 
         if let Some(existing_idx) = ast_index_by_key.get(&key).copied() {
             if result_priority(&result) > result_priority(&out[existing_idx]) {
