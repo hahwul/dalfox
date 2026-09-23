@@ -445,6 +445,96 @@ fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
 }
 
 #[test]
+fn test_get_dom_payloads_javascript_context_carries_string_breakouts() {
+    use crate::parameter_analysis::DelimiterType;
+    let args = default_scan_args();
+    for (delim, wants) in [
+        (
+            DelimiterType::SingleQuote,
+            &[
+                "'-alert(1)-'",
+                "'+alert(1)+'",
+                "'*alert(1)*'",
+                "');alert(1)//",
+                "':alert(1),'",
+            ][..],
+        ),
+        (
+            DelimiterType::DoubleQuote,
+            &[
+                "\"-alert(1)-\"",
+                "\"+alert(1)+\"",
+                "\"*alert(1)*\"",
+                "\");alert(1)//",
+                "\":alert(1),\"",
+            ][..],
+        ),
+        (DelimiterType::Backtick, &["${alert(1)}"][..]),
+    ] {
+        let param = Param {
+            injection_context: Some(InjectionContext::Javascript(Some(delim))),
+            ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
+        };
+        let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
+        for want in wants {
+            assert!(
+                payloads.iter().any(|p| p == want),
+                "JS context must carry the `{want}` string breakout"
+            );
+        }
+        // The expression breakouts come before the `</script>` tag breakouts,
+        // and the whole catalog stays far below the per-param safety cap.
+        let first_tag = payloads.iter().position(|p| p.contains("</script>"));
+        let last_expr = payloads.iter().rposition(|p| wants.contains(&p.as_str()));
+        assert!(last_expr < first_tag, "expression breakouts must lead");
+        assert!(payloads.len() < crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP / 2);
+    }
+}
+
+#[test]
+fn test_get_dom_payloads_javascript_string_breakouts_are_raw_and_bounded_ahead_of_tags() {
+    use crate::parameter_analysis::DelimiterType;
+    let args = default_scan_args();
+    let expression = get_js_expression_breakout_payloads(Some(&DelimiterType::DoubleQuote));
+    let dom = |escaped: Option<Vec<char>>| {
+        let param = Param {
+            injection_context: Some(InjectionContext::Javascript(Some(
+                DelimiterType::DoubleQuote,
+            ))),
+            escaped_specials: escaped,
+            ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
+        };
+        get_dom_payloads(&param, &args).expect("dom payload generation")
+    };
+
+    // Raw only: each string breakout is sent once, never through the encoders.
+    let payloads = dom(None);
+    for e in &expression {
+        assert_eq!(payloads.iter().filter(|p| *p == e).count(), 1, "`{e}`");
+    }
+    let tags =
+        crate::encoding::apply_encoders_to_payloads(&get_js_breakout_payloads(), &args.encoders);
+    assert_eq!(
+        payloads.len(),
+        get_jsonp_callback_payloads().len() + expression.len() + tags.len(),
+        "only the tag breakouts go through the encoders"
+    );
+
+    // A `</script>`-exploitable string must reach the tag breakouts after at
+    // most one form per joiner (the JSONP verifiers lead the whole list).
+    let jsonp = get_jsonp_callback_payloads().len();
+    let first_tag = payloads
+        .iter()
+        .position(|p| p.contains("</script>"))
+        .expect("tag breakouts present");
+    assert!(first_tag <= jsonp + 5, "tag breakouts start at {first_tag}");
+
+    // A JS-escaped delimiter quote defeats every raw-quote breakout.
+    let payloads = dom(Some(vec!['"']));
+    assert!(payloads[jsonp].contains("</script>"));
+}
+
+#[test]
 fn test_get_dom_payloads_html_context_includes_encoded_variants() {
     let param = Param {
         injection_context: Some(InjectionContext::Html(None)),
@@ -1327,6 +1417,123 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
         "V finding must carry a DomEvidenceKind label from classify_dom_evidence; got {:?}",
         labels
     );
+}
+
+/// A reflection inside a server `on*` handler's single-quoted JS argument.
+/// `/inert` JS-escapes then HTML-escapes the input, so nothing can close the
+/// string: no payload may verify (the inline-handler check used to accept a
+/// `</script><svg onload=alert(1)>` payload sitting inside the string).
+/// `/vuln` only HTML-escapes; the browser decodes `&#x27;` at attribute-parse
+/// time (xss-game L4), so a string breakout must verify — which needs the JS
+/// DOM catalog to carry `'-alert(1)-'`-style payloads, not only `</script>`
+/// tag breakouts that are inert in a handler.
+#[tokio::test]
+async fn test_run_scanning_inline_handler_string_reflection_verifies_only_real_breakout() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    fn html_escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#x27;")
+    }
+    async fn inert(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default();
+        let js = q.replace('\\', "\\\\").replace('\'', "\\'");
+        Html(format!(
+            "<img src=x onload=\"startTimer('{}')\">",
+            html_escape(&js)
+        ))
+    }
+    async fn vuln(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default();
+        Html(format!(
+            "<img src=x onload=\"startTimer('{}')\">",
+            html_escape(&q)
+        ))
+    }
+
+    // Vulnerable twins behind a filter that strips `-` (only the `+`/`*`/closer
+    // joiners survive), one with the reflection in an object-key position.
+    async fn nodash(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default().replace('-', "");
+        Html(format!(
+            "<img src=x onload=\"startTimer('{}')\">",
+            html_escape(&q)
+        ))
+    }
+    async fn objkey(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p.get("q").cloned().unwrap_or_default().replace('-', "");
+        Html(format!(
+            "<button onclick=\"go({{'{}':1}})\">x</button>",
+            html_escape(&q)
+        ))
+    }
+
+    let app = Router::new()
+        .route("/inert", get(inert))
+        .route("/vuln", get(vuln))
+        .route("/nodash", get(nodash))
+        .route("/objkey", get(objkey));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    for (path, expect_verified) in [
+        ("inert", false),
+        ("vuln", true),
+        ("nodash", true),
+        ("objkey", true),
+    ] {
+        let mut target = parse_target(&format!("http://{addr}/{path}?q=a")).expect("parse_target");
+        target.reflection_params.push(Param {
+            injection_context: Some(InjectionContext::Javascript(Some(
+                crate::parameter_analysis::DelimiterType::SingleQuote,
+            ))),
+            // What discovery records for both routes: the HTML-escaped
+            // characters come back encoded, so the reflection phase's adaptive
+            // payloads drop every quote-bearing breakout and only the DOM phase
+            // can verify.
+            invalid_specials: Some(vec!['\'', '"', '<', '>', '&']),
+            valid_specials: Some(vec!['(', ')', '-', '+', ';', '/', '=', '`']),
+            ..Param::new("q".to_string(), "a".to_string(), Location::Query)
+        });
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(integration_scan_args(false)),
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        let guard = results.lock().await;
+        let verified: Vec<_> = guard
+            .iter()
+            .filter(|r| matches!(r.result_type, FindingType::Verified))
+            .map(|r| r.payload.clone())
+            .collect();
+        if expect_verified {
+            assert!(
+                verified
+                    .iter()
+                    .any(|p| p.starts_with('\'') && !p.contains("</script>")),
+                "/{path}: a string breakout must verify; got {verified:?}"
+            );
+        } else {
+            assert!(
+                verified.is_empty(),
+                "/{path}: inert reflection verified: {verified:?}"
+            );
+        }
+    }
 }
 
 /// Issue #1156 — a self-/canonical-link-style echo that reflects every payload

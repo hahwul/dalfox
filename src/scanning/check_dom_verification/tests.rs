@@ -1385,6 +1385,42 @@ fn test_inline_handler_breakout_ignores_unrelated_alert_in_handler() {
 }
 
 #[test]
+fn test_inline_handler_breakout_ignores_payload_inside_js_string() {
+    // The server JS-escapes and HTML-escapes the input into a single-quoted
+    // argument: after attribute decoding the handler is
+    // `startTimer('</script><svg onload=alert(1) class=x>')` — the payload
+    // (and its `alert(`) is inert string content. Previously reported [V].
+    let payload = "</script><svg onload=alert(1) class=dlx0000>";
+    let body = "<img src=x onload=\"startTimer('&lt;/script&gt;&lt;svg onload=alert(1) class=dlx0000&gt;')\">";
+    assert_eq!(classify_dom_evidence(payload, body), None);
+
+    // A `"` payload inside the template's `'…'` string never closes it.
+    let payload = "\"-alert(1)-\"";
+    let body = "<img src=x onload=\"startTimer('&quot;-alert(1)-&quot;')\">";
+    assert_eq!(classify_dom_evidence(payload, body), None);
+}
+
+#[test]
+fn test_inline_handler_breakout_does_not_double_decode_entities() {
+    // `&amp;#39;` reaches the JS engine as the literal text `&#39;`, so the
+    // quote never closes the string.
+    let payload = "'-alert(1)-'";
+    let body = "<img onload=\"startTimer('&amp;#39;-alert(1)-&amp;#39;')\">";
+    assert_eq!(classify_dom_evidence(payload, body), None);
+}
+
+#[test]
+fn test_inline_handler_breakout_parses_handler_as_function_body() {
+    // Handler bodies may `return`; that must not read as a parse error.
+    let payload = "'-alert(1)-'";
+    let body = "<a href=# onclick=\"return go('&#39;-alert(1)-&#39;')\">x</a>";
+    assert_eq!(
+        classify_dom_evidence(payload, body),
+        Some(DomEvidenceKind::InlineHandlerBreakout)
+    );
+}
+
+#[test]
 fn test_classify_dom_evidence_returns_executable_url() {
     let payload = "javascript:alert(1)";
     let body = format!("<html><body><a href=\"{}\">x</a></body></html>", payload);

@@ -5419,3 +5419,34 @@ open.onsuccess = function (e) {
     );
 }
 mod expression_regressions;
+
+#[test]
+fn numeric_coercion_clears_taint() {
+    let analyzer = AstDomAnalyzer::new();
+    for code in [
+        "var p=location.hash; el.innerHTML = 'Page ' + parseInt(p, 10);",
+        "var p=location.search; el.innerHTML = parseFloat(p);",
+        "var p=location.search; el.innerHTML = Number(p);",
+        "var p=new URLSearchParams(location.search).get('n'); el.innerHTML = Number.parseInt(p);",
+        "var p=location.hash; document.write(Number.parseFloat(p.slice(1)));",
+    ] {
+        let found = analyzer.analyze(code).expect("parses");
+        assert!(
+            found.is_empty(),
+            "numeric result reported as DOM XSS: {code} -> {found:?}"
+        );
+    }
+    // A page-local function under a built-in's name is no coercion.
+    let found = analyzer
+        .analyze("function Number(v){ return v } var p=location.hash; el.innerHTML = Number(p);")
+        .expect("parses");
+    assert!(!found.is_empty(), "shadowed Number() must not clear taint");
+    // The coercion must wrap the source: a sibling tainted operand still flows.
+    let found = analyzer
+        .analyze("var p=location.hash; el.innerHTML = parseInt(p) + p;")
+        .expect("parses");
+    assert!(
+        !found.is_empty(),
+        "uncoerced operand must still be reported"
+    );
+}

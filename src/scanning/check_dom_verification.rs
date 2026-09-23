@@ -821,11 +821,11 @@ fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
     if payload.len() < MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN {
         return false;
     }
-    // Decode HTML entities once for the whole body — cheap and lets a
-    // single substring search cover the dominant on*-attribute escape
-    // pattern that servers use (`&#39;` for `'`, `&quot;` for `"`).
-    let decoded = decode_html_entities(text);
-    let document = crate::utils::html::parse_document_bounded(&decoded);
+    // Parse the raw body: the HTML parser decodes attribute entities exactly
+    // once, as the browser does (`&#39;` → `'`). Pre-decoding the whole body
+    // first decoded twice, turning a server's `&amp;#39;` (a literal `&#39;`
+    // in the handler's JS) into a quote that never reaches the JS engine.
+    let document = crate::utils::html::parse_document_bounded(text);
     let selector = selectors::universal();
     for node in document.select(selector) {
         // Issue #1183: a handler on a `<input type="hidden">` — even one the
@@ -838,10 +838,11 @@ fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
             if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
                 continue;
             }
-            if !attr_value.contains(payload) {
-                continue;
-            }
-            if crate::scanning::js_context_verify::payload_carries_js_sink(attr_value) {
+            // The sink must be the payload's own call, outside every string
+            // literal: a payload reflected *inside* the template's quoted
+            // argument (`startTimer('<svg onload=alert(1)>')`, or a `"`
+            // payload inside a `'…'` string) carries `alert(` as inert text.
+            if crate::scanning::js_context_verify::handler_payload_hits_sink(attr_value, payload) {
                 return true;
             }
         }

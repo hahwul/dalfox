@@ -82,15 +82,43 @@ pub(crate) fn payload_carries_js_sink(payload: &str) -> bool {
 fn script_block_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?is)<script\b[^>]*>(.*?)</script\s*>").expect("valid script block regex")
+        Regex::new(r"(?is)(<script\b[^>]*>)(.*?)</script\s*>").expect("valid script block regex")
     })
 }
 
-/// Iterate `<script>` block contents in the HTML response.
-fn script_blocks(html: &str) -> impl Iterator<Item = &str> {
+/// Iterate `<script>` blocks in the HTML response as `(open_tag, body)`.
+fn script_blocks(html: &str) -> impl Iterator<Item = (&str, &str)> {
     script_block_re()
         .captures_iter(html)
-        .filter_map(|cap| cap.get(1).map(|m| m.as_str()))
+        .filter_map(|cap| Some((cap.get(1)?.as_str(), cap.get(2)?.as_str())))
+}
+
+/// Apply HTML's script-type rules to a raw `<script …>` open tag: false for
+/// data blocks the browser never runs (`type="text/template"`,
+/// `application/json`, `application/ld+json`, …). Babel-standalone blocks
+/// (`text/babel`, `text/jsx`) are not JS to the browser but an in-page loader
+/// transpiles and runs them, so they count as executing.
+fn open_tag_is_javascript(open_tag: &str) -> bool {
+    // Cheap path for the common attribute-less / type-less tag.
+    if !open_tag
+        .as_bytes()
+        .windows(4)
+        .any(|w| w.eq_ignore_ascii_case(b"type") || w.eq_ignore_ascii_case(b"lang"))
+    {
+        return true;
+    }
+    let fragment = scraper::Html::parse_fragment(&format!("{open_tag}</script>"));
+    fragment
+        .select(crate::scanning::selectors::script())
+        .next()
+        .is_none_or(|el| {
+            let el = el.value();
+            crate::scanning::ast_integration::script_type_is_javascript(el)
+                || el.attr("type").is_some_and(|t| {
+                    let t = t.trim();
+                    t.eq_ignore_ascii_case("text/babel") || t.eq_ignore_ascii_case("text/jsx")
+                })
+        })
 }
 
 /// Soft cap on cached entries. Beyond this we drop a quarter of the cache
@@ -125,7 +153,7 @@ fn hash_block(script_src: &str) -> u64 {
 /// Parse `script_src` once and collect every sink-call span and every
 /// string-literal span. Returns `None` when the source has parser errors
 /// (treated as inert — injected JS that breaks parsing won't execute).
-fn collect_parsed_spans(script_src: &str) -> ParsedSpans {
+fn collect_parsed_spans(script_src: &str, source_type: SourceType) -> ParsedSpans {
     // Guard the oxc parse exactly like `ast_dom_analysis::analyze`: a single
     // malicious/compromised target can serve a `<script>` body with thousands
     // of nested brackets or a multi-byte right-leaning chain that overflows
@@ -137,12 +165,12 @@ fn collect_parsed_spans(script_src: &str) -> ParsedSpans {
         return None;
     }
     if script_src.len() <= crate::scanning::ast_dom_analysis::SAFE_INLINE_PARSE_BYTES {
-        return collect_spans_on_stack(script_src);
+        return collect_spans_on_stack(script_src, source_type);
     }
     // A spawn failure (`None`) is also treated as inert — we must NOT fall back
     // to an inline parse, which could overflow the caller's worker stack.
     crate::scanning::ast_dom_analysis::run_parse_on_large_stack(|| {
-        collect_spans_on_stack(script_src)
+        collect_spans_on_stack(script_src, source_type)
     })
     .flatten()
 }
@@ -150,9 +178,9 @@ fn collect_parsed_spans(script_src: &str) -> ParsedSpans {
 /// Parse `script_src` and collect every sink-call span and every string-literal
 /// span. Factored out of [`collect_parsed_spans`] so it can run on a dedicated
 /// large-stack thread for inputs above [`SAFE_INLINE_PARSE_BYTES`].
-fn collect_spans_on_stack(script_src: &str) -> ParsedSpans {
+fn collect_spans_on_stack(script_src: &str, source_type: SourceType) -> ParsedSpans {
     let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
+    let ret = Parser::new(&allocator, script_src, source_type).parse();
     if !ret.errors.is_empty() {
         return None;
     }
@@ -168,8 +196,8 @@ fn collect_spans_on_stack(script_src: &str) -> ParsedSpans {
 /// across many per-payload responses (page boilerplate, inline framework
 /// setup); each distinct block is parsed at most once across the whole
 /// process.
-fn cached_parsed_spans(script_src: &str) -> ParsedSpans {
-    let key = hash_block(script_src);
+fn cached_parsed_spans(script_src: &str, source_type: SourceType) -> ParsedSpans {
+    let key = hash_block(script_src) ^ u64::from(source_type.is_script());
     // Recover from poisoning instead of propagating it. The guard only ever
     // covers a map get/insert — there is no invariant a panicking holder could
     // leave broken — so re-panicking here would turn one unrelated task panic
@@ -182,7 +210,7 @@ fn cached_parsed_spans(script_src: &str) -> ParsedSpans {
             return v.clone();
         }
     }
-    let result = collect_parsed_spans(script_src);
+    let result = collect_parsed_spans(script_src, source_type);
     let mut cache = sink_cache().lock().unwrap_or_else(PoisonError::into_inner);
     if cache.len() >= SINK_CACHE_CAPACITY {
         let drop_n = cache.len() / 4;
@@ -211,10 +239,11 @@ fn cached_parsed_spans(script_src: &str) -> ParsedSpans {
 ///   byte range, meaning the payload itself produced the call.
 fn script_block_has_sink_call_in_range(
     script_src: &str,
+    source_type: SourceType,
     payload_start: u32,
     payload_end: u32,
 ) -> bool {
-    let Some(spans) = cached_parsed_spans(script_src) else {
+    let Some(spans) = cached_parsed_spans(script_src, source_type) else {
         return false;
     };
     let (sinks, strings) = &*spans;
@@ -434,9 +463,58 @@ fn gather_sink_spans_in_statement(
                 }
             }
         }
+        Statement::ForOfStatement(s) => {
+            gather_for_left(&s.left, out, strings);
+            gather_sink_spans_in_expression(&s.right, out, strings);
+            gather_sink_spans_in_statement(&s.body, out, strings);
+        }
+        Statement::ForInStatement(s) => {
+            gather_for_left(&s.left, out, strings);
+            gather_sink_spans_in_expression(&s.right, out, strings);
+            gather_sink_spans_in_statement(&s.body, out, strings);
+        }
+        Statement::WithStatement(s) => {
+            gather_sink_spans_in_expression(&s.object, out, strings);
+            gather_sink_spans_in_statement(&s.body, out, strings);
+        }
         Statement::LabeledStatement(s) => gather_sink_spans_in_statement(&s.body, out, strings),
         Statement::ThrowStatement(s) => gather_sink_spans_in_expression(&s.argument, out, strings),
         _ => {}
+    }
+}
+
+fn gather_for_left(
+    left: &ForStatementLeft<'_>,
+    out: &mut Vec<(u32, u32)>,
+    strings: &mut Vec<(u32, u32)>,
+) {
+    if let ForStatementLeft::VariableDeclaration(decl) = left {
+        for d in &decl.declarations {
+            if let Some(e) = &d.init {
+                gather_sink_spans_in_expression(e, out, strings);
+            }
+        }
+    }
+}
+
+/// Call / `new` arguments, including `...spread` ones (which
+/// `Argument::as_expression` does not yield).
+fn gather_arguments(
+    args: &[Argument<'_>],
+    out: &mut Vec<(u32, u32)>,
+    strings: &mut Vec<(u32, u32)>,
+) {
+    for arg in args {
+        match arg {
+            Argument::SpreadElement(s) => {
+                gather_sink_spans_in_expression(&s.argument, out, strings)
+            }
+            _ => {
+                if let Some(e) = arg.as_expression() {
+                    gather_sink_spans_in_expression(e, out, strings);
+                }
+            }
+        }
     }
 }
 
@@ -463,11 +541,7 @@ fn gather_sink_spans_in_expression(
                 push_span(out, call.span());
             }
             gather_sink_spans_in_expression(&call.callee, out, strings);
-            for arg in &call.arguments {
-                if let Some(e) = arg.as_expression() {
-                    gather_sink_spans_in_expression(e, out, strings);
-                }
-            }
+            gather_arguments(&call.arguments, out, strings);
         }
         Expression::TaggedTemplateExpression(t) => {
             if callee_identifier_is_sink(&t.tag) {
@@ -483,17 +557,33 @@ fn gather_sink_spans_in_expression(
                 push_span(out, ne.span());
             }
             gather_sink_spans_in_expression(&ne.callee, out, strings);
-            for arg in &ne.arguments {
-                if let Some(e) = arg.as_expression() {
-                    gather_sink_spans_in_expression(e, out, strings);
-                }
-            }
+            gather_arguments(&ne.arguments, out, strings);
         }
         Expression::AssignmentExpression(a) => {
             if assignment_is_sink(a) {
                 push_span(out, a.span());
             }
+            // The target's receiver is evaluated too:
+            // `document.getElementById(X).style.display = …`, `window[X] = …`.
+            match &a.left {
+                AssignmentTarget::StaticMemberExpression(m) => {
+                    gather_sink_spans_in_expression(&m.object, out, strings)
+                }
+                AssignmentTarget::ComputedMemberExpression(m) => {
+                    gather_sink_spans_in_expression(&m.object, out, strings);
+                    gather_sink_spans_in_expression(&m.expression, out, strings);
+                }
+                _ => {}
+            }
             gather_sink_spans_in_expression(&a.right, out, strings);
+        }
+        Expression::AwaitExpression(a) => {
+            gather_sink_spans_in_expression(&a.argument, out, strings)
+        }
+        Expression::YieldExpression(y) => {
+            if let Some(arg) = &y.argument {
+                gather_sink_spans_in_expression(arg, out, strings);
+            }
         }
         Expression::SequenceExpression(s) => {
             for e in &s.expressions {
@@ -522,15 +612,30 @@ fn gather_sink_spans_in_expression(
         }
         Expression::ArrayExpression(a) => {
             for el in &a.elements {
-                if let Some(e) = el.as_expression() {
-                    gather_sink_spans_in_expression(e, out, strings);
+                match el {
+                    ArrayExpressionElement::SpreadElement(s) => {
+                        gather_sink_spans_in_expression(&s.argument, out, strings)
+                    }
+                    _ => {
+                        if let Some(e) = el.as_expression() {
+                            gather_sink_spans_in_expression(e, out, strings);
+                        }
+                    }
                 }
             }
         }
         Expression::ObjectExpression(o) => {
             for prop in &o.properties {
-                if let ObjectPropertyKind::ObjectProperty(p) = prop {
-                    gather_sink_spans_in_expression(&p.value, out, strings);
+                match prop {
+                    ObjectPropertyKind::ObjectProperty(p) => {
+                        if let Some(k) = p.key.as_expression() {
+                            gather_sink_spans_in_expression(k, out, strings);
+                        }
+                        gather_sink_spans_in_expression(&p.value, out, strings);
+                    }
+                    ObjectPropertyKind::SpreadProperty(s) => {
+                        gather_sink_spans_in_expression(&s.argument, out, strings)
+                    }
                 }
             }
         }
@@ -564,11 +669,7 @@ fn gather_sink_spans_in_expression(
                     push_span(out, call.span());
                 }
                 gather_sink_spans_in_expression(&call.callee, out, strings);
-                for arg in &call.arguments {
-                    if let Some(e) = arg.as_expression() {
-                        gather_sink_spans_in_expression(e, out, strings);
-                    }
-                }
+                gather_arguments(&call.arguments, out, strings);
             }
         }
         _ => {}
@@ -586,7 +687,28 @@ fn any_payload_occurrence_hits_sink(src: &str, payload: &str) -> bool {
     }
     src.match_indices(payload).any(|(start, _)| {
         let end = start + payload.len();
-        script_block_has_sink_call_in_range(src, start as u32, end as u32)
+        script_block_has_sink_call_in_range(src, SourceType::default(), start as u32, end as u32)
+    })
+}
+
+/// True when `payload`, reflected into an inline `on*` handler body, produces a
+/// JS sink call of its own — i.e. it broke out of any string literal the
+/// server's template wrapped it in. `handler` is the attribute value as the
+/// browser sees it (entities already decoded by the HTML parser).
+///
+/// The handler is parsed as a sloppy-mode function body, as the browser
+/// compiles it, so a top-level `return` or a `with (…)` block in the server's
+/// template does not read as a parse error.
+pub(crate) fn handler_payload_hits_sink(handler: &str, payload: &str) -> bool {
+    const PREFIX: &str = "function __dlx_handler(){\n";
+    if payload.is_empty() {
+        return false;
+    }
+    let src = format!("{PREFIX}{handler}\n}}");
+    handler.match_indices(payload).any(|(start, _)| {
+        let start = PREFIX.len() + start;
+        let end = start + payload.len();
+        script_block_has_sink_call_in_range(&src, SourceType::script(), start as u32, end as u32)
     })
 }
 
@@ -608,9 +730,12 @@ pub(crate) fn has_js_context_evidence(payload: &str, html: &str) -> bool {
         return false;
     }
     let mut saw_block = false;
-    for block in script_blocks(html) {
+    for (open_tag, block) in script_blocks(html) {
         saw_block = true;
-        if any_payload_occurrence_hits_sink(block, payload) {
+        if block.contains(payload)
+            && open_tag_is_javascript(open_tag)
+            && any_payload_occurrence_hits_sink(block, payload)
+        {
             return true;
         }
     }

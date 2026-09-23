@@ -647,6 +647,26 @@ const DOM_SANITIZERS: &[&str] = &[
     "htmlEncode",
     "sanitizeHTML",
     "validator.escape",
+    // Numeric coercions (see `NUMERIC_COERCIONS`).
+    "parseInt",
+    "parseFloat",
+    "Number",
+    "Number.parseInt",
+    "Number.parseFloat",
+];
+
+/// Sanitizer entries that are built-in numeric coercions: the result is always
+/// a number (or NaN), which cannot carry markup, so
+/// `innerHTML = 'Page ' + parseInt(p)` is inert. Unlike an `escapeHtml` helper
+/// (whose page-local definition is the normal case), a page declaring its own
+/// function under one of these names has shadowed the built-in, so the name
+/// stops counting as a sanitizer there.
+const NUMERIC_COERCIONS: &[&str] = &[
+    "parseInt",
+    "parseFloat",
+    "Number",
+    "Number.parseInt",
+    "Number.parseFloat",
 ];
 
 static STATIC_SOURCES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
