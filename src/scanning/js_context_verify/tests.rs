@@ -122,8 +122,9 @@ fn cached_parsed_spans_returns_same_result_for_identical_blocks() {
     // Two distinct calls on the same script source must yield the same
     // span set; the second call should hit the cache rather than re-parse.
     let block = "var c2 = \"\"-alert(1)-\"\"; var x = 5; window.foo = 1;";
-    let first = cached_parsed_spans(block).expect("parses cleanly");
-    let second = cached_parsed_spans(block).expect("parses cleanly (cache hit)");
+    let first = cached_parsed_spans(block, SourceType::default()).expect("parses cleanly");
+    let second =
+        cached_parsed_spans(block, SourceType::default()).expect("parses cleanly (cache hit)");
     assert_eq!(first, second);
     assert!(!first.0.is_empty(), "should record at least one sink span");
 }
@@ -269,8 +270,8 @@ fn does_not_flag_assignment_to_innocuous_property() {
 fn cached_parsed_spans_distinct_for_different_blocks() {
     let a = "var c1 = ''-alert(1)-'';";
     let b = "var c2 = \"-prompt(1)-\";";
-    let sa = cached_parsed_spans(a).expect("a parses");
-    let sb = cached_parsed_spans(b).expect("b parses");
+    let sa = cached_parsed_spans(a, SourceType::default()).expect("a parses");
+    let sb = cached_parsed_spans(b, SourceType::default()).expect("b parses");
     assert_ne!(sa, sb);
 }
 
@@ -582,4 +583,50 @@ fn handler_payload_hits_sink_requires_string_breakout() {
         "<svg onload=alert(1)>"
     ));
     assert!(!handler_payload_hits_sink("startTimer('x')", ""));
+}
+
+#[test]
+fn handler_breakout_found_in_every_evaluated_position() {
+    // Handler templates where `'-alert(1)-'` (entity-decoded by the attribute
+    // parser) really fires in a browser; each nests the reflection somewhere
+    // the sink walker must descend into.
+    let p = "'-alert(1)-'";
+    for tmpl in [
+        "document.getElementById('Q').style.display='none'",
+        "window['Q']=1",
+        "(async()=>{await load('Q')})()",
+        "with(document){foo('Q')}",
+        "for (const k of ['Q']) go(k)",
+        "for (const k in {a:'Q'}) go(k)",
+        "go(...['Q'])",
+        "go([...['Q']])",
+        "new Go(...['Q'])",
+        "go({...{a:'Q'}})",
+        "go({['Q']:1})",
+        // Sloppy-script-only syntax: a module parse rejects the legacy
+        // HTML-like comment outright.
+        "<!-- legacy\ngo('Q')",
+    ] {
+        let handler = tmpl.replacen("'Q'", &format!("'{p}'"), 1);
+        assert!(
+            handler_payload_hits_sink(&handler, p),
+            "breakout in `{tmpl}` not found: {handler}"
+        );
+    }
+}
+
+#[test]
+fn handler_breakout_joiner_forms_hit_sink() {
+    for (handler, p) in [
+        ("startTimer(''+alert(1)+'')", "'+alert(1)+'"),
+        ("startTimer(''*alert(1)*'')", "'*alert(1)*'"),
+        ("startTimer('');alert(1)//')", "');alert(1)//"),
+        ("go({'':alert(1),'':1})", "':alert(1),'"),
+        ("go({\"\":alert(1),\"\":1})", "\":alert(1),\""),
+    ] {
+        assert!(
+            handler_payload_hits_sink(handler, p),
+            "`{p}` in `{handler}`"
+        );
+    }
 }
