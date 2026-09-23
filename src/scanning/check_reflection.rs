@@ -2340,6 +2340,26 @@ tokio::task_local! {
     pub(crate) static SXSS_BASELINE: std::sync::Arc<Vec<String>>;
 }
 
+tokio::task_local! {
+    /// Set true around the stored-XSS reflection/DOM *payload* phases (never
+    /// around the per-parameter store-probe). When set, a payload's retrieval
+    /// stops after the first pass over the check URLs once no URL shows its
+    /// count above the baseline — the backoff retries only paid off for
+    /// propagation delay, which the store-probe already absorbed once at
+    /// parameter entry with its own retries. Without it, a parameter that
+    /// stores some payloads but not others pays the full retry/backoff loop on
+    /// every non-stored payload. Unset by default, so a direct
+    /// `check_reflection` call (tests, non-scan callers) keeps the retries.
+    pub(crate) static SXSS_SKIP_PAYLOAD_RETRIES: bool;
+}
+
+/// Whether the per-payload retrieval retries are disabled in the current scope.
+pub(crate) fn sxss_payload_retries_skipped() -> bool {
+    SXSS_SKIP_PAYLOAD_RETRIES
+        .try_with(|skip| *skip)
+        .unwrap_or(false)
+}
+
 /// Occurrences of `payload` — or one of its decode variants — in `body`. Mirrors
 /// the variant set [`classify_reflection`] matches on, so a server that URL- or
 /// entity-decodes stored input before rendering is counted the same way it is
@@ -2566,18 +2586,25 @@ async fn fetch_injection_response_with_client(
 
         let check_urls = resolve_sxss_check_urls(target, param, args);
         let retries = args.sxss_retries.max(1) as u64;
+        let skip_payload_retries = sxss_payload_retries_skipped();
         let mut fallback_body: Option<ReflectionBody> = None;
-        for sxss_url in &check_urls {
-            // Retry with delay to handle session / content propagation
-            for attempt in 0u64..retries {
-                if attempt > 0 {
-                    // Clamped: the ramp is quadratic in total, so the tail of a
-                    // long retry run would otherwise sleep for minutes at a time.
-                    sleep(Duration::from_millis(
-                        (500 * attempt).min(crate::cmd::scan::MAX_SXSS_BACKOFF_MS),
-                    ))
-                    .await;
-                }
+        // Attempt-major so an early exit can consider the *whole* first pass
+        // over the check URLs, not just one URL: retries exist for
+        // propagation delay, and delay affects every retrieval URL alike.
+        'retry: for attempt in 0u64..retries {
+            if attempt > 0 {
+                // Clamped: the ramp is quadratic in total, so the tail of a
+                // long retry run would otherwise sleep for minutes at a time.
+                sleep(Duration::from_millis(
+                    (500 * attempt).min(crate::cmd::scan::MAX_SXSS_BACKOFF_MS),
+                ))
+                .await;
+            }
+            // Whether any URL on this pass answered at all. A pass where every
+            // URL errored is not evidence the payload was not stored, so it must
+            // not trigger the no-increase early exit below.
+            let mut saw_any_body = false;
+            for sxss_url in &check_urls {
                 let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
                 let check_request =
                     crate::utils::build_request(client, target, method, sxss_url.clone(), None);
@@ -2593,6 +2620,7 @@ async fn fetch_injection_response_with_client(
                 if let Ok(resp) = sent
                     && let Some(body) = gated_body(resp, param, payload, args).await
                 {
+                    saw_any_body = true;
                     if classify_reflection(&body.text, payload).is_some()
                         && sxss_injection_credited(&body.text, payload)
                     {
@@ -2613,6 +2641,18 @@ async fn fetch_injection_response_with_client(
                         fallback_body = Some(body);
                     }
                 }
+            }
+            // Second line of defence against the non-storing-field request
+            // blow-up: once a pass has read the retrieval pages and none shows
+            // this payload above the baseline, retrying with backoff cannot
+            // change that — a credit needs an occurrence increase, which would
+            // have returned above. The propagation-delay case the retries exist
+            // for is already handled once, at parameter entry, by the
+            // store-probe's own retries; a parameter only reaches the payload
+            // phases after that probe confirmed it stores. So stop here instead
+            // of sleeping through the remaining attempts.
+            if skip_payload_retries && saw_any_body {
+                break 'retry;
             }
         }
         // Inline-stored sink fallback: the inject response body itself often

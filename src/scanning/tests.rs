@@ -4892,3 +4892,116 @@ async fn sxss_credit_gate_always_sees_a_baseline_during_the_phases() {
         hits.first()
     );
 }
+
+/// Request-budget guard for the `--sxss` store-probe. Two form fields (`c`,
+/// `name`); only `c` stores. `name` never stores, but the storing field's
+/// stale marker on the retrieval page lets it pass the (deliberately un-gated)
+/// Stage-0 probe. Without the baseline-gated store-probe it would then run the
+/// whole payload catalog — every payload correctly refused, but each refusal
+/// paying the full sxss retrieval retry loop, which measured in the tens of
+/// thousands of requests. The store-probe must stop `name` before the catalog.
+#[tokio::test]
+async fn sxss_store_probe_bounds_a_non_storing_siblings_request_budget() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtOrd};
+    use tokio::time::{Duration, sleep};
+
+    let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+    // Counts POSTs that inject a payload into the *non-storing* `name` field
+    // (its value is something other than the seed). This isolates the sibling's
+    // own scan cost from the storing field's, independent of when the storing
+    // field verifies and stops. The store-probe should let `name` issue only
+    // its one marker probe; without it, `name` runs the whole payload catalog.
+    let name_injections = Arc::new(AtomicUsize::new(0));
+    let write = store.clone();
+    let read = store.clone();
+    let name_inj = name_injections.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                let name_inj = name_inj.clone();
+                async move {
+                    // Only `c` is stored; `name` is accepted and dropped.
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "name" && v != "x" {
+                            name_inj.fetch_add(1, AtOrd::Relaxed);
+                        }
+                        if k == "c" {
+                            store.lock().unwrap().push(v.into_owned());
+                        }
+                    }
+                    Html("saved")
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    Html(format!(
+                        "<html><body>{}</body></html>",
+                        store.lock().unwrap().join("<hr>")
+                    ))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    for name in ["c", "name"] {
+        target.reflection_params.push(Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            form_action_url: Some(format!("http://{addr}/save")),
+            form_origin_url: Some(format!("http://{addr}/page")),
+            ..Param::new(name.to_string(), "x".to_string(), Location::Body)
+        });
+    }
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    // A full catalog: if `name` were to run it, the hit count would be orders
+    // of magnitude over the budget below.
+    args.max_payloads_per_param = 120;
+    args.sxss_retries = 1;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    assert!(
+        results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.param == "c" && r.result_type == FindingType::Verified),
+        "control: the storing field must still be Verified"
+    );
+    let name_posts = name_injections.load(AtOrd::Relaxed);
+    // `name` never stores, so its store-probe injection does not raise the
+    // marker count above the baseline and its catalog is skipped: only the one
+    // store-probe POST reaches the sink. Without the store-probe `name` runs the
+    // full catalog (here 120 payloads plus the DOM set) — an order of magnitude
+    // more injections.
+    assert!(
+        name_posts < 10,
+        "the non-storing sibling must be stopped by the store-probe, \
+         but it injected into `name` {name_posts} times (a catalog run is 100+)"
+    );
+}

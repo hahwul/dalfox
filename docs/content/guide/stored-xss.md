@@ -37,6 +37,14 @@ credited to that parameter only when its injection makes the payload appear
 earlier is already in the snapshot, so it is never mis-credited. The snapshot
 costs one extra GET per retrieval URL per parameter.
 
+Right after the snapshot, Dalfox re-probes the field once: if that probe's own
+injection does not raise the marker count on the retrieval page, the field does
+not store here and its payload catalog is skipped. This stops a form's
+non-storing fields — which would otherwise pass the reflection probe on the
+marker a sibling field stored — from running the whole catalog. Because that
+probe already absorbs any write-to-read propagation delay, the per-payload
+retrieval is not retried again for payloads that do not appear.
+
 ## Choosing the retrieval URL
 
 Pick the page the stored value **reads** from. Examples:

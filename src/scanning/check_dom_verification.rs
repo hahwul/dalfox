@@ -887,15 +887,19 @@ async fn verify_sxss_dom(
     let check_urls =
         crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args);
     let retries = args.sxss_retries.max(1) as u64;
-    for sxss_url in &check_urls {
-        for attempt in 0u64..retries {
-            if attempt > 0 {
-                // Clamped; see the twin loop in check_reflection.rs.
-                sleep(Duration::from_millis(
-                    (500 * attempt).min(crate::cmd::scan::MAX_SXSS_BACKOFF_MS),
-                ))
-                .await;
-            }
+    let skip_payload_retries = crate::scanning::check_reflection::sxss_payload_retries_skipped();
+    // Attempt-major, mirroring the reflection retrieval loop, so the retry-skip
+    // can weigh the whole first pass over the check URLs.
+    'retry: for attempt in 0u64..retries {
+        if attempt > 0 {
+            // Clamped; see the twin loop in check_reflection.rs.
+            sleep(Duration::from_millis(
+                (500 * attempt).min(crate::cmd::scan::MAX_SXSS_BACKOFF_MS),
+            ))
+            .await;
+        }
+        let mut saw_any_body = false;
+        for sxss_url in &check_urls {
             let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
             let check_request =
                 crate::utils::build_request(client, target, method, sxss_url.clone(), None);
@@ -914,21 +918,30 @@ async fn verify_sxss_dom(
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
-                if let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::utils::is_htmlish_content_type(ct)
-                    && crate::scanning::check_reflection::classify_reflection(&text, payload)
-                        .is_some()
-                    // Credit the stored payload to this parameter only when its
-                    // injection increased the payload's occurrence over the
-                    // pre-injection baseline — a copy another parameter stored
-                    // earlier is already in the retrieval page (see
-                    // `check_reflection::SXSS_BASELINE`).
-                    && crate::scanning::check_reflection::sxss_injection_credited(&text, payload)
-                    && has_dom_evidence(payload, &text)
-                {
-                    return (true, Some(text));
+                if let Ok(text) = crate::utils::http::read_body(resp).await {
+                    saw_any_body = true;
+                    if crate::utils::is_htmlish_content_type(ct)
+                        && crate::scanning::check_reflection::classify_reflection(&text, payload)
+                            .is_some()
+                        // Credit the stored payload to this parameter only when its
+                        // injection increased the payload's occurrence over the
+                        // pre-injection baseline — a copy another parameter stored
+                        // earlier is already in the retrieval page (see
+                        // `check_reflection::SXSS_BASELINE`).
+                        && crate::scanning::check_reflection::sxss_injection_credited(&text, payload)
+                        && has_dom_evidence(payload, &text)
+                    {
+                        return (true, Some(text));
+                    }
                 }
             }
+        }
+        // See the reflection retrieval loop: once a pass has read the pages and
+        // none shows this payload's DOM evidence above the baseline, the backoff
+        // retries cannot change that; propagation delay was absorbed once by the
+        // store-probe at parameter entry.
+        if skip_payload_retries && saw_any_body {
+            break 'retry;
         }
     }
     (false, None)

@@ -688,6 +688,39 @@ impl ScanWorkerCtx {
         };
 
         let phases = async {
+            // Stored-XSS store-probe (baseline-gated). Stage 0 above is
+            // deliberately *not* baseline-gated, so a sibling field that never
+            // stores still passes it on the marker the storing field left on the
+            // retrieval page during analysis — and then runs the whole payload
+            // catalog, every payload correctly refused but each refusal paying
+            // the full retrieval retry/backoff loop (measured at tens of
+            // thousands of requests for one non-storing field). Re-probe the
+            // marker now, inside the baseline scope: the credit gate returns a
+            // hit only when *this* field's own injection raised the marker's
+            // occurrence above the pre-injection baseline, i.e. this field
+            // actually stores. If it does not, skip the catalog entirely.
+            // `--deep-scan` keeps the catalog (it must not depend on this gate).
+            if self.args.sxss && !self.args.deep_scan {
+                let marker = crate::scanning::markers::bracketed_marker();
+                let (kind, _, _) = check_reflection::check_reflection_with_response_status(
+                    Some(self.client.as_ref()),
+                    &self.target,
+                    &param,
+                    marker,
+                    &self.args,
+                    &waf_streak,
+                )
+                .await;
+                if kind.is_none() {
+                    crate::dbg_log!(
+                        "sxss store-probe (param={}): injection did not raise the marker count above the baseline — field does not store here, skipping the payload catalog",
+                        param.name
+                    );
+                    self.flush_results(&mut state.local_results).await;
+                    return;
+                }
+            }
+
             // Save a reference copy for the HPP phase (only first 5 payloads)
             // before the reflection phase consumes `reflection_payloads`. Gate on
             // the same condition `run_hpp_phase` checks (Query location) so we don't
@@ -699,20 +732,36 @@ impl ScanWorkerCtx {
                     vec![]
                 };
 
-            if let PhaseFlow::Abort = self
-                .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
-                .await
-            {
-                self.flush_results(&mut state.local_results).await;
-                return;
-            }
-            if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await {
-                self.flush_results(&mut state.local_results).await;
-                return;
-            }
-            self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
+            let payload_phases = async {
+                if let PhaseFlow::Abort = self
+                    .run_reflection_phase(&param, reflection_payloads, &mut state, &waf_streak)
+                    .await
+                {
+                    self.flush_results(&mut state.local_results).await;
+                    return;
+                }
+                if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await
+                {
+                    self.flush_results(&mut state.local_results).await;
+                    return;
+                }
+                self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
 
-            self.flush_results(&mut state.local_results).await;
+                self.flush_results(&mut state.local_results).await;
+            };
+
+            // Under `--sxss`, disable the per-payload retrieval retries for the
+            // payload phases only (the store-probe above kept them): propagation
+            // delay is absorbed once at parameter entry, so a non-stored payload
+            // no longer pays the backoff loop. See
+            // `check_reflection::SXSS_SKIP_PAYLOAD_RETRIES`.
+            if self.args.sxss {
+                crate::scanning::check_reflection::SXSS_SKIP_PAYLOAD_RETRIES
+                    .scope(true, payload_phases)
+                    .await;
+            } else {
+                payload_phases.await;
+            }
         };
 
         // The baseline is a task-local, and task-locals do not cross
