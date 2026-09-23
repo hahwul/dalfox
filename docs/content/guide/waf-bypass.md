@@ -109,22 +109,23 @@ Different WAFs fall to different tricks. A small sample:
 | Mutation | Example | Works against |
 |----------|---------|---------------|
 | **HTML comment split** | `<scr<!---->ipt>` | Signature regex |
-| **JS comment split** | `al/**/ert(1)` | Keyword filters |
 | **Backtick call** | `` alert`1` `` | `alert(` regex |
 | **Constructor chain** | `[].constructor.constructor('alert(1)')()` | Heavy keyword blocks |
 | **Unicode JS escape** | `alert(1)` | JS-token filters |
-| **Slash separator** | `<svg/onload=alert(1)/class=x>` | CRS 941160 |
+| **Slash separator** | `<svg/onload=alert(1) class=x>` | CRS 941160 |
 | **SVG animate** | `<svg><animate onbegin=alert(1) attributeName=x>` | CRS 941110 |
 | **HTML entity parens** | `alert&#40;1&#41;` | CRS 941370 |
 | **Exotic whitespace** | form-feed / vertical tab | CRS 941320 |
 | **Case alternation** | `<ScRiPt>` | Case-sensitive rules |
 | **zwsp insertion** | `al​ert(1)` | Lexer-based detection |
 | **Keyword entity encode** | `onerror=&#97;lert(1)` | `alert`/handler keyword regex (attribute-decoded) |
-| **Multi-slash** | `<img/src=x/onerror=alert(1)>` | Regexes anchored on `\s` between later attributes |
+| **Multi-slash** | `<img/src="x"/onerror="alert(1)"/class=x>` | Regexes anchored on `\s` between later attributes |
 | **Scheme break** | `href=java&#9;script:alert(1)` | Literal `javascript:` scheme regex (URL-parser strips the TAB) |
 | **Entity scheme** | `href=&#106;avascript:alert(1)` | Literal `javascript:` scheme regex (attribute-decoded) |
 
-The last four exploit that the HTML tokenizer decodes character references **inside attribute values** before the URL parser or the event-handler JS compiler sees them. They fire only in attribute / event-handler / `javascript:`-URL context and are skipped for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
+Slash separators are emitted only where the HTML tokenizer will still begin a new attribute; a slash after an unquoted value is part of that value, so Dalfox preserves the whitespace there. Keyword entity encoding, scheme break, and entity scheme rely on the HTML tokenizer decoding character references **inside attribute values** before the URL parser or event-handler JS compiler sees them. Those entity mutations are skipped for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
+
+Dalfox does not split JavaScript identifiers with comments (`al/**/ert`). JavaScript treats the comment as a token boundary, so that form cannot call `alert`; the scanner skips the wasted variant.
 
 You don't configure these directly; they're selected automatically per WAF. To inspect what's happening, run with `--debug`.
 

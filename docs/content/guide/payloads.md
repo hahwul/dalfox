@@ -123,11 +123,13 @@ Provide your own list, one payload per line:
 dalfox https://target.app --custom-payload mypayloads.txt
 ```
 
-Swap out the built-in library entirely:
+Use a custom file instead of the local built-in library:
 
 ```bash
 dalfox https://target.app --custom-payload mypayloads.txt --only-custom-payload
 ```
+
+The custom file supplies the local reflection and DOM base payloads. Adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still produce variants of custom entries, and explicitly requested `--remote-payloads` remain active.
 
 ## Remote payload sources
 

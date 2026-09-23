@@ -112,7 +112,8 @@ pub(crate) fn generate_param_jobs(
         // count), the truncation below can evict the catalog entirely in favour
         // of these higher-signal synthesized payloads — intentional, since the
         // user asked for few payloads and these are the ones most likely to fire.
-        if let Some(context) = &param.injection_context
+        if !args.only_custom_payload
+            && let Some(context) = &param.injection_context
             && (param.invalid_specials.is_some() || param.valid_specials.is_some())
         {
             let invalid = param.invalid_specials.as_deref().unwrap_or_default();
@@ -232,7 +233,7 @@ pub(crate) fn generate_param_jobs(
         // Append shared payloads (CSP bypass + tech-specific) AFTER the cap so
         // the safety cap can never trim these few, high-value payloads. They
         // still get the same WAF-bypass expansion as the base set.
-        if !shared_payloads.is_empty() {
+        if !args.only_custom_payload && !shared_payloads.is_empty() {
             let mut shared_refl: Vec<String> = shared_payloads.to_vec();
             let mut shared_dom: Vec<String> = shared_payloads.to_vec();
             if let Some(strategy) = waf_strategy {

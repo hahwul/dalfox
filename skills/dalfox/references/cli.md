@@ -118,7 +118,7 @@ full-window batching would have reached.
 | `-e, --encoders` | `url,html` | `none,url,2url,3url,4url,html,base64` (comma-separated) |
 | `--remote-payloads` | (none) | `portswigger,payloadbox` |
 | `--custom-payload` | — | File of extra payloads |
-| `--only-custom-payload` | false | Ignore built-in set |
+| `--only-custom-payload` | false | Use the custom file as the local base set; skip built-in families, adaptive synthesis, and shared CSP/technology payloads. Explicit remote providers and encoder/WAF variants remain active. |
 | `--custom-blind-xss-payload` | — | File for blind XSS |
 | `-b, --blind` | — | Callback URL (interact.sh, Burp Collab, etc.) — you run the listener |
 | `--blind-oob[=servers]` | — | OOB/OAST blind XSS: Dalfox manages an interactsh session, correlates callbacks per-payload, and polls. Bare `--blind-oob` uses the public mesh; name servers with the `=` form (`--blind-oob=oast.fun`). CLI-only |

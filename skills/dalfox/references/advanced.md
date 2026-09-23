@@ -57,7 +57,7 @@ Use these in order of preference:
 ## Custom Payloads & Markers
 
 - `--custom-payload file.txt` — appends to the built-in set
-- `--only-custom-payload --custom-payload file.txt` — replaces the entire set
+- `--only-custom-payload --custom-payload file.txt` — uses that file as the local base set across reflection and DOM checks; adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still expand those custom payloads, and explicitly requested `--remote-payloads` remain active.
 - `--custom-blind-xss-payload file.txt` — only affects blind XSS mode
 - `--inject-marker 'FUZZ'` — lets you write `https://target/?q=FUZZ` and have payloads replace the literal `FUZZ` token (great for complex JSON bodies or non-standard locations)
 

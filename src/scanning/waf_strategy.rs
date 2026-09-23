@@ -227,3 +227,6 @@ pub(crate) fn expand_waf_payloads(
 
     out
 }
+
+#[cfg(test)]
+mod tests;

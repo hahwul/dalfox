@@ -419,6 +419,22 @@ pub(crate) fn get_dom_payloads_for_context(
     param: &Param,
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    // `--only-custom-payload` restricts both the reflection catalog and its DOM
+    // verification catalog. The context-specific branches below generate
+    // built-in families, so handle this policy before selecting a context; the
+    // unknown-context arm already followed this rule, but known contexts
+    // silently reintroduced the built-ins.
+    if args.only_custom_payload {
+        let base_payloads = match &args.custom_payload {
+            Some(path) => crate::scanning::xss_common::load_custom_payloads(path)?,
+            None => Vec::new(),
+        };
+        return Ok(crate::encoding::apply_encoders_to_payloads(
+            &base_payloads,
+            &args.encoders,
+        ));
+    }
+
     match &param.injection_context {
         // JS context: script breakout payloads with markers for DOM verification
         Some(crate::parameter_analysis::InjectionContext::Javascript(delim)) => {

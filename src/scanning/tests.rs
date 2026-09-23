@@ -549,10 +549,45 @@ fn test_get_dom_payloads_html_context_includes_encoded_variants() {
 }
 
 #[test]
-fn test_get_dom_payloads_unknown_context_falls_back_even_with_only_custom() {
-    let param = Param::new("q".to_string(), "seed".to_string(), Location::Query);
+fn test_get_dom_payloads_only_custom_honors_known_contexts() {
+    use crate::parameter_analysis::InjectionContext;
+
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "dalfox-only-custom-{}-{unique}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&path, "<custom-only-payload>\n").expect("write custom payload fixture");
+
     let mut args = default_scan_args();
     args.only_custom_payload = true;
+    args.custom_payload = Some(path.to_string_lossy().into_owned());
+    args.encoders = vec!["none".to_string()];
+
+    for context in [
+        InjectionContext::Html(None),
+        InjectionContext::Attribute(None),
+        InjectionContext::Javascript(None),
+    ] {
+        let param = Param {
+            injection_context: Some(context),
+            ..Param::new("q".to_string(), "seed".to_string(), Location::Query)
+        };
+        let payloads = get_dom_payloads(&param, &args).expect("DOM payload generation");
+        assert_eq!(payloads, vec!["<custom-only-payload>".to_string()]);
+    }
+
+    std::fs::remove_file(path).expect("remove custom payload fixture");
+}
+
+#[test]
+fn test_get_dom_payloads_unknown_context_falls_back_without_custom_restriction() {
+    let param = Param::new("q".to_string(), "seed".to_string(), Location::Query);
+    let mut args = default_scan_args();
+    args.only_custom_payload = false;
     args.custom_payload = None;
     args.encoders = vec!["none".to_string()];
 
@@ -2895,6 +2930,41 @@ fn generate_param_jobs_appends_shared_payloads() {
         dom.iter().any(|p| p == "<shared-marker>"),
         "dom missing shared"
     );
+}
+
+#[test]
+fn generate_param_jobs_only_custom_excludes_generated_and_shared_payloads() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "dalfox-only-custom-jobs-{}-{unique}.txt",
+        std::process::id()
+    ));
+    let custom = "<custom-only-payload>";
+    std::fs::write(&path, format!("{custom}\n")).expect("write custom payload fixture");
+
+    let mut param = req_param("a", "1", Location::Query);
+    param.injection_context = Some(InjectionContext::Html(None));
+    // Active probing records a profile even when no special characters were
+    // blocked. Job assembly must not turn that metadata into built-in payloads
+    // when the caller explicitly selected custom-only testing.
+    param.invalid_specials = Some(vec![]);
+    param.valid_specials = Some(vec!['<', '>', '"']);
+    let target = target_with_params(vec![param]);
+    let mut args = integration_scan_args(true);
+    args.only_custom_payload = true;
+    args.custom_payload = Some(path.to_string_lossy().into_owned());
+    args.encoders = vec!["none".to_string()];
+
+    let shared = vec!["<shared-builtin-payload>".to_string()];
+    let (jobs, _) = super::generate_param_jobs(&target, &args, None, &shared);
+    std::fs::remove_file(path).expect("remove custom payload fixture");
+
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].1, vec![custom.to_string()]);
+    assert_eq!(jobs[0].2, vec![custom.to_string()]);
 }
 
 #[test]
