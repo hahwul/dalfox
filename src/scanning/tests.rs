@@ -2440,7 +2440,9 @@ fn build_request_text_query_renders_the_as_sent_url() {
 
 #[test]
 fn build_request_text_path_renders_pre_encoded_value() {
-    // `2url` pre-encoding: the segment carries the double-encoded payload.
+    // `2url` pre-encoding: the segment carries exactly two encoding layers
+    // (one from the pre-encoding, one from the segment's `%` escape), matching
+    // what the path detection probe measured.
     let mut param = req_param("path_segment_1", "b", Location::Path);
     param.pre_encoding = Some("2url".to_string());
     let target = target_for("https://example.com/a/b/c");
@@ -2455,7 +2457,7 @@ fn build_request_text_path_renders_pre_encoded_value() {
         req.starts_with(&format!("GET {} ", sent.path())),
         "req:\n{req}"
     );
-    assert!(req.contains("%25253C"), "req:\n{req}");
+    assert!(req.contains("/a/%253Cx%253E/c "), "req:\n{req}");
 }
 
 #[test]
