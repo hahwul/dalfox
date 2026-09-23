@@ -2445,6 +2445,117 @@ pub(crate) async fn capture_sxss_baseline(
     bodies
 }
 
+/// Outcome of the per-parameter stored-XSS store-probe.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StoreProbeOutcome {
+    /// The field stored the marker (its injection raised the marker count above
+    /// the pre-injection baseline). When false, the caller skips the catalog.
+    pub stored: bool,
+    /// The store was visible on the *first* retrieval pass — a synchronous
+    /// sink. When it only became visible after a backoff wait (a write-behind
+    /// store), this is false, and the caller keeps the full per-payload
+    /// retrieval retries so a delayed payload is not missed.
+    pub synchronous: bool,
+}
+
+/// Total retrieval attempts the store-probe makes per marker. The per-payload
+/// retrieval that used to gate each finding was URL-major — every check URL got
+/// the full `--sxss-retries` backoff ramp — so its effective propagation window
+/// was roughly `URLs × ramp`. The store-probe is attempt-major (one ramp shared
+/// across URLs), so it needs proportionally more attempts to wait as long. Match
+/// the old window by scaling attempts with the URL count; a store visible within
+/// the window the plain path used to tolerate is still caught now that the probe
+/// gates the whole catalog.
+fn store_probe_attempts(args: &crate::cmd::scan::ScanArgs, url_count: usize) -> u64 {
+    let base = args.sxss_retries.max(1) as u64;
+    (base + url_count.saturating_sub(1) as u64).max(base)
+}
+
+/// Per-parameter store-probe (baseline-gated). Injects the reflection markers
+/// and checks whether *this* field's injection raises a marker's occurrence
+/// above the pre-injection baseline on any retrieval URL — i.e. the field
+/// stores here. Both the long bracketed marker and the short numeric fallback
+/// are tried, so a length-capped or long-token-filtering sink (which passes
+/// Stage 0 only on the numeric marker) is not wrongly judged non-storing.
+///
+/// Must be called inside the `SXSS_BASELINE` scope (it consults the credit
+/// gate) and *outside* the `SXSS_SKIP_PAYLOAD_RETRIES` scope (it needs the full
+/// backoff window to detect a write-behind store).
+pub(crate) async fn sxss_store_probe(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    args: &crate::cmd::scan::ScanArgs,
+) -> StoreProbeOutcome {
+    let check_urls = resolve_sxss_check_urls(target, param, args);
+    let attempts = store_probe_attempts(args, check_urls.len());
+    let markers = [
+        crate::scanning::markers::bracketed_marker(),
+        NUMERIC_PROBE_MARKER,
+    ];
+    for marker in markers {
+        // Write the marker through the same per-location injection builder the
+        // payload phases use (so a body / header / cookie field is written the
+        // way it will be written later).
+        let encoded = crate::encoding::pre_encoding::apply_param_encoding(marker, param);
+        let inject_request =
+            crate::scanning::url_inject::build_inject_request(client, target, param, &encoded);
+        let inject_resp =
+            crate::utils::send_with_retry(inject_request, args.retries, args.retry_delay).await;
+        crate::tick_request_count();
+
+        // Inline-rendered sinks (an immediate reflection, or a write endpoint
+        // that returns the rendered list) show the value in the injection
+        // response itself. Check it before the retrieval fan-out, mirroring the
+        // inline fallback in the reflection path — otherwise a reflecting-but-
+        // not-separately-stored sink would be judged non-storing and skipped.
+        if let Ok(resp) = inject_resp
+            && let Ok(text) = crate::utils::http::read_body(resp).await
+            && classify_reflection(&text, marker).is_some()
+            && sxss_injection_credited(&text, marker)
+        {
+            return StoreProbeOutcome {
+                stored: true,
+                synchronous: true,
+            };
+        }
+
+        for attempt in 0u64..attempts {
+            if attempt > 0 {
+                sleep(Duration::from_millis(
+                    (500 * attempt).min(crate::cmd::scan::MAX_SXSS_BACKOFF_MS),
+                ))
+                .await;
+            }
+            for url in &check_urls {
+                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+                let request =
+                    crate::utils::build_request(client, target, method, url.clone(), None);
+                crate::record_outbound_request().await;
+                let sent = request.send().await;
+                if sent.is_err() {
+                    crate::tick_request_failure();
+                    continue;
+                }
+                if let Ok(resp) = sent
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
+                    && classify_reflection(&text, marker).is_some()
+                    && sxss_injection_credited(&text, marker)
+                {
+                    return StoreProbeOutcome {
+                        stored: true,
+                        synchronous: attempt == 0,
+                    };
+                }
+            }
+        }
+    }
+    StoreProbeOutcome {
+        stored: false,
+        synchronous: false,
+    }
+}
+
 async fn fetch_injection_response(
     target: &Target,
     param: &Param,

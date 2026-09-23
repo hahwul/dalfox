@@ -38,12 +38,19 @@ earlier is already in the snapshot, so it is never mis-credited. The snapshot
 costs one extra GET per retrieval URL per parameter.
 
 Right after the snapshot, Dalfox re-probes the field once: if that probe's own
-injection does not raise the marker count on the retrieval page, the field does
-not store here and its payload catalog is skipped. This stops a form's
-non-storing fields — which would otherwise pass the reflection probe on the
-marker a sibling field stored — from running the whole catalog. Because that
-probe already absorbs any write-to-read propagation delay, the per-payload
-retrieval is not retried again for payloads that do not appear.
+injection does not raise the marker count on the retrieval page (or in the write
+response), the field does not store here and its payload catalog is skipped. This
+stops a form's non-storing fields — which would otherwise pass the reflection
+probe on the marker a sibling field stored — from running the whole catalog. The
+probe tries both a long and a short marker, so a sink that only keeps short
+values is not mistaken for a non-storing one.
+
+The probe also observes *when* the store becomes visible. A synchronous sink
+(visible immediately) lets Dalfox skip re-fetching a payload that does not
+appear, keeping the request count low. A write-behind sink (visible only after a
+delay) keeps the full per-payload retrieval retries so a delayed payload is not
+missed; if your target stores slower than the default retry window, raise
+`--sxss-retries`.
 
 ## Choosing the retrieval URL
 

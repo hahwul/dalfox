@@ -5005,3 +5005,194 @@ async fn sxss_store_probe_bounds_a_non_storing_siblings_request_budget() {
          but it injected into `name` {name_posts} times (a catalog run is 100+)"
     );
 }
+
+/// Regression (a): a sink that stores only short values keeps the long
+/// bracketed marker out, so the field passes Stage 0 only on the short numeric
+/// fallback marker. The store-probe must try that fallback too, or the field is
+/// wrongly judged non-storing and its catalog skipped.
+#[tokio::test]
+async fn sxss_store_probe_uses_the_numeric_marker_fallback_for_length_capped_sinks() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtOrd};
+    use tokio::time::{Duration, sleep};
+
+    let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+    // POSTs that inject a non-seed value into `c` — i.e. the field's catalog is
+    // running rather than being skipped after the probe.
+    let c_injections = Arc::new(AtomicUsize::new(0));
+    let write = store.clone();
+    let read = store.clone();
+    let c_inj = c_injections.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                let c_inj = c_inj.clone();
+                async move {
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "c" {
+                            if v != "x" {
+                                c_inj.fetch_add(1, AtOrd::Relaxed);
+                            }
+                            // Length-capped sink: the ~36-char bracketed marker
+                            // and the long payloads never fit; the 8-char
+                            // numeric fallback marker does.
+                            if v.len() <= 10 {
+                                store.lock().unwrap().push(v.into_owned());
+                            }
+                        }
+                    }
+                    Html("saved")
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    Html(format!(
+                        "<html><body>{}</body></html>",
+                        store.lock().unwrap().join("<hr>")
+                    ))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        form_action_url: Some(format!("http://{addr}/save")),
+        form_origin_url: Some(format!("http://{addr}/page")),
+        ..Param::new("c".to_string(), "x".to_string(), Location::Body)
+    });
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.max_payloads_per_param = 40;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    // The field stores short values, so the numeric fallback credits it and its
+    // catalog runs. Without the fallback the probe sees only the too-long
+    // bracketed marker, judges it non-storing, and skips (a handful of probe
+    // injections at most).
+    let injections = c_injections.load(AtOrd::Relaxed);
+    assert!(
+        injections > 20,
+        "the length-capped field must be scanned via the numeric-marker fallback, \
+         but only {injections} payloads reached `c` (a skipped catalog is a few)"
+    );
+}
+
+/// Regression (b): a write-behind sink (the value is stored but visible on the
+/// retrieval page only after a short delay) must still be found. The store-probe
+/// window must be wide enough to observe the delayed store, and — because the
+/// store is not synchronous — the per-payload retrieval retries must be kept so
+/// a delayed payload is not missed.
+#[tokio::test]
+async fn sxss_finds_a_write_behind_store() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use std::time::Instant;
+    use tokio::time::{Duration, sleep};
+
+    // Each stored item becomes visible on /view only ~350 ms after it was
+    // written — a write-behind sink.
+    let store: Arc<StdMutex<Vec<(Instant, String)>>> = Arc::default();
+    let write = store.clone();
+    let read = store.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                async move {
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "c" && v != "x" {
+                            store.lock().unwrap().push((Instant::now(), v.into_owned()));
+                        }
+                    }
+                    Html("saved")
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    let now = Instant::now();
+                    let visible: String = store
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|(t, _)| now.duration_since(*t) >= Duration::from_millis(350))
+                        .map(|(_, v)| v.clone())
+                        .collect::<Vec<_>>()
+                        .join("<hr>");
+                    Html(format!("<html><body>{visible}</body></html>"))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        form_action_url: Some(format!("http://{addr}/save")),
+        form_origin_url: Some(format!("http://{addr}/page")),
+        ..Param::new("c".to_string(), "x".to_string(), Location::Body)
+    });
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    // Default retry ramp (backoff 500 ms) covers the 350 ms write-behind delay.
+    args.sxss_retries = 3;
+    args.max_payloads_per_param = 40;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    assert!(
+        results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.param == "c" && r.result_type == FindingType::Verified),
+        "a write-behind store must still be verified: the store-probe window must \
+         observe the delayed store and the per-payload retries must be kept"
+    );
+}

@@ -700,24 +700,36 @@ impl ScanWorkerCtx {
             // occurrence above the pre-injection baseline, i.e. this field
             // actually stores. If it does not, skip the catalog entirely.
             // `--deep-scan` keeps the catalog (it must not depend on this gate).
+            // Non-`--sxss` scans keep the per-payload retries; `--sxss` decides
+            // below from the store-probe (a synchronous sink skips them, a
+            // write-behind sink keeps them).
+            let mut sxss_skip_payload_retries = false;
             if self.args.sxss && !self.args.deep_scan {
-                let marker = crate::scanning::markers::bracketed_marker();
-                let (kind, _, _) = check_reflection::check_reflection_with_response_status(
-                    Some(self.client.as_ref()),
+                let outcome = check_reflection::sxss_store_probe(
+                    self.client.as_ref(),
                     &self.target,
                     &param,
-                    marker,
                     &self.args,
-                    &waf_streak,
                 )
                 .await;
-                if kind.is_none() {
+                if !outcome.stored {
                     crate::dbg_log!(
                         "sxss store-probe (param={}): injection did not raise the marker count above the baseline — field does not store here, skipping the payload catalog",
                         param.name
                     );
                     self.flush_results(&mut state.local_results).await;
                     return;
+                }
+                // Only skip the per-payload retrieval retries when the store was
+                // visible on the first pass. A write-behind sink (store visible
+                // only after a wait) keeps the full retries so a delayed payload
+                // is not missed.
+                sxss_skip_payload_retries = outcome.synchronous;
+                if !sxss_skip_payload_retries {
+                    crate::dbg_log!(
+                        "sxss store-probe (param={}): store is write-behind — keeping per-payload retrieval retries",
+                        param.name
+                    );
                 }
             }
 
@@ -750,12 +762,13 @@ impl ScanWorkerCtx {
                 self.flush_results(&mut state.local_results).await;
             };
 
-            // Under `--sxss`, disable the per-payload retrieval retries for the
-            // payload phases only (the store-probe above kept them): propagation
-            // delay is absorbed once at parameter entry, so a non-stored payload
-            // no longer pays the backoff loop. See
+            // Under `--sxss` with a *synchronous* sink, disable the per-payload
+            // retrieval retries for the payload phases only (the store-probe
+            // above kept them): the store-probe confirmed the sink stores on the
+            // first pass, so a non-stored payload no longer pays the backoff
+            // loop. A write-behind sink keeps the retries. See
             // `check_reflection::SXSS_SKIP_PAYLOAD_RETRIES`.
-            if self.args.sxss {
+            if sxss_skip_payload_retries {
                 crate::scanning::check_reflection::SXSS_SKIP_PAYLOAD_RETRIES
                     .scope(true, payload_phases)
                     .await;
