@@ -1884,3 +1884,15 @@ async fn probe_xml_body_params_fires_on_xml_prolog_without_content_type() {
             .any(|p| p.name == "msg" && p.location == Location::XmlBody)
     );
 }
+
+/// The script body starts after the open tag's real `>`, not one inside a
+/// quoted attribute value — otherwise the prefix begins with `b">` and the
+/// computed closer is wrong.
+#[test]
+fn test_detect_js_breakout_with_marker_skips_quoted_gt_in_open_tag() {
+    let body = "<script data-x=\"a>b\">h([\"4815162342\"]);</script>";
+    assert_eq!(
+        detect_js_breakout_with_marker(body, "4815162342").as_deref(),
+        Some("\"])")
+    );
+}

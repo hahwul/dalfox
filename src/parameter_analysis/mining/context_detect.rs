@@ -80,9 +80,9 @@ pub(crate) fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option
     // `<script` (case-insensitive) never matches a closing `</script>` tag (the
     // char after `<` is `/`, not `s`), so the last match is a real opener.
     let open_tag = rfind_ascii_case_insensitive(text.as_bytes(), mp, b"<script")?;
-    // Script content begins just after the `>` that ends the opening tag.
-    let gt = text[open_tag..mp].find('>')?;
-    let content_start = open_tag + gt + 1;
+    // Script content begins just after the `>` that ends the opening tag (a
+    // `>` inside a quoted attribute value does not end it).
+    let content_start = crate::utils::html::open_tag_end(text, open_tag).filter(|&e| e <= mp)?;
     let prefix = &text[content_start..mp];
     // Guard the multi-`<script>` edge: if a `</script>` closes between this
     // opener and the marker, the marker isn't inside this script body — bail to

@@ -212,10 +212,17 @@ static COMPILED: LazyLock<Vec<CompiledLib>> = LazyLock::new(|| {
 /// response body would also flag versions mentioned in prose, link text,
 /// download `href`s, comments, or non-JS filenames (false positives), so
 /// detection is scoped to these two via `script_haystacks`.
-static SCRIPT_SRC_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)<script\b[^>]*\bsrc\s*=\s*["']?([^"'>\s]+)"#).unwrap());
-static SCRIPT_INLINE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<script\b(?:\s[^>]*)?>(.*?)</script\s*>").unwrap());
+static SCRIPT_SRC_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)<script\b(?:[^>=]|=\s*"[^"]*"|=\s*'[^']*'|=)*?\bsrc\s*=\s*["']?([^"'>\s]+)"#)
+        .unwrap()
+});
+static SCRIPT_INLINE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"(?is){}(.*?)</script\s*>",
+        crate::utils::html::SCRIPT_OPEN_TAG_PATTERN
+    ))
+    .unwrap()
+});
 
 /// Extract the script-context haystacks from `body`: `(src URLs joined, inline
 /// script bodies joined)`. url-patterns match only the former, inline-patterns
