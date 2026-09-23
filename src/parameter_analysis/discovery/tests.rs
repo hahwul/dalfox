@@ -4,6 +4,7 @@ use crate::target_parser::parse_target;
 use axum::Router;
 use axum::extract::Query;
 use axum::http::{HeaderMap, Uri};
+use axum::response::Html;
 use axum::routing::any;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -1162,12 +1163,72 @@ async fn reflect_get_form_route_state(uri: Uri) -> String {
     }
 }
 
+async fn reflect_first_q_or_form(uri: Uri) -> Html<String> {
+    let first_q = uri
+        .query()
+        .into_iter()
+        .flat_map(|query| url::form_urlencoded::parse(query.as_bytes()))
+        .find(|(name, _)| name == "q")
+        .map(|(_, value)| value.into_owned());
+    match first_q.as_deref() {
+        Some("foo") => Html(
+            "<html><body><form method=\"GET\"><input name=\"q\" value=\"seed\"></form></body></html>"
+                .to_string(),
+        ),
+        Some(value) => Html(format!("<html><body>{value}</body></html>")),
+        None => Html("<html><body>missing q</body></html>".to_string()),
+    }
+}
+
+#[tokio::test]
+async fn get_form_discovery_replaces_page_query_collision_for_first_value_server() {
+    // An action-less GET form resolves to the page URL. If its `q` control is
+    // appended to the page's `?q=foo`, a first-value server never sees the
+    // probe marker and discovery misses the field.
+    let app = Router::new().route("/", any(reflect_first_q_or_form));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind first-value form listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/?q=foo")).expect("target parses");
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_form_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+
+    let param = reflection_params
+        .lock()
+        .await
+        .iter()
+        .find(|param| param.name == "q" && param.location == Location::Query)
+        .expect("discovery must replace the action's first q value")
+        .clone();
+    let target = Arc::new(target);
+    let client = target.build_client_or_default();
+    let response =
+        crate::scanning::url_inject::build_inject_request(&client, &target, &param, "PAY")
+            .send()
+            .await
+            .expect("scan injection request should reach the page");
+    assert_eq!(
+        response.text().await.expect("read response"),
+        "<html><body>PAY</body></html>",
+        "the scan sender and discovery probe must both replace the colliding page query"
+    );
+}
+
 #[tokio::test]
 async fn get_form_discovery_preserves_action_query_for_probe_and_injection() {
-    // A GET form submits its controls alongside the query already present in
-    // its action URL. Clearing that query sends the probe to a different
-    // route, so discovery misses a field that the browser and scan sender can
-    // reach.
+    // Discovery and injection retain unrelated action-query state such as
+    // `mode=search`; clearing it sends the probe to a different route.
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("bind form listener");
