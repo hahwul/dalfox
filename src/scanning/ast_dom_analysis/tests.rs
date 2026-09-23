@@ -5505,16 +5505,20 @@ fn markup(
     text: &[&str],
     css: &[&str],
 ) -> crate::scanning::ast_dom_analysis::PageMarkup {
-    let mut m = crate::scanning::ast_dom_analysis::PageMarkup::default();
-    for (id, names) in attrs {
-        m.attrs.insert(
-            id.to_string(),
-            names.iter().map(|n| n.to_string()).collect(),
-        );
+    crate::scanning::ast_dom_analysis::PageMarkup {
+        attrs: attrs
+            .iter()
+            .map(|(id, names)| {
+                (
+                    id.to_string(),
+                    names.iter().map(|n| n.to_string()).collect(),
+                )
+            })
+            .collect(),
+        text: text.iter().map(|s| s.to_string()).collect(),
+        css_custom_properties: css.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
     }
-    m.text = text.iter().map(|s| s.to_string()).collect();
-    m.css_custom_properties = css.iter().map(|s| s.to_string()).collect();
-    m
 }
 
 /// Server-reflected markup read back by the page is a source — but only for
@@ -5606,9 +5610,10 @@ fn unreflected_markup_reads_stay_clean() {
 }
 
 fn forms(ids: &[&str]) -> crate::scanning::ast_dom_analysis::PageMarkup {
-    let mut m = crate::scanning::ast_dom_analysis::PageMarkup::default();
-    m.form_ids = ids.iter().map(|s| s.to_string()).collect();
-    m
+    crate::scanning::ast_dom_analysis::PageMarkup {
+        form_ids: ids.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    }
 }
 
 /// A tainted `action` on a real `<form>` runs a `javascript:` URL on submit.
@@ -5697,9 +5702,10 @@ fn decoded_literal_without_proof_stays_clean() {
 }
 
 fn sent(value: &str) -> crate::scanning::ast_dom_analysis::PageMarkup {
-    let mut m = crate::scanning::ast_dom_analysis::PageMarkup::default();
-    m.sent_value = Some(value.to_string());
-    m
+    crate::scanning::ast_dom_analysis::PageMarkup {
+        sent_value: Some(value.to_string()),
+        ..Default::default()
+    }
 }
 
 /// The AST pass is often seeded by an attack payload with no marker; a
