@@ -544,3 +544,49 @@ fn test_parse_hash_token_rejects_nonce_token() {
     let lower = token.to_ascii_lowercase();
     assert_eq!(parse_hash_token(token, &lower), None);
 }
+
+/// A comma-separated policy list is several policies, all enforced: a
+/// permission survives only when every policy grants it.
+#[test]
+fn test_analyze_csp_from_policy_list_intersects_permissions() {
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "script-src 'unsafe-inline' 'unsafe-eval', script-src 'unsafe-inline'; require-trusted-types-for 'script'",
+    );
+    assert!(a.has_unsafe_inline, "both policies allow inline script");
+    assert!(!a.has_unsafe_eval, "the second policy forbids eval");
+    assert!(a.require_trusted_types_for);
+    assert!(!a.missing_script_src);
+
+    // A policy without script-src / default-src grants everything, so it does
+    // not revoke the other policy's permission.
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "object-src 'none', script-src 'unsafe-inline'",
+    );
+    assert!(a.has_unsafe_inline);
+    assert!(!a.missing_object_src);
+
+    // A nonce in either policy pins inline script for that policy.
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "script-src 'unsafe-inline', script-src 'nonce-abc' 'unsafe-inline'",
+    );
+    assert_eq!(a.nonce_values, vec!["abc".to_string()]);
+}
+
+#[test]
+fn test_analyze_csp_from_single_policy_unchanged() {
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "script-src 'self' cdn.example.com",
+    );
+    assert!(!a.has_unsafe_inline);
+    assert_eq!(a.whitelisted_domains, vec!["cdn.example.com".to_string()]);
+    let r = analyze_csp_from(
+        "Content-Security-Policy-Report-Only",
+        "script-src 'self', require-trusted-types-for 'script'",
+    );
+    assert!(r.report_only);
+    assert!(!r.require_trusted_types_for);
+}

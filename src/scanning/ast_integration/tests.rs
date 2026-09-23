@@ -1442,7 +1442,8 @@ fn test_posture_from_response_meta_report_only_enforces_nothing() {
     assert!(p.inline_script_allowed);
 }
 
-/// Header wins over the document, and the enforcing header wins over
+/// A header and a meta policy are both enforced, so the restrictive header is
+/// not relaxed by a permissive meta; the enforcing header wins over
 /// report-only — the same precedence preflight applies.
 #[test]
 fn test_posture_from_response_header_precedence() {
@@ -1491,6 +1492,44 @@ fn test_posture_from_response_enforcing_meta_beats_report_only_header() {
         "the enforcing meta policy restricts inline script"
     );
     assert!(p.trusted_types_enforced, "the enforcing meta requires TT");
+}
+
+/// Browsers enforce every `Content-Security-Policy` header, so a restriction
+/// sent in a second header line applies. Only the first line used to be read,
+/// grading a Trusted-Types-hardened, nonce-only page `high`.
+#[test]
+fn test_posture_from_response_reads_every_enforcing_header() {
+    let mut h = headers_with(&[("content-security-policy", "object-src 'none'")]);
+    h.append(
+        reqwest::header::CONTENT_SECURITY_POLICY,
+        reqwest::header::HeaderValue::from_static(
+            "script-src 'nonce-abc'; require-trusted-types-for 'script'",
+        ),
+    );
+    let p = PageSecurityPosture::from_response(&h, "");
+    assert!(
+        !p.inline_script_allowed,
+        "second header's script-src applies"
+    );
+    assert!(
+        p.trusted_types_enforced,
+        "second header's TT requirement applies"
+    );
+}
+
+/// An enforcing header does not hide an enforcing `<meta>` policy: both apply.
+#[test]
+fn test_posture_from_response_combines_header_and_meta() {
+    let body = r#"<meta http-equiv="Content-Security-Policy" content="require-trusted-types-for 'script'">"#;
+    let p = PageSecurityPosture::from_response(
+        &headers_with(&[("content-security-policy", "script-src 'unsafe-inline'")]),
+        body,
+    );
+    assert!(
+        p.inline_script_allowed,
+        "neither policy restricts inline script"
+    );
+    assert!(p.trusted_types_enforced, "the meta policy requires TT");
 }
 
 #[test]

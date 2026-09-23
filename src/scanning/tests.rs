@@ -3071,6 +3071,22 @@ fn test_extract_meta_csp_prefers_enforcing_over_report_only() {
     assert!(content.contains("require-trusted-types-for"));
 }
 
+/// Every enforcing meta policy applies, so all of them are returned as one
+/// policy list, not just the first.
+#[test]
+fn test_extract_meta_csp_returns_every_enforcing_policy() {
+    let html = r#"<html><head>
+        <meta http-equiv="Content-Security-Policy" content="object-src 'none'">
+        <meta http-equiv="Content-Security-Policy" content="require-trusted-types-for 'script'">
+    </head><body></body></html>"#;
+    let (name, content) = extract_meta_csp(html).expect("a meta CSP is present");
+    assert_eq!(name, "Content-Security-Policy");
+    assert_eq!(
+        content,
+        "object-src 'none', require-trusted-types-for 'script'"
+    );
+}
+
 /// With only a report-only meta present, it is still returned (nothing else to
 /// fall back to).
 #[test]
