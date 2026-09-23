@@ -1470,6 +1470,29 @@ fn test_posture_from_response_header_precedence() {
     );
 }
 
+/// A report-only header enforces nothing, so it must not shadow an enforcing
+/// `<meta>` policy in the same response. The report-only header used to win
+/// simply for being a header, and the enforcing meta was never read.
+#[test]
+fn test_posture_from_response_enforcing_meta_beats_report_only_header() {
+    let body = r#"<html><head>
+        <meta http-equiv="Content-Security-Policy"
+              content="script-src 'self'; require-trusted-types-for 'script'">
+        </head><body></body></html>"#;
+    let p = PageSecurityPosture::from_response(
+        &headers_with(&[(
+            "content-security-policy-report-only",
+            "script-src 'unsafe-inline'",
+        )]),
+        body,
+    );
+    assert!(
+        !p.inline_script_allowed,
+        "the enforcing meta policy restricts inline script"
+    );
+    assert!(p.trusted_types_enforced, "the enforcing meta requires TT");
+}
+
 #[test]
 fn test_posture_from_response_report_only_header_is_permissive() {
     let p = PageSecurityPosture::from_response(

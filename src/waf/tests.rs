@@ -90,7 +90,7 @@ async fn probe_mirrors_target_method_and_preserves_auth_for_get() {
         .push(("session".to_string(), "abc".to_string()));
 
     let client = target.build_client_or_default();
-    let _ = fingerprint_with_probe(&target, &client).await;
+    let _ = fingerprint_with_probe(&target, &client, None).await;
     handle.abort();
 
     assert_eq!(
@@ -124,7 +124,7 @@ async fn probe_mirrors_target_method_and_body_for_post() {
         .push(("session".to_string(), "abc".to_string()));
 
     let client = target.build_client_or_default();
-    let _ = fingerprint_with_probe(&target, &client).await;
+    let _ = fingerprint_with_probe(&target, &client, None).await;
     handle.abort();
 
     assert_eq!(
@@ -678,4 +678,30 @@ fn test_safeline_detection_by_cookie() {
     let headers = make_headers(&[("set-cookie", "sl-session=abc123; Path=/; Secure")]);
     let result = fingerprint_from_response(&headers, None, 200);
     assert!(result.waf_types().contains(&&WafType::SafeLine));
+}
+
+/// The status-only inference still fires when the block is the probe's doing
+/// (the landing page answered 200), and is skipped only when the unprovoked
+/// page already returned that same status.
+#[tokio::test]
+async fn probe_status_inference_is_relative_to_the_baseline_status() {
+    let app = Router::new().route("/", get(|| async { (StatusCode::FORBIDDEN, "denied") }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let target = crate::target_parser::parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+
+    let provoked = fingerprint_with_probe(&target, &client, Some(200)).await;
+    assert_eq!(
+        provoked.primary().map(|f| f.waf_type.clone()),
+        Some(WafType::Unknown("HTTP 403".to_string()))
+    );
+    let always = fingerprint_with_probe(&target, &client, Some(403)).await;
+    handle.abort();
+    assert!(always.is_empty(), "{:?}", always.detected);
 }

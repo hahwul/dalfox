@@ -846,6 +846,39 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
     );
 }
 
+/// A report-only header must not shadow an enforcing `<meta>` policy: the CLI
+/// preflight analyses the policy the browser actually enforces.
+#[tokio::test]
+async fn test_preflight_enforcing_meta_csp_beats_report_only_header() {
+    let html = "<html><head><meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'self'\"></head><body>ok</body></html>";
+    let (url, handle) = spawn_preflight_server(
+        Some((
+            "content-security-policy-report-only",
+            "script-src 'unsafe-inline'",
+        )),
+        html,
+    )
+    .await;
+
+    let target = parse_target(&url).expect("valid target");
+    let mut args = default_scan_args();
+    args.skip_waf_probe = true;
+    let preflight = match preflight_content_type(&target, &args).await {
+        PreflightOutcome::WithContentType(r) => r,
+        PreflightOutcome::NoContentType(_) => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
+    };
+    handle.abort();
+
+    assert_eq!(
+        preflight.csp_header,
+        Some((
+            "Content-Security-Policy".to_string(),
+            "script-src 'self'".to_string()
+        ))
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Shared fixtures for the POC / output rendering tests below.
 // ─────────────────────────────────────────────────────────────────────────
@@ -2972,7 +3005,7 @@ async fn finish_waf_detection_sends_no_provocation_probe_on_a_dry_run() {
             dry_run,
             ..ScanArgs::default()
         };
-        super::finish_waf_detection(Default::default(), &target, &client, &args).await;
+        super::finish_waf_detection(Default::default(), None, &target, &client, &args).await;
         assert_eq!(
             hits.load(std::sync::atomic::Ordering::Relaxed),
             expected_hits,
@@ -3174,5 +3207,44 @@ async fn side_channel_pocs_from_a_real_scan_carry_the_wafpad_prefix() {
         };
         assert!(curl.contains(&curl_arg), "{name} curl: {curl}");
         assert!(httpie.contains(&httpie_arg), "{name} httpie: {httpie}");
+    }
+}
+
+/// An origin that answers *every* request with the same blocking status (an
+/// auth wall's 403, a maintenance page's 503) is not a WAF: the provocation
+/// probe getting that status too says nothing about the payload. Reading it as
+/// `Unknown(HTTP 503)` engaged a bypass strategy — mutations, extra encoders
+/// and a 1.5 s per-request delay hint — against a WAF-less target.
+#[tokio::test]
+async fn preflight_does_not_infer_a_waf_from_a_status_the_page_always_returns() {
+    for status in [403u16, 503] {
+        let app = Router::new().route(
+            "/",
+            get(move || async move {
+                (
+                    axum::http::StatusCode::from_u16(status).unwrap(),
+                    [("content-type", "text/html")],
+                    "<html><body>unavailable</body></html>",
+                )
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let target = parse_target(&format!("http://{addr}/")).expect("target");
+        let args = default_scan_args();
+        let preflight = match preflight_content_type(&target, &args).await {
+            PreflightOutcome::WithContentType(r) => r,
+            _ => panic!("preflight should return a Content-Type"),
+        };
+        server.abort();
+        assert!(
+            preflight.waf_result.is_empty(),
+            "HTTP {status} on every request is not a WAF: {:?}",
+            preflight.waf_result.detected
+        );
     }
 }
