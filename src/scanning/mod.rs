@@ -715,6 +715,13 @@ impl ScanWorkerCtx {
             self.flush_results(&mut state.local_results).await;
         };
 
+        // The baseline is a task-local, and task-locals do not cross
+        // `tokio::spawn`. Everything that consults the credit gate
+        // (`check_reflection::sxss_injection_credited`) must run inside this
+        // scope on the same task: the gate fails *open* when the baseline is
+        // missing, so a spawn inside the reflection/DOM phases would silently
+        // bring back the wrong-field stored-XSS finding. Guarded by
+        // `sxss_credit_gate_always_sees_a_baseline_during_the_phases`.
         match sxss_baseline {
             Some(baseline) => {
                 crate::scanning::check_reflection::SXSS_BASELINE

@@ -4799,3 +4799,96 @@ async fn sxss_credits_only_the_fields_that_actually_store() {
         );
     }
 }
+
+/// The `--sxss` credit gate fails *open* when no baseline is in scope, and the
+/// baseline is a task-local that does not cross `tokio::spawn`. Drive a real
+/// `--sxss` scan through `run_scanning` and assert every attack-payload gate
+/// call during the reflection/DOM phases saw a baseline. A future spawn inside
+/// those phases (or dropping the scope) would record fail-open hits here.
+#[tokio::test]
+async fn sxss_credit_gate_always_sees_a_baseline_during_the_phases() {
+    use crate::scanning::check_reflection::{SXSS_GATE_FAIL_OPEN, SXSS_GATE_GUARD_SENTINEL};
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use tokio::time::{Duration, sleep};
+
+    let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+    let write = store.clone();
+    let read = store.clone();
+    // Every page carries the sentinel so only this test's gate calls are
+    // recorded (see `record_sxss_gate_fail_open`).
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                async move {
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "c" {
+                            store.lock().unwrap().push(v.into_owned());
+                        }
+                    }
+                    Html(format!("<p>{SXSS_GATE_GUARD_SENTINEL}</p>saved"))
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    Html(format!(
+                        "<html><body><p>{SXSS_GATE_GUARD_SENTINEL}</p>{}</body></html>",
+                        store.lock().unwrap().join("<hr>")
+                    ))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        form_action_url: Some(format!("http://{addr}/save")),
+        form_origin_url: Some(format!("http://{addr}/page")),
+        ..Param::new("c".to_string(), "x".to_string(), Location::Body)
+    });
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.max_payloads_per_param = 20;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    // Control: the phases actually ran and reached the gate with a stored hit.
+    assert!(
+        results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.param == "c" && r.result_type == FindingType::Verified),
+        "control: the stored field must be verified"
+    );
+    let hits = SXSS_GATE_FAIL_OPEN.lock().unwrap().clone();
+    assert!(
+        hits.is_empty(),
+        "credit gate ran without a baseline in scope for {} attack payload(s), e.g. {:?}",
+        hits.len(),
+        hits.first()
+    );
+}

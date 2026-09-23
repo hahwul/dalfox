@@ -34,7 +34,8 @@ the rest of the scan. To keep findings on the right field, before a parameter
 injects anything Dalfox snapshots the retrieval page(s) once; a payload is
 credited to that parameter only when its injection makes the payload appear
 *more* often than the snapshot already showed. A copy another field stored
-earlier is already in the snapshot, so it is never mis-credited.
+earlier is already in the snapshot, so it is never mis-credited. The snapshot
+costs one extra GET per retrieval URL per parameter.
 
 ## Choosing the retrieval URL
 

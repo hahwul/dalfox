@@ -2366,7 +2366,35 @@ pub(crate) fn sxss_injection_credited(body: &str, payload: &str) -> bool {
             .unwrap_or(0)
     }) {
         Ok(baseline) => reflection_occurrences(body, payload) > baseline,
-        Err(_) => true,
+        Err(_) => {
+            #[cfg(test)]
+            record_sxss_gate_fail_open(body, payload);
+            true
+        }
+    }
+}
+
+/// Test-only record of credit-gate calls that ran *without* a baseline in
+/// scope, for attack payloads (the Stage-0 probe markers are expected to be
+/// un-gated and are skipped). Only bodies carrying the guard test's sentinel
+/// are kept, so concurrent tests that call the gate directly cannot pollute it.
+#[cfg(test)]
+pub(crate) static SXSS_GATE_FAIL_OPEN: std::sync::Mutex<Vec<String>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+pub(crate) const SXSS_GATE_GUARD_SENTINEL: &str = "sxss-gate-guard-sentinel";
+
+#[cfg(test)]
+fn record_sxss_gate_fail_open(body: &str, payload: &str) {
+    if payload == crate::scanning::markers::bracketed_marker()
+        || payload == NUMERIC_PROBE_MARKER
+        || !body.contains(SXSS_GATE_GUARD_SENTINEL)
+    {
+        return;
+    }
+    if let Ok(mut hits) = SXSS_GATE_FAIL_OPEN.lock() {
+        hits.push(payload.to_string());
     }
 }
 
