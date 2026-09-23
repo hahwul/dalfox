@@ -4434,3 +4434,22 @@ async fn path_param_classified_2url_is_scanned_with_matching_layers() {
         guard.len()
     );
 }
+
+/// A CSP `<meta>` outside `<head>` is ignored by browsers, so it must not be
+/// merged into the analysed policy.
+#[test]
+fn test_extract_meta_csp_ignores_meta_outside_head() {
+    let html = r#"<html><head><title>x</title></head><body>
+        <meta http-equiv="Content-Security-Policy" content="script-src 'none'">
+    </body></html>"#;
+    assert_eq!(extract_meta_csp(html), None);
+    let html = r#"<html><head>
+        <meta http-equiv="Content-Security-Policy" content="object-src 'none'">
+    </head><body>
+        <meta http-equiv="Content-Security-Policy" content="script-src 'none'">
+    </body></html>"#;
+    assert_eq!(
+        extract_meta_csp(html).map(|(_, c)| c).as_deref(),
+        Some("object-src 'none'")
+    );
+}

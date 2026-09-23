@@ -116,6 +116,15 @@ pub(crate) fn extract_meta_csp(html: &str) -> Option<(String, String)> {
     let mut enforcing: Vec<String> = Vec::new();
     let mut report_only: Option<(String, String)> = None;
     for el in doc.select(crate::scanning::selectors::meta_csp()) {
+        // Browsers only honour a CSP `<meta>` that is a child of `<head>`; one
+        // in the body (a reflected or user-authored one included) is ignored.
+        let in_head = el
+            .parent()
+            .and_then(|p| p.value().as_element().map(|e| e.name() == "head"))
+            .unwrap_or(false);
+        if !in_head {
+            continue;
+        }
         let http_equiv = el
             .value()
             .attr("http-equiv")
