@@ -2805,14 +2805,16 @@ async fn fetch_injection_response_with_client(
         // renders the stored value (e.g. POST /comments returns the rendered
         // /comments page). Without this check we'd miss the entire class
         // of sinks where the write-response is the rendered view.
-        if let Some((body, is_xml)) = inject_body.as_ref()
-            && classify_reflection(&body.text, payload).is_some()
-            && sxss_injection_credited(&body.text, payload)
-        {
+        let inline_xml_content_type = inject_body.as_ref().and_then(|(body, is_xml)| {
+            (classify_reflection(&body.text, payload).is_some()
+                && sxss_injection_credited(&body.text, payload))
+            .then_some(*is_xml)
+        });
+        if let Some(xml_content_type) = inline_xml_content_type {
             return FetchedInjection {
                 body: inject_body.map(|(body, _)| body),
                 status: 0,
-                xml_content_type: *is_xml,
+                xml_content_type,
             };
         }
         let (body, xml_content_type) = fallback_body
