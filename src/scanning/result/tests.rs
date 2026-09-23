@@ -289,8 +289,8 @@ fn test_results_to_markdown() {
 
     // Check findings section
     assert!(markdown.contains("## Findings"));
-    assert!(markdown.contains("### 1. Vulnerability - q (inHTML)"));
-    assert!(markdown.contains("### 2. Reflection - data (inJS)"));
+    assert!(markdown.contains("### 1. Vulnerability - `q` (inHTML)"));
+    assert!(markdown.contains("### 2. Reflection - `data` (inJS)"));
 
     // Check table content
     assert!(markdown.contains("| **Type** | V |"));
@@ -773,7 +773,7 @@ fn test_results_to_markdown_with_meta() {
     assert!(md.contains("| **Total Requests** | 42 |"));
     assert!(md.contains("### Target Summary"));
     assert!(md.contains("| https://example.com | findings | 1 | Cloudflare |"));
-    assert!(md.contains("| https://ex2.com | skipped (CONNECTION_FAILED) | 0 | none |"));
+    assert!(md.contains("| https://ex2.com | skipped (CONNECTION\\_FAILED) | 0 | none |"));
     // still has the findings summary
     assert!(md.contains("## Summary"));
     assert!(md.contains("**Total Findings**: 1"));
@@ -918,6 +918,78 @@ fn markdown_param_cannot_forge_rows_or_headings() {
 }
 
 #[test]
+fn markdown_target_text_cannot_create_a_link_inside_parameter_cells() {
+    // Parameter names can come directly from a page's form or query string.
+    // A backtick closes the fixed inline-code span used by the table, leaving
+    // the rest of this value active Markdown in both the heading and cell.
+    let hostile = "q` [click](https://attacker.example)";
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/")
+        .param(hostile)
+        .payload("<svg onload=alert(1)>")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
+    let md = Result::results_to_markdown(&[result], false, false);
+
+    assert!(
+        md.contains("### 1. Vulnerability - ``q` [click](https://attacker.example)`` (inHTML)"),
+        "target text must stay inside a code span in the finding heading:\n{md}"
+    );
+    assert!(
+        md.contains("| **Parameter** | ``q` [click](https://attacker.example)`` |"),
+        "the parameter value must remain inside one code span:\n{md}"
+    );
+}
+
+#[test]
+fn markdown_finding_includes_type_description() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/")
+        .param("q")
+        .payload("<svg onload=alert(1)>")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
+    let md = Result::results_to_markdown(&[result], false, false);
+
+    assert!(
+        md.contains("| **Type Description** | Vulnerable - dalfox asserts this input is exploitable; act on it |"),
+        "Markdown must pair the type code with its description:\n{md}"
+    );
+}
+
+#[test]
+fn sarif_finding_includes_type_description() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/")
+        .param("q")
+        .payload("<svg onload=alert(1)>")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
+    let sarif = Result::results_to_sarif(&[result], false, false);
+    let value: serde_json::Value = serde_json::from_str(&sarif).expect("valid SARIF JSON");
+
+    assert_eq!(
+        value["runs"][0]["results"][0]["properties"]["type_description"],
+        "Vulnerable - dalfox asserts this input is exploitable; act on it"
+    );
+}
+
+#[test]
 fn markdown_control_bytes_in_cells_are_escaped() {
     let result = Result::builder(FindingType::Verified)
         .inject_type("inHTML")
@@ -932,7 +1004,7 @@ fn markdown_control_bytes_in_cells_are_escaped() {
         .build();
     let md = Result::results_to_markdown(&[result], false, false);
     assert!(!md.contains('\u{1b}') && !md.contains('\u{7}'), "{md:?}");
-    assert!(md.contains("\\x1b]8;;http://evil/\\x07"), "{md}");
+    assert!(md.contains("\\\\x1b\\]8;;http://evil/\\\\x07"), "{md}");
     // Payload punctuation is untouched.
     assert!(md.contains("<svg onload=alert(1)>"), "{md}");
 }
