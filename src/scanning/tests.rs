@@ -3255,6 +3255,175 @@ async fn test_run_scanning_hpp_phase_reports_duplicated_param_bypass() {
     );
 }
 
+/// A query param discovered in a `<form action=…>` lives at the action URL. The
+/// reflection and DOM phases inject there (`effective_query_base`); the HPP
+/// phase polluted `target.url` — the page hosting the form — instead, so the
+/// duplicated parameter never reached the sink and the bypass went unreported.
+#[tokio::test]
+async fn test_run_scanning_hpp_phase_targets_the_form_action_url() {
+    use axum::{Router, extract::RawQuery, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    // Sanitizes the first `q`, renders the last one raw.
+    async fn sink(RawQuery(raw): RawQuery) -> Html<String> {
+        let raw = raw.unwrap_or_default();
+        let values: Vec<String> = raw
+            .split('&')
+            .filter_map(|pair| pair.strip_prefix("q="))
+            .map(|v| urlencoding::decode(v).unwrap_or_default().into_owned())
+            .collect();
+        match values.as_slice() {
+            [] => Html("<div>no q</div>".to_string()),
+            [first, ..] if first.contains('<') || first.contains('>') => {
+                Html("<div>blocked</div>".to_string())
+            }
+            [.., last] => Html(format!("<div>{last}</div>")),
+        }
+    }
+
+    let app = Router::new()
+        .route(
+            "/page",
+            get(|| async { Html(r#"<form action="/sink" method="get"><input name="q"></form>"#) }),
+        )
+        .route("/sink", get(sink));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).expect("parse_target");
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        form_action_url: Some(format!("http://{addr}/sink")),
+        form_origin_url: Some(format!("http://{addr}/page")),
+        ..Param::new("q".to_string(), "safe".to_string(), Location::Query)
+    });
+
+    let mut args = integration_scan_args(false);
+    args.hpp = true;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let guard = results.lock().await;
+    let hpp: Vec<_> = guard
+        .iter()
+        .filter(|r| r.inject_type == "inHTML-HPP")
+        .collect();
+    assert_eq!(
+        hpp.len(),
+        1,
+        "the HPP bypass at the form action must be reported; got: {:?}",
+        guard
+            .iter()
+            .map(|r| (&r.result_type, r.inject_type.as_str(), r.data.as_str()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        hpp[0].data.starts_with(&format!("http://{addr}/sink?")),
+        "the reported (and PoC) URL must be the form action, got: {}",
+        hpp[0].data
+    );
+}
+
+/// A pre-encoded param (base64 here) is sent encoded by every phase except, it
+/// used to be, HPP: the duplicated value went out raw, the server base64-decoded
+/// it to garbage, and the bypass was never seen. The reported URL must carry the
+/// encoded value too, or the PoC reproduces nothing.
+#[tokio::test]
+async fn test_run_scanning_hpp_phase_applies_param_pre_encoding() {
+    use axum::{Router, extract::RawQuery, response::Html, routing::get};
+    use base64::Engine as _;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    // Base64-decodes every `q`; escapes the first, renders the last raw.
+    async fn sink(RawQuery(raw): RawQuery) -> Html<String> {
+        let raw = raw.unwrap_or_default();
+        let values: Vec<String> = raw
+            .split('&')
+            .filter_map(|pair| pair.strip_prefix("q="))
+            .map(|v| {
+                let v = urlencoding::decode(v).unwrap_or_default().into_owned();
+                base64::engine::general_purpose::STANDARD
+                    .decode(v)
+                    .ok()
+                    .and_then(|b| String::from_utf8(b).ok())
+                    .unwrap_or_default()
+            })
+            .collect();
+        match values.as_slice() {
+            [first, .., last] => Html(format!(
+                "<div>{}</div><div>{last}</div>",
+                first.replace('<', "&lt;")
+            )),
+            [only] => Html(format!("<div>{}</div>", only.replace('<', "&lt;"))),
+            [] => Html("<div>no q</div>".to_string()),
+        }
+    }
+
+    let app = Router::new().route("/", get(sink));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/?q=c2FmZQ==")).expect("parse_target");
+    let mut param = Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        ..Param::new("q".to_string(), "c2FmZQ==".to_string(), Location::Query)
+    };
+    param.pre_encoding = Some("base64".to_string());
+    target.reflection_params.push(param);
+
+    let mut args = integration_scan_args(false);
+    args.hpp = true;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let guard = results.lock().await;
+    let hpp: Vec<_> = guard
+        .iter()
+        .filter(|r| r.inject_type == "inHTML-HPP")
+        .collect();
+    assert_eq!(
+        hpp.len(),
+        1,
+        "the HPP bypass on a base64 param must be reported; got: {:?}",
+        guard
+            .iter()
+            .map(|r| (&r.result_type, r.inject_type.as_str(), r.data.as_str()))
+            .collect::<Vec<_>>()
+    );
+    let finding = hpp[0];
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&finding.payload);
+    assert!(
+        finding.data.contains(&*urlencoding::encode(&encoded)),
+        "the reported URL must carry the base64 value that was sent, got: {}",
+        finding.data
+    );
+    assert_eq!(finding.wire_payload.as_deref(), Some(encoded.as_str()));
+}
+
 /// The HPP phase is opt-in. Without `--hpp` the same target must produce no
 /// HPP finding, so the flag gate in `run_hpp_phase` (and the payload-cloning
 /// gate in `scan_param` that mirrors it) stays honest.

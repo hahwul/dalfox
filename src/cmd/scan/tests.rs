@@ -3272,7 +3272,8 @@ fn stream_findings_folds_ast_duplicates_like_the_final_report() {
 
     // A stronger survivor than what was streamed is still shown at the end.
     let upgraded = make(FindingType::Verified, "a", "verified");
-    let final_results = dedupe_ast_results(vec![make(FindingType::AstDetected, "a", "m"), upgraded]);
+    let final_results =
+        dedupe_ast_results(vec![make(FindingType::AstDetected, "a", "m"), upgraded]);
     let out = super::output::render_plain_finding_blocks(&args, &final_results, Some(&seen));
     assert!(out.contains("[POC][V]"), "{out}");
 }

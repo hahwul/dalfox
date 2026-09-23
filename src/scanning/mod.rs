@@ -1452,8 +1452,20 @@ impl ScanWorkerCtx {
         // `hpp_payloads` is already the small reflection-payload subset capped
         // by the caller (see `scan_param`), which bounds the request fan-out.
         let hpp_positions = [HppPosition::Last, HppPosition::First, HppPosition::Both];
+        // Same base the reflection/DOM phases inject at: a query param found in
+        // a `<form action=…>` lives at the action URL, not at the page that
+        // hosts the form. Polluting `target.url` sent every HPP request to the
+        // form page, where the parameter is never read.
+        let hpp_base = crate::scanning::url_inject::effective_query_base(&self.target.url, param);
 
         'hpp_outer: for hpp_payload in &hpp_payloads {
+            // Send the as-encoded value like every other phase does (base64,
+            // multi-URL, …), but classify the reflection against the raw
+            // payload, which is what the server renders after decoding. The
+            // raw payload on the wire decoded to garbage on a pre-encoded param,
+            // so the HPP phase could never find anything there.
+            let wire_payload =
+                crate::encoding::pre_encoding::apply_param_encoding(hpp_payload, param);
             // Cancellation is checked here *and* in the inner position loop:
             // this phase runs after the reflection/DOM phases have already
             // broken out on cancel, and without its own check a cancelled
@@ -1466,8 +1478,7 @@ impl ScanWorkerCtx {
                 if self.cancelled() {
                     break 'hpp_outer;
                 }
-                if let Some(hpp_url) = build_hpp_url(&self.target.url, param, hpp_payload, position)
-                {
+                if let Some(hpp_url) = build_hpp_url(&hpp_base, param, &wire_payload, position) {
                     let (kind, response_text) =
                         crate::scanning::check_reflection::check_reflection_with_hpp_url(
                             self.client.as_ref(),
@@ -1518,6 +1529,8 @@ impl ScanWorkerCtx {
                                 ))
                                 .build();
                         result.set_injection_point(&self.target, param);
+                        result.wire_payload =
+                            (wire_payload != *hpp_payload).then(|| wire_payload.clone());
                         result.response = response_text
                             .map(|t| crate::scanning::result::bound_evidence_body(t, hpp_payload));
                         self.stream_finding(&result);
