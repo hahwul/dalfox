@@ -78,21 +78,6 @@ fn test_unicode_js_escape_covers_new_keywords() {
 }
 
 #[test]
-fn test_js_comment_split_covers_new_sinks() {
-    // setTimeout / Function / fetch were not in the original literal
-    // list — they now get mutated when present.
-    assert!(js_comment_split("setTimeout(x,1)").contains("/**/"));
-    assert!(js_comment_split("Function('x')()").contains("/**/"));
-    assert!(js_comment_split("fetch('/x')").contains("/**/"));
-}
-
-#[test]
-fn test_js_comment_split() {
-    assert_eq!(js_comment_split("alert(1)"), "al/**/ert(1)");
-    assert_eq!(js_comment_split("confirm(1)"), "con/**/firm(1)");
-}
-
-#[test]
 fn test_backtick_parens() {
     assert_eq!(backtick_parens("alert(1)"), "alert`1`");
     assert_eq!(backtick_parens("confirm(1)"), "confirm`1`");
@@ -235,13 +220,24 @@ fn test_apply_mutations_limit() {
         MutationType::HtmlCommentSplit,
         MutationType::CaseAlternation,
         MutationType::BacktickParens,
-        MutationType::JsCommentSplit,
     ];
     // Limit to 2 variants per payload
     let result = apply_mutations(&payloads, &mutations, 2);
     // Original + at most 2 variants
     assert!(result.len() <= 3);
     assert_eq!(result[0], "<script>alert(1)</script>");
+}
+
+#[test]
+fn strategies_do_not_split_javascript_sink_identifiers_with_comments() {
+    let payloads = vec!["<script>alert(1)</script>".to_string()];
+    let strategy = get_bypass_strategy(&WafType::Cloudflare);
+    let expanded = apply_mutations(&payloads, &strategy.mutations, 16);
+
+    assert!(
+        !expanded.iter().any(|payload| payload.contains("al/**/ert")),
+        "a JS comment separates identifier tokens and cannot preserve alert()"
+    );
 }
 
 #[test]
@@ -293,14 +289,14 @@ fn mutation_stats_records_variants_per_type() {
     let stats = MutationStats::default();
     stats.record_variant(MutationType::HtmlCommentSplit);
     stats.record_variant(MutationType::HtmlCommentSplit);
-    stats.record_variant(MutationType::JsCommentSplit);
+    stats.record_variant(MutationType::BacktickParens);
     let snap = stats.snapshot();
     assert_eq!(
         snap.variants.get(&MutationType::HtmlCommentSplit).copied(),
         Some(2)
     );
     assert_eq!(
-        snap.variants.get(&MutationType::JsCommentSplit).copied(),
+        snap.variants.get(&MutationType::BacktickParens).copied(),
         Some(1)
     );
 }
@@ -553,7 +549,6 @@ fn test_citrix_netscaler_strategy() {
 const ALL_MUTATIONS: &[MutationType] = &[
     MutationType::HtmlCommentSplit,
     MutationType::WhitespaceMutation,
-    MutationType::JsCommentSplit,
     MutationType::BacktickParens,
     MutationType::ConstructorChain,
     MutationType::UnicodeJsEscape,
@@ -591,7 +586,6 @@ fn apply_single_mutation_dispatches_and_transforms_every_type() {
     let cases: &[(MutationType, &str)] = &[
         (MutationType::HtmlCommentSplit, "<svg onload=alert(1)>"),
         (MutationType::WhitespaceMutation, "<svg onload=alert(1)>"),
-        (MutationType::JsCommentSplit, "<svg onload=alert(1)>"),
         (MutationType::BacktickParens, "<svg onload=alert(1)>"),
         (MutationType::ConstructorChain, "<svg onload=alert(1)>"),
         (MutationType::UnicodeJsEscape, "<svg onload=alert(1)>"),
@@ -760,20 +754,42 @@ fn keyword_entity_encode_not_fooled_by_literal_script_in_attribute() {
 // ── MultiSlash (M4) ─────────────────────────────────────────────────
 
 #[test]
-fn multi_slash_replaces_every_top_level_separator() {
+fn multi_slash_replaces_only_parser_safe_separators() {
     assert_eq!(
         multi_slash("<img src=x onerror=alert(1)>"),
-        "<img/src=x/onerror=alert(1)>"
+        "<img/src=x onerror=alert(1)>"
     );
 }
 
 #[test]
-fn multi_slash_noops_on_single_separator() {
-    // One separator → identical to slash_separator's output, which the dedup
-    // seen-set would drop; no-op so it never claims a variant slot.
+fn multi_slash_keeps_unquoted_handler_and_marker_separate() {
+    use oxc_allocator::Allocator;
+    use oxc_parser::Parser;
+    use oxc_span::SourceType;
+
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<svg onload=alert(1) class={marker}>");
+    let mutated = multi_slash(&payload);
+    let fragment = scraper::Html::parse_fragment(&mutated);
+    let selector = scraper::Selector::parse("svg").expect("static selector");
+    let svg = fragment.select(&selector).next().expect("mutated svg");
+
+    let handler = svg.value().attr("onload").expect("event handler");
+    assert_eq!(handler, "alert(1)");
+    assert_eq!(svg.value().attr("class"), Some(marker));
+
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, handler, SourceType::default()).parse();
+    assert!(parsed.errors.is_empty(), "invalid handler: {handler:?}");
+}
+
+#[test]
+fn multi_slash_keeps_the_single_safe_separator() {
+    // The second separator follows an unquoted handler value, so changing it
+    // would append `/` to the JavaScript rather than start another attribute.
     assert_eq!(
         multi_slash("<svg onload=alert(1)>"),
-        "<svg onload=alert(1)>"
+        "<svg/onload=alert(1)>"
     );
 }
 
@@ -782,7 +798,13 @@ fn multi_slash_preserves_quoted_attribute_whitespace() {
     // Whitespace inside a quoted value must NOT become a slash.
     assert_eq!(
         multi_slash("<img src=x onerror=\"a = b\">"),
-        "<img/src=x/onerror=\"a = b\">"
+        "<img/src=x onerror=\"a = b\">"
+    );
+    // After a quoted value the tokenizer is back in its attribute-name state,
+    // so slash separators are valid and all three attributes survive.
+    assert_eq!(
+        multi_slash("<img src=\"x\" onerror=\"alert(1)\" class=x>"),
+        "<img/src=\"x\"/onerror=\"alert(1)\"/class=x>"
     );
 }
 
@@ -796,10 +818,10 @@ fn multi_slash_noops_without_an_opening_tag() {
 #[test]
 fn multi_slash_leaves_trailing_self_close_alone() {
     // The space before a trailing `/>` is not followed by an attr letter, so it
-    // is not a separator → single real separator → no-op.
+    // is not a separator. The actual tag/attribute separator remains safe.
     assert_eq!(
         multi_slash("<svg onload=alert(1) />"),
-        "<svg onload=alert(1) />"
+        "<svg/onload=alert(1) />"
     );
 }
 
@@ -923,7 +945,6 @@ fn mutations_never_panic_on_multibyte_payloads() {
     const MUTATIONS: &[MutationType] = &[
         MutationType::HtmlCommentSplit,
         MutationType::WhitespaceMutation,
-        MutationType::JsCommentSplit,
         MutationType::BacktickParens,
         MutationType::ConstructorChain,
         MutationType::UnicodeJsEscape,

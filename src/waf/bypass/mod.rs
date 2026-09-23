@@ -86,7 +86,6 @@ fn apply_single_mutation(payload: &str, mutation: &MutationType) -> String {
     match mutation {
         MutationType::HtmlCommentSplit => html_comment_split(payload),
         MutationType::WhitespaceMutation => whitespace_mutation(payload),
-        MutationType::JsCommentSplit => js_comment_split(payload),
         MutationType::BacktickParens => backtick_parens(payload),
         MutationType::ConstructorChain => constructor_chain(payload),
         MutationType::UnicodeJsEscape => unicode_js_escape(payload),

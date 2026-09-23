@@ -99,11 +99,13 @@ dalfox https://target.app -e url,html,base64
 dalfox https://target.app --custom-payload mypayloads.txt
 ```
 
-내장 라이브러리를 완전히 교체합니다:
+로컬 내장 라이브러리 대신 사용자 지정 파일을 사용합니다:
 
 ```bash
 dalfox https://target.app --custom-payload mypayloads.txt --only-custom-payload
 ```
+
+사용자 지정 파일이 로컬 반사 및 DOM 검사의 기본 페이로드가 됩니다. 적응형 합성과 CSP/기술 공유 페이로드는 추가하지 않습니다. 인코더와 WAF 변형은 사용자 지정 항목에서 파생되며, 명시적으로 요청한 `--remote-payloads`는 계속 사용됩니다.
 
 ## 원격 페이로드 소스
 

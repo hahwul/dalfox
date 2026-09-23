@@ -188,56 +188,6 @@ pub(super) fn whitespace_mutation(payload: &str) -> String {
     payload.to_string()
 }
 
-/// JS sinks worth splitting with `/**/`. Keeping this list explicit
-/// (rather than splitting any IDENT) avoids mutating identifiers that
-/// just happen to contain a paren — e.g. `class=foo(bar)`.
-const JS_SINK_NAMES: &[&str] = &[
-    "alert",
-    "confirm",
-    "prompt",
-    "eval",
-    "Function",
-    "setTimeout",
-    "setInterval",
-    "fetch",
-    "XMLHttpRequest",
-    "import",
-    "execScript",
-];
-
-/// Split a JS sink name with `/**/` partway through, on the first
-/// match found in the payload. Split offset is `len/2` (floor) so the
-/// two halves each carry a recognizable substring — matches the prior
-/// per-name behavior (`al/**/ert`, `con/**/firm`, `pro/**/mpt`, …).
-/// Tries `name(` first, then `` name` `` (template-literal call form)
-/// so both `alert(1)` and `` alert`1` `` get mutated.
-pub(super) fn js_comment_split(payload: &str) -> String {
-    for name in JS_SINK_NAMES {
-        if name.len() < 3 {
-            continue;
-        }
-        let split_idx = (name.len() / 2).max(2);
-        let prefix = &name[..split_idx];
-        let suffix = &name[split_idx..];
-        // Match either `name(` or `` name` `` to cover both the standard
-        // call and the template-literal form.
-        for follower in ['(', '`'] {
-            let needle = format!("{}{}", name, follower);
-            if let Some(pos) = payload.find(&needle) {
-                let mut out = String::with_capacity(payload.len() + 4);
-                out.push_str(&payload[..pos]);
-                out.push_str(prefix);
-                out.push_str("/**/");
-                out.push_str(suffix);
-                out.push(follower);
-                out.push_str(&payload[pos + needle.len()..]);
-                return out;
-            }
-        }
-    }
-    payload.to_string()
-}
-
 /// Render the inside of a backtick template literal for a sink-call
 /// argument. Bare numbers and simple quoted strings reduce to their raw
 /// text (`1` → `` `1` ``, `'XSS'` → `` `XSS` ``); anything else — member
@@ -706,11 +656,11 @@ pub(super) fn keyword_entity_encode(payload: &str) -> String {
     payload.to_string()
 }
 
-/// Replace EVERY top-level whitespace attribute separator in the first opening
-/// tag with `/`. No-op when the first tag has fewer than two such separators
-/// (the single-separator result equals `slash_separator`'s output and would be
-/// deduped away). Whitespace inside quoted attribute values, the closing-tag
-/// `</`, and a trailing self-closing `/>` are left untouched.
+/// Replace parser-safe top-level whitespace attribute separators in the first
+/// opening tag with `/`. A slash after an unquoted attribute value is part of
+/// that value, not a separator, so that whitespace is preserved. Whitespace
+/// inside quoted attribute values, the closing-tag `</`, and a trailing
+/// self-closing `/>` are also left untouched.
 pub(super) fn multi_slash(payload: &str) -> String {
     let bytes = payload.as_bytes();
     // First opening tag: `<` directly followed by an ASCII letter.
@@ -734,6 +684,8 @@ pub(super) fn multi_slash(payload: &str) -> String {
     // name / an attribute from a following attribute name.
     let is_ws = |b: u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r');
     let mut quote = 0u8;
+    let mut awaiting_value = false;
+    let mut unquoted_value = false;
     let mut seps: Vec<usize> = Vec::new();
     let mut k = j;
     while k < bytes.len() {
@@ -746,7 +698,22 @@ pub(super) fn multi_slash(payload: &str) -> String {
             continue;
         }
         match c {
-            b'"' | b'\'' => quote = c,
+            b'"' | b'\'' => {
+                if awaiting_value {
+                    quote = c;
+                    awaiting_value = false;
+                }
+            }
+            b'=' => {
+                if awaiting_value {
+                    // A second `=` where an attribute value is expected is
+                    // itself the first byte of an unquoted value.
+                    unquoted_value = true;
+                    awaiting_value = false;
+                } else if !unquoted_value {
+                    awaiting_value = true;
+                }
+            }
             b'>' => break,
             _ if is_ws(c) => {
                 // Only the first byte of a whitespace run, and only when the
@@ -757,15 +724,28 @@ pub(super) fn multi_slash(payload: &str) -> String {
                 while m < bytes.len() && is_ws(bytes[m]) {
                     m += 1;
                 }
-                if run_start && m < bytes.len() && bytes[m].is_ascii_alphabetic() {
+                if run_start && !unquoted_value && m < bytes.len() && bytes[m].is_ascii_alphabetic()
+                {
                     seps.push(k);
                 }
+                if !awaiting_value {
+                    // Whitespace terminates an unquoted attribute value. A
+                    // slash at this position would have been consumed as part
+                    // of that value, so preserve this separator and reset for
+                    // the next attribute.
+                    unquoted_value = false;
+                }
             }
-            _ => {}
+            _ => {
+                if awaiting_value {
+                    unquoted_value = true;
+                    awaiting_value = false;
+                }
+            }
         }
         k += 1;
     }
-    if seps.len() < 2 {
+    if seps.is_empty() {
         return payload.to_string();
     }
     let sepset: std::collections::HashSet<usize> = seps.into_iter().collect();

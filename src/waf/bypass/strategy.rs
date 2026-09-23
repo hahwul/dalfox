@@ -19,7 +19,6 @@ pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
                 MutationType::BacktickParens,
                 MutationType::SchemeBreak,
                 MutationType::EntityScheme,
-                MutationType::JsCommentSplit,
                 MutationType::CaseAlternation,
             ],
             extra_delay_hint_ms: 100,
@@ -56,7 +55,6 @@ pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
                 MutationType::BacktickParens,
                 MutationType::SchemeBreak,
                 MutationType::MultiSlash,
-                MutationType::JsCommentSplit,
                 MutationType::MixedHtmlEntities,
                 MutationType::UnicodeJsEscape,
             ],
@@ -179,7 +177,6 @@ pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
             mutations: vec![
                 MutationType::KeywordEntityEncode,
                 MutationType::WhitespaceMutation,
-                MutationType::JsCommentSplit,
                 MutationType::BacktickParens,
             ],
             extra_delay_hint_ms: 0,
@@ -197,7 +194,7 @@ pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
         },
         // NetScaler AppFirewall is signature/regex driven and keys heavily
         // on literal tag/keyword shapes. Structural mutations that break the
-        // literal `<tag>` and `alert(` shapes (comment split, case, exotic
+        // literal `<tag>` shapes (HTML comment split, case, exotic
         // whitespace) plus backtick calls are the highest-yield levers; pair
         // with url/unicode encoders for its body-decoding path.
         WafType::Citrix => BypassStrategy {

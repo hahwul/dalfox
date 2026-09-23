@@ -15,8 +15,6 @@ pub enum MutationType {
     HtmlCommentSplit,
     /// Tab/newline between tag and attribute: `<img\t\nsrc=x>`
     WhitespaceMutation,
-    /// JavaScript comment splitting: `al/**/ert(1)`
-    JsCommentSplit,
     /// Backtick instead of parentheses: `` alert`1` ``
     BacktickParens,
     /// Constructor chain: `[].constructor.constructor('alert(1)')()`
@@ -52,10 +50,10 @@ pub enum MutationType {
     /// `onerror=&#97;lert(1)`. The tokenizer decodes `&#97;` to `a` before the
     /// handler is compiled, so a literal-`alert` keyword regex misses it.
     KeywordEntityEncode,
-    /// Replace EVERY top-level whitespace attribute separator in the first tag
-    /// with `/`: `<img src=x onerror=alert(1)>` → `<img/src=x/onerror=alert(1)>`.
-    /// Defeats regexes that tolerate one `/` but re-anchor on `\s` before later
-    /// attributes. Distinct from [`MutationType::SlashSeparator`] (first only).
+    /// Replace parser-safe top-level attribute separators in the first tag
+    /// with `/`. Whitespace after an unquoted attribute value remains, because
+    /// `/` there is part of that value. Distinct from
+    /// [`MutationType::SlashSeparator`] (first only).
     MultiSlash,
     /// Insert a numeric control-char entity (`&#9;` TAB) inside an executable
     /// URI scheme keyword: `href=javascript:…` → `href=java&#9;script:…`. The
@@ -75,7 +73,6 @@ impl std::fmt::Display for MutationType {
         let name = match self {
             MutationType::HtmlCommentSplit => "HtmlCommentSplit",
             MutationType::WhitespaceMutation => "WhitespaceMutation",
-            MutationType::JsCommentSplit => "JsCommentSplit",
             MutationType::BacktickParens => "BacktickParens",
             MutationType::ConstructorChain => "ConstructorChain",
             MutationType::UnicodeJsEscape => "UnicodeJsEscape",
