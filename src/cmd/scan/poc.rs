@@ -36,10 +36,11 @@ pub(crate) fn build_ast_dom_message(
 /// whether the param lived in the URL, an HTTP header (or cookie jar),
 /// the body, or the URL fragment. The `Cookie` header gets its own tag
 /// since users typically copy/paste cookie strings rather than raw headers.
-fn poc_location_tag(location: &str, param: &str) -> Option<&'static str> {
+fn poc_location_tag(location: &str, param: &str, cookie_param: bool) -> Option<&'static str> {
     match location {
-        // Header location with the literal `Cookie` name folds to a cookie POC.
-        "Header" if param.eq_ignore_ascii_case("cookie") => Some("cookie"),
+        // A per-cookie param, or the literal `Cookie` header, folds to a
+        // cookie POC.
+        "Header" if cookie_param || param.eq_ignore_ascii_case("cookie") => Some("cookie"),
         "Header" => Some("hdr"),
         "GraphqlBody" => Some("graphql"),
         "XmlBody" => Some("xml"),
@@ -106,7 +107,20 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
 
     let attack_url = {
         let mut url = result.data.clone();
-        if result.param.starts_with("path_segment_") {
+        if result.location == "Path" {
+            // Every producer that tags a finding `Path` stores in `data` the
+            // exact URL it sent (`build_injected_url`, which already encodes
+            // the segment). Use it verbatim. The legacy rewrite below looks
+            // for the *raw* payload in `data`; `build_injected_url`'s output
+            // percent-encodes `<`, `>`, `"` and spaces, so for nearly every
+            // HTML payload it missed and appended the payload again as an
+            // extra trailing segment (`/a/<p>/c/<p>`) — a different route, so
+            // the POC reproduced nothing. It also re-encoded the payload with
+            // the first `--encoders` entry (`html`, `base64`, …), a value the
+            // scan never sent to this URL.
+        } else if result.param.starts_with("path_segment_") {
+            // Legacy results with no recorded location (deserialized from an
+            // older report): rebuild the path POC from the payload.
             // Determine if payload (raw or already selectively encoded) is present
             let sel = selective_path_encode(&result.payload);
             let transformed = apply_path_encoders_if_requested(&result.payload);
@@ -161,7 +175,7 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
     };
 
     // Short location hint surfaced in plain POC (e.g. `[GET][hdr]`).
-    let loc_segment = match poc_location_tag(&result.location, &result.param) {
+    let loc_segment = match poc_location_tag(&result.location, &result.param, result.cookie_param) {
         Some(tag) => format!("[{}]", tag),
         None => String::new(),
     };
@@ -213,6 +227,18 @@ fn shell_single_quote(s: &str) -> String {
     out
 }
 
+/// The value a side-channel (header / cookie / body) POC must send: the
+/// as-sent, pre-encoded value when the scan applied one (see
+/// `Result::wire_payload`), otherwise the raw payload.
+///
+/// Query / path POCs don't need this — `result.data` is already built from the
+/// as-sent value — but a header, cookie or body POC interpolates the value
+/// itself, and the raw payload drops e.g. the WAF window-pad prefix the
+/// finding only got past the WAF with.
+fn poc_wire_value(result: &crate::scanning::result::Result) -> &str {
+    result.wire_payload.as_deref().unwrap_or(&result.payload)
+}
+
 /// Render a runnable `curl` invocation that reproduces the finding.
 /// For header / cookie / body locations we emit the matching side-channel
 /// flag so copy-pasting actually exercises the same wire request — a plain
@@ -224,23 +250,35 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
     let method = shell_single_quote(&result.method.to_uppercase());
     let url = shell_single_quote(attack_url);
     let field = |name: &str, value: &str| shell_single_quote(&format!("{}={}", name, value));
+    let value = poc_wire_value(result);
     match result.location.as_str() {
-        "Header" if result.param.eq_ignore_ascii_case("cookie") => format!(
+        // A cookie param travels as `Cookie: name=value` (see
+        // `url_inject::build_header_request`). A header param that merely
+        // happens to be *named* `Cookie` is sent as `Cookie: <value>` and is
+        // rendered by the plain `-H` arm below — `-b 'Cookie=<value>'` would
+        // send a cookie named `Cookie` instead.
+        "Header" if result.cookie_param => format!(
             "curl -X {} -b {} {}\n",
             method,
-            field(&result.param, &result.payload),
+            field(&result.param, value),
             url
         ),
         "Header" => format!(
             "curl -X {} -H {} {}\n",
             method,
-            shell_single_quote(&format!("{}: {}", result.param, result.payload)),
+            shell_single_quote(&format!("{}: {}", result.param, value)),
             url
         ),
+        // `--data` sends its argument verbatim, so a payload carrying `&`, `+`
+        // or `%` (entity-encoded variants, `'ale'+'rt'` splits, …) was split
+        // into extra fields, turned into spaces, or percent-decoded by the
+        // server — not the value the scanner sent through a form serializer.
+        // `--data-urlencode name=content` encodes the content; the name part
+        // is taken as already encoded, so encode it here.
         "Body" => format!(
-            "curl -X {} --data {} {}\n",
+            "curl -X {} --data-urlencode {} {}\n",
             method,
-            field(&result.param, &result.payload),
+            field(&urlencoding::encode(&result.param), value),
             url
         ),
         // `--data` sends `application/x-www-form-urlencoded`; a multipart
@@ -253,7 +291,7 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
         "MultipartBody" => format!(
             "curl -X {} --form-string {} {}\n",
             method,
-            field(&result.param, &result.payload),
+            field(&result.param, value),
             url
         ),
         // Built with `serde_json` rather than hand-spliced into a `{"k":"v"}`
@@ -263,7 +301,7 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
         "JsonBody" => format!(
             "curl -X {} -H 'Content-Type: application/json' --data {} {}\n",
             method,
-            shell_single_quote(&json_object_body(&result.param, &result.payload)),
+            shell_single_quote(&json_object_body(&result.param, value)),
             url
         ),
         // GraphQL / XML carry a full structured document as the body — a
@@ -340,32 +378,25 @@ fn httpie_escape_name(name: &str) -> String {
 fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str) -> String {
     let method = shell_single_quote(&result.method.to_lowercase());
     let url = shell_single_quote(attack_url);
+    let value = poc_wire_value(result);
     match result.location.as_str() {
-        "Header" if result.param.eq_ignore_ascii_case("cookie") => format!(
+        "Header" if result.cookie_param => format!(
             "http {} {} {}\n",
             method,
             url,
-            shell_single_quote(&format!("Cookie:{}={}", result.param, result.payload))
+            shell_single_quote(&format!("Cookie:{}={}", result.param, value))
         ),
         "Header" => format!(
             "http {} {} {}\n",
             method,
             url,
-            shell_single_quote(&format!(
-                "{}:{}",
-                httpie_escape_name(&result.param),
-                result.payload
-            ))
+            shell_single_quote(&format!("{}:{}", httpie_escape_name(&result.param), value))
         ),
         "Body" => format!(
             "http -f {} {} {}\n",
             method,
             url,
-            shell_single_quote(&format!(
-                "{}={}",
-                httpie_escape_name(&result.param),
-                result.payload
-            ))
+            shell_single_quote(&format!("{}={}", httpie_escape_name(&result.param), value))
         ),
         // httpie's `-f`/`--form` sends urlencoded unless a file field is
         // present; `--multipart` forces the multipart/form-data request a
@@ -374,21 +405,13 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
             "http --multipart {} {} {}\n",
             method,
             url,
-            shell_single_quote(&format!(
-                "{}={}",
-                httpie_escape_name(&result.param),
-                result.payload
-            ))
+            shell_single_quote(&format!("{}={}", httpie_escape_name(&result.param), value))
         ),
         "JsonBody" => format!(
             "http {} {} {}\n",
             method,
             url,
-            shell_single_quote(&format!(
-                "{}={}",
-                httpie_escape_name(&result.param),
-                result.payload
-            ))
+            shell_single_quote(&format!("{}={}", httpie_escape_name(&result.param), value))
         ),
         // Feed the exact recorded structured body to httpie via stdin — its
         // `key=value` field syntax can't express a full GraphQL/XML document.

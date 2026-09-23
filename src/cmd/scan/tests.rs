@@ -490,11 +490,38 @@ fn test_generate_poc_cookie_uses_cookie_tag_and_dash_b() {
         "plain cookie POC missing [cookie] tag: {}",
         plain
     );
+    // A header param *named* `Cookie` is sent as `Cookie: <payload>`, so the
+    // POC sets that header; `-b 'Cookie=<payload>'` would send a cookie named
+    // `Cookie` instead.
     let curl = generate_poc(&r, "curl");
     assert!(
-        curl.contains("-b 'Cookie=<svg/onload=alert(1)>'"),
-        "curl POC missing -b: {}",
+        curl.contains("-H 'Cookie: <svg/onload=alert(1)>'"),
+        "curl POC must set the Cookie header as sent: {}",
         curl
+    );
+}
+
+#[test]
+fn test_generate_poc_cookie_param_is_sent_as_a_cookie() {
+    // A per-cookie param (`Location::Header`, named after the cookie) is
+    // injected as `Cookie: sid=<payload>`. Rendering it as `-H 'sid: …'`
+    // set a header the application never reads.
+    let mut r = reflected_result("http://example.com/", "sid", "<svg/onload=alert(1)>");
+    r.location = "Header".to_string();
+    r.cookie_param = true;
+    assert!(generate_poc(&r, "plain").contains("[cookie]"));
+    let curl = generate_poc(&r, "curl");
+    assert!(
+        curl.contains("-b 'sid=<svg/onload=alert(1)>'"),
+        "curl: {}",
+        curl
+    );
+    assert!(!curl.contains("-H"), "curl: {}", curl);
+    let httpie = generate_poc(&r, "httpie");
+    assert!(
+        httpie.contains("'Cookie:sid=<svg/onload=alert(1)>'"),
+        "httpie: {}",
+        httpie
     );
 }
 
@@ -526,8 +553,8 @@ fn test_generate_poc_body_emits_data_flag() {
     );
     let curl = generate_poc(&r, "curl");
     assert!(
-        curl.contains("--data 'username=<svg/onload=alert(1)>'"),
-        "curl POC missing --data: {}",
+        curl.contains("--data-urlencode 'username=<svg/onload=alert(1)>'"),
+        "curl POC missing --data-urlencode: {}",
         curl
     );
 }
@@ -926,8 +953,8 @@ fn test_generate_poc_httpie_cookie_uses_cookie_arg() {
     r.location = "Header".to_string();
     let out = generate_poc(&r, "httpie");
     assert!(
-        out.contains("'Cookie:Cookie=<svg/onload=alert(1)>'"),
-        "httpie cookie POC missing cookie arg: {}",
+        out.contains("'Cookie:<svg/onload=alert(1)>'"),
+        "httpie must set the Cookie header as sent: {}",
         out
     );
 }
@@ -3054,4 +3081,98 @@ async fn a_worker_panic_alongside_a_healthy_target_still_fails_the_run() {
         ScanOutcome::Error,
         "a run with a panicked target must not exit 0 just because a sibling was clean"
     );
+}
+
+/// End to end: a header and a cookie param behind a size-limited WAF window
+/// are only reachable with the `wafpad` prefix. The scan sends it and finds
+/// the reflection; the `curl` / `httpie` POCs rendered from those findings
+/// must send it too — and the cookie param as a cookie — or pasting them just
+/// hits the WAF (or a header the application never reads).
+#[tokio::test]
+async fn side_channel_pocs_from_a_real_scan_carry_the_wafpad_prefix() {
+    fn window_blocked(v: &str) -> bool {
+        v.chars().take(100).any(|c| c == '<' || c == '>')
+    }
+    let app = Router::new().route(
+        "/",
+        get(|headers: HeaderMap| async move {
+            let hdr = headers
+                .get("x-q")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            let sid = headers
+                .get("cookie")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|c| {
+                    c.split("; ")
+                        .find_map(|kv| kv.strip_prefix("sid=").map(str::to_string))
+                })
+                .unwrap_or_default();
+            if window_blocked(&hdr) || window_blocked(&sid) {
+                return (
+                    axum::http::StatusCode::FORBIDDEN,
+                    axum::response::Html("blocked".to_string()),
+                );
+            }
+            (
+                axum::http::StatusCode::OK,
+                axum::response::Html(format!(
+                    "<html><body><div>{hdr}</div><p>{sid}</p></body></html>"
+                )),
+            )
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let mut target = parse_target(&format!("http://{addr}/")).expect("target");
+    target.cookies = vec![("sid".to_string(), "abc".to_string())];
+    for name in ["X-Q", "sid"] {
+        let mut p = Param::new(name.to_string(), String::new(), Location::Header);
+        p.injection_context = Some(InjectionContext::Html(None));
+        p.pre_encoding = Some("wafpad".to_string());
+        target.reflection_params.push(p);
+    }
+    let args = Arc::new(ScanArgs {
+        skip_mining: true,
+        skip_discovery: true,
+        skip_ast_analysis: true,
+        skip_waf_probe: true,
+        waf_bypass: "off".to_string(),
+        encoders: vec!["none".to_string()],
+        timeout: 5,
+        workers: 4,
+        ..default_scan_args()
+    });
+    let results = Arc::new(Mutex::new(Vec::new()));
+    crate::scanning::run_scanning(
+        &target,
+        args,
+        crate::scanning::ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    let pad = crate::encoding::pre_encoding::waf_window_pad();
+    let results = results.lock().await;
+    for name in ["X-Q", "sid"] {
+        let r = results
+            .iter()
+            .find(|r| r.param == name)
+            .unwrap_or_else(|| panic!("no finding for {name}: {} results", results.len()));
+        let wire = format!("{pad}{}", r.payload);
+        let curl = generate_poc(r, "curl");
+        let httpie = generate_poc(r, "httpie");
+        let (curl_arg, httpie_arg) = if name == "sid" {
+            (format!("-b 'sid={wire}'"), format!("'Cookie:sid={wire}'"))
+        } else {
+            (format!("-H 'X-Q: {wire}'"), format!("'X-Q:{wire}'"))
+        };
+        assert!(curl.contains(&curl_arg), "{name} curl: {curl}");
+        assert!(httpie.contains(&httpie_arg), "{name} httpie: {httpie}");
+    }
 }
