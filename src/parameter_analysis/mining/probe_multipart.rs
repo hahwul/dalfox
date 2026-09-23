@@ -38,6 +38,7 @@ pub async fn probe_multipart_params(
     let client = target.build_client_or_default();
     let marker = crate::scanning::markers::bracketed_marker();
     let silence = args.silence;
+    let delay = target.delay;
 
     let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
     for field in wanted {
@@ -107,6 +108,9 @@ pub async fn probe_multipart_params(
                         Param::new(field_name, marker.to_string(), Location::MultipartBody)
                             .with_reflection_analysis(&text),
                     );
+                }
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
                 }
                 drop(permit);
                 discovered

@@ -92,6 +92,13 @@ pub(crate) static WAF_CONSECUTIVE_BLOCKS: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
 pub static NO_COLOR: AtomicBool = AtomicBool::new(false);
 
+/// Shared lock for tests that inspect or mutate process-global request counters.
+/// `run_scan` resets and snapshots these counters, so counter-using tests must
+/// serialize with its tests instead of racing another scan's tally.
+#[cfg(test)]
+pub(crate) static REQUEST_COUNTER_TEST_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
 /// Install the process-wide rustls crypto provider (ring).
 ///
 /// reqwest is built with the `rustls-no-provider` feature so it bundles no

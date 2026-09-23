@@ -11,6 +11,7 @@ use super::{
     CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, ScanArgs, ScanOutcome, ScanState,
     finalize_scan_args,
 };
+use crate::REQUEST_COUNTER_TEST_LOCK as RUN_SCAN_LOCK;
 use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::scanning::result::{FindingType, Result as ScanResult};
 use crate::target_parser::{Target, parse_target};
@@ -25,11 +26,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-
-/// `run_scan` zeroes and then reads the process-global request and failure
-/// counters that decide `meta.incomplete` and the exit code. Every lib test
-/// that calls it holds this lock, so one scan cannot read another's tally.
-static RUN_SCAN_LOCK: Mutex<()> = Mutex::const_new(());
 
 fn default_scan_args() -> ScanArgs {
     ScanArgs {

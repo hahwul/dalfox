@@ -1322,6 +1322,44 @@ async fn start_raw_body_reflect_server() -> SocketAddr {
     addr
 }
 
+async fn record_multipart_timing(
+    axum::extract::State(timestamps): axum::extract::State<Arc<Mutex<Vec<tokio::time::Instant>>>>,
+    request: axum::http::Request<axum::body::Body>,
+) -> Html<String> {
+    let (parts, body) = request.into_parts();
+    if parts
+        .headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("multipart/form-data"))
+    {
+        timestamps.lock().await.push(tokio::time::Instant::now());
+    }
+    let body = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+    Html(format!(
+        "<html><body>{}</body></html>",
+        String::from_utf8_lossy(&body)
+    ))
+}
+
+async fn start_multipart_timing_server() -> (SocketAddr, Arc<Mutex<Vec<tokio::time::Instant>>>) {
+    let timestamps = Arc::new(Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/r", axum::routing::any(record_multipart_timing))
+        .with_state(timestamps.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    (addr, timestamps)
+}
+
 #[tokio::test]
 async fn test_probe_multipart_params_seeds_explicit_field() {
     // `-p file:multipart` is a known multipart sink. Before, MultipartBody
@@ -1349,6 +1387,47 @@ async fn test_probe_multipart_params_seeds_explicit_field() {
             .iter()
             .map(|p| (&p.name, &p.location))
             .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_probe_multipart_params_honors_delay_between_probes() {
+    // `--delay` paces body/JSON/XML probes, but multipart mining used to send
+    // its serialized probes back-to-back. The request counter is process
+    // global, so share the same lock as run_scan tests while exercising it.
+    let _serial = crate::REQUEST_COUNTER_TEST_LOCK.lock().await;
+    let (addr, timestamps) = start_multipart_timing_server().await;
+    let mut target =
+        parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
+    target.method = "POST".to_string();
+    target.delay = 250;
+    let mut args = default_scan_args();
+    args.method = "POST".to_string();
+    args.data = Some("first=one&second=two".to_string());
+    args.param = vec![
+        "first:multipart".to_string(),
+        "second:multipart".to_string(),
+    ];
+
+    probe_multipart_params(
+        &target,
+        &args,
+        Arc::new(Mutex::new(Vec::<Param>::new())),
+        Arc::new(tokio::sync::Semaphore::new(1)),
+        None,
+    )
+    .await;
+
+    let timestamps = timestamps.lock().await;
+    assert_eq!(
+        timestamps.len(),
+        2,
+        "both multipart probes should reach the server"
+    );
+    let interval = timestamps[1].duration_since(timestamps[0]);
+    assert!(
+        interval >= Duration::from_millis(200),
+        "multipart probes arrived {interval:?} apart despite --delay 250"
     );
 }
 
