@@ -25,10 +25,12 @@ pub async fn check_path_discovery(
 
     let mut handles = Vec::new();
 
-    let mut new_segments: Vec<String> = segments.iter().map(ToString::to_string).collect();
     for (idx, original) in segments.iter().enumerate() {
-        let saved = std::mem::replace(&mut new_segments[idx], test_value.to_string());
-        let new_path = format!("/{}", new_segments.join("/"));
+        let Some(new_path) =
+            crate::scanning::url_inject::replace_nonempty_path_segment(path, idx, test_value)
+        else {
+            continue;
+        };
 
         let mut new_url = target.url.clone();
         new_url.set_path(&new_path);
@@ -43,7 +45,12 @@ pub async fn check_path_discovery(
         // exploitable_context, and we keep the path-segment registration only
         // if the response contains the literal `<MARKER>` substring — i.e. `<`
         // and `>` both survived reflection without entity-escaping.
-        let bracket_path = new_path.replace(test_value, &format!("%3C{}%3E", test_value));
+        let bracket_segment = format!("%3C{}%3E", test_value);
+        let Some(bracket_path) =
+            crate::scanning::url_inject::replace_nonempty_path_segment(path, idx, &bracket_segment)
+        else {
+            continue;
+        };
         let mut bracket_url = target.url.clone();
         bracket_url.set_path(&bracket_path);
 
@@ -62,7 +69,6 @@ pub async fn check_path_discovery(
             if guard.iter().any(|p| {
                 p.name == param_name && p.location == crate::parameter_analysis::Location::Path
             }) {
-                new_segments[idx] = saved;
                 continue;
             }
         }
@@ -170,7 +176,6 @@ pub async fn check_path_discovery(
             },
         ));
         handles.push(handle);
-        new_segments[idx] = saved;
     }
 
     // Batch collect discovered path params

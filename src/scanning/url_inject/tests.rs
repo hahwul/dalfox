@@ -80,6 +80,66 @@ fn test_query_injection_preserves_existing_percent_encoding() {
 }
 
 #[test]
+fn query_injection_preserves_literal_percent_sequences_in_other_values() {
+    // `query_pairs()` returns decoded values. A literal "%2F" therefore
+    // comes back from the source URL `other=%252F`; reusing the payload
+    // encoder for that decoded value turns it into `/` on the next request.
+    let base = make_url("https://example.com/path?other=%252F&q=seed");
+    let param = Param::new("q", "seed", Location::Query);
+    let out = build_injected_url(&base, &param, "PAY");
+    let parsed = Url::parse(&out).expect("injected URL must parse");
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+
+    assert_eq!(
+        pairs,
+        vec![("other".into(), "%2F".into()), ("q".into(), "PAY".into())]
+    );
+}
+
+#[test]
+fn hpp_injection_preserves_literal_percent_sequences() {
+    let base = make_url("https://example.com/path?other=%252F&q=%252F");
+    let param = Param::new("q", "%2F", Location::Query);
+    let out = build_hpp_url(&base, &param, "PAY", HppPosition::Last)
+        .expect("query params have HPP variants");
+    let parsed = Url::parse(&out).expect("injected URL must parse");
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+
+    assert_eq!(
+        pairs,
+        vec![
+            ("other".into(), "%2F".into()),
+            ("q".into(), "%2F".into()),
+            ("q".into(), "PAY".into()),
+        ]
+    );
+}
+
+#[test]
+fn query_injection_replaces_every_occurrence_of_a_duplicate_name() {
+    // The scanner stores query params by name, so all wire occurrences must
+    // carry the probe. Otherwise last-value servers never see it when the
+    // first duplicate is changed.
+    let base = make_url("https://example.com/path?q=first&q=last");
+    let param = Param::new("q", "first", Location::Query);
+    let out = build_injected_url(&base, &param, "PAY");
+    let parsed = Url::parse(&out).expect("injected URL must parse");
+    let values: Vec<String> = parsed
+        .query_pairs()
+        .filter(|(k, _)| k == "q")
+        .map(|(_, v)| v.into_owned())
+        .collect();
+
+    assert_eq!(values, vec!["PAY", "PAY"]);
+}
+
+#[test]
 fn test_query_injection_encodes_raw_spaces_without_plus() {
     let base = make_url("https://example.com/path?q=seed");
     let param = Param::new("q", "seed", Location::Query);
@@ -94,6 +154,18 @@ fn test_path_injection_basic() {
     let out = build_injected_url(&base, &param, "PAY LOAD");
     // space should be %20
     assert!(out.contains("/a/PAY%20LOAD/c"));
+}
+
+#[test]
+fn path_injection_preserves_empty_and_trailing_segments() {
+    // Empty path segments and a trailing slash can select different routes.
+    // Replacing one segment must keep the rest of the captured path intact.
+    let base = make_url("https://example.com/a//b/");
+    let param = Param::new("path_segment_0", "a", Location::Path);
+    let out = build_injected_url(&base, &param, "PAY");
+    let parsed = Url::parse(&out).expect("injected URL must parse");
+
+    assert_eq!(parsed.path(), "/PAY//b/");
 }
 
 /// Only the space arm of the path-segment encoder was exercised. The rest of

@@ -23,13 +23,14 @@ fn is_hex(byte: u8) -> bool {
     byte.is_ascii_hexdigit()
 }
 
-/// Percent-encode a query component directly into `out`, preserving existing `%XX` sequences.
-fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
+/// Percent-encode a query component directly into `out`.
+fn encode_query_component_into(raw: &str, out: &mut String, preserve_pct: bool) {
     let bytes = raw.as_bytes();
     let mut idx = 0;
 
     while idx < bytes.len() {
-        if bytes[idx] == b'%'
+        if preserve_pct
+            && bytes[idx] == b'%'
             && idx + 2 < bytes.len()
             && is_hex(bytes[idx + 1])
             && is_hex(bytes[idx + 2])
@@ -54,6 +55,45 @@ fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
         }
         idx += ch.len_utf8();
     }
+}
+
+/// Encode a decoded query component. Existing URL components come from
+/// `Url::query_pairs()`, which has already decoded `%25`; their literal percent
+/// signs must be escaped again rather than treated as preserved wire encoding.
+fn encode_decoded_query_component_into(raw: &str, out: &mut String) {
+    encode_query_component_into(raw, out, false);
+}
+
+/// Encode an injected query component while preserving valid `%XX` sequences.
+/// Payload encoders can intentionally hand this function pre-escaped bytes.
+fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
+    encode_query_component_into(raw, out, true);
+}
+
+/// Replace the zero-based `idx`th non-empty path segment without changing any
+/// empty segments, leading slash, or trailing slash in `path`.
+pub(crate) fn replace_nonempty_path_segment(
+    path: &str,
+    idx: usize,
+    replacement: &str,
+) -> Option<String> {
+    let mut segment_idx = 0;
+    let mut result = String::with_capacity(path.len() + replacement.len());
+    for (part_idx, part) in path.split('/').enumerate() {
+        if part_idx > 0 {
+            result.push('/');
+        }
+        if part.is_empty() {
+            continue;
+        }
+        if segment_idx == idx {
+            result.push_str(replacement);
+        } else {
+            result.push_str(part);
+        }
+        segment_idx += 1;
+    }
+    (idx < segment_idx).then_some(result)
 }
 
 /// Selectively encode a path segment for readability while preserving most characters
@@ -197,9 +237,9 @@ pub(crate) fn build_injected_url(base: &url::Url, param: &Param, injected: &str)
                         result.push('&');
                     }
                     first = false;
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
-                    encode_query_component_preserving_pct_into(&v, &mut result);
+                    encode_decoded_query_component_into(&v, &mut result);
                 }
                 if !first {
                     result.push('&');
@@ -214,23 +254,20 @@ pub(crate) fn build_injected_url(base: &url::Url, param: &Param, injected: &str)
                         result.push('&');
                     }
                     first = false;
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
-                    if k == param.effective_wire_name() && !found {
+                    if k == param.effective_wire_name() {
                         encode_query_component_preserving_pct_into(injected, &mut result);
                         found = true;
                     } else {
-                        encode_query_component_preserving_pct_into(&v, &mut result);
+                        encode_decoded_query_component_into(&v, &mut result);
                     }
                 }
                 if !found {
                     if !first {
                         result.push('&');
                     }
-                    encode_query_component_preserving_pct_into(
-                        param.effective_wire_name(),
-                        &mut result,
-                    );
+                    encode_decoded_query_component_into(param.effective_wire_name(), &mut result);
                     result.push('=');
                     encode_query_component_preserving_pct_into(injected, &mut result);
                 }
@@ -249,22 +286,9 @@ pub(crate) fn build_injected_url(base: &url::Url, param: &Param, injected: &str)
                 let original_path = url.path().to_string();
                 if original_path != "/" {
                     let encoded = selective_path_segment_encode(injected);
-                    let mut new_path = String::with_capacity(original_path.len() + encoded.len());
-                    let segments = original_path
-                        .trim_matches('/')
-                        .split('/')
-                        .filter(|s| !s.is_empty());
-                    let mut count = 0;
-                    for (i, segment) in segments.enumerate() {
-                        new_path.push('/');
-                        if i == idx {
-                            new_path.push_str(&encoded);
-                        } else {
-                            new_path.push_str(segment);
-                        }
-                        count = i + 1;
-                    }
-                    if idx < count {
+                    if let Some(new_path) =
+                        replace_nonempty_path_segment(&original_path, idx, &encoded)
+                    {
                         url.set_path(&new_path);
                     }
                 }
@@ -420,11 +444,11 @@ pub(crate) fn build_hpp_url(
                         result.push('&');
                     }
                     first = false;
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
-                    encode_query_component_preserving_pct_into(safe_value, &mut result);
+                    encode_decoded_query_component_into(safe_value, &mut result);
                     result.push('&');
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
                     encode_query_component_preserving_pct_into(injected, &mut result);
                 }
@@ -434,13 +458,13 @@ pub(crate) fn build_hpp_url(
                         result.push('&');
                     }
                     first = false;
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
                     encode_query_component_preserving_pct_into(injected, &mut result);
                     result.push('&');
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
-                    encode_query_component_preserving_pct_into(safe_value, &mut result);
+                    encode_decoded_query_component_into(safe_value, &mut result);
                 }
                 HppPosition::Both => {
                     // payload in both positions
@@ -448,11 +472,11 @@ pub(crate) fn build_hpp_url(
                         result.push('&');
                     }
                     first = false;
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
                     encode_query_component_preserving_pct_into(injected, &mut result);
                     result.push('&');
-                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    encode_decoded_query_component_into(&k, &mut result);
                     result.push('=');
                     encode_query_component_preserving_pct_into(injected, &mut result);
                 }
@@ -462,9 +486,9 @@ pub(crate) fn build_hpp_url(
                 result.push('&');
             }
             first = false;
-            encode_query_component_preserving_pct_into(&k, &mut result);
+            encode_decoded_query_component_into(&k, &mut result);
             result.push('=');
-            encode_query_component_preserving_pct_into(&v, &mut result);
+            encode_decoded_query_component_into(&v, &mut result);
         }
     }
 
@@ -475,11 +499,11 @@ pub(crate) fn build_hpp_url(
                 if !first {
                     result.push('&');
                 }
-                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                encode_decoded_query_component_into(&param.name, &mut result);
                 result.push('=');
-                encode_query_component_preserving_pct_into(safe_value, &mut result);
+                encode_decoded_query_component_into(safe_value, &mut result);
                 result.push('&');
-                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                encode_decoded_query_component_into(&param.name, &mut result);
                 result.push('=');
                 encode_query_component_preserving_pct_into(injected, &mut result);
             }
@@ -487,23 +511,23 @@ pub(crate) fn build_hpp_url(
                 if !first {
                     result.push('&');
                 }
-                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                encode_decoded_query_component_into(&param.name, &mut result);
                 result.push('=');
                 encode_query_component_preserving_pct_into(injected, &mut result);
                 result.push('&');
-                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                encode_decoded_query_component_into(&param.name, &mut result);
                 result.push('=');
-                encode_query_component_preserving_pct_into(safe_value, &mut result);
+                encode_decoded_query_component_into(safe_value, &mut result);
             }
             HppPosition::Both => {
                 if !first {
                     result.push('&');
                 }
-                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                encode_decoded_query_component_into(&param.name, &mut result);
                 result.push('=');
                 encode_query_component_preserving_pct_into(injected, &mut result);
                 result.push('&');
-                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                encode_decoded_query_component_into(&param.name, &mut result);
                 result.push('=');
                 encode_query_component_preserving_pct_into(injected, &mut result);
             }
