@@ -26,6 +26,12 @@ use dalfox::parameter_analysis::analyze_parameters;
 use std::collections::HashMap;
 use tokio::net::TcpListener;
 
+/// `run_scan` resets and then reads the process-global request and failure
+/// counters that decide `meta.incomplete` and the exit code, so two scans in
+/// flight in this binary read each other's tallies. Every test that scans holds
+/// this lock for its whole run.
+static RUN_SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Reflect `q` into a single-quoted JS string that is the value of a key in an
 /// object literal — `var config = {apiKey: '<q>', debug: false};` — after
 /// stripping `<`, `>`, `-` and `+`. Stripping angles makes every HTML-tag /
@@ -132,6 +138,7 @@ fn base_args(url: String, out: String) -> ScanArgs {
 
 #[tokio::test]
 async fn observed_breakout_detects_nested_object_script_context() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     dalfox::ensure_crypto_provider();
 
     let app = Router::new().route("/", get(nested_object_handler));
@@ -224,6 +231,7 @@ async fn reflect_non_sentinel_handler(
 /// covering the carrier wiring) is the goal.
 #[tokio::test]
 async fn observed_breakout_carrier_covers_mining_and_form_routes() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     dalfox::ensure_crypto_provider();
 
     let app = Router::new()
@@ -271,6 +279,7 @@ async fn observed_breakout_carrier_covers_mining_and_form_routes() {
 /// whose action endpoint reflects the POST body.
 #[tokio::test]
 async fn observed_breakout_carrier_covers_form_route() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     dalfox::ensure_crypto_provider();
 
     let app = Router::new()
@@ -318,6 +327,7 @@ async fn observed_breakout_carrier_covers_form_route() {
 /// JSON-body probe construct its `Param` (and its `js_breakout` carrier).
 #[tokio::test]
 async fn observed_breakout_carrier_covers_json_body_route() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     dalfox::ensure_crypto_provider();
 
     let app = Router::new().route(

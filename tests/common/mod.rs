@@ -7,6 +7,14 @@
 
 use dalfox::cmd::scan::ScanArgs;
 
+/// Serializes every `scan::run_scan` call in this test binary (`unit_tests`:
+/// the `functional`, `integration`, `e2e` and `unit` modules all run in one
+/// process). `run_scan` resets and then reads the process-global
+/// `REQUEST_COUNT` / `REQUEST_FAILURE_COUNT`, which decide `meta.incomplete`
+/// and the exit code, so two overlapping scans read each other's tallies.
+/// Hold it across the scan *and* any read of those counters.
+pub static RUN_SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Factory function to create default ScanArgs for testing
 pub fn create_test_scan_args() -> ScanArgs {
     ScanArgs {

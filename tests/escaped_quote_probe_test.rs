@@ -16,6 +16,12 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
+/// `run_scan` resets and then reads the process-global request and failure
+/// counters that decide `meta.incomplete` and the exit code, so two scans in
+/// flight in this binary read each other's tallies. Every test that scans holds
+/// this lock for its whole run.
+static RUN_SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Reflect `q` into a double-quoted JS string after JavaScript-style
 /// backslash-escaping of quotes (`"` -> `\"`, `'` -> `\'`). Backslashes pass
 /// through raw, so the `\";…` bypass precondition holds.
@@ -38,6 +44,7 @@ fn js_dq_param() -> Param {
 
 #[tokio::test]
 async fn active_probe_detects_escaped_quotes_against_escaping_server() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     dalfox::ensure_crypto_provider();
 
     let app = Router::new().route("/", get(escaping_handler));
@@ -62,6 +69,7 @@ async fn active_probe_detects_escaped_quotes_against_escaping_server() {
 
 #[tokio::test]
 async fn active_probe_no_escaped_flag_on_plain_reflection() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     dalfox::ensure_crypto_provider();
 
     // Reflects the value verbatim into a JS string — no escaping, so no flag.
@@ -96,6 +104,7 @@ async fn active_probe_no_escaped_flag_on_plain_reflection() {
 /// HTTP-driven paths the pure unit tests can't reach.
 #[tokio::test]
 async fn analyze_parameters_covers_discovery_constructors_and_debug_line() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     use axum::http::HeaderMap;
     use dalfox::cmd::scan::ScanArgs;
     use dalfox::parameter_analysis::analyze_parameters;
@@ -244,6 +253,7 @@ async fn analyze_parameters_covers_discovery_constructors_and_debug_line() {
 /// succeed, so the server returns a minimal 200.
 #[tokio::test]
 async fn run_scan_inject_marker_covers_marker_param_constructors() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     use dalfox::cmd::scan::{ScanArgs, run_scan};
 
     async fn ok_handler() -> Html<String> {

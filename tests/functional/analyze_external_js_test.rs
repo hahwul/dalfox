@@ -245,6 +245,7 @@ fn read_findings(out: &std::path::Path) -> Vec<serde_json::Value> {
 /// per-param probe loop (which never runs when reflection_params is empty).
 #[tokio::test]
 async fn test_ext_js_spa_finds_dom_xss() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let (args, out) = make_scan_args(addr, "/", true, vec![], vec![]);
     scan::run_scan(&args).await;
@@ -267,6 +268,7 @@ async fn test_ext_js_spa_finds_dom_xss() {
 /// Flag off (default): external scripts are never fetched → no findings.
 #[tokio::test]
 async fn test_ext_js_default_off_no_findings() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let (args, out) = make_scan_args(addr, "/", false, vec![], vec![]);
     scan::run_scan(&args).await;
@@ -280,6 +282,7 @@ async fn test_ext_js_default_off_no_findings() {
 /// Body over MAX_EXTERNAL_JS_BYTES (512 KiB): script is skipped, no panic.
 #[tokio::test]
 async fn test_ext_js_size_cap_skips_oversized_script() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let (args, out) = make_scan_args(addr, "/big", true, vec![], vec![]);
     // Primarily a no-panic smoke test; big.js has no sink so findings == 0.
@@ -291,6 +294,7 @@ async fn test_ext_js_size_cap_skips_oversized_script() {
 /// MAX_EXTERNAL_JS_FILES = 16 means they are never fetched → no findings.
 #[tokio::test]
 async fn test_ext_js_count_cap_stops_at_max() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let (args, out) = make_scan_args(addr, "/many", true, vec![], vec![]);
     scan::run_scan(&args).await;
@@ -305,6 +309,7 @@ async fn test_ext_js_count_cap_stops_at_max() {
 /// skipped even with --analyze-external-js on.
 #[tokio::test]
 async fn test_ext_js_exclude_url_skips_matched_script() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let (args, out) = make_scan_args(addr, "/", true, vec![], vec!["app\\.js".to_string()]);
     scan::run_scan(&args).await;
@@ -320,6 +325,7 @@ async fn test_ext_js_exclude_url_skips_matched_script() {
 /// include_url matches only "vendor", /app.js is skipped → no findings.
 #[tokio::test]
 async fn test_ext_js_include_url_allows_only_matched_script() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let (args, out) = make_scan_args(addr, "/two", true, vec!["vendor\\.js".to_string()], vec![]);
     scan::run_scan(&args).await;

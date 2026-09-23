@@ -10,6 +10,12 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 
+/// `run_scan` resets and then reads the process-global request and failure
+/// counters that decide `meta.incomplete` and the exit code, so two scans in
+/// flight in this binary read each other's tallies. Every test that scans holds
+/// this lock for its whole run.
+static RUN_SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn base_scan_args() -> ScanArgs {
     ScanArgs {
         insecure: Some(true),
@@ -114,21 +120,29 @@ fn non_network_url_args(url: &str) -> ScanArgs {
 
 fn unique_temp_path(prefix: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
+    // `nanos` alone is not unique: the clock is coarser than that on macOS and
+    // Windows, so two tests starting in the same tick got the same path and one
+    // read the other's truncated (empty) output file. The sequence number makes
+    // the name unique within the process.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time")
         .as_nanos();
     path.push(format!(
-        "dalfox-{}-{}-{}",
+        "dalfox-{}-{}-{}-{}",
         prefix,
         std::process::id(),
-        nanos
+        nanos,
+        seq
     ));
     path
 }
 
 #[tokio::test]
 async fn test_run_scan_rejects_invalid_input_type() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = base_scan_args();
     args.input_type = "not-valid".to_string();
     args.targets = vec!["http://example.com".to_string()];
@@ -139,6 +153,7 @@ async fn test_run_scan_rejects_invalid_input_type() {
 
 #[tokio::test]
 async fn test_run_scan_file_input_requires_path() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = base_scan_args();
     args.input_type = "file".to_string();
     args.targets.clear();
@@ -149,6 +164,7 @@ async fn test_run_scan_file_input_requires_path() {
 
 #[tokio::test]
 async fn test_run_scan_file_input_handles_missing_file() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = base_scan_args();
     args.input_type = "file".to_string();
     args.targets = vec!["/tmp/dalfox-missing-input-file.txt".to_string()];
@@ -159,6 +175,7 @@ async fn test_run_scan_file_input_handles_missing_file() {
 
 #[tokio::test]
 async fn test_run_scan_raw_http_parse_error_path() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = base_scan_args();
     args.input_type = "raw-http".to_string();
     args.targets = vec!["INVALID RAW REQUEST".to_string()];
@@ -169,6 +186,7 @@ async fn test_run_scan_raw_http_parse_error_path() {
 
 #[tokio::test]
 async fn test_run_scan_writes_json_output_for_empty_results() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let output_path = unique_temp_path("scan-output.json");
     let mut args = non_network_url_args("http://example.com/?q=1");
     args.output = Some(output_path.to_string_lossy().to_string());
@@ -186,6 +204,7 @@ async fn test_run_scan_writes_json_output_for_empty_results() {
 
 #[tokio::test]
 async fn test_run_scan_handles_output_write_error() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let output_dir = unique_temp_path("scan-output-dir");
     std::fs::create_dir_all(&output_dir).expect("create temp directory");
     let mut args = non_network_url_args("http://example.com/?q=1");
@@ -232,6 +251,7 @@ async fn spawn_cloudflare_lookalike() -> (String, tokio::task::JoinHandle<()>) {
 
 #[tokio::test]
 async fn test_run_scan_emits_waf_block_in_target_summary() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let (url, handle) = spawn_cloudflare_lookalike().await;
     let output_path = unique_temp_path("scan-waf-output.json");
     let mut args = base_scan_args();
@@ -317,6 +337,7 @@ async fn spawn_low_confidence_via_varnish_server() -> (String, tokio::task::Join
 
 #[tokio::test]
 async fn test_run_scan_filters_waf_below_min_confidence() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     // Scenario A: threshold 0.0 (default) → low-confidence "via: varnish"
     // (0.5) survives.
     let (url_a, handle_a) = spawn_low_confidence_via_varnish_server().await;
@@ -376,6 +397,7 @@ async fn test_run_scan_filters_waf_below_min_confidence() {
 
 #[tokio::test]
 async fn test_run_scan_omits_waf_block_when_no_waf_detected() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     // Plain server with no WAF-like headers: target_summary entry must
     // NOT contain a `waf` field, keeping the common-case output lean.
     let app = Router::new().route(
@@ -424,6 +446,7 @@ async fn test_run_scan_omits_waf_block_when_no_waf_detected() {
 
 #[tokio::test]
 async fn test_run_scan_unknown_format_fallback_path() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = non_network_url_args("http://example.com/?q=1");
     args.format = "custom-format".to_string();
     args.silence = true;
@@ -435,6 +458,7 @@ async fn test_run_scan_unknown_format_fallback_path() {
 /// with a clear error rather than hanging or scanning nothing.
 #[tokio::test]
 async fn test_run_scan_har_requires_a_source() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = base_scan_args();
     args.input_type = "har".to_string();
     args.targets.clear();
@@ -448,6 +472,7 @@ async fn test_run_scan_har_requires_a_source() {
 /// JSON surfaces a parse error instead of being silently treated as a URL.
 #[tokio::test]
 async fn test_run_scan_har_invalid_content_errors() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     let mut args = base_scan_args();
     args.input_type = "har".to_string();
     args.targets = vec!["this is definitely not har".to_string()];
@@ -463,6 +488,7 @@ async fn test_run_scan_har_invalid_content_errors() {
 /// request the scan sends so we can assert the HAR shaped them.
 #[tokio::test]
 async fn test_run_scan_har_input_drives_get_and_post_targets() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
     use axum::extract::State;
     use axum::response::Html;
     use axum::routing::post;

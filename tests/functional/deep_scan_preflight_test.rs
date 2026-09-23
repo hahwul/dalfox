@@ -156,6 +156,7 @@ fn has_dom_innerhtml_finding(findings: &[serde_json::Value]) -> bool {
 /// was skipped for deep scans.
 #[tokio::test]
 async fn deep_scan_still_runs_initial_ast_dom_analysis() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let out = std::env::temp_dir().join(format!(
         "dalfox_deepscan_ast_{}_{}.json",
@@ -178,6 +179,7 @@ async fn deep_scan_still_runs_initial_ast_dom_analysis() {
 /// the baseline the deep-scan behavior is expected to match.
 #[tokio::test]
 async fn normal_scan_runs_initial_ast_dom_analysis() {
+    let _serial = crate::common::RUN_SCAN_LOCK.lock().await;
     let addr = start_server().await;
     let out = std::env::temp_dir().join(format!(
         "dalfox_normalscan_ast_{}_{}.json",

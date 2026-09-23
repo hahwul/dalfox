@@ -1012,6 +1012,21 @@ async fn run_scan_test(
     case_id: u32,
     scan_config: ScanTestConfig,
 ) -> Vec<serde_json::Value> {
+    run_scan_test_counted(addr, endpoint, case_id, scan_config)
+        .await
+        .0
+}
+
+/// [`run_scan_test`] plus the scan's request count. The count is read while
+/// `RUN_SCAN_LOCK` is still held: `run_scan` resets the process-global
+/// `REQUEST_COUNT` at start, so a read after releasing it could see another
+/// scan's tally.
+async fn run_scan_test_counted(
+    addr: SocketAddr,
+    endpoint: &str,
+    case_id: u32,
+    scan_config: ScanTestConfig,
+) -> (Vec<serde_json::Value>, u64) {
     let target = format!(
         "http://{}:{}/{}{}",
         addr.ip(),
@@ -1112,16 +1127,20 @@ async fn run_scan_test(
         ..Default::default()
     };
 
+    let serial = crate::common::RUN_SCAN_LOCK.lock().await;
     scan::run_scan(&args).await;
+    let requests = dalfox::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+    drop(serial);
 
     let content = std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
     let v: serde_json::Value = serde_json::from_str(&content).expect("output should be valid JSON");
 
     // JSON output is now wrapped: {"meta": {...}, "findings": [...]}
-    v["findings"]
+    let findings = v["findings"]
         .as_array()
         .expect("json should have a 'findings' array")
-        .clone()
+        .clone();
+    (findings, requests)
 }
 
 struct DiscoveryOpts {
@@ -2512,8 +2531,6 @@ async fn test_realworld_xss_by_category() {
 #[tokio::test]
 #[ignore = "benchmark: issue #1075 filter-constrained synthesis effectiveness + request cost"]
 async fn test_synthesis_filter_effectiveness_v2() {
-    use std::sync::atomic::Ordering;
-
     dalfox::ensure_crypto_provider();
     let (addr, _state) = start_mock_server_v2().await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2556,10 +2573,9 @@ async fn test_synthesis_filter_effectiveness_v2() {
             skip_reflection_path: true,
         };
 
-        let results = run_scan_test(addr, "realworld/query", case.id, config).await;
         // run_scan resets REQUEST_COUNT at the start of each single-target run,
-        // so this reading is this case's request cost.
-        let reqs = dalfox::REQUEST_COUNT.load(Ordering::Relaxed);
+        // so the count read under the scan lock is this case's request cost.
+        let (results, reqs) = run_scan_test_counted(addr, "realworld/query", case.id, config).await;
         total_requests += reqs;
         let detected = !results.is_empty();
 
@@ -2728,7 +2744,9 @@ async fn run_libscan(addr: SocketAddr, case_id: u32, detect_libs: bool) -> Vec<s
         ..Default::default()
     };
 
+    let serial = crate::common::RUN_SCAN_LOCK.lock().await;
     scan::run_scan(&args).await;
+    drop(serial);
 
     let content = std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
     let v: serde_json::Value = serde_json::from_str(&content).expect("output should be valid JSON");
