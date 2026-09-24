@@ -899,6 +899,7 @@ impl ScanWorkerCtx {
                     &self.target,
                     param,
                     response_text,
+                    crate::scanning::markers::bracketed_marker(),
                     probe_response_is_xml,
                     &mut state.ast_seen,
                 )
@@ -1125,6 +1126,7 @@ impl ScanWorkerCtx {
                         &self.target,
                         param,
                         response_text,
+                        reflection_payload,
                         xml_content_type,
                         &mut state.ast_seen,
                     )

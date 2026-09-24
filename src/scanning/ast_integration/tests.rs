@@ -1696,3 +1696,101 @@ fn test_grade_ast_finding_origin_fixed_sources_grade_low() {
         );
     }
 }
+
+#[test]
+fn reflected_markup_prescan_finds_marker_slots_only() {
+    let m = crate::scanning::markers::open_marker();
+    let html = format!(
+        r#"<html><head><style>body {{ --theme: {m}; --plain: red; }}</style></head><body>
+        <div id="target" data-content="{m}" data-other="x"></div>
+        <noscript id="ns">{m}</noscript>
+        <div data-noid="{m}"></div>
+        <div id="clean" data-content="hello">plain</div>
+        <span id="styled" style="--inline: {m}"></span>
+        <script>1</script></body></html>"#
+    );
+    let (_, _, markup) = extract_js_script_ids_and_reflected_markup(&html);
+    assert_eq!(
+        markup
+            .attrs
+            .get("target")
+            .map(|a| a.contains("data-content")),
+        Some(true)
+    );
+    assert!(!markup.attrs["target"].contains("data-other"));
+    assert!(!markup.attrs.contains_key("clean"));
+    assert!(markup.text.contains("ns"));
+    assert!(!markup.text.contains("clean"));
+    assert!(markup.css_custom_properties.contains("--theme"));
+    assert!(markup.css_custom_properties.contains("--inline"));
+    assert!(!markup.css_custom_properties.contains("--plain"));
+
+    // A response without this scan's marker proves nothing.
+    let (_, _, empty) = extract_js_script_ids_and_reflected_markup(
+        r#"<div id="t" data-content="dlxdeadbeef">x</div>"#,
+    );
+    assert!(empty.is_empty());
+}
+
+/// End to end through the per-param entry point's analysis: a page that reads
+/// back a reflected `data-*` attribute yields a markup-sourced finding graded
+/// as reachable, and the same page without the marker yields nothing.
+#[test]
+fn reflected_markup_flow_is_found_and_graded_reachable() {
+    let m = crate::scanning::markers::open_marker();
+    let page = |value: &str| {
+        format!(
+            r#"<div id="target" data-content="{value}"></div><script>
+            document.getElementById('target').innerHTML = document.getElementById('target').dataset.content;
+            </script>"#
+        )
+    };
+    let run = |html: &str| {
+        let (js, ids, markup) = extract_js_script_ids_and_reflected_markup(html);
+        js.iter()
+            .flat_map(|code| {
+                analyze_javascript_for_dom_xss_with_html_context(
+                    code,
+                    "http://t/",
+                    &ids,
+                    &markup,
+                    false,
+                )
+            })
+            .map(|(v, _, _)| v)
+            .collect::<Vec<_>>()
+    };
+    let found = run(&page(m));
+    let v = found
+        .first()
+        .expect("reflected data-* read reaches innerHTML");
+    assert_eq!(v.source, "markup:#target[data-content]");
+    let (grade, reason) = grade_ast_finding(
+        &v.source,
+        &v.sink,
+        false,
+        false,
+        PageSecurityPosture::default(),
+    );
+    assert_eq!(grade, crate::scanning::result::Confidence::High, "{reason}");
+    assert!(run(&page("static")).is_empty());
+}
+
+/// Form ids are collected on every page (no marker needed), and a
+/// `form.action` finding gets a `javascript:` payload, the only scheme a form
+/// submission navigates to and runs.
+#[test]
+fn form_ids_prescan_and_form_action_payload() {
+    let (_, _, markup) = extract_js_script_ids_and_reflected_markup(
+        r#"<form id="f"></form><form></form><div id="d"></div><script>1</script>"#,
+    );
+    assert!(markup.form_ids.contains("f"));
+    assert!(!markup.form_ids.contains("d"));
+    assert!(markup.is_empty(), "form ids are not reflected slots");
+
+    let (payload, _) = generate_dom_xss_poc("URLSearchParams.get(query)", "form.action");
+    assert!(
+        payload.starts_with("query=javascript:alert(1)"),
+        "{payload}"
+    );
+}

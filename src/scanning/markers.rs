@@ -51,6 +51,16 @@ pub(crate) fn id_marker() -> &'static str {
         .as_str()
 }
 
+/// Whether `s` carries one of this process's scan markers. They are
+/// session-random, so a page cannot contain one unless it reflected it.
+pub(crate) fn carries_scan_marker(s: &str) -> bool {
+    s.contains("dlx")
+        && [open_marker(), inner_marker(), class_marker(), id_marker()]
+            .iter()
+            .any(|m| s.contains(m))
+        || s.contains(close_marker())
+}
+
 /// Sandwich probe value: `OPEN + INNER + CLOSE`. Used by Stage 0/1/2
 /// (discovery + mining + sentinel) so that response analysis can tell
 /// apart a full reflection from a prefix-/suffix-stripped variant. The

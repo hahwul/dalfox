@@ -10,6 +10,10 @@ pub(crate) const MAX_EXTERNAL_JS_FILES: usize = 16;
 pub(crate) const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
 /// Run AST-based DOM XSS static analysis on the given response HTML.
 ///
+/// `injected` is the value `param` carried in the request that produced
+/// `response_text`; it lets the analyzer recognise the page's own copy of it
+/// (see `PageMarkup::sent_value`).
+///
 /// Extracts JavaScript blocks, analyses each for DOM XSS flows, performs
 /// lightweight runtime verification, and returns any findings.  De-duplicates
 /// against `ast_seen` (shared across calls for the same parameter).
@@ -18,15 +22,25 @@ pub(crate) async fn run_ast_dom_analysis(
     target: &Target,
     param: &Param,
     response_text: &str,
+    injected: &str,
     xml_response: bool,
     ast_seen: &mut HashSet<String>,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
-    let (js_blocks, script_element_ids) = if xml_response {
-        crate::scanning::ast_integration::extract_js_and_script_ids_from_xml(response_text)
+    // The response carries this request's marker in `param`, so the markup
+    // slots holding it are proven reflections (see `PageMarkup`).
+    let (js_blocks, script_element_ids, mut reflected_markup) = if xml_response {
+        let (js_blocks, script_ids) =
+            crate::scanning::ast_integration::extract_js_and_script_ids_from_xml(response_text);
+        (js_blocks, script_ids, Default::default())
     } else {
-        crate::scanning::ast_integration::extract_js_and_script_ids(response_text)
+        crate::scanning::ast_integration::extract_js_script_ids_and_reflected_markup(response_text)
     };
+    // …and the slots the pre-scan probe proved, when Stage 0 was skipped.
+    if let Some(probed) = &param.reflected_markup {
+        reflected_markup.merge(probed);
+    }
+    reflected_markup.sent_value = Some(injected.to_string());
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
     for js_code in js_blocks {
         let findings =
@@ -34,6 +48,7 @@ pub(crate) async fn run_ast_dom_analysis(
                 &js_code,
                 target.url.as_str(),
                 &script_element_ids,
+                &reflected_markup,
                 posture.trusted_types_enforced,
             );
         for (vuln, payload, description) in findings {
@@ -256,6 +271,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 &body,
                 target.url.as_str(),
                 &script_element_ids,
+                &Default::default(),
                 trusted_types_enforced,
             );
 

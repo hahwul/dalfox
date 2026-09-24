@@ -50,6 +50,21 @@ impl<'a> DomXssVisitor<'a> {
                 let script_text_sink = right_tainted
                     && Self::is_script_element_text_sink_prop(prop_name)
                     && self.expr_resolves_to_script_element(&member.object);
+                // `form.action = tainted` on a real `<form>`: a `javascript:`
+                // action runs when the form is submitted. Gated on the
+                // receiver resolving to a form, never on the property name —
+                // `action` is an ordinary field on countless other objects.
+                if right_tainted
+                    && prop_name == "action"
+                    && self.expr_resolves_to_form(&member.object)
+                {
+                    self.report_vulnerability_with_source(
+                        assign.span(),
+                        "form.action",
+                        "Assignment of a form action runs a javascript: URL on submit",
+                        right_source.clone(),
+                    );
+                }
                 if script_text_sink {
                     self.report_vulnerability_with_source(
                         assign.span(),

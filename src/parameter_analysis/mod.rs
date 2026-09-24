@@ -192,6 +192,15 @@ pub struct Param {
     /// starts out `false`, i.e. gets the pre-existing behaviour.
     #[serde(default, skip)]
     pub marker_echoed: bool,
+    /// Page slots (element attributes / text, CSS custom properties) that
+    /// held the pre-scan probe's marker, when that probe echoed on a page with
+    /// script. The AST phase reads it as proof that the page's JS reading
+    /// those slots reads this parameter: Stage 0 is skipped when the probe
+    /// echoed, and the attack response it analyses instead has usually broken
+    /// out of the very slot it would need to prove. Scan-internal, like
+    /// `marker_echoed`.
+    #[serde(default, skip)]
+    pub reflected_markup: Option<std::sync::Arc<crate::scanning::ast_dom_analysis::PageMarkup>>,
     /// XML response MIME for which the active probe reflected its marker but
     /// the body has no active namespace yet. The scan uses a small, namespaced
     /// XML payload set for this case rather than spending the full HTML catalog
@@ -239,6 +248,7 @@ impl Param {
             escaped_specials: None,
             js_breakout: None,
             marker_echoed: false,
+            reflected_markup: None,
             xml_namespace_candidate: None,
             is_cookie: None,
         }
@@ -877,6 +887,13 @@ pub async fn active_probe_param(
     // act on.
     param.marker_echoed =
         batched.actionable && batched.text.as_deref().is_some_and(body_has_probe_marker);
+    if param.marker_echoed {
+        param.reflected_markup = batched
+            .text
+            .as_deref()
+            .and_then(crate::scanning::ast_integration::reflected_markup_from_html)
+            .map(std::sync::Arc::new);
+    }
     let xml_text_context = matches!(
         param.injection_context.as_ref(),
         None | Some(InjectionContext::Html(None))

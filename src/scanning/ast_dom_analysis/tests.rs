@@ -5499,3 +5499,248 @@ fn numeric_coercion_polyfill_is_not_an_override() {
         "an overridden built-in stays overridden when copied"
     );
 }
+
+fn markup(
+    attrs: &[(&str, &[&str])],
+    text: &[&str],
+    css: &[&str],
+) -> crate::scanning::ast_dom_analysis::PageMarkup {
+    crate::scanning::ast_dom_analysis::PageMarkup {
+        attrs: attrs
+            .iter()
+            .map(|(id, names)| {
+                (
+                    id.to_string(),
+                    names.iter().map(|n| n.to_string()).collect(),
+                )
+            })
+            .collect(),
+        text: text.iter().map(|s| s.to_string()).collect(),
+        css_custom_properties: css.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    }
+}
+
+/// Server-reflected markup read back by the page is a source — but only for
+/// the slots the pre-scan proved carry the marker.
+#[test]
+fn reflected_markup_reads_are_sources() {
+    let cases: [(&str, crate::scanning::ast_dom_analysis::PageMarkup); 5] = [
+        (
+            "document.getElementById('target').innerHTML = document.getElementById('target').dataset.content;",
+            markup(&[("target", &["data-content"])], &[], &[]),
+        ),
+        (
+            "var probe = document.getElementById('probe'); var out = document.getElementById('out');
+             new MutationObserver(function () { out.innerHTML = '<b>' + probe.dataset.userName + '</b>'; }).observe(probe, {attributes: true});",
+            markup(&[("probe", &["data-user-name"])], &[], &[]),
+        ),
+        (
+            "document.getElementById('out').innerHTML = document.getElementById('ns').textContent;",
+            markup(&[], &["ns"], &[]),
+        ),
+        (
+            "var el = document.querySelector('#cfg'); document.body.innerHTML = el.getAttribute('title');",
+            markup(&[("cfg", &["title"])], &[], &[]),
+        ),
+        (
+            "var style = getComputedStyle(document.body); var p = style.getPropertyValue('--theme').trim(); new Function(p)();",
+            markup(&[], &[], &["--theme"]),
+        ),
+    ];
+    for (code, m) in cases {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(m)
+            .analyze(code)
+            .expect("parses");
+        assert!(
+            found.iter().any(|v| v.source.starts_with("markup:")),
+            "reflected slot read must be a source: {code} -> {found:?}"
+        );
+    }
+}
+
+/// Benign lookalikes: the same component idioms with no marker proven in the
+/// slot being read stay clean. The attribute/property name never decides.
+#[test]
+fn unreflected_markup_reads_stay_clean() {
+    let cases: [(&str, crate::scanning::ast_dom_analysis::PageMarkup); 6] = [
+        // No reflection anywhere: the ordinary `data-template` component.
+        (
+            "var el = document.getElementById('tpl'); el.innerHTML = el.dataset.template;",
+            markup(&[], &[], &[]),
+        ),
+        // Marker in a different attribute of the same element.
+        (
+            "var el = document.getElementById('tpl'); el.innerHTML = el.dataset.template;",
+            markup(&[("tpl", &["title"])], &[], &[]),
+        ),
+        // Marker on a different element.
+        (
+            "document.getElementById('a').innerHTML = document.getElementById('b').dataset.x;",
+            markup(&[("a", &["data-x"])], &[], &[]),
+        ),
+        // Reading reflected text back through innerHTML returns the server's
+        // escaped serialization, not the decoded value.
+        (
+            "document.getElementById('out').innerHTML = document.getElementById('ns').innerHTML;",
+            markup(&[], &["ns"], &[]),
+        ),
+        // A custom property that is not the reflected one.
+        (
+            "new Function(getComputedStyle(document.body).getPropertyValue('--other'))();",
+            markup(&[], &[], &["--theme"]),
+        ),
+        // A dynamic id cannot be matched to the pre-scan.
+        (
+            "var id = 'target'; document.body.innerHTML = document.getElementById(id).dataset.content;",
+            markup(&[("target", &["data-content"])], &[], &[]),
+        ),
+    ];
+    for (code, m) in cases {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(m)
+            .analyze(code)
+            .expect("parses");
+        assert!(
+            found.is_empty(),
+            "unproven slot read reported: {code} -> {found:?}"
+        );
+    }
+}
+
+fn forms(ids: &[&str]) -> crate::scanning::ast_dom_analysis::PageMarkup {
+    crate::scanning::ast_dom_analysis::PageMarkup {
+        form_ids: ids.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    }
+}
+
+/// A tainted `action` on a real `<form>` runs a `javascript:` URL on submit.
+#[test]
+fn form_action_on_a_form_receiver_is_a_sink() {
+    for code in [
+        "var q = new URLSearchParams(location.search).get('query'); var form = document.getElementById('f'); form.action = q; form.submit();",
+        "document.getElementById('f').action = location.hash.slice(1);",
+        "document.forms[0].action = location.hash.slice(1);",
+        "document.forms.login.action = location.hash.slice(1);",
+        "var f = document.createElement('form'); f.action = location.hash.slice(1);",
+        "document.querySelector('form#f').action = location.hash.slice(1);",
+    ] {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(forms(&["f"]))
+            .analyze(code)
+            .expect("parses");
+        assert!(
+            found.iter().any(|v| v.sink == "form.action"),
+            "form action sink missed: {code} -> {found:?}"
+        );
+    }
+}
+
+/// `action` is an ordinary field name: only a form receiver makes it a sink.
+#[test]
+fn action_on_a_non_form_receiver_stays_clean() {
+    for code in [
+        // Redux-style action objects.
+        "var store = {}; store.action = location.hash.slice(1);",
+        "var msg = { type: 'x' }; msg.action = new URLSearchParams(location.search).get('a');",
+        // An element id the pre-scan did not see as a form.
+        "document.getElementById('panel').action = location.hash.slice(1);",
+        // A form, but an untainted value.
+        "document.getElementById('f').action = '/search';",
+        // Dynamic id: cannot be matched to the pre-scan.
+        "var id = 'f'; document.getElementById(id).action = location.hash.slice(1);",
+    ] {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(forms(&["f"]))
+            .analyze(code)
+            .expect("parses");
+        assert!(
+            !found.iter().any(|v| v.sink == "form.action"),
+            "non-form action reported: {code} -> {found:?}"
+        );
+    }
+}
+
+/// `decodeURIComponent('<reflected, percent-encoded>')` → sink: the literal
+/// carries this scan's marker, so the server wrote the parameter there.
+#[test]
+fn decoded_reflected_literal_is_a_source() {
+    let m = crate::scanning::markers::open_marker();
+    for decoder in ["decodeURIComponent", "decodeURI", "unescape"] {
+        let code = format!(
+            "var content = {decoder}('%3Cimg%20{m}%3E'); document.getElementById('app').innerHTML = content;"
+        );
+        let found = AstDomAnalyzer::new().analyze(&code).expect("parses");
+        assert!(
+            found
+                .iter()
+                .any(|v| v.source.starts_with("markup:") && v.sink == "innerHTML"),
+            "{code} -> {found:?}"
+        );
+    }
+}
+
+#[test]
+fn decoded_literal_without_proof_stays_clean() {
+    let m = crate::scanning::markers::open_marker();
+    for code in [
+        // Constant i18n / template strings are decoded all the time.
+        "document.getElementById('app').innerHTML = decodeURIComponent('%3Cb%3EHello%3C%2Fb%3E');"
+            .to_string(),
+        // Some other session's marker-looking token proves nothing.
+        "document.getElementById('app').innerHTML = decodeURIComponent('dlxdeadbeef');".to_string(),
+        // Not a percent decoder.
+        format!("document.getElementById('app').innerHTML = atob('{m}');"),
+        // Undecoded literal: left to the reflection engine.
+        format!("document.getElementById('app').innerHTML = '{m}';"),
+    ] {
+        let found = AstDomAnalyzer::new().analyze(&code).expect("parses");
+        assert!(found.is_empty(), "{code} -> {found:?}");
+    }
+}
+
+fn sent(value: &str) -> crate::scanning::ast_dom_analysis::PageMarkup {
+    crate::scanning::ast_dom_analysis::PageMarkup {
+        sent_value: Some(value.to_string()),
+        ..Default::default()
+    }
+}
+
+/// The AST pass is often seeded by an attack payload with no marker; a
+/// literal that decodes to exactly what this request sent is the same proof.
+#[test]
+fn decoded_literal_matching_the_sent_value_is_a_source() {
+    let code = "var content = decodeURIComponent('%27%29%3Balert%281%29//'); document.getElementById('app').innerHTML = content;";
+    let found = AstDomAnalyzer::new()
+        .with_reflected_markup(sent("');alert(1)//"))
+        .analyze(code)
+        .expect("parses");
+    assert!(
+        found.iter().any(|v| v.source.starts_with("markup:")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn decoded_literal_not_matching_the_sent_value_stays_clean() {
+    for (code, value) in [
+        // A short sent value matches constants by accident.
+        (
+            "document.body.innerHTML = decodeURIComponent('%3Cb%3Ea%3C%2Fb%3E');",
+            "a",
+        ),
+        // A constant that is not what was sent.
+        (
+            "document.body.innerHTML = decodeURIComponent('%3Cb%3EHello%3C%2Fb%3E');",
+            "');alert(1)//",
+        ),
+    ] {
+        let found = AstDomAnalyzer::new()
+            .with_reflected_markup(sent(value))
+            .analyze(code)
+            .expect("parses");
+        assert!(found.is_empty(), "{code} -> {found:?}");
+    }
+}

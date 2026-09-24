@@ -2092,6 +2092,74 @@ fn test_body_has_probe_marker_is_case_insensitive() {
     assert!(!body_has_probe_marker("nothing reflected here"));
 }
 
+/// When the probe echoes, the slots holding its marker ride on the `Param`:
+/// Stage 0 is then skipped, and the attack response the AST pass analyses
+/// instead has usually broken out of the very attribute it would need to
+/// prove. Only pages with script get it — there is nothing to read it back.
+#[tokio::test]
+async fn active_probe_carries_the_reflected_markup_slots() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn with_script(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let v = p
+            .get("x")
+            .cloned()
+            .unwrap_or_default()
+            .replace('"', "&quot;");
+        Html(format!(
+            r#"<div id="t" data-content="{v}"></div><script>t.innerHTML = t.dataset.content;</script>"#
+        ))
+    }
+    async fn no_script(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let v = p
+            .get("x")
+            .cloned()
+            .unwrap_or_default()
+            .replace('"', "&quot;");
+        Html(format!(r#"<div id="t" data-content="{v}"></div>"#))
+    }
+
+    let app = Router::new()
+        .route("/s", get(with_script))
+        .route("/n", get(no_script));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let probe = |path: &str| {
+        let target = parse_target(&format!("http://{addr}{path}?x=1")).unwrap();
+        async move {
+            active_probe_param(
+                &target,
+                probe_param("x", Location::Query),
+                Arc::new(Semaphore::new(8)),
+            )
+            .await
+        }
+    };
+    let res = probe("/s").await;
+    assert!(res.marker_echoed);
+    let markup = res
+        .reflected_markup
+        .expect("the proven slot rides on the param");
+    assert!(markup.attrs["t"].contains("data-content"));
+
+    let res = probe("/n").await;
+    assert!(res.marker_echoed);
+    assert!(
+        res.reflected_markup.is_none(),
+        "no script, nothing to carry"
+    );
+}
+
 /// Part of `--sxss` support: when the write endpoint does not echo the probe
 /// (the common "saved" / redirect / JSON-ack stored sink), the active probe
 /// records every special character as filtered. The adaptive prune would then

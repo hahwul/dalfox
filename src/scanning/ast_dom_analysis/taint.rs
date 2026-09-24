@@ -259,6 +259,13 @@ impl<'a> DomXssVisitor<'a> {
         if let Some(source) = self.css_custom_property_read_source(call) {
             return (true, Some(source));
         }
+        // …or reads back markup the server filled from the parameter.
+        if let Some(source) = self.reflected_markup_source_for_call(call) {
+            return (true, Some(source));
+        }
+        if let Some(source) = self.decoded_reflected_literal_source(call) {
+            return (true, Some(source));
+        }
 
         // The tainted value can also arrive as the *return value* of a callback
         // the call runs over its receiver — `tpl.replace('SLOT', () => tainted)`
@@ -603,6 +610,9 @@ impl<'a> DomXssVisitor<'a> {
             return true;
         }
         if self.file_reader_source_for_member(member).is_some() {
+            return true;
+        }
+        if self.reflected_markup_source_for_member(member).is_some() {
             return true;
         }
         if let Some(full_path) = self.get_member_string(member) {
