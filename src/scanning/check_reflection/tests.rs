@@ -2181,6 +2181,37 @@ fn test_occurrence_inside_url_attr_value_handles_query_string() {
 // `build_hpp_url` degrades here rather than at the call site.
 // ---------------------------------------------------------------------------
 
+#[test]
+fn hpp_response_gate_requires_a_browser_executable_response_type() {
+    let markup_payload = "<script>alert(1)</script>";
+    let json = format!("{{\"q\":\"{markup_payload}\"}}");
+    assert!(!hpp_response_has_executable_reflection(
+        markup_payload,
+        "application/json",
+        &json
+    ));
+    assert!(!hpp_response_has_executable_reflection(
+        markup_payload,
+        "text/plain; charset=utf-8",
+        markup_payload
+    ));
+    assert!(hpp_response_has_executable_reflection(
+        markup_payload,
+        "text/html",
+        markup_payload
+    ));
+    assert!(!hpp_response_has_executable_reflection(
+        markup_payload,
+        "application/javascript",
+        markup_payload
+    ));
+    assert!(hpp_response_has_executable_reflection(
+        "alert(1);foo",
+        "application/javascript",
+        "alert(1);foo({\"data\":1})"
+    ));
+}
+
 /// Happy path: the duplicated-parameter URL is sent verbatim and the payload
 /// echoed by the server is classified as a reflection, with the body returned
 /// as evidence.
@@ -2619,7 +2650,7 @@ mod status_path {
         let args = default_scan_args();
         let streak = std::sync::atomic::AtomicU32::new(0);
 
-        let (kind, body, status) =
+        let (kind, body, status, _) =
             crate::scanning::check_reflection::check_reflection_with_response_status(
                 None, &target, &param, payload, &args, &streak,
             )
@@ -2660,7 +2691,7 @@ mod status_path {
         let args = default_scan_args();
         let streak = std::sync::atomic::AtomicU32::new(0);
 
-        let (_kind, _body, status) =
+        let (_kind, _body, status, _) =
             crate::scanning::check_reflection::check_reflection_with_response_status(
                 None, &target, &param, payload, &args, &streak,
             )

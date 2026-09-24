@@ -23,13 +23,19 @@ pub(crate) async fn run_ast_dom_analysis(
     param: &Param,
     response_text: &str,
     injected: &str,
+    xml_response: bool,
     ast_seen: &mut HashSet<String>,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
     // The response carries this request's marker in `param`, so the markup
     // slots holding it are proven reflections (see `PageMarkup`).
-    let (js_blocks, script_element_ids, mut reflected_markup) =
-        crate::scanning::ast_integration::extract_js_script_ids_and_reflected_markup(response_text);
+    let (js_blocks, script_element_ids, mut reflected_markup) = if xml_response {
+        let (js_blocks, script_ids) =
+            crate::scanning::ast_integration::extract_js_and_script_ids_from_xml(response_text);
+        (js_blocks, script_ids, Default::default())
+    } else {
+        crate::scanning::ast_integration::extract_js_script_ids_and_reflected_markup(response_text)
+    };
     // …and the slots the pre-scan probe proved, when Stage 0 was skipped.
     if let Some(probed) = &param.reflected_markup {
         reflected_markup.merge(probed);

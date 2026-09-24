@@ -14,6 +14,7 @@ pub mod rate_limit;
 pub mod scan_id;
 pub mod shimmer;
 pub mod term;
+pub(crate) mod xml;
 
 /// Largest permit count `tokio::sync::Semaphore::new` accepts; it asserts
 /// above this. Taken from tokio's own public constant rather than hand-copying
@@ -48,8 +49,8 @@ pub(crate) use scan_id::{make_scan_id, make_unique_scan_id, short_scan_id};
 pub(crate) use http::{
     apply_header_overrides, build_body_request_base, build_preflight_request, build_request,
     build_request_with_cookie, compose_cookie_header_excluding, content_type_is_never_markup,
-    content_type_primary, is_htmlish_content_type, is_javascript_content_type,
-    is_xss_scannable_content_type, send_with_retry,
+    content_type_primary, is_htmlish_content_type, is_javascript_content_type, is_xml_content_type,
+    is_xss_scannable_content_type, response_has_markup_document, send_with_retry,
 };
 
 // Re-export remote payload/wordlist getters at `crate::utils::*`

@@ -1124,6 +1124,47 @@ async fn active_probe_does_not_record_an_echo_from_an_inert_content_type() {
     );
 }
 
+#[tokio::test]
+async fn active_probe_marks_reflected_unnamespaced_xml_for_small_namespace_family() {
+    use axum::{Router, extract::Query, response::IntoResponse, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn xml_echo(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let value = p.get("x").cloned().unwrap_or_default();
+        (
+            [("content-type", "text/xml; charset=utf-8")],
+            format!("<root>{value}</root>"),
+        )
+    }
+
+    let app = Router::new().route("/xml", get(xml_echo));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/xml?x=1")).unwrap();
+    let mut param = probe_param("x", Location::Query);
+    param.injection_context = Some(InjectionContext::Html(None));
+    let res = active_probe_param(&target, param, Arc::new(Semaphore::new(8))).await;
+
+    assert!(
+        !res.marker_echoed,
+        "an unnamespaced XML echo is not yet an executable markup document"
+    );
+    assert_eq!(
+        res.xml_namespace_candidate.as_deref(),
+        Some("text/xml; charset=utf-8"),
+        "retain the echoed parameter for the small namespace-activating payload family"
+    );
+}
+
 /// Path parameters keep their Stage-0 probe: the path suppressions
 /// (`should_suppress_path_reflection_with_body`, the non-2xx error-page rule)
 /// need the body, which this cheap content-type check cannot stand in for.
@@ -2116,5 +2157,55 @@ async fn active_probe_carries_the_reflected_markup_slots() {
     assert!(
         res.reflected_markup.is_none(),
         "no script, nothing to carry"
+    );
+}
+
+/// Part of `--sxss` support: when the write endpoint does not echo the probe
+/// (the common "saved" / redirect / JSON-ack stored sink), the active probe
+/// records every special character as filtered. The adaptive prune would then
+/// drop every `<`/`>`/quote payload before the retrieval URL is ever checked.
+/// Under `--sxss` that verdict — derived from a page that never rendered the
+/// value — is discarded so the full payload set still runs.
+#[tokio::test]
+async fn sxss_discards_the_no_echo_special_char_verdict() {
+    use axum::{Router, routing::post};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    // A write endpoint that never echoes the submitted value.
+    let app = Router::new().route("/save", post(|| async { "saved" }));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/save")).unwrap();
+    target.method = "POST".to_string();
+    target.data = Some("c=seed".to_string());
+    target.workers = 1;
+    let mut param = probe_param("c", Location::Body);
+    param.injection_context = Some(InjectionContext::Html(None));
+    target.reflection_params.push(param);
+
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/save"));
+
+    analyze_parameters(&mut target, &args, None).await;
+
+    let c = target
+        .reflection_params
+        .iter()
+        .find(|p| p.name == "c")
+        .expect("param c survives analysis");
+    // The all-invalid verdict from the non-echoing write is cleared, not kept.
+    assert!(
+        c.invalid_specials.as_ref().is_none_or(|v| v.is_empty()),
+        "no-echo special-char verdict must be discarded under --sxss, got {:?}",
+        c.invalid_specials
     );
 }

@@ -2902,6 +2902,50 @@ fn generate_param_jobs_total_tasks_matches_payload_counts() {
 }
 
 #[test]
+fn xml_namespace_payloads_are_scoped_small_and_keep_verifiers_ahead_of_caps() {
+    let mut param = req_param("q", "seed", Location::Query);
+    param.injection_context = Some(InjectionContext::Html(None));
+    param.xml_namespace_candidate = Some("image/svg+xml; charset=utf-8".to_string());
+    param.valid_specials = Some(vec!['<', '>', '"', '\'']);
+    let target = target_with_params(vec![param]);
+    let mut args = integration_scan_args(true);
+    args.max_payloads_per_param = 1;
+    let shared = vec!["<shared-csp-payload>".to_string()];
+    let (jobs, _) = super::generate_param_jobs(&target, &args, None, &shared);
+    let (_, reflection, dom) = &jobs[0];
+    let marker = crate::scanning::markers::class_marker();
+
+    assert_eq!(reflection.len(), 1);
+    assert!(
+        reflection[0].starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""),
+        "image/svg+xml should try the SVG namespace verifier before the cap"
+    );
+    assert!(reflection[0].contains(&format!("class=\"{marker}\"")));
+    assert!(reflection[0].contains("onload=\"alert(1)\""));
+    assert!(
+        dom.is_empty(),
+        "the reflection response verifies XML payloads directly"
+    );
+    assert!(
+        !reflection
+            .iter()
+            .chain(dom)
+            .any(|payload| payload == "<shared-csp-payload>"),
+        "inert XML candidates should not regain the full shared catalog"
+    );
+
+    let mut html_param = req_param("q", "seed", Location::Query);
+    html_param.injection_context = Some(InjectionContext::Html(None));
+    let html_target = target_with_params(vec![html_param]);
+    let (html_jobs, _) = super::generate_param_jobs(&html_target, &args, None, &[]);
+    assert_ne!(
+        html_jobs[0].1,
+        crate::scanning::payload_families::get_xml_namespace_payloads("image/svg+xml"),
+        "XML namespace payloads must not replace or bloat the normal HTML family"
+    );
+}
+
+#[test]
 fn generate_param_jobs_respects_max_payloads_per_param() {
     let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
     let mut args = integration_scan_args(true);
@@ -4690,5 +4734,509 @@ fn test_extract_meta_csp_ignores_meta_outside_head() {
     assert_eq!(
         extract_meta_csp(html).map(|(_, c)| c).as_deref(),
         Some("object-src 'none'")
+    );
+}
+
+/// End-to-end for `--sxss` per-parameter marker attribution. Two body fields
+/// (`c`, `name`) are injected at a stored sink. Which fields the sink keeps is
+/// varied; a field is credited with a Verified finding only when the retrieval
+/// page shows an element *this field* produced. Because every field is sent the
+/// same payload catalog, a shared marker would let one field's stored element
+/// satisfy another's verification — the cross-attribution this guards against.
+#[tokio::test]
+async fn sxss_credits_only_the_fields_that_actually_store() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use tokio::time::{Duration, sleep};
+
+    async fn run_case(store_fields: &'static [&'static str]) -> Vec<(String, String)> {
+        let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+        let write = store.clone();
+        let read = store.clone();
+        let app = Router::new()
+            .route(
+                "/save",
+                axum::routing::post(move |body: String| {
+                    let store = write.clone();
+                    async move {
+                        for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                            if store_fields.contains(&k.as_ref()) {
+                                store.lock().unwrap().push(v.into_owned());
+                            }
+                        }
+                        Html("saved")
+                    }
+                }),
+            )
+            .route(
+                "/view",
+                get(move || {
+                    let store = read.clone();
+                    async move {
+                        Html(format!(
+                            "<html><body>{}</body></html>",
+                            store.lock().unwrap().join("<hr>")
+                        ))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        sleep(Duration::from_millis(20)).await;
+
+        let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+        target.workers = 1;
+        for name in ["c", "name"] {
+            target.reflection_params.push(Param {
+                injection_context: Some(InjectionContext::Html(None)),
+                form_action_url: Some(format!("http://{addr}/save")),
+                form_origin_url: Some(format!("http://{addr}/page")),
+                ..Param::new(name.to_string(), "x".to_string(), Location::Body)
+            });
+        }
+        let mut args = integration_scan_args(false);
+        args.sxss = true;
+        args.sxss_url = Some(format!("http://{addr}/view"));
+        args.max_payloads_per_param = 40;
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(args),
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        server.abort();
+        let out: Vec<(String, String)> = results
+            .lock()
+            .await
+            .iter()
+            .filter(|r| r.result_type == FindingType::Verified)
+            .map(|r| (r.param.clone(), r.payload.clone()))
+            .collect();
+        out
+    }
+
+    // Only `c` stores: `name` must not be credited with `c`'s stored element.
+    let only_c = run_case(&["c"]).await;
+    assert!(
+        only_c.iter().all(|(p, _)| p == "c"),
+        "a field the sink never stores must not be credited: {only_c:?}"
+    );
+    assert!(
+        only_c.iter().any(|(p, _)| p == "c"),
+        "the storing field must be verified: {only_c:?}"
+    );
+
+    // Both store: each is credited (the baseline delta sees each field's own
+    // injection raise the payload's occurrence on the retrieval page).
+    let both = run_case(&["c", "name"]).await;
+    for field in ["c", "name"] {
+        assert!(
+            both.iter().any(|(p, _)| p == field),
+            "both storing fields must be verified, missing {field}: {both:?}"
+        );
+    }
+}
+
+/// The `--sxss` credit gate fails *open* when no baseline is in scope, and the
+/// baseline is a task-local that does not cross `tokio::spawn`. Drive a real
+/// `--sxss` scan through `run_scanning` and assert every attack-payload gate
+/// call during the reflection/DOM phases saw a baseline. A future spawn inside
+/// those phases (or dropping the scope) would record fail-open hits here.
+#[tokio::test]
+async fn sxss_credit_gate_always_sees_a_baseline_during_the_phases() {
+    use crate::scanning::check_reflection::{SXSS_GATE_FAIL_OPEN, SXSS_GATE_GUARD_SENTINEL};
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use tokio::time::{Duration, sleep};
+
+    let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+    let write = store.clone();
+    let read = store.clone();
+    // Every page carries the sentinel so only this test's gate calls are
+    // recorded (see `record_sxss_gate_fail_open`).
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                async move {
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "c" {
+                            store.lock().unwrap().push(v.into_owned());
+                        }
+                    }
+                    Html(format!("<p>{SXSS_GATE_GUARD_SENTINEL}</p>saved"))
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    Html(format!(
+                        "<html><body><p>{SXSS_GATE_GUARD_SENTINEL}</p>{}</body></html>",
+                        store.lock().unwrap().join("<hr>")
+                    ))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        form_action_url: Some(format!("http://{addr}/save")),
+        form_origin_url: Some(format!("http://{addr}/page")),
+        ..Param::new("c".to_string(), "x".to_string(), Location::Body)
+    });
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.max_payloads_per_param = 20;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    // Control: the phases actually ran and reached the gate with a stored hit.
+    assert!(
+        results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.param == "c" && r.result_type == FindingType::Verified),
+        "control: the stored field must be verified"
+    );
+    let hits = SXSS_GATE_FAIL_OPEN.lock().unwrap().clone();
+    assert!(
+        hits.is_empty(),
+        "credit gate ran without a baseline in scope for {} attack payload(s), e.g. {:?}",
+        hits.len(),
+        hits.first()
+    );
+}
+
+/// Request-budget guard for the `--sxss` store-probe. Two form fields (`c`,
+/// `name`); only `c` stores. `name` never stores, but the storing field's
+/// stale marker on the retrieval page lets it pass the (deliberately un-gated)
+/// Stage-0 probe. Without the baseline-gated store-probe it would then run the
+/// whole payload catalog — every payload correctly refused, but each refusal
+/// paying the full sxss retrieval retry loop, which measured in the tens of
+/// thousands of requests. The store-probe must stop `name` before the catalog.
+#[tokio::test]
+async fn sxss_store_probe_bounds_a_non_storing_siblings_request_budget() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtOrd};
+    use tokio::time::{Duration, sleep};
+
+    let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+    // Counts POSTs that inject a payload into the *non-storing* `name` field
+    // (its value is something other than the seed). This isolates the sibling's
+    // own scan cost from the storing field's, independent of when the storing
+    // field verifies and stops. The store-probe should let `name` issue only
+    // its one marker probe; without it, `name` runs the whole payload catalog.
+    let name_injections = Arc::new(AtomicUsize::new(0));
+    let write = store.clone();
+    let read = store.clone();
+    let name_inj = name_injections.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                let name_inj = name_inj.clone();
+                async move {
+                    // Only `c` is stored; `name` is accepted and dropped.
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "name" && v != "x" {
+                            name_inj.fetch_add(1, AtOrd::Relaxed);
+                        }
+                        if k == "c" {
+                            store.lock().unwrap().push(v.into_owned());
+                        }
+                    }
+                    Html("saved")
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    Html(format!(
+                        "<html><body>{}</body></html>",
+                        store.lock().unwrap().join("<hr>")
+                    ))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    for name in ["c", "name"] {
+        target.reflection_params.push(Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            form_action_url: Some(format!("http://{addr}/save")),
+            form_origin_url: Some(format!("http://{addr}/page")),
+            ..Param::new(name.to_string(), "x".to_string(), Location::Body)
+        });
+    }
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    // A full catalog: if `name` were to run it, the hit count would be orders
+    // of magnitude over the budget below.
+    args.max_payloads_per_param = 120;
+    args.sxss_retries = 1;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    assert!(
+        results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.param == "c" && r.result_type == FindingType::Verified),
+        "control: the storing field must still be Verified"
+    );
+    let name_posts = name_injections.load(AtOrd::Relaxed);
+    // `name` never stores, so its store-probe injection does not raise the
+    // marker count above the baseline and its catalog is skipped: only the one
+    // store-probe POST reaches the sink. Without the store-probe `name` runs the
+    // full catalog (here 120 payloads plus the DOM set) — an order of magnitude
+    // more injections.
+    assert!(
+        name_posts < 10,
+        "the non-storing sibling must be stopped by the store-probe, \
+         but it injected into `name` {name_posts} times (a catalog run is 100+)"
+    );
+}
+
+/// Regression (a): a sink that stores only short values keeps the long
+/// bracketed marker out, so the field passes Stage 0 only on the short numeric
+/// fallback marker. The store-probe must try that fallback too, or the field is
+/// wrongly judged non-storing and its catalog skipped.
+#[tokio::test]
+async fn sxss_store_probe_uses_the_numeric_marker_fallback_for_length_capped_sinks() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtOrd};
+    use tokio::time::{Duration, sleep};
+
+    let store: Arc<StdMutex<Vec<String>>> = Arc::default();
+    // POSTs that inject a non-seed value into `c` — i.e. the field's catalog is
+    // running rather than being skipped after the probe.
+    let c_injections = Arc::new(AtomicUsize::new(0));
+    let write = store.clone();
+    let read = store.clone();
+    let c_inj = c_injections.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                let c_inj = c_inj.clone();
+                async move {
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "c" {
+                            if v != "x" {
+                                c_inj.fetch_add(1, AtOrd::Relaxed);
+                            }
+                            // Length-capped sink: the ~36-char bracketed marker
+                            // and the long payloads never fit; the 8-char
+                            // numeric fallback marker does.
+                            if v.len() <= 10 {
+                                store.lock().unwrap().push(v.into_owned());
+                            }
+                        }
+                    }
+                    Html("saved")
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    Html(format!(
+                        "<html><body>{}</body></html>",
+                        store.lock().unwrap().join("<hr>")
+                    ))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        form_action_url: Some(format!("http://{addr}/save")),
+        form_origin_url: Some(format!("http://{addr}/page")),
+        ..Param::new("c".to_string(), "x".to_string(), Location::Body)
+    });
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.max_payloads_per_param = 40;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    // The field stores short values, so the numeric fallback credits it and its
+    // catalog runs. Without the fallback the probe sees only the too-long
+    // bracketed marker, judges it non-storing, and skips (a handful of probe
+    // injections at most).
+    let injections = c_injections.load(AtOrd::Relaxed);
+    assert!(
+        injections > 20,
+        "the length-capped field must be scanned via the numeric-marker fallback, \
+         but only {injections} payloads reached `c` (a skipped catalog is a few)"
+    );
+}
+
+/// Regression (b): a write-behind sink (the value is stored but visible on the
+/// retrieval page only after a short delay) must still be found. The store-probe
+/// window must be wide enough to observe the delayed store, and — because the
+/// store is not synchronous — the per-payload retrieval retries must be kept so
+/// a delayed payload is not missed.
+#[tokio::test]
+async fn sxss_finds_a_write_behind_store() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::Mutex as StdMutex;
+    use std::time::Instant;
+    use tokio::time::{Duration, sleep};
+
+    // Each stored item becomes visible on /view only ~350 ms after it was
+    // written — a write-behind sink.
+    let store: Arc<StdMutex<Vec<(Instant, String)>>> = Arc::default();
+    let write = store.clone();
+    let read = store.clone();
+    let app = Router::new()
+        .route(
+            "/save",
+            axum::routing::post(move |body: String| {
+                let store = write.clone();
+                async move {
+                    for (k, v) in url::form_urlencoded::parse(body.as_bytes()) {
+                        if k == "c" && v != "x" {
+                            store.lock().unwrap().push((Instant::now(), v.into_owned()));
+                        }
+                    }
+                    Html("saved")
+                }
+            }),
+        )
+        .route(
+            "/view",
+            get(move || {
+                let store = read.clone();
+                async move {
+                    let now = Instant::now();
+                    let visible: String = store
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|(t, _)| now.duration_since(*t) >= Duration::from_millis(350))
+                        .map(|(_, v)| v.clone())
+                        .collect::<Vec<_>>()
+                        .join("<hr>");
+                    Html(format!("<html><body>{visible}</body></html>"))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/page")).unwrap();
+    target.workers = 1;
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        form_action_url: Some(format!("http://{addr}/save")),
+        form_origin_url: Some(format!("http://{addr}/page")),
+        ..Param::new("c".to_string(), "x".to_string(), Location::Body)
+    });
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{addr}/view"));
+    // Default retry ramp (backoff 500 ms) covers the 350 ms write-behind delay.
+    args.sxss_retries = 3;
+    args.max_payloads_per_param = 40;
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    server.abort();
+
+    assert!(
+        results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.param == "c" && r.result_type == FindingType::Verified),
+        "a write-behind store must still be verified: the store-probe window must \
+         observe the delayed store and the per-payload retries must be kept"
     );
 }

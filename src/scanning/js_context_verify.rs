@@ -721,6 +721,30 @@ pub(crate) fn handler_payload_hits_sink(handler: &str, payload: &str) -> bool {
 /// per-payload overhead bounded.
 const JSONP_PARSE_MAX_BYTES: usize = 64 * 1024;
 
+/// Check whether an entire response body served as JavaScript contains a
+/// sink call introduced by `payload`. This is separate from HTML inline-script
+/// checking: a raw JavaScript response only executes when used as a script
+/// resource (the JSONP case), and must never be treated as markup.
+pub(crate) fn has_javascript_body_evidence(payload: &str, body: &str) -> bool {
+    payload_carries_js_sink(payload)
+        && body.len() <= JSONP_PARSE_MAX_BYTES
+        && any_payload_occurrence_hits_sink(body, payload)
+}
+
+/// Check only executable inline script blocks in an HTML/XML document. The
+/// raw-body fallback below is reserved for responses whose Content-Type says
+/// JavaScript; text between HTML tags is not executable JavaScript.
+pub(crate) fn has_inline_script_context_evidence(payload: &str, html: &str) -> bool {
+    if !payload_carries_js_sink(payload) {
+        return false;
+    }
+    script_blocks(html).any(|(open_tag, block)| {
+        block.contains(payload)
+            && open_tag_is_javascript(open_tag)
+            && any_payload_occurrence_hits_sink(block, payload)
+    })
+}
+
 /// Public entry point: returns true when the payload, reflected inside any
 /// `<script>` block of `html`, parses cleanly and produces a JS sink call
 /// whose span sits inside the payload range.
@@ -730,26 +754,8 @@ const JSONP_PARSE_MAX_BYTES: usize = 64 * 1024;
 /// where the payload is reflected as the callable identifier (e.g.
 /// `callback=alert(1);foo` reflected as `alert(1);foo({…})`).
 pub(crate) fn has_js_context_evidence(payload: &str, html: &str) -> bool {
-    if !payload_carries_js_sink(payload) {
-        return false;
-    }
-    let mut saw_block = false;
-    for (open_tag, block) in script_blocks(html) {
-        saw_block = true;
-        if block.contains(payload)
-            && open_tag_is_javascript(open_tag)
-            && any_payload_occurrence_hits_sink(block, payload)
-        {
-            return true;
-        }
-    }
-    if !saw_block
-        && html.len() <= JSONP_PARSE_MAX_BYTES
-        && any_payload_occurrence_hits_sink(html, payload)
-    {
-        return true;
-    }
-    false
+    has_inline_script_context_evidence(payload, html)
+        || (!script_block_re().is_match(html) && has_javascript_body_evidence(payload, html))
 }
 
 #[cfg(test)]

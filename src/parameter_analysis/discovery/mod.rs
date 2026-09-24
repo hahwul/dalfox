@@ -83,7 +83,13 @@ pub async fn check_discovery(
             check_path_discovery(target, reflection_params.clone(), semaphore.clone()).await;
         }
         // Form discovery: parse HTML forms and test POST parameters
-        check_form_discovery(target, reflection_params.clone(), semaphore.clone()).await;
+        check_form_discovery_with(
+            target,
+            reflection_params.clone(),
+            semaphore.clone(),
+            args.sxss,
+        )
+        .await;
         // Fragment discovery: extract params from URL hash fragments (client-side only)
         check_fragment_discovery(target, reflection_params.clone()).await;
     }

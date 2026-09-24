@@ -21,6 +21,9 @@ pub(crate) const PREFLIGHT_BODY_BYTES: usize = 8192;
 /// Preflight result containing content-type, CSP, body, WAF, and tech detection info.
 pub(crate) struct PreflightResult {
     pub(crate) content_type: String,
+    /// Content-Type from the GET response whose body is captured below. It can
+    /// differ from HEAD on servers that route the methods separately.
+    pub(crate) response_content_type: String,
     pub(crate) csp_header: Option<(String, String)>,
     pub(crate) response_body: Option<String>,
     pub(crate) waf_result: crate::waf::WafDetectionResult,
@@ -41,16 +44,19 @@ pub(crate) struct PreflightResult {
 pub(crate) enum PreflightOutcome {
     /// HEAD/GET preflight returned a response with a usable Content-Type.
     WithContentType(PreflightResult),
-    /// Response was received (e.g. 405 from a POST-only endpoint) but
-    /// no Content-Type header — keep scanning, just without preflight
-    /// metadata (CSP, WAF, tech).
+    /// HEAD returned no Content-Type header — keep scanning and carry the
+    /// GET body/type through for MIME-aware initial-page analysis.
     ///
     /// The session baseline rides along rather than being dropped with the
     /// rest: the target still gets scanned, so it still has a session that can
     /// die, and with `--session-check-url` the extra baseline request has
     /// already been spent. Discarding it silently disabled monitoring the
     /// operator explicitly asked for.
-    NoContentType(Option<super::session::SessionBaseline>),
+    NoContentType {
+        session_baseline: Option<super::session::SessionBaseline>,
+        response_body: Option<String>,
+        response_content_type: String,
+    },
     /// Hard reachability failure — the `&'static str` carries the
     /// specific error_code (`DNS_RESOLUTION_FAILED`,
     /// `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, or
@@ -240,6 +246,7 @@ pub(crate) async fn preflight_content_type(
 
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
+    let mut response_content_type = String::new();
     let mut session_baseline: Option<super::session::SessionBaseline> = None;
     let monitor_session = super::session::monitoring_enabled(args, target);
     let get_req =
@@ -249,6 +256,11 @@ pub(crate) async fn preflight_content_type(
         let get_status = get_resp.status().as_u16();
         baseline_status = Some(get_status);
         let get_headers = get_resp.headers().clone();
+        response_content_type = get_headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         // Captured before `read_body` consumes the response. Under
         // `--follow-redirects` this is where the chain actually ended, which is
         // the only thing the session baseline can meaningfully compare against.
@@ -317,13 +329,18 @@ pub(crate) async fn preflight_content_type(
     match ct_opt {
         Some(ct) => PreflightOutcome::WithContentType(PreflightResult {
             content_type: ct,
+            response_content_type,
             csp_header,
             response_body,
             waf_result,
             tech_result,
             session_baseline,
         }),
-        None => PreflightOutcome::NoContentType(session_baseline),
+        None => PreflightOutcome::NoContentType {
+            session_baseline,
+            response_body,
+            response_content_type,
+        },
     }
 }
 

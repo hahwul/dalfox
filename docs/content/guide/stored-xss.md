@@ -23,6 +23,35 @@ Dalfox will:
 
 Only findings that survive both steps are reported as SXSS.
 
+The write endpoint does not need to echo what you submit. Dalfox keeps a stored
+field even when the submit response just says "saved", and it does not use that
+non-rendering response to decide which characters the sink filters — so a
+form-backed stored sink is tested with the full payload set rather than skipped.
+
+Every parameter is sent the same payloads, and a stored sink keeps whatever it
+is given, so once one field has stored a payload the retrieval page shows it for
+the rest of the scan. To keep findings on the right field, before a parameter
+injects anything Dalfox snapshots the retrieval page(s) once; a payload is
+credited to that parameter only when its injection makes the payload appear
+*more* often than the snapshot already showed. A copy another field stored
+earlier is already in the snapshot, so it is never mis-credited. The snapshot
+costs one extra GET per retrieval URL per parameter.
+
+Right after the snapshot, Dalfox re-probes the field once: if that probe's own
+injection does not raise the marker count on the retrieval page (or in the write
+response), the field does not store here and its payload catalog is skipped. This
+stops a form's non-storing fields — which would otherwise pass the reflection
+probe on the marker a sibling field stored — from running the whole catalog. The
+probe tries both a long and a short marker, so a sink that only keeps short
+values is not mistaken for a non-storing one.
+
+The probe also observes *when* the store becomes visible. A synchronous sink
+(visible immediately) lets Dalfox skip re-fetching a payload that does not
+appear, keeping the request count low. A write-behind sink (visible only after a
+delay) keeps the full per-payload retrieval retries so a delayed payload is not
+missed; if your target stores slower than the default retry window, raise
+`--sxss-retries`.
+
 ## Choosing the retrieval URL
 
 Pick the page the stored value **reads** from. Examples:

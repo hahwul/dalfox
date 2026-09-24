@@ -4,10 +4,32 @@ use super::*;
 use std::collections::HashSet;
 
 /// Discover POST form parameters by parsing HTML forms from the GET response.
+#[cfg(test)]
 pub async fn check_form_discovery(
     target: &Target,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
+) {
+    check_form_discovery_with(target, reflection_params, semaphore, false).await;
+}
+
+/// [`check_form_discovery`], optionally keeping form fields whose submission
+/// did not echo the probe marker.
+///
+/// `keep_unreflected` is set under `--sxss`. Every probe here keeps a field only
+/// when the marker comes back in the *immediate* response, which a stored sink
+/// by definition fails: a comment form's write endpoint answers "saved" and
+/// the value surfaces later, on the page that lists comments. Dropping those
+/// fields left the scan with nothing to test, so `--sxss` against the canonical
+/// form-backed stored sink reported clean without ever requesting the
+/// retrieval URL. Kept fields carry `form_action_url` / `form_origin_url`, which
+/// is what the stored-XSS stages resolve their check URLs from, and the
+/// Stage-0 probe still drops any field whose value is never stored.
+pub(crate) async fn check_form_discovery_with(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+    keep_unreflected: bool,
 ) {
     // Only discover forms when the target doesn't already have POST data
     if target.data.is_some() || target.method.eq_ignore_ascii_case("POST") {
@@ -147,22 +169,22 @@ pub async fn check_form_discovery(
                 )
                 .multipart(form);
                 crate::record_outbound_request().await;
-                if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                    && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                if let Some(param) = form_field_param(
+                    crate::utils::http::send_counted(rb).await,
+                    keep_unreflected,
+                    Param {
+                        form_action_url: Some(form_url.to_string()),
+                        form_origin_url: Some(target.url.to_string()),
+                        ..Param::new(
+                            field_name.clone(),
+                            field_value.clone(),
+                            crate::parameter_analysis::Location::MultipartBody,
+                        )
+                    },
+                )
+                .await
                 {
-                    batch.push(
-                        Param {
-                            form_action_url: Some(form_url.to_string()),
-                            form_origin_url: Some(target.url.to_string()),
-                            ..Param::new(
-                                field_name.clone(),
-                                field_value.clone(),
-                                crate::parameter_analysis::Location::MultipartBody,
-                            )
-                        }
-                        .with_reflection_analysis(&text),
-                    );
+                    batch.push(param);
                 }
                 if target.delay > 0 {
                     sleep(Duration::from_millis(target.delay)).await;
@@ -221,22 +243,22 @@ pub async fn check_form_discovery(
                     )],
                 );
                 crate::record_outbound_request().await;
-                if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                    && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                if let Some(param) = form_field_param(
+                    crate::utils::http::send_counted(rb).await,
+                    keep_unreflected,
+                    Param {
+                        form_action_url: Some(form_url.to_string()),
+                        form_origin_url: Some(target.url.to_string()),
+                        ..Param::new(
+                            field_name.clone(),
+                            field_value.clone(),
+                            crate::parameter_analysis::Location::Body,
+                        )
+                    },
+                )
+                .await
                 {
-                    batch.push(
-                        Param {
-                            form_action_url: Some(form_url.to_string()),
-                            form_origin_url: Some(target.url.to_string()),
-                            ..Param::new(
-                                field_name.clone(),
-                                field_value.clone(),
-                                crate::parameter_analysis::Location::Body,
-                            )
-                        }
-                        .with_reflection_analysis(&text),
-                    );
+                    batch.push(param);
                 }
                 if target.delay > 0 {
                     sleep(Duration::from_millis(target.delay)).await;
@@ -291,22 +313,22 @@ pub async fn check_form_discovery(
                 let m = reqwest::Method::GET;
                 let rb = crate::utils::build_request(&client, target, m, test_url.clone(), None);
                 crate::record_outbound_request().await;
-                if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                    && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                if let Some(param) = form_field_param(
+                    crate::utils::http::send_counted(rb).await,
+                    keep_unreflected,
+                    Param {
+                        form_action_url: Some(form_url.to_string()),
+                        form_origin_url: Some(target.url.to_string()),
+                        ..Param::new(
+                            field_name.clone(),
+                            field_value.clone(),
+                            crate::parameter_analysis::Location::Query,
+                        )
+                    },
+                )
+                .await
                 {
-                    batch.push(
-                        Param {
-                            form_action_url: Some(form_url.to_string()),
-                            form_origin_url: Some(target.url.to_string()),
-                            ..Param::new(
-                                field_name.clone(),
-                                field_value.clone(),
-                                crate::parameter_analysis::Location::Query,
-                            )
-                        }
-                        .with_reflection_analysis(&text),
-                    );
+                    batch.push(param);
                 }
                 if target.delay > 0 {
                     sleep(Duration::from_millis(target.delay)).await;
@@ -517,5 +539,23 @@ pub async fn check_form_discovery(
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
         guard.extend(batch);
+    }
+}
+
+/// Turn one form-field probe response into a discovered param: kept with its
+/// reflection analysis when the marker echoed, kept bare when it did not but
+/// `keep_unreflected` asks for it (`--sxss`, see [`check_form_discovery_with`]),
+/// dropped otherwise. A probe that never got a response keeps nothing either
+/// way — an unreachable form is not evidence of a stored sink.
+async fn form_field_param(
+    sent: Result<reqwest::Response, reqwest::Error>,
+    keep_unreflected: bool,
+    param: Param,
+) -> Option<Param> {
+    let text = crate::utils::http::read_body(sent.ok()?).await.ok()?;
+    if crate::scanning::markers::classify_probe_reflection(&text).detected() {
+        Some(param.with_reflection_analysis(&text))
+    } else {
+        keep_unreflected.then_some(param)
     }
 }
