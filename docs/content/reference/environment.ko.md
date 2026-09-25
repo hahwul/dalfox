@@ -44,7 +44,7 @@ dalfox scan https://target.app > scan.log   # 이미 일반 텍스트
 
 ```bash
 XDG_CONFIG_HOME=./.config dalfox scan https://target.app
-# Dalfox reads ./.config/dalfox/config.toml
+# Dalfox는 ./.config/dalfox/config.toml을 읽습니다
 ```
 
 ## 환경 변수가 아닌 것

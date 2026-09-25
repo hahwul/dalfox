@@ -101,9 +101,9 @@ encoders = ["url", "html"]
 remote_payloads = []
 # custom_blind_xss_payload = "blind.txt"
 # blind_callback_url = "https://callback.example"
-# blind_oob = []                       # [] = enable with the public interactsh mesh; or name servers: ["oast.fun"]
-# blind_oob_secret = "token"           # auth token for a self-hosted interactsh server
-# blind_oob_wait = 30                  # seconds to keep polling after payloads are sent
+# blind_oob = []                       # [] = 공개 interactsh 메시로 활성화; 또는 서버 지정: ["oast.fun"]
+# blind_oob_secret = "token"           # 자체 호스팅 interactsh 서버용 인증 토큰
+# blind_oob_wait = 30                  # 페이로드 전송 후 계속 폴링할 시간(초)
 # custom_payload = "payloads.txt"
 only_custom_payload = false
 # inject_marker = "FUZZ"
@@ -258,7 +258,7 @@ debug = false
 | `skip_ast_analysis` | bool | `false` | AST DOM-XSS 건너뜀 |
 | `analyze_external_js` | bool | `false` | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석 수행 (프리플라이트, 대상당 1회; 최대 16개 파일, 각 512 KiB; `include_url`/`exclude_url` 준수) |
 | `detect_outdated_libs` | bool | `false` | 오래되었거나 알려진 취약점이 있는 JS 라이브러리도 보고 (정보성, CWE-1104; 추가 요청 0회) |
-| `hpp` | bool | `false` | HTTP Parameter Pollution |
+| `hpp` | bool | `false` | HTTP 파라미터 오염(HPP) |
 
 ### WAF
 
@@ -279,11 +279,11 @@ debug = false
 ## 우선순위
 
 ```
-CLI flag  >  Config file  >  Built-in default
+CLI 플래그  >  설정 파일  >  내장 기본값
 ```
 
 - 목록 키(`headers`, `encoders`, `param` 등)는 합쳐지지 않고 통째로 대체됩니다. 명령줄에 `-H`를 하나만 줘도 설정 파일의 `headers` 항목은 모두 빠집니다.
-- `deep_scan`이나 `silence` 같은 켜고 끄는 스위치는 명령줄에서 켜기만 할 수 있습니다. 설정 파일에서 `true`로 켜 두면 한 번의 실행만 끄는 플래그는 없습니다. 예외는 `insecure`로, `--insecure=false`가 설정 값을 덮어씁니다.
+- `deep_scan`이나 `silence` 같은 켜고 끄는 스위치는 명령줄 플래그로 켤 수만 있고 끌 수는 없습니다. 설정 파일에서 `true`로 켜 두면 한 번의 실행만 끄는 플래그는 없습니다. 예외는 `insecure`로, `--insecure=false`가 설정 값을 덮어씁니다.
 
 ## 검증
 

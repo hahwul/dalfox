@@ -287,7 +287,8 @@ Response (in progress):
 }
 ```
 
-Full status responses also carry `results` (`null` until the scan is terminal),
+Full status responses also carry `results` (`null` until the scan is terminal, and
+still `null` for a scan that never reached the target or was cancelled before it started),
 `pagination`, `queued_at_ms`, `started_at_ms`, `finished_at_ms`, `duration_ms`,
 and `error_message` when one is set. `requests_failed` counts requests that
 never reached the target; when it is a large share of `requests_sent`, zero

@@ -9,7 +9,7 @@ Dalfox reads a config file on startup so you don't have to pass the same flags e
 
 ## Where the file lives
 
-Dalfox reads `$XDG_CONFIG_HOME/dalfox/config.toml` when `XDG_CONFIG_HOME` is set, and `$HOME/.config/dalfox/config.toml` otherwise. A `config.json` in the same directory is read when there is no `config.toml`.
+Dalfox reads `$XDG_CONFIG_HOME/dalfox/config.toml` when `XDG_CONFIG_HOME` is set and non-empty, and `$HOME/.config/dalfox/config.toml` otherwise. A `config.json` in the same directory is read when there is no `config.toml`.
 
 You can point anywhere else with `--config`:
 

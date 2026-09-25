@@ -36,7 +36,7 @@ dalfox scan https://target.app -f jsonl -o findings.jsonl
 
 | 필드 | 예시 | 의미 |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R`, `I` | 탐지 등급: Vulnerable / AST 탐지 / Reflected / Informational |
+| `type` | `V`, `A`, `R`, `I` | 탐지 티어: Vulnerable / AST 탐지 / Reflected / Informational |
 | `type_description` | `"Vulnerable - dalfox asserts this input is exploitable; act on it"` | 사람이 읽는 라벨(한 단어가 아니라 문장 전체) |
 | `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | 취약점이라고 주장할 수 있는지 (`high` / `low`). `I`에는 없음 |
@@ -55,7 +55,7 @@ dalfox scan https://target.app -f jsonl -o findings.jsonl
 
 다음 세 필드는 요청했을 때만 나타납니다: `new`(`--baseline-mode annotate`), `request`(`--include-request`), `response`(`--include-response`).
 
-각 등급이 실제로 어떤 증거인지, 그리고 순수 클라이언트 사이드 DOM-XSS가 왜 `V`에
+각 티어가 실제로 어떤 증거인지, 그리고 순수 클라이언트 사이드 DOM-XSS가 왜 `V`에
 도달하지 못하는지는 [탐지 모델](../detection-model/) 문서에서 다룹니다.
 
 `V` / `A` / `R`은 XSS 탐지 결과입니다. `I`(**Informational**)는 공격에 사용할 수 없는
@@ -136,8 +136,8 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 - `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃). 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다
 - `findings_count`
 - `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 도중에 끊긴 경우 `error_code`(세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`도), 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
-- `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 타깃 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
-- `targets_unparsable` — 타깃 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/) 참고
+- `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 대상 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
+- `targets_unparsable` — 대상 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/) 참고
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
 - `resumed` — `--state-file`을 쓴 경우에만 포함됩니다. `state_file`(경로)과 `targets_skipped_completed`(이전 실행에서 끝나 건너뛴 대상 수)
 - `incomplete` — 실행이 **완전히 테스트되지 않았을 때** `true`입니다. 스캔 도중 대상의 인증 세션이 끊어졌거나([세션 모니터링](../scanning-modes/) 참고), 전체 요청의 10% 이상(최소 3건)이 응답을 받지 못한 경우입니다. `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
@@ -211,7 +211,7 @@ dalfox scan https://target.app --limit 10 --limit-result-type v
 
 ## 베이스라인: 새로 생긴 것만 보고하기
 
-`--only-poc`와 `--limit`은 **형태**로 거릅니다. 이미 트리아지를 끝낸 건과 오늘 아침에 새로 나타난 건을 구분하지 못하므로, 기존 이슈가 100건인 저장소는 PR마다 똑같은 100건을 다시 보게 되고 결국 게이트는 항상 빨간불이거나 꺼두게 됩니다.
+`--only-poc`와 `--limit`은 *형태*로 거릅니다. 이미 트리아지를 끝낸 건과 오늘 아침에 새로 나타난 건을 구분하지 못하므로, 기존 이슈가 100건인 저장소는 PR마다 똑같은 100건을 다시 보게 되고 결국 게이트는 항상 빨간불이거나 꺼두게 됩니다.
 
 `--baseline`이 이 문제를 해결합니다. 이전 리포트를 지정하면 거기에 이미 있는 건은 억제됩니다.
 
@@ -390,7 +390,7 @@ Dalfox는 다음을 반환합니다.
 
 `--baseline`은 같은 종료 코드를 **신규 여부**로 좁힙니다. 기본 `filter` 모드에서는 억제된 건이 종료 코드 판정에 도달하지 않으므로, 백로그가 전부 베이스라인에 들어 있는 실행은 `0`으로 끝납니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고.
 
-## 다음
+## 다음 단계
 
 - [REST API 서버](../../integrations/server/)로 스캔을 자동화하세요.
 - [MCP 서버](../../integrations/mcp/)로 AI 에이전트에 맡기세요.

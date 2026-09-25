@@ -40,7 +40,7 @@ URL 목록을 한 줄에 하나씩 스캔합니다:
 # https://target.app/search?q=1
 # https://target.app/profile?id=2
 dalfox scan urls.txt
-# or, explicit:
+# 또는 명시적으로:
 dalfox scan --input-type file urls.txt
 ```
 
@@ -124,7 +124,7 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 | `cancelled` | Ctrl-C, `--scan-timeout` 만료, `--limit` 도달로 인한 중단, 스캔 도중 세션 끊김, 심각한 전송 손실(`meta.incomplete`) | 재시도 |
 | `error` | 프리플라이트에서 제외됨(도달 불가, content-type 불일치, `--max-targets-per-host` 상한), 또는 스캔 워커 크래시 | 재시도 |
 
-대상의 식별자는 URL, 메서드, 그리고 요청에 실리는 데이터(본문, 헤더, 쿠키, user-agent)의 해시입니다. raw HTTP·HAR 입력에 캡처된 값뿐 아니라 `-H`, `--cookies`, `--user-agent`로 준 값도 포함되므로, 캡처가 바뀌면 다시 스캔합니다. **실행 전체에 적용되는 자격 증명 값은 제외됩니다**: `--cookies`와 `--cookie-from-raw`의 모든 쿠키 값, 그리고 `-H`로 준 `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key` / `*-Api-Key`, `X-Auth-Token` / `*-Token`, `X-CSRF-Token` / `X-XSRF-Token`, `*-Session-Id` / `X-Session-Token`, `X-Access-Key`, `X-JWT-Assertion`의 값입니다. 이 플래그들은 모든 대상에 적용되고 다시 로그인할 때 갱신하는 값이므로, 세션을 교체해도 다시 스캔하지 않고 이어서 진행합니다. 헤더나 쿠키를 추가·삭제하면 여전히 다시 스캔합니다. 반면 raw HTTP·HAR 캡처 **안에** 들어 있는 자격 증명은 식별자에 포함됩니다. `Authorization`만 다른 두 캡처(테넌트 A와 B)는 서로 다른 요청이므로 따로 기록됩니다. 같은 플래그로 다른 *계정*을 넘겨도 이어서 진행되므로, 계정마다 별도의 `--state-file`을 쓰세요. 파일에는 해시만 저장되고 값 자체는 기록되지 않습니다. 같은 플래그로 실행하면 식별자도 같으므로, 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라 URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
+대상의 이어하기 식별자는 URL, 메서드, 그리고 요청에 실리는 데이터(본문, 헤더, 쿠키, user-agent)의 해시입니다. raw HTTP·HAR 입력에 캡처된 값뿐 아니라 `-H`, `--cookies`, `--user-agent`로 준 값도 포함되므로, 캡처가 바뀌면 다시 스캔합니다. **실행 전체에 적용되는 자격증명 값은 제외됩니다**: `--cookies`와 `--cookie-from-raw`의 모든 쿠키 값, 그리고 `-H`로 준 `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key` / `*-Api-Key`, `X-Auth-Token` / `*-Token`, `X-CSRF-Token` / `X-XSRF-Token`, `*-Session-Id` / `X-Session-Token`, `X-Access-Key`, `X-JWT-Assertion`의 값입니다. 이 플래그들은 모든 대상에 적용되고 다시 로그인할 때 갱신하는 값이므로, 세션을 교체해도 다시 스캔하지 않고 이어서 진행합니다. 헤더나 쿠키를 추가·삭제하면 여전히 다시 스캔합니다. 반면 raw HTTP·HAR 캡처 **안에** 들어 있는 자격증명은 식별자에 포함됩니다. `Authorization`만 다른 두 캡처(테넌트 A와 B)는 서로 다른 요청이므로 따로 기록됩니다. 같은 플래그로 다른 *계정*을 넘겨도 이어서 진행되므로, 계정마다 별도의 `--state-file`을 쓰세요. 파일에는 해시만 저장되고 값 자체는 기록되지 않습니다. 같은 플래그로 실행하면 식별자도 같으므로, 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라 URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
 
 **설정이 바뀌면 처음부터 다시 시작합니다.** 파일 헤더에는 스캔에 영향을 주는 설정의 해시가 들어 있습니다. 해시가 맞지 않으면 기록된 대상들은 이번 실행과 다른 설정에서 검사된 것이므로, Dalfox는 기존 파일을 `scan.state.bak`으로 옮기고 새 파일로 시작한 뒤 전부 다시 스캔합니다:
 
@@ -134,7 +134,7 @@ Warning: scan configuration changed since 'scan.state' was written (recorded a5f
 
 덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 초기화 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 기존 파일을 그 자리에서 덮어쓰거나 지우지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
 
-출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response`, `--silence`, `--stream-findings`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록과 `--input-type` 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--headers` / `--cookies`의 헤더·쿠키 *이름*(과 자격 증명이 아닌 헤더 값) 등이 여기에 해당합니다. 실행 전체에 적용되는 자격 증명 값과 `--cookie-from-raw` 경로는 위에서 설명한 대로 해시에 들어가지 않습니다.
+출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response`, `--silence`, `--stream-findings`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록과 `--input-type` 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--headers` / `--cookies`의 헤더·쿠키 *이름*(과 자격증명이 아닌 헤더 값) 등이 여기에 해당합니다. 실행 전체에 적용되는 자격증명 값과 `--cookie-from-raw` 경로는 위에서 설명한 대로 해시에 들어가지 않습니다.
 
 해시에는 Dalfox의 메이저 버전과 스캔 옵션 전체도 들어갑니다. 따라서 스캔 플래그가 추가된 버전으로 업그레이드하면 모든 state 파일이 한 번 처음부터 시작합니다. 조용히 건너뛰는 쪽이 아니라 중복 스캔 쪽으로 기우는 설계입니다.
 
@@ -163,11 +163,11 @@ dalfox scan --input-type raw-http request.txt
 [HAR](http://www.softwareishard.com/blog/har-12-spec/)(HTTP Archive) 익스포트는 브라우저 DevTools와 가로채기 프록시(Burp, Caido, ZAP, Charles, mitmproxy)가 만들어 내는 JSON 캡처입니다. 파일을 통째로 넘겨주면 그 안의 모든 요청을 각각의 URL, 메서드, 헤더, 쿠키, 본문을 보존한 채로 스캔합니다:
 
 ```bash
-# Auto-detected from the file content:
+# 파일 내용으로 자동 판별:
 dalfox scan capture.har
-# or explicit:
+# 또는 명시적으로:
 dalfox scan --input-type har capture.har
-# or piped from another tool:
+# 또는 다른 도구에서 파이프로:
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
@@ -195,17 +195,17 @@ Dalfox는 첫 번째 URL에 주입한 다음, 두 번째 URL을 가져와 페이
 # 직접 운영하는 리스너: 호출은 그쪽으로 가고, Dalfox는 아무것도 기록하지 않습니다
 dalfox scan https://target.app/?q=1 -b https://your-callback.example
 
-# Dalfox가 관리하는 interactsh 세션: 콜백이 결과로 돌아옵니다
+# Dalfox가 관리하는 interactsh 세션: 콜백이 탐지 결과로 돌아옵니다
 dalfox scan https://target.app/?q=1 --blind-oob
 ```
 
-`--blind-oob`는 interactsh 서버(공개 메시, 또는 `--blind-oob=oast.fun`처럼 지정한 서버)에 등록하고, 페이로드마다 콜백 호스트를 새로 발급하며, 스캔이 끝난 뒤에도 `--blind-oob-wait`초(기본값 `30`) 동안 폴링을 계속합니다. 도착한 콜백은 `detection_method: oob`인 `V` 결과가 됩니다. Blind 페이로드는 저장되는 공격 트래픽이므로 `--dry-run`, `--only-discovery`, `--skip-xss-scanning`에서는 보내지 않습니다. 템플릿과 커스텀 페이로드는 [페이로드와 인코딩](../payloads/#blind-xss)에서 다룹니다.
+`--blind-oob`는 interactsh 서버(공개 메시, 또는 `--blind-oob=oast.fun`처럼 지정한 서버)에 등록하고, 페이로드마다 콜백 호스트를 새로 발급하며, 스캔이 끝난 뒤에도 `--blind-oob-wait`초(기본값 `30`) 동안 폴링을 계속합니다. 도착한 콜백은 `detection_method: oob`인 `V` 탐지 결과가 됩니다. Blind 페이로드는 저장되는 공격 트래픽이므로 `--dry-run`, `--only-discovery`, `--skip-xss-scanning`에서는 보내지 않습니다. 템플릿과 커스텀 페이로드는 [페이로드와 인코딩](../payloads/#blind-xss)에서 다룹니다.
 
 ## 세션 모니터링
 
 정적 자격증명(`--cookies`, `-H 'Cookie: …'`, `-H 'Authorization: …'`, `--cookie-from-raw`, 또는 캡처된 raw HTTP / HAR 요청 안의 값)은 모든 요청에 그대로 붙을 뿐 유효성을 다시 확인하지 않습니다. 긴 스캔 도중 한 시간쯤 지나 세션이 만료되면 이후 모든 요청은 로그인 페이지를 받고, 아무것도 반사되지 않으며, Dalfox는 빈 리포트와 함께 `0`으로 종료합니다 — 진짜로 안전한 대상과 구분할 수 없습니다.
 
-세션 모니터링이 이 간극을 메웁니다. 프리플라이트 단계에서 인증된 랜딩 응답의 지문(상태 코드, 리다이렉트 후 최종 도착지, 로그인 폼이 이미 있었는지)을 **추가 요청 없이** 확보합니다 — 프리플라이트가 이미 가져온 본문을 재사용합니다. 이후 각 대상의 주입 단계가 끝난 직후에 다시 조회하고, 기준 지문이 30초 이상 지났다면 디스패치 경계에서도 한 번 더 조회해 비교합니다. (짧거나 단일 대상 실행에서는 사후 조회만 발생합니다. 방금 잡은 기준을 다시 확인해 봐야 알 수 있는 것이 없기 때문입니다.)
+세션 모니터링이 이 간극을 메웁니다. 프리플라이트 단계에서 인증된 랜딩 응답의 지문(상태 코드, 리다이렉트 후 최종 도착지, 로그인 폼이 이미 있었는지)을 **추가 요청 없이** 확보합니다 — 프리플라이트가 이미 가져온 본문을 재사용합니다. 이후 각 대상의 주입 단계가 끝난 직후에 다시 프로브하고, 기준 지문이 30초 이상 지났다면 디스패치 경계에서도 한 번 더 프로브해 비교합니다. (짧거나 단일 대상 실행에서는 사후 프로브만 발생합니다. 방금 잡은 기준을 다시 확인해 봐야 알 수 있는 것이 없기 때문입니다.)
 
 ```bash
 # 별도 설정이 필요 없습니다. 자격증명이 있으면 자동으로 켜집니다.
@@ -233,7 +233,7 @@ dalfox scan https://app.example.com/dashboard?q=1 \
   --session-check-url https://app.example.com/api/me
 ```
 
-예외는 하나입니다. 조회한 응답 본문이 기준 응답에서 마커가 있던 위치보다 앞에서 잘린 경우에는 마커가 없다는 사실만으로 아무것도 증명할 수 없으므로, 휴리스틱을 대체 수단으로 참고합니다.
+예외는 하나입니다. 프로브 응답 본문이 기준 응답에서 마커가 있던 위치보다 앞에서 잘린 경우에는 마커가 없다는 사실만으로 아무것도 증명할 수 없으므로, 휴리스틱을 대체 수단으로 참고합니다.
 
 스캔 대상이 무겁거나, 페이지네이션이 있거나, 그 자체로 공개 페이지라면 `--session-check-url`로 가벼운 인증 엔드포인트를 따로 지정하세요. 이 경우 기준 지문도 해당 엔드포인트에서 잡습니다(플래그를 지정했을 때만, 대상당 프리플라이트 요청 1건 추가). 덕분에 `/auth/session`처럼 로그인 형태의 프로브 경로도 스캔 대상이 아니라 자기 자신의 인증된 응답과 비교됩니다.
 
@@ -248,7 +248,7 @@ dalfox scan https://app.example.com/dashboard?q=1 \
 - [스캔 메타데이터 엔벨로프](../output/#스캔-메타데이터-엔벨로프)의 `meta.incomplete: true`
 - 탐지 결과가 없는 실행에 한해 `abort`에서 종료 코드 `2` — 따라서 로그아웃된 상태에서 `dalfox scan … && echo "no XSS found"`가 그 줄을 출력할 수 없습니다. 탐지 결과가 *있었다면* 여전히 `1`로 종료합니다. 발견된 취약점은 어쨌든 실재하고, 불완전하다는 사실은 `meta.incomplete`가 전달하기 때문입니다. `continue`는 종료 코드를 전혀 바꾸지 않습니다
 
-**프리플라이트** 응답부터 이미 미인증으로 보이거나, `--session-check` 마커가 기준 응답에 애초에 없었던 경우(오타이거나 다른 페이지에 있는 마커)도 표시합니다. 두 경우 모두 단순 로그가 아니라 `SESSION_LOST`로 보고합니다: 그런 기준에서는 이후 어떤 조회도 *변화*를 감지할 수 없으므로, 만료된 자격증명이 조용하고 완벽하게 "깨끗한" 실행을 만들어 내기 때문입니다. 대상 스캔 자체는 그대로 진행되며, 결과를 정직하게 만드는 것은 이 표시와 종료 코드입니다.
+**프리플라이트** 응답부터 이미 미인증으로 보이거나, `--session-check` 마커가 기준 응답에 애초에 없었던 경우(오타이거나 다른 페이지에 있는 마커)도 표시합니다. 두 경우 모두 단순 로그가 아니라 `SESSION_LOST`로 보고합니다: 그런 기준에서는 이후 어떤 프로브도 *변화*를 감지할 수 없으므로, 만료된 자격증명이 조용하고 완벽하게 "깨끗한" 실행을 만들어 내기 때문입니다. 대상 스캔 자체는 그대로 진행되며, 결과를 정직하게 만드는 것은 이 표시와 종료 코드입니다.
 
 "이미 미인증으로 보인다"는 것은 로그인 페이지 그 자체, 즉 `401`이나 페이지에 직접 렌더링된 비밀번호 입력란, `/login`, `/signin`, `/users/sign_in`으로의 리다이렉트를 뜻합니다. 단지 인증*처럼 생긴* 경로로 리다이렉트되는 것만으로는 부족합니다. 인증된 홈을 `/auth/home`이나 `/sso/dashboard`에서 서빙하는 앱이 많고, 그걸 끊어진 세션으로 판정하면 멀쩡한 세션의 스캔을 실패시키게 됩니다. 이 경우 Dalfox는 대신 `SESSION?` 참고 메시지를 출력합니다 — 눈에는 보이지만 `SESSION_LOST` 항목도, `meta.incomplete`도, 종료 코드 변화도 없습니다. 앱이 여기 해당하는데도 검사를 정확히 하고 싶다면 `--session-check`로 확정하세요.
 
@@ -281,11 +281,11 @@ dalfox mcp
 스캔 모드는 아니지만 곁에 두면 유용합니다. 스캔을 실행하지 않고 페이로드를 출력하거나 가져옵니다.
 
 ```bash
-dalfox payload event-handlers    # list DOM event handlers
-dalfox payload useful-tags       # list useful HTML tags
-dalfox payload portswigger       # fetch PortSwigger XSS cheatsheet
-dalfox payload payloadbox        # fetch PayloadBox XSS list
-dalfox payload uri-scheme        # print javascript:/data: payloads
+dalfox payload event-handlers    # DOM 이벤트 핸들러 목록
+dalfox payload useful-tags       # 유용한 HTML 태그 목록
+dalfox payload portswigger       # PortSwigger XSS 치트시트 가져오기
+dalfox payload payloadbox        # PayloadBox XSS 목록 가져오기
+dalfox payload uri-scheme        # javascript:/data: 페이로드 출력
 ```
 
 ## 모드 선택하기

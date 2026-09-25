@@ -25,7 +25,7 @@ v3 unifies the scan subcommands behind a single entrypoint.
 
 {{ alert(type="info", body="The legacy url, file and pipe subcommands survive as hidden aliases. file and pipe keep their v2 shape. url does not: it takes the target through -u/--url (dalfox url -u URL), so a v2 line like dalfox url URL fails — switch it to dalfox scan URL. sxss did not survive: stored-XSS scanning moved onto the scan subcommand as the --sxss flag.") }}
 
-v2's `--rawdata`, `--har` and `--http` input switches are gone too. A captured raw HTTP request and a HAR export are auto-detected (`dalfox scan request.txt`, `dalfox scan capture.har`), or can be forced with `--input-type raw-http` / `--input-type har`. A raw request whose request line holds only a path goes out over `https` when it carries an HTTP/2 signal or a `:443` Host, and over `http` otherwise; put a full URL in the request line to pin the scheme. See [Quick Start](../quick-start/).
+v2's `--rawdata`, `--har` and `--http` input switches are gone too. A captured raw HTTP request and a HAR export are auto-detected (`dalfox scan request.txt`, `dalfox scan capture.har`), or can be forced with `--input-type raw-http` / `--input-type har`. A raw request whose request line holds only a path follows its `:scheme` pseudo-header when it has one; failing that, it goes out over `https` when it carries an HTTP/2 signal or a `:443` Host, and over `http` otherwise; put a full URL in the request line to pin the scheme. See [Quick Start](../quick-start/).
 
 ## 2. Renamed flags
 

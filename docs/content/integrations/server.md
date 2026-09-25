@@ -137,10 +137,10 @@ name must be 1–64 characters from `[A-Za-z0-9_$.]`, starting with a letter,
 |--------|------|--------------|
 | `POST` | `/scan` | Submit a new scan (JSON body) |
 | `GET` | `/scan?target=...` | Submit a new scan (query string) |
-| `GET` | `/scan/:id` | Get scan status and results |
-| `DELETE` | `/scan/:id` | Cancel a queued or running scan |
+| `GET` | `/scan/{id}` | Get scan status and results |
+| `DELETE` | `/scan/{id}` | Cancel a queued or running scan |
 | `GET` | `/scans` | List all scans (optional `?status=`) |
-| `GET` | `/result/:id` | Alias for `/scan/:id` |
+| `GET` | `/result/{id}` | Alias for `/scan/{id}` |
 | `POST` | `/preflight` | Discover parameters without sending payloads |
 | `GET` | `/health` | Server info + capability list |
 
@@ -225,8 +225,9 @@ Response (while running):
 ```
 
 `results` appears once the scan's worker has finished: the findings of a `done`
-scan, or the partial findings of an `error` / `cancelled` one. A scan cancelled
-while running reports `cancelled` at once but only gains `results` when the
+scan, or the partial findings of an `error` / `cancelled` one. A scan that never
+reached the target, or was cancelled before it started, has no `results` at all,
+because nothing was tested. A scan cancelled while running reports `cancelled` at once but only gains `results` when the
 worker drains, which can take a few seconds. `error_message` is added when
 a scan failed or ran out of its `scan_timeout`. `progress` is absent while the scan is still
 `queued`. `requests_failed` counts requests that never reached the target

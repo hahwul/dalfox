@@ -283,7 +283,7 @@ CLI flag  >  Config file  >  Built-in default
 ```
 
 - A list key (`headers`, `encoders`, `param`, …) is replaced, not merged: one `-H` on the command line drops every `headers` entry from the config.
-- On/off switches such as `deep_scan` or `silence` can only be turned on from the command line. When the config sets one to `true`, no flag turns it back off for a single run. `insecure` is the exception: `--insecure=false` overrides the config.
+- A command-line flag can turn an on/off switch such as `deep_scan` or `silence` on, but never off. When the config sets one to `true`, no flag turns it back off for a single run. `insecure` is the exception: `--insecure=false` overrides the config.
 
 ## Validation
 

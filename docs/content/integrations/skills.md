@@ -1,6 +1,6 @@
 +++
 title = "Agent Skill"
-description = "Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents."
+description = "Drop-in SKILL.md for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents."
 weight = 3
 toc = true
 +++

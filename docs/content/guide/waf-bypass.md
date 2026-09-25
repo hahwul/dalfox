@@ -128,7 +128,7 @@ Different WAFs fall to different tricks. A small sample:
 | **Scheme break** | `href=java&#9;script:alert(1)` | Literal `javascript:` scheme regex (URL-parser strips the TAB) |
 | **Entity scheme** | `href=&#106;avascript:alert(1)` | Literal `javascript:` scheme regex (attribute-decoded) |
 
-Slash separators are emitted only where the HTML tokenizer will still begin a new attribute; a slash after an unquoted value is part of that value, so Dalfox preserves the whitespace there. Keyword entity encoding, scheme break, and entity scheme rely on the HTML tokenizer decoding character references **inside attribute values** before the URL parser or event-handler JS compiler sees them. Those entity mutations are skipped for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
+Slash separators are emitted only where the HTML tokenizer will still begin a new attribute; a slash after an unquoted value is part of that value, so Dalfox preserves the whitespace there. Keyword entity encoding, scheme break, and entity scheme rely on the HTML tokenizer decoding character references **inside attribute values** before the URL parser or event-handler JS compiler sees them. Dalfox applies those entity mutations only in attribute, event-handler, and `javascript:`-URL positions, and skips them for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
 
 Dalfox does not split JavaScript identifiers with comments (`al/**/ert`). JavaScript treats the comment as a token boundary, so that form cannot call `alert`; the scanner skips the wasted variant.
 
@@ -142,15 +142,15 @@ During active probing, when a parameter's special-character probe comes back ful
 
 ## Combining with encoders
 
-Your `--encoders` list and the WAF's extra encoders are merged. So this:
+The WAF's extra encoders are added on top of your `--encoders` list:
 
 ```bash
 dalfox scan https://target.app -e url,base64
 # Cloudflare detected → extra encoders: unicode, 4url, zwsp
-# Effective: url, base64, unicode, 4url, zwsp
+# Effective: url, base64, then unicode, 4url, zwsp on top
 ```
 
-Duplicates are dropped. Structural mutations are sent as-is: Dalfox does not run a mutated payload through the encoders as well, so the two kinds of variant add up rather than multiply.
+The extra encoders run over the list your own encoders already produced, so the url-encoded and base64 variants get `unicode` / `4url` / `zwsp` forms too. Duplicates are dropped. Structural mutations are sent as-is: Dalfox does not run a mutated payload through the WAF's encoders, so those two kinds of variant add up rather than multiply.
 
 ## Rate limiting & backoff
 

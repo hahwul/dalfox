@@ -112,7 +112,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--session-check-url` | — | 세션 재검증 시 스캔 대상 대신 이 URL(절대 `http(s)://`)을 조회합니다 (예: 가벼운 `/api/me` 엔드포인트) |
 | `--on-session-loss` | `abort` | `abort`는 해당 대상을 중단하고 같은 호스트의 나머지 대상도 건너뛰며, 탐지 결과가 없으면 `2`로 종료합니다. `continue`는 스캔을 계속하고 종료 코드를 바꾸지 않습니다. 어느 쪽이든 대상은 `clean`이 아니라 `incomplete` / `SESSION_LOST`로 보고됩니다 |
 
-### 범위
+### 스코프
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
@@ -120,7 +120,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--exclude-url` | — | 이 정규식에 매칭되는 URL을 건너뜁니다(부분 매칭). 패턴을 더 주려면 플래그를 반복합니다 |
 | `--ignore-param` | — | 건너뛸 파라미터 이름(정확히 일치). 이름을 더 주려면 플래그를 반복합니다 |
 | `--out-of-scope` | — | 호스트가 이 패턴에 맞는 대상을 건너뜁니다. `*.example.com`은 `example.com`과 모든 하위 도메인에 맞고, 그 밖의 값은 호스트와 정확히 같아야 합니다(대소문자 무관). 패턴을 더 주려면 플래그를 반복합니다: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. 쉼표는 구분자가 아닙니다 |
-| `--out-of-scope-file` | — | 범위 외 패턴을 한 줄에 하나씩 적은 파일(빈 줄과 `#` 줄은 무시). 매칭 방식은 `--out-of-scope`와 같습니다. 읽을 수 없는 경로는 치명적 오류(`FILE_READ_ERROR`)입니다 — 제외 목록 없이 계속 진행하면 그 목록에 적힌 호스트를 전부 공격하게 됩니다 |
+| `--out-of-scope-file` | — | 스코프 외 패턴을 한 줄에 하나씩 적은 파일(빈 줄과 `#` 줄은 무시). 매칭 방식은 `--out-of-scope`와 같습니다. 읽을 수 없는 경로는 치명적 오류(`FILE_READ_ERROR`)입니다 — 제외 목록 없이 계속 진행하면 그 목록에 적힌 호스트를 전부 공격하게 됩니다 |
 
 ### 탐색
 
@@ -190,7 +190,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--max-payloads-per-param` | — | `0` | 파라미터별로 테스트하는 페이로드 수 제한 (`0`은 `--deep-scan`이 없으면 세트당 3000개의 내장 안전 상한을 적용) |
 | `--skip-ast-analysis` | — | false | AST DOM-XSS(`[A]` 결과를 만드는 source→sink 패스)를 건너뜁니다. `--skip-mining-dom`이 아니라 이 플래그입니다 |
 | `--analyze-external-js` | — | false | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석을 수행합니다 (프리플라이트, 대상별 1회; 최대 16개 파일, 각 512 KiB; `--include-url`/`--exclude-url`을 준수) |
-| `--hpp` | — | false | HTTP 파라미터 오염 |
+| `--hpp` | — | false | HTTP 파라미터 오염(HPP) |
 | `--detect-outdated-libs` | — | false | 오래되었거나 알려진 취약점이 있는 JS 라이브러리도 보고합니다 (정보성, CWE-1104; 추가 요청 0회) |
 
 ### WAF

@@ -99,18 +99,18 @@ dalfox scan https://target.app -e url,html,base64
 
 Available encoders:
 
-| Encoder | Transforms `<` to |
-|---------|-------------------|
-| `none` | `<` (raw) |
-| `url` | `%3C` |
-| `2url` | `%253C` (double) |
-| `3url` | `%25253C` (triple) |
-| `4url` | quadruple URL |
-| `html` | `&#x003c;` |
-| `htmlpad` | zero-padded HTML entity |
-| `base64` | base64 of payload |
-| `unicode` | fullwidth mapping |
-| `zwsp` | zero-width space insertion |
+| Encoder | Transforms `<` to | Notes |
+|---------|-------------------|-------|
+| `none` | `<` (raw) | Turns encoding off (see below) |
+| `url` | `%3C` | Single URL encoding |
+| `2url` | `%253C` | Double URL encoding |
+| `3url` | `%25253C` | Triple |
+| `4url` | `%2525253C` | Quadruple |
+| `html` | `&#x003c;` | Every character becomes a hex entity |
+| `htmlpad` | `&#x000003c;` | 7-digit zero-padded hex entity; letters, digits, and spaces stay raw |
+| `base64` | `PA==` | Base64 of the whole payload |
+| `unicode` | `＜` | Printable ASCII mapped to its fullwidth form (U+FF01–U+FF5E) |
+| `zwsp` | `<` + U+200B | Zero-width space inserted after `<` `>` `"` `'` `(` `)` `/` `;` |
 
 Defaults: `url,html`. The raw payload is always sent too, so each active encoder adds one variant per base payload (the default sends each payload three ways). If you add `none` to the list, Dalfox sends only the raw payloads.
 
@@ -194,9 +194,11 @@ render the host/origin), so a single screenshot proves impact.
 The classic `alert(1)` can be loud. Swap it out so you can prove impact without popping dialogs everywhere:
 
 ```bash
-dalfox scan https://target.app \
-  --custom-alert-value "document.domain" \
-  --custom-alert-type str
+# alert(document.domain): the value stays a JavaScript expression
+dalfox scan https://target.app --custom-alert-value document.domain
+
+# alert('dalfox'): the value becomes a string literal
+dalfox scan https://target.app --custom-alert-value dalfox --custom-alert-type str
 ```
 
 - `--custom-alert-value`: replaces the `1` in the built-in `alert(1)` / `prompt(1)` / `confirm(1)` calls (and their backtick forms). Default `1`.

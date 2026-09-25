@@ -45,7 +45,7 @@ Wallarm, NAXSI, SafeLine은 핑거프린트는 되지만 전용 전략이 없으
 
 ```bash
 dalfox scan https://target.app
-# equivalent to:
+# 다음과 같음:
 dalfox scan https://target.app --waf-bypass auto
 ```
 
@@ -90,7 +90,7 @@ dalfox scan https://target.app --waf-evasion
 WAF 탐지와 무관하게 **모든** 워커와 대상에 걸쳐 공유되는 절대적인 요청 속도 상한을 원한다면 `--rate-limit`(초당 요청 수)과 결합하세요. `--delay`는 단일 워커의 간격만 벌리므로, 공유 IP 뒤에서 스캔하거나 전역 임계값을 가진 엣지 WAF를 상대할 때 바로 이 옵션이 적합합니다:
 
 ```bash
-# At most 15 requests/second across the whole scan, with adaptive evasion
+# 스캔 전체에서 초당 최대 15건, 적응형 회피 사용
 dalfox scan https://target.app --rate-limit 15 --waf-evasion
 ```
 
@@ -101,7 +101,7 @@ dalfox scan https://target.app --rate-limit 15 --waf-evasion
 각 핑거프린트는 신뢰도 점수(0.0–1.0)를 가집니다. `Request blocked`(0.3)나 `Server: Google Frontend`(0.15) 같은 일반적인 마커는 때때로 무해한 오리진에서 오탐을 냅니다. `--waf-min-confidence`를 사용해 임계값 미만의 항목을 모두 버리세요:
 
 ```bash
-# Keep only confident matches (drops 0.3/0.15 noise)
+# 신뢰도 높은 매치만 유지(0.3/0.15 잡음 제거)
 dalfox scan https://target.app --waf-min-confidence 0.7
 ```
 
@@ -128,7 +128,7 @@ WAF마다 통하는 수법이 다릅니다. 몇 가지 예를 들면:
 | **스킴 분리** | `href=java&#9;script:alert(1)` | 리터럴 `javascript:` 스킴 정규식(URL 파서가 TAB을 제거) |
 | **엔티티 스킴** | `href=&#106;avascript:alert(1)` | 리터럴 `javascript:` 스킴 정규식(속성 디코딩됨) |
 
-슬래시 구분자는 HTML 토크나이저가 새 속성을 시작하는 위치에서만 생성됩니다. 따옴표 없는 값 뒤의 슬래시는 그 값의 일부가 되므로 해당 구분자의 공백을 유지합니다. 키워드 엔티티 인코딩, 스킴 분리, 엔티티 스킴은 URL 파서나 이벤트 핸들러 JS 컴파일러가 보기 전에 HTML 토크나이저가 **속성 값 안의** 문자 참조를 디코딩한다는 점을 악용합니다. 이 엔티티 변형은 속성 / 이벤트 핸들러 / `javascript:`-URL 컨텍스트에서만 사용하며, 엔티티 디코딩이 일어나지 않는 순수 본문 텍스트와 `<script>`/`<style>` 페이로드에서는 건너뜁니다.
+슬래시 구분자는 HTML 토크나이저가 새 속성을 시작하는 위치에서만 생성됩니다. 따옴표 없는 값 뒤의 슬래시는 그 값의 일부가 되므로 해당 구분자의 공백을 유지합니다. 키워드 엔티티 인코딩, 스킴 분리, 엔티티 스킴은 URL 파서나 이벤트 핸들러 JS 컴파일러가 보기 전에 HTML 토크나이저가 **속성 값 안의** 문자 참조를 디코딩한다는 점을 악용합니다. Dalfox는 이 엔티티 변형을 속성, 이벤트 핸들러, `javascript:`-URL 위치에서만 사용하며, 엔티티 디코딩이 일어나지 않는 순수 본문 텍스트와 `<script>`/`<style>` 페이로드에서는 건너뜁니다.
 
 JavaScript 주석은 식별자를 이어 붙이지 않고 토큰 경계로 처리되므로, Dalfox는 `al/**/ert`처럼 식별자 안에 주석을 넣지 않습니다. 해당 형태로는 `alert`를 호출할 수 없어 낭비되는 변형을 건너뜁니다.
 
@@ -142,15 +142,15 @@ JavaScript 주석은 식별자를 이어 붙이지 않고 토큰 경계로 처�
 
 ## 인코더와 결합하기
 
-`--encoders` 목록과 WAF의 추가 인코더가 병합됩니다. 예를 들면:
+WAF의 추가 인코더는 `--encoders` 목록 위에 더해집니다.
 
 ```bash
 dalfox scan https://target.app -e url,base64
-# Cloudflare detected → extra encoders: unicode, 4url, zwsp
-# Effective: url, base64, unicode, 4url, zwsp
+# Cloudflare 탐지 → 추가 인코더: unicode, 4url, zwsp
+# 실제 적용: url, base64, 그 위에 unicode, 4url, zwsp
 ```
 
-중복은 제거됩니다. 구조 변형은 그대로 보냅니다. 변형한 페이로드를 다시 인코더에 통과시키지 않으므로, 두 종류의 변형은 곱해지지 않고 더해집니다.
+추가 인코더는 사용자 인코더가 이미 만든 목록 전체에 적용되므로, url 인코딩 변형과 base64 변형에도 `unicode` / `4url` / `zwsp` 형태가 생깁니다. 중복은 제거됩니다. 구조 변형은 그대로 보냅니다. 변형한 페이로드를 WAF 인코더에 다시 통과시키지 않으므로, 이 두 종류의 변형은 곱해지지 않고 더해집니다.
 
 ## 요청 속도 제한과 백오프
 
@@ -168,7 +168,7 @@ dalfox scan https://target.app --delay 500 --workers 10
 dalfox scan --debug https://target.app 2>&1 | grep -i waf
 ```
 
-## 다음
+## 다음 단계
 
 - [저장형 XSS](../stored-xss/)는 한 곳에 주입하고 다른 곳에서 검증하는 패턴을 다루며, WAF와 얽히는 경우가 많습니다.
 - [출력과 리포트](../output/)는 탐지 결과를 파이프라인에 통합하는 방법을 다룹니다.

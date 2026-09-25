@@ -12,10 +12,10 @@ toc = true
 ## 1. 단일 URL 스캔
 
 ```bash
-dalfox https://xss-game.appspot.com/level1/frame?query=test
+dalfox 'https://xss-game.appspot.com/level1/frame?query=test'
 ```
 
-첫 번째 인자가 대상입니다. Dalfox는 이것이 URL임을 알아보고 `scan` 서브커맨드를 자동으로 붙여 실행합니다. 실행하면 이런 것들이 보입니다.
+첫 번째 인자가 대상입니다. Dalfox는 이것이 URL임을 알아보고 `scan` 서브커맨드를 자동으로 붙여 실행합니다. `?`나 `&`가 들어간 URL은 따옴표로 감싸세요. 셸이 특수 문자로 해석하며, zsh는 따옴표 없는 `?`를 만나면 `no matches found`를 내고 실행을 멈춥니다. 실행하면 이런 것들이 보입니다.
 
 - 버전이 적힌 배너.
 - 파라미터를 찾고 컨텍스트를 살피는 동안 찍히는 `INF` 라인.
@@ -29,7 +29,7 @@ dalfox https://xss-game.appspot.com/level1/frame?query=test
 크롤러가 뽑아둔 URL 목록을 그대로 넘기세요.
 
 ```bash
-# urls.txt, one target per line
+# urls.txt, 한 줄에 대상 하나
 dalfox scan urls.txt
 ```
 
@@ -41,7 +41,7 @@ URL마다 같은 파이프라인을 거칩니다. 탐지 결과는 스캔이 끝
 
 ```bash
 cat urls.txt | dalfox
-# or combined with your recon tools:
+# 또는 정찰 도구와 연결해서:
 waybackurls example.com | gf xss | dalfox
 ```
 
@@ -50,7 +50,7 @@ waybackurls example.com | gf xss | dalfox
 `jq`나 대시보드, CI에 그대로 물려 쓰세요.
 
 ```bash
-dalfox scan https://target.app/search?q=test -f json -o report.json
+dalfox scan 'https://target.app/search?q=test' -f json -o report.json
 ```
 
 기계 판독 형식(`json`, `jsonl`, `sarif`, `toml`)은 배너를 자동으로 끄기 때문에 파일이 깔끔하게 남습니다.
@@ -79,7 +79,7 @@ dalfox scan --input-type raw-http request.txt
 브라우저 DevTools나 프록시에서 뽑은 **HAR** 전체를 다시 흘려보낼 수도 있습니다. Dalfox는 그 안의 모든 요청을 스캔하며, 각 요청의 메서드, 헤더, 쿠키, 본문을 그대로 살립니다.
 
 ```bash
-dalfox scan capture.har            # auto-detected
+dalfox scan capture.har            # 자동 판별
 dalfox scan --input-type har capture.har
 ```
 
@@ -92,13 +92,13 @@ dalfox scan https://target.app \
   -b https://your-callback.interact.sh
 ```
 
-blind 페이로드는 파라미터 탐색보다 먼저 나가기 때문에, 요청에 이미 들어 있는 곳에만 닿습니다. 쿼리 파라미터, 폼 인코딩된 `-d` 본문, `-H` 헤더, 쿠키가 그 대상입니다. 여기에 더해 Dalfox는 대상 페이지를 받아 같은 출처로 보내는 POST 폼마다 텍스트 필드에 페이로드를 넣어 제출합니다. 탐색이나 마이닝으로 나중에 찾은 파라미터에는 blind 페이로드가 가지 않습니다. 나중에 관리자 패널에서 페이로드가 터지면 콜백 서버가 그것을 기록합니다.
+블라인드 페이로드는 파라미터 탐색보다 먼저 나가기 때문에, 요청에 이미 들어 있는 곳에만 닿습니다. 쿼리 파라미터, 폼 인코딩된 `-d` 본문, `-H` 헤더, 쿠키가 그 대상입니다. 여기에 더해 Dalfox는 대상 페이지를 받아 같은 출처로 보내는 POST 폼마다 텍스트 필드에 페이로드를 넣어 제출합니다. 탐색이나 마이닝으로 나중에 찾은 파라미터에는 블라인드 페이로드가 가지 않습니다. 나중에 관리자 패널에서 페이로드가 터지면 콜백 서버가 그것을 기록합니다.
 
 [interactsh](https://github.com/projectdiscovery/interactsh)(OAST) 서버 관리를 Dalfox에 맡길 수도 있습니다. 세션을 등록하고, 콜백을 원본 페이로드와 연결 짓고, 알아서 폴링합니다.
 
 ```bash
-dalfox scan https://target.app --blind-oob             # public interactsh mesh
-dalfox scan https://target.app --blind-oob=oast.fun    # pick servers
+dalfox scan https://target.app --blind-oob             # 공개 interactsh 메시
+dalfox scan https://target.app --blind-oob=oast.fun    # 서버 지정
 ```
 
 자체 호스팅 서버라면 `--blind-oob-secret`을 쓰고, 스캔이 끝난 뒤 폴링을 얼마나 더 이어갈지는 `--blind-oob-wait`으로 정합니다.
@@ -122,7 +122,7 @@ dalfox scan https://target.app --dry-run
 | 태그 | 의미 |
 |-----|---------|
 | `[V]` | **취약(Vulnerable)**: Dalfox가 입력이 악용 가능하다고 판단함 — 파싱된 응답에서 페이로드가 실행 가능한 위치에 도달했거나(예: Dalfox 마커가 붙은 DOM 요소), 대역외 콜백이 발생함 |
-| `[A]` | **AST 탐지(AST-detected)**: 정적 JS 분석에서 source→sink 흐름을 발견함 |
+| `[A]` | **AST 탐지(AST-detected)**: 정적 JS 분석에서 소스→싱크 흐름을 발견함 |
 | `[R]` | **반사됨(Reflected)**: 페이로드가 응답에 나타났으나 DOM 증거는 없음 |
 | `[I]` | **정보(Informational)**: XSS 판정이 아님. 예: 옵트인 `--detect-outdated-libs`로 찾은 알려진 취약 JS 라이브러리 |
 

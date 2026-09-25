@@ -12,10 +12,10 @@ This page walks you from install to a verified finding. We'll use an intentional
 ## 1. Scan a single URL
 
 ```bash
-dalfox https://xss-game.appspot.com/level1/frame?query=test
+dalfox 'https://xss-game.appspot.com/level1/frame?query=test'
 ```
 
-The first argument is the target. Dalfox auto-detects that it's a URL and runs the `scan` subcommand implicitly. You'll see:
+The first argument is the target. Dalfox auto-detects that it's a URL and runs the `scan` subcommand implicitly. Quote any URL that contains `?` or `&`: the shell treats them as special characters, and zsh aborts an unquoted `?` with `no matches found`. You'll see:
 
 - A banner with the version.
 - `INF` lines as Dalfox discovers parameters and probes contexts.
@@ -50,7 +50,7 @@ waybackurls example.com | gf xss | dalfox
 Pair Dalfox with `jq`, a dashboard, or CI:
 
 ```bash
-dalfox scan https://target.app/search?q=test -f json -o report.json
+dalfox scan 'https://target.app/search?q=test' -f json -o report.json
 ```
 
 Machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) auto-suppress the banner so the file stays clean.

@@ -25,7 +25,7 @@ v3는 스캔 관련 서브커맨드를 하나의 진입점으로 모았습니다
 
 {{ alert(type="info", body="legacy url, file, pipe 서브커맨드는 숨겨진 별칭으로 남아 있습니다. file과 pipe는 v2 형태 그대로입니다. url은 다릅니다. 대상을 -u/--url로 받기 때문에(dalfox url -u URL) v2의 dalfox url URL 형태는 실패하니 dalfox scan URL로 바꾸세요. sxss는 남지 않았습니다. 저장형 XSS 스캔은 scan 서브커맨드의 --sxss 플래그로 옮겨졌습니다.") }}
 
-v2의 `--rawdata`, `--har`, `--http` 입력 스위치도 없어졌습니다. 프록시로 잡아둔 원시 HTTP 요청과 HAR 익스포트는 자동으로 판별되며(`dalfox scan request.txt`, `dalfox scan capture.har`), `--input-type raw-http` / `--input-type har`로 강제할 수도 있습니다. 요청 줄에 경로만 있는 원시 요청은 HTTP/2 신호가 있거나 Host가 `:443`이면 `https`로, 아니면 `http`로 보냅니다. 스킴을 고정하려면 요청 줄에 전체 URL을 쓰세요. [빠른 시작](../quick-start/)을 참고하세요.
+v2의 `--rawdata`, `--har`, `--http` 입력 스위치도 없어졌습니다. 프록시로 잡아둔 raw HTTP 요청과 HAR 익스포트는 자동으로 판별되며(`dalfox scan request.txt`, `dalfox scan capture.har`), `--input-type raw-http` / `--input-type har`로 강제할 수도 있습니다. 요청 줄에 경로만 있는 raw HTTP 요청은 `:scheme` 의사 헤더가 있으면 그 값을 따르고, 없으면 HTTP/2 신호가 있거나 Host가 `:443`이면 `https`로, 아니면 `http`로 보냅니다. 스킴을 고정하려면 요청 줄에 전체 URL을 쓰세요. [빠른 시작](../quick-start/)을 참고하세요.
 
 ## 2. 이름이 바뀐 플래그
 

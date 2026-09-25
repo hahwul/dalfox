@@ -9,7 +9,7 @@ Dalfox는 시작할 때 설정 파일을 읽으므로 매번 같은 플래그를
 
 ## 파일 위치
 
-Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있으면 `$XDG_CONFIG_HOME/dalfox/config.toml`을, 그렇지 않으면 `$HOME/.config/dalfox/config.toml`을 읽습니다. 같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
+Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG_CONFIG_HOME/dalfox/config.toml`을, 그렇지 않으면 `$HOME/.config/dalfox/config.toml`을 읽습니다. 같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
 
 `--config`로 다른 위치를 지정할 수 있습니다.
 
@@ -34,19 +34,19 @@ encoders = ["url", "html"]
 
 ```bash
 dalfox 'https://target.app/?q=test'
-# → writes JSON results to results.json with workers=100
+# → workers=100으로 스캔하고 JSON 결과를 results.json에 씀
 ```
 
 ## 우선순위
 
 ```
-CLI flag  >  Config file  >  Built-in defaults
+CLI 플래그  >  설정 파일  >  내장 기본값
 ```
 
-커맨드 라인에 지정한 것이 우선합니다. 그래서 설정 파일에는 무난한 기본값을 두고, 스캔할 때마다 필요한 값만 덮어쓰면 됩니다.
+명령줄에 지정한 것이 우선합니다. 그래서 설정 파일에는 무난한 기본값을 두고, 스캔할 때마다 필요한 값만 덮어쓰면 됩니다.
 
 ```bash
-# Config sets workers=100, but for this quick scan use 20
+# 설정 파일은 workers=100이지만, 이번 빠른 스캔은 20으로
 dalfox scan --workers 20 https://target.app
 ```
 
@@ -100,11 +100,11 @@ silence = true
 설정 파일을 커밋한다면 API 키, 베어러 토큰, blind-XSS 콜백 호스트명은 파일에서 빼세요. Dalfox가 환경 변수에서 읽는 시크릿은 REST 서버의 API 키 하나뿐입니다.
 
 ```bash
-# .env or your shell profile
+# .env 또는 셸 프로필
 export DALFOX_API_KEY="..."
 ```
 
-나머지(`-H "Authorization: …"`, `--cookies`, `-b`)는 커맨드 라인에서만 넘기고 파일에는 남기지 마세요.
+나머지(`-H "Authorization: …"`, `--cookies`, `-b`)는 명령줄에서만 넘기고 파일에는 남기지 마세요.
 
 ## 다음 단계
 

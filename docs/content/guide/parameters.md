@@ -64,7 +64,7 @@ names.
 
 Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this in two ways:
 
-- **Sentinel pre-probe:** Before iterating the wordlist, three random parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic `any` Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (>15 entries) for the pre-probe to pay off.
+- **Sentinel pre-probe:** Before iterating the wordlist, three random-looking parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic `any` Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (>15 entries) for the pre-probe to pay off.
 - **EWMA collapse:** After bucket processing, Dalfox watches the rolling reflection ratio. A high ratio (≥85% after at least 15 candidate names) triggers a confirmation check for smaller lists. If the sentinels also reflect, mined Query params are folded into the same `any` placeholder; if they do not, every confirmed candidate is kept. A negative sentinel therefore does not cut coverage from the rest of a large wordlist.
 
 The sentinel-confirmed route produces one synthetic Query injection point. A negative sentinel preserves the individual reflected names, while still benefiting from bucketed requests.
