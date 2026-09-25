@@ -23,7 +23,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 | **mXSS** | `<foreignobject>`/DOMPurify 우회 | 새니타이저가 변형한 DOM |
 | **블라인드** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` 또는 `--blind-oob`가 설정된 경우 |
 
-대부분의 페이로드 템플릿은 마커(`class={CLASS}` 또는 `id={ID}`)를 지니고 있어, 검증 단계에서 DOM 내에서 자신의 요소를 확실하게 식별할 수 있습니다. 길이 제한이 있는 반사를 위해 마커 없는 짧은 페이로드도 몇 개 있는데, 이것만으로는 `R` 결과까지만 나옵니다.
+대부분의 페이로드 템플릿은 마커(`class={CLASS}` 또는 `id={ID}`)를 지니고 있어, 검증 단계에서 DOM 내에서 자신의 요소를 확실하게 식별할 수 있습니다. 길이 제한이 있는 반사에 들어가도록 마커를 뺀 짧은 페이로드도 몇 개 있는데, 이런 페이로드는 파싱된 응답에서 페이로드 자신의 이벤트 핸들러나 `<script>` 본문을 찾아 검증합니다.
 
 ## 컨텍스트 인식 선택
 
@@ -105,7 +105,7 @@ dalfox scan https://target.app --custom-payload mypayloads.txt
 dalfox scan https://target.app --custom-payload mypayloads.txt --only-custom-payload
 ```
 
-`--custom-payload` 없이 `--only-custom-payload`만 주면 거부되며, 쓸 수 있는 줄이 하나도 없는 파일도 마찬가지입니다. 커스텀 파일이 로컬 반사 및 DOM 검사의 기본 페이로드가 됩니다. 적응형 합성과 CSP/기술 공유 페이로드는 추가하지 않습니다. 인코더와 WAF 변형은 커스텀 항목에서 파생되며, 명시적으로 요청한 `--remote-payloads`는 계속 사용됩니다.
+`--custom-payload` 없이 `--only-custom-payload`만 주면 거부됩니다. 파일이 없거나 쓸 수 있는 줄이 하나도 없을 때도 마찬가지이며, `--only-custom-payload` 없이 쓸 때는 경고만 하고 내장 페이로드로 스캔합니다. 커스텀 파일이 로컬 반사 및 DOM 검사의 기본 페이로드가 됩니다. 적응형 합성과 CSP/기술 공유 페이로드는 추가하지 않습니다. 인코더와 WAF 변형은 커스텀 항목에서 파생되며, 명시적으로 요청한 `--remote-payloads`는 계속 사용됩니다.
 
 ## 원격 페이로드 소스
 
@@ -163,7 +163,7 @@ dalfox scan https://target.app --custom-alert-value document.domain
 dalfox scan https://target.app --custom-alert-value dalfox --custom-alert-type str
 ```
 
-- `--custom-alert-value`: 내장 `alert(1)` / `prompt(1)` / `confirm(1)` 호출(백틱 형태 포함)의 `1`을 이 값으로 바꿉니다. 기본값 `1`.
+- `--custom-alert-value`: `alert(1)` / `prompt(1)` / `confirm(1)` 호출(백틱 형태 포함)의 `1`을 이 값으로 바꿉니다. 기본값 `1`. 주입 컨텍스트가 파악된 파라미터의 주요 반사 페이로드에만 적용되고, DOM 검증용 페이로드와 생성된 페이로드는 `alert(1)`을 그대로 쓰므로 보고된 PoC에 `alert(1)`이 나올 수 있습니다.
 - `--custom-alert-type`: `none`(기본값)은 값을 그대로 넣으므로 `document.domain`이 표현식으로 남고, `str`은 값을 작은따옴표로 감싸 문자열 리터럴로 만듭니다.
 
 ## Blind XSS

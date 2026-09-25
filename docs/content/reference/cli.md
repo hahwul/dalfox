@@ -179,7 +179,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--blind-oob-wait` | — | `30` | Seconds to keep polling for OOB callbacks after all payloads are sent (`0` = no extra end-of-scan wait) |
 | `--custom-payload` | — | — | Custom payload file, one payload per line (blank and `#` lines skipped). Added to the built-in payloads unless `--only-custom-payload` is set |
 | `--only-custom-payload` | — | false | Use only custom payloads. Requires `--custom-payload` (exit `2` without it) |
-| `--custom-alert-value` | — | `1` | Value inside `alert()`/`prompt()`/`confirm()` |
+| `--custom-alert-value` | — | `1` | Value inside `alert()`/`prompt()`/`confirm()` in the context-matched reflection payloads (DOM-verification and fallback payloads keep `1`) |
 | `--custom-alert-type` | — | `none` | `none` or `str` |
 | `--inject-marker` | — | — | Replace this token with payloads (e.g. `FUZZ`) |
 | `--skip-xss-scanning` | — | false | Skip payload injection |

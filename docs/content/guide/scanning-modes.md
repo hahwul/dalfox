@@ -134,9 +134,9 @@ Warning: scan configuration changed since 'scan.state' was written (recorded a5f
 
 The old file is set aside rather than overwritten, because it is a record of real work, and losing 40k completions to a reset would be worse than the redundant scan. Nothing is ever destroyed in place — a file at that path that is *not* a Dalfox state file (a typo pointing at your target list, say) is refused outright rather than adopted.
 
-Output and pacing flags are deliberately outside that hash — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response`, `--silence`, `--stream-findings`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, and the target list and `--input-type` themselves. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file — including `--deep-scan`, `--encoders`, `--custom-payload`, the mining and discovery toggles, the WAF options, `--limit`, and the header and cookie *names* in `--headers` / `--cookies` (plus non-credential header values). Run-wide credential values and the `--cookie-from-raw` path are not hashed, as described above.
+Output and pacing flags are deliberately outside that hash — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response` / `--include-all`, `--silence`, `--no-color`, `--stream-findings`, `--only-poc`, `--baseline` / `--baseline-mode`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, and the target list and `--input-type` themselves. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file — including `--deep-scan`, `--encoders`, `--custom-payload`, the mining and discovery toggles, the WAF options, `--limit`, and the header and cookie *names* in `--headers` / `--cookies` (plus non-credential header values). Run-wide credential values and the `--cookie-from-raw` path are not hashed, as described above.
 
-The hash also covers Dalfox's major version and the full set of scan options, so an upgrade that adds a scan flag starts every state file over once. That errs toward a redundant scan, never a silent skip.
+The hash also covers Dalfox's major version and every other scan option, so an upgrade that adds a scan flag starts every state file over once. That errs toward a redundant scan, never a silent skip.
 
 The file is append-only JSONL: one header line, then one line per target. A hard kill can at worst tear the final line, which is skipped on read while every complete record before it still counts. A target whose outcome is unchanged from the last run is not re-recorded, so a permanently unreachable host does not grow the file once per run.
 
@@ -173,7 +173,7 @@ mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 
 Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped by URL + method; bodies are not compared, so two POSTs to the same URL with different bodies collapse into the first. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
 
-CLI request flags still apply on top, for HAR and raw HTTP alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). `-H` does not replace a header the capture already carries: both values are sent, so remove a stale header from the capture rather than overriding it. The exception is `-H 'Cookie: …'`, which replaces the captured cookies outright; use `--cookies` to add a cookie alongside them. Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
+CLI request flags still apply on top, for HAR and raw HTTP alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). `-H` does not replace a header the capture already carries: both values are sent, so remove a stale header from the capture rather than overriding it. Two exceptions: `-H 'User-Agent: …'` replaces the captured User-Agent like `--user-agent` does, and `-H 'Cookie: …'` replaces the captured cookies (and any `--cookies`) outright; use `--cookies` alone to add a cookie alongside the captured ones. Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
 
 ## Stored XSS mode (SXSS)
 
@@ -185,7 +185,7 @@ dalfox scan https://target.app/post-comment \
   --sxss-url https://target.app/comments
 ```
 
-Dalfox injects into the first URL, then fetches the second to check whether the payload landed. `--sxss-url` is optional: without it Dalfox checks the page the form was found on, then the form's `action`, then the injection target itself. Because a stored sink does not echo in the immediate response, `--sxss` also tests the request's own query and `-d` body parameters and the fields of discovered forms even when they don't reflect during discovery. See the [Stored XSS guide](../stored-xss/) for the full flow.
+Dalfox injects into the first URL, then fetches the second to check whether the payload landed. It also checks the page the form was found on, the form's `action` (same origin only), and the injection target itself, so `--sxss-url` is optional. Because a stored sink does not echo in the immediate response, `--sxss` also tests the fields of discovered forms and, when `-p` is not set, the request's own query and `-d` body parameters, even when they don't reflect during discovery. See the [Stored XSS guide](../stored-xss/) for the full flow.
 
 ## Blind XSS
 
@@ -251,9 +251,10 @@ dalfox scan 'https://app.example.com/dashboard?q=1' \
   --session-check-url https://app.example.com/api/me
 ```
 
-The one exception is a probe body that was cut short before the point where
-the marker sat in the baseline: an absent marker proves nothing there, so the
-heuristics are consulted as a fallback.
+The one exception is a probe response that came back incomplete (a `206`, or
+a body cut short) before reaching where the marker sat in the baseline: an
+absent marker proves nothing there, so the heuristics are consulted as a
+fallback.
 
 `--session-check-url` is worth setting when the scan target is expensive,
 paginated, or itself public — point it at a cheap authenticated endpoint
@@ -305,7 +306,8 @@ set. Logging in is out of scope: this is detection only.
 
 `dalfox server` and MCP jobs use the same detection rules, checked on the
 job's baseline and once after the scan: a lost session ends the job as `error`
-with a `SESSION_LOST:` message.
+with a `SESSION_LOST:` message. Jobs take no `--session-check` equivalent, so
+they rely on the heuristics.
 
 ## Server mode
 

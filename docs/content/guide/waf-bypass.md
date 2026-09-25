@@ -10,7 +10,7 @@ Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatica
 ## How it works
 
 1. Dalfox matches the preflight response's headers and body against its fingerprint rules (no extra request), then sends one **provocation probe**: the target's own request with `dalfox_waf_probe=<script>alert(1)</script>` appended to the query.
-2. If a known WAF signature shows up (headers like `cf-ray`, body markers like "Attention required!"), Dalfox notes the WAF and its confidence. A probe answered with 403/406/429/503 and no recognisable signature is recorded as an unknown WAF, unless the page returns that status to every request or the 429 carries `Retry-After` (plain rate limiting).
+2. If a known WAF signature shows up (headers like `cf-ray`, body markers like "Attention required!"), Dalfox notes the WAF and its confidence. A probe answered with 403/406/429/503 and no recognisable signature is recorded as an unknown WAF, unless the plain preflight request already got that same status (an auth wall or maintenance page) or the 429 carries `Retry-After` (plain rate limiting).
 3. The scanner merges the WAF's **extra encoders** into your encoder list and adds the WAF's **mutation list** to the payload generator.
 4. Payload mutations are capped (4 variants per base payload) so request volume stays sane. The cap only applies once a WAF is detected, so the extra effort lands exactly on the scans that need it.
 
@@ -154,7 +154,7 @@ The extra encoders run over the list your own encoders already produced, so the 
 
 ## Rate limiting & backoff
 
-Dalfox tracks consecutive blocked responses per worker. After three 429 or 503 responses in a row it backs off with an exponential sleep (2 s, doubling, capped at 30 s) to avoid permanent blocks. A 403 or 406 is treated as a block on that one payload, so Dalfox moves straight on to the next payload; the same cooldown applies to those only under `--waf-evasion`. You can help it along with `--delay` (per-request ms) and smaller `--workers` for fragile targets. Any `--delay` above 0 also makes each parameter send its payloads one at a time.
+Dalfox tracks consecutive blocked responses (403/406/429/503) per parameter. From the third block in a row onward, every 429 or 503 makes it back off with an exponential sleep (2 s, doubling, capped at 30 s) to avoid permanent blocks. A 403 or 406 is treated as a block on that one payload, so Dalfox moves straight on to the next payload; the same cooldown applies to those only under `--waf-evasion`. You can help it along with `--delay` (per-request ms) and smaller `--workers` for fragile targets. Any `--delay` above 0 also makes each parameter send its payloads one at a time.
 
 ```bash
 dalfox scan https://target.app --delay 500 --workers 10

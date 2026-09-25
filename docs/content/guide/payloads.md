@@ -23,7 +23,7 @@ Dalfox composes payloads from several families:
 | **mXSS** | `<foreignobject>`/DOMPurify bypasses | Sanitizer-mutated DOM |
 | **Blind** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` or `--blind-oob` is set |
 
-Most payload templates carry a marker (`class={CLASS}` or `id={ID}`) so the verification stage can positively identify its own element in the DOM. A few short, marker-free payloads exist for length-capped reflections; on their own they can only produce `R` findings.
+Most payload templates carry a marker (`class={CLASS}` or `id={ID}`) so the verification stage can positively identify its own element in the DOM. A few short payloads carry no marker so they fit length-capped reflections; for those, verification looks for the payload's own event handler or `<script>` body in the parsed response instead.
 
 ## Context-aware selection
 
@@ -128,7 +128,7 @@ Use a custom file instead of the local built-in library:
 dalfox scan https://target.app --custom-payload mypayloads.txt --only-custom-payload
 ```
 
-`--only-custom-payload` without `--custom-payload` is rejected, as is a file with no usable lines. The custom file supplies the local reflection and DOM base payloads. Adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still produce variants of custom entries, and explicitly requested `--remote-payloads` remain active.
+`--only-custom-payload` without `--custom-payload` is rejected. So is a missing file or one with no usable lines; without `--only-custom-payload` that is only a warning, and the scan runs on the built-in payloads. The custom file supplies the local reflection and DOM base payloads. Adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still produce variants of custom entries, and explicitly requested `--remote-payloads` remain active.
 
 ## Remote payload sources
 
@@ -186,7 +186,7 @@ dalfox scan https://target.app --custom-alert-value document.domain
 dalfox scan https://target.app --custom-alert-value dalfox --custom-alert-type str
 ```
 
-- `--custom-alert-value`: replaces the `1` in the built-in `alert(1)` / `prompt(1)` / `confirm(1)` calls (and their backtick forms). Default `1`.
+- `--custom-alert-value`: replaces the `1` in `alert(1)` / `prompt(1)` / `confirm(1)` calls (and their backtick forms). Default `1`. It reaches the main reflection payloads for parameters whose injection context was identified; DOM-verification and generated payloads keep `alert(1)`, so a reported PoC can still show `alert(1)`.
 - `--custom-alert-type`: `none` (default) inserts the value as-is, so `document.domain` stays an expression; `str` wraps it in single quotes, so it becomes a string literal.
 
 ## Blind XSS

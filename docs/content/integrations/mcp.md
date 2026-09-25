@@ -177,13 +177,10 @@ results are reserved for tools that actually ran. The ceilings are the REST API'
 `timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `workers` `1`–`500`,
 `scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`.
 
-One thing to know about that trade: tool results are always rendered into the model's
-context, whereas a JSON-RPC error is handled by the host, and some hosts show the user a
-generic failure instead of passing the text back to the model. The message still names
-the offending key and lists every accepted spelling — if your client swallows it, the
-model loses a self-correcting hint it would otherwise act on.
+One caveat: some hosts show the user a generic failure for a JSON-RPC error instead of
+passing its text back to the model, so the model never sees which key was wrong.
 
-Because of that, the [REST API](../server/) spellings are accepted
+To make the common mistake a non-error, the [REST API](../server/) spellings are accepted
 as aliases: `url` for `target`, `cookie` for `cookies`, `header` for `headers`,
 `worker` for `workers`, and `blind` for `blind_callback_url`. `cookie` also
 takes a single `Cookie:`-header string (`"sid=abc; lang=en"`) in place of the
@@ -215,9 +212,9 @@ compatibility mode:
 `scan_with_dalfox` — it sends no payloads, so options describing pacing,
 workers, WAF handling, blind XSS or waiting have nothing to act on and are
 refused. Its own field list is below. (`POST /preflight` on the REST side
-reuses the full scan body: it paces discovery with `delay`, `worker` and
-`rate_limit` and ignores the rest, so this is the one place the two surfaces
-genuinely differ.) Credentials and the target do reach
+takes the full scan body instead, also honours `delay`, `worker` and
+`rate_limit` for pacing, and ignores the options it has no use for — the one
+place the two surfaces genuinely differ.) Credentials and the target do reach
 it: sending preflight without cookies would under-report the parameters an
 authenticated scan would find.
 
@@ -338,9 +335,8 @@ discovered parameter is lifted out of the target's own markup.
 
 `offset` and `limit` page through large result sets, and `pagination` reports
 `{total, offset, limit, returned, has_more}`. A page is additionally capped at
-2 MiB of findings: the target decides how many findings a scan produces, and
-each one can carry 64 KiB of `evidence` plus 64 KiB of `response`. When the
-budget cuts a page short, `pagination` adds `truncated_by_size: true` and
+2 MiB of findings, since the target, not the caller, decides how many findings a
+scan produces. When the budget cuts a page short, `pagination` adds `truncated_by_size: true` and
 `max_page_bytes` — fewer findings came back than `limit` asked for, and the
 rest are still there at the next `offset`. A single finding larger than the
 budget is emitted alone rather than dropped, so paging always advances.
@@ -445,7 +441,7 @@ discovered set.
 
 `encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with.
 
-The estimate counts both phases the scan runs per parameter — reflection and DOM verification — each truncated to the per-parameter payload cap, matching `--dry-run`. It remains a lower bound: WAF mutation/encoder expansion and the shared CSP/tech payloads appended after the cap are not counted.
+The estimate counts both phases the scan runs per parameter (reflection and DOM verification), each held to the per-parameter payload cap, the same arithmetic as `--dry-run`. It is a lower bound: WAF bypass mutations and the CSP/tech-specific payloads a scan adds on top are not counted.
 
 ### Capacity limits
 
@@ -500,11 +496,11 @@ read the finding axes, and the provenance rule below.
 **Progress.** Attach `_meta.progressToken` to a `scan_with_dalfox` call with `wait=true`,
 or to `preflight_dalfox`, and Dalfox streams `notifications/progress` against that token
 while the call is open — so a client shows movement instead of a silent spinner for what
-can be minutes of work. The numeric `progress` is cumulative requests sent (the spec
-requires it to rise on every notification, and that is the one counter that always does);
+can be minutes of work. For a scan, the numeric `progress` is cumulative requests sent and
 `message` carries the phase, parameters tested, findings so far, and requests that never
-reached the target. Nothing is published for the terminal state: the tool's own result is
-that signal.
+reached the target. `preflight_dalfox` sends a heartbeat every two seconds instead
+(`analyzing target (Ns elapsed)`). Nothing is published for the terminal state: the
+tool's own result is that signal.
 
 **Cancellation.** Sending `notifications/cancelled` for an in-flight `wait=true` call
 stops the scan itself, not just the wait — the job settles `cancelled` with the
@@ -521,10 +517,9 @@ stops the scan itself, not just the wait — the job settles `cancelled` with th
 `resources/list` returns the index plus one entry per tracked scan (paged with a cursor),
 so a host's context picker shows real scans rather than a template to fill in. A read of
 the index bounds itself at 200 rows — `resources/read` takes no page parameters, so the
-body says in its `pagination` where it was cut. Any tool
-result that carries a `scan_id` also carries a `resource_link` content block pointing at
-that scan, letting a client attach the findings instead of asking the model to re-quote
-them. The link is omitted for clients that negotiated a protocol revision older than
+body says in its `pagination` where it was cut. The results of `scan_with_dalfox` and
+`get_results_dalfox` also carry a `resource_link` content block pointing at the scan,
+letting a client attach the findings instead of asking the model to re-quote them. The link is omitted for clients that negotiated a protocol revision older than
 `2025-06-18`, which cannot parse the block type.
 
 **Prompts.** Two workflows are published for a client's prompt menu:

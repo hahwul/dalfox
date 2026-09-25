@@ -41,7 +41,7 @@ dalfox scan https://target.app -f jsonl -o findings.jsonl
 | `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | 증거가 그 주장을 얼마나 강하게 뒷받침하는지 (`high` / `low`). `I`에는 없음 |
 | `confidence_reason` | `"URL-carried source; inline script permitted"` | 판단 근거 신호 |
-| `inject_type` | `"inHTML"` | 탐지 라벨: 주입한 페이로드는 `inHTML`(`--sxss`에서는 `sxss-inHTML`, 해당하면 `-CSTI`나 `-VHtml` 같은 프레임워크 싱크 접미어가 붙음), `inHTML-HPP`, `DOM-XSS`(AST), `blind-oob-<location>-<protocol>`, `OutdatedComponent`(`I`) |
+| `inject_type` | `"inHTML"` | 탐지 라벨: 주입한 페이로드는 `inHTML`(`--sxss`에서는 `sxss-inHTML`, 해당하면 `-CSTI` 접미어나 `-VHtml` 같은 프레임워크 싱크 접미어가 붙음), `inHTML-HPP`, `DOM-XSS`(AST), `blind-oob-<location>-<protocol>`, `OutdatedComponent`(`I`) |
 | `method` | `"GET"` | HTTP 메서드 |
 | `data` | `"https://target.app/?q=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx1ec4110f%3E"` | PoC URL |
 | `param` | `"q"` | 공격에 사용된 파라미터 |

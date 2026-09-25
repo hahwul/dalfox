@@ -134,9 +134,9 @@ Warning: scan configuration changed since 'scan.state' was written (recorded a5f
 
 덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 초기화 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 기존 파일을 그 자리에서 덮어쓰거나 지우지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
 
-출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response`, `--silence`, `--stream-findings`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록과 `--input-type` 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--headers` / `--cookies`의 헤더·쿠키 *이름*(과 자격증명이 아닌 헤더 값) 등이 여기에 해당합니다. 실행 전체에 적용되는 자격증명 값과 `--cookie-from-raw` 경로는 위에서 설명한 대로 해시에 들어가지 않습니다.
+출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response` / `--include-all`, `--silence`, `--no-color`, `--stream-findings`, `--only-poc`, `--baseline` / `--baseline-mode`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록과 `--input-type` 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--headers` / `--cookies`의 헤더·쿠키 *이름*(과 자격증명이 아닌 헤더 값) 등이 여기에 해당합니다. 실행 전체에 적용되는 자격증명 값과 `--cookie-from-raw` 경로는 위에서 설명한 대로 해시에 들어가지 않습니다.
 
-해시에는 Dalfox의 메이저 버전과 스캔 옵션 전체도 들어갑니다. 따라서 스캔 플래그가 추가된 버전으로 업그레이드하면 모든 state 파일이 한 번 처음부터 시작합니다. 조용히 건너뛰는 쪽이 아니라 중복 스캔 쪽으로 기우는 설계입니다.
+해시에는 Dalfox의 메이저 버전과 그 밖의 모든 스캔 옵션도 들어갑니다. 따라서 스캔 플래그가 추가된 버전으로 업그레이드하면 모든 state 파일이 한 번 처음부터 시작합니다. 조용히 건너뛰는 쪽이 아니라 중복 스캔 쪽으로 기우는 설계입니다.
 
 파일은 append-only JSONL입니다. 헤더 한 줄 뒤에 대상당 한 줄이 붙습니다. 강제 종료로 잘릴 수 있는 것은 마지막 줄 하나뿐이고, 그 줄은 읽을 때 건너뛰되 앞의 온전한 기록은 모두 그대로 유효합니다. 지난 실행과 결과가 같은 대상은 다시 기록하지 않으므로, 계속 죽어 있는 호스트 때문에 파일이 실행마다 커지지 않습니다.
 
@@ -173,7 +173,7 @@ mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 
 HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드로 판단하고 본문은 비교하지 않으므로, 같은 URL에 본문만 다른 POST 두 개는 첫 번째 것 하나로 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
-CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`는 캡처에 이미 있는 헤더를 대체하지 않고 두 값을 모두 보내므로, 오래된 헤더는 덮어쓰려 하지 말고 캡처에서 지우세요. 예외는 `-H 'Cookie: …'`로, 캡처된 쿠키를 통째로 대체합니다. 캡처된 쿠키에 하나를 더하려면 `--cookies`를 쓰세요. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
+CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`는 캡처에 이미 있는 헤더를 대체하지 않고 두 값을 모두 보내므로, 오래된 헤더는 덮어쓰려 하지 말고 캡처에서 지우세요. 예외는 두 가지입니다. `-H 'User-Agent: …'`는 `--user-agent`처럼 캡처된 User-Agent를 대체하고, `-H 'Cookie: …'`는 캡처된 쿠키(와 `--cookies`로 준 쿠키)를 통째로 대체합니다. 캡처된 쿠키에 하나를 더하려면 `--cookies`만 쓰세요. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
 
 ## 저장형 XSS 모드 (SXSS)
 
@@ -185,7 +185,7 @@ dalfox scan https://target.app/post-comment \
   --sxss-url https://target.app/comments
 ```
 
-Dalfox는 첫 번째 URL에 주입한 다음, 두 번째 URL을 가져와 페이로드가 도달했는지 확인합니다. `--sxss-url`은 생략할 수 있습니다. 생략하면 Dalfox는 폼을 찾은 페이지, 폼의 `action`, 주입 대상 자체 순서로 확인합니다. 저장형 싱크는 즉시 응답에 값을 되돌려주지 않으므로, `--sxss`는 요청의 쿼리·`-d` 본문 파라미터와 발견한 폼의 필드를 탐색 중 반사되지 않더라도 테스트합니다. 전체 흐름은 [저장형 XSS 가이드](../stored-xss/)를 참고하세요.
+Dalfox는 첫 번째 URL에 주입한 다음, 두 번째 URL을 가져와 페이로드가 도달했는지 확인합니다. 폼을 찾은 페이지, 폼의 `action`(같은 오리진일 때만), 주입 대상 자체도 함께 확인하므로 `--sxss-url`은 생략할 수 있습니다. 저장형 싱크는 즉시 응답에 값을 되돌려주지 않으므로, `--sxss`는 발견한 폼의 필드와, `-p`를 지정하지 않았다면 요청의 쿼리·`-d` 본문 파라미터까지 탐색 중 반사되지 않더라도 테스트합니다. 전체 흐름은 [저장형 XSS 가이드](../stored-xss/)를 참고하세요.
 
 ## Blind XSS
 
@@ -233,7 +233,7 @@ dalfox scan 'https://app.example.com/dashboard?q=1' \
   --session-check-url https://app.example.com/api/me
 ```
 
-예외는 하나입니다. 프로브 응답 본문이 기준 응답에서 마커가 있던 위치보다 앞에서 잘린 경우에는 마커가 없다는 사실만으로 아무것도 증명할 수 없으므로, 휴리스틱을 대체 수단으로 참고합니다.
+예외는 하나입니다. 프로브 응답이 불완전하게 돌아와서(`206`이거나 본문이 잘림) 기준 응답에서 마커가 있던 위치에 미치지 못한 경우에는 마커가 없다는 사실만으로 아무것도 증명할 수 없으므로, 휴리스틱을 대체 수단으로 참고합니다.
 
 스캔 대상이 무겁거나, 페이지네이션이 있거나, 그 자체로 공개 페이지라면 `--session-check-url`로 가벼운 인증 엔드포인트를 따로 지정하세요. 이 경우 기준 지문도 해당 엔드포인트에서 잡습니다(플래그를 지정했을 때만, 대상당 프리플라이트 요청 1건 추가). 덕분에 `/auth/session`처럼 로그인 형태의 프로브 경로도 스캔 대상이 아니라 자기 자신의 인증된 응답과 비교됩니다.
 
@@ -254,7 +254,7 @@ dalfox scan 'https://app.example.com/dashboard?q=1' \
 
 요청에 쿠키도, `Cookie` / `Authorization` 헤더도 없고 `--session-check` 계열 플래그도 지정하지 않으면 모니터링은 꺼져 있으며 비용도 들지 않습니다. 자동 로그인은 범위 밖입니다. 이 기능은 감지만 담당합니다.
 
-`dalfox server`와 MCP 잡도 같은 감지 규칙을 쓰며, 잡의 기준 응답과 스캔이 끝난 뒤 한 번 확인합니다. 세션이 끊어졌다면 잡은 `SESSION_LOST:` 메시지와 함께 `error`로 끝납니다.
+`dalfox server`와 MCP 잡도 같은 감지 규칙을 쓰며, 잡의 기준 응답과 스캔이 끝난 뒤 한 번 확인합니다. 세션이 끊어졌다면 잡은 `SESSION_LOST:` 메시지와 함께 `error`로 끝납니다. 잡에는 `--session-check`에 해당하는 옵션이 없으므로 휴리스틱만 사용합니다.
 
 ## 서버 모드
 

@@ -66,7 +66,7 @@ done
 - **인가 게이트:** 대상이 누가 봐도 테스트 랩인 경우가 아니라면, 스킬은 사용자가 대상에 페이로드를 보낼 권한이 있음을 확인하기 전까지 스캔을 거부합니다.
 - **모드 감지:** MCP 도구가 있으면 그쪽을 먼저 쓰고, 없으면 `dalfox` CLI로 넘어가며, 둘 다 없으면 설치 방법을 사용자에게 안내합니다.
 - **MCP 플레이북:** `preflight_dalfox` → `scan_with_dalfox` → `get_results_dalfox` 폴링(`suggested_poll_interval_ms` 준수) → `settled: true`가 된 뒤에만 `delete_scan_dalfox`. 취소 직후 워커가 아직 정리 중이면 삭제를 다시 시도해야 합니다. 검증된 입력 범위(timeout 1–299초, delay 0–9999ms)를 포함하여 에이전트가 Dalfox가 거부할 값을 보내지 않게 합니다.
-- **CLI 시나리오:** POST 본문, 인증된 세션, Burp 경유 프록시, 콜백 URL을 사용하는 블라인드 XSS, 저장형 XSS, 파이프 입력, 빠른 스모크 테스트, 최대 커버리지 실행, 기계 판독 가능 출력.
+- **CLI 시나리오:** POST 본문, 인증된 세션, Burp 경유 프록시, 블라인드 XSS(직접 준비한 콜백 URL, 또는 `--blind-oob`로 Dalfox가 관리하는 OAST 세션), 저장형 XSS, 대상 목록, 캡처한 요청(raw-http / HAR), 빠른 스모크 테스트, 최대 커버리지 실행.
 - **결과 해석:** 서로 독립된 세 축 — `type`(주장: `V` 악용 가능 판단 > `A` AST 탐지 > `R` 반사만 확인 > `I` 정보성), `detection_method`(탐지 방식), `severity`(영향도, 현재는 티어에서 파생) — 과 그 주장의 근거 등급인 `confidence` / `confidence_reason`. 에이전트가 가장 강한 주장부터 앞세우고, `V`를 브라우저 실행 관측으로는 절대 서술하지 않습니다. [탐지 모델](../../guide/detection-model/) 참고.
 - **실패 모드:** `reachable: false`, `CONNECTION_FAILED`나 `SESSION_LOST` 오류, 실제로는 제대로 돌지 않은 스캔의 빈 보고서가 왜 깨끗한 결과가 아닌지, 그리고 `invalid_params` 오류가 에이전트에게 무엇을 고치라는 뜻인지.
 

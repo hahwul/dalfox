@@ -9,9 +9,9 @@ Finding XSS starts with finding the right parameter. Dalfox's discovery engine i
 
 ## The pipeline, briefly
 
-1. **Discovery:** Probe the inputs the request already carries: query values (and query parameter *names*), headers, cookies, path segments, and the fields of forms found on the page. URL-fragment keys are recorded too, but only so AST findings can be matched to them; a fragment never reaches the server, so it is not fuzzed.
+1. **Discovery:** Probe the inputs the request already carries: query values (and query parameter *names*), headers, cookies, path segments, and the fields of forms found on the page. URL-fragment keys are listed too (and can be named with `-p`), but a fragment never reaches the server, so the scan never fuzzes them.
 2. **Mining:** Probe the body parameters of `-d` (form, JSON, GraphQL variables, XML, multipart), then look for names the request doesn't carry: a dictionary wordlist and the `id`/`name` of `<input>` elements in the response.
-3. **Active probing:** Fire a probe for each parameter to learn which special characters survive, refine the injection context, and detect servers that URL-decode more than once.
+3. **Active probing:** Probe each parameter to learn which special characters survive, and detect servers that URL-decode more than once.
 4. **Payload generation:** Build context-aware payload sets (HTML, JS, attribute, CSS). Before a parameter's payloads go out, a **fast probe** sends one sandwich-marker request (plus a numeric-only fallback for filters that strip letters). If nothing reflects, the heavy payload loops are skipped for that parameter unless `--deep-scan` is set. When active probing already saw the marker come back, the fast probe reuses that answer instead of sending its own request.
 5. **Reflection check:** Send the payload, then see whether it comes back.
 6. **DOM verification:** Parse the response and confirm the payload reached an executable position. AST-based DOM-XSS analysis runs once over the landing page itself, then once per parameter on the fast-probe response (or on the first reflection response when the fast probe was skipped).
@@ -53,7 +53,7 @@ Only one list is used per scan. When `--remote-wordlists` loads, it wins and `-W
 
 Dictionary and DOM candidates are tested in buckets of up to 64 names per request (kept under an ~8 KiB request line), not one request per name. A name whose canary reflects is identified from that one response. When a bucket changes the response without reflecting anything, Dalfox compares it with a same-size control request and splits the bucket to find the name behind the change. Only those ambiguous buckets cost extra requests, so a large wordlist stays cheap.
 
-On a page whose body differs between identical requests (a rotating widget, a timestamp), only a status-code change counts as such a response change. A bucket that fails, or that the server rejects for its size (a query-length limit), is split and retried rather than dropped.
+On a page whose body differs between identical requests (a rotating widget, a timestamp), only a status-code change counts as such a response change. A multi-name bucket that fails, or that the server rejects for its size (a query-length limit), is split and retried rather than dropped.
 
 With no custom or remote wordlist selected, the built-in seed keeps Dalfox's
 historical XSS-oriented names and adds an attributed, broader Param Miner seed
@@ -65,7 +65,7 @@ names.
 Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this in two ways:
 
 - **Sentinel pre-probe:** Before iterating the wordlist, three random-looking parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic `any` Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (>15 entries) for the pre-probe to pay off.
-- **EWMA collapse:** After bucket processing, Dalfox watches the rolling reflection ratio. A high ratio (≥85% after at least 15 candidate names) triggers a confirmation check for smaller lists. If the sentinels also reflect, mined Query params are folded into the same `any` placeholder; if they do not, every confirmed candidate is kept. A negative sentinel therefore does not cut coverage from the rest of a large wordlist.
+- **EWMA collapse:** After bucket processing, Dalfox watches the rolling reflection ratio. A high ratio (≥85% after at least 15 candidate names and 5 reflections) triggers a confirmation check for smaller lists. If the sentinels also reflect, mined Query params are folded into the same `any` placeholder; if they do not, every confirmed candidate is kept. A negative sentinel therefore does not cut coverage from the rest of a large wordlist.
 
 The sentinel-confirmed route produces one synthetic Query injection point. A negative sentinel preserves the individual reflected names, while still benefiting from bucketed requests.
 
@@ -97,9 +97,9 @@ dalfox scan urls.txt --out-of-scope '*.google.com' --out-of-scope '*.cdn.cloudfl
 
 ## Only discover, don't attack
 
-Both modes run the same discovery, mining, and active-probing requests and stop before the scan stage, so no XSS payload is sent. They differ in what they print.
+Both modes run the same discovery, mining, and active-probing requests and stop before the scan stage, so none of the scan's XSS payloads are sent. They differ in what they print.
 
-Dry-run prints the attack plan: target count, the parameters found per target, and a lower-bound estimate of the requests a real scan would send. It also skips the WAF provocation probe (one request carrying a `<script>` payload), so use it when no attack-shaped request may be sent at all.
+Dry-run prints the attack plan: target count, the parameters found per target, and a lower-bound estimate of the requests a real scan would send. It also skips the WAF provocation probe (one request carrying a `<script>` payload), which `--only-discovery` still sends unless `--skip-waf-probe` is set, so use dry-run when no attack-shaped request may be sent at all.
 
 ```bash
 dalfox scan https://target.app --dry-run
@@ -198,7 +198,7 @@ dalfox scan https://target.app/graphql \
 
 A plain REST endpoint that merely has a field named `query` (a search box, `{"query":"laptop"}`) is **not** treated as GraphQL — the `variables` object and an operation-shaped value are both required, so ordinary JSON bodies stay on the normal `json` path.
 
-**XML / SOAP** (`text/xml`, `application/xml`, `application/soap+xml`, or a body with an `<?xml …?>` prolog): each element text node and attribute value is probed, and each one that reflects becomes an `xml` parameter. A byte-range splice injects the payload in place, leaving every other byte of the document — namespaces, sibling elements, the SOAP envelope — untouched, and the request's XML content-type is preserved.
+**XML / SOAP** (`text/xml`, `application/xml`, `application/soap+xml`, `application/xhtml+xml`, or a body with an `<?xml …?>` prolog): each element text node and attribute value is probed, and each one that reflects becomes an `xml` parameter. A byte-range splice injects the payload in place, leaving every other byte of the document — namespaces, sibling elements, the SOAP envelope — untouched, and the request's XML content-type is preserved.
 
 ```bash
 dalfox scan https://target.app/soap \

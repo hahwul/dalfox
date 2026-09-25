@@ -48,7 +48,7 @@ Terminal jobs auto-purge after 1 hour.
   and `dalfox://scan/{scan_id}` is one scan (same body as `get_results_dalfox`). Every
   tracked scan is also listed individually by `resources/list`, which pages with a
   cursor, and a read of `dalfox://scans` bounds itself at 200 rows (it takes no page
-  parameters — `pagination` reports the cut). Results that carry a `scan_id` include a
+  parameters — `pagination` reports the cut). `scan_with_dalfox` and `get_results_dalfox` results include a
   `resource_link` content block pointing at that scan, so a host can attach the findings
   instead of re-fetching them (omitted for clients that negotiated a revision older than
   2025-06-18, which cannot parse the block). Resource contents carry

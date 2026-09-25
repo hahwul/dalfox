@@ -63,7 +63,7 @@ Use these in order of preference:
 - `--custom-blind-xss-payload file.txt` — blind XSS templates; each line must contain `{callback}` (lines without it are skipped)
 - `--inject-marker 'FUZZ'` — lets you write `https://target/?q=FUZZ` and have payloads replace the literal `FUZZ` token (great for complex JSON bodies or non-standard locations)
 
-`--custom-alert-value 'document.domain'` rewrites `alert(1)` → `alert(document.domain)` (clearer PoC). Add `--custom-alert-type str` only for a literal: it wraps the value in single quotes (`alert('dalfox')`), so with `document.domain` you would get the string, not the domain.
+`--custom-alert-value 'document.domain'` rewrites `alert(1)` → `alert(document.domain)` in the context-matched reflection payloads (clearer PoC; DOM-verification and fallback payloads keep `alert(1)`). Add `--custom-alert-type str` only for a literal: it wraps the value in single quotes (`alert('dalfox')`), so with `document.domain` you would get the string, not the domain.
 
 ## HTTP Parameter Pollution (HPP)
 

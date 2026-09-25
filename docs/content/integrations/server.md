@@ -68,8 +68,8 @@ CI job — send neither header and are unaffected.
 
 The `Host` header is checked the same way, which is what blocks DNS rebinding
 (a hostname the attacker controls, re-resolved to your machine, which the
-browser then treats as same-origin). IP literals and `localhost` are always
-accepted; any other hostname must be listed:
+browser then treats as same-origin). IP literals, `localhost` and the `--host`
+you bound to are always accepted; any other hostname must be listed:
 
 ```bash
 # only needed when a proxy forwards a public hostname to dalfox
@@ -152,8 +152,9 @@ statuses you will see are `400` (invalid body or option, including a body over
 untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown scan
 id), `409` (purge of a scan that is still active), `500` (a preflight that
 failed inside the server) and `503` (at capacity). The exceptions are a CORS
-preflight (`OPTIONS`), which answers `204` with no body, and a path or method
-not in the table, which gets a bare `404` / `405`.
+preflight (`OPTIONS`), which answers `204` with no body (or a bare `403` when the
+browser gate refuses it), and a path or method not in the table, which gets a
+bare `404` / `405`.
 
 ### Submit a scan
 
@@ -224,17 +225,18 @@ Response (while running):
 }
 ```
 
-`results` appears once the scan's worker has finished: the findings of a `done`
-scan, or the partial findings of an `error` / `cancelled` one. A scan that never
-reached the target, or was cancelled before it started, has no `results` at all,
-because nothing was tested. A scan cancelled while running reports `cancelled` at once but only gains `results` when the
-worker drains, which can take a few seconds. `error_message` is added when
-a scan failed or ran out of its `scan_timeout`. `progress` is absent while the scan is still
-`queued`. `requests_failed` counts requests that never reached the target
-(connect, TLS, timeout); when it is a large share of `requests_sent`, the scan
-did not really run, so read zero findings as "not scanned" rather than
-"clean". `suggested_poll_interval_ms` drops from `3000` to `2000` past 10% and
-to `1000` past 80%, and is `0` once the scan is terminal.
+- `results` appears once the scan's worker has finished: the findings of a
+  `done` scan, or the partial findings of an `error` / `cancelled` one. A scan
+  that never reached the target, or was cancelled before it started, has no
+  `results` at all. A scan cancelled while running reports `cancelled` at once
+  but only gains `results` when the worker drains, which can take a few seconds.
+- `error_message` is added when a scan failed or ran out of its `scan_timeout`.
+- `progress` is absent while the scan is still `queued`.
+- `requests_failed` counts requests that never reached the target (connect,
+  TLS, timeout). When it is a large share of `requests_sent`, the scan did not
+  really run: read zero findings as "not scanned", not "clean".
+- `suggested_poll_interval_ms` drops from `3000` to `2000` past 10% and to
+  `1000` past 80%, and is `0` once the scan is terminal.
 
 ### List scans
 
@@ -378,12 +380,9 @@ outdated / known-vulnerable JS libraries as informational `[I]` findings
 the CLI scanner default); send `"insecure": false` (or `?insecure=false` on
 `GET /scan`) to enforce certificate validation.
 
-`proxy` and `callback_url` are validated at submission and rejected with `400`
-when unusable, rather than being accepted and then silently discarded. An
-unusable `proxy` would otherwise resolve away to *no proxy*, so the scan would
-connect **directly** to the target — bypassing the tunnel you asked for — and
-still report `done`; a `callback_url` with a scheme other than `http(s)` would
-never be dialed, leaving your webhook subscriber waiting forever.
+`proxy` and `callback_url` are validated at submission, and an unusable value
+is a `400`. `callback_url` must be `http://` or `https://` (empty means no
+webhook).
 
 `analyze_external_js` is opt-in (default `false`): set it `true` to fetch
 same-origin `<script src>` bundles at preflight time and AST-analyze them for
@@ -411,19 +410,14 @@ preflight response still runs. `force_waf` pins a specific WAF profile (e.g.
 enables adaptive evasion. `waf_min_confidence` is the detection confidence floor
 in `[0.0, 1.0]` (default `0.3`); fingerprints below it are discarded.
 
-`method` and `encoders` are validated against the same value sets the CLI
-accepts. `method` is uppercased for you (`"post"` → `"POST"`), and an
-unsupported verb or an unknown encoder name is rejected with `400` rather than
-silently producing a scan that sends the wrong verb or skips encodings. `remote_payloads` and
-`remote_wordlists` are checked the same way: an unregistered provider name
-fetches nothing and would leave the scan reporting `done` with the payload
-coverage you asked for quietly missing.
+`method`, `encoders`, `remote_payloads` and `remote_wordlists` are checked
+against the same values the CLI accepts, and an unknown verb, encoder or
+provider name is a `400`. `method` is uppercased for you (`"post"` → `"POST"`).
 
-`blind` must be empty (meaning "no blind XSS") or start with `http://` /
-`https://`. Setting it arms *stored* blind-XSS injection — `<script src=...>`
-payloads are written into every query, body, header and cookie parameter and
-stay in the target — so a value that could never receive a callback is rejected
-with `400` rather than leaving those payloads behind for nothing.
+`blind` must be empty (meaning "no blind XSS") or an absolute `http://` /
+`https://` URL; anything else is a `400`. Setting it arms *stored* blind-XSS
+injection: `<script src=...>` payloads are written into every query, body,
+header and cookie parameter and stay in the target.
 
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached

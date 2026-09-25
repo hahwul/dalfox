@@ -178,7 +178,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--blind-oob-wait` | — | `30` | 모든 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) (`0` = 스캔 종료 후 추가 대기 없음) |
 | `--custom-payload` | — | — | 사용자 지정 페이로드 파일(한 줄에 하나, 빈 줄과 `#` 줄은 무시). `--only-custom-payload`가 없으면 내장 페이로드에 추가됩니다 |
 | `--only-custom-payload` | — | false | 사용자 지정 페이로드만 사용합니다. `--custom-payload`가 필요합니다 (없으면 종료 코드 `2`) |
-| `--custom-alert-value` | — | `1` | `alert()`/`prompt()`/`confirm()` 안에 들어가는 값 |
+| `--custom-alert-value` | — | `1` | 컨텍스트에 맞춘 반사 페이로드의 `alert()`/`prompt()`/`confirm()` 안에 들어가는 값 (DOM 검증용·폴백 페이로드는 `1` 유지) |
 | `--custom-alert-type` | — | `none` | `none` 또는 `str` |
 | `--inject-marker` | — | — | 이 토큰을 페이로드로 치환합니다 (예: `FUZZ`) |
 | `--skip-xss-scanning` | — | false | 페이로드 주입을 건너뜁니다 |
