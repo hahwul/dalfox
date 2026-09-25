@@ -2,7 +2,7 @@
 
 ## Search Order & Precedence
 
-1. Explicit `--config /path/to/file.toml` (or `.json`) — highest priority, fails visibly on parse error.
+1. Explicit `--config /path/to/file.toml` (or `.json`) — replaces the default location. A parse failure prints `Warning: failed to load --config …` on stderr and the run **continues on built-in defaults**; a path that does not exist is created from the template (stderr `Notice:`) and the run uses defaults. Check stderr before trusting a config took effect.
 2. Default user config (no `--config` flag):
    - `$XDG_CONFIG_HOME/dalfox/config.toml` (or `.json`) if `XDG_CONFIG_HOME` is set and non-empty
    - Otherwise `$HOME/.config/dalfox/config.toml` (preferred) or `config.json`
@@ -16,7 +16,7 @@ There is **no automatic project-local** `.dalfox/config.toml` discovery in the c
 
 The function `Config::apply_to_scan_args_if_default` only fills fields the operator did not supply on the command line. Which fields those are comes from clap's `ValueSource`, not from comparing values, so a flag typed with the value that happens to be its built-in default (`--workers 50`, `--method GET`) still wins over the config file.
 
-This is the same rule used by the server and (indirectly) by MCP callers who pass explicit parameters.
+Config values bypass clap's value parsers; `Config::normalize_and_validate` resets an invalid value to its default with a stderr `Warning:`.
 
 ## What Lives in a Config File
 
@@ -28,28 +28,25 @@ See the auto-generated template for the full schema. Common useful keys under `[
 - `workers = 20`
 - `timeout = 15`
 - `delay = 150`
-- `waf_bypass = "force"`
+- `waf_bypass = "off"` (only `off` changes behaviour; `force` acts like `auto`)
 - `force_waf = "cloudflare"`
 - `deep_scan = true`
 - `skip_mining = true`
 
-The config also supports top-level keys for server defaults in future versions, but today most server behavior is passed on the `dalfox server` command line.
-
 ## Banner & Silence Interaction
 
-Banner suppression is decided from three places (OR-ed):
+The banner is skipped when any of these holds:
 
-- Root `--silence` / `-S`
-- `scan.silence` under the subcommand
-- `silence = true` in the loaded config file
-
-Machine-readable output formats also force silence automatically.
+- `--silence` / `-S` (root or after `scan`), or `silence = true` in the config
+- `--format` (CLI or config `format`) is anything but `plain` (`format_is_machine`)
+- the subcommand is `mcp`
+- `dalfox payload` with a selector or `--json` (the argless prose summary keeps it)
 
 ## When to Recommend a Config File to the User
 
 - Repeated custom encoder sets
 - Corporate proxy + auth headers that must be present on every scan
-- Team-standard WAF bypass policy (`waf_bypass = "force"`, `force_waf = "akamai"`)
+- Team-standard WAF policy (`force_waf = "akamai"` pins the profile; `waf_bypass = "off"` for detect-only)
 - Lower worker count for politeness on a shared target range
 - Consistent `silence = true` + `format = "json"` for automation
 
@@ -66,11 +63,10 @@ waf_min_confidence = 0.4
 
 ## MCP and Server vs Config
 
-- MCP calls go through the same `ScanArgs` construction path but most fields come from the JSON-RPC parameters (no automatic config merge for MCP at the moment — the caller is expected to supply what they want).
-- The HTTP server (`dalfox server`) also accepts per-scan options in the request body and applies the same conservative default-merging logic where relevant.
+Neither `dalfox mcp` nor `dalfox server` reads the config file. Their scans are built from the request (JSON-RPC arguments / REST body) plus built-in defaults, so a team config's headers, encoders or `baseline` never apply there — pass them per request.
 
 ## Debugging "why is my setting not taking effect?"
 
-1. Run with `--debug` — look for config load messages.
-2. `dalfox --config /path/to/your.toml scan ... --help` (or just parse the args).
+1. Check stderr for `Warning:` / `Notice:` lines about the config.
+2. `dalfox scan --config /path/to/your.toml --debug --dry-run 'https://target/?q=1'` — preflight only, no payloads.
 3. Remember: if you typed the flag at all, the config value is ignored for that field.

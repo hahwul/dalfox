@@ -7,10 +7,12 @@
 | Situation | Command / Flags |
 |-----------|-----------------|
 | Unknown / first pass | `--waf-bypass auto` (default) |
-| Known Cloudflare, want to force bypass mutations | `--waf-bypass force --force-waf cloudflare` |
-| Akamai or ModSecurity | `--waf-bypass force --force-waf akamai` (or `modsecurity`) |
-| Very noisy / aggressive WAF | `--waf-bypass force --waf-evasion` (forces workers=1 + 3s delay) |
-| Only fingerprint, no bypass mutations | `--waf-bypass off` |
+| Known Cloudflare, detection misses it | `--force-waf cloudflare` |
+| Akamai or ModSecurity | `--force-waf akamai` (or `modsecurity`) |
+| Very noisy / aggressive WAF | `--waf-evasion` (adaptive jitter + escalating cooldown on block clusters; pair with `--rate-limit`) |
+| Only fingerprint, no bypass | `--waf-bypass off` (also skips the provocation probe and per-WAF pacing) |
+
+`--waf-bypass force` currently behaves exactly like `auto` — the code only distinguishes `off`. `--force-waf` is what pins a profile, and it does so in any mode (under `off` the pinned WAF is reported but no bypass runs).
 
 `--waf-min-confidence 0.3` (default) drops weak signals (Google Frontend, generic "request blocked" strings). Drop to `0.0` only when you are debugging fingerprinting.
 
@@ -20,7 +22,7 @@
 
 Biggest lever for request count is usually `--skip-mining` (or the more granular `--skip-mining-dom` / `--skip-mining-dict`).
 
-Discovery (`--skip-discovery`) turns off HTML form / link / inline-JS extraction. **Always pass `-p` when using it** — without `-p`, a bare URL has nothing to test. Bare `-p name` synthesizes a param when discovery/mining did not seed it (location inferred from the request, default `query`). Prefer `name:location` (`q:query`, `user:body`, `auth:header`, `sid:cookie`) when the location is not obvious.
+`--skip-discovery` turns off all discovery checks (query/header/cookie/path reflection, forms, fragment). **Always pass `-p` when using it** — without `-p`, a bare URL has nothing to test. Bare `-p name` synthesizes a param when discovery/mining did not seed it (location inferred from the request, default `query`). Prefer `name:location` (`q:query`, `user:body`, `auth:header`, `sid:cookie`) when the location is not obvious.
 
 `--only-discovery` / `--dry-run` are excellent for "how many parameters will this scan actually hit?" before a long run. Dry-run JSON surfaces `meta.warnings` if an explicit `-p` could not be seeded (e.g. `path` / `fragment`).
 
@@ -58,10 +60,10 @@ Use these in order of preference:
 
 - `--custom-payload file.txt` — appends to the built-in set
 - `--only-custom-payload --custom-payload file.txt` — uses that file as the local base set across reflection and DOM checks; adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still expand those custom payloads, and explicitly requested `--remote-payloads` remain active.
-- `--custom-blind-xss-payload file.txt` — only affects blind XSS mode
+- `--custom-blind-xss-payload file.txt` — blind XSS templates; each line must contain `{callback}` (lines without it are skipped)
 - `--inject-marker 'FUZZ'` — lets you write `https://target/?q=FUZZ` and have payloads replace the literal `FUZZ` token (great for complex JSON bodies or non-standard locations)
 
-`--custom-alert-value 'document.domain'` + `--custom-alert-type str` is useful when the target has a CSP that blocks bare `alert(1)` but allows `alert(document.domain)`.
+`--custom-alert-value 'document.domain'` rewrites `alert(1)` → `alert(document.domain)` (clearer PoC). Add `--custom-alert-type str` only for a literal: it wraps the value in single quotes (`alert('dalfox')`), so with `document.domain` you would get the string, not the domain.
 
 ## HTTP Parameter Pollution (HPP)
 
@@ -74,7 +76,7 @@ Use these in order of preference:
 - WAF evasion mode: let `--waf-evasion` do the throttling for you.
 - Very large number of targets: combine `--max-concurrent-targets 10` with per-host caps.
 
-`--scan-timeout` (wall-clock seconds per target after preflight) is useful when a single endpoint is hanging and you don't want one bad target to stall the entire file.
+`--scan-timeout` (wall-clock seconds per target, max 86400) caps only the payload-injection stage — discovery and mining are not covered. Useful when a single endpoint is hanging and you don't want one bad target to stall the entire file.
 
 ## raw-http Input (under-appreciated superpower)
 
