@@ -129,7 +129,7 @@ To move faster or work around a fragile target, skip parts of the pipeline:
 
 What you name explicitly survives these flags. Body parameters from `-d` are probed even under `--skip-mining`, and a `-p name:header` or `-p name:cookie` is probed even under the matching `--skip-reflection-*` flag. The payload-side skips (`--skip-xss-scanning`, `--skip-ast-analysis`, `--skip-waf-probe`) are listed in the [CLI reference](../../reference/cli/).
 
-> `--skip-mining-dom` only stops dalfox from harvesting parameter *names* out of the response HTML. It does **not** disable DOM-XSS detection: the static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/). To filter those findings out of the output instead, use `--only-poc v,r`. See [Detection Model](../detection-model/) for how the two subsystems differ and what each evidence tier proves.
+> `--skip-mining-dom` only stops dalfox from harvesting parameter *names* out of the response HTML. It does **not** disable DOM-XSS detection: the static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/#skipping-payload-stages). To filter those findings out of the output instead, use `--only-poc v,r`. See [Detection Model](../detection-model/) for how the two subsystems differ and what each evidence tier proves.
 
 ## Injection markers
 

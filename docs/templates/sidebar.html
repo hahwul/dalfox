@@ -14,7 +14,8 @@
   {"en": "Payloads & Encoding", "ko": "페이로드와 인코딩", "u": "/guide/payloads/"},
   {"en": "WAF Bypass", "ko": "WAF 우회", "u": "/guide/waf-bypass/"},
   {"en": "Stored XSS", "ko": "저장형 XSS", "u": "/guide/stored-xss/"},
-  {"en": "Output & Reports", "ko": "출력과 리포트", "u": "/guide/output/"}
+  {"en": "Output & Reports", "ko": "출력과 리포트", "u": "/guide/output/"},
+  {"en": "Detection Model", "ko": "탐지 모델", "u": "/guide/detection-model/"}
 ] %}
 {% set integ_links = [
   {"en": "Overview", "ko": "개요", "u": "/integrations/"},
@@ -31,10 +32,10 @@
   {"en": "XSSMaze Score", "ko": "XSSMaze 점수", "u": "/reference/xssmaze/"}
 ] %}
 <aside class="docs-sidebar" id="docs-sidebar">
-  <nav class="sidebar-nav">
+  <nav class="sidebar-nav" aria-label="{% if ko %}문서{% else %}Documentation{% endif %}">
     <div class="sidebar-section">
       <div class="sidebar-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
         {% if ko %}시작하기{% else %}Getting Started{% endif %}
       </div>
       <ul class="sidebar-links">
@@ -44,7 +45,7 @@
     </div>
     <div class="sidebar-section">
       <div class="sidebar-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
         {% if ko %}가이드{% else %}Guide{% endif %}
       </div>
       <ul class="sidebar-links">
@@ -54,7 +55,7 @@
     </div>
     <div class="sidebar-section">
       <div class="sidebar-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         {% if ko %}연동{% else %}Integrations{% endif %}
       </div>
       <ul class="sidebar-links">
@@ -64,7 +65,7 @@
     </div>
     <div class="sidebar-section">
       <div class="sidebar-title">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
         {% if ko %}레퍼런스{% else %}Reference{% endif %}
       </div>
       <ul class="sidebar-links">
@@ -74,12 +75,12 @@
     </div>
   </nav>
   <div class="sidebar-footer">
-    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v{{ site.data.dalfox.version }}" target="_blank" rel="noopener" title="Dalfox v{{ site.data.dalfox.version }} release notes">v{{ site.data.dalfox.version }}</a>
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v{{ site.data.dalfox.version }}" target="_blank" rel="noopener" title="{% if ko %}Dalfox v{{ site.data.dalfox.version }} 릴리스 노트{% else %}Dalfox v{{ site.data.dalfox.version }} release notes{% endif %}">v{{ site.data.dalfox.version }}</a>
     <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="{% if ko %}사이드바 접기{% else %}Collapse sidebar{% endif %}" title="{% if ko %}사이드바 접기{% else %}Collapse sidebar{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
     </button>
   </div>
 </aside>
 <button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="{% if ko %}사이드바 펼치기{% else %}Expand sidebar{% endif %}" title="{% if ko %}사이드바 펼치기{% else %}Expand sidebar{% endif %}">
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
 </button>

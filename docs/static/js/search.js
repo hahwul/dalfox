@@ -9,6 +9,9 @@
   // to the language the reader is currently in, so a Korean page searches
   // Korean docs and an English page searches English docs.
   var pageIsKo = /^\/ko(\/|$)/.test(location.pathname);
+  var L = pageIsKo
+    ? { none: function (q) { return '"' + q + '"에 대한 검색 결과가 없습니다'; }, navigate: '이동', open: '열기', close: '닫기' }
+    : { none: function (q) { return 'No results for "' + q + '"'; }, navigate: 'navigate', open: 'open', close: 'close' };
   function inCurrentLang(url) {
     var path = (url || '').replace(/^https?:\/\/[^/]+/, '');
     return /^\/ko(\/|$)/.test(path) === pageIsKo;
@@ -100,7 +103,7 @@
     results = results.slice(0, 10);
 
     if (results.length === 0) {
-      resultsEl.innerHTML = '<div class="search-no-results">No results for "' + escapeHtml(query) + '"</div>';
+      resultsEl.innerHTML = '<div class="search-no-results">' + L.none(escapeHtml(query)) + '</div>';
       activeIndex = -1;
       return;
     }
@@ -114,7 +117,7 @@
         + '<div class="search-result-snippet">' + highlightMatch(snippet, query.trim()) + '</div>'
         + '</a>';
     }
-    html += '<div class="search-hint"><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span><span><kbd>Enter</kbd> open</span><span><kbd>ESC</kbd> close</span></div>';
+    html += '<div class="search-hint"><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> ' + L.navigate + '</span><span><kbd>Enter</kbd> ' + L.open + '</span><span><kbd>ESC</kbd> ' + L.close + '</span></div>';
     resultsEl.innerHTML = html;
     activeIndex = -1;
   }

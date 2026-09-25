@@ -98,7 +98,7 @@ dalfox scan urls.txt --out-of-scope '*.google.com' --out-of-scope '*.cdn.cloudfl
 
 두 모드 모두 같은 탐색, 마이닝, 능동 프로빙 요청을 실행하고 스캔 단계 전에 멈추므로, XSS 페이로드는 보내지 않습니다. 차이는 무엇을 출력하느냐입니다.
 
-Dry-run은 공격 계획을 출력합니다. 대상 수, 대상별로 찾은 파라미터, 실제 스캔이 보낼 요청 수의 하한 추정치입니다. WAF 유도 프로브(`<script>` 페이로드를 담은 요청 1건)도 건너뛰므로, 공격 형태의 요청을 하나도 보내면 안 될 때는 이쪽을 쓰세요.
+Dry-run은 공격 계획을 출력합니다. 대상 수, 대상별로 찾은 파라미터, 실제 스캔이 보낼 요청 수의 하한 추정치입니다. WAF 자극 프로브(`<script>` 페이로드를 담은 요청 1건)도 건너뛰므로, 공격 형태의 요청을 하나도 보내면 안 될 때는 이쪽을 쓰세요.
 
 ```bash
 dalfox scan https://target.app --dry-run
@@ -128,7 +128,7 @@ dalfox scan https://target.app --only-discovery
 
 명시적으로 지정한 것은 이 플래그들의 영향을 받지 않습니다. `-d` 본문 파라미터는 `--skip-mining`에서도 프로빙되고, `-p name:header`나 `-p name:cookie`는 해당 `--skip-reflection-*` 플래그가 있어도 프로빙됩니다. 페이로드 쪽 건너뛰기 플래그(`--skip-xss-scanning`, `--skip-ast-analysis`, `--skip-waf-probe`)는 [CLI 레퍼런스](../../reference/cli/)에 있습니다.
 
-> `--skip-mining-dom`은 응답 HTML에서 파라미터 *이름*을 수집하는 동작만 멈춥니다. DOM-XSS 탐지 자체를 끄지는 **않습니다**: 인라인 `<script>` 블록을 정적 분석해 `location.hash` → `innerHTML` 같은 source→sink 흐름을 찾아 `[A]`(AST 탐지) 결과를 내는 패스는 [`--skip-ast-analysis`](../payloads/)가 제어하는 별개의 단계입니다. 결과에서 해당 항목만 걸러내려면 `--only-poc v,r`을 사용하세요. 두 서브시스템의 차이와 각 증거 등급의 의미는 [탐지 모델](../detection-model/) 문서를 참고하세요.
+> `--skip-mining-dom`은 응답 HTML에서 파라미터 *이름*을 수집하는 동작만 멈춥니다. DOM-XSS 탐지 자체를 끄지는 **않습니다**: 인라인 `<script>` 블록을 정적 분석해 `location.hash` → `innerHTML` 같은 source→sink 흐름을 찾아 `[A]`(AST 탐지) 결과를 내는 패스는 [`--skip-ast-analysis`](../payloads/#페이로드-단계-건너뛰기)가 제어하는 별개의 단계입니다. 결과에서 해당 항목만 걸러내려면 `--only-poc v,r`을 사용하세요. 두 서브시스템의 차이와 각 증거 등급의 의미는 [탐지 모델](../detection-model/) 문서를 참고하세요.
 
 ## 주입 마커(Injection markers)
 

@@ -1,7 +1,7 @@
 +++
 title = "Caido Workflows"
 description = "Run Dalfox automatically from Caido Active Workflows and Findings to catch XSS in real time."
-weight = 4
+weight = 3
 toc = true
 aliases = ["/page/running/caido/"]
 +++

@@ -39,7 +39,7 @@ Every finding includes:
 | `type` | `V`, `A`, `R`, `I` | Finding tier: Vulnerable / AST-detected / Reflected / Informational |
 | `type_description` | `"Vulnerable - dalfox asserts this input is exploitable; act on it"` | Human label (the full sentence, not the bare word) |
 | `detection_method` | `"ast"` | How it was found: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
-| `confidence` | `"high"` | Whether Dalfox can claim a vulnerability (`high` / `low`); absent on `I` |
+| `confidence` | `"high"` | How strongly the evidence supports the claim (`high` / `low`); absent on `I` |
 | `confidence_reason` | `"URL-carried source; inline script permitted"` | The deciding signals |
 | `inject_type` | `"inHTML"` | Finding label: `inHTML` for injected payloads (`sxss-inHTML` under `--sxss`, with a `-CSTI` or framework-sink suffix such as `-VHtml` when one applies), `inHTML-HPP`, `DOM-XSS` (AST), `blind-oob-<location>-<protocol>`, `OutdatedComponent` (`I`) |
 | `method` | `"GET"` | HTTP method |
@@ -137,11 +137,11 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `failed_requests` — requests that never got a response (reset, refused, timed out) after their retries. A payload that never reached the target was never tested
 - `findings_count`
 - `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or cut short (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
-- `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
-- `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/)
+- `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/#collapsing-near-duplicate-urls) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
+- `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/#file-mode)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
 - `resumed` — only when `--state-file` was used: `state_file` (the path) and `targets_skipped_completed` (targets skipped because an earlier run finished them)
-- `incomplete` — `true` when the run was **not fully tested**: a target's authenticated session died mid-scan (see [Session monitoring](../scanning-modes/)), or at least 10% of the run's requests (and at least 3) never got a response. Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
+- `incomplete` — `true` when the run was **not fully tested**: a target's authenticated session died mid-scan (see [Session monitoring](../scanning-modes/#session-monitoring)), or at least 10% of the run's requests (and at least 3) never got a response. Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
 
 A target whose session died is reported as `"status": "incomplete"` (or `"skipped"` if it never ran) with `"error_code": "SESSION_LOST"` and the signal that fired in `"error_message"` — never as `"clean"`.
 

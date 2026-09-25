@@ -53,9 +53,9 @@ Pair Dalfox with `jq`, a dashboard, or CI:
 dalfox scan 'https://target.app/search?q=test' -f json -o report.json
 ```
 
-Machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) auto-suppress the banner so the file stays clean.
+Every format except `plain` (so `json`, `jsonl`, `markdown`, `sarif`, `toml`) suppresses the banner, so the file stays clean.
 
-The exit code is CI-friendly too: `0` means the scan finished with no findings, `1` means it found something, and `2` means there is no result to trust: an input, configuration, or runtime error, every target unreachable, or a no-finding run that lost too many requests to count as clean (Dalfox prints a `WRN INCOMPLETE` line when that happens).
+The exit code is CI-friendly too: `0` means the scan finished with no findings, `1` means it found something, and `2` means there is no result to trust: an input, configuration, or runtime error, every target unreachable, or a no-finding run that could not finish cleanly: too many requests lost to count as clean (Dalfox prints a `WRN INCOMPLETE` line when that happens), or an authenticated session that expired mid-scan (under the default `--on-session-loss abort`). See [Exit codes](../../guide/output/#exit-codes) for the full rule.
 
 ## 5. Authenticated scans
 
@@ -101,7 +101,7 @@ dalfox scan https://target.app --blind-oob             # public interactsh mesh
 dalfox scan https://target.app --blind-oob=oast.fun    # pick servers
 ```
 
-Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes.
+A callback that arrives becomes a `V` finding with `detection_method: oob`. Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes. See [Blind XSS](../../guide/scanning-modes/#blind-xss) for the details.
 
 `--insecure` (on by default) does **not** reach the public mesh. It is a statement about the scan target, which you do not control; the OAST server is infrastructure Dalfox picked, and that channel carries your `--blind-oob-secret` and the session key that reads your callbacks. The public servers present valid certificates, so they are always verified. `--insecure` still applies to a server you named yourself with `--blind-oob=`, which is the case it exists for — a self-hosted interactsh behind a self-signed or hostname-mismatched certificate.
 
@@ -128,7 +128,7 @@ Each finding is tagged:
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 
-`[V]` is not browser execution. Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as `[A]` today and is worth confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (whether Dalfox can claim a vulnerability) — see [Detection Model](../../guide/detection-model/).
+`[V]` is not browser execution. Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as `[A]` today and is worth confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (how strongly the evidence supports the claim) — see [Detection Model](../../guide/detection-model/).
 
 ## Next steps
 

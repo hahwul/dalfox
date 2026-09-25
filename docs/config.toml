@@ -62,7 +62,7 @@ use_cdn = false           # Vendored locally under static/assets/ (no external C
 # Page-level settings (front matter) override these defaults
 
 [og]
-default_image = "/images/og-default.png"   # Default image for social sharing
+default_image = "/images/logo.png"         # Fallback for pages without an auto OG image (404)
 type = "article"                           # OpenGraph type (website, article, etc.)
 twitter_card = "summary_large_image"       # Twitter card type (summary, summary_large_image)
 # twitter_site = "@yourusername"           # Twitter @username for the site
@@ -108,10 +108,11 @@ enabled = true
 # =============================================================================
 # Related Posts
 # =============================================================================
-# Recommend related content based on shared taxonomy terms
+# Recommend related content based on shared taxonomy terms.
+# Off: no page carries taxonomy terms, so there is nothing to relate on.
 
 [related]
-enabled = true
+enabled = false
 limit = 5
 taxonomies = ["tags"]
 
@@ -119,18 +120,10 @@ taxonomies = ["tags"]
 # Taxonomies
 # =============================================================================
 # Define content classification systems (tags, categories, etc.)
-
-[[taxonomies]]
-name = "tags"
-feed = true
-sitemap = false
-
-[[taxonomies]]
-name = "categories"
-paginate_by = 5
-
-[[taxonomies]]
-name = "authors"
+#
+# None defined: no docs page sets tags/categories/authors, and declaring them
+# only produced empty /tags/, /categories/ and /authors/ listings (two of them
+# in the sitemap). Re-add a [[taxonomies]] block here once pages carry terms.
 
 # =============================================================================
 # Sitemap

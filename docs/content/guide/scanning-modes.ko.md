@@ -300,4 +300,4 @@ dalfox payload uri-scheme        # javascript:/data: 페이로드 출력
 | 나중에 보이지 않는 곳에서 실행되는 페이로드 잡기 | Blind (`-b` / `--blind-oob`) |
 | 대시보드나 CI에서 여러 스캔 실행 | Server |
 | AI 에이전트가 스캔을 구동하게 하기 | MCP |
-| Dalfox가 보낼 페이로드만 확인 | Payload 유틸리티나 `--dry-run` |
+| 공격 없이 Dalfox가 보낼 것만 확인 | Payload 유틸리티(페이로드 목록)나 `--dry-run`(대상별 계획과 요청 수 추정) |

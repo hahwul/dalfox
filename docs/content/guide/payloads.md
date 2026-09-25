@@ -142,23 +142,7 @@ Supported sources: `portswigger`, `payloadbox`. Fetched once per run, respecting
 
 ## Inspecting payloads
 
-Print a payload family without running a scan:
-
-| Selector | Description | Example |
-|----------|-------------|---------|
-| `javascript` | Print the canonical JavaScript execution payloads used in JS-string / script contexts (`alert(1)`, backtick and keyword-split variants, ...) | `dalfox payload javascript` |
-| `event-handlers` | List all DOM event handler attribute names (e.g., `onclick`, `onmouseover`) | `dalfox payload event-handlers` |
-| `useful-tags` | List useful HTML tag names often used in XSS contexts (e.g., `script`, `img`, `svg`) | `dalfox payload useful-tags` |
-| `payloadbox` | Fetch and print remote XSS payloads from PayloadBox | `dalfox payload payloadbox` |
-| `portswigger` | Fetch and print remote XSS payloads from PortSwigger | `dalfox payload portswigger` |
-| `uri-scheme` | Print scheme-based XSS payloads (`javascript:`, `data:`, etc.) | `dalfox payload uri-scheme` |
-| `special-chars` | Print special characters (and encoded variants) for context probing / breakout | `dalfox payload special-chars` |
-| `functions` | Print visibly-confirmable sinks with filter-surviving variants (`alert`, `prompt`, ...) | `dalfox payload functions` |
-| `awesome-alert` | Print polished alert PoCs for clean screenshots/demos (`alert(document.domain)`, ...) | `dalfox payload awesome-alert` |
-| `dom-clobbering` | Print DOM clobbering payloads | `dalfox payload dom-clobbering` |
-| `mxss` | Print mutation-XSS / sanitizer-bypass payloads | `dalfox payload mxss` |
-| `blind` | Print blind-XSS skeletons (`{}` = your OOB callback URL) | `dalfox payload blind` |
-| `all` | Print every local selector above in one pass, each under a `# name` header (remote selectors excluded — no network fetch) | `dalfox payload all` |
+Print a payload family without running a scan. Each selector is described in the [CLI reference](../../reference/cli/); `portswigger` and `payloadbox` fetch remote lists, the rest are built in:
 
 ```bash
 dalfox payload javascript      # alert(1), alert`1`, prompt(1), ...
@@ -172,6 +156,7 @@ dalfox payload dom-clobbering  # DOM clobbering vectors
 dalfox payload mxss            # mutation-XSS / sanitizer-bypass payloads
 dalfox payload blind           # blind-XSS skeletons ({} = your callback URL)
 dalfox payload portswigger     # fetch + print remote list
+dalfox payload payloadbox      # fetch + print remote list
 dalfox payload all             # every local selector, grouped under "# name" headers
 ```
 
@@ -223,7 +208,7 @@ dalfox scan https://target.app \
 
 Only lines containing `{callback}` are used; other lines are skipped with a warning, and `#` comments and blank lines are ignored. A literal `{}` is left alone, so a template can carry JavaScript like `()=>{}`. That also means the `{}` skeletons printed by `dalfox payload blind` need `{}` changed to `{callback}` before you use them here. If no line is usable, Dalfox falls back to the built-in templates.
 
-Without a callback server of your own, `--blind-oob` registers with interactsh and polls for the callback itself; see [Quick Start](../../getting-started/quick-start/).
+Without a callback server of your own, `--blind-oob` registers with interactsh and polls for the callback itself, and a callback that arrives becomes a `V` finding; see [Blind XSS](../scanning-modes/#blind-xss) in Scanning Modes.
 
 ## HTTP Parameter Pollution (HPP)
 

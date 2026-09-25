@@ -402,10 +402,12 @@ MCP scan tool's field of the same name.
 
 The five WAF fields mirror the CLI's WAF flags and are all optional — omit them
 and the scanner defaults apply. `waf_bypass` selects the handling mode:
-`"auto"` (detect then bypass, the default), `"force"` (use `force_waf`), or
-`"off"` (detect only). `skip_waf_probe` (default `false`) skips the WAF
-fingerprinting probe entirely. `force_waf` pins a specific WAF profile (e.g.
-`"cloudflare"`) instead of detecting one. `waf_evasion` (default `false`)
+`"auto"` (detect then bypass, the default) or `"off"` (detect and report
+only); `"force"` is accepted and behaves like `"auto"`. `skip_waf_probe`
+(default `false`) skips the active provocation probe; passive detection on the
+preflight response still runs. `force_waf` pins a specific WAF profile (e.g.
+`"cloudflare"`) in place of whatever detection found, under `"auto"` or
+`"force"` alike; under `"off"` it is reported but no bypass is applied. `waf_evasion` (default `false`)
 enables adaptive evasion. `waf_min_confidence` is the detection confidence floor
 in `[0.0, 1.0]` (default `0.3`); fingerprints below it are discarded.
 

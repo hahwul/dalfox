@@ -53,9 +53,9 @@ waybackurls example.com | gf xss | dalfox
 dalfox scan 'https://target.app/search?q=test' -f json -o report.json
 ```
 
-기계 판독 형식(`json`, `jsonl`, `sarif`, `toml`)은 배너를 자동으로 끄기 때문에 파일이 깔끔하게 남습니다.
+`plain`을 제외한 모든 형식(`json`, `jsonl`, `markdown`, `sarif`, `toml`)은 배너를 끄기 때문에 파일이 깔끔하게 남습니다.
 
-종료 코드도 CI에 맞춰져 있습니다. `0`은 탐지 결과 없이 스캔이 끝났다는 뜻이고, `1`은 무언가를 찾았다는 뜻입니다. `2`는 믿을 만한 결과가 없다는 뜻으로, 입력·설정·실행 중 오류가 났거나, 모든 대상에 접속하지 못했거나, 탐지 결과 없이 끝났지만 요청을 너무 많이 잃어 깨끗하다고 볼 수 없는 경우입니다(이때는 `WRN INCOMPLETE` 라인이 찍힙니다).
+종료 코드도 CI에 맞춰져 있습니다. `0`은 탐지 결과 없이 스캔이 끝났다는 뜻이고, `1`은 무언가를 찾았다는 뜻입니다. `2`는 믿을 만한 결과가 없다는 뜻으로, 입력·설정·실행 중 오류가 났거나, 모든 대상에 접속하지 못했거나, 탐지 결과 없이 끝났지만 깨끗하게 마치지 못한 경우입니다. 요청을 너무 많이 잃어 깨끗하다고 볼 수 없거나(이때는 `WRN INCOMPLETE` 라인이 찍힙니다), 스캔 도중 인증 세션이 만료된 경우(기본값 `--on-session-loss abort`일 때)가 여기에 해당합니다. 전체 규칙은 [종료 코드](../../guide/output/#종료-코드)를 참고하세요.
 
 ## 5. 인증이 필요한 스캔
 
@@ -101,7 +101,7 @@ dalfox scan https://target.app --blind-oob             # 공개 interactsh 메�
 dalfox scan https://target.app --blind-oob=oast.fun    # 서버 지정
 ```
 
-자체 호스팅 서버라면 `--blind-oob-secret`을 쓰고, 스캔이 끝난 뒤 폴링을 얼마나 더 이어갈지는 `--blind-oob-wait`으로 정합니다.
+도착한 콜백은 `detection_method: oob`인 `V` 탐지 결과가 됩니다. 자체 호스팅 서버라면 `--blind-oob-secret`을 쓰고, 스캔이 끝난 뒤 폴링을 얼마나 더 이어갈지는 `--blind-oob-wait`으로 정합니다. 자세한 내용은 [Blind XSS](../../guide/scanning-modes/#blind-xss)를 참고하세요.
 
 `--insecure`(기본으로 켜져 있음)는 공개 메시에는 **적용되지 않습니다**. 이 옵션은 여러분이 통제하지 않는 스캔 대상에 대한 선택인 반면, OAST 서버는 Dalfox가 고른 인프라이고 그 채널에는 `--blind-oob-secret`과 콜백을 읽어오는 세션 키가 실립니다. 공개 서버들은 정상 인증서를 쓰므로 항상 검증합니다. `--blind-oob=`로 직접 지정한 서버에는 `--insecure`가 그대로 적용됩니다. 자체 서명 인증서나 호스트명이 맞지 않는 인증서를 쓰는 자체 호스팅 interactsh가 바로 이 옵션이 필요한 경우입니다.
 
@@ -128,7 +128,7 @@ dalfox scan https://target.app --dry-run
 
 `V`와 `A`는 바로 조치할 수 있는 결과입니다. `R`은 한 번 볼 만하지만 이후 단계에서 더 걸러질 수 있습니다.
 
-`[V]`는 브라우저 실행이 아닙니다. Dalfox는 설계상 브라우저를 구동하지 않습니다. 순수 클라이언트 사이드 DOM-XSS는 지금은 `[A]`로 보고되니 브라우저에서 직접 확인해 보세요. 각 결과에는 `detection_method`(어떻게 찾았는지)와 `confidence`(취약점이라고 주장할 수 있는지)도 함께 실립니다 — [탐지 모델](../../guide/detection-model/) 문서를 참고하세요.
+`[V]`는 브라우저 실행이 아닙니다. Dalfox는 설계상 브라우저를 구동하지 않습니다. 순수 클라이언트 사이드 DOM-XSS는 지금은 `[A]`로 보고되니 브라우저에서 직접 확인해 보세요. 각 결과에는 `detection_method`(어떻게 찾았는지)와 `confidence`(증거가 그 주장을 얼마나 강하게 뒷받침하는지)도 함께 실립니다 — [탐지 모델](../../guide/detection-model/) 문서를 참고하세요.
 
 ## 다음 단계
 

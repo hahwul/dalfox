@@ -25,7 +25,7 @@ v3 unifies the scan subcommands behind a single entrypoint.
 
 {{ alert(type="info", body="The legacy url, file and pipe subcommands survive as hidden aliases. file and pipe keep their v2 shape. url does not: it takes the target through -u/--url (dalfox url -u URL), so a v2 line like dalfox url URL fails — switch it to dalfox scan URL. sxss did not survive: stored-XSS scanning moved onto the scan subcommand as the --sxss flag.") }}
 
-v2's `--rawdata`, `--har` and `--http` input switches are gone too. A captured raw HTTP request and a HAR export are auto-detected (`dalfox scan request.txt`, `dalfox scan capture.har`), or can be forced with `--input-type raw-http` / `--input-type har`. A raw request whose request line holds only a path follows its `:scheme` pseudo-header when it has one; failing that, it goes out over `https` when it carries an HTTP/2 signal or a `:443` Host, and over `http` otherwise; put a full URL in the request line to pin the scheme. See [Quick Start](../quick-start/).
+v2's `--rawdata`, `--har` and `--http` input switches are gone too. A captured raw HTTP request and a HAR export are auto-detected (`dalfox scan request.txt`, `dalfox scan capture.har`), or can be forced with `--input-type raw-http` / `--input-type har`. A raw request whose request line holds only a path follows its `:scheme` pseudo-header when it has one; failing that, it goes out over `https` when it carries an HTTP/2 signal or a `:443` Host, and over `http` otherwise; put a full URL in the request line to pin the scheme. See [Raw HTTP mode](../../guide/scanning-modes/#raw-http-mode) and [HAR mode](../../guide/scanning-modes/#har-mode).
 
 ## 2. Renamed flags
 
@@ -57,7 +57,7 @@ Some legacy flags and the heavyweight engines behind them were dropped to keep v
 | `--grep <file>`, `--skip-grepping` | None. | **Engine replaced**. Regex response matching gave way to context-aware AST analysis. `--only-poc g` (grep findings) went with it. |
 | `--report`, `--report-format` | `-f markdown -o <file>`, `-f sarif -o <file>`. | **Standardization**. Report flags folded into the output format flags — see [Output & Reports](../../guide/output/). |
 | `--max-cpu` | Automatic. | **Architecture**. The async scheduler (`tokio`) allocates work across cores; manual CPU pinning is obsolete. |
-| `--no-spinner` | Automatic. | **UI**. Spinners and progress bars draw only when stdout is a terminal and `-S` is off. The banner is dropped for `-S` and for machine-readable formats (`json`, `jsonl`, `sarif`, `toml`). |
+| `--no-spinner` | Automatic. | **UI**. Spinners and progress bars draw only when stdout is a terminal and `-S` is off. The banner is dropped for `-S` and for every format except `plain`. |
 | `--context-aware`, `--magic-char-test` | Nothing to configure. | **Built in**. Every reflected parameter gets per-character probes (`valid_specials` / `invalid_specials`) that steer payload selection. |
 | `--deep-domxss`, `--detailed-analysis`, `--fast-scan`, `--har-file-path`, `--output-all` | None. | **Removed**. No v3 flag replaces them; v3 reads HAR files as input but does not record one. |
 
@@ -66,15 +66,15 @@ Because headless verification is gone, a finding's evidence class matters more t
 ## 4. What v3 adds
 
 - **MCP server (`dalfox mcp`)** — exposes Dalfox to AI coding assistants over JSON-RPC on stdio, replacing v2's `server --type mcp`. See [MCP Server](../../integrations/mcp/).
-- **Hard time budget (`--scan-timeout <secs>`)** — caps the payload-injection stage per target so a half-hung server can't stall the run. Discovery and mining are bounded by `--timeout` instead.
+- **Hard time budget (`--scan-timeout <secs>`)** — caps the payload-injection stage per target so a half-hung server can't stall the run. Preflight, discovery and mining run before that stage and are not covered by it; there only the per-request `--timeout` applies. (`dalfox server` and MCP apply their `scan_timeout` to the whole job.)
 - **Payload cap (`--max-payloads-per-param <int>`)** — keeps combinatorial payload expansion (bypasses × encoders) from turning into a request burst.
 - **Preflight (`--dry-run`)** — reports discovered parameters and an estimated request count without sending a single payload.
-- **Adaptive WAF evasion (`--waf-evasion`)** — the flag existed in v2 as a fixed `worker=1, delay=3s` preset. In v3, on WAF detection, it randomizes inter-request timing and escalates a cooldown when blocked responses cluster. See [WAF Bypass](../../guide/waf-bypass/).
+- **Adaptive WAF evasion (`--waf-evasion`)** — the flag existed in v2 as a fixed `worker=1, delay=3s` preset. In v3 it randomizes inter-request timing (whether or not a WAF was detected) and escalates a cooldown when blocked responses cluster. See [WAF Bypass](../../guide/waf-bypass/).
 - **HTTP parameter pollution (`--hpp`)** — duplicates query parameters to slip past string-matching WAF layers.
 - **Managed OAST (`--blind-oob`)** — registers an interactsh session and correlates callbacks to the payload that caused them, alongside the plain `-b` callback URL.
 - **Pacing and retries (`--rate-limit`, `--retries`)** — a global requests-per-second cap shared by every worker, and backoff retries on 5xx and transient errors.
 - **Resumable and incremental runs (`--state-file`, `--baseline`)** — skip targets a previous run completed, or report only findings new since an earlier JSON report.
-- **Session monitoring (`--session-check`)** — an authenticated scan whose session drops is reported as incomplete instead of clean.
+- **Session monitoring** — on automatically whenever the scan carries credentials (`--session-check` pins it to a marker you choose); an authenticated scan whose session drops is reported as incomplete instead of clean. See [Session monitoring](../../guide/scanning-modes/#session-monitoring).
 - **Shell completions (`dalfox completion <shell>`)** — bash, zsh, fish, PowerShell, and Elvish.
 
 ## Next steps

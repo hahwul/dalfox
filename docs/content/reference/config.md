@@ -140,7 +140,7 @@ debug = false
 |-----|------|---------|-------------|
 | `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature` (collapse URLs differing only in param values), `off` |
-| `state_file` | string | — | Record completed targets and skip them on re-run. **CLI only** — ignored by `dalfox server` / MCP |
+| `state_file` | string | — | Record completed targets and skip them on re-run ([Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-interrupted-scan)). **CLI only** — ignored by `dalfox server` / MCP |
 
 ### Output
 
@@ -158,7 +158,7 @@ debug = false
 | `limit` | int | — | Cap on result count (must be at least `1`; `0` is ignored with a warning) |
 | `limit_result_type` | string | `"all"` | Which types count: `all`, `v`, `r`, `a`, `i` |
 | `only_poc` | array | `[]` | Filter output: `["v","a"]` |
-| `baseline` | string | — | Previous JSON/JSONL report to diff against; only findings new since it are reported. **CLI only** — ignored by `dalfox server` / MCP |
+| `baseline` | string | — | Previous JSON/JSONL report to diff against; only findings new since it are reported ([Baselines](../../guide/output/#baselines-reporting-only-what-is-new)). **CLI only** — ignored by `dalfox server` / MCP |
 | `baseline_mode` | string | `"filter"` | `filter` drops known findings, `annotate` keeps them and marks each `new` |
 | `no_color` | bool | `false` | Disable ANSI colour |
 
@@ -176,7 +176,7 @@ debug = false
 
 ### Session
 
-Mid-scan session-loss detection — see [Session monitoring](../../guide/scanning-modes/).
+Mid-scan session-loss detection — see [Session monitoring](../../guide/scanning-modes/#session-monitoring).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -267,7 +267,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `waf_bypass` | string | `"auto"` | `auto` or `off` (detect and report only). `force` is accepted and behaves like `auto`; `force_waf` is what picks the WAF |
 | `skip_waf_probe` | bool | `false` | Skip active fingerprinting |
 | `force_waf` | string | — | Treat the target as this WAF instead of what detection found (same names as `--force-waf`, case-insensitive) |
-| `waf_evasion` | bool | `false` | Adaptive evasion on WAF detection: randomized jitter + escalating cooldown on block clusters (pairs with `rate_limit`) |
+| `waf_evasion` | bool | `false` | Adaptive evasion: randomized inter-request jitter (with or without a detected WAF) + escalating cooldown on block clusters (pairs with `rate_limit`) |
 | `waf_min_confidence` | float | `0.3` | Drop fingerprints below this confidence (0.0–1.0); default suppresses weak matches |
 
 ### Logging

@@ -39,7 +39,7 @@ dalfox scan https://target.app -f jsonl -o findings.jsonl
 | `type` | `V`, `A`, `R`, `I` | 탐지 티어: Vulnerable / AST 탐지 / Reflected / Informational |
 | `type_description` | `"Vulnerable - dalfox asserts this input is exploitable; act on it"` | 사람이 읽는 라벨(한 단어가 아니라 문장 전체) |
 | `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
-| `confidence` | `"high"` | 취약점이라고 주장할 수 있는지 (`high` / `low`). `I`에는 없음 |
+| `confidence` | `"high"` | 증거가 그 주장을 얼마나 강하게 뒷받침하는지 (`high` / `low`). `I`에는 없음 |
 | `confidence_reason` | `"URL-carried source; inline script permitted"` | 판단 근거 신호 |
 | `inject_type` | `"inHTML"` | 탐지 라벨: 주입한 페이로드는 `inHTML`(`--sxss`에서는 `sxss-inHTML`, 해당하면 `-CSTI`나 `-VHtml` 같은 프레임워크 싱크 접미어가 붙음), `inHTML-HPP`, `DOM-XSS`(AST), `blind-oob-<location>-<protocol>`, `OutdatedComponent`(`I`) |
 | `method` | `"GET"` | HTTP 메서드 |
@@ -136,11 +136,11 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 - `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃). 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다
 - `findings_count`
 - `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 도중에 끊긴 경우 `error_code`(세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`도), 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
-- `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 대상 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
-- `targets_unparsable` — 대상 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/) 참고
+- `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/#거의-같은-url-묶기) 모드와 그것이 병합한 대상 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
+- `targets_unparsable` — 대상 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/#file-모드) 참고
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
 - `resumed` — `--state-file`을 쓴 경우에만 포함됩니다. `state_file`(경로)과 `targets_skipped_completed`(이전 실행에서 끝나 건너뛴 대상 수)
-- `incomplete` — 실행이 **완전히 테스트되지 않았을 때** `true`입니다. 스캔 도중 대상의 인증 세션이 끊어졌거나([세션 모니터링](../scanning-modes/) 참고), 전체 요청의 10% 이상(최소 3건)이 응답을 받지 못한 경우입니다. `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
+- `incomplete` — 실행이 **완전히 테스트되지 않았을 때** `true`입니다. 스캔 도중 대상의 인증 세션이 끊어졌거나([세션 모니터링](../scanning-modes/#세션-모니터링) 참고), 전체 요청의 10% 이상(최소 3건)이 응답을 받지 못한 경우입니다. `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
 
 세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)에 `"error_code": "SESSION_LOST"`, 그리고 감지된 신호가 `"error_message"`에 담겨 보고됩니다. 절대 `"clean"`으로는 표시되지 않습니다.
 

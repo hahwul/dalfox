@@ -41,7 +41,7 @@ Exit codes:
 | `1` | Success, findings reported (any tier — combine with `--only-poc v` to gate on `V` only) |
 | `2` | Input / config / runtime error |
 
-`server` and `mcp` exit `2` when they fail to start (for example, the port is already in use). `payload` exits `2` for an unknown selector.
+`2` also covers a run with no findings that could not finish cleanly (every target skipped, a lost session, a crashed scan worker, heavy request loss); see [Exit codes](../../guide/output/#exit-codes) for the full rule. `server` and `mcp` exit `2` when they fail to start (for example, the port is already in use). `payload` exits `2` for an unknown selector.
 
 ---
 
@@ -101,7 +101,7 @@ See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for th
 
 Guards against the silent failure where an authenticated session expires
 mid-scan, every later request is answered by a login page, and the run reports
-zero findings. See [Session monitoring](../../guide/scanning-modes/).
+zero findings. See [Session monitoring](../../guide/scanning-modes/#session-monitoring).
 
 Monitoring turns itself on whenever credentials are present (`--cookies`,
 `--cookie-from-raw`, or a `Cookie` / `Authorization` header), and whenever either
@@ -199,9 +199,9 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--waf-bypass` | `auto` | `auto` applies bypass mutations and extra encoders for the detected WAF. `off` still detects and reports the WAF but changes no payloads. `force` is accepted and currently behaves like `auto`; use `--force-waf` to choose the WAF |
-| `--skip-waf-probe` | false | Skip the active provocation probe (header-based detection still runs) |
+| `--skip-waf-probe` | false | Skip the active provocation probe (passive detection on the preflight response's headers and body still runs) |
 | `--force-waf` | — | Treat the target as this WAF, replacing whatever detection found. Works under `auto` and `force`; under `off` the WAF is reported but no bypass is applied. Names: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (case-insensitive; aliases such as `cf`, `modsec`, `incapsula`, `netscaler` also work) |
-| `--waf-evasion` | false | Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses. The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. |
+| `--waf-evasion` | false | Adaptive evasion: randomized inter-request jitter (applied whether or not a WAF is detected), an escalating cooldown on clusters of blocked responses, and one-at-a-time payload sending per parameter. The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. See [WAF Bypass](../../guide/waf-bypass/#evasion-throttle). |
 | `--waf-min-confidence` | `0.3` | Drop fingerprints below this confidence (0.0–1.0). The default `0.3` suppresses weak matches like `Server: Google Frontend` (0.15). Set lower to keep weak signals; `1.0` keeps only fingerprints with full confidence. |
 
 ---

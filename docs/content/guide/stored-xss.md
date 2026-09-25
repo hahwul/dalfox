@@ -94,7 +94,7 @@ dalfox scan https://target.app/support/ticket \
   -b https://callback.interact.sh
 ```
 
-You still need to wait for someone to view the page; the callback tells you when it happens.
+You still need to wait for someone to view the page; the callback tells you when it happens. `--blind-oob` instead of `-b` has Dalfox poll an interactsh session and report a callback as a `V` finding, but only one that arrives before `--blind-oob-wait` runs out; a view hours later reaches only a listener you run yourself. See [Blind XSS](../scanning-modes/#blind-xss).
 
 ## Tips
 

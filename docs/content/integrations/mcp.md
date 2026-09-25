@@ -173,7 +173,9 @@ way to mistake it for a scan that ran.
 
 Every bad argument arrives on that same channel — a missing `target`, a number where a
 string belongs, a value past its ceiling — so a client only has to watch `error`. Tool
-results are reserved for tools that actually ran.
+results are reserved for tools that actually ran. The ceilings are the REST API's:
+`timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `workers` `1`–`500`,
+`scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`.
 
 One thing to know about that trade: tool results are always rendered into the model's
 context, whereas a JSON-RPC error is handled by the host, and some hosts show the user a
@@ -229,10 +231,13 @@ HTTP request text and the raw response body to each finding for forensic
 analysis. Opt in only when you need the evidence — responses can be large.
 
 The five WAF fields mirror the CLI's WAF flags. `waf_bypass` picks the handling
-mode: `"auto"` (detect then bypass, the default), `"force"` (use `force_waf`),
-or `"off"` (detect only). `skip_waf_probe` (default `false`) skips the WAF
-fingerprinting probe entirely. `force_waf` pins a specific WAF profile (e.g.
-`"cloudflare"`, `"akamai"`, `"modsec"`) instead of detecting one. `waf_evasion`
+mode: `"auto"` (detect then bypass, the default) or `"off"` (detect and
+report only); `"force"` is accepted and behaves like `"auto"`. `skip_waf_probe`
+(default `false`) skips the active provocation probe; passive detection on the
+preflight response still runs. `force_waf` pins a specific WAF profile (e.g.
+`"cloudflare"`, `"akamai"`, `"modsec"`) in place of whatever detection found,
+under `"auto"` or `"force"` alike; under `"off"` it is reported but no bypass is
+applied. `waf_evasion`
 (default `false`) turns on adaptive evasion. `waf_min_confidence` is the
 detection confidence floor in `[0.0, 1.0]` (default `0.3`); fingerprints below
 it are dropped. Unknown values for `waf_bypass` or `force_waf`, and a

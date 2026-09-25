@@ -119,23 +119,7 @@ dalfox scan https://target.app --remote-payloads portswigger,payloadbox
 
 ## 페이로드 확인하기
 
-스캔을 실행하지 않고 페이로드 계열을 출력합니다:
-
-| 셀렉터 | 설명 | 예시 |
-|--------|------|------|
-| `javascript` | JS 문자열 / 스크립트 컨텍스트에서 쓰이는 표준 JavaScript 실행 페이로드를 출력합니다 (`alert(1)`, 백틱 및 키워드 분할 변형 등) | `dalfox payload javascript` |
-| `event-handlers` | 모든 DOM 이벤트 핸들러 속성 이름을 나열합니다 (예: `onclick`, `onmouseover`) | `dalfox payload event-handlers` |
-| `useful-tags` | XSS 컨텍스트에서 자주 사용되는 유용한 HTML 태그 이름을 나열합니다 (예: `script`, `img`, `svg`) | `dalfox payload useful-tags` |
-| `payloadbox` | PayloadBox에서 원격 XSS 페이로드를 가져와 출력합니다 | `dalfox payload payloadbox` |
-| `portswigger` | PortSwigger에서 원격 XSS 페이로드를 가져와 출력합니다 | `dalfox payload portswigger` |
-| `uri-scheme` | 스킴 기반 XSS 페이로드를 출력합니다 (`javascript:`, `data:` 등) | `dalfox payload uri-scheme` |
-| `special-chars` | 컨텍스트 프로빙/브레이크아웃을 위한 특수 문자(및 인코딩된 변형)를 출력합니다 | `dalfox payload special-chars` |
-| `functions` | 필터를 통과하는 변형을 포함해 눈으로 확인 가능한 싱크를 출력합니다 (`alert`, `prompt` 등) | `dalfox payload functions` |
-| `awesome-alert` | 깔끔한 스크린샷/데모용으로 다듬어진 alert PoC를 출력합니다 (`alert(document.domain)` 등) | `dalfox payload awesome-alert` |
-| `dom-clobbering` | DOM 클로버링 페이로드를 출력합니다 | `dalfox payload dom-clobbering` |
-| `mxss` | mutation-XSS / 새니타이저 우회 페이로드를 출력합니다 | `dalfox payload mxss` |
-| `blind` | blind-XSS 스켈레톤을 출력합니다 (`{}` = OOB 콜백 URL) | `dalfox payload blind` |
-| `all` | 위의 모든 로컬 셀렉터를 한 번에, 각 그룹 앞에 `# name` 헤더를 붙여 출력합니다 (원격 셀렉터 제외 — 네트워크 요청 없음) | `dalfox payload all` |
+스캔을 실행하지 않고 페이로드 계열을 출력합니다. 각 셀렉터의 설명은 [CLI 레퍼런스](../../reference/cli/)에 있습니다. `portswigger`와 `payloadbox`는 원격 목록을 가져오고, 나머지는 내장 목록입니다:
 
 ```bash
 dalfox payload javascript      # alert(1), alert`1`, prompt(1), ...
@@ -149,6 +133,7 @@ dalfox payload dom-clobbering  # DOM 클로버링 벡터
 dalfox payload mxss            # mutation-XSS / 새니타이저 우회 페이로드
 dalfox payload blind           # blind-XSS 스켈레톤 ({} = 콜백 URL)
 dalfox payload portswigger     # 원격 목록을 가져와 출력
+dalfox payload payloadbox      # 원격 목록을 가져와 출력
 dalfox payload all             # 모든 로컬 셀렉터를 "# name" 헤더로 묶어 출력
 ```
 
@@ -200,7 +185,7 @@ dalfox scan https://target.app \
 
 `{callback}`이 들어 있는 줄만 사용되며, 나머지 줄은 경고와 함께 건너뜁니다. `#` 주석과 빈 줄은 무시합니다. 리터럴 `{}`는 그대로 두므로 템플릿에 `()=>{}` 같은 JavaScript를 넣을 수 있습니다. 그래서 `dalfox payload blind`가 출력하는 `{}` 스켈레톤을 여기에 쓰려면 `{}`를 `{callback}`으로 바꿔야 합니다. 쓸 수 있는 줄이 하나도 없으면 내장 템플릿으로 대체합니다.
 
-직접 운영하는 콜백 서버가 없다면 `--blind-oob`가 interactsh에 등록하고 콜백을 직접 폴링합니다. [빠른 시작](../../getting-started/quick-start/)을 참고하세요.
+직접 운영하는 콜백 서버가 없다면 `--blind-oob`가 interactsh에 등록하고 콜백을 직접 폴링하며, 도착한 콜백은 `V` 탐지 결과가 됩니다. 스캔 모드의 [Blind XSS](../scanning-modes/#blind-xss)를 참고하세요.
 
 ## HTTP 파라미터 오염(HPP)
 

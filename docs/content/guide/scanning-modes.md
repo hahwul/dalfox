@@ -351,4 +351,4 @@ dalfox payload uri-scheme        # print javascript:/data: payloads
 | Catch a payload that fires later, out of sight | Blind (`-b` / `--blind-oob`) |
 | Run many scans from a dashboard or CI | Server |
 | Let an AI agent drive scans | MCP |
-| Just see what payloads Dalfox would send | Payload utility or `--dry-run` |
+| See what Dalfox would send, without attacking | Payload utility (the payload lists) or `--dry-run` (the per-target plan and request estimate) |

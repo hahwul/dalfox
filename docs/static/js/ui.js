@@ -13,7 +13,10 @@
     var href = (a.getAttribute('href') || '')
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/\/$/, '') || '/';
-    if (href === path) a.classList.add('active');
+    if (href === path) {
+      a.classList.add('active');
+      a.setAttribute('aria-current', 'page');
+    }
   });
 
   // --- Search overlay wiring (handlers live in search.js) ---

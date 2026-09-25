@@ -140,7 +140,7 @@ debug = false
 |-----|------|---------|-------------|
 | `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature`(파라미터 값만 다른 URL을 하나로 병합), `off` |
-| `state_file` | string | — | 완료된 대상을 기록해 재실행 시 건너뜁니다. **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
+| `state_file` | string | — | 완료된 대상을 기록해 재실행 시 건너뜁니다([중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)). **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
 
 ### 출력
 
@@ -158,7 +158,7 @@ debug = false
 | `limit` | int | — | 결과 개수 상한 (`1` 이상이어야 하며, `0`은 경고와 함께 무시) |
 | `limit_result_type` | string | `"all"` | 집계 대상 타입: `all`, `v`, `r`, `a`, `i` |
 | `only_poc` | array | `[]` | 출력 필터: `["v","a"]` |
-| `baseline` | string | — | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다. **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
+| `baseline` | string | — | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다([베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)). **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
 | `baseline_mode` | string | `"filter"` | `filter`는 알려진 건을 제거, `annotate`는 유지한 채 `new` 표시 |
 | `no_color` | bool | `false` | ANSI 색상 비활성화 |
 
@@ -176,7 +176,7 @@ debug = false
 
 ### 세션
 
-스캔 도중 세션 만료 감지 — [세션 모니터링](../../guide/scanning-modes/)을 참고하세요.
+스캔 도중 세션 만료 감지 — [세션 모니터링](../../guide/scanning-modes/#세션-모니터링)을 참고하세요.
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
@@ -267,7 +267,7 @@ debug = false
 | `waf_bypass` | string | `"auto"` | `auto` 또는 `off`(탐지와 보고만). `force`도 받지만 `auto`와 똑같이 동작하며, WAF를 고르는 것은 `force_waf`입니다 |
 | `skip_waf_probe` | bool | `false` | 능동적 핑거프린팅 건너뜀 |
 | `force_waf` | string | — | 탐지 결과 대신 대상을 이 WAF로 간주 (`--force-waf`와 같은 이름, 대소문자 무관) |
-| `waf_evasion` | bool | `false` | WAF 탐지 시 적응형 회피: 랜덤 지터 + 차단 클러스터에 대한 점증 쿨다운 (`rate_limit`과 함께 사용) |
+| `waf_evasion` | bool | `false` | 적응형 회피: 요청 간 랜덤 지터(WAF 탐지 여부와 무관) + 차단 클러스터에 대한 점증 쿨다운 (`rate_limit`과 함께 사용) |
 | `waf_min_confidence` | float | `0.3` | 이 신뢰도 미만의 핑거프린트 제거 (0.0–1.0); 기본값은 약한 매칭을 억제 |
 
 ### 로깅

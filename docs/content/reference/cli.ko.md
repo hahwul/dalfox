@@ -41,7 +41,7 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 | `1` | 성공, 탐지 결과 보고됨 (티어 무관 — `V`만 게이트하려면 `--only-poc v`와 함께) |
 | `2` | 입력 / 설정 / 런타임 오류 |
 
-`server`와 `mcp`는 시작하지 못하면(예: 포트가 이미 사용 중) `2`로 종료합니다. `payload`는 알 수 없는 선택자를 받으면 `2`로 종료합니다.
+탐지 결과 없이 깨끗하게 끝나지 못한 실행(모든 대상이 건너뛰어짐, 세션 유실, 스캔 워커 크래시, 대량의 요청 유실)도 `2`입니다. 전체 규칙은 [종료 코드](../../guide/output/#종료-코드)를 참고하세요. `server`와 `mcp`는 시작하지 못하면(예: 포트가 이미 사용 중) `2`로 종료합니다. `payload`는 알 수 없는 선택자를 받으면 `2`로 종료합니다.
 
 ---
 
@@ -100,7 +100,7 @@ dalfox scan [TARGETS]... [FLAGS]
 ### 세션
 
 인증 세션이 스캔 도중 만료되어 이후 모든 요청이 로그인 페이지를 받고도 "취약점 0건"으로
-정상 종료되는 조용한 실패를 막습니다. [세션 모니터링](../../guide/scanning-modes/)을 참고하세요.
+정상 종료되는 조용한 실패를 막습니다. [세션 모니터링](../../guide/scanning-modes/#세션-모니터링)을 참고하세요.
 
 자격증명이 있으면(`--cookies`, `--cookie-from-raw`, 또는 `Cookie` / `Authorization` 헤더)
 자동으로 켜지고, `--session-check` 계열 플래그를 직접 지정해도 켜집니다. 그 외에는 꺼져 있으며
@@ -198,9 +198,9 @@ dalfox scan [TARGETS]... [FLAGS]
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
 | `--waf-bypass` | `auto` | `auto`는 탐지된 WAF에 맞는 우회 변형과 추가 인코더를 적용합니다. `off`는 WAF를 탐지해 보고만 하고 페이로드는 바꾸지 않습니다. `force`도 받지만 현재는 `auto`와 똑같이 동작하므로, WAF를 지정하려면 `--force-waf`를 쓰세요 |
-| `--skip-waf-probe` | false | 능동 자극 프로브를 건너뜁니다(헤더 기반 탐지는 그대로 실행) |
+| `--skip-waf-probe` | false | 자극 프로브를 건너뜁니다(프리플라이트 응답의 헤더와 본문에 대한 패시브 탐지는 그대로 실행) |
 | `--force-waf` | — | 탐지 결과 대신 대상을 이 WAF로 간주합니다. `auto`와 `force`에서 동작하며, `off`에서는 WAF를 보고만 하고 우회는 적용하지 않습니다. 이름: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (대소문자 무관; `cf`, `modsec`, `incapsula`, `netscaler` 같은 별칭도 허용) |
-| `--waf-evasion` | false | WAF 탐지 시 적응형 회피: 요청 간 무작위 지터 + 차단된 응답이 몰릴 때 점증하는 쿨다운. 이 플래그가 없어도 WAF별 페이싱 힌트는 탐지 시 자동으로 적용됩니다. `--rate-limit`와 함께 쓰면 좋습니다. |
+| `--waf-evasion` | false | 적응형 회피: 요청 간 무작위 지터(WAF 탐지 여부와 무관하게 적용), 차단된 응답이 몰릴 때 점증하는 쿨다운, 파라미터별 페이로드를 하나씩 순차 전송. 이 플래그가 없어도 WAF별 페이싱 힌트는 탐지 시 자동으로 적용됩니다. `--rate-limit`와 함께 쓰면 좋습니다. [WAF 우회](../../guide/waf-bypass/#회피-스로틀) 참고. |
 | `--waf-min-confidence` | `0.3` | 이 신뢰도 미만의 핑거프린트를 제거합니다 (0.0–1.0). 기본값 `0.3`은 `Server: Google Frontend`(0.15) 같은 약한 매칭을 억제합니다. 약한 신호를 유지하려면 더 낮게 설정하고, `1.0`은 완전한 신뢰도를 가진 핑거프린트만 유지합니다. |
 
 ---

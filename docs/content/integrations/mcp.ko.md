@@ -173,7 +173,9 @@ claude mcp add dalfox -- dalfox mcp
 
 잘못된 인자는 모두 같은 채널로 옵니다. `target` 누락, 문자열 자리에 들어온 숫자,
 상한을 넘은 값 모두 마찬가지이므로 클라이언트는 `error`만 보면 됩니다. 도구 결과는
-실제로 실행된 도구(tool)를 위해 남겨 둡니다.
+실제로 실행된 도구(tool)를 위해 남겨 둡니다. 상한은 REST API와 같습니다:
+`timeout` `1`–`299`초, `delay` `0`–`9999`ms, `workers` `1`–`500`,
+`scan_timeout` `0`–`86400`초, `max_payloads_per_param` `0`–`100000`.
 
 다만 알아둘 트레이드오프가 있습니다. 도구 결과는 항상 모델 컨텍스트에 렌더링되지만,
 JSON-RPC 오류는 호스트가 처리하며 일부 호스트는 모델에 텍스트를 돌려주지 않고 사용자에게
@@ -223,10 +225,12 @@ JSON-RPC 오류는 호스트가 처리하며 일부 호스트는 모델에 텍�
 응답이 클 수 있으므로 증거가 필요할 때만 켜세요.
 
 WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_bypass`는 처리
-모드를 고릅니다: `"auto"`(탐지 후 우회, 기본값), `"force"`(`force_waf`를 사용),
-`"off"`(탐지만). `skip_waf_probe`는(기본값 `false`) WAF 핑거프린팅 프로브를 아예
-건너뜁니다. `force_waf`는 WAF를 탐지하는 대신 특정 프로필(예: `"cloudflare"`,
-`"akamai"`, `"modsec"`)을 고정합니다. `waf_evasion`은(기본값 `false`) 적응형
+모드를 고릅니다: `"auto"`(탐지 후 우회, 기본값) 또는 `"off"`(탐지하고 보고만 함).
+`"force"`도 받지만 `"auto"`와 똑같이 동작합니다. `skip_waf_probe`는(기본값 `false`)
+자극 프로브만 건너뛰며, 프리플라이트 응답에 대한 패시브 탐지는 그대로 실행됩니다.
+`force_waf`는 탐지 결과 대신 특정 프로필(예: `"cloudflare"`, `"akamai"`,
+`"modsec"`)을 고정합니다. `"auto"`와 `"force"` 모두에서 적용되며, `"off"`에서는
+보고만 되고 우회는 적용되지 않습니다. `waf_evasion`은(기본값 `false`) 적응형
 우회를 켭니다. `waf_min_confidence`는 `[0.0, 1.0]` 범위의 탐지 신뢰도
 하한이며(기본값 `0.3`), 이보다 낮은 핑거프린트는 버려집니다. `waf_bypass`나
 `force_waf`에 알 수 없는 값을 주거나 `waf_min_confidence`가 범위를 벗어나면
