@@ -10,9 +10,10 @@ Each page is self-contained. Read them in order the first time, then come back a
 
 ## Topics
 
-- **[Scanning Modes](./scanning-modes/):** Single URL, file batch, pipe, stored-XSS, server, and MCP.
+- **[Scanning Modes](./scanning-modes/):** Single URL, file batch, pipe, raw HTTP, HAR, stored and blind XSS, server, and MCP.
 - **[Parameters &amp; Discovery](./parameters/):** How Dalfox finds inputs, prunes false-positives, and mines wordlists.
 - **[Payloads &amp; Encoding](./payloads/):** Built-in payload families, encoders, and custom wordlists.
 - **[WAF Bypass](./waf-bypass/):** Fingerprinting WAFs and applying evasive mutations.
 - **[Stored XSS](./stored-xss/):** Inject on one URL, verify on another.
 - **[Output &amp; Reports](./output/):** Plain, JSON, JSONL, Markdown, SARIF, TOML.
+- **[Detection Model](./detection-model/):** What `V` / `R` / `A` / `I` mean, how each finding was produced, and what the evidence proves.

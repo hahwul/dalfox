@@ -14,6 +14,8 @@ Dalfox는 다음 순서로 파일을 찾습니다.
 1. `$XDG_CONFIG_HOME/dalfox/config.toml`
 2. `$HOME/.config/dalfox/config.toml`
 
+같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
+
 `--config`로 다른 위치를 지정할 수 있습니다.
 
 ```bash
@@ -50,8 +52,10 @@ CLI flag  >  Config file  >  Built-in defaults
 
 ```bash
 # Config sets workers=100, but for this quick scan use 20
-dalfox --workers 20 https://target.app
+dalfox scan --workers 20 https://target.app
 ```
+
+스캔 플래그를 쓰려면 `scan` 서브커맨드를 명시해야 합니다. `dalfox <TARGET>` 축약형은 대상과 전역 플래그만 받습니다. 켜고 끄는 스위치는 명령줄에서 켜기만 할 수 있으므로, 설정 파일의 `deep_scan = true`는 모든 실행에 적용됩니다. 자세한 내용은 [우선순위](../../reference/config/#우선순위)를 참고하세요.
 
 ## 형식
 
@@ -75,7 +79,7 @@ silence = true
 
 ## 무엇을 설정할 수 있나요?
 
-`dalfox scan` 아래에 CLI 플래그가 있는 모든 항목은 `[scan]` 테이블에 넣을 수 있습니다. 자주 쓰는 키 몇 가지입니다.
+`dalfox scan` 아래에 CLI 플래그가 있는 모든 항목은 `[scan]` 테이블에 넣을 수 있습니다(`--blind`의 키 이름은 `blind_callback_url`). 이 파일은 CLI 스캔에만 적용되며 `dalfox server`와 `dalfox mcp`는 읽지 않습니다. 자주 쓰는 키 몇 가지입니다.
 
 | 키 | 예시 | 기능 |
 |-----|---------|--------------|
@@ -98,14 +102,14 @@ silence = true
 
 ## 시크릿
 
-설정 파일을 커밋한다면 API 키, 베어러 토큰, blind-XSS 콜백 호스트명은 파일에서 빼세요. 환경 변수를 쓰는 편이 낫습니다.
+설정 파일을 커밋한다면 API 키, 베어러 토큰, blind-XSS 콜백 호스트명은 파일에서 빼세요. Dalfox가 환경 변수에서 읽는 시크릿은 REST 서버의 API 키 하나뿐입니다.
 
 ```bash
 # .env or your shell profile
 export DALFOX_API_KEY="..."
 ```
 
-아니면 커맨드 라인에서만 넘기고 파일에는 남기지 마세요.
+나머지(`-H "Authorization: …"`, `--cookies`, `-b`)는 커맨드 라인에서만 넘기고 파일에는 남기지 마세요.
 
 ## 다음 단계
 

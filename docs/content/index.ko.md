@@ -239,7 +239,7 @@ template = "landing"
       <div class="how-step">
         <h3>결과 전달</h3>
         <p>SARIF, JSON, Markdown으로 내보내거나 결과를 파이프라인으로 프록시하세요. 결과는 추측이 아니라 검증을 거쳐 나옵니다.</p>
-        <code>dalfox scan urls.txt -o report.sarif</code>
+        <code>dalfox scan urls.txt -f sarif -o report.sarif</code>
       </div>
     </div>
   </div>

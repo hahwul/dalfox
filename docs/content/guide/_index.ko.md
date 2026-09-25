@@ -10,9 +10,10 @@ weight = 2
 
 ## 주제
 
-- **[스캐닝 모드](./scanning-modes/):** 단일 URL, 파일 배치, 파이프, 저장형 XSS, 서버, MCP.
+- **[스캔 모드](./scanning-modes/):** 단일 URL, 파일 배치, 파이프, raw HTTP, HAR, 저장형·블라인드 XSS, 서버, MCP.
 - **[파라미터와 탐색](./parameters/):** Dalfox가 입력값을 찾고, 오탐을 걸러내고, 워드리스트를 마이닝하는 방법.
 - **[페이로드와 인코딩](./payloads/):** 내장 페이로드 계열, 인코더, 커스텀 워드리스트.
 - **[WAF 우회](./waf-bypass/):** WAF 핑거프린팅과 회피 변형 적용.
 - **[저장형 XSS](./stored-xss/):** 한 URL에서 주입하고 다른 URL에서 검증.
 - **[출력과 리포트](./output/):** Plain, JSON, JSONL, Markdown, SARIF, TOML.
+- **[탐지 모델](./detection-model/):** `V` / `R` / `A` / `I`의 의미, 각 결과가 어떻게 나왔는지, 증거가 무엇을 증명하는지.

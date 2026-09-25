@@ -205,7 +205,7 @@ _Generated 2026-09-13T09:06:30Z · image `ghcr.io/hahwul/xssmaze:main` (`ghcr.io
 ## Methodology
 
 - **Targets:** every endpoint returned by XSSMaze's `/map/json`, grouped by its catalog `type` (category).
-- **Per-endpoint scan:** Dalfox is pointed at the exact injection point the catalog declares (`query`, body, header, or path), with parameter mining disabled (`--skip-mining`); discovery and reflection checks stay on so header/path cases still resolve.
+- **Per-endpoint scan:** Dalfox scans the endpoint URL with parameter mining disabled (`--skip-mining`). Every query parameter the catalog declares is present in the URL, header injection points are targeted with `-p <name>:header`, and POST bodies are seeded with `-d` (sent as a form first, retried as JSON only if the form pass finds nothing). Discovery and reflection checks stay on, so Dalfox finds the real injection point itself — the catalog's parameter names are advisory — and path cases still resolve.
 - **Detected:** an endpoint counts as detected when Dalfox returns at least one finding (verified, reflected, or AST-DOM).
 - **Verified:** the subset where Dalfox found the payload in an executable position in the parsed DOM (finding type `V`). Not browser execution — see [Detection Model](../../guide/detection-model/).
 - **Rate:** `detected / endpoints`, per category and overall.

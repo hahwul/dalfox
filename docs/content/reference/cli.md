@@ -5,7 +5,7 @@ weight = 1
 toc = true
 +++
 
-Dalfox is organised into five subcommands, plus the built-in `help`. The default (when you just pass a target) is `scan`.
+Dalfox is organised into five subcommands, plus the built-in `help`. The default (when you just pass a target) is `scan`, but that short form accepts only targets and the global flags below. Any other scan flag needs the explicit subcommand: `dalfox scan <TARGET> --workers 20` works, while `dalfox <TARGET> --workers 20` is rejected as an unexpected argument.
 
 ```
 dalfox [SUBCOMMAND] [TARGET] [FLAGS]
@@ -26,8 +26,12 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 |------|-------------|
 | `--config <FILE>` | Path to a config file (TOML or JSON). Overrides default search path. |
 | `--debug` | Enable debug logging. |
+| `--no-color` | Disable ANSI colour (also honours `NO_COLOR`). |
+| `-S`, `--silence` | Silence all logs except PoC output to STDOUT. |
 | `-h`, `--help` | Print help. |
 | `-V`, `--version` | Print version. |
+
+`--config`, `--debug`, `--no-color` and `--silence` are accepted before or after any subcommand (`dalfox --config ./dalfox.toml scan …` and `dalfox scan … --config ./dalfox.toml` are the same).
 
 Exit codes:
 
@@ -41,7 +45,7 @@ Exit codes:
 
 ## `dalfox scan`
 
-Scan targets for XSS. Omitting the subcommand is equivalent.
+Scan targets for XSS. Omitting the subcommand also runs a scan, but then only targets and the global flags are accepted (see above).
 
 ```bash
 dalfox scan [TARGETS]... [FLAGS]
@@ -69,9 +73,9 @@ See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-inter
 | `--no-color` | — | false | Disable ANSI colour |
 | `--silence` | `-S` | false | Emit only findings to STDOUT |
 | `--dry-run` | — | false | Discover and plan without sending payloads |
-| `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`) |
+| `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`, `--baseline`) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
-| `--limit` | — | — | Cap total results shown |
+| `--limit` | — | — | Cap total results shown (must be at least `1`; omit for no cap) |
 | `--limit-result-type` | — | `all` | Which types count toward `--limit`: `all`, `v`, `r`, `a`, `i` |
 | `--only-poc` | — | — | Comma-separated filter: `v` (vulnerable), `r` (reflected), `a` (AST), `i` (informational) |
 | `--baseline` | — | — | Diff against a previous Dalfox JSON/JSONL report and report only findings new since it. An ordinary `-f json -o` report is the baseline |
@@ -104,7 +108,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--session-check` | — | Regex that must keep matching an authenticated response body. Authoritative: when set, the built-in heuristics are not consulted |
-| `--session-check-url` | — | Probe this URL instead of the scan target when re-validating (e.g. a cheap `/api/me` endpoint) |
+| `--session-check-url` | — | Probe this URL (absolute `http(s)://`) instead of the scan target when re-validating (e.g. a cheap `/api/me` endpoint) |
 | `--on-session-loss` | `abort` | `abort` stops the affected target, skips the rest of that host, and exits `2` when the run found nothing; `continue` keeps scanning and leaves the exit code alone. Either way the target is reported `incomplete` / `SESSION_LOST`, never `clean` |
 
 ### Scope
@@ -141,30 +145,30 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--timeout` | — | `10` | Per-request timeout in seconds (network only; does not bound total scan time) |
-| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage (post-preflight), in seconds. Aborts a target once exceeded; useful when many sequential phases each pay the per-request `--timeout` cost against a partially-hung endpoint. `0` disables. |
-| `--delay` | — | `0` | Delay between requests (ms), per worker |
-| `--rate-limit` | `-r`, `--rl` | `0` | Cap the **global** outbound request rate in requests/second, shared across every worker and target (`0` = unlimited). Unlike `--delay` (which only spaces one worker), this bounds the total in-flight burst from `workers × concurrent targets` — friendlier to shared-IP / edge WAF thresholds. |
-| `--retries` | — | `0` | Retry failed requests on HTTP 5xx and transient transport errors (timeouts, connection resets) up to this many times (`0` = off). HTTP 429 is always retried regardless. |
-| `--retry-delay` | — | `1000` | Base delay (ms) for the exponential backoff between `--retries` attempts (doubles each attempt, capped internally). A server `Retry-After` header takes precedence on 429. |
+| `--timeout` | — | `10` | Per-request timeout in seconds, `1`–`3600` (network only; does not bound total scan time) |
+| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the payload-injection (scan) stage, in seconds (max `86400`). Aborts a target once exceeded; useful when many sequential phases each pay the per-request `--timeout` cost against a partially-hung endpoint. Preflight and parameter analysis (discovery + mining) run before this stage and are not covered by it. `0` disables. |
+| `--delay` | — | `0` | Delay between requests (ms), per worker; max `60000` |
+| `--rate-limit` | `-r`, `--rl` | `0` | Cap the **global** outbound request rate in requests/second, shared across every worker and target (`0` = unlimited). Unlike `--delay` (which only spaces one worker), this bounds the total in-flight burst from `workers × concurrent targets` — friendlier to shared-IP / edge WAF thresholds. Max `100000`. |
+| `--retries` | — | `0` | Retry failed requests on HTTP 5xx and transient transport errors (timeouts, connection resets) up to this many times (`0` = off, max `100`). HTTP 429 is always retried regardless. |
+| `--retry-delay` | — | `1000` | Base delay (ms) for the exponential backoff between `--retries` attempts (doubles each attempt, capped internally; max `60000`). A server `Retry-After` header takes precedence on 429. |
 | `--proxy` | — | — | Proxy URL — `http(s)://` or `socks4/5(h)://` only; an unroutable scheme (e.g. `ftp://`) is rejected up front instead of silently scanning direct |
 | `--insecure` | — | `true` | Skip TLS/SSL certificate verification (accept self-signed, expired, or hostname-mismatched certs). On by default for scanner use; pass `--insecure=false` to enforce certificate validation. Applies to the scan target and to an OAST server you named with `--blind-oob=`; the public interactsh mesh is always verified. |
 | `--follow-redirects` | `-F` | false | Follow 3xx responses |
-| `--ignore-return` | — | — | HTTP status codes to ignore |
+| `--ignore-return` | — | — | HTTP status codes to ignore (comma-separated, e.g. `302,403,404`) |
 
 ### Engine
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--workers` | `50` | Concurrent workers per target |
-| `--max-concurrent-targets` | `50` | Global concurrent targets |
-| `--max-targets-per-host` | `100` | Per-host cap |
+| `--workers` | `50` | Concurrent workers per target (`1`–`500`) |
+| `--max-concurrent-targets` | `50` | Global concurrent targets (at least `1`) |
+| `--max-targets-per-host` | `100` | Per-host cap (at least `1`) |
 
 ### XSS scanning
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--encoders` | `-e` | `url,html` | Comma-separated encoders |
+| `--encoders` | `-e` | `url,html` | Comma-separated encoders: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `--remote-payloads` | — | — | `portswigger`, `payloadbox` |
 | `--custom-blind-xss-payload` | — | — | Custom blind payload template file |
 | `--blind` | `-b` | — | Blind XSS callback URL |
@@ -172,16 +176,16 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--blind-oob-secret` | — | — | Auth token for a self-hosted interactsh server (sent as `Authorization` on register/poll/deregister) |
 | `--blind-oob-wait` | — | `30` | Seconds to keep polling for OOB callbacks after all payloads are sent (`0` = no extra end-of-scan wait) |
 | `--custom-payload` | — | — | Custom payload file |
-| `--only-custom-payload` | — | false | Use only custom payloads |
+| `--only-custom-payload` | — | false | Use only custom payloads. Requires `--custom-payload` (exit `2` without it) |
 | `--custom-alert-value` | — | `1` | Value inside `alert()`/`prompt()`/`confirm()` |
 | `--custom-alert-type` | — | `none` | `none` or `str` |
 | `--inject-marker` | — | — | Replace this token with payloads (e.g. `FUZZ`) |
 | `--skip-xss-scanning` | — | false | Skip payload injection |
 | `--deep-scan` | — | false | Keep testing after first finding |
 | `--sxss` | — | false | Enable Stored XSS mode |
-| `--sxss-url` | — | — | Retrieval URL for SXSS (absolute `http(s)://`); only used with `--sxss` |
+| `--sxss-url` | — | — | Retrieval URL for SXSS (absolute `http(s)://`); only used with `--sxss`. When omitted, `--sxss` auto-detects the retrieval page from form discovery |
 | `--sxss-method` | — | `GET` | Retrieval method |
-| `--sxss-retries` | — | `3` | Retries on the retrieval URL when fetching stored output |
+| `--sxss-retries` | — | `3` | Retries on the retrieval URL when fetching stored output (max `20`; each retry waits 500 ms × attempt, capped at 5 s) |
 | `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `--deep-scan` is set) |
 | `--skip-ast-analysis` | — | false | Skip AST DOM-XSS — the source→sink pass that emits `[A]` findings (not `--skip-mining-dom`) |
 | `--analyze-external-js` | — | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`) |
@@ -194,7 +198,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 |------|---------|-------------|
 | `--waf-bypass` | `auto` | `auto`, `force`, `off` |
 | `--skip-waf-probe` | false | Skip active WAF fingerprinting |
-| `--force-waf` | — | WAF name when `--waf-bypass force` |
+| `--force-waf` | — | WAF name when `--waf-bypass force`: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (case-insensitive; aliases such as `cf`, `modsec`, `incapsula`, `netscaler` also work) |
 | `--waf-evasion` | false | Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses. The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. |
 | `--waf-min-confidence` | `0.3` | Drop fingerprints below this confidence (0.0–1.0). The default `0.3` suppresses weak matches like `Server: Google Frontend` (0.15). Set lower to keep weak signals; `1.0` keeps only fingerprints with full confidence. |
 
@@ -212,8 +216,8 @@ dalfox server [FLAGS]
 |------|-------|---------|-------------|
 | `--port` | `-p` | `6664` | Listen port |
 | `--host` | `-H` | `127.0.0.1` | Bind address |
-| `--api-key` | — | — | Required `X-API-KEY` header value (or `DALFOX_API_KEY`) |
-| `--log-file` | — | — | Plain-text log file |
+| `--api-key` | — | — | Required `X-API-KEY` header value (or `DALFOX_API_KEY`; the flag wins over the variable). An empty `--api-key ""` disables auth |
+| `--log-file` | — | — | Plain-text log file (created mode `0600` on Unix; the server warns at startup if an existing file is group/other-readable) |
 | `--allowed-origins` | — | — | CORS origins (comma-separated, supports `*` and `regex:`) |
 | `--jsonp` | — | false | Wrap responses in JSONP |
 | `--callback-param-name` | — | `callback` | JSONP callback param |
@@ -235,10 +239,10 @@ See [REST API Server](../../integrations/server/) for endpoints.
 List or fetch payload collections.
 
 ```bash
-dalfox payload <SELECTOR> [--json]
+dalfox payload [SELECTOR] [--json]
 ```
 
-Use `--json` to print the selected payloads as a JSON array instead of one item per line.
+Use `--json` to print the selected payloads as a JSON array instead of one item per line. Without a selector, Dalfox prints a summary (usage examples and per-selector counts), as JSON under `--json`. An unknown selector exits `2` and suggests the closest match.
 
 Selectors:
 

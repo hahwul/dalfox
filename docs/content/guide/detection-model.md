@@ -39,7 +39,7 @@ Filter with `--only-poc` (e.g. `--only-poc v`, `--only-poc v,a`, `--only-poc i`)
 
 `V` is **not** browser execution. Dalfox drives no browser and speaks no CDP; it never renders a page or watches an `alert()` fire. For the request-based methods, `V` means the payload was found in a *DOM tree parsed from a real HTTP response* — static analysis, on stronger evidence than the raw string match behind `R`.
 
-There is exactly one method where Dalfox observes real execution: **out-of-band callbacks** (blind XSS). When an injected `<script src=…>` calls home, a real browser parsed and fetched it. That is empirical, and it is the strongest evidence Dalfox produces — but it comes from someone else's browser, not one Dalfox controls.
+There is exactly one method where Dalfox observes real execution: **out-of-band callbacks** (blind XSS with `--blind-oob`). When an injected `<script src=…>` calls home, a real browser parsed and fetched it. That is empirical, and it is the strongest evidence Dalfox produces — but it comes from someone else's browser, not one Dalfox controls. A plain `-b` callback URL sends the hit to your own listener, so Dalfox records no finding for it.
 
 ## Method: what `detection_method` means
 
@@ -76,6 +76,19 @@ already had, instead of spending another request.
 ### `dom-verification` evidence
 
 Five ways a payload proves it reached an executable position: the Dalfox marker matched by CSS selector; an executable scheme (`javascript:`, `data:text/html`) in a dangerous attribute; an injected element carrying a sink-calling handler; a sink call inside `<script>` whose AST range covers the payload; and an inline-handler breakout where the payload terminated the surrounding JS string. The `evidence` field names which one fired.
+
+### What the response content type allows
+
+The evidence has to hold in the parser a browser would use for that response, so the response's `Content-Type` decides which checks can succeed:
+
+| Response type | How it is read |
+|---------------|----------------|
+| `text/html`, or no usable `Content-Type` with a body that starts like HTML | Parsed as HTML |
+| `application/xhtml+xml`, `image/svg+xml`, other XML (`text/xml`, `application/xml`, `*+xml`) | Parsed as XML; only markup in an active namespace (XHTML, SVG) counts |
+| JavaScript (`application/javascript`, `text/javascript`, …) | Read as script: only a JS-context payload such as a JSONP callback grades `V`, never HTML markup in the body |
+| `application/json`, `*+json`, `text/csv`, supplied `text/plain`, binary media | Not a markup document: the reflection is dropped, with no `R` either |
+
+`text/plain` is inert whether or not `X-Content-Type-Options: nosniff` is present, since a browser never sniffs a declared `text/plain` into HTML. The AST pass over the target page follows the same rule: it runs only when that page is an active markup document.
 
 ### `ast` and the DOM-XSS ceiling
 
@@ -156,8 +169,9 @@ are not the number of findings recorded during the scan:
   so an ungraded `V` still outranks a `high` `A`.
 
 `--stream-findings` emits each finding the moment it is recorded, which is
-*before* the collapse. An `R` can therefore appear in the stream and be absent
-from the final report. When the two disagree, the final report is the answer.
+*before* the `R` collapse (AST duplicates are folded in the stream too). An `R`
+can therefore appear in the stream and be absent from the final report. When
+the two disagree, the final report is the answer.
 
 ### Selecting tiers: `--only-poc` vs `--limit-result-type`
 
@@ -176,7 +190,9 @@ add `--only-poc v`.
 
 `0` means no findings and `1` means at least one finding **of any tier**,
 counted after `--only-poc` and the collapse above. `2` is a hard error (bad
-input, every target unreachable, `--output` unwritable). A lone `R`, or a
+input, every target unreachable, `--output` unwritable), and also covers a run
+with no findings that could not finish cleanly: a lost session under the
+default `--on-session-loss abort`, or severe transport loss. A lone `R`, or a
 single `I` from `--detect-outdated-libs`, exits `1` exactly like a `V` does.
 For CI that should fail only on what Dalfox asserts is exploitable, run
 `--only-poc v`.

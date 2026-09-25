@@ -272,12 +272,19 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
     "params_total": 10,
     "params_tested": 4,
     "requests_sent": 215,
+    "requests_failed": 0,
     "findings_so_far": 1,
     "estimated_completion_pct": 40,
-    "suggested_poll_interval_ms": 3000
+    "suggested_poll_interval_ms": 2000
   }
 }
 ```
+
+전체 상태 응답에는 `results`(스캔이 종료될 때까지 `null`), `pagination`, `queued_at_ms`,
+`started_at_ms`, `finished_at_ms`, `duration_ms`, 그리고 값이 있을 때 `error_message`도
+담깁니다. `requests_failed`는 대상에 닿지 못한 요청 수입니다. 이 값이 `requests_sent`의
+큰 비중을 차지한다면 탐지 결과 0건은 대상이 깨끗하다는 뜻이 아니라 스캔이 사실상 돌지
+않았다는 뜻입니다.
 
 응답(완료):
 
@@ -348,14 +355,17 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 ### `list_scans_dalfox`
 
-추적 중인 모든 스캔을 나열합니다. 선택적 필터:
+추적 중인 모든 스캔을 최신순으로 나열합니다. 인자는 모두 선택 사항입니다:
 
 ```json
-{ "status": "running" }
+{ "status": "running", "offset": 0, "limit": 0 }
 ```
 
-`total`, `scans: [{scan_id, target, status, result_count, queued_at_ms, started_at_ms,
-finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_message`가 붙습니다 —
+`status`는 `queued`, `running`, `done`, `error`, `cancelled` 중 하나이고, `offset`과
+`limit`으로 목록을 페이지 단위로 넘깁니다(`limit: 0`이 기본값이며 `offset`부터 전부 반환).
+
+`total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms, started_at_ms,
+finished_at_ms, duration_ms}]`, `pagination: {offset, limit, returned, has_more}`를 반환하며, 실패한 스캔에는 `error_message`가 붙습니다 —
 이것이 없으면 `status: "error", result_count: 0`인 행은 깨끗하게 끝난 스캔과 똑같아 보입니다.
 
 ### `cancel_scan_dalfox`
@@ -366,6 +376,11 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 { "scan_id": "9f2c…" }
 ```
 
+`{scan_id, target, cancelled, previous_status}`를 반환합니다. `cancelled`는 스캔이
+`queued`나 `running`이었을 때만 `true`입니다. 이미 끝난 스캔이라면 이 호출은 아무 일도
+하지 않고 `cancelled`는 `false`입니다. 실행 중인 스캔은 다음 취소 확인 지점에서 멈추고,
+부분 결과를 가진 채 `cancelled`로 목록에 남습니다.
+
 ### `delete_scan_dalfox`
 
 추적 중인 스캔을 메모리에서 영구적으로 제거합니다. 종료된 스캔(`done`, `error`, `cancelled`) 중 worker가 정리를 끝낸 경우에만 삭제할 수 있습니다. 실행 중이거나 대기 중인 스캔은 먼저 취소해야 합니다. 취소 직후 삭제에서 worker가 정리 중이라는 오류가 나오면 스캔 상태를 조회하고 잠시 후 다시 삭제해야 합니다. 종료된 스캔은 1시간 후 자동으로 정리되기도 합니다.
@@ -374,16 +389,27 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 { "scan_id": "9f2c…" }
 ```
 
-`{scan_id, deleted: true, previous_status}`를 반환합니다.
+`{scan_id, target, deleted: true, previous_status}`를 반환합니다.
 
 ### `preflight_dalfox`
 
 페이로드를 보내지 **않고** 대상을 분석합니다. 스캔을 확정하기 전에 범위를 정하는 데 유용합니다.
 
+받는 모든 필드와 각각의 기본값입니다. 필수 필드는 `target` 하나뿐입니다:
+
 ```json
 {
   "target": "https://example.com",
+  "param": [],
   "method": "GET",
+  "data": null,
+  "headers": [],
+  "cookies": [],
+  "user_agent": null,
+  "timeout": 10,
+  "proxy": null,
+  "follow_redirects": false,
+  "insecure": true,
   "skip_discovery": false,
   "skip_mining": false,
   "encoders": ["url", "html"],
@@ -392,11 +418,24 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 }
 ```
 
-도달 가능 여부, 발견된 파라미터, 예상 요청 수를 반환합니다.
+도달 가능 여부, 발견된 파라미터, 예상 요청 수를 반환합니다:
+`{target, reachable, method, params_discovered, estimated_total_requests,
+params: [{name, location, estimated_requests}]}`. 도달할 수 없는 대상은
+`reachable: false`와 `error_code: "CONNECTION_FAILED"`로 돌아옵니다. `param`은 스캔
+도구와의 대칭을 위해 받기만 하고 적용하지 않습니다. 프리플라이트는 항상 발견된 파라미터
+전체를 보고합니다.
 
 `encoders`, `max_payloads_per_param`, `deep_scan`는 그 자체로 요청을 보내지 않습니다. 뒤이어 실행할 `scan_with_dalfox` 호출을 설명하는 값이며, `estimated_total_requests`가 그 스캔의 확장 폭을 반영하도록 합니다. 실제로 스캔할 때 쓸 값을 그대로 넘기세요.
 
 추정치는 스캔이 파라미터마다 실행하는 두 단계(리플렉션, DOM 검증)를 모두 세며, 각 단계를 파라미터당 페이로드 상한으로 자릅니다. `--dry-run`과 동일한 계산입니다. 다만 하한값입니다: WAF 변형/인코더 확장과 상한 적용 이후 덧붙는 공용 CSP/tech 페이로드는 세지 않습니다.
+
+### 용량 제한
+
+MCP 서버는 활성(대기 중이거나 실행 중인) 스캔을 최대 100개, 동시 프리플라이트를 최대
+32개까지 유지합니다. 한도를 넘는 호출은 서버가 용량을 다 썼다는 JSON-RPC `-32603` 오류로
+거부됩니다. `-32602`와 달리 스캔이 끝나거나 취소된 뒤 다시 시도할 만한 오류입니다. 종료된
+스캔은 최대 1000개까지 보관하며, 넘치면 가장 오래된 것부터 버리고, 종료된 스캔은 모두 끝난
+지 1시간 뒤 정리됩니다.
 
 ## 구조화된 결과
 

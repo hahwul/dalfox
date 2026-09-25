@@ -277,12 +277,19 @@ Response (in progress):
     "params_total": 10,
     "params_tested": 4,
     "requests_sent": 215,
+    "requests_failed": 0,
     "findings_so_far": 1,
     "estimated_completion_pct": 40,
-    "suggested_poll_interval_ms": 3000
+    "suggested_poll_interval_ms": 2000
   }
 }
 ```
+
+Full status responses also carry `results` (`null` until the scan is terminal),
+`pagination`, `queued_at_ms`, `started_at_ms`, `finished_at_ms`, `duration_ms`,
+and `error_message` when one is set. `requests_failed` counts requests that
+never reached the target; when it is a large share of `requests_sent`, zero
+findings means the scan never really ran, not that the target is clean.
 
 Response (done):
 
@@ -355,14 +362,19 @@ passed.
 
 ### `list_scans_dalfox`
 
-List every tracked scan. Optional filter:
+List every tracked scan, newest first. All arguments are optional:
 
 ```json
-{ "status": "running" }
+{ "status": "running", "offset": 0, "limit": 0 }
 ```
 
-Returns `total`, `scans: [{scan_id, target, status, result_count, queued_at_ms,
-started_at_ms, finished_at_ms, duration_ms}]`, plus `error_message` on a scan that
+`status` is one of `queued`, `running`, `done`, `error`, `cancelled`; `offset` and
+`limit` page through the list (`limit: 0`, the default, returns everything from
+`offset` on).
+
+Returns `total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms,
+started_at_ms, finished_at_ms, duration_ms}]` and `pagination: {offset, limit,
+returned, has_more}`, plus `error_message` on a scan that
 failed — without it a row reading `status: "error", result_count: 0` looks exactly like
 a clean one.
 
@@ -374,6 +386,11 @@ Abort a queued or running scan:
 { "scan_id": "9f2c…" }
 ```
 
+Returns `{scan_id, target, cancelled, previous_status}`. `cancelled` is `true` only
+when the scan was `queued` or `running`; on a scan that had already finished the
+call is a no-op and `cancelled` is `false`. A running scan stops at its next
+cancellation checkpoint and stays listed as `cancelled` with its partial results.
+
 ### `delete_scan_dalfox`
 
 Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) whose worker has finished draining can be deleted; running or queued scans must be cancelled first. If deletion reports a draining worker after cancellation, poll the scan and retry after a short delay. Terminal scans are also auto-purged after 1 hour.
@@ -382,16 +399,27 @@ Permanently remove a tracked scan from memory. Only terminal scans (`done`, `err
 { "scan_id": "9f2c…" }
 ```
 
-Returns `{scan_id, deleted: true, previous_status}`.
+Returns `{scan_id, target, deleted: true, previous_status}`.
 
 ### `preflight_dalfox`
 
 Analyse a target **without** sending payloads. Useful for scoping before committing to a scan.
 
+Every field it accepts, with its default — `target` is the only required one:
+
 ```json
 {
   "target": "https://example.com",
+  "param": [],
   "method": "GET",
+  "data": null,
+  "headers": [],
+  "cookies": [],
+  "user_agent": null,
+  "timeout": 10,
+  "proxy": null,
+  "follow_redirects": false,
+  "insecure": true,
   "skip_discovery": false,
   "skip_mining": false,
   "encoders": ["url", "html"],
@@ -400,11 +428,25 @@ Analyse a target **without** sending payloads. Useful for scoping before committ
 }
 ```
 
-Returns reachability, discovered parameters, and an estimated request count.
+Returns reachability, discovered parameters, and an estimated request count:
+`{target, reachable, method, params_discovered, estimated_total_requests,
+params: [{name, location, estimated_requests}]}`. An unreachable target comes back
+as `reachable: false` with `error_code: "CONNECTION_FAILED"`. `param` is accepted
+for symmetry with the scan tool but not applied: preflight always reports the full
+discovered set.
 
 `encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with.
 
 The estimate counts both phases the scan runs per parameter — reflection and DOM verification — each truncated to the per-parameter payload cap, matching `--dry-run`. It remains a lower bound: WAF mutation/encoder expansion and the shared CSP/tech payloads appended after the cap are not counted.
+
+### Capacity limits
+
+The MCP server holds at most 100 active (queued or running) scans and 32
+concurrent preflights. A call past either limit is refused with a JSON-RPC
+`-32603` error saying the server is at capacity; unlike `-32602`, it is worth
+retrying once a scan finishes or is cancelled. Up to 1000 finished scans are
+kept; beyond that the oldest are dropped, and every terminal scan is purged an
+hour after it finishes.
 
 ## Structured results
 
@@ -489,7 +531,7 @@ a scan id is a 64-character digest nobody types by hand.
 4. Once the status is terminal and `settled == true`, the agent may call
    `delete_scan_dalfox`; it then summarises findings and reports back to the user.
 
-Because every tool is async, the agent stays responsive; no long-running tool call blocks the conversation.
+Because scans are async, the agent stays responsive. To fold a long scan into one call instead, use `wait=true` with a progress token.
 
 ## Authorization & safety
 

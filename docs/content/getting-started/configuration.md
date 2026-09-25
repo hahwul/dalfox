@@ -14,6 +14,8 @@ Dalfox looks in this order:
 1. `$XDG_CONFIG_HOME/dalfox/config.toml`
 2. `$HOME/.config/dalfox/config.toml`
 
+A `config.json` in the same directory is read when there is no `config.toml`.
+
 You can point anywhere else with `--config`:
 
 ```bash
@@ -50,8 +52,10 @@ Anything on the command line wins. This lets you keep sensible defaults in the c
 
 ```bash
 # Config sets workers=100, but for this quick scan use 20
-dalfox --workers 20 https://target.app
+dalfox scan --workers 20 https://target.app
 ```
+
+Scan flags need the explicit `scan` subcommand; the bare `dalfox <TARGET>` form accepts only targets and the global flags. On/off switches can only be turned on from the command line, so a `deep_scan = true` in the config holds for every run. See [Precedence](../../reference/config/#precedence) for the details.
 
 ## Formats
 
@@ -75,7 +79,7 @@ silence = true
 
 ## What can I configure?
 
-Anything that has a CLI flag under `dalfox scan` can live in the `[scan]` table. Common examples:
+Anything that has a CLI flag under `dalfox scan` can live in the `[scan]` table (`--blind` is spelled `blind_callback_url`). The file applies to CLI scans only; `dalfox server` and `dalfox mcp` ignore it. Common examples:
 
 | Key | Example | What it does |
 |-----|---------|--------------|
@@ -98,14 +102,14 @@ See the [Config File reference](../../reference/config/) for every key.
 
 ## Secrets
 
-Keep API keys, bearer tokens, and blind-XSS callback hostnames out of the config file if you commit it. Prefer environment variables:
+Keep API keys, bearer tokens, and blind-XSS callback hostnames out of the config file if you commit it. The only secret Dalfox reads from the environment is the REST server's API key:
 
 ```bash
 # .env or your shell profile
 export DALFOX_API_KEY="..."
 ```
 
-Or pass them at the command line and never persist them.
+Pass the rest (`-H "Authorization: …"`, `--cookies`, `-b`) at the command line and never persist them.
 
 ## Next steps
 

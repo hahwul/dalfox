@@ -10,7 +10,7 @@ toc = true
 ## 형식 선택
 
 ```bash
-dalfox https://target.app -f json -o report.json
+dalfox scan https://target.app -f json -o report.json
 ```
 
 | 형식 | 플래그 | 기계 판독 가능 | 적합한 용도 |
@@ -25,7 +25,7 @@ dalfox https://target.app -f json -o report.json
 ## 파일로 저장하기
 
 ```bash
-dalfox https://target.app -f jsonl -o findings.jsonl
+dalfox scan https://target.app -f jsonl -o findings.jsonl
 ```
 
 `-o`가 없으면 출력은 `stdout`으로 나갑니다.
@@ -41,14 +41,19 @@ dalfox https://target.app -f jsonl -o findings.jsonl
 | `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | 취약점이라고 주장할 수 있는지 (`high` / `low`). `I`에는 없음 |
 | `confidence_reason` | `"URL-carried source; inline script permitted"` | 판단 근거 신호 |
-| `inject_type` | `"inHTML"` | 컨텍스트 (`inHTML`, `inAttr`, `inJS`, …) |
+| `inject_type` | `"inHTML"` | 탐지 라벨: 주입한 페이로드는 `inHTML`(`--sxss`에서는 `sxss-inHTML`, 해당하면 `-CSTI`나 `-VHtml` 같은 프레임워크 싱크 접미어가 붙음), `inHTML-HPP`, `DOM-XSS`(AST), `blind-oob-<location>-<protocol>`, `OutdatedComponent`(`I`) |
 | `method` | `"GET"` | HTTP 메서드 |
+| `data` | `"https://target.app/?q=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx1ec4110f%3E"` | PoC URL |
 | `param` | `"q"` | 공격에 사용된 파라미터 |
-| `payload` | `<svg/onload=alert(1)>` | 정확한 페이로드 |
-| `evidence` | `"payload reflected in response"` | Dalfox가 그렇게 판단한 근거 |
+| `location` | `"Query"` | 파라미터가 실리는 위치: `Query`, `Body`, `JsonBody`, `MultipartBody`, `GraphqlBody`, `XmlBody`, `Header`(쿠키 포함), `Path`, `Fragment`. 알 수 없으면 생략 |
+| `payload` | `<svg onload=alert(1)>` | 정확한 페이로드 |
+| `evidence` | `"DOM verification successful for param q (DOM marker)"` | Dalfox가 그렇게 판단한 근거 |
 | `cwe` | `"CWE-79"` | 표준 CWE |
 | `severity` | `"High"` | High / Medium / Low / Info |
-| `message_str` | `"XSS found"` | 짧은 메시지 |
+| `message_id` | `606` | 카탈로그 메시지 ID |
+| `message_str` | `"Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>"` | 짧은 메시지 |
+
+다음 세 필드는 요청했을 때만 나타납니다: `new`(`--baseline-mode annotate`), `request`(`--include-request`), `response`(`--include-response`).
 
 각 등급이 실제로 어떤 증거인지, 그리고 순수 클라이언트 사이드 DOM-XSS가 왜 `V`에
 도달하지 못하는지는 [탐지 모델](../detection-model/) 문서에서 다룹니다.
@@ -63,10 +68,10 @@ dalfox https://target.app -f jsonl -o findings.jsonl
 선택적으로 전체 요청/응답을 포함할 수 있습니다.
 
 ```bash
-dalfox https://target.app -f json --include-all -o report.json
+dalfox scan https://target.app -f json --include-all -o report.json
 # 또는 세부적으로:
-dalfox ... --include-request
-dalfox ... --include-response
+dalfox scan ... --include-request
+dalfox scan ... --include-response
 ```
 
 기록되는 요청은 Dalfox가 실제로 보낸 것 그대로입니다. `-H`로 준 헤더와 쿠키가
@@ -74,6 +79,51 @@ dalfox ... --include-response
 공유하기 전에 내용을 확인하세요. 유닉스에서는 `-o` 파일을 `0600`으로 생성해
 같은 호스트의 다른 계정이 읽지 못하게 하지만, 그 파일이 이후에 어디로 가는지는
 별개의 문제입니다.
+
+## JSON과 JSONL 형태
+
+`-f json`은 엔벨로프를 `meta` 아래에, 탐지 결과를 `findings` 아래에 담은 문서 하나를 씁니다.
+
+```json
+{
+  "findings": [
+    {
+      "confidence": "high",
+      "confidence_reason": "payload reached an executable position in the parsed response",
+      "cwe": "CWE-79",
+      "data": "https://target.app/?q=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx1ec4110f%3E",
+      "detection_method": "reflection",
+      "evidence": "DOM verification successful for param q (DOM marker)",
+      "inject_type": "inHTML",
+      "location": "Query",
+      "message_id": 606,
+      "message_str": "Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>",
+      "method": "GET",
+      "param": "q",
+      "payload": "<svg onload=alert(1) class=dlx1ec4110f>",
+      "severity": "High",
+      "type": "V",
+      "type_description": "Vulnerable - dalfox asserts this input is exploitable; act on it"
+    }
+  ],
+  "meta": {
+    "dalfox_version": "3.2.3",
+    "dedup_mode": "exact",
+    "failed_requests": 0,
+    "findings_count": 1,
+    "incomplete": false,
+    "scan_duration_ms": 1234,
+    "target_summary": [
+      { "findings_count": 1, "status": "findings", "target": "https://target.app/?q=a" }
+    ],
+    "targets": ["https://target.app/?q=a"],
+    "targets_deduplicated": 0,
+    "total_requests": 87
+  }
+}
+```
+
+`-f jsonl`은 같은 데이터를 한 줄에 객체 하나씩 씁니다. 첫 줄은 `{"meta": {…}}`이고, 그 뒤의 각 줄이 탐지 결과 하나입니다. 탐지 결과만 필요하다면 첫 줄을 건너뛰거나, `jq 'select(.severity=="High")'`처럼 탐지 결과 필드로 거르세요.
 
 ## 스캔 메타데이터 엔벨로프
 
@@ -83,16 +133,18 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 - `targets` (입력 대상)
 - `scan_duration_ms`
 - `total_requests`
+- `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃). 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다
 - `findings_count`
-- `target_summary[]` — 대상별 상태, 탐지 결과 수, error_code(건너뛴 경우), 그리고 탐지된 경우 WAF/우회 세부 정보
+- `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 도중에 끊긴 경우 `error_code` / `error_message`, 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 타깃 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
 - `targets_unparsable` — 타깃 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/) 참고
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
-- `incomplete` — 하나 이상의 대상이 **완전히 테스트되지 않았을 때** `true`입니다. 현재는 스캔 도중 인증 세션이 끊어진 경우를 뜻합니다([세션 모니터링](../scanning-modes/) 참고). `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
+- `resumed` — `--state-file`을 쓴 경우에만 포함됩니다. `state_file`(경로)과 `targets_skipped_completed`(이전 실행에서 끝나 건너뛴 대상 수)
+- `incomplete` — 실행이 **완전히 테스트되지 않았을 때** `true`입니다. 스캔 도중 대상의 인증 세션이 끊어졌거나([세션 모니터링](../scanning-modes/) 참고), 전체 요청의 10% 이상(최소 3건)이 응답을 받지 못한 경우입니다. `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*
 
 세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)에 `"error_code": "SESSION_LOST"`, 그리고 감지된 신호가 `"error_message"`에 담겨 보고됩니다. 절대 `"clean"`으로는 표시되지 않습니다.
 
-**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복으로 실려, GitHub 코드 스캐닝을 비롯한 소비 도구가 컨텍스트를 잃지 않습니다.
+**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복으로 실려, GitHub 코드 스캐닝을 비롯한 소비 도구가 컨텍스트를 잃지 않습니다. 각 결과의 `ruleId`는 `dalfox/cwe-<n>`(XSS는 `dalfox/cwe-79`, 오래된 라이브러리는 `dalfox/cwe-1104`)이고, `level`은 `severity`를 따르며(High → `error`, Medium → `warning`, Low / Info → `note`), PoC URL은 location의 `uri`에 들어갑니다. `partialFingerprints["vulnIdentity/v1"]`은 코드 스캐닝이 실행 간에 같은 건을 맞춰 볼 수 있게 하는 안정적인 해시입니다. 탐지 결과 필드(`type`, `inject_type`, `param`, `payload`, `severity` 등)는 결과의 `properties` 아래에 있습니다.
 
 **TOML**에서는 최상위 `[meta]` 테이블로 나타납니다(탐지 결과는 `[[results]]` 아래).
 
@@ -105,9 +157,9 @@ Plain 텍스트 출력은 탐지 결과만 담습니다.
 로그 없이 `stdout`에 **탐지 결과만** 내보냅니다.
 
 ```bash
-dalfox https://target.app --silence
+dalfox scan https://target.app --silence
 # 탐지 결과를 다른 도구로 파이프:
-cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity=="High")'
+cat urls.txt | dalfox scan --silence -f jsonl | jq 'select(.severity=="High")'
 ```
 
 셸 파이프라인과 cron 작업에 유용합니다.
@@ -122,11 +174,11 @@ Payload / Line)을 스캔 종료 시점의 `WRN XSS found N XSS` 요약 **이후
 각 탐지 결과는 검증되는 즉시 진행 표시줄 위에 출력됩니다.
 
 ```bash
-dalfox https://target.app --stream-findings
+dalfox scan https://target.app --stream-findings
 ```
 
 `--stream-findings`는 `plain` 형식에만 영향을 미칩니다. 스캔 종료 시점에 스트리머가 그대로
-반영할 수 없는 필터(`--output`, `--limit`, `--only-poc`)를 적용해야 하면 자동으로
+반영할 수 없는 필터(`--output`, `--limit`, `--only-poc`, `--baseline`)를 적용해야 하면 자동으로
 비활성화됩니다.
 
 ## POC 스타일
@@ -134,27 +186,27 @@ dalfox https://target.app --stream-findings
 개념 증명(proof-of-concept)을 다양한 클라이언트 형태로 다시 렌더링합니다.
 
 ```bash
-dalfox https://target.app --poc-type curl      # curl 명령
-dalfox https://target.app --poc-type httpie    # HTTPie
-dalfox https://target.app --poc-type http-request  # 원시 HTTP
+dalfox scan https://target.app --poc-type curl      # curl 명령
+dalfox scan https://target.app --poc-type httpie    # HTTPie
+dalfox scan https://target.app --poc-type http-request  # 원시 HTTP
 ```
 
-기본값은 `plain`입니다. 티켓 등록에 적합합니다.
+기본값은 `plain`입니다. 티켓 등록에 적합합니다. `--poc-type`은 `plain` 리포트의 POC 줄만 바꿉니다. 구조화 형식은 항상 `data`에 PoC URL을 담습니다. `http-request`는 Dalfox가 해당 건에 기록한 원시 요청을 출력하며, 기록된 요청이 없으면 URL로 대체합니다.
 
 ## 필터링
 
 특정 결과 유형만 표시합니다.
 
 ```bash
-dalfox https://target.app --only-poc v     # 검증된 것만
-dalfox https://target.app --only-poc v,a   # 검증 + AST
+dalfox scan https://target.app --only-poc v     # V(Vulnerable)만
+dalfox scan https://target.app --only-poc v,a   # V + AST
 ```
 
 결과 수를 제한합니다.
 
 ```bash
-dalfox https://target.app --limit 50
-dalfox https://target.app --limit 10 --limit-result-type v
+dalfox scan https://target.app --limit 50
+dalfox scan https://target.app --limit 10 --limit-result-type v
 ```
 
 ## 베이스라인: 새로 생긴 것만 보고하기
@@ -224,9 +276,9 @@ git commit -am "chore: refresh dalfox baseline"
 ## 색상 및 TTY 동작
 
 ```bash
-dalfox https://target.app --no-color
+dalfox scan https://target.app --no-color
 # 또는
-NO_COLOR=1 dalfox https://target.app
+NO_COLOR=1 dalfox scan https://target.app
 ```
 
 Dalfox는 출력이 파일이나 비 TTY로 리다이렉트될 때도 색상을 자동으로 비활성화합니다.
@@ -237,33 +289,42 @@ JSON과 동일한 데이터 형태이며(다른 형식과의 일관성을 위한
 
 ```toml
 [meta]
-dalfox_version = "3.x"
-targets = ["https://target.app"]
-scan_duration_ms = 1234
-total_requests = 87
+dalfox_version = "3.2.3"
+dedup_mode = "exact"
+failed_requests = 0
 findings_count = 1
-target_summary = [{ target = "https://target.app", status = "findings", findings_count = 1 }]
+incomplete = false
+scan_duration_ms = 1234
+targets = ["https://target.app/?q=a"]
+targets_deduplicated = 0
+total_requests = 87
+
+[[meta.target_summary]]
+findings_count = 1
+status = "findings"
+target = "https://target.app/?q=a"
 
 [[results]]
 type = "V"
 type_description = "Vulnerable - dalfox asserts this input is exploitable; act on it"
-detection_method = "dom-verification"
-confidence = "high"
 inject_type = "inHTML"
 method = "GET"
-data = "https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E"
+data = "https://target.app/?q=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx1ec4110f%3E"
 param = "q"
-payload = "<svg/onload=alert(1)>"
-evidence = "payload reflected and DOM element verified"
-location = "Query"
+payload = "<svg onload=alert(1) class=dlx1ec4110f>"
+evidence = "DOM verification successful for param q (DOM marker)"
 cwe = "CWE-79"
 severity = "High"
 message_id = 606
-message_str = "XSS found"
+message_str = "Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>"
+location = "Query"
+detection_method = "reflection"
+confidence = "high"
+confidence_reason = "payload reached an executable position in the parsed response"
 ```
 
 ```bash
-dalfox https://target.app -f toml -o report.toml
+dalfox scan https://target.app -f toml -o report.toml
 ```
 
 ## SARIF → GitHub 코드 스캐닝
@@ -323,9 +384,9 @@ Dalfox는 다음을 반환합니다.
 |------|---------|
 | `0` | 성공적으로 완료, 탐지 결과 없음 |
 | `1` | 성공적으로 완료, **티어와 무관하게** 탐지 결과 하나 이상 |
-| `2` | 입력/설정/런타임 오류, **또는** 기본값 `--on-session-loss abort`에서 스캔 도중 세션이 끊어졌고 *탐지 결과가 없는* 경우 (탐지 결과가 있었다면 여전히 `1`) |
+| `2` | 입력/설정/런타임 오류, 또는 `-o` 파일을 쓰지 못한 경우. 탐지 결과가 없을 때는 다음도 해당: 모든 대상을 건너뜀(접속 불가, 맞지 않는 콘텐츠 타입 등), 대상의 스캔 워커가 중단됨(`INTERNAL_ERROR`), 요청의 10% 이상(최소 3건)이 응답을 받지 못함, 기본값 `--on-session-loss abort`에서 스캔 도중 세션이 끊어짐 (탐지 결과가 있었다면 여전히 `1`) |
 
-`1`은 모든 티어를 포함합니다. `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 코드가 정해지기 전에 필터가 적용됩니다. (JSON에 `jq`로 `severity >= High`를 거는 방식도 오늘은 같은 집합을 얻습니다. severity가 현재 티어를 따라가기 때문입니다. [탐지 모델](../detection-model/) 참고.)
+`1`은 모든 티어를 포함합니다. `R` 하나나 `--detect-outdated-libs`가 만든 `I` 하나도 `V`와 똑같이 빌드를 실패시킵니다. Dalfox가 악용 가능하다고 판단한 것만 게이트로 삼으려면 `--only-poc v`를 주고 종료 코드를 그대로 쓰세요. 코드가 정해지기 전에 필터가 적용됩니다. (JSON에 `jq`로 `severity == "High"`를 거는 방식도 오늘은 거의 같은 집합을 얻습니다. severity가 현재 티어를 따라가기 때문입니다. `V`는 `High`, `A`는 `Medium`, `R`은 `Info`입니다. 예외는 `I` 라이브러리 결과로, 권고(advisory)의 severity를 그대로 가지므로 `High`일 수 있습니다. [탐지 모델](../detection-model/) 참고.)
 
 `--baseline`은 같은 종료 코드를 **신규 여부**로 좁힙니다. 기본 `filter` 모드에서는 억제된 건이 종료 코드 판정에 도달하지 않으므로, 백로그가 전부 베이스라인에 들어 있는 실행은 `0`으로 끝납니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고.
 

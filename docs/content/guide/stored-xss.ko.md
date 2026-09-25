@@ -10,7 +10,7 @@ toc = true
 ## 기본 흐름
 
 ```bash
-dalfox https://target.app/post-comment \
+dalfox scan https://target.app/post-comment \
   --sxss \
   --sxss-url https://target.app/comments
 ```
@@ -21,7 +21,9 @@ Dalfox는 다음을 수행합니다.
 2. 두 번째 URL(`comments`)을 GET으로 **가져옵니다**(`--sxss-method`로 구성 가능).
 3. 페이로드가 가져온 응답에 반사되는지, 그리고 실제 DOM 요소를 생성했는지 **검증**합니다.
 
-두 단계를 모두 통과한 탐지 결과만 SXSS로 리포팅됩니다.
+조회 페이지에 다시 나타난 페이로드는 `R`로, 그곳에서 실제 DOM 요소까지 만든 페이로드는 `V`로 보고됩니다. 저장형 탐지 결과의 `inject_type`에는 `sxss-` 접두어가 붙으므로(`sxss-inHTML`), 리포트에서 반사형 결과와 구분됩니다.
+
+저장형 모드는 철저히 순차적으로 동작합니다. 쓰기 순서와 조회 재시도가 이를 전제로 하므로 파라미터도 하나씩, 요청도 하나씩 보냅니다. `--workers`를 늘려도 빨라지지 않습니다.
 
 쓰기 엔드포인트가 제출한 값을 돌려줄 필요는 없습니다. 제출 응답이 "saved"만 돌려줘도 Dalfox는 저장 필드를 유지하며, 값을 렌더링하지 않는 그 응답으로 싱크가 어떤 문자를 거르는지 판단하지 않습니다. 그래서 폼 기반 저장형 싱크도 건너뛰지 않고 전체 페이로드로 테스트됩니다.
 
@@ -29,7 +31,7 @@ Dalfox는 다음을 수행합니다.
 
 스냅샷 직후 Dalfox는 필드를 한 번 다시 프로브합니다. 그 프로브의 주입이 조회 페이지(또는 쓰기 응답)의 마커 수를 늘리지 못하면 이 필드는 여기에 저장되지 않는 것으로 보고 페이로드 카탈로그를 건너뜁니다. 이렇게 하면 폼의 비저장 필드가 — 형제 필드가 저장한 마커로 반사 프로브를 통과하더라도 — 전체 카탈로그를 돌리는 일을 막습니다. 프로브는 긴 마커와 짧은 마커를 모두 시도하므로, 짧은 값만 저장하는 싱크를 비저장 필드로 오인하지 않습니다.
 
-프로브는 저장이 **언제** 보이는지도 관찰합니다. 동기 싱크(즉시 보임)라면 나타나지 않는 페이로드를 다시 조회하지 않아 요청 수를 낮게 유지합니다. 쓰기 지연(write-behind) 싱크(지연 후에만 보임)라면 지연된 페이로드를 놓치지 않도록 페이로드별 조회 재시도를 그대로 유지합니다. 대상이 기본 재시도 창보다 느리게 저장한다면 `--sxss-retries`를 높이세요.
+프로브는 저장이 **언제** 보이는지도 관찰합니다. 동기 싱크(즉시 보임)라면 나타나지 않는 페이로드를 다시 조회하지 않아 요청 수를 낮게 유지합니다. 쓰기 지연(write-behind) 싱크(지연 후에만 보임)라면 지연된 페이로드를 놓치지 않도록 페이로드별 조회 재시도를 그대로 유지합니다. 대상이 기본 재시도 창보다 느리게 저장한다면 `--sxss-retries`(기본값 `3`, 최대 `20`)를 높이세요. *n*번째 재시도는 500 ms × *n*만큼 기다리며, 한 번의 대기는 최대 5 s입니다. `--deep-scan`을 주면 저장 프로브를 건너뛰고 모든 필드에 전체 카탈로그를 실행합니다.
 
 ## 조회 URL 선택
 
@@ -41,12 +43,12 @@ Dalfox는 다음을 수행합니다.
 | `PATCH /profile` | `GET /u/myself` |
 | `POST /support/ticket` | `GET /admin/tickets` (관리자 권한이 있는 경우) |
 
-`--sxss-url`을 생략하면, Dalfox는 폼 탐색 컨텍스트를 차례로 사용합니다. 폼이 발견된 페이지, 그다음 폼의 `action` 엔드포인트, 마지막으로 주입 대상 자신입니다. 저장된 값이 이 세 곳이 아닌 다른 곳에 렌더링된다면 `--sxss-url`을 직접 지정하세요.
+Dalfox는 후보 조회 페이지를 모두 읽으며, 순서는 `--sxss-url`(지정한 경우), 폼이 발견된 페이지, 폼의 `action` 엔드포인트(대상과 같은 오리진이거나 같은 호스트를 HTTPS로 올린 경우에만), 주입 대상 자신입니다. 중복된 URL은 한 번만 가져옵니다. `--sxss-url`이 없으면 뒤의 세 곳이 전부이므로, 저장된 값이 그 밖의 곳에 렌더링된다면 `--sxss-url`을 직접 지정하세요. `--sxss-url`은 `--sxss` 없이는 아무 효과가 없으며, 단독으로 주면 Dalfox가 경고합니다.
 
 ## 조회 메서드
 
 ```bash
-dalfox https://target.app/form --sxss \
+dalfox scan https://target.app/form --sxss \
   --sxss-url https://target.app/list \
   --sxss-method GET
 ```
@@ -58,7 +60,7 @@ dalfox https://target.app/form --sxss \
 저장형 XSS에는 세션이 두 개 필요한 경우가 많습니다. 하나는 쓰는 쪽(사용자), 다른 하나는 읽는 쪽(관리자)입니다. 조회 GET이 작성해 둔 내용을 볼 수 있을 만큼 충분한 접근 권한을 주는 헤더/쿠키를 사용하세요.
 
 ```bash
-dalfox https://target.app/profile \
+dalfox scan https://target.app/profile \
   --sxss --sxss-url https://target.app/admin/users \
   -H "Cookie: admin_session=abc; role=admin"
 ```
@@ -68,7 +70,7 @@ dalfox https://target.app/profile \
 조회 페이지가 로그인 뒤에 있는데 그 로그인 정보가 없다면, 블라인드 XSS로 전환하세요. 페이로드는 관리자의 브라우저에서 실행되고, 콜백 서버가 이를 기록합니다.
 
 ```bash
-dalfox https://target.app/support/ticket \
+dalfox scan https://target.app/support/ticket \
   -b https://callback.interact.sh
 ```
 

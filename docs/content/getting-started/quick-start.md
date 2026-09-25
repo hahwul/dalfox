@@ -19,7 +19,9 @@ The first argument is the target. Dalfox auto-detects that it's a URL and runs t
 
 - A banner with the version.
 - `INF` lines as Dalfox discovers parameters and probes contexts.
-- `[V]` (vulnerable) and `[R]` (reflected) lines for each finding, with the exact payload that worked.
+- A `WRN XSS found N XSS` summary, then a `[POC][V]…` (vulnerable) or `[POC][R]…` (reflected) line for each finding, with the exact payload that worked.
+
+The bare form only takes a target plus the global flags (`--config`, `--debug`, `--no-color`, `-S`). Every other scan flag needs the explicit subcommand — `dalfox scan <target> …` — which is the form the rest of this page uses.
 
 ## 2. Scan from a file
 
@@ -30,7 +32,7 @@ Feed a list of URLs from your crawler:
 dalfox scan urls.txt
 ```
 
-Each URL runs through the same pipeline. Results stream as they're found.
+Each URL runs through the same pipeline. Findings are printed after the end-of-scan `WRN XSS found N XSS` summary; add `--stream-findings` to print each one the moment it is verified.
 
 ## 3. Scan from a pipeline
 
@@ -47,17 +49,19 @@ waybackurls example.com | gf xss | dalfox
 Pair Dalfox with `jq`, a dashboard, or CI:
 
 ```bash
-dalfox https://target.app/search?q=test -f json -o report.json
+dalfox scan https://target.app/search?q=test -f json -o report.json
 ```
 
 Machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) auto-suppress the banner so the file stays clean.
+
+The exit code is CI-friendly too: `0` means the scan finished with no findings, `1` means it found something, and `2` means an input, configuration, or runtime error.
 
 ## 5. Authenticated scans
 
 Pass cookies, headers, or a custom method:
 
 ```bash
-dalfox https://api.target.app/v1/users \
+dalfox scan https://api.target.app/v1/users \
   -X POST \
   -H "Authorization: Bearer eyJ..." \
   -H "Content-Type: application/json" \
@@ -83,7 +87,7 @@ dalfox scan --input-type har capture.har
 Use an out-of-band callback (Interactsh, Burp Collaborator, XSS Hunter, etc.):
 
 ```bash
-dalfox https://target.app \
+dalfox scan https://target.app \
   -b https://your-callback.interact.sh
 ```
 
@@ -92,8 +96,8 @@ Dalfox sends blind-XSS payloads across every discovered parameter; if the payloa
 Or let Dalfox manage an [interactsh](https://github.com/projectdiscovery/interactsh) (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:
 
 ```bash
-dalfox https://target.app --blind-oob                  # public interactsh mesh
-dalfox https://target.app --blind-oob=oast.fun         # pick servers
+dalfox scan https://target.app --blind-oob             # public interactsh mesh
+dalfox scan https://target.app --blind-oob=oast.fun    # pick servers
 ```
 
 Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes.
@@ -105,7 +109,7 @@ Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to cont
 Use `--dry-run` to preview what Dalfox would scan:
 
 ```bash
-dalfox https://target.app --dry-run
+dalfox scan https://target.app --dry-run
 ```
 
 It discovers parameters and estimates request volume without firing any payloads.
@@ -116,9 +120,10 @@ Each finding is tagged:
 
 | Tag | Meaning |
 |-----|---------|
-| `[V]` | **Vulnerable**: the payload came back as a real DOM element in the parsed response (CSS-selector match on Dalfox's marker) |
+| `[V]` | **Vulnerable**: Dalfox asserts the input is exploitable — the payload reached an executable position in the parsed response (for example a DOM element carrying Dalfox's marker), or an out-of-band callback fired |
 | `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
 | `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
+| `[I]` | **Informational**: not an XSS claim, e.g. a known-vulnerable JS library from the opt-in `--detect-outdated-libs` |
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 

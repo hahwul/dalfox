@@ -10,7 +10,7 @@ Every scan produces the same internal result structure. Dalfox renders it in whi
 ## Choosing a format
 
 ```bash
-dalfox https://target.app -f json -o report.json
+dalfox scan https://target.app -f json -o report.json
 ```
 
 | Format | Flag | Machine-readable | Best for |
@@ -25,7 +25,7 @@ dalfox https://target.app -f json -o report.json
 ## Writing to a file
 
 ```bash
-dalfox https://target.app -f jsonl -o findings.jsonl
+dalfox scan https://target.app -f jsonl -o findings.jsonl
 ```
 
 Without `-o`, output goes to `stdout`.
@@ -41,14 +41,19 @@ Every finding includes:
 | `detection_method` | `"ast"` | How it was found: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | Whether Dalfox can claim a vulnerability (`high` / `low`); absent on `I` |
 | `confidence_reason` | `"URL-carried source; inline script permitted"` | The deciding signals |
-| `inject_type` | `"inHTML"` | Context (`inHTML`, `inAttr`, `inJS`, …) |
+| `inject_type` | `"inHTML"` | Finding label: `inHTML` for injected payloads (`sxss-inHTML` under `--sxss`, with a `-CSTI` or framework-sink suffix such as `-VHtml` when one applies), `inHTML-HPP`, `DOM-XSS` (AST), `blind-oob-<location>-<protocol>`, `OutdatedComponent` (`I`) |
 | `method` | `"GET"` | HTTP method |
+| `data` | `"https://target.app/?q=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx1ec4110f%3E"` | The PoC URL |
 | `param` | `"q"` | Parameter that was exploited |
-| `payload` | `<svg/onload=alert(1)>` | The exact payload |
-| `evidence` | `"payload reflected in response"` | Why Dalfox believes it |
+| `location` | `"Query"` | Where the parameter travels: `Query`, `Body`, `JsonBody`, `MultipartBody`, `GraphqlBody`, `XmlBody`, `Header` (cookies included), `Path`, `Fragment`; omitted when unknown |
+| `payload` | `<svg onload=alert(1)>` | The exact payload |
+| `evidence` | `"DOM verification successful for param q (DOM marker)"` | Why Dalfox believes it |
 | `cwe` | `"CWE-79"` | Standard CWE |
 | `severity` | `"High"` | High / Medium / Low / Info |
-| `message_str` | `"XSS found"` | Short message |
+| `message_id` | `606` | Catalog message id |
+| `message_str` | `"Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>"` | Short message |
+
+Three more fields appear only when asked for: `new` (under `--baseline-mode annotate`), `request` (with `--include-request`), and `response` (with `--include-response`).
 
 What each tier is actually evidence of, and why a pure client-side DOM-XSS
 never reaches `V`, is covered in [Detection Model](../detection-model/).
@@ -64,10 +69,10 @@ preflight response's `<script>` tags). Filter it out with `--only-poc v,a,r`.
 Optionally include the full request/response:
 
 ```bash
-dalfox https://target.app -f json --include-all -o report.json
+dalfox scan https://target.app -f json --include-all -o report.json
 # or granularly:
-dalfox ... --include-request
-dalfox ... --include-response
+dalfox scan ... --include-request
+dalfox scan ... --include-response
 ```
 
 The recorded request is the one Dalfox sent, verbatim — every `-H` header and
@@ -75,6 +80,51 @@ the whole cookie jar included. Check a report built with `--include-request` /
 `--include-all` before you share it. On Unix, `-o` creates the file `0600` so
 it is not readable by other local accounts, but that says nothing about where
 the file goes next.
+
+## JSON and JSONL shape
+
+`-f json` writes one document with the envelope under `meta` and the findings under `findings`:
+
+```json
+{
+  "findings": [
+    {
+      "confidence": "high",
+      "confidence_reason": "payload reached an executable position in the parsed response",
+      "cwe": "CWE-79",
+      "data": "https://target.app/?q=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx1ec4110f%3E",
+      "detection_method": "reflection",
+      "evidence": "DOM verification successful for param q (DOM marker)",
+      "inject_type": "inHTML",
+      "location": "Query",
+      "message_id": 606,
+      "message_str": "Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>",
+      "method": "GET",
+      "param": "q",
+      "payload": "<svg onload=alert(1) class=dlx1ec4110f>",
+      "severity": "High",
+      "type": "V",
+      "type_description": "Vulnerable - dalfox asserts this input is exploitable; act on it"
+    }
+  ],
+  "meta": {
+    "dalfox_version": "3.2.3",
+    "dedup_mode": "exact",
+    "failed_requests": 0,
+    "findings_count": 1,
+    "incomplete": false,
+    "scan_duration_ms": 1234,
+    "target_summary": [
+      { "findings_count": 1, "status": "findings", "target": "https://target.app/?q=a" }
+    ],
+    "targets": ["https://target.app/?q=a"],
+    "targets_deduplicated": 0,
+    "total_requests": 87
+  }
+}
+```
+
+`-f jsonl` writes the same data one object per line: the first line is `{"meta": {…}}`, and every line after it is one finding. Skip the first line (or filter on a finding field, as `jq 'select(.severity=="High")'` does) when you only want findings.
 
 ## Scan metadata envelope
 
@@ -84,16 +134,18 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `targets` (the input targets)
 - `scan_duration_ms`
 - `total_requests`
+- `failed_requests` — requests that never got a response (reset, refused, timed out) after their retries. A payload that never reached the target was never tested
 - `findings_count`
-- `target_summary[]` — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected
+- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` / `error_message` when it was skipped or cut short, and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
 - `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
-- `incomplete` — `true` when at least one target was **not fully tested**; today that means its authenticated session died mid-scan (see [Session monitoring](../scanning-modes/)). Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
+- `resumed` — only when `--state-file` was used: `state_file` (the path) and `targets_skipped_completed` (targets skipped because an earlier run finished them)
+- `incomplete` — `true` when the run was **not fully tested**: a target's authenticated session died mid-scan (see [Session monitoring](../scanning-modes/)), or at least 10% of the run's requests (and at least 3) never got a response. Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
 
 A target whose session died is reported as `"status": "incomplete"` (or `"skipped"` if it never ran) with `"error_code": "SESSION_LOST"` and the signal that fired in `"error_message"` — never as `"clean"`.
 
-In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context.
+In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context. Each result's `ruleId` is `dalfox/cwe-<n>` (`dalfox/cwe-79` for XSS, `dalfox/cwe-1104` for outdated libraries), its `level` follows `severity` (High → `error`, Medium → `warning`, Low / Info → `note`), the PoC URL is the location `uri`, and `partialFingerprints["vulnIdentity/v1"]` is a stable hash that lets code scanning match a finding across runs. The finding fields (`type`, `inject_type`, `param`, `payload`, `severity`, …) are under the result's `properties`.
 
 In **TOML** it appears as a top-level `[meta]` table (findings under `[[results]]`).
 
@@ -106,9 +158,9 @@ Plain text output stays findings-only.
 Emit **only findings** on `stdout`, no logs:
 
 ```bash
-dalfox https://target.app --silence
+dalfox scan https://target.app --silence
 # Pipe findings into another tool:
-cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity=="High")'
+cat urls.txt | dalfox scan --silence -f jsonl | jq 'select(.severity=="High")'
 ```
 
 Useful in shell pipelines and cron jobs.
@@ -124,39 +176,39 @@ with `--stream-findings`. Each finding is printed the moment it is
 verified, above the progress bars:
 
 ```bash
-dalfox https://target.app --stream-findings
+dalfox scan https://target.app --stream-findings
 ```
 
 `--stream-findings` only affects the `plain` format and is auto-disabled
 when the end-of-scan path needs to apply filters the streamer can't
-mirror cleanly (`--output`, `--limit`, `--only-poc`).
+mirror cleanly (`--output`, `--limit`, `--only-poc`, `--baseline`).
 
 ## POC styles
 
 Re-render the proof-of-concept in different client shapes:
 
 ```bash
-dalfox https://target.app --poc-type curl      # curl command
-dalfox https://target.app --poc-type httpie    # HTTPie
-dalfox https://target.app --poc-type http-request  # raw HTTP
+dalfox scan https://target.app --poc-type curl      # curl command
+dalfox scan https://target.app --poc-type httpie    # HTTPie
+dalfox scan https://target.app --poc-type http-request  # raw HTTP
 ```
 
-Default is `plain`. Good for filing tickets.
+Default is `plain`. Good for filing tickets. `--poc-type` changes the POC line of the `plain` report only; structured formats always carry the PoC URL in `data`. `http-request` prints the raw request Dalfox recorded for the finding, and falls back to the URL when there is none.
 
 ## Filtering
 
 Show only certain result types:
 
 ```bash
-dalfox https://target.app --only-poc v     # only verified
-dalfox https://target.app --only-poc v,a   # verified + AST
+dalfox scan https://target.app --only-poc v     # only V (Vulnerable)
+dalfox scan https://target.app --only-poc v,a   # V + AST
 ```
 
 Cap the number of results:
 
 ```bash
-dalfox https://target.app --limit 50
-dalfox https://target.app --limit 10 --limit-result-type v
+dalfox scan https://target.app --limit 50
+dalfox scan https://target.app --limit 10 --limit-result-type v
 ```
 
 ## Baselines: reporting only what is new
@@ -226,9 +278,9 @@ Running with `--baseline` and `-o` pointed at the same file destroys the baselin
 ## Colour & TTY behaviour
 
 ```bash
-dalfox https://target.app --no-color
+dalfox scan https://target.app --no-color
 # or
-NO_COLOR=1 dalfox https://target.app
+NO_COLOR=1 dalfox scan https://target.app
 ```
 
 Dalfox also auto-disables colour when output is redirected to a file or a non-TTY.
@@ -239,33 +291,42 @@ Same data shape as JSON (plus top-level `[meta]` envelope for parity with other 
 
 ```toml
 [meta]
-dalfox_version = "3.x"
-targets = ["https://target.app"]
-scan_duration_ms = 1234
-total_requests = 87
+dalfox_version = "3.2.3"
+dedup_mode = "exact"
+failed_requests = 0
 findings_count = 1
-target_summary = [{ target = "https://target.app", status = "findings", findings_count = 1 }]
+incomplete = false
+scan_duration_ms = 1234
+targets = ["https://target.app/?q=a"]
+targets_deduplicated = 0
+total_requests = 87
+
+[[meta.target_summary]]
+findings_count = 1
+status = "findings"
+target = "https://target.app/?q=a"
 
 [[results]]
 type = "V"
 type_description = "Vulnerable - dalfox asserts this input is exploitable; act on it"
-detection_method = "dom-verification"
-confidence = "high"
 inject_type = "inHTML"
 method = "GET"
-data = "https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E"
+data = "https://target.app/?q=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx1ec4110f%3E"
 param = "q"
-payload = "<svg/onload=alert(1)>"
-evidence = "payload reflected and DOM element verified"
-location = "Query"
+payload = "<svg onload=alert(1) class=dlx1ec4110f>"
+evidence = "DOM verification successful for param q (DOM marker)"
 cwe = "CWE-79"
 severity = "High"
 message_id = 606
-message_str = "XSS found"
+message_str = "Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>"
+location = "Query"
+detection_method = "reflection"
+confidence = "high"
+confidence_reason = "payload reached an executable position in the parsed response"
 ```
 
 ```bash
-dalfox https://target.app -f toml -o report.toml
+dalfox scan https://target.app -f toml -o report.toml
 ```
 
 ## SARIF → GitHub code scanning
@@ -325,9 +386,9 @@ Dalfox returns:
 |------|---------|
 | `0` | Completed successfully, no findings |
 | `1` | Completed successfully, at least one finding **of any tier** |
-| `2` | Input/config/runtime error, **or** a session lost mid-scan *with no findings* under the default `--on-session-loss abort` (a run that did find something still exits `1`) |
+| `2` | Input/config/runtime error, or the `-o` file could not be written. With no findings, also: every target was skipped (unreachable, wrong content type, …), a target's scan worker crashed (`INTERNAL_ERROR`), at least 10% of requests (and at least 3) never got a response, or a session was lost mid-scan under the default `--on-session-loss abort` (a run that did find something still exits `1`) |
 
-`1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity >= High` with `jq` reaches the same set today, because severity currently tracks the tier; see [Detection Model](../detection-model/).)
+`1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity == "High"` with `jq` reaches nearly the same set today, because severity currently tracks the tier: `V` is `High`, `A` is `Medium`, `R` is `Info`. The exception is an `I` library finding, which carries its advisory's severity and can be `High`. See [Detection Model](../detection-model/).)
 
 `--baseline` narrows the same code to *novelty*: under the default `filter` mode, suppressed findings never reach the exit-code decision, so a run whose entire backlog is already in the baseline exits `0`. See [Baselines](#baselines-reporting-only-what-is-new).
 

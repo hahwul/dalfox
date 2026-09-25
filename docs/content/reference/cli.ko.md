@@ -5,7 +5,7 @@ weight = 1
 toc = true
 +++
 
-Dalfox는 다섯 개의 서브커맨드와 기본 제공 `help`로 구성되어 있습니다. 기본값(대상만 전달했을 때)은 `scan`입니다.
+Dalfox는 다섯 개의 서브커맨드와 기본 제공 `help`로 구성되어 있습니다. 기본값(대상만 전달했을 때)은 `scan`이지만, 이 축약형은 대상과 아래의 전역 플래그만 받습니다. 그 밖의 스캔 플래그를 쓰려면 서브커맨드를 명시해야 합니다. `dalfox scan <TARGET> --workers 20`은 동작하지만 `dalfox <TARGET> --workers 20`은 예상하지 못한 인자로 거부됩니다.
 
 ```
 dalfox [SUBCOMMAND] [TARGET] [FLAGS]
@@ -26,8 +26,12 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 |------|-------------|
 | `--config <FILE>` | 설정 파일 경로(TOML이나 JSON). 기본 검색 경로를 덮어씁니다. |
 | `--debug` | 디버그 로깅을 활성화합니다. |
+| `--no-color` | ANSI 색상을 비활성화합니다 (`NO_COLOR`도 따릅니다). |
+| `-S`, `--silence` | PoC 출력을 제외한 모든 로그를 STDOUT에서 숨깁니다. |
 | `-h`, `--help` | 도움말을 출력합니다. |
 | `-V`, `--version` | 버전을 출력합니다. |
+
+`--config`, `--debug`, `--no-color`, `--silence`는 서브커맨드 앞뒤 어디에 써도 됩니다(`dalfox --config ./dalfox.toml scan …`과 `dalfox scan … --config ./dalfox.toml`은 같습니다).
 
 종료 코드:
 
@@ -41,7 +45,7 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 
 ## `dalfox scan`
 
-대상에서 XSS를 스캔합니다. 서브커맨드를 생략해도 동일합니다.
+대상에서 XSS를 스캔합니다. 서브커맨드를 생략해도 스캔이 실행되지만, 이때는 대상과 전역 플래그만 받습니다(위 참고).
 
 ```bash
 dalfox scan [TARGETS]... [FLAGS]
@@ -53,7 +57,7 @@ dalfox scan [TARGETS]... [FLAGS]
 |------|-------|---------|-------------|
 | `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
 | `--dedup-urls` | — | `exact` | 대상 중복 제거: `exact`(URL+메서드가 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
-| `--state-file` | — | — | 끝난 대상을 파일에 기록해 두고 같은 스캔을 다시 돌릴 때 건너뜁니다. 중단된 대량 스캔을 처음부터가 아니라 이어서 진행합니다. `-H` / `--cookies` / `--cookie-from-raw`로 준 자격 증명 값은 식별자에서 제외되므로 세션을 갱신해도 이어서 진행합니다. 캡처 안의 자격 증명은 그대로 포함됩니다 |
+| `--state-file` | — | — | 끝난 대상을 파일에 기록해 두고 같은 스캔을 다시 돌릴 때 건너뜁니다. 중단된 대량 스캔을 처음부터가 아니라 이어서 진행합니다. raw HTTP/HAR 요청 데이터는 지문으로 기록되므로 바뀐 캡처는 다시 스캔합니다. `-H` / `--cookies` / `--cookie-from-raw`로 준 자격 증명 값은 식별자에서 제외되므로 세션을 갱신해도 이어서 진행합니다. 캡처 안의 자격 증명은 그대로 포함됩니다 |
 
 무엇을 건너뛰고 무엇을 다시 시도하는지는 [중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)를 참고하세요.
 
@@ -69,9 +73,9 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--no-color` | — | false | ANSI 색상을 비활성화합니다 |
 | `--silence` | `-S` | false | STDOUT에 탐지 결과만 출력합니다 |
 | `--dry-run` | — | false | 페이로드를 보내지 않고 탐색 및 계획만 수행합니다 |
-| `--stream-findings` | — | false | 스캔 종료 요약 이후가 아니라 각 탐지 결과가 검증되는 즉시 출력합니다 (plain 형식만; `--output`, `--limit`, `--only-poc` 사용 시 자동 비활성화) |
+| `--stream-findings` | — | false | 스캔 종료 요약 이후가 아니라 각 탐지 결과가 검증되는 즉시 출력합니다 (plain 형식만; `--output`, `--limit`, `--only-poc`, `--baseline` 사용 시 자동 비활성화) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
-| `--limit` | — | — | 표시되는 전체 결과 수를 제한합니다 |
+| `--limit` | — | — | 표시되는 전체 결과 수를 제한합니다 (`1` 이상이어야 하며, 제한하지 않으려면 생략) |
 | `--limit-result-type` | — | `all` | `--limit`에 집계되는 유형: `all`, `v`, `r`, `a`, `i` |
 | `--only-poc` | — | — | 쉼표로 구분된 필터: `v`(취약), `r`(반사됨), `a`(AST), `i`(정보성) |
 | `--baseline` | — | — | 이전 Dalfox JSON/JSONL 리포트와 비교해 그 이후 새로 생긴 건만 보고합니다. 평범한 `-f json -o` 리포트가 그대로 베이스라인입니다 |
@@ -103,7 +107,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
 | `--session-check` | — | 인증된 응답 본문에 계속 매칭되어야 하는 정규식. 지정하면 이 값이 기준이 되며 내장 휴리스틱은 사용하지 않습니다 |
-| `--session-check-url` | — | 세션 재검증 시 스캔 대상 대신 이 URL을 조회합니다 (예: 가벼운 `/api/me` 엔드포인트) |
+| `--session-check-url` | — | 세션 재검증 시 스캔 대상 대신 이 URL(절대 `http(s)://`)을 조회합니다 (예: 가벼운 `/api/me` 엔드포인트) |
 | `--on-session-loss` | `abort` | `abort`는 해당 대상을 중단하고 같은 호스트의 나머지 대상도 건너뛰며, 탐지 결과가 없으면 `2`로 종료합니다. `continue`는 스캔을 계속하고 종료 코드를 바꾸지 않습니다. 어느 쪽이든 대상은 `clean`이 아니라 `incomplete` / `SESSION_LOST`로 보고됩니다 |
 
 ### 범위
@@ -140,30 +144,30 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
-| `--timeout` | — | `10` | 요청당 타임아웃(초) (네트워크 한정; 전체 스캔 시간을 제한하지 않음) |
-| `--scan-timeout` | — | `0` | 스캔 단계(프리플라이트 이후)의 대상별 실제 경과 시간 하드 상한(초). 초과 시 해당 대상을 중단합니다. 여러 순차 단계가 부분적으로 멈춘 엔드포인트에 대해 각각 요청당 `--timeout` 비용을 치를 때 유용합니다. `0`은 비활성화합니다. |
-| `--delay` | — | `0` | 요청 간 지연(ms), 워커별 |
-| `--rate-limit` | `-r`, `--rl` | `0` | 모든 워커와 대상에 걸쳐 공유되는 **전역** 아웃바운드 요청 속도를 초당 요청 수로 제한합니다 (`0` = 무제한). 하나의 워커만 간격을 두는 `--delay`와 달리, `workers × concurrent targets`에서 한꺼번에 나가는 전체 요청량을 제한하므로 공유 IP / 엣지 WAF 임계값에 더 친화적입니다. |
-| `--retries` | — | `0` | HTTP 5xx 및 일시적 전송 오류(타임아웃, 연결 재설정) 시 실패한 요청을 이 횟수만큼 재시도합니다 (`0` = 끔). HTTP 429는 이 값과 무관하게 항상 재시도합니다. |
-| `--retry-delay` | — | `1000` | `--retries` 시도 사이의 지수 백오프 기본 지연(ms) (시도마다 두 배로 증가, 내부적으로 상한 적용). 429에서는 서버의 `Retry-After` 헤더가 우선합니다. |
+| `--timeout` | — | `10` | 요청당 타임아웃(초), `1`–`3600` (네트워크 한정; 전체 스캔 시간을 제한하지 않음) |
+| `--scan-timeout` | — | `0` | 페이로드 주입(스캔) 단계의 대상별 실제 경과 시간 하드 상한(초, 최대 `86400`). 초과 시 해당 대상을 중단합니다. 여러 순차 단계가 부분적으로 멈춘 엔드포인트에 대해 각각 요청당 `--timeout` 비용을 치를 때 유용합니다. 이 단계보다 먼저 실행되는 프리플라이트와 파라미터 분석(탐색 + 마이닝)은 이 상한에 포함되지 않습니다. `0`은 비활성화합니다. |
+| `--delay` | — | `0` | 요청 간 지연(ms), 워커별; 최대 `60000` |
+| `--rate-limit` | `-r`, `--rl` | `0` | 모든 워커와 대상에 걸쳐 공유되는 **전역** 아웃바운드 요청 속도를 초당 요청 수로 제한합니다 (`0` = 무제한). 하나의 워커만 간격을 두는 `--delay`와 달리, `workers × concurrent targets`에서 한꺼번에 나가는 전체 요청량을 제한하므로 공유 IP / 엣지 WAF 임계값에 더 친화적입니다. 최대 `100000`. |
+| `--retries` | — | `0` | HTTP 5xx 및 일시적 전송 오류(타임아웃, 연결 재설정) 시 실패한 요청을 이 횟수만큼 재시도합니다 (`0` = 끔, 최대 `100`). HTTP 429는 이 값과 무관하게 항상 재시도합니다. |
+| `--retry-delay` | — | `1000` | `--retries` 시도 사이의 지수 백오프 기본 지연(ms) (시도마다 두 배로 증가, 내부적으로 상한 적용; 최대 `60000`). 429에서는 서버의 `Retry-After` 헤더가 우선합니다. |
 | `--proxy` | — | — | 프록시 URL — `http(s)://` 또는 `socks4/5(h)://`만 허용; 라우팅 불가한 스킴(예: `ftp://`)은 조용히 직접 스캔하지 않고 시작 시 거부됨 |
 | `--insecure` | — | `true` | TLS/SSL 인증서 검증을 건너뜁니다 (자체 서명, 만료, 호스트명 불일치 인증서 허용). 스캐너 사용을 위해 기본적으로 켜져 있으며, 인증서 검증을 강제하려면 `--insecure=false`를 전달합니다. 스캔 대상과 `--blind-oob=`로 직접 지정한 OAST 서버에 적용되며, 공개 interactsh 메시는 항상 검증합니다. |
 | `--follow-redirects` | `-F` | false | 3xx 응답을 따라갑니다 |
-| `--ignore-return` | — | — | 무시할 HTTP 상태 코드 |
+| `--ignore-return` | — | — | 무시할 HTTP 상태 코드 (쉼표로 구분, 예: `302,403,404`) |
 
 ### 엔진
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
-| `--workers` | `50` | 대상별 동시 워커 수 |
-| `--max-concurrent-targets` | `50` | 전역 동시 대상 수 |
-| `--max-targets-per-host` | `100` | 호스트별 상한 |
+| `--workers` | `50` | 대상별 동시 워커 수 (`1`–`500`) |
+| `--max-concurrent-targets` | `50` | 전역 동시 대상 수 (`1` 이상) |
+| `--max-targets-per-host` | `100` | 호스트별 상한 (`1` 이상) |
 
 ### XSS 스캐닝
 
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
-| `--encoders` | `-e` | `url,html` | 쉼표로 구분된 인코더 |
+| `--encoders` | `-e` | `url,html` | 쉼표로 구분된 인코더: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `--remote-payloads` | — | — | `portswigger`, `payloadbox` |
 | `--custom-blind-xss-payload` | — | — | 사용자 지정 블라인드 페이로드 템플릿 파일 |
 | `--blind` | `-b` | — | 블라인드 XSS 콜백 URL |
@@ -171,16 +175,16 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--blind-oob-secret` | — | — | 자체 호스팅 interactsh 서버용 인증 토큰 (register/poll/deregister 시 `Authorization`으로 전송) |
 | `--blind-oob-wait` | — | `30` | 모든 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) (`0` = 스캔 종료 후 추가 대기 없음) |
 | `--custom-payload` | — | — | 사용자 지정 페이로드 파일 |
-| `--only-custom-payload` | — | false | 사용자 지정 페이로드만 사용합니다 |
+| `--only-custom-payload` | — | false | 사용자 지정 페이로드만 사용합니다. `--custom-payload`가 필요합니다 (없으면 종료 코드 `2`) |
 | `--custom-alert-value` | — | `1` | `alert()`/`prompt()`/`confirm()` 안에 들어가는 값 |
 | `--custom-alert-type` | — | `none` | `none` 또는 `str` |
 | `--inject-marker` | — | — | 이 토큰을 페이로드로 치환합니다 (예: `FUZZ`) |
 | `--skip-xss-scanning` | — | false | 페이로드 주입을 건너뜁니다 |
 | `--deep-scan` | — | false | 첫 탐지 결과 이후에도 계속 테스트합니다 |
 | `--sxss` | — | false | Stored XSS 모드를 활성화합니다 |
-| `--sxss-url` | — | — | SXSS용 조회 URL (절대 `http(s)://`); `--sxss`와 함께일 때만 사용됨 |
+| `--sxss-url` | — | — | SXSS용 조회 URL (절대 `http(s)://`); `--sxss`와 함께일 때만 사용됨. 생략하면 `--sxss`가 폼 탐색 결과에서 조회 페이지를 자동으로 찾습니다 |
 | `--sxss-method` | — | `GET` | 조회 메서드 |
-| `--sxss-retries` | — | `3` | 저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수 |
+| `--sxss-retries` | — | `3` | 저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수 (최대 `20`; 재시도마다 500 ms × 시도 횟수만큼 대기, 최대 5초) |
 | `--max-payloads-per-param` | — | `0` | 파라미터별로 테스트하는 페이로드 수 제한 (`0`은 `--deep-scan`이 없으면 세트당 3000개의 내장 안전 상한을 적용) |
 | `--skip-ast-analysis` | — | false | AST DOM-XSS(`[A]` 결과를 만드는 source→sink 패스)를 건너뜁니다. `--skip-mining-dom`이 아니라 이 플래그입니다 |
 | `--analyze-external-js` | — | false | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석을 수행합니다 (프리플라이트, 대상별 1회; 최대 16개 파일, 각 512 KiB; `--include-url`/`--exclude-url`을 준수) |
@@ -193,7 +197,7 @@ dalfox scan [TARGETS]... [FLAGS]
 |------|---------|-------------|
 | `--waf-bypass` | `auto` | `auto`, `force`, `off` |
 | `--skip-waf-probe` | false | 능동 WAF 핑거프린팅을 건너뜁니다 |
-| `--force-waf` | — | `--waf-bypass force`일 때 사용할 WAF 이름 |
+| `--force-waf` | — | `--waf-bypass force`일 때 사용할 WAF 이름: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (대소문자 무관; `cf`, `modsec`, `incapsula`, `netscaler` 같은 별칭도 허용) |
 | `--waf-evasion` | false | WAF 탐지 시 적응형 회피: 요청 간 무작위 지터 + 차단된 응답이 몰릴 때 점증하는 쿨다운. 이 플래그가 없어도 WAF별 페이싱 힌트는 탐지 시 자동으로 적용됩니다. `--rate-limit`와 함께 쓰면 좋습니다. |
 | `--waf-min-confidence` | `0.3` | 이 신뢰도 미만의 핑거프린트를 제거합니다 (0.0–1.0). 기본값 `0.3`은 `Server: Google Frontend`(0.15) 같은 약한 매칭을 억제합니다. 약한 신호를 유지하려면 더 낮게 설정하고, `1.0`은 완전한 신뢰도를 가진 핑거프린트만 유지합니다. |
 
@@ -211,8 +215,8 @@ dalfox server [FLAGS]
 |------|-------|---------|-------------|
 | `--port` | `-p` | `6664` | 수신 포트 |
 | `--host` | `-H` | `127.0.0.1` | 바인딩 주소 |
-| `--api-key` | — | — | 필수 `X-API-KEY` 헤더 값 (또는 `DALFOX_API_KEY`) |
-| `--log-file` | — | — | 일반 텍스트 로그 파일 |
+| `--api-key` | — | — | 필수 `X-API-KEY` 헤더 값 (또는 `DALFOX_API_KEY`; 둘 다 있으면 플래그가 우선). 빈 값 `--api-key ""`는 인증을 끕니다 |
+| `--log-file` | — | — | 일반 텍스트 로그 파일 (Unix에서는 `0600` 권한으로 생성; 기존 파일을 그룹/기타 사용자가 읽을 수 있으면 서버가 시작 시 경고) |
 | `--allowed-origins` | — | — | CORS 오리진 (쉼표로 구분, `*` 및 `regex:` 지원) |
 | `--jsonp` | — | false | 응답을 JSONP로 감쌉니다 |
 | `--callback-param-name` | — | `callback` | JSONP 콜백 파라미터 |
@@ -234,10 +238,10 @@ dalfox server [FLAGS]
 페이로드 컬렉션을 나열하거나 가져옵니다.
 
 ```bash
-dalfox payload <SELECTOR> [--json]
+dalfox payload [SELECTOR] [--json]
 ```
 
-선택한 페이로드를 한 줄에 하나씩이 아니라 JSON 배열로 출력하려면 `--json`을 쓰세요.
+선택한 페이로드를 한 줄에 하나씩이 아니라 JSON 배열로 출력하려면 `--json`을 쓰세요. 선택자 없이 실행하면 요약(사용 예시와 선택자별 개수)을 출력하며, `--json`을 주면 JSON으로 출력합니다. 알 수 없는 선택자는 가장 가까운 이름을 제안하고 종료 코드 `2`로 끝납니다.
 
 선택자:
 

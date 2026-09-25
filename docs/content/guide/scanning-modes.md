@@ -1,13 +1,13 @@
 +++
 title = "Scanning Modes"
-description = "Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow."
+description = "Single URL, file batch, pipeline, raw HTTP, HAR, stored and blind XSS, server, and MCP. Pick the mode that fits your workflow."
 weight = 1
 toc = true
 +++
 
 Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.
 
-Under the hood there are four subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server). Everything below labelled "URL / File / Pipe / Raw HTTP / HAR / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
+Under the hood there are four working subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server), plus `completion`, which prints shell completion scripts. Everything below labelled "URL / File / Pipe / Raw HTTP / HAR / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
 
 > The fan-out input shapes (`file`, `pipe`, `raw-http`, `har`) are `scan`-only: each expands one input into many targets. The `server` and `mcp` interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.
 
@@ -19,7 +19,9 @@ Just give Dalfox a URL. It figures out the rest.
 dalfox https://target.app/search?q=test
 ```
 
-Under the hood, Dalfox uses the `scan` subcommand with `--input-type auto`. It auto-detects whether the argument is a URL, a file path, or a stream on `stdin`.
+Under the hood, Dalfox uses the `scan` subcommand with `--input-type auto`. It auto-detects whether the argument is a URL, a URL-list file, a raw HTTP request file, a HAR file, or a stream on `stdin`.
+
+The bare form takes only targets and the global flags (`--config`, `--debug`, `--no-color`, `-S`). Any scan flag needs the subcommand spelled out: `dalfox scan https://target.app -p q`, not `dalfox https://target.app -p q`.
 
 ## URL mode
 
@@ -132,7 +134,9 @@ Warning: scan configuration changed since 'scan.state' was written (recorded a5f
 
 The old file is set aside rather than overwritten, because it is a record of real work, and losing 40k completions to a reset would be worse than the redundant scan. Nothing is ever destroyed in place — a file at that path that is *not* a Dalfox state file (a typo pointing at your target list, say) is refused outright rather than adopted.
 
-Output and pacing flags are deliberately outside that hash — `--format`, `--output`, `--silence`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--workers`, `--max-concurrent-targets`, and the target list itself. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file — including `--deep-scan`, `--encoders`, `--custom-payload`, the mining and discovery toggles, the WAF options, `--limit`, and the header and cookie *names* in `--headers` / `--cookies` (plus non-credential header values). Run-wide credential values and the `--cookie-from-raw` path are not hashed, as described above.
+Output and pacing flags are deliberately outside that hash — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response`, `--silence`, `--stream-findings`, `--only-poc`, `--baseline`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, and the target list and `--input-type` themselves. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file — including `--deep-scan`, `--encoders`, `--custom-payload`, the mining and discovery toggles, the WAF options, `--limit`, and the header and cookie *names* in `--headers` / `--cookies` (plus non-credential header values). Run-wide credential values and the `--cookie-from-raw` path are not hashed, as described above.
+
+The hash also covers Dalfox's major version and the full set of scan options, so an upgrade that adds a scan flag starts every state file over once. That errs toward a redundant scan, never a silent skip.
 
 The file is append-only JSONL: one header line, then one line per target. A hard kill can at worst tear the final line, which is skipped on read while every complete record before it still counts. A target whose outcome is unchanged from the last run is not re-recorded, so a permanently unreachable host does not grow the file once per run.
 
@@ -148,7 +152,7 @@ Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalf
 dalfox scan --input-type raw-http request.txt
 ```
 
-The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves every header, cookie, and body parameter.
+The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves the headers, cookies, and body parameters. It drops only the headers it has to: `Content-Length` / `Transfer-Encoding` (recomputed for each injected body), hop-by-hop and `Accept-Encoding` headers, and lines an HTTP client cannot send, such as the HTTP/2 `:authority` pseudo-header a copy-as-cURL capture often includes.
 
 A request line with a bare path (`GET /search HTTP/1.1`) does not say whether the request went over HTTP or HTTPS, so Dalfox takes the scheme from the capture: an HTTP/2 `:scheme` pseudo-header wins, then an `HTTP/2` / `HTTP/3` request line means HTTPS, then a `Host` ending in `:443`; anything else is scanned over `http://`. An absolute URL in the request line (`GET https://app/search HTTP/1.1`) is used as is.
 
@@ -169,7 +173,7 @@ mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 
 Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target; requests are deduplicated by URL + method and run through the same scope filters as every other mode. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
 
-CLI request flags still apply on top — e.g. `-H "Authorization: Bearer …"` is appended to every entry, and `--include-url` / `--out-of-scope` narrow the set.
+CLI request flags still apply on top, for HAR and raw HTTP alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
 
 ## Stored XSS mode (SXSS)
 
@@ -181,11 +185,26 @@ dalfox scan https://target.app/post-comment \
   --sxss-url https://target.app/comments
 ```
 
-Dalfox injects into the first URL, then fetches the second to check whether the payload landed. See the [Stored XSS guide](../stored-xss/) for the full flow.
+Dalfox injects into the first URL, then fetches the second to check whether the payload landed. `--sxss-url` is optional: without it Dalfox checks the page the form was found on, then the form's `action`, then the injection target itself. Because a stored sink does not echo in the immediate response, `--sxss` also tests the request's own query and `-d` body parameters and the fields of discovered forms even when they don't reflect during discovery. See the [Stored XSS guide](../stored-xss/) for the full flow.
+
+## Blind XSS
+
+For a payload that fires later, somewhere you can't see (an admin panel, a support dashboard), inject a callback payload:
+
+```bash
+# Your own listener: hits arrive there, Dalfox records nothing
+dalfox scan https://target.app/?q=1 -b https://your-callback.example
+
+# Dalfox-managed interactsh session: callbacks come back as findings
+dalfox scan https://target.app/?q=1 --blind-oob
+```
+
+`--blind-oob` registers with an interactsh server (the public mesh, or the ones you name with `--blind-oob=oast.fun`), mints a callback host per payload, and after the scan keeps polling for `--blind-oob-wait` seconds (default `30`). A callback that arrives becomes a `V` finding with `detection_method: oob`. Blind payloads are stored attack traffic, so they are not sent under `--dry-run`, `--only-discovery`, or `--skip-xss-scanning`. Templates and custom payloads are covered in [Payloads & Encoding](../payloads/#blind-xss).
 
 ## Session monitoring
 
-Static credentials (`--cookies`, `-H 'Cookie: …'`, `--cookie-from-raw`) are
+Static credentials (`--cookies`, `-H 'Cookie: …'`, `-H 'Authorization: …'`,
+`--cookie-from-raw`, or the ones inside a captured raw HTTP / HAR request) are
 attached to every request and never revisited. If that session expires an hour
 into a long scan, every request after it is answered by a login page, nothing
 reflects, and Dalfox exits `0` with an empty report — indistinguishable from a
@@ -223,7 +242,7 @@ calling it a logout would abort the host group over a WAF rule. Use
 
 The heuristics are deliberately narrow — the default is to abort, so a false
 positive costs a whole scan. When you know exactly what an authenticated
-response looks like, say so and the heuristics step aside entirely:
+response looks like, say so and the heuristics step aside:
 
 ```bash
 dalfox scan https://app.example.com/dashboard?q=1 \
@@ -231,6 +250,10 @@ dalfox scan https://app.example.com/dashboard?q=1 \
   --session-check 'Signed in as' \
   --session-check-url https://app.example.com/api/me
 ```
+
+The one exception is a probe body that was cut short before the point where
+the marker sat in the baseline: an absent marker proves nothing there, so the
+heuristics are consulted as a fallback.
 
 `--session-check-url` is worth setting when the scan target is expensive,
 paginated, or itself public — point it at a cheap authenticated endpoint
@@ -276,9 +299,13 @@ entry, no `meta.incomplete`, and no effect on the exit code. If your app is one
 of those and you want the check to be exact anyway, `--session-check` settles
 it.
 
-Monitoring is off (and costs nothing) when no credentials are supplied and
-neither `--session-check` flag is set. Logging in is out of scope: this is
-detection only.
+Monitoring is off (and costs nothing) when the request carries no cookies and
+no `Cookie` / `Authorization` header, and neither `--session-check` flag is
+set. Logging in is out of scope: this is detection only.
+
+`dalfox server` and MCP jobs use the same detection rules, checked on the
+job's baseline and once after the scan: a lost session ends the job as `error`
+with a `SESSION_LOST:` message.
 
 ## Server mode
 
@@ -321,6 +348,7 @@ dalfox payload uri-scheme        # print javascript:/data: payloads
 | Replay a specific request | Raw HTTP |
 | Replay a whole captured session (proxy/DevTools export) | HAR |
 | Test a form that writes to another page | SXSS |
+| Catch a payload that fires later, out of sight | Blind (`-b` / `--blind-oob`) |
 | Run many scans from a dashboard or CI | Server |
 | Let an AI agent drive scans | MCP |
 | Just see what payloads Dalfox would send | Payload utility or `--dry-run` |

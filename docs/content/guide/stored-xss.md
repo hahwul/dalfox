@@ -10,7 +10,7 @@ A Stored XSS lives on the server: you submit it once (a comment, a profile field
 ## The basic flow
 
 ```bash
-dalfox https://target.app/post-comment \
+dalfox scan https://target.app/post-comment \
   --sxss \
   --sxss-url https://target.app/comments
 ```
@@ -21,7 +21,9 @@ Dalfox will:
 2. **Retrieve** the second URL (`comments`) with a GET (configurable via `--sxss-method`).
 3. **Verify** whether the payload reflects in the retrieval response, and whether it produced a real DOM element.
 
-Only findings that survive both steps are reported as SXSS.
+A payload that comes back on a retrieval page is reported as `R`; one that also forms a real DOM element there is `V`. Stored findings carry an `inject_type` prefixed with `sxss-` (`sxss-inHTML`), so reports keep them apart from reflected ones.
+
+Stored mode is strictly serial: one parameter at a time, one request at a time, because write ordering and the retrieval retries assume it. `--workers` does not speed it up.
 
 The write endpoint does not need to echo what you submit. Dalfox keeps a stored
 field even when the submit response just says "saved", and it does not use that
@@ -50,7 +52,9 @@ The probe also observes *when* the store becomes visible. A synchronous sink
 appear, keeping the request count low. A write-behind sink (visible only after a
 delay) keeps the full per-payload retrieval retries so a delayed payload is not
 missed; if your target stores slower than the default retry window, raise
-`--sxss-retries`.
+`--sxss-retries` (default `3`, maximum `20`). Retry *n* waits 500 ms × *n*,
+capped at 5 s per wait. `--deep-scan` skips the store probe and runs the full
+catalog on every field.
 
 ## Choosing the retrieval URL
 
@@ -62,14 +66,17 @@ Pick the page the stored value **reads** from. Examples:
 | `PATCH /profile` | `GET /u/myself` |
 | `POST /support/ticket` | `GET /admin/tickets` (if you have admin access) |
 
-If you omit `--sxss-url`, Dalfox falls back to the form-discovery context: the page the form was
-found on, then the form's `action` endpoint, then the injection target itself. Set it explicitly
-whenever the stored value is rendered somewhere those three don't cover.
+Dalfox reads every candidate retrieval page, in this order: `--sxss-url` (when set), the page the
+form was found on, the form's `action` endpoint (only when it is on the target's origin, or the
+same host upgraded to HTTPS), and the injection target itself. Duplicates are fetched once. Without
+`--sxss-url` the last three are all it has, so set it whenever the stored value is rendered
+somewhere they don't cover. `--sxss-url` does nothing without `--sxss`; Dalfox warns when you pass
+it alone.
 
 ## Retrieval method
 
 ```bash
-dalfox https://target.app/form --sxss \
+dalfox scan https://target.app/form --sxss \
   --sxss-url https://target.app/list \
   --sxss-method GET
 ```
@@ -81,7 +88,7 @@ dalfox https://target.app/form --sxss \
 Stored-XSS often requires two sessions: one that writes (user), and one that reads (admin). Use headers/cookies that grant enough access for the retrieval GET to see what you wrote.
 
 ```bash
-dalfox https://target.app/profile \
+dalfox scan https://target.app/profile \
   --sxss --sxss-url https://target.app/admin/users \
   -H "Cookie: admin_session=abc; role=admin"
 ```
@@ -91,7 +98,7 @@ dalfox https://target.app/profile \
 If the retrieval page is behind a login you don't have, switch to blind XSS. The payload fires on the admin's browser, and your callback server records it:
 
 ```bash
-dalfox https://target.app/support/ticket \
+dalfox scan https://target.app/support/ticket \
   -b https://callback.interact.sh
 ```
 

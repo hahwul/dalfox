@@ -46,12 +46,14 @@ FOUND=0
 
 rm -f "$TMP"
 
-# Exit code 1 from Dalfox means "findings existed"
+# Exit codes: 0 = clean, 1 = findings, 2 = error (bad input, unreachable target, ...)
 if [[ $FOUND -eq 1 ]]; then
     # Caido If/Else: route this to the "finding" branch
     echo "XSS detected"
 else
-    # Clean - emit a truthy value so Caido treats it as "no finding"
+    # An error is not a clean result; leave a trace in the workflow log
+    if [[ $FOUND -ne 0 ]]; then echo "dalfox failed (exit $FOUND)" >&2; fi
+    # Emit a truthy value so Caido treats it as "no finding"
     echo "1"
 fi
 ```

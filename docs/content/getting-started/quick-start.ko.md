@@ -19,7 +19,9 @@ dalfox https://xss-game.appspot.com/level1/frame?query=test
 
 - 버전이 적힌 배너.
 - 파라미터를 찾고 컨텍스트를 살피는 동안 찍히는 `INF` 라인.
-- 결과마다 붙는 `[V]`(취약), `[R]`(반사됨) 라인과 실제로 통한 페이로드.
+- `WRN XSS found N XSS` 요약과 그 뒤에 결과마다 찍히는 `[POC][V]…`(취약) 또는 `[POC][R]…`(반사됨) 라인, 그리고 실제로 통한 페이로드.
+
+서브커맨드 없이 쓰는 이 형태는 대상과 전역 플래그(`--config`, `--debug`, `--no-color`, `-S`)만 받습니다. 그 밖의 스캔 플래그는 모두 `dalfox scan <target> …`처럼 서브커맨드를 명시해야 하며, 이 페이지의 나머지 예제도 이 형태를 씁니다.
 
 ## 2. 파일에서 스캔
 
@@ -30,7 +32,7 @@ dalfox https://xss-game.appspot.com/level1/frame?query=test
 dalfox scan urls.txt
 ```
 
-URL마다 같은 파이프라인을 거칩니다. 결과는 찾는 즉시 흘러나옵니다.
+URL마다 같은 파이프라인을 거칩니다. 탐지 결과는 스캔이 끝날 때 `WRN XSS found N XSS` 요약 뒤에 출력됩니다. 검증되는 즉시 하나씩 보고 싶다면 `--stream-findings`를 더하세요.
 
 ## 3. 파이프라인에서 스캔
 
@@ -47,17 +49,19 @@ waybackurls example.com | gf xss | dalfox
 `jq`나 대시보드, CI에 그대로 물려 쓰세요.
 
 ```bash
-dalfox https://target.app/search?q=test -f json -o report.json
+dalfox scan https://target.app/search?q=test -f json -o report.json
 ```
 
 기계 판독 형식(`json`, `jsonl`, `sarif`, `toml`)은 배너를 자동으로 끄기 때문에 파일이 깔끔하게 남습니다.
+
+종료 코드도 CI에 맞춰져 있습니다. `0`은 탐지 결과 없이 스캔이 끝났다는 뜻이고, `1`은 무언가를 찾았다는 뜻, `2`는 입력·설정·실행 중 오류가 났다는 뜻입니다.
 
 ## 5. 인증이 필요한 스캔
 
 쿠키나 헤더, 커스텀 메서드를 함께 넘기면 됩니다.
 
 ```bash
-dalfox https://api.target.app/v1/users \
+dalfox scan https://api.target.app/v1/users \
   -X POST \
   -H "Authorization: Bearer eyJ..." \
   -H "Content-Type: application/json" \
@@ -83,7 +87,7 @@ dalfox scan --input-type har capture.har
 대역외 콜백(Interactsh, Burp Collaborator, XSS Hunter 등)을 씁니다.
 
 ```bash
-dalfox https://target.app \
+dalfox scan https://target.app \
   -b https://your-callback.interact.sh
 ```
 
@@ -92,8 +96,8 @@ Dalfox는 찾아낸 모든 파라미터에 blind-XSS 페이로드를 심습니�
 [interactsh](https://github.com/projectdiscovery/interactsh)(OAST) 서버 관리를 Dalfox에 맡길 수도 있습니다. 세션을 등록하고, 콜백을 원본 페이로드와 연결 짓고, 알아서 폴링합니다.
 
 ```bash
-dalfox https://target.app --blind-oob                  # public interactsh mesh
-dalfox https://target.app --blind-oob=oast.fun         # pick servers
+dalfox scan https://target.app --blind-oob             # public interactsh mesh
+dalfox scan https://target.app --blind-oob=oast.fun    # pick servers
 ```
 
 자체 호스팅 서버라면 `--blind-oob-secret`을 쓰고, 스캔이 끝난 뒤 폴링을 얼마나 더 이어갈지는 `--blind-oob-wait`으로 정합니다.
@@ -105,7 +109,7 @@ dalfox https://target.app --blind-oob=oast.fun         # pick servers
 `--dry-run`으로 Dalfox가 무엇을 스캔할지 미리 봅니다.
 
 ```bash
-dalfox https://target.app --dry-run
+dalfox scan https://target.app --dry-run
 ```
 
 페이로드는 하나도 쏘지 않은 채 파라미터를 찾고 요청량만 가늠합니다.
@@ -116,9 +120,10 @@ dalfox https://target.app --dry-run
 
 | 태그 | 의미 |
 |-----|---------|
-| `[V]` | **취약(Vulnerable)**: 파싱된 응답에서 페이로드가 실제 DOM 요소로 확인됨(Dalfox 마커에 대한 CSS 셀렉터 매칭) |
+| `[V]` | **취약(Vulnerable)**: Dalfox가 입력이 악용 가능하다고 판단함 — 파싱된 응답에서 페이로드가 실행 가능한 위치에 도달했거나(예: Dalfox 마커가 붙은 DOM 요소), 대역외 콜백이 발생함 |
 | `[A]` | **AST 탐지(AST-detected)**: 정적 JS 분석에서 source→sink 흐름을 발견함 |
 | `[R]` | **반사됨(Reflected)**: 페이로드가 응답에 나타났으나 DOM 증거는 없음 |
+| `[I]` | **정보(Informational)**: XSS 판정이 아님. 예: 옵트인 `--detect-outdated-libs`로 찾은 알려진 취약 JS 라이브러리 |
 
 `V`와 `A`는 바로 조치할 수 있는 결과입니다. `R`은 한 번 볼 만하지만 이후 단계에서 더 걸러질 수 있습니다.
 

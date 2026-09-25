@@ -92,7 +92,12 @@ dalfox server \
   --cors-allow-headers "Content-Type,X-API-KEY,Authorization"
 ```
 
-`*` is accepted as a wildcard. Regex is supported via `regex:^https://.*\.example\.com$`.
+`*` on its own allows every origin (see below); a `*` inside an entry is a
+wildcard (`https://*.example.com`). Regex is supported via `regex:^https://.*\.example\.com$`.
+
+No CORS headers are sent at all unless `--allowed-origins` is set. When it is,
+`--cors-allow-methods` defaults to `GET,POST,OPTIONS,PUT,PATCH,DELETE` and
+`--cors-allow-headers` to `Content-Type,X-API-KEY,Authorization`.
 
 Both forms are matched against the **whole** `Origin`, so a pattern can never
 accept a longer host that merely contains it — `regex:https://app\.example\.com`
@@ -121,6 +126,11 @@ site can then launch scans through this API and read the results. Pair it with
 `--api-key`, or prefer CORS (`--allowed-origins`), which keeps the gate on. The
 server prints a startup warning when `--jsonp` is enabled without an API key.
 
+With `--jsonp` on, every endpoint honours the callback parameter: the body is
+wrapped as `name(json);` and served as `application/javascript`. The callback
+name must be 1–64 characters from `[A-Za-z0-9_$.]`, starting with a letter,
+`_` or `$`; any other value is ignored and plain JSON comes back.
+
 ## Endpoints
 
 | Method | Path | What it does |
@@ -133,6 +143,14 @@ server prints a startup warning when `--jsonp` is enabled without an API key.
 | `GET` | `/result/:id` | Alias for `/scan/:id` |
 | `POST` | `/preflight` | Discover parameters without sending payloads |
 | `GET` | `/health` | Server info + capability list |
+
+Every response, success or failure, is the same `{code, msg, data}` envelope
+served as `application/json`. On an error `code` repeats the HTTP status, `msg`
+says what went wrong, and `data` is absent. The statuses you will see are `400`
+(invalid body or option), `401` (missing or wrong API key), `403` (cross-site or
+untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown scan
+id), `409` (purge of a scan that is still active), `413` (body over
+`--max-body-bytes`) and `503` (at capacity).
 
 ### Submit a scan
 
@@ -153,12 +171,17 @@ curl -X POST http://127.0.0.1:6664/scan \
 
 The scan target field is `target` (matching the MCP `scan_with_dalfox` tool and the response payload). The legacy field name `url` is still accepted as an alias, in the JSON body and in the `?target=` / `?url=` query string alike, so existing clients keep working.
 
+Options go under `options`. An unknown key, at the top level or inside
+`options`, is rejected with `400` instead of being ignored, so a flat body such
+as `{"target": ..., "worker": 5}` fails loudly rather than scanning with every
+option dropped.
+
 Response:
 
 ```json
 {
   "code": 200,
-  "msg": "queued",
+  "msg": "ok",
   "data": {
     "scan_id": "9f2c…",
     "target": "https://target.app?q=test"
@@ -177,24 +200,35 @@ Response (while running):
 ```json
 {
   "code": 200,
-  "msg": "running",
+  "msg": "ok",
   "data": {
     "target": "https://target.app?q=test",
     "status": "running",
-    "results": [],
     "progress": {
       "params_total": 12,
       "params_tested": 5,
       "requests_sent": 234,
+      "requests_failed": 0,
       "findings_so_far": 1,
       "estimated_completion_pct": 41,
-      "suggested_poll_interval_ms": 3000
-    }
+      "suggested_poll_interval_ms": 2000
+    },
+    "queued_at_ms": 1758700000000,
+    "started_at_ms": 1758700000120,
+    "finished_at_ms": null,
+    "duration_ms": 8450
   }
 }
 ```
 
-When complete, `status` becomes `done` and `results` is populated.
+`results` appears once the scan reaches a terminal state: `done`, or the
+partial findings of an `error` / `cancelled` scan. `error_message` is added when
+a scan failed or ran out of its `scan_timeout`. `progress` is absent while the scan is still
+`queued`. `requests_failed` counts requests that never reached the target
+(connect, TLS, timeout); when it is a large share of `requests_sent`, the scan
+did not really run, so read zero findings as "not scanned" rather than
+"clean". `suggested_poll_interval_ms` drops from `3000` to `2000` past 10% and
+to `1000` past 80%, and is `0` once the scan is terminal.
 
 ### List scans
 
@@ -202,13 +236,50 @@ When complete, `status` becomes `done` and `results` is populated.
 curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/scans?status=running'
 ```
 
+`status` is one of `queued`, `running`, `done`, `error`, `cancelled` (anything
+else is a `400`). `offset` and `limit` page through the list (`limit=0`, the
+default, returns everything from `offset` on). Scans come back newest first:
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "total": 1,
+    "scans": [
+      {
+        "scan_id": "9f2c…",
+        "target": "https://target.app?q=test",
+        "status": "running",
+        "result_count": 0,
+        "queued_at_ms": 1758700000000,
+        "started_at_ms": 1758700000120,
+        "finished_at_ms": null,
+        "duration_ms": 8450
+      }
+    ],
+    "pagination": { "offset": 0, "limit": 0, "returned": 1, "has_more": false }
+  }
+}
+```
+
+A row for a failed scan also carries its `error_message`, so it can't be
+mistaken for a clean one with `result_count: 0`.
+
 ### Cancel a scan
 
 ```bash
 curl -X DELETE -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
-To remove a terminal record, append `?purge=1`. This is an explicit force-purge
+The response data is `{scan_id, target, cancelled, previous_status}`.
+`cancelled` is `true` only when the scan was `queued` or `running`; on a scan
+that had already finished the call is a no-op and `cancelled` is `false`. A
+cancelled scan stays listed with whatever partial results it gathered.
+
+To remove a terminal record, append `?purge=1`; the data is then
+`{scan_id, target, deleted: true, previous_status}`, and a scan that is still
+`queued` or `running` is refused with `409`. This is an explicit force-purge
 escape hatch: unlike MCP's safe delete, it may discard partial results or a
 terminal webhook if the cancelled worker is still draining.
 
@@ -223,13 +294,22 @@ curl -X POST http://127.0.0.1:6664/preflight \
 
 Response includes `params_discovered`, `estimated_total_requests`, and a list of parameters so you can scope before committing to a real scan.
 
+The body is the same `{target, options}` shape as `POST /scan`. The data comes
+back as `{target, reachable, method, params_discovered, estimated_total_requests,
+params: [{name, location, estimated_requests}]}`. An unreachable target returns
+`reachable: false` with `error_code: "CONNECTION_FAILED"` and no parameters.
+Preflight is not silent on the wire: discovery and mining send real requests,
+paced by the request's `delay`, `worker` and `rate_limit` (and capped by the
+server's `--rate-limit`). At most 32 preflights run at once; beyond that the
+server answers `503`.
+
 ### Health
 
 ```bash
 curl http://127.0.0.1:6664/health
 ```
 
-Returns version, `auth_required`, and the list of supported endpoints. Good for uptime checks.
+Returns `status: "ok"`, version, `auth_required`, and the list of supported endpoints. Good for uptime checks. It needs no API key, but the browser gate in [Browser requests](#browser-requests) still applies.
 
 ## ScanOptions reference (request body)
 
@@ -246,6 +326,7 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "method": "POST",
     "data": "user=test",
     "header": ["Authorization: Bearer token"],
+    "cookie": "session=abc123; lang=en",
     "user_agent": "Custom",
     "encoders": ["url", "html"],
     "remote_payloads": ["portswigger"],
@@ -274,6 +355,16 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
 ```
 
 Fields mirror the CLI flags. See the [CLI reference](../../reference/cli/) for meaning and defaults.
+`cookie` is a single `Cookie:` header value; a list of `name=value` strings is
+also accepted and joined with `; `. The [MCP](../mcp/) spellings are accepted
+as aliases, so an argument dict written for `scan_with_dalfox` works here too:
+`cookies` for `cookie`, `headers` for `header`, `workers` for `worker`, and
+`blind_callback_url` for `blind`.
+
+Numeric options are range-checked and an out-of-range value is a `400`:
+`timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `worker` `1`–`500`,
+`scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`.
+
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
 outdated / known-vulnerable JS libraries as informational `[I]` findings
 (CWE-1104, 0 extra requests). The same key works as a `GET /scan` query parameter.
@@ -333,6 +424,32 @@ the scan stops, keeps whatever partial findings it gathered, and settles as
 a timeout apart from a client-issued cancel). The server-wide `--scan-timeout`
 flag caps every submitted scan the same way `--rate-limit` does.
 
+### GET /scan query parameters
+
+`GET /scan` takes the same option names as query parameters. List options
+(`encoders`, `param`, `remote_payloads`, `remote_wordlists`) are
+comma-separated. `header` packs several headers into one value and is split
+only at a comma that starts a new `Name:`, so a comma inside a value such as
+`Accept: text/html,application/xhtml+xml` survives. Booleans read `1`, `true`,
+`yes` or `on` (any case) as true and anything else as false. A number that is
+present but unparseable is a `400`. `method` defaults to `GET` and `encoders`
+to `url,html`.
+
+### Completion webhook
+
+When `callback_url` is set, the server POSTs one JSON body to it as soon as the
+scan reaches a terminal state, whichever it is (including a scan cancelled
+before it started):
+
+```json
+{ "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [] }
+```
+
+`status` is `done`, `error` or `cancelled`, the same value `GET /scan/{id}`
+reports. The target is under `url` here, not `target`. The POST goes through the
+scan's own proxy and TLS settings, times out after 10 seconds, and is not
+retried.
+
 ### Server flags worth setting
 
 - `--rate-limit <rps>` — cap every scan's outbound request rate (protects targets).
@@ -360,16 +477,20 @@ flag caps every submitted scan the same way `--rate-limit` does.
 queued → running → done
                  ↘ error
                  ↘ cancelled
+queued → cancelled
 ```
 
-Terminal states (`done`, `error`, `cancelled`) are sticky.
+Terminal states (`done`, `error`, `cancelled`) are sticky. A queued scan can be
+cancelled before it starts. Jobs live in memory only: a finished scan is kept
+for one hour (or until `--max-retained-scans` evicts it) and nothing survives a
+restart.
 
 A target that can't be connected to (DNS failure, connection refused, TLS
 error, timeout) ends as `error` with an `error_message` of
 `target unreachable: connection failed (CONNECTION_FAILED)` — not `done` with
 zero findings, so you can tell "scanned, nothing found" apart from "never
 reached the host." Use `POST /preflight` first if you want to check
-reachability without launching a scan. The `url` must start with `http://` or
+reachability without launching a scan. The `target` must start with `http://` or
 `https://`; any other scheme is rejected with `400` (same as `/preflight`).
 
 The same rule covers a **dead session**. When the scan request carries
