@@ -11,7 +11,7 @@ toc = true
 
 ```bash
 dalfox server
-# listens on http://127.0.0.1:6664 by default
+# 기본값으로 http://127.0.0.1:6664 에서 대기
 ```
 
 자주 쓰는 옵션:
@@ -67,7 +67,7 @@ export DALFOX_API_KEY="$(openssl rand -hex 16)"
 
 `Host` 헤더도 같은 방식으로 검사하며, 이것이 DNS 리바인딩(공격자가 소유한 호스트명을
 사용자 머신으로 재해석시켜 브라우저가 동일 출처로 취급하게 만드는 공격)을 막습니다.
-IP 리터럴과 `localhost`는 항상 허용되고, 그 외 호스트명은 명시해야 합니다:
+IP 리터럴, `localhost`, 바인딩한 `--host`는 항상 허용되고, 그 외 호스트명은 명시해야 합니다:
 
 ```bash
 # 프록시가 공개 호스트명을 dalfox로 전달할 때만 필요합니다
@@ -90,7 +90,12 @@ dalfox server \
   --cors-allow-headers "Content-Type,X-API-KEY,Authorization"
 ```
 
-`*`는 와일드카드로 허용됩니다. 정규식은 `regex:^https://.*\.example\.com$` 형태로 지원됩니다.
+`*` 하나만 쓰면 모든 오리진을 허용하고(아래 참고), 항목 안에 들어간 `*`는
+와일드카드입니다(`https://*.example.com`). 정규식은 `regex:^https://.*\.example\.com$` 형태로 지원됩니다.
+
+`--allowed-origins`를 설정하지 않으면 CORS 헤더를 아예 보내지 않습니다. 설정했다면
+`--cors-allow-methods`의 기본값은 `GET,POST,OPTIONS,PUT,PATCH,DELETE`,
+`--cors-allow-headers`의 기본값은 `Content-Type,X-API-KEY,Authorization`입니다.
 
 두 형태 모두 `Origin` **전체**와 매칭되므로, 패턴을 부분 문자열로 포함하는 더 긴 호스트가
 통과할 수 없습니다 — `regex:https://app\.example\.com`은 `https://app.example.com.evil.com`과
@@ -109,7 +114,7 @@ dalfox server \
 
 ```bash
 dalfox server --jsonp --callback-param-name callback
-# then GET /scan?target=...&callback=myFunction
+# 그다음 GET /scan?target=...&callback=myFunction
 ```
 
 JSONP는 `<script src>` 로드로 전달되는데, 스크립트 로드에는 검증할 `Origin`이 없습니다.
@@ -118,18 +123,33 @@ JSONP는 `<script src>` 로드로 전달되는데, 스크립트 로드에는 검
 유지되는 CORS(`--allowed-origins`)를 우선 고려하세요. API 키 없이 `--jsonp`을 켜면 서버가
 시작 시 경고를 출력합니다.
 
+`--jsonp`를 켜면 모든 엔드포인트가 콜백 파라미터를 따릅니다. 본문은 `name(json);`
+형태로 감싸져 `application/javascript`로 나갑니다. 콜백 이름은 `[A-Za-z0-9_$.]`로 된
+1~64자여야 하며 영문자, `_`, `$` 중 하나로 시작해야 합니다. 그 밖의 값은 무시되고
+일반 JSON이 돌아옵니다.
+
 ## 엔드포인트
 
 | 메서드 | 경로 | 기능 |
 |--------|------|--------------|
 | `POST` | `/scan` | 새 스캔 제출 (JSON 본문) |
 | `GET` | `/scan?target=...` | 새 스캔 제출 (쿼리 문자열) |
-| `GET` | `/scan/:id` | 스캔 상태 및 결과 조회 |
-| `DELETE` | `/scan/:id` | 큐에 있거나 실행 중인 스캔 취소 |
+| `GET` | `/scan/{id}` | 스캔 상태 및 결과 조회 |
+| `DELETE` | `/scan/{id}` | 큐에 있거나 실행 중인 스캔 취소 |
 | `GET` | `/scans` | 모든 스캔 목록 조회 (선택적 `?status=`) |
-| `GET` | `/result/:id` | `/scan/:id`의 별칭 |
+| `GET` | `/result/{id}` | `/scan/{id}`의 별칭 |
 | `POST` | `/preflight` | 페이로드를 보내지 않고 파라미터 탐색 |
 | `GET` | `/health` | 서버 정보 + 기능 목록 |
+
+이 엔드포인트들의 응답은 성공이든 실패든 모두 같은 `{code, msg, data}` 구조이며
+`application/json`으로 나갑니다. 오류일 때 `code`는 HTTP 상태 코드와 같고, `msg`가
+무엇이 잘못됐는지 알려 주며, `data`는 없습니다. 볼 수 있는 상태 코드는 `400`(잘못된
+본문이나 옵션. `--max-body-bytes`를 넘는 본문도 여기에 해당), `401`(API 키 없음 또는
+불일치), `403`(크로스사이트 요청 또는 신뢰하지 않는 `Host`,
+[브라우저 요청](#브라우저-요청) 참고), `404`(알 수 없는 스캔 id), `409`(아직 활성
+상태인 스캔의 purge), `500`(서버 내부에서 실패한 preflight), `503`(용량 초과)입니다.
+예외는 두 가지입니다. CORS 사전 요청(`OPTIONS`)은 본문 없이 `204`로 답하고(브라우저 게이트가
+거부하면 본문 없는 `403`), 표에 없는 경로나 메서드는 본문 없는 `404` / `405`를 받습니다.
 
 ### 스캔 제출
 
@@ -150,12 +170,16 @@ curl -X POST http://127.0.0.1:6664/scan \
 
 스캔 대상 필드는 `target`입니다 (MCP `scan_with_dalfox` 도구 및 응답 페이로드와 동일). 레거시 필드명 `url`도 별칭으로 계속 받습니다. JSON 본문과 `?target=` / `?url=` 쿼리 문자열 모두에서 통하므로 기존 클라이언트는 그대로 동작합니다.
 
+옵션은 `options` 아래에 둡니다. 최상위든 `options` 안이든 알 수 없는 키는 무시되지 않고
+`400`으로 거부됩니다. 그래서 `{"target": ..., "worker": 5}` 같은 평평한 본문은 모든
+옵션이 빠진 채 스캔되는 대신 곧바로 실패합니다.
+
 응답:
 
 ```json
 {
   "code": 200,
-  "msg": "queued",
+  "msg": "ok",
   "data": {
     "scan_id": "9f2c…",
     "target": "https://target.app?q=test"
@@ -174,24 +198,39 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan
 ```json
 {
   "code": 200,
-  "msg": "running",
+  "msg": "ok",
   "data": {
     "target": "https://target.app?q=test",
     "status": "running",
-    "results": [],
     "progress": {
       "params_total": 12,
       "params_tested": 5,
       "requests_sent": 234,
+      "requests_failed": 0,
       "findings_so_far": 1,
       "estimated_completion_pct": 41,
-      "suggested_poll_interval_ms": 3000
-    }
+      "suggested_poll_interval_ms": 2000
+    },
+    "queued_at_ms": 1758700000000,
+    "started_at_ms": 1758700000120,
+    "finished_at_ms": null,
+    "duration_ms": 8450
   }
 }
 ```
 
-완료되면 `status`는 `done`이 되고 `results`가 채워집니다.
+- `results`는 스캔의 워커가 끝난 뒤에 나타납니다. `done` 스캔의 탐지 결과이거나,
+  `error` / `cancelled` 스캔의 부분 탐지 결과입니다. 대상에 끝내 닿지 못했거나 시작
+  전에 취소된 스캔에는 `results` 자체가 없습니다. 실행 중에 취소한 스캔은 곧바로
+  `cancelled`로 보고되지만, `results`는 워커가 정리를 마친 뒤(몇 초 걸릴 수 있음)에야
+  붙습니다.
+- 스캔이 실패했거나 `scan_timeout`을 다 썼다면 `error_message`가 붙습니다.
+- 스캔이 아직 `queued`이면 `progress`는 없습니다.
+- `requests_failed`는 대상에 닿지 못한 요청(연결, TLS, 타임아웃) 수입니다. 이 값이
+  `requests_sent`의 큰 비중을 차지한다면 스캔이 사실상 돌지 않은 것이므로, 탐지 결과
+  0건을 "깨끗함"이 아니라 "스캔되지 않음"으로 읽으세요.
+- `suggested_poll_interval_ms`는 10%를 넘으면 `3000`에서 `2000`으로, 80%를 넘으면
+  `1000`으로 줄고, 스캔이 종료되면 `0`이 됩니다.
 
 ### 스캔 목록 조회
 
@@ -199,14 +238,51 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan
 curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/scans?status=running'
 ```
 
+`status`는 `queued`, `running`, `done`, `error`, `cancelled` 중 하나입니다(그 밖의 값은
+`400`). `offset`과 `limit`으로 목록을 페이지 단위로 넘깁니다(`limit=0`이 기본값이며
+`offset`부터 전부 반환). 스캔은 최신순으로 옵니다:
+
+```json
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "total": 1,
+    "scans": [
+      {
+        "scan_id": "9f2c…",
+        "target": "https://target.app?q=test",
+        "status": "running",
+        "result_count": 0,
+        "queued_at_ms": 1758700000000,
+        "started_at_ms": 1758700000120,
+        "finished_at_ms": null,
+        "duration_ms": 8450
+      }
+    ],
+    "pagination": { "offset": 0, "limit": 0, "returned": 1, "has_more": false }
+  }
+}
+```
+
+실패한 스캔의 행에는 `error_message`도 담기므로, `result_count: 0`인 깨끗한 스캔과
+헷갈리지 않습니다.
+
 ### 스캔 취소
 
 ```bash
 curl -X DELETE -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan/9f2c…
 ```
 
-종료된 레코드를 제거하려면 `?purge=1`을 붙이세요. 이는 명시적인 강제 삭제
-경로입니다. MCP의 안전한 삭제와 달리 취소된 worker가 아직 정리 중이면 부분
+응답 데이터는 `{scan_id, target, cancelled, previous_status}`입니다. `cancelled`는
+스캔이 `queued`나 `running`이었을 때만 `true`입니다. 이미 끝난 스캔이라면 이 호출은
+아무 일도 하지 않고 `cancelled`는 `false`입니다. 취소된 스캔은 그때까지 모은 부분 결과를
+가진 채 목록에 남습니다.
+
+종료된 레코드를 제거하려면 `?purge=1`을 붙이세요. 이때 데이터는
+`{scan_id, target, deleted: true, previous_status}`이고, 아직 `queued`나 `running`인
+스캔은 `409`로 거부됩니다. 이는 명시적인 강제 삭제
+경로입니다. MCP의 안전한 삭제와 달리 취소된 워커가 아직 정리 중이면 부분
 결과나 종료 webhook을 버릴 수 있습니다.
 
 ### 프리플라이트 (공격 없음)
@@ -220,13 +296,22 @@ curl -X POST http://127.0.0.1:6664/preflight \
 
 응답에는 `params_discovered`, `estimated_total_requests`와 파라미터 목록이 담겨 있어, 실제 스캔에 들어가기 전에 범위를 정할 수 있습니다.
 
+본문은 `POST /scan`과 같은 `{target, options}` 구조입니다. 데이터는
+`{target, reachable, method, params_discovered, estimated_total_requests,
+params: [{name, location, estimated_requests}]}` 형태로 돌아옵니다. 도달할 수 없는
+대상은 `reachable: false`와 `error_code: "CONNECTION_FAILED"`를 돌려주며 파라미터는
+비어 있습니다. 프리플라이트도 네트워크상으로는 조용하지 않습니다. 탐색과 마이닝이 실제
+요청을 보내며, 요청의 `delay`, `worker`, `rate_limit`에 따라 속도가 조절되고 서버의
+`--rate-limit`이 상한을 둡니다. 프리플라이트는 동시에 최대 32개까지 실행되며, 넘치면
+서버가 `503`으로 응답합니다.
+
 ### 헬스
 
 ```bash
 curl http://127.0.0.1:6664/health
 ```
 
-버전, `auth_required`, 지원되는 엔드포인트 목록을 반환합니다. 가동 상태 확인에 유용합니다.
+`status: "ok"`, 버전, `auth_required`, 지원되는 엔드포인트 목록을 반환합니다. 가동 상태 확인에 유용합니다. API 키는 필요 없지만 [브라우저 요청](#브라우저-요청)의 브라우저 게이트는 그대로 적용됩니다.
 
 ## ScanOptions 참조 (요청 본문)
 
@@ -243,6 +328,7 @@ curl http://127.0.0.1:6664/health
     "method": "POST",
     "data": "user=test",
     "header": ["Authorization: Bearer token"],
+    "cookie": "session=abc123; lang=en",
     "user_agent": "Custom",
     "encoders": ["url", "html"],
     "remote_payloads": ["portswigger"],
@@ -271,6 +357,15 @@ curl http://127.0.0.1:6664/health
 ```
 
 필드는 CLI 플래그와 대응됩니다. 의미와 기본값은 [CLI 참조](../../reference/cli/)를 보세요.
+`cookie`는 `Cookie:` 헤더 값 하나입니다. `name=value` 문자열의 리스트도 받으며 `; `로
+이어 붙입니다. [MCP](../mcp/) 쪽 철자도 별칭으로 받으므로 `scan_with_dalfox`용으로 쓴
+인자도 그대로 통합니다: `cookie`에 `cookies`, `header`에 `headers`, `worker`에
+`workers`, `blind`에 `blind_callback_url`입니다.
+
+숫자 옵션은 범위를 검사하며, 범위를 벗어나면 `400`입니다: `timeout` `1`~`299`초,
+`delay` `0`~`9999`ms, `worker` `1`~`500`, `scan_timeout` `0`~`86400`초,
+`max_payloads_per_param` `0`~`100000`.
+
 `detect_outdated_libs`는 옵트인 방식입니다 (기본값 `false`). `true`로 설정하면
 오래되었거나 알려진 취약점이 있는 JS 라이브러리도 정보성 `[I]` 탐지 결과로
 보고합니다 (CWE-1104, 추가 요청 0건). 같은 키를 `GET /scan` 쿼리 파라미터로도 사용할 수 있습니다.
@@ -278,11 +373,8 @@ curl http://127.0.0.1:6664/health
 건너뜁니다). 인증서 검증을 강제하려면 `"insecure": false` (또는 `GET /scan`에서
 `?insecure=false`)를 보내세요.
 
-`proxy`와 `callback_url`은 요청을 받는 시점에 검증하며, 사용할 수 없는 값이면 조용히
-버리는 대신 `400`으로 거절합니다. 사용할 수 없는 `proxy`는 그냥 "프록시 없음"으로
-해석되어 스캔이 요청한 터널을 우회한 채 대상에 **직접** 연결되고도 `done`으로
-보고되며, `http(s)` 이외 스킴의 `callback_url`은 아예 호출되지 않아 웹훅 구독자가
-영원히 기다리게 됩니다.
+`proxy`와 `callback_url`은 제출 시점에 검증하며, 사용할 수 없는 값이면 `400`입니다.
+`callback_url`은 `http://`나 `https://`여야 합니다(비어 있으면 웹훅 없음).
 
 `analyze_external_js`는 옵트인 방식입니다 (기본값 `false`). `true`로 설정하면
 프리플라이트 시점에 동일 출처의 `<script src>` 번들을 가져와 DOM XSS를 위한 AST
@@ -300,24 +392,22 @@ curl http://127.0.0.1:6664/health
 
 WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선택 사항입니다. 생략하면
 스캐너 기본값이 적용됩니다. `waf_bypass`는 처리 모드를 고릅니다: `"auto"`(탐지 후
-우회, 기본값), `"force"`(`force_waf`를 사용), `"off"`(탐지만). `skip_waf_probe`는
-(기본값 `false`) WAF 핑거프린팅 프로브를 아예 건너뜁니다. `force_waf`는 WAF를
-탐지하는 대신 특정 프로필(예: `"cloudflare"`)을 고정합니다. `waf_evasion`은
+우회, 기본값) 또는 `"off"`(탐지하고 보고만 함). `"force"`도 받지만 `"auto"`와 똑같이
+동작합니다. `skip_waf_probe`는(기본값 `false`) 자극 프로브만 건너뛰며, 프리플라이트
+응답에 대한 패시브 탐지는 그대로 실행됩니다. `force_waf`는 탐지 결과 대신 특정
+프로필(예: `"cloudflare"`)을 고정합니다. `"auto"`와 `"force"` 모두에서 적용되며,
+`"off"`에서는 보고만 되고 우회는 적용되지 않습니다. `waf_evasion`은
 (기본값 `false`) 적응형 우회를 켭니다. `waf_min_confidence`는 `[0.0, 1.0]` 범위의
 탐지 신뢰도 하한입니다 (기본값 `0.3`). 이 값보다 낮은 핑거프린트는 버려집니다.
 
-`method`와 `encoders`는 CLI가 허용하는 것과 동일한 값 집합으로 검증됩니다.
-`method`는 자동으로 대문자로 바뀌며(`"post"` → `"POST"`), 지원하지 않는 메서드나
-모르는 인코더 이름은 `400`으로 거부합니다. 잘못된 메서드를 보내거나 인코딩을 건너뛰는
-스캔이 조용히 돌아가는 것보다 낫기 때문입니다. `remote_payloads`와 `remote_wordlists`도
-같은 방식으로 검사합니다. 등록되지 않은 프로바이더 이름은 아무것도 받아오지 못한 채,
-요청한 페이로드 커버리지가 빠진 스캔을 `done`으로 보고하게 만들기 때문입니다.
+`method`, `encoders`, `remote_payloads`, `remote_wordlists`는 CLI가 허용하는 것과
+같은 값으로 검사하며, 모르는 메서드·인코더·프로바이더 이름은 `400`입니다. `method`는
+자동으로 대문자로 바뀝니다(`"post"` → `"POST"`).
 
-`blind`는 비어 있거나(= 블라인드 XSS 사용 안 함) `http://` / `https://`로 시작해야
-합니다. 이 값을 설정하면 *저장형* 블라인드 XSS 주입이 켜집니다 — `<script src=...>`
-페이로드가 모든 쿼리·바디·헤더·쿠키 파라미터에 기록되어 대상에 그대로 남습니다.
-그래서 콜백을 받을 수 없는 값은 그 페이로드만 남기고 아무 소득도 없으므로 `400`으로
-거부합니다.
+`blind`는 비어 있거나(= 블라인드 XSS 사용 안 함) 절대 `http://` / `https://` URL이어야
+하며, 그 밖의 값은 `400`입니다. 이 값을 설정하면 *저장형* 블라인드 XSS 주입이 켜집니다.
+`<script src=...>` 페이로드가 모든 쿼리·바디·헤더·쿠키 파라미터에 기록되어 대상에
+그대로 남습니다.
 
 `scan_timeout`은 스캔 전체의 벽시계 시간 예산(초)입니다 (기본값 `0` = 무제한).
 요청당 `timeout`과는 구별됩니다. 예산에 도달하면 스캔이 중단되고, 그때까지 수집한
@@ -326,6 +416,33 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 있습니다). 서버 전역 `--scan-timeout` 플래그는 `--rate-limit`과 마찬가지로 제출된 모든
 스캔에 동일하게 상한을 적용합니다.
 
+### GET /scan 쿼리 파라미터
+
+`GET /scan`은 같은 옵션 이름을 쿼리 파라미터로 받습니다. `target` 대신 `url`도
+받지만, MCP 별칭(`workers`, `headers`, `cookies`, `blind_callback_url`)은 읽지
+않습니다. JSON 본문과 달리 모르는 쿼리 파라미터는 거부하지 않고 무시하므로 철자를
+확인하세요. 리스트 옵션(`encoders`,
+`param`, `remote_payloads`, `remote_wordlists`)은 쉼표로 구분합니다. `header`는 여러
+헤더를 한 값에 담으며, 새 `Name:`이 시작되는 쉼표에서만 나눕니다. 그래서
+`Accept: text/html,application/xhtml+xml`처럼 값 안에 든 쉼표는 그대로 남습니다.
+불리언은 `1`, `true`, `yes`, `on`(대소문자 무관)을 참으로, 그 밖의 값은 거짓으로
+읽습니다. 값은 있는데 숫자로 해석할 수 없으면 `400`입니다. `method`의 기본값은 `GET`,
+`encoders`의 기본값은 `url,html`입니다.
+
+### 완료 웹훅
+
+`callback_url`을 설정하면, 스캔이 어떻게 끝나든(시작 전에 취소된 경우 포함) 서버가
+JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE` 시점이 아니라 워커가
+정리를 마친 뒤에 POST가 나갑니다:
+
+```json
+{ "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [] }
+```
+
+`status`는 `done`, `error`, `cancelled` 중 하나로, `GET /scan/{id}`가 보고하는 값과
+같습니다. 여기서는 대상이 `target`이 아니라 `url` 아래에 있습니다. 이 POST는 스캔 자신의
+프록시·TLS 설정을 따르며, 10초 뒤 타임아웃되고, 재시도하지 않습니다.
+
 ### 설정해 둘 만한 서버 플래그
 
 - `--rate-limit <rps>` — 모든 스캔의 아웃바운드 요청 속도를 제한합니다 (대상을 보호).
@@ -333,9 +450,11 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
   작업을 제한하여 하나의 대상이 워커를 무한정 점유하지 못하게 합니다.
 - `--max-concurrent-scans <n>` — `n`개의 스캔이 큐에 있거나 실행 중이면 새 제출을
   `503`으로 거부합니다 (기본값 `100`, `0` = 무제한). 제출 폭주에 대비해 메모리와
-  블로킹 풀을 제한합니다.
+  블로킹 풀을 제한합니다. 취소한 스캔은 워커가 실제로 멈출 때까지(최대 5분) 자리를
+  계속 차지하므로, 취소한다고 곧바로 여유가 생기지는 않습니다.
 - `--max-body-bytes <n>` — `POST /scan` 및 `/preflight`의 명시적 요청 본문 상한
-  (기본값 `1048576` = 1 MiB). 크기를 초과하는 본문은 `413`을 받습니다.
+  (기본값 `1048576` = 1 MiB). 크기를 초과하는 본문은 `400`
+  (`invalid request body: ... length limit exceeded`)으로 거부됩니다.
 - `--max-retained-scans <n>` — 메모리에 보관하는 *종료된* 스캔 수 상한 (기본값 `1000`,
   `0` = 무제한). `--max-concurrent-scans`는 활성 스캔만 세기 때문에, 이 상한이 없으면
   짧은 스캔이 몰릴 때 모든 결과가(`include_response`를 켰다면 응답 본문까지) 1시간
@@ -351,15 +470,23 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 queued → running → done
                  ↘ error
                  ↘ cancelled
+queued → cancelled
 ```
 
-종료 상태(`done`, `error`, `cancelled`)는 고정되어 변하지 않습니다.
+종료 상태(`done`, `error`, `cancelled`)는 고정되어 변하지 않습니다. 대기 중인 스캔은
+시작 전에 취소될 수 있습니다. 작업은 메모리에만 존재합니다. 종료된 스캔은 1시간 동안(또는
+`--max-retained-scans`가 밀어낼 때까지) 보관되며, 재시작하면 아무것도 남지 않습니다.
+
+스캔 하나가 테스트하는 파라미터는 최대 512개입니다. 그보다 많은 파라미터를 드러내는
+대상에서는 발견한 목록이 잘리고 스캔은 그대로 `done`으로 끝나며, 흔적은 서버 로그의
+`discovered params capped to 512` 경고 한 줄뿐입니다. 모든 파라미터가 중요하다면
+`param`으로 나눠서 스캔하세요.
 
 연결할 수 없는 대상(DNS 실패, 연결 거부, TLS 오류, 타임아웃)은
 `target unreachable: connection failed (CONNECTION_FAILED)`라는 `error_message`와
 함께 `error`로 종료됩니다 — 탐지 결과가 0건인 `done`이 아니므로 "스캔했으나 아무것도
 찾지 못함"과 "호스트에 도달하지 못함"을 구별할 수 있습니다. 스캔을 실행하지 않고
-도달 가능성만 확인하려면 먼저 `POST /preflight`를 쓰세요. `url`은 `http://`나
+도달 가능성만 확인하려면 먼저 `POST /preflight`를 쓰세요. `target`은 `http://`나
 `https://`로 시작해야 하며, 그 외 스킴은 `400`으로 거부됩니다 (`/preflight`와 동일).
 
 **끊어진 세션**도 같은 규칙을 따릅니다. 스캔 요청이 자격증명(`cookie`, 또는 `header`의

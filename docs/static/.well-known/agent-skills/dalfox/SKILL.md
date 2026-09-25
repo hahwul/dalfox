@@ -49,7 +49,7 @@ Use `preflight_dalfox`. Look at `estimated_total_requests` and `reachable`.
 
 **CLI**:
 ```bash
-dalfox scan https://target/?q=test --dry-run --skip-mining
+dalfox scan 'https://target/?q=test' --dry-run --skip-mining
 # Prefer --format json for machine parsing; check meta.warnings if you passed -p
 ```
 
@@ -65,7 +65,7 @@ If the number is huge or `reachable == false`, report back to the user before se
       "max_payloads_per_param":20,"wait":true,"wait_timeout_sec":120}
      ```
    - **MCP long scan**: `scan_with_dalfox` with `wait=false` → store `scan_id` → poll `get_results_dalfox`. Prefer explicit `param` (`["q:query"]` when location is known).
-   - **CLI**: `dalfox scan https://target/?q=test -p q --skip-mining ...`  
+   - **CLI**: `dalfox scan 'https://target/?q=test' -p q --skip-mining ...`  
      Bare `-p name` is fine for query params (synthesized if discovery was skipped). Use `name:location` for body/header/cookie/json (`-p user:body`). GraphQL `variables` and XML/SOAP bodies are auto-detected as `graphql`/`xml` injection points from a matching `-d` body (or raw-http/har). Cap volume with `--max-payloads-per-param`.
 3. Poll only when not using `wait=true`.
 4. Present findings using the rules in `references/results.md` (lead with V, surface `type_description` and `inject_type`).
@@ -143,9 +143,10 @@ Key points for agents:
 - Select AST findings with `detection_method == "ast"`, not `type == "A"`.
 - `confidence` (`high`/`low`) + `confidence_reason` grade the claim; sort a
   large `A` batch on them. Machine formats only — plain output omits them.
-- `inject_type` tells you the reflection context (`inHTML`, `inJS`, `inATTR`, etc.).
-- The parameter *location* (query/body/header/...) is in the `location` field,
-  and also visible in `data` + `method`.
+- `inject_type` names the check that produced the finding (`inHTML`,
+  `sxss-inHTML`, `DOM-XSS`, `inHTML-HPP`, `blind-oob-…`, `OutdatedComponent`),
+  not the reflection context — there is no `inJS` / `inATTR`.
+- The parameter *location* (query/body/header/...) is in the `location` field.
 - `include_request` / `include_response` are opt-in only — never enable them by default.
 
 ## 5. Performance & Scope Recipes
@@ -153,7 +154,7 @@ Key points for agents:
 See `references/advanced.md` for the detailed recipes:
 
 - "Too many parameters / too slow" → preflight + `--skip-mining` + explicit `-p` (`name:location` when not query) + `max_payloads_per_param` / `--max-payloads-per-param`
-- "WAF present" → the matrix of `--waf-bypass`, `--force-waf`, `--waf-evasion`
+- "WAF present" → `--force-waf`, `--waf-evasion`, `--waf-bypass off` (`force` acts like `auto`)
 - "Need custom payloads or markers" → `--custom-payload`, `--inject-marker`, `--custom-alert-*`
 - "Captured request testing" → `-i raw-http` (single request) or `-i har` (whole proxy/DevTools export)
 - Concurrency / politeness caps
@@ -162,7 +163,7 @@ See `references/advanced.md` for the detailed recipes:
 
 See `references/config.md`.
 
-- `--config path` overrides everything.
+- `--config path` replaces the default config location (a parse error only warns and runs on defaults).
 - Default location: `$XDG_CONFIG_HOME/dalfox/` or `~/.config/dalfox/`.
 - CLI flags always beat config values (enforced by `apply_to_scan_args_if_default`).
 - A `silence = true` in config suppresses the banner the same way `-S` does.

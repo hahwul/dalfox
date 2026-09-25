@@ -9,12 +9,12 @@ Dalfox respects a small set of environment variables for configuration that does
 
 | Variable | Used by | Purpose |
 |----------|---------|---------|
-| `DALFOX_API_KEY` | `dalfox server` | Value required in the `X-API-KEY` header. Equivalent to `--api-key`. |
-| `DALFOX_STDIN_WAIT_MS` | `dalfox scan` (auto input) | Milliseconds to wait for piped `stdin` to produce its first byte when targets were *also* given on the command line. Default `500`; `0` skips the stdin merge entirely. Does not apply to `--input-type pipe`/`har`, which always wait. |
+| `DALFOX_API_KEY` | `dalfox server` | Value required in the `X-API-KEY` header. Read only when `--api-key` is not given; an empty value is ignored. |
+| `DALFOX_STDIN_WAIT_MS` | `dalfox scan` (auto input) | Milliseconds to wait for piped `stdin` to produce its first byte when targets were *also* given on the command line. Default `500`; `0` skips the stdin merge entirely. A value that is not a whole number falls back to `500`, and anything above `3600000` (one hour) is clamped to it. Does not apply to `--input-type pipe`/`har`, which always wait. |
 | `NO_COLOR` | all modes | Disables ANSI colour output when set to any value, an empty string included. Equivalent to `--no-color`, and to `no_color = true` in the config file. See the [NO_COLOR](https://no-color.org) convention. |
-| `XDG_CONFIG_HOME` | config loader | Base directory for the config file (`$XDG_CONFIG_HOME/dalfox/config.toml`). Falls back to `$HOME/.config`. |
-| `HOME` | config loader | Used when `XDG_CONFIG_HOME` is unset. |
-| `USERPROFILE` | config loader | Windows fallback base directory, used when both `XDG_CONFIG_HOME` and `HOME` are unset. |
+| `XDG_CONFIG_HOME` | config loader | Base directory for the config file (`$XDG_CONFIG_HOME/dalfox/config.toml`, or `config.json` when there is no TOML file). Falls back to `$HOME/.config` when unset or empty. |
+| `HOME` | config loader | Used when `XDG_CONFIG_HOME` is unset or empty. |
+| `USERPROFILE` | config loader | Windows fallback base directory, used when `HOME` is unset and `XDG_CONFIG_HOME` is unset or empty. |
 
 ## Examples
 
@@ -51,6 +51,6 @@ XDG_CONFIG_HOME=./.config dalfox scan https://target.app
 
 A few things that *look* like they should be environment variables but aren't:
 
-- **Proxy.** Use `--proxy` or `proxy` in config; Dalfox doesn't read `HTTP_PROXY`/`HTTPS_PROXY` to avoid accidental traffic interception.
+- **Proxy.** Use `--proxy` or `proxy` in config. Scan traffic and the interactsh OOB client ignore `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` to avoid accidental traffic interception. The one exception is downloading remote lists (`--remote-payloads`, `--remote-wordlists`, `dalfox payload portswigger|payloadbox`): without `--proxy`, those requests follow the standard proxy variables.
 - **Timeout, workers, format.** CLI flag or config only.
 - **Debug.** Pass `--debug` on the command line or set `debug = true` in config.

@@ -12,7 +12,7 @@
       navigator.clipboard.writeText(code.textContent.trim()).then(function () {
         copyBtn.classList.add('copied');
         var prev = copyBtn.textContent;
-        copyBtn.textContent = 'copied';
+        copyBtn.textContent = document.documentElement.lang === 'ko' ? '복사됨' : 'copied';
         setTimeout(function () {
           copyBtn.classList.remove('copied');
           copyBtn.textContent = prev;

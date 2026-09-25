@@ -15,6 +15,12 @@ brew install dalfox
 
 Homebrew formula는 최신 안정 버전을 따라갑니다. 출처: [formulae.brew.sh/formula/dalfox](https://formulae.brew.sh/formula/dalfox).
 
+프로젝트 자체 tap은 같은 릴리스를 소스에서 빌드하며(그래서 Rust도 함께 설치됩니다), man 페이지와 셸 자동완성까지 설치합니다.
+
+```bash
+brew install hahwul/dalfox/dalfox
+```
+
 ## Snap (Ubuntu / Linux)
 
 ```bash
@@ -92,13 +98,33 @@ nix develop
 
 [direnv](https://direnv.net)를 설치했다면 저장소의 `.envrc` 덕분에 `direnv allow` 한 번으로 같은 셸이 자동으로 활성화됩니다.
 
+## Docker
+
+멀티 아키텍처 이미지(`linux/amd64`, `linux/arm64`)가 Docker Hub와 GitHub Container Registry에 올라갑니다. 바이너리는 `/app/dalfox`에 있고 이미지에 엔트리포인트가 없으므로 명령에 바이너리를 직접 지정하세요.
+
+```bash
+docker run --rm hahwul/dalfox:latest ./dalfox scan https://example.com
+
+# 또는 GHCR에서
+docker run --rm ghcr.io/hahwul/dalfox:latest ./dalfox scan https://example.com
+```
+
+`/app`이 이미지의 `PATH`에 없으므로 `dalfox`만 쓰면 실행되지 않습니다. URL 목록을 스캔하려면 파일을 컨테이너에 마운트하거나 `-i`로 파이프하세요.
+
+```bash
+docker run --rm -v "$PWD:/data" hahwul/dalfox:latest ./dalfox scan /data/urls.txt
+cat urls.txt | docker run --rm -i hahwul/dalfox:latest ./dalfox scan
+```
+
+`latest`는 최신 릴리스입니다. 릴리스마다 `v<major>.<minor>.<patch>` 태그가 붙고, Docker Hub에는 `v<major>.<minor>`와 `v<major>` 태그도 붙습니다. `ghcr.io/hahwul/dalfox:main`은 `main` 브랜치를 따라갑니다.
+
 ## Cargo (crates.io)
 
 ```bash
 cargo install dalfox
 ```
 
-최신 Rust 툴체인이 필요합니다(stable이면 충분). `~/.cargo/bin/dalfox`에 빌드됩니다.
+Rust 1.93 이상이 필요합니다(크레이트의 `rust-version`). `~/.cargo/bin/dalfox`에 빌드됩니다.
 
 ## 사전 빌드된 바이너리
 
@@ -111,7 +137,7 @@ cargo install dalfox
 - `linux-aarch64` (glibc), `linux-aarch64-musl` (정적 링크)
 - `windows-x86_64`
 
-Linux는 두 아키텍처 모두 `.deb`와 `.rpm` 패키지도 나오며, 모든 아카이브에는 `.sha256`이 붙고 `checksum.txt`도 함께 올라갑니다.
+아카이브 이름은 `dalfox-v<version>-<platform>` 형식이며, macOS와 Linux는 `.tar.gz`, Windows는 `.zip`입니다. Linux는 두 아키텍처 모두 `.deb`와 `.rpm` 패키지도 나오고, 모든 아카이브와 패키지에는 `.sha256`이 붙으며 `checksum.txt`도 함께 올라갑니다. 릴리스마다 CycloneDX SBOM(`dalfox.cdx.xml`)도 포함됩니다.
 
 ## 소스에서 빌드
 
@@ -122,7 +148,7 @@ cargo build --release
 # 바이너리 경로: ./target/release/dalfox
 ```
 
-Rust(2024 edition)가 필요합니다. 없다면 [rustup](https://rustup.rs/)으로 설치하세요.
+Rust 1.93 이상(2024 edition)이 필요합니다. 없다면 [rustup](https://rustup.rs/)으로 설치하세요.
 
 ## 설치 확인
 
@@ -130,13 +156,13 @@ Rust(2024 edition)가 필요합니다. 없다면 [rustup](https://rustup.rs/)으
 dalfox --version
 ```
 
-`dalfox 3.2.3` 같은 버전 정보와 함께 Dalfox 배너가 보이면 됩니다.
+`dalfox 3.2.3` 같은 한 줄이 출력되면 됩니다.
 
 ## 셸 자동완성
 
-Homebrew, AUR 패키지, `.deb` / `.rpm` 패키지, Nix 플레이크로 설치하면 bash·zsh·fish 자동완성이 함께 설치되므로 따로 할 일이 없습니다.
+`hahwul/dalfox` Homebrew tap, AUR 패키지, `.deb` / `.rpm` 패키지, Nix flake로 설치하면 bash·zsh·fish 자동완성(과 `dalfox(1)` man 페이지)이 함께 설치되므로 따로 할 일이 없습니다.
 
-Cargo, 릴리스 아카이브, 소스 빌드처럼 다른 방법으로 설치했다면 직접 생성하면 됩니다.
+코어 `brew install dalfox` formula, Snap, Docker, Cargo, 릴리스 아카이브, 소스 빌드처럼 다른 방법으로 설치했다면 직접 생성하면 됩니다.
 
 ```bash
 dalfox completion bash > /etc/bash_completion.d/dalfox

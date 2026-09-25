@@ -98,15 +98,17 @@ dedup, or exit codes — those still key off `type`.
 no `message` field. `confidence` / `confidence_reason` / `location` are omitted
 when unset. `request` / `response` appear only under the opt-in flags below.
 
-### inject_type values (reflection context, not parameter location)
+### inject_type values (which check produced it, not parameter location)
 
-- `inHTML` — inside HTML text / tag content
-- `inJS` — inside a script block or event handler
-- `inATTR` — inside an attribute value
-- `inURL` — inside a URL attribute (href, src, etc.)
-- `inCSS` — inside style / CSS context (rare)
+- `inHTML` — reflected finding from the payload scan (any reflection context)
+- `sxss-inHTML` — same, under `--sxss` (stored)
+- suffixes on either: `-CSTI` (`{{…}}` template payload), `-VHtml` / `-DataBind` / `-NgBindHtml` / `-DangerouslySetInnerHTML` / `-FrameworkSink` (framework innerHTML sink)
+- `inHTML-HPP` — `--hpp` duplicated-parameter finding
+- `DOM-XSS` — AST source→sink finding
+- `blind-oob-<location>-<protocol>` — `--blind-oob` callback (e.g. `blind-oob-Query-http`)
+- `OutdatedComponent` — `--detect-outdated-libs` `[I]` finding
 
-For the **parameter location** (query / body / header / cookie / path / JSON), look at the `data` field (the actual probed URL) + `method`.
+There is no `inJS` / `inATTR` / `inURL`: the reflection context is not encoded here. For the **parameter location** (query / body / header / cookie / path / JSON), read the `location` field (`"Query"`, `"Body"`, `"JsonBody"`, `"Header"`, `"Cookie"`, …; absent when the finding is not tied to a parameter, e.g. page-level AST or outdated-lib).
 
 ## Output Formats (`--format`)
 
@@ -114,12 +116,12 @@ For the **parameter location** (query / body / header / cookie / path / JSON), l
 |--------|----------|-------|
 | `plain` (default) | Human reading, interactive | Color + banner unless silenced |
 | `json` | Parsing, piping, server/MCP | Full envelope with `meta.target_summary` |
-| `jsonl` | Streaming / log ingestion | One finding per line + final meta line |
+| `jsonl` | Streaming / log ingestion | First line `{"meta": …}`, then one finding per line |
 | `markdown` | Reports, PR comments | Human-friendly with sections |
 | `sarif` | GitHub Code Scanning, SARIF tools | Standard static-analysis interchange |
 | `toml` | Config-like consumption | Rarely used |
 
-**Machine-readable formats** (`json`, `jsonl`, `sarif`, `toml`) automatically suppress the banner so stdout stays parseable.
+Every format except `plain` (so `markdown` too) suppresses the banner, so stdout stays parseable.
 
 ## POC Output (`--poc-type`)
 
@@ -230,20 +232,23 @@ In JSON output the per-target summary contains `error_code` when the target fail
 that could not be parsed and were skipped. Like `meta.targets_deduplicated`, it
 exists so a report is never read as full coverage of the input list.
 
-## Incomplete Runs (session loss)
+## Incomplete Runs
 
-`meta.incomplete: true` means at least one target was **not fully tested**.
-Today the only cause is session loss: static credentials (`--cookies`,
-`-H 'Cookie: …'`) expired mid-scan, so later requests hit a login page. Those
-targets carry `"status": "incomplete"` (ran, session gone by the end) or
-`"status": "skipped"` (never ran, aborted with its host), plus
-`"error_code": "SESSION_LOST"` and the triggering signal in `"error_message"`.
+`meta.incomplete: true` means the run was **not fully tested**. Two causes:
+
+- **Severe transport loss** — at least 10% of requests (and at least 3) got no
+  answer. `meta.failed_requests` has the count.
+- **Session loss** — static credentials (`--cookies`, `-H 'Cookie: …'`)
+  expired mid-scan, so later requests hit a login page. Those targets carry
+  `"status": "incomplete"` (ran, session gone by the end) or `"status":
+  "skipped"` (never ran, aborted with its host), plus `"error_code":
+  "SESSION_LOST"` and the triggering signal in `"error_message"`.
 
 **Agent guidance: never report `findings_count: 0` as "no XSS found" when
-`meta.incomplete` is true.** The correct summary is "the scan could not
-complete — the session expired", followed by a suggestion to re-run with fresh
-credentials. Under the default `--on-session-loss abort` the exit code is also
-`2`, not `0`.
+`meta.incomplete` is true.** Say the scan could not complete (session expired,
+or the target stopped answering) and suggest a re-run — with fresh credentials,
+or slower (`--rate-limit`, `--delay`). With no findings, the exit code is also `2`, not `0` (session loss
+only under the default `--on-session-loss abort`).
 
 ## Exit Codes (CLI)
 
@@ -252,15 +257,16 @@ credentials. Under the default `--on-session-loss abort` the exit code is also
   `--only-poc` and dedup. A lone `R`, or a single `I` from
   `--detect-outdated-libs`, exits `1` just like a `V` does. For CI that should
   fail only on asserted vulnerabilities, run `--only-poc v`
-- `2` — Hard error (bad input, config, runtime failure, every target
-  unreachable, `--output` could not be written, or a session lost mid-scan
-  **with no findings** under the default `--on-session-loss abort`; a run that
-  did find something still exits `1`)
+- `2` — Hard error: bad input, config, runtime failure, every target
+  unreachable, `--output` could not be written. Also, **only when there are no
+  findings**: a session lost mid-scan (default `--on-session-loss abort`), a
+  target skipped with `INTERNAL_ERROR` (worker panic), or severe transport loss
+  (`meta.incomplete`). A run that did find something still exits `1`
 
 With `--baseline` (default `filter` mode), suppressed findings never reach the
 exit-code decision, so the code reports novelty rather than the whole backlog.
 
-MCP and server surface the same information via `status` and `error_code` fields instead of process exit codes.
+MCP and server have no exit code: a failed scan settles `status: "error"` with the code inside `error_message` (e.g. `…(CONNECTION_FAILED)`, `SESSION_LOST: …`). Only preflight returns a separate `error_code` field.
 
 ## How to Present Results to Users (agent guidance)
 

@@ -15,6 +15,12 @@ brew install dalfox
 
 The Homebrew formula tracks the latest stable release. Source: [formulae.brew.sh/formula/dalfox](https://formulae.brew.sh/formula/dalfox).
 
+The project's own tap builds the same release from source (so it pulls in Rust) and also installs the man page and shell completions:
+
+```bash
+brew install hahwul/dalfox/dalfox
+```
+
 ## Snap (Ubuntu / Linux)
 
 ```bash
@@ -92,13 +98,33 @@ nix develop
 
 With [direnv](https://direnv.net) installed, `direnv allow` picks the same shell up automatically from the repo's `.envrc`.
 
+## Docker
+
+Multi-arch images (`linux/amd64`, `linux/arm64`) are published to Docker Hub and GitHub Container Registry. The binary sits at `/app/dalfox` and the image has no entrypoint, so name it in the command:
+
+```bash
+docker run --rm hahwul/dalfox:latest ./dalfox scan https://example.com
+
+# or from GHCR
+docker run --rm ghcr.io/hahwul/dalfox:latest ./dalfox scan https://example.com
+```
+
+A bare `dalfox` fails: `/app` is not on the image's `PATH`. To scan a URL list, mount it into the container, or pipe it in with `-i`:
+
+```bash
+docker run --rm -v "$PWD:/data" hahwul/dalfox:latest ./dalfox scan /data/urls.txt
+cat urls.txt | docker run --rm -i hahwul/dalfox:latest ./dalfox scan
+```
+
+`latest` is the newest release. Each release is also tagged `v<major>.<minor>.<patch>`, and Docker Hub adds `v<major>.<minor>` and `v<major>`. `ghcr.io/hahwul/dalfox:main` tracks the `main` branch.
+
 ## Cargo (from crates.io)
 
 ```bash
 cargo install dalfox
 ```
 
-Requires a recent Rust toolchain (stable is fine). Builds into `~/.cargo/bin/dalfox`.
+Requires Rust 1.93 or newer (the crate's `rust-version`). Builds into `~/.cargo/bin/dalfox`.
 
 ## Prebuilt binaries
 
@@ -111,7 +137,7 @@ We publish the following per release:
 - `linux-aarch64` (glibc), `linux-aarch64-musl` (statically linked)
 - `windows-x86_64`
 
-Linux also gets `.deb` and `.rpm` packages for both architectures, and every archive ships with a `.sha256` alongside a combined `checksum.txt`.
+Archives are named `dalfox-v<version>-<platform>`: `.tar.gz` on macOS and Linux, `.zip` on Windows. Linux also gets `.deb` and `.rpm` packages for both architectures, every archive and package ships with a `.sha256` alongside a combined `checksum.txt`, and each release carries a CycloneDX SBOM (`dalfox.cdx.xml`).
 
 ## Build from source
 
@@ -122,7 +148,7 @@ cargo build --release
 # Binary at ./target/release/dalfox
 ```
 
-You'll need Rust (2024 edition). Install with [rustup](https://rustup.rs/) if you don't have it.
+You'll need Rust 1.93 or newer (2024 edition). Install with [rustup](https://rustup.rs/) if you don't have it.
 
 ## Verify
 
@@ -130,13 +156,13 @@ You'll need Rust (2024 edition). Install with [rustup](https://rustup.rs/) if yo
 dalfox --version
 ```
 
-You should see something like `dalfox 3.2.3` along with the Dalfox banner.
+You should see a single line such as `dalfox 3.2.3`.
 
 ## Shell completions
 
-Homebrew, the AUR package, the `.deb` / `.rpm` packages and the Nix flake install bash, zsh and fish completions for you — nothing else to do.
+The `hahwul/dalfox` Homebrew tap, the AUR package, the `.deb` / `.rpm` packages and the Nix flake install bash, zsh and fish completions (and the `dalfox(1)` man page) for you — nothing else to do.
 
-Installed another way (Cargo, a release archive, a source build)? Generate them yourself:
+Installed another way (the core `brew install dalfox` formula, Snap, Docker, Cargo, a release archive, a source build)? Generate them yourself:
 
 ```bash
 dalfox completion bash > /etc/bash_completion.d/dalfox

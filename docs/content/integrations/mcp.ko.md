@@ -173,24 +173,24 @@ claude mcp add dalfox -- dalfox mcp
 
 잘못된 인자는 모두 같은 채널로 옵니다. `target` 누락, 문자열 자리에 들어온 숫자,
 상한을 넘은 값 모두 마찬가지이므로 클라이언트는 `error`만 보면 됩니다. 도구 결과는
-실제로 실행된 도구(tool)를 위해 남겨 둡니다.
+실제로 실행된 도구(tool)를 위해 남겨 둡니다. 상한은 REST API와 같습니다:
+`timeout` `1`–`299`초, `delay` `0`–`9999`ms, `workers` `1`–`500`,
+`scan_timeout` `0`–`86400`초, `max_payloads_per_param` `0`–`100000`.
 
-다만 알아둘 트레이드오프가 있습니다. 도구 결과는 항상 모델 컨텍스트에 렌더링되지만,
-JSON-RPC 오류는 호스트가 처리하며 일부 호스트는 모델에 텍스트를 돌려주지 않고 사용자에게
-일반적인 실패만 보여 줍니다. 메시지 자체에는 문제가 된 키와 허용되는 철자 전체가 담겨
-있으므로, 클라이언트가 이를 삼키면 모델은 스스로 고칠 단서를 잃습니다.
+주의할 점이 하나 있습니다. 일부 호스트는 JSON-RPC 오류의 텍스트를 모델에 돌려주지 않고
+사용자에게 일반적인 실패만 보여 주므로, 모델은 어떤 키가 틀렸는지 알 수 없게 됩니다.
 
-그래서 [REST API](../server/) 쪽 철자도 별칭으로 받습니다.
+흔한 실수가 오류가 되지 않도록 [REST API](../server/) 쪽 철자도 별칭으로 받습니다.
 `target`에 `url`, `cookies`에 `cookie`, `headers`에 `header`, `workers`에
 `worker`, `blind_callback_url`에 `blind`입니다. `cookie`는 리스트 대신
 `Cookie:` 헤더 문자열 하나(`"sid=abc; lang=en"`)도 받습니다. 도구 스키마가
 알리는 이름은 위의 MCP 정식 명칭이며, 별칭은 REST 문서를 보고 작성한 인자도
 의도한 그대로 스캔되게 하려고 존재합니다.
 
-REST 옵션 중 둘은 별칭을 두지 않고 의도적으로 빼두었으며, 요청하면 에러가
-납니다. `callback_url`(모델이 원하는 호스트로 스캔 결과를 내보낼 수 있는
-웹훅)과 `cookie_from_raw`(서버 측 파일 읽기)입니다. 쿠키는 `cookies`로 직접
-넘기세요.
+다른 표면에 있는 옵션 중 둘은 별칭을 두지 않고 의도적으로 빼두었으며, 요청하면
+에러가 납니다. REST의 `callback_url`(모델이 원하는 호스트로 스캔 결과를 내보낼 수
+있는 웹훅)과, CLI의 `--cookie-from-raw`에 해당하는 `cookie_from_raw`(서버 측 파일
+읽기)입니다. 쿠키는 `cookies`로 직접 넘기세요.
 
 별칭을 일반적인 REST 호환 모드로 오해하지 않도록, 세 가지 한계를 밝혀둡니다.
 
@@ -207,8 +207,9 @@ REST 옵션 중 둘은 별칭을 두지 않고 의도적으로 빼두었으며, 
 `preflight_dalfox`는 `scan_with_dalfox`보다 의도적으로 **좁은** 집합을 받습니다.
 페이로드를 보내지 않으므로 속도 조절·워커·WAF 처리·블라인드 XSS·대기에 관한
 옵션은 작용할 대상이 없어 거부됩니다. 받는 필드는 아래에 따로 적어두었습니다.
-(REST의 `POST /preflight`는 스캔 본문을 그대로 재사용하고 쓸 수 없는 값은
-무시하므로, 두 표면이 실제로 갈리는 유일한 지점입니다.) 자격 증명과 대상은
+(REST의 `POST /preflight`는 대신 스캔 본문 전체를 받고, `delay`, `worker`,
+`rate_limit`로도 속도를 조절하며, 쓸 데가 없는 옵션은 무시합니다. 두 표면이 실제로
+갈리는 유일한 지점입니다.) 자격 증명과 대상은
 그대로 전달됩니다. 쿠키 없이 preflight를 돌리면 인증된 스캔이 찾아낼 파라미터를
 적게 보고하게 되기 때문입니다.
 
@@ -222,10 +223,12 @@ REST 옵션 중 둘은 별칭을 두지 않고 의도적으로 빼두었으며, 
 응답이 클 수 있으므로 증거가 필요할 때만 켜세요.
 
 WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_bypass`는 처리
-모드를 고릅니다: `"auto"`(탐지 후 우회, 기본값), `"force"`(`force_waf`를 사용),
-`"off"`(탐지만). `skip_waf_probe`는(기본값 `false`) WAF 핑거프린팅 프로브를 아예
-건너뜁니다. `force_waf`는 WAF를 탐지하는 대신 특정 프로필(예: `"cloudflare"`,
-`"akamai"`, `"modsec"`)을 고정합니다. `waf_evasion`은(기본값 `false`) 적응형
+모드를 고릅니다: `"auto"`(탐지 후 우회, 기본값) 또는 `"off"`(탐지하고 보고만 함).
+`"force"`도 받지만 `"auto"`와 똑같이 동작합니다. `skip_waf_probe`는(기본값 `false`)
+자극 프로브만 건너뛰며, 프리플라이트 응답에 대한 패시브 탐지는 그대로 실행됩니다.
+`force_waf`는 탐지 결과 대신 특정 프로필(예: `"cloudflare"`, `"akamai"`,
+`"modsec"`)을 고정합니다. `"auto"`와 `"force"` 모두에서 적용되며, `"off"`에서는
+보고만 되고 우회는 적용되지 않습니다. `waf_evasion`은(기본값 `false`) 적응형
 우회를 켭니다. `waf_min_confidence`는 `[0.0, 1.0]` 범위의 탐지 신뢰도
 하한이며(기본값 `0.3`), 이보다 낮은 핑거프린트는 버려집니다. `waf_bypass`나
 `force_waf`에 알 수 없는 값을 주거나 `waf_min_confidence`가 범위를 벗어나면
@@ -272,12 +275,20 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
     "params_total": 10,
     "params_tested": 4,
     "requests_sent": 215,
+    "requests_failed": 0,
     "findings_so_far": 1,
     "estimated_completion_pct": 40,
-    "suggested_poll_interval_ms": 3000
+    "suggested_poll_interval_ms": 2000
   }
 }
 ```
+
+전체 상태 응답에는 `results`(스캔이 종료될 때까지 `null`이며, 대상에 끝내 닿지 못했거나
+시작 전에 취소된 스캔은 종료된 뒤에도 `null`), `pagination`, `queued_at_ms`,
+`started_at_ms`, `finished_at_ms`, `duration_ms`, 그리고 값이 있을 때 `error_message`도
+담깁니다. `requests_failed`는 대상에 닿지 못한 요청 수입니다. 이 값이 `requests_sent`의
+큰 비중을 차지한다면 탐지 결과 0건은 대상이 깨끗하다는 뜻이 아니라 스캔이 사실상 돌지
+않았다는 뜻입니다.
 
 응답(완료):
 
@@ -318,8 +329,8 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 `offset`과 `limit`으로 큰 결과 집합을 페이지 단위로 넘길 수 있고, `pagination`은
 `{total, offset, limit, returned, has_more}`를 보고합니다. 한 페이지는 추가로
-2 MiB로 제한됩니다: 탐지 결과가 몇 건 나올지는 대상이 정하고, 각 건은
-`evidence` 64 KiB에 `response` 64 KiB까지 실을 수 있기 때문입니다. 이 예산으로
+2 MiB로 제한됩니다. 탐지 결과가 몇 건 나올지는 호출자가 아니라 대상이 정하기
+때문입니다. 이 예산으로
 페이지가 잘리면 `pagination`에 `truncated_by_size: true`와 `max_page_bytes`가
 추가됩니다 — `limit`이 요청한 것보다 적게 돌아왔을 뿐, 나머지는 다음
 `offset`에 그대로 있습니다. 예산보다 큰 단일 탐지 결과는 버리지 않고 혼자
@@ -327,8 +338,9 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 `progress.estimated_completion_pct`와 `params_tested`는 발견된 각 파라미터가
 완료될 때마다 실시간으로 증가합니다. 따라서 폴링 간격을 조절하는 데 사용할 수 있습니다 —
-`suggested_poll_interval_ms`를 따르세요. 전체 상태 응답에는 `settled`도 담깁니다.
-종료된 worker가 아직 정리 중이면 `false`이고, 레코드를 삭제해도 안전해지면
+`suggested_poll_interval_ms`를 따르세요. 스캔이 `queued`를 벗어나면 상태 응답에
+`settled`도 담깁니다.
+종료된 워커가 아직 정리 중이면 `false`이고, 레코드를 삭제해도 안전해지면
 `true`가 됩니다. `settled: true`가 될 때까지는 0이 아닌 폴링 간격을 따르고,
 그 뒤에 `delete_scan_dalfox`를 호출하세요.
 
@@ -348,14 +360,17 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 ### `list_scans_dalfox`
 
-추적 중인 모든 스캔을 나열합니다. 선택적 필터:
+추적 중인 모든 스캔을 최신순으로 나열합니다. 인자는 모두 선택 사항입니다:
 
 ```json
-{ "status": "running" }
+{ "status": "running", "offset": 0, "limit": 0 }
 ```
 
-`total`, `scans: [{scan_id, target, status, result_count, queued_at_ms, started_at_ms,
-finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_message`가 붙습니다 —
+`status`는 `queued`, `running`, `done`, `error`, `cancelled` 중 하나이고, `offset`과
+`limit`으로 목록을 페이지 단위로 넘깁니다(`limit: 0`이 기본값이며 `offset`부터 전부 반환).
+
+`total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms, started_at_ms,
+finished_at_ms, duration_ms}]`, `pagination: {offset, limit, returned, has_more}`를 반환하며, 실패한 스캔에는 `error_message`가 붙습니다 —
 이것이 없으면 `status: "error", result_count: 0`인 행은 깨끗하게 끝난 스캔과 똑같아 보입니다.
 
 ### `cancel_scan_dalfox`
@@ -366,24 +381,40 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 { "scan_id": "9f2c…" }
 ```
 
+`{scan_id, target, cancelled, previous_status}`를 반환합니다. `cancelled`는 스캔이
+`queued`나 `running`이었을 때만 `true`입니다. 이미 끝난 스캔이라면 이 호출은 아무 일도
+하지 않고 `cancelled`는 `false`입니다. 실행 중인 스캔은 다음 취소 확인 지점에서 멈추고,
+부분 결과를 가진 채 `cancelled`로 목록에 남습니다.
+
 ### `delete_scan_dalfox`
 
-추적 중인 스캔을 메모리에서 영구적으로 제거합니다. 종료된 스캔(`done`, `error`, `cancelled`) 중 worker가 정리를 끝낸 경우에만 삭제할 수 있습니다. 실행 중이거나 대기 중인 스캔은 먼저 취소해야 합니다. 취소 직후 삭제에서 worker가 정리 중이라는 오류가 나오면 스캔 상태를 조회하고 잠시 후 다시 삭제해야 합니다. 종료된 스캔은 1시간 후 자동으로 정리되기도 합니다.
+추적 중인 스캔을 메모리에서 영구적으로 제거합니다. 종료된 스캔(`done`, `error`, `cancelled`) 중 워커가 정리를 끝낸 경우에만 삭제할 수 있습니다. 실행 중이거나 대기 중인 스캔은 먼저 취소해야 합니다. 취소 직후 삭제에서 워커가 정리 중이라는 오류가 나오면 스캔 상태를 조회하고 잠시 후 다시 삭제해야 합니다. 종료된 스캔은 1시간 후 자동으로 정리되기도 합니다.
 
 ```json
 { "scan_id": "9f2c…" }
 ```
 
-`{scan_id, deleted: true, previous_status}`를 반환합니다.
+`{scan_id, target, deleted: true, previous_status}`를 반환합니다.
 
 ### `preflight_dalfox`
 
 페이로드를 보내지 **않고** 대상을 분석합니다. 스캔을 확정하기 전에 범위를 정하는 데 유용합니다.
 
+받는 모든 필드와 각각의 기본값입니다. 필수 필드는 `target` 하나뿐입니다:
+
 ```json
 {
   "target": "https://example.com",
+  "param": [],
   "method": "GET",
+  "data": null,
+  "headers": [],
+  "cookies": [],
+  "user_agent": null,
+  "timeout": 10,
+  "proxy": null,
+  "follow_redirects": false,
+  "insecure": true,
   "skip_discovery": false,
   "skip_mining": false,
   "encoders": ["url", "html"],
@@ -392,11 +423,29 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 }
 ```
 
-도달 가능 여부, 발견된 파라미터, 예상 요청 수를 반환합니다.
+도달 가능 여부, 발견된 파라미터, 예상 요청 수를 반환합니다:
+`{target, reachable, method, params_discovered, estimated_total_requests,
+params: [{name, location, estimated_requests}]}`. 도달할 수 없는 대상은
+`reachable: false`와 `error_code: "CONNECTION_FAILED"`로 돌아옵니다. `param`은 스캔
+도구와의 대칭을 위해 받기만 하고 적용하지 않습니다. 프리플라이트는 항상 발견된 파라미터
+전체를 보고합니다.
 
 `encoders`, `max_payloads_per_param`, `deep_scan`는 그 자체로 요청을 보내지 않습니다. 뒤이어 실행할 `scan_with_dalfox` 호출을 설명하는 값이며, `estimated_total_requests`가 그 스캔의 확장 폭을 반영하도록 합니다. 실제로 스캔할 때 쓸 값을 그대로 넘기세요.
 
-추정치는 스캔이 파라미터마다 실행하는 두 단계(리플렉션, DOM 검증)를 모두 세며, 각 단계를 파라미터당 페이로드 상한으로 자릅니다. `--dry-run`과 동일한 계산입니다. 다만 하한값입니다: WAF 변형/인코더 확장과 상한 적용 이후 덧붙는 공용 CSP/tech 페이로드는 세지 않습니다.
+추정치는 스캔이 파라미터마다 실행하는 두 단계(리플렉션, DOM 검증)를 모두 세며, 각 단계를 파라미터당 페이로드 상한 안으로 맞춥니다. `--dry-run`과 같은 계산입니다. 다만 하한값입니다. WAF 우회 변형과 스캔이 덧붙이는 CSP/기술 스택별 페이로드는 세지 않습니다.
+
+### 용량 제한
+
+MCP 서버는 활성(대기 중이거나 실행 중인) 스캔을 최대 100개, 동시 프리플라이트를 최대
+32개까지 유지합니다. 한도를 넘는 호출은 서버가 용량을 다 썼다는 JSON-RPC `-32603` 오류로
+거부됩니다. `-32602`와 달리 스캔이 끝나거나 취소된 뒤 다시 시도할 만한 오류입니다. 취소한
+스캔은 워커가 실제로 멈출 때까지(`settled: true`) 자리를 계속 차지합니다. 종료된 스캔은
+최대 1000개까지 보관하며, 넘치면 가장 오래된 것부터 버리고, 종료된 스캔은 모두 끝난 지
+1시간 뒤 정리됩니다.
+
+스캔 하나가 테스트하는 파라미터는 최대 512개입니다. 그보다 많은 파라미터를 드러내는
+대상에서는 발견한 목록이 잘리고 스캔은 그대로 `done`으로 끝나므로, 중요한 파라미터는
+`param`으로 골라 넘기세요.
 
 ## 구조화된 결과
 
@@ -425,8 +474,10 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 공격 페이로드는 보내지 않지만 `method`와 `data`를 받고 마이닝 단계가 프로브 요청을
 보내므로, `POST` preflight는 대상의 상태를 바꿀 수 있습니다.
 
-`initialize` 핸드셰이크는 서버를 `dalfox`와 그 자신의 버전으로 식별하며, 의도한 도구(tool)
-호출 순서, 탐지 결과의 축을 읽는 법, 그리고 아래의 출처 규칙을 담은 `instructions`를
+`initialize` 핸드셰이크는 서버를 `dalfox`(표시 제목 `Dalfox XSS Scanner`)와 그 자신의
+버전으로 식별하고, 아이콘과 문서 사이트(`websiteUrl`)도 함께 알립니다. `tools`,
+`resources`, `prompts`, `completions` 기능(capability)을 선언하며, 의도한 도구(tool) 호출
+순서, 탐지 결과의 축을 읽는 법, 그리고 아래의 출처 규칙을 담은 `instructions`를
 돌려줍니다.
 
 ## 진행률, 리소스, 프롬프트
@@ -434,14 +485,15 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 **진행률.** `wait=true`인 `scan_with_dalfox` 호출이나 `preflight_dalfox` 호출에
 `_meta.progressToken`을 붙이면, 호출이 열려 있는 동안 Dalfox가 그 토큰으로
 `notifications/progress`를 흘려보냅니다 — 몇 분이 걸릴 수 있는 작업에서 클라이언트가
-조용한 스피너 대신 실제 움직임을 보여줍니다. 숫자 `progress`는 누적 전송 요청 수입니다
-(스펙은 알림마다 이 값이 증가할 것을 요구하는데, 항상 증가하는 카운터는 이것뿐입니다).
-단계, 테스트한 파라미터 수, 지금까지의 탐지 결과, 대상에 끝내 닿지 못한 요청 수는
-`message`에 담깁니다. 종료 상태에 대해서는 아무것도 보내지 않습니다. 그 신호는 도구(tool)
-호출의 결과 자체입니다.
+조용한 스피너 대신 실제 움직임을 보여줍니다. 스캔의 경우 숫자 `progress`는 누적 전송
+요청 수이고, 단계, 테스트한 파라미터 수, 지금까지의 탐지 결과, 대상에 끝내 닿지 못한 요청
+수는 `message`에 담깁니다. `preflight_dalfox`는 대신 2초마다 하트비트를 보냅니다
+(`analyzing target (Ns elapsed)`). 종료 상태에 대해서는 아무것도 보내지 않습니다. 그
+신호는 도구(tool) 호출의 결과 자체입니다.
 
 **취소.** 진행 중인 `wait=true` 호출에 `notifications/cancelled`를 보내면 대기만이 아니라
-스캔 자체가 멈춥니다 — 작업은 `cancelled`로 정리되고 그때까지 찾은 것은 유지됩니다. 대기
+스캔 자체가 멈춥니다 — 작업은 `the client cancelled the tool call`이라는
+`error_message`와 함께 `cancelled`로 정리되고, 그때까지 찾은 것은 유지됩니다. 대기
 예산이 그냥 만료되는 경우(`wait_timed_out: true`)와는 의도적으로 다릅니다. 그때는 계속
 폴링할 수 있도록 스캔이 살아 있습니다.
 
@@ -455,7 +507,7 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 `resources/list`는 목록과 함께 추적 중인 스캔을 하나씩 돌려줍니다(커서로 페이징). 호스트의
 컨텍스트 선택기에 빈 템플릿이 아니라 실제 스캔이 뜬다는 뜻입니다. 목록 리소스를 읽을 때는
 200행에서 스스로 끊습니다 — `resources/read`에는 페이지 인자가 없으므로, 어디서 잘렸는지는
-본문의 `pagination`이 말해 줍니다. `scan_id`를 담은 도구(tool)
+본문의 `pagination`이 말해 줍니다. `scan_with_dalfox`와 `get_results_dalfox`의
 결과에는 그 스캔을 가리키는 `resource_link` 콘텐츠 블록도 함께 실려서, 모델이 결과를 다시
 인용하게 하는 대신 클라이언트가 탐지 결과를 그대로 첨부할 수 있습니다. 이 블록을 해석하지
 못하는 `2025-06-18` 이전 리비전을 협상한 클라이언트에게는 붙이지 않습니다.
@@ -483,14 +535,15 @@ finished_at_ms, duration_ms}]`을 반환하며, 실패한 스캔에는 `error_me
 
 ## 권한 및 안전
 
-MCP 서버는 CLI와 동일한 규칙을 적용합니다: **테스트 권한이 있는 대상만 스캔하세요.** 에이전트의 시스템 프롬프트에서 "모든 스캔 전에 범위를 확인하세요"와 같은 명시적 사용자 확인 단계 뒤에 Dalfox MCP 호출을 두는 것을 고려하세요.
-
-여기에는 스캔의 `error_message`도 포함됩니다. 인증 세션이 스캔 도중 끊기면 Dalfox는
-*오리진*이 리다이렉트한 URL을 그대로 보고하므로, 탐지 결과가 하나도 없는 스캔에서도 그
-필드는 대상이 고른 값을 인용합니다. 그 값을 실어 나르는 본문(상태 폴링, 스캔 목록, 대응
-리소스)에는 같은 이유로 `_untrusted_content_notice`가 붙습니다.
+CLI와 같은 규칙이 적용되며, Dalfox가 대신 확인해 주지는 못합니다: **테스트 권한이 있는 대상만 스캔하세요.** 에이전트의 시스템 프롬프트에서 "모든 스캔 전에 범위를 확인하세요"와 같은 명시적 사용자 확인 단계 뒤에 Dalfox MCP 호출을 두는 것을 고려하세요.
 
 **탐지 결과는 에이전트에게 신뢰할 수 없는 입력입니다.** CLI나 REST API와 달리 MCP는 스캔 출력을 "읽은 대로 행동하는" 모델에게 건네고, 탐지 결과에 인용된 바이트는 전부 대상이 고른 것입니다. Dalfox는 그런 응답에 `_untrusted_content_notice`를 붙이지만 이는 상기시키는 라벨이지 샌드박스가 아닙니다 — 범위 결정(어느 대상, 어느 프록시, 어느 콜백)은 운영자가 쥐고 있어야 하며, 스캐너가 페이지에서 읽어온 무언가가 그것을 바꾸게 두면 안 됩니다.
+
+스캔의 `error_message`도 마찬가지입니다. 인증 세션이 스캔 도중 끊기면 Dalfox는
+*오리진*이 리다이렉트한 URL을 그대로 보고하므로, 탐지 결과가 하나도 없는 스캔에서도 그
+필드는 대상이 고른 값을 인용합니다. 그 값을 실어 나르는 본문(상태 폴링,
+`list_scans_dalfox` 목록, 대응 리소스)에는 같은 이유로 `_untrusted_content_notice`가
+붙습니다.
 
 ## 문제 해결
 

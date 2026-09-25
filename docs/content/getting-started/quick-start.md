@@ -12,14 +12,17 @@ This page walks you from install to a verified finding. We'll use an intentional
 ## 1. Scan a single URL
 
 ```bash
-dalfox https://xss-game.appspot.com/level1/frame?query=test
+dalfox 'https://xss-game.appspot.com/level1/frame?query=test'
 ```
 
-The first argument is the target. Dalfox auto-detects that it's a URL and runs the `scan` subcommand implicitly. You'll see:
+The first argument is the target. Dalfox auto-detects that it's a URL and runs the `scan` subcommand implicitly. Quote any URL that contains `?` or `&`: the shell treats them as special characters, and zsh aborts an unquoted `?` with `no matches found`. You'll see:
 
 - A banner with the version.
 - `INF` lines as Dalfox discovers parameters and probes contexts.
-- `[V]` (vulnerable) and `[R]` (reflected) lines for each finding, with the exact payload that worked.
+- A `WRN XSS found N XSS` summary, then a `[POC][V]…` (vulnerable) or `[POC][R]…` (reflected) line for each finding. Under it come the issue, the exact payload that worked, and the response line it landed in.
+- A closing `INF scan completed in … seconds`.
+
+The bare form accepts only the global flags (`--config`, `--debug`, `--no-color`, `-S`). Any other scan flag needs `dalfox scan <target> …`, the form the rest of this page uses.
 
 ## 2. Scan from a file
 
@@ -30,7 +33,7 @@ Feed a list of URLs from your crawler:
 dalfox scan urls.txt
 ```
 
-Each URL runs through the same pipeline. Results stream as they're found.
+Each URL runs through the same pipeline. Findings are printed after the end-of-scan `WRN XSS found N XSS` summary; add `--stream-findings` to print each one the moment it is verified.
 
 ## 3. Scan from a pipeline
 
@@ -47,17 +50,19 @@ waybackurls example.com | gf xss | dalfox
 Pair Dalfox with `jq`, a dashboard, or CI:
 
 ```bash
-dalfox https://target.app/search?q=test -f json -o report.json
+dalfox scan 'https://target.app/search?q=test' -f json -o report.json
 ```
 
-Machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) auto-suppress the banner so the file stays clean.
+Every format except `plain` (so `json`, `jsonl`, `markdown`, `sarif`, `toml`) suppresses the banner, so the file stays clean.
+
+The exit code is CI-friendly too: `0` means no findings, `1` means findings, and `2` means an error or a result you can't trust (every target unreachable, too many lost requests, an expired login). See [Exit codes](../../guide/output/#exit-codes).
 
 ## 5. Authenticated scans
 
 Pass cookies, headers, or a custom method:
 
 ```bash
-dalfox https://api.target.app/v1/users \
+dalfox scan https://api.target.app/v1/users \
   -X POST \
   -H "Authorization: Bearer eyJ..." \
   -H "Content-Type: application/json" \
@@ -83,29 +88,29 @@ dalfox scan --input-type har capture.har
 Use an out-of-band callback (Interactsh, Burp Collaborator, XSS Hunter, etc.):
 
 ```bash
-dalfox https://target.app \
+dalfox scan https://target.app \
   -b https://your-callback.interact.sh
 ```
 
-Dalfox sends blind-XSS payloads across every discovered parameter; if the payload fires later in an admin panel, your callback server records it.
+Blind payloads go into the parameters the request already carries (query, a form-encoded `-d` body, `-H` headers, cookies) and into the same-origin POST forms on the page. Parameters found later by discovery or mining get none. If a payload fires later in an admin panel, your callback server records it.
 
 Or let Dalfox manage an [interactsh](https://github.com/projectdiscovery/interactsh) (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:
 
 ```bash
-dalfox https://target.app --blind-oob                  # public interactsh mesh
-dalfox https://target.app --blind-oob=oast.fun         # pick servers
+dalfox scan https://target.app --blind-oob             # public interactsh mesh
+dalfox scan https://target.app --blind-oob=oast.fun    # pick servers
 ```
 
-Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes.
+A callback that arrives becomes a `V` finding with `detection_method: oob`. Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes. See [Blind XSS](../../guide/scanning-modes/#blind-xss) for the details.
 
-`--insecure` does **not** reach the public mesh. It is a statement about the scan target, which you do not control; the OAST server is infrastructure Dalfox picked, and that channel carries your `--blind-oob-secret` and the session key that reads your callbacks. The public servers present valid certificates, so they are always verified. `--insecure` still applies to a server you named yourself with `--blind-oob=`, which is the case it exists for — a self-hosted interactsh behind a self-signed or hostname-mismatched certificate.
+On the OAST channel, `--insecure` (on by default) only reaches a server you named with `--blind-oob=`, such as a self-hosted one behind a self-signed certificate. The public interactsh servers are always TLS-verified.
 
 ## 7. Dry-run first
 
 Use `--dry-run` to preview what Dalfox would scan:
 
 ```bash
-dalfox https://target.app --dry-run
+dalfox scan https://target.app --dry-run
 ```
 
 It discovers parameters and estimates request volume without firing any payloads.
@@ -116,13 +121,14 @@ Each finding is tagged:
 
 | Tag | Meaning |
 |-----|---------|
-| `[V]` | **Vulnerable**: the payload came back as a real DOM element in the parsed response (CSS-selector match on Dalfox's marker) |
+| `[V]` | **Vulnerable**: Dalfox asserts the input is exploitable — the payload reached an executable position in the parsed response (for example a DOM element carrying Dalfox's marker), or an out-of-band callback fired |
 | `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
 | `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
+| `[I]` | **Informational**: not an XSS claim, e.g. a known-vulnerable JS library from the opt-in `--detect-outdated-libs` |
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 
-`[V]` is not browser execution. Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as `[A]` today and is worth confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (whether Dalfox can claim a vulnerability) — see [Detection Model](../../guide/detection-model/).
+`[V]` is not browser execution. Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as `[A]` today and is worth confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (how strongly the evidence supports the claim) — see [Detection Model](../../guide/detection-model/).
 
 ## Next steps
 

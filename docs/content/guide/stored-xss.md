@@ -10,7 +10,7 @@ A Stored XSS lives on the server: you submit it once (a comment, a profile field
 ## The basic flow
 
 ```bash
-dalfox https://target.app/post-comment \
+dalfox scan https://target.app/post-comment \
   --sxss \
   --sxss-url https://target.app/comments
 ```
@@ -21,36 +21,32 @@ Dalfox will:
 2. **Retrieve** the second URL (`comments`) with a GET (configurable via `--sxss-method`).
 3. **Verify** whether the payload reflects in the retrieval response, and whether it produced a real DOM element.
 
-Only findings that survive both steps are reported as SXSS.
+A payload that comes back on a retrieval page is reported as `R`; one that also forms a real DOM element there is `V`. Stored findings carry an `inject_type` prefixed with `sxss-` (`sxss-inHTML`), so reports keep them apart from reflected ones.
 
-The write endpoint does not need to echo what you submit. Dalfox keeps a stored
-field even when the submit response just says "saved", and it does not use that
-non-rendering response to decide which characters the sink filters — so a
-form-backed stored sink is tested with the full payload set rather than skipped.
+Stored mode is strictly serial: one parameter at a time, one request at a time, because write ordering and the retrieval retries assume it. `--workers` does not speed it up.
 
-Every parameter is sent the same payloads, and a stored sink keeps whatever it
-is given, so once one field has stored a payload the retrieval page shows it for
-the rest of the scan. To keep findings on the right field, before a parameter
-injects anything Dalfox snapshots the retrieval page(s) once; a payload is
-credited to that parameter only when its injection makes the payload appear
-*more* often than the snapshot already showed. A copy another field stored
-earlier is already in the snapshot, so it is never mis-credited. The snapshot
-costs one extra GET per retrieval URL per parameter.
+The write endpoint does not need to echo what you submit. A submit response that
+just says "saved" is fine, and Dalfox does not use it to decide which characters
+the sink filters.
 
-Right after the snapshot, Dalfox re-probes the field once: if that probe's own
-injection does not raise the marker count on the retrieval page (or in the write
-response), the field does not store here and its payload catalog is skipped. This
-stops a form's non-storing fields — which would otherwise pass the reflection
-probe on the marker a sibling field stored — from running the whole catalog. The
-probe tries both a long and a short marker, so a sink that only keeps short
-values is not mistaken for a non-storing one.
+Every field gets the same payloads, and a stored value stays on the page, so
+before a parameter sends its payloads Dalfox does two things:
 
-The probe also observes *when* the store becomes visible. A synchronous sink
-(visible immediately) lets Dalfox skip re-fetching a payload that does not
-appear, keeping the request count low. A write-behind sink (visible only after a
-delay) keeps the full per-payload retrieval retries so a delayed payload is not
-missed; if your target stores slower than the default retry window, raise
-`--sxss-retries`.
+- **Snapshot.** It fetches each retrieval page once. A payload is credited to the
+  parameter only when that parameter's injection makes it appear *more* often
+  than the snapshot showed, so a copy another field stored earlier is never
+  mis-credited. This costs one GET per retrieval URL per parameter.
+- **Store probe.** It injects a marker, a long one and then a short one for sinks
+  that keep only short values. If neither raises the count on a retrieval page
+  (or in the write response), the field does not store and its payloads are
+  skipped.
+
+The probe also shows *when* the store becomes visible. If it is visible at once,
+Dalfox checks each payload with a single retrieval pass. If it shows up only
+after a delay (a write-behind store), every payload keeps the full retrieval
+retries. For a target that stores slower than that, raise `--sxss-retries`
+(default `3`, maximum `20`); retry *n* waits 500 ms × *n*, at most 5 s per wait.
+`--deep-scan` skips the store probe and runs every payload on every field.
 
 ## Choosing the retrieval URL
 
@@ -62,14 +58,17 @@ Pick the page the stored value **reads** from. Examples:
 | `PATCH /profile` | `GET /u/myself` |
 | `POST /support/ticket` | `GET /admin/tickets` (if you have admin access) |
 
-If you omit `--sxss-url`, Dalfox falls back to the form-discovery context: the page the form was
-found on, then the form's `action` endpoint, then the injection target itself. Set it explicitly
-whenever the stored value is rendered somewhere those three don't cover.
+Dalfox reads every candidate retrieval page, in this order: `--sxss-url` (when set), the page the
+form was found on, the form's `action` endpoint (only when it is on the target's origin, or the
+same host upgraded to HTTPS), and the injection target itself. Duplicates are fetched once. Without
+`--sxss-url` the last three are all it has, so set it whenever the stored value is rendered
+somewhere they don't cover. `--sxss-url` does nothing without `--sxss`; Dalfox warns when you pass
+it alone.
 
 ## Retrieval method
 
 ```bash
-dalfox https://target.app/form --sxss \
+dalfox scan https://target.app/form --sxss \
   --sxss-url https://target.app/list \
   --sxss-method GET
 ```
@@ -81,7 +80,7 @@ dalfox https://target.app/form --sxss \
 Stored-XSS often requires two sessions: one that writes (user), and one that reads (admin). Use headers/cookies that grant enough access for the retrieval GET to see what you wrote.
 
 ```bash
-dalfox https://target.app/profile \
+dalfox scan https://target.app/profile \
   --sxss --sxss-url https://target.app/admin/users \
   -H "Cookie: admin_session=abc; role=admin"
 ```
@@ -91,11 +90,11 @@ dalfox https://target.app/profile \
 If the retrieval page is behind a login you don't have, switch to blind XSS. The payload fires on the admin's browser, and your callback server records it:
 
 ```bash
-dalfox https://target.app/support/ticket \
+dalfox scan https://target.app/support/ticket \
   -b https://callback.interact.sh
 ```
 
-You still need to wait for someone to view the page; the callback tells you when it happens.
+You still need to wait for someone to view the page; the callback tells you when it happens. `--blind-oob` instead of `-b` has Dalfox poll an interactsh session and report a callback as a `V` finding, but only one that arrives before `--blind-oob-wait` runs out; a view hours later reaches only a listener you run yourself. See [Blind XSS](../scanning-modes/#blind-xss).
 
 ## Tips
 

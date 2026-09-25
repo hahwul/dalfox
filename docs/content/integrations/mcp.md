@@ -173,15 +173,14 @@ way to mistake it for a scan that ran.
 
 Every bad argument arrives on that same channel — a missing `target`, a number where a
 string belongs, a value past its ceiling — so a client only has to watch `error`. Tool
-results are reserved for tools that actually ran.
+results are reserved for tools that actually ran. The ceilings are the REST API's:
+`timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `workers` `1`–`500`,
+`scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`.
 
-One thing to know about that trade: tool results are always rendered into the model's
-context, whereas a JSON-RPC error is handled by the host, and some hosts show the user a
-generic failure instead of passing the text back to the model. The message still names
-the offending key and lists every accepted spelling — if your client swallows it, the
-model loses a self-correcting hint it would otherwise act on.
+One caveat: some hosts show the user a generic failure for a JSON-RPC error instead of
+passing its text back to the model, so the model never sees which key was wrong.
 
-Because of that, the [REST API](../server/) spellings are accepted
+To make the common mistake a non-error, the [REST API](../server/) spellings are accepted
 as aliases: `url` for `target`, `cookie` for `cookies`, `header` for `headers`,
 `worker` for `workers`, and `blind` for `blind_callback_url`. `cookie` also
 takes a single `Cookie:`-header string (`"sid=abc; lang=en"`) in place of the
@@ -189,10 +188,11 @@ list. The canonical MCP names above are what the tool schema advertises; the
 aliases exist so arguments written against the REST docs still run the scan
 they describe.
 
-Two REST options are deliberately absent here rather than aliased, and asking
-for them is an error: `callback_url` (a webhook that would let a model ship
-scan output to a host of its choosing) and `cookie_from_raw` (a server-side
-file read). Pass cookies directly via `cookies`.
+Two options from the other surfaces are deliberately absent here rather than
+aliased, and asking for them is an error: REST's `callback_url` (a webhook that
+would let a model ship scan output to a host of its choosing) and the CLI's
+`--cookie-from-raw` as `cookie_from_raw` (a server-side file read). Pass cookies
+directly via `cookies`.
 
 Three limits on the aliases, so they are not mistaken for a general REST
 compatibility mode:
@@ -212,7 +212,8 @@ compatibility mode:
 `scan_with_dalfox` — it sends no payloads, so options describing pacing,
 workers, WAF handling, blind XSS or waiting have nothing to act on and are
 refused. Its own field list is below. (`POST /preflight` on the REST side
-reuses the full scan body and ignores what it cannot use, so this is the one
+takes the full scan body instead, also honours `delay`, `worker` and
+`rate_limit` for pacing, and ignores the options it has no use for — the one
 place the two surfaces genuinely differ.) Credentials and the target do reach
 it: sending preflight without cookies would under-report the parameters an
 authenticated scan would find.
@@ -227,10 +228,13 @@ HTTP request text and the raw response body to each finding for forensic
 analysis. Opt in only when you need the evidence — responses can be large.
 
 The five WAF fields mirror the CLI's WAF flags. `waf_bypass` picks the handling
-mode: `"auto"` (detect then bypass, the default), `"force"` (use `force_waf`),
-or `"off"` (detect only). `skip_waf_probe` (default `false`) skips the WAF
-fingerprinting probe entirely. `force_waf` pins a specific WAF profile (e.g.
-`"cloudflare"`, `"akamai"`, `"modsec"`) instead of detecting one. `waf_evasion`
+mode: `"auto"` (detect then bypass, the default) or `"off"` (detect and
+report only); `"force"` is accepted and behaves like `"auto"`. `skip_waf_probe`
+(default `false`) skips the active provocation probe; passive detection on the
+preflight response still runs. `force_waf` pins a specific WAF profile (e.g.
+`"cloudflare"`, `"akamai"`, `"modsec"`) in place of whatever detection found,
+under `"auto"` or `"force"` alike; under `"off"` it is reported but no bypass is
+applied. `waf_evasion`
 (default `false`) turns on adaptive evasion. `waf_min_confidence` is the
 detection confidence floor in `[0.0, 1.0]` (default `0.3`); fingerprints below
 it are dropped. Unknown values for `waf_bypass` or `force_waf`, and a
@@ -277,12 +281,20 @@ Response (in progress):
     "params_total": 10,
     "params_tested": 4,
     "requests_sent": 215,
+    "requests_failed": 0,
     "findings_so_far": 1,
     "estimated_completion_pct": 40,
-    "suggested_poll_interval_ms": 3000
+    "suggested_poll_interval_ms": 2000
   }
 }
 ```
+
+Full status responses also carry `results` (`null` until the scan is terminal, and
+still `null` for a scan that never reached the target or was cancelled before it started),
+`pagination`, `queued_at_ms`, `started_at_ms`, `finished_at_ms`, `duration_ms`,
+and `error_message` when one is set. `requests_failed` counts requests that
+never reached the target; when it is a large share of `requests_sent`, zero
+findings means the scan never really ran, not that the target is clean.
 
 Response (done):
 
@@ -323,17 +335,16 @@ discovered parameter is lifted out of the target's own markup.
 
 `offset` and `limit` page through large result sets, and `pagination` reports
 `{total, offset, limit, returned, has_more}`. A page is additionally capped at
-2 MiB of findings: the target decides how many findings a scan produces, and
-each one can carry 64 KiB of `evidence` plus 64 KiB of `response`. When the
-budget cuts a page short, `pagination` adds `truncated_by_size: true` and
+2 MiB of findings, since the target, not the caller, decides how many findings a
+scan produces. When the budget cuts a page short, `pagination` adds `truncated_by_size: true` and
 `max_page_bytes` — fewer findings came back than `limit` asked for, and the
 rest are still there at the next `offset`. A single finding larger than the
 budget is emitted alone rather than dropped, so paging always advances.
 
 `progress.estimated_completion_pct` and `params_tested` advance live as each
 discovered parameter finishes, so they are usable for pacing polls — honor
-`suggested_poll_interval_ms`. Full status responses also include `settled`:
-it is `false` while a terminal worker is still draining and becomes `true` when
+`suggested_poll_interval_ms`. Once the scan has left `queued`, status responses
+also include `settled`: it is `false` while a terminal worker is still draining and becomes `true` when
 the record is safe to delete. A terminal response that is not yet settled
 keeps a non-zero suggested poll interval; wait for `settled: true` before
 calling `delete_scan_dalfox`.
@@ -355,14 +366,19 @@ passed.
 
 ### `list_scans_dalfox`
 
-List every tracked scan. Optional filter:
+List every tracked scan, newest first. All arguments are optional:
 
 ```json
-{ "status": "running" }
+{ "status": "running", "offset": 0, "limit": 0 }
 ```
 
-Returns `total`, `scans: [{scan_id, target, status, result_count, queued_at_ms,
-started_at_ms, finished_at_ms, duration_ms}]`, plus `error_message` on a scan that
+`status` is one of `queued`, `running`, `done`, `error`, `cancelled`; `offset` and
+`limit` page through the list (`limit: 0`, the default, returns everything from
+`offset` on).
+
+Returns `total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms,
+started_at_ms, finished_at_ms, duration_ms}]` and `pagination: {offset, limit,
+returned, has_more}`, plus `error_message` on a scan that
 failed — without it a row reading `status: "error", result_count: 0` looks exactly like
 a clean one.
 
@@ -374,6 +390,11 @@ Abort a queued or running scan:
 { "scan_id": "9f2c…" }
 ```
 
+Returns `{scan_id, target, cancelled, previous_status}`. `cancelled` is `true` only
+when the scan was `queued` or `running`; on a scan that had already finished the
+call is a no-op and `cancelled` is `false`. A running scan stops at its next
+cancellation checkpoint and stays listed as `cancelled` with its partial results.
+
 ### `delete_scan_dalfox`
 
 Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) whose worker has finished draining can be deleted; running or queued scans must be cancelled first. If deletion reports a draining worker after cancellation, poll the scan and retry after a short delay. Terminal scans are also auto-purged after 1 hour.
@@ -382,16 +403,27 @@ Permanently remove a tracked scan from memory. Only terminal scans (`done`, `err
 { "scan_id": "9f2c…" }
 ```
 
-Returns `{scan_id, deleted: true, previous_status}`.
+Returns `{scan_id, target, deleted: true, previous_status}`.
 
 ### `preflight_dalfox`
 
 Analyse a target **without** sending payloads. Useful for scoping before committing to a scan.
 
+Every field it accepts, with its default — `target` is the only required one:
+
 ```json
 {
   "target": "https://example.com",
+  "param": [],
   "method": "GET",
+  "data": null,
+  "headers": [],
+  "cookies": [],
+  "user_agent": null,
+  "timeout": 10,
+  "proxy": null,
+  "follow_redirects": false,
+  "insecure": true,
   "skip_discovery": false,
   "skip_mining": false,
   "encoders": ["url", "html"],
@@ -400,11 +432,30 @@ Analyse a target **without** sending payloads. Useful for scoping before committ
 }
 ```
 
-Returns reachability, discovered parameters, and an estimated request count.
+Returns reachability, discovered parameters, and an estimated request count:
+`{target, reachable, method, params_discovered, estimated_total_requests,
+params: [{name, location, estimated_requests}]}`. An unreachable target comes back
+as `reachable: false` with `error_code: "CONNECTION_FAILED"`. `param` is accepted
+for symmetry with the scan tool but not applied: preflight always reports the full
+discovered set.
 
 `encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with.
 
-The estimate counts both phases the scan runs per parameter — reflection and DOM verification — each truncated to the per-parameter payload cap, matching `--dry-run`. It remains a lower bound: WAF mutation/encoder expansion and the shared CSP/tech payloads appended after the cap are not counted.
+The estimate counts both phases the scan runs per parameter (reflection and DOM verification), each held to the per-parameter payload cap, the same arithmetic as `--dry-run`. It is a lower bound: WAF bypass mutations and the CSP/tech-specific payloads a scan adds on top are not counted.
+
+### Capacity limits
+
+The MCP server holds at most 100 active (queued or running) scans and 32
+concurrent preflights. A call past either limit is refused with a JSON-RPC
+`-32603` error saying the server is at capacity; unlike `-32602`, it is worth
+retrying once a scan finishes or is cancelled. A cancelled scan keeps its slot
+until its worker has actually stopped (`settled: true`). Up to 1000 finished
+scans are kept; beyond that the oldest are dropped, and every terminal scan is
+purged an hour after it finishes.
+
+A single scan tests at most 512 parameters. On a target that exposes more, the
+discovered set is truncated and the scan still ends `done`, so pass `param` to
+choose which ones matter.
 
 ## Structured results
 
@@ -434,24 +485,26 @@ read-only either: it sends no attack payloads, but it accepts `method` and `data
 its mining stage fires probe requests, so a `POST` preflight can change state on the
 target.
 
-The `initialize` handshake identifies the server as `dalfox` at its own version and
-returns `instructions` covering the intended tool order, how to read the finding axes,
-and the provenance rule below.
+The `initialize` handshake identifies the server as `dalfox` (display title
+`Dalfox XSS Scanner`) at its own version, with icons and the docs site as
+`websiteUrl`. It advertises the `tools`, `resources`, `prompts` and `completions`
+capabilities, and returns `instructions` covering the intended tool order, how to
+read the finding axes, and the provenance rule below.
 
 ## Progress, resources and prompts
 
 **Progress.** Attach `_meta.progressToken` to a `scan_with_dalfox` call with `wait=true`,
 or to `preflight_dalfox`, and Dalfox streams `notifications/progress` against that token
 while the call is open — so a client shows movement instead of a silent spinner for what
-can be minutes of work. The numeric `progress` is cumulative requests sent (the spec
-requires it to rise on every notification, and that is the one counter that always does);
+can be minutes of work. For a scan, the numeric `progress` is cumulative requests sent and
 `message` carries the phase, parameters tested, findings so far, and requests that never
-reached the target. Nothing is published for the terminal state: the tool's own result is
-that signal.
+reached the target. `preflight_dalfox` sends a heartbeat every two seconds instead
+(`analyzing target (Ns elapsed)`). Nothing is published for the terminal state: the
+tool's own result is that signal.
 
 **Cancellation.** Sending `notifications/cancelled` for an in-flight `wait=true` call
-stops the scan itself, not just the wait — the job settles `cancelled` and keeps whatever
-it found. That is deliberately different from the wait budget simply expiring
+stops the scan itself, not just the wait — the job settles `cancelled` with the
+`error_message` `the client cancelled the tool call` and keeps whatever it found. That is deliberately different from the wait budget simply expiring
 (`wait_timed_out: true`), which leaves the scan running so you can keep polling it.
 
 **Resources.** Scans are addressable, not only callable:
@@ -464,10 +517,9 @@ it found. That is deliberately different from the wait budget simply expiring
 `resources/list` returns the index plus one entry per tracked scan (paged with a cursor),
 so a host's context picker shows real scans rather than a template to fill in. A read of
 the index bounds itself at 200 rows — `resources/read` takes no page parameters, so the
-body says in its `pagination` where it was cut. Any tool
-result that carries a `scan_id` also carries a `resource_link` content block pointing at
-that scan, letting a client attach the findings instead of asking the model to re-quote
-them. The link is omitted for clients that negotiated a protocol revision older than
+body says in its `pagination` where it was cut. The results of `scan_with_dalfox` and
+`get_results_dalfox` also carry a `resource_link` content block pointing at the scan,
+letting a client attach the findings instead of asking the model to re-quote them. The link is omitted for clients that negotiated a protocol revision older than
 `2025-06-18`, which cannot parse the block type.
 
 **Prompts.** Two workflows are published for a client's prompt menu:
@@ -489,18 +541,19 @@ a scan id is a 64-character digest nobody types by hand.
 4. Once the status is terminal and `settled == true`, the agent may call
    `delete_scan_dalfox`; it then summarises findings and reports back to the user.
 
-Because every tool is async, the agent stays responsive; no long-running tool call blocks the conversation.
+Because scans are async, the agent stays responsive. To fold a long scan into one call instead, use `wait=true` with a progress token.
 
 ## Authorization & safety
 
-The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
-
-This includes a scan's `error_message`: when an authenticated session dies mid-scan,
-Dalfox reports the URL the *origin* redirected it to, so that field quotes the target
-even on a scan with no findings. Bodies carrying it — a status poll, a `/scans`-style
-listing, the matching resource — carry `_untrusted_content_notice` for that reason.
+The same rule applies as on the CLI, and Dalfox cannot check it for you: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
 
 **Findings are untrusted input to your agent.** Unlike the CLI and the REST API, MCP hands scan output to a model that acts on what it reads, and every quoted byte in a finding was chosen by the target. Dalfox labels those responses with `_untrusted_content_notice`, but the label is a reminder, not a sandbox — keep the scope decision (which target, which proxy, which callback) with the operator, and never let it be changed by something the scanner read off a page.
+
+The same goes for a scan's `error_message`: when an authenticated session dies
+mid-scan, Dalfox reports the URL the *origin* redirected it to, so that field
+quotes the target even on a scan with no findings. Bodies carrying it — a status
+poll, a `list_scans_dalfox` listing, the matching resource — carry
+`_untrusted_content_notice` for that reason.
 
 ## Troubleshooting
 

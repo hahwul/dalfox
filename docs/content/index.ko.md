@@ -68,12 +68,11 @@ template = "landing"
             <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
             <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
             <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
-            <div class="t-line"></div>
             <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
-            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%2Fonload%3Dalert%281%29%3E</div>
+            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx444fc070%3E</div>
             <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
-            <div class="t-line t-dim">  ├── Payload: &lt;svg/onload=alert(1)&gt;</div>
-            <div class="t-line t-dim">  └── L13: matches for &#x3c;svg/onload=alert(1)&#x3e;</div>
+            <div class="t-line t-dim">  ├── Payload: &lt;svg onload=alert(1) class=dlx444fc070&gt;</div>
+            <div class="t-line t-dim">  └── L13: …results were found for &lt;b&gt;&lt;svg onload=alert(1) class=dlx444fc070&gt;&lt;/b&gt;</div>
             <div class="t-line"></div>
             <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
             <div class="t-line t-cursor"></div>
@@ -114,7 +113,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         </div>
         <h3>깊이 있는 XSS 탐색</h3>
-        <p>반사형, 저장형, DOM 기반 XSS를 페이로드 최적화와 함께 찾습니다. AST 기반 DOM 검증 덕분에 단순 반사로 인한 오탐이 사라집니다.</p>
+        <p>반사형, 저장형, DOM 기반 XSS를 페이로드 최적화와 함께 찾습니다. HTML 파서와 JavaScript AST로 DOM을 검증해, 실제로 실행되는 반사와 단순히 되돌아오기만 하는 반사를 구분합니다.</p>
         <div class="feature-tags">
           <span class="feature-tag">reflected</span>
           <span class="feature-tag">stored</span>
@@ -239,7 +238,7 @@ template = "landing"
       <div class="how-step">
         <h3>결과 전달</h3>
         <p>SARIF, JSON, Markdown으로 내보내거나 결과를 파이프라인으로 프록시하세요. 결과는 추측이 아니라 검증을 거쳐 나옵니다.</p>
-        <code>dalfox scan urls.txt -o report.sarif</code>
+        <code>dalfox scan urls.txt -f sarif -o report.sarif</code>
       </div>
     </div>
   </div>

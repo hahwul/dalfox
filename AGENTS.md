@@ -53,7 +53,7 @@ banner/config machinery writes anything, so stdout stays a pure artifact.
 
 Behavioral default:
 - No subcommand => defaults to `scan` in `src/main.rs`.
-- Banner is suppressed automatically for `mcp` and for machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) so stdout stays parseable.
+- Banner is suppressed automatically for `mcp` and for every `--format` other than `plain` (`format_is_machine`: `json`, `jsonl`, `sarif`, `toml`, `markdown`) so stdout stays parseable.
 
 CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 - `0` Clean — scan finished, no findings

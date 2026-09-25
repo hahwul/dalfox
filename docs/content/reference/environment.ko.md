@@ -9,12 +9,12 @@ Dalfox는 설정 파일이나 명령줄에 두기 적합하지 않은 설정을 
 
 | 변수 | 사용 위치 | 용도 |
 |----------|---------|---------|
-| `DALFOX_API_KEY` | `dalfox server` | `X-API-KEY` 헤더에 요구되는 값. `--api-key`와 동일. |
-| `DALFOX_STDIN_WAIT_MS` | `dalfox scan` (auto 입력) | 명령줄에도 대상을 준 상태에서 파이프된 `stdin`의 첫 바이트를 기다릴 밀리초. 기본값 `500`, `0`이면 stdin 병합을 건너뜁니다. 항상 대기하는 `--input-type pipe`/`har`에는 적용되지 않습니다. |
+| `DALFOX_API_KEY` | `dalfox server` | `X-API-KEY` 헤더에 요구되는 값. `--api-key`를 주지 않았을 때만 읽으며, 빈 값은 무시합니다. |
+| `DALFOX_STDIN_WAIT_MS` | `dalfox scan` (auto 입력) | 명령줄에도 대상을 준 상태에서 파이프된 `stdin`의 첫 바이트를 기다릴 밀리초. 기본값 `500`, `0`이면 stdin 병합을 건너뜁니다. 정수가 아닌 값은 `500`으로 처리하고, `3600000`(1시간)을 넘는 값은 그 값으로 제한합니다. 항상 대기하는 `--input-type pipe`/`har`에는 적용되지 않습니다. |
 | `NO_COLOR` | 모든 모드 | 빈 문자열을 포함해 어떤 값으로든 설정되면 ANSI 색상 출력을 비활성화. `--no-color` 및 설정 파일의 `no_color = true`와 동일. [NO_COLOR](https://no-color.org) 관례 참고. |
-| `XDG_CONFIG_HOME` | 설정 로더 | 설정 파일의 기준 디렉터리 (`$XDG_CONFIG_HOME/dalfox/config.toml`). `$HOME/.config`로 폴백. |
-| `HOME` | 설정 로더 | `XDG_CONFIG_HOME`이 설정되지 않았을 때 사용. |
-| `USERPROFILE` | 설정 로더 | `XDG_CONFIG_HOME`과 `HOME`이 모두 없을 때 사용하는 Windows 폴백 기준 디렉터리. |
+| `XDG_CONFIG_HOME` | 설정 로더 | 설정 파일의 기준 디렉터리 (`$XDG_CONFIG_HOME/dalfox/config.toml`, TOML 파일이 없으면 `config.json`). 설정되지 않았거나 비어 있으면 `$HOME/.config`로 폴백. |
+| `HOME` | 설정 로더 | `XDG_CONFIG_HOME`이 설정되지 않았거나 비어 있을 때 사용. |
+| `USERPROFILE` | 설정 로더 | `HOME`이 없고 `XDG_CONFIG_HOME`도 없거나 비어 있을 때 사용하는 Windows 폴백 기준 디렉터리. |
 
 ## 예시
 
@@ -44,13 +44,13 @@ dalfox scan https://target.app > scan.log   # 이미 일반 텍스트
 
 ```bash
 XDG_CONFIG_HOME=./.config dalfox scan https://target.app
-# Dalfox reads ./.config/dalfox/config.toml
+# Dalfox는 ./.config/dalfox/config.toml을 읽습니다
 ```
 
 ## 환경 변수가 아닌 것
 
 환경 변수처럼 *보이지만* 실제로는 아닌 몇 가지입니다.
 
-- **프록시.** `--proxy`나 설정 파일의 `proxy`를 쓰세요. Dalfox는 의도치 않은 트래픽 가로채기를 막으려고 `HTTP_PROXY`/`HTTPS_PROXY`를 읽지 않습니다.
+- **프록시.** `--proxy`나 설정 파일의 `proxy`를 쓰세요. 스캔 트래픽과 interactsh OOB 클라이언트는 의도치 않은 트래픽 가로채기를 막으려고 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`를 읽지 않습니다. 예외는 원격 목록 다운로드(`--remote-payloads`, `--remote-wordlists`, `dalfox payload portswigger|payloadbox`)로, `--proxy`가 없으면 이 요청들은 표준 프록시 환경 변수를 따릅니다.
 - **타임아웃, 워커, 형식.** CLI 플래그나 설정 파일로만 지정합니다.
 - **디버그.** 명령줄에 `--debug`를 주거나 설정 파일에 `debug = true`를 넣으세요.

@@ -68,12 +68,11 @@ template = "landing"
             <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
             <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
             <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
-            <div class="t-line"></div>
             <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
-            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%2Fonload%3Dalert%281%29%3E</div>
+            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx444fc070%3E</div>
             <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
-            <div class="t-line t-dim">  ├── Payload: &lt;svg/onload=alert(1)&gt;</div>
-            <div class="t-line t-dim">  └── L13: matches for &#x3c;svg/onload=alert(1)&#x3e;</div>
+            <div class="t-line t-dim">  ├── Payload: &lt;svg onload=alert(1) class=dlx444fc070&gt;</div>
+            <div class="t-line t-dim">  └── L13: …results were found for &lt;b&gt;&lt;svg onload=alert(1) class=dlx444fc070&gt;&lt;/b&gt;</div>
             <div class="t-line"></div>
             <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
             <div class="t-line t-cursor"></div>
@@ -114,7 +113,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         </div>
         <h3>Deep XSS discovery</h3>
-        <p>Reflected, Stored, and DOM-based XSS with payload optimization. AST-backed DOM verification means no more false positives from blind reflections.</p>
+        <p>Reflected, Stored, and DOM-based XSS with payload optimization. DOM verification (HTML parser plus a JavaScript AST) separates a reflection that executes from one that only echoes back.</p>
         <div class="feature-tags">
           <span class="feature-tag">reflected</span>
           <span class="feature-tag">stored</span>
@@ -239,7 +238,7 @@ template = "landing"
       <div class="how-step">
         <h3>Ship the findings</h3>
         <p>Export to SARIF, JSON, or Markdown, or proxy results to your pipeline. Findings come verified, not guessed.</p>
-        <code>dalfox scan urls.txt -o report.sarif</code>
+        <code>dalfox scan urls.txt -f sarif -o report.sarif</code>
       </div>
     </div>
   </div>

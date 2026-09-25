@@ -39,7 +39,7 @@ Filter with `--only-poc` (e.g. `--only-poc v`, `--only-poc v,a`, `--only-poc i`)
 
 `V` is **not** browser execution. Dalfox drives no browser and speaks no CDP; it never renders a page or watches an `alert()` fire. For the request-based methods, `V` means the payload was found in a *DOM tree parsed from a real HTTP response* — static analysis, on stronger evidence than the raw string match behind `R`.
 
-There is exactly one method where Dalfox observes real execution: **out-of-band callbacks** (blind XSS). When an injected `<script src=…>` calls home, a real browser parsed and fetched it. That is empirical, and it is the strongest evidence Dalfox produces — but it comes from someone else's browser, not one Dalfox controls.
+There is exactly one method where Dalfox observes real execution: **out-of-band callbacks** (blind XSS with `--blind-oob`). When an injected `<script src=…>` calls home, something loaded the payload and fetched it — almost always a victim's browser, though any correlated DNS or HTTP interaction counts, so a server-side fetcher that follows the URL triggers it too. That is empirical, and it is the strongest evidence Dalfox produces — but it comes from a client Dalfox does not control. A plain `-b` callback URL sends the hit to your own listener, so Dalfox records no finding for it.
 
 ## Method: what `detection_method` means
 
@@ -47,8 +47,8 @@ There is exactly one method where Dalfox observes real execution: **out-of-band 
 |-------|-------|------------------|
 | `reflection` | The response body, for the payload's bytes | Yes |
 | `dom-verification` | The response parsed as HTML, for an executable position | Yes |
-| `ast` | The JavaScript in the response, for a source→sink flow | No |
-| `oob` | An out-of-band callback from a real browser | Yes |
+| `ast` | The JavaScript in the response, for a source→sink flow | Not to find the flow; a flow found on a probe response gets one re-check request |
+| `oob` | An out-of-band callback (DNS or HTTP) from whatever loaded the payload | Yes |
 | `library` | `<script>` tags, for known-vulnerable versions | No |
 
 **Use `detection_method == "ast"`, not `type == "A"`, to select AST findings.** The method field is stable; the tier is not.
@@ -66,7 +66,7 @@ The tier and the method are chosen separately, so `V` does not imply
 | `V` | `ast` | `high` **or** `low` | High | The two legacy AST promotions — the disagreement [Migration](#migration) is about |
 | `A` | `ast` | `high` **or** `low` | Medium | Every other source→sink flow |
 | `R` | `reflection` | `low` | Info | A reflection with no confirmed executable position, including the `--hpp` duplicate-parameter echo (`inject_type: inHTML-HPP`) |
-| `I` | `library` | *(absent)* | Low / Medium / High | `--detect-outdated-libs` |
+| `I` | `library` | *(absent)* | Medium / High | `--detect-outdated-libs` |
 
 `V` + `reflection` is the row that surprises people. `reflection` names *which
 request the evidence came from*, not how weak the evidence is: that row parsed
@@ -77,18 +77,31 @@ already had, instead of spending another request.
 
 Five ways a payload proves it reached an executable position: the Dalfox marker matched by CSS selector; an executable scheme (`javascript:`, `data:text/html`) in a dangerous attribute; an injected element carrying a sink-calling handler; a sink call inside `<script>` whose AST range covers the payload; and an inline-handler breakout where the payload terminated the surrounding JS string. The `evidence` field names which one fired.
 
+### What the response content type allows
+
+The evidence has to hold in the parser a browser would use for that response, so the response's `Content-Type` decides which checks can succeed:
+
+| Response type | How it is read |
+|---------------|----------------|
+| `text/html`, or no usable `Content-Type` with a body that starts like HTML | Parsed as HTML |
+| `application/xhtml+xml`, `image/svg+xml`, other XML (`text/xml`, `application/xml`, `*+xml`) | Parsed as XML; only markup in an active namespace (XHTML, SVG) counts |
+| JavaScript (`application/javascript`, `text/javascript`, …) | Read as script: only a JS-context payload such as a JSONP callback grades `V`, never HTML markup in the body |
+| `application/json`, `*+json`, `text/csv`, supplied `text/plain`, binary media | Not a markup document: the reflection is dropped, with no `R` either |
+
+`text/plain` is inert whether or not `X-Content-Type-Options: nosniff` is present, since a browser never sniffs a declared `text/plain` into HTML. The AST pass over the target page follows the same rule: it runs only when that page is an active markup document. One exception to the last row: a payload echoed in a redirect's `Location` header still records an `R`, whatever the body type.
+
 ### `ast` and the DOM-XSS ceiling
 
-The AST pass parses the JavaScript in the response and traces data from a dangerous source (`location.hash`, `location.search`, `document.referrer`, `postMessage`, …) into a dangerous sink (`innerHTML`, `document.write`, `eval`, …) with no sanitizer on the path. It reads each `<script>` block once and reports every flow it finds, so it can name inputs you never passed on the command line — including a URL fragment, which is never sent to the server. `-p` does not narrow it: `-p` scopes which parameters get *requested*, and this pass sends nothing.
+The AST pass parses the JavaScript in the response and traces data from a dangerous source (`location.hash`, `location.search`, `document.referrer`, `postMessage`, …) into a dangerous sink (`innerHTML`, `document.write`, `eval`, …) with no sanitizer on the path. It reads each `<script>` block once and reports every flow it finds, so it can name inputs you never passed on the command line — including a URL fragment, which is never sent to the server. `-p` does not narrow the pass over the landing page: `-p` scopes which parameters get *requested*, and that pass reads a response Dalfox already has.
 
-It also explains a result that looks like a gap but isn't. For a **pure client-side DOM-XSS**, the payload is written into the page by JavaScript at runtime, so it never appears in the server's response and the response-parsing methods have nothing to find. On a static page whose only sink is `location.hash → innerHTML`, `--only-poc v` correctly returns nothing. Open the POC URL in a browser with devtools to confirm — Dalfox prints a complete POC URL on every AST finding, plus a `[manual POC: …]` setup hint for sources it cannot put in a URL (`window.name`, `document.referrer`, cookies, `postMessage`, …).
+It also explains a result that looks like a gap but isn't. For a **pure client-side DOM-XSS**, the payload is written into the page by JavaScript at runtime, so it never appears in the server's response and the response-parsing methods have nothing to find. On a static page whose only sink is `location.hash → innerHTML`, `--only-poc v` correctly returns nothing. Open the POC URL in a browser with devtools to confirm — Dalfox prints a complete POC URL on every AST finding, and on landing-page findings a `[manual POC: …]` setup hint for sources it cannot put in a URL (`window.name`, `document.referrer`, cookies, `postMessage`, …).
 
 | Flag | Effect |
 |------|--------|
 | `--skip-ast-analysis` | Turn off source→sink analysis |
 | `--analyze-external-js` | Also fetch and analyze same-origin `<script src>` bundles |
 
-`--skip-mining-dom` does **not** affect this pass — it governs harvesting parameter *names* from HTML `id`/`name` attributes. See [Parameters & Discovery](../parameters/).
+`--skip-mining-dom` does **not** affect this pass — it governs harvesting parameter *names* from the `id`/`name` attributes of `<input>` elements. See [Parameters & Discovery](../parameters/).
 
 ## `confidence`: the grade behind the claim
 
@@ -102,7 +115,7 @@ Every XSS finding carries a `confidence` of `high` or `low`, plus a `confidence_
 
 Sanitizers are not a grading signal because they are already a *filter*: the analyzer treats them as taint clearers, so a finding existing at all means no recognised sanitizer was on the path.
 
-`confidence_reason` never mixes the two directions. A `high` grade lists the supporting signals; a `low` grade lists **only** what blocked it, so the signals that did hold are not shown. One reason is informational either way: `flow sits inside a conditional branch` records that the flow is guarded, and never changes the grade on its own.
+`confidence_reason` never mixes the two directions. A `high` grade lists the supporting signals; a `low` grade lists **only** what blocked it, so the signals that did hold are not shown. One reason is informational only: `flow sits inside a conditional branch` records that the flow is guarded. It appears on `high` grades and never changes the grade on its own.
 
 ### Where the grade is visible — and where it isn't
 
@@ -148,20 +161,23 @@ Two post-processing passes run before anything is printed, so the tier counts
 are not the number of findings recorded during the scan:
 
 - **Redundant `R` collapse** — an `R` is dropped when a `V` exists for the same
-  `(param, inject_type)` on that target. Reporting both would list the same
+  `(param, location, inject_type)` on that target. Reporting both would list the same
   input twice at two different strengths. `V` and `A` are never dropped.
 - **AST deduplication** — the same source→sink flow can be found by the
   preflight, the probe, and the reflection loop. One survives per fingerprint:
   the strongest by `type`, then `severity`. `confidence` does not participate,
-  so an ungraded `V` still outranks a `high` `A`.
+  so a `low`-confidence `V` still outranks a `high` `A`.
 
-`--stream-findings` emits each finding the moment it is recorded, which is
-*before* the collapse. An `R` can therefore appear in the stream and be absent
-from the final report. When the two disagree, the final report is the answer.
+`--stream-findings` prints each scan-loop finding the moment it is recorded,
+which is *before* the `R` collapse and before AST duplicates are narrowed to
+the strongest. An `R` can therefore appear in the stream and be
+absent from the final report, and findings from the landing-page AST pass,
+outdated libraries, and OOB callbacks appear only in the final report. When the
+two disagree, the final report is the answer.
 
 ### Selecting tiers: `--only-poc` vs `--limit-result-type`
 
-Both take `v` / `r` / `a` / `i`, and they do different things:
+Both select by tier, and they do different things. `--only-poc` takes a comma list (`v,r,a,i`); `--limit-result-type` takes one of `all` (the default), `v`, `r`, `a`, `i`.
 
 | Flag | Effect |
 |------|--------|
@@ -175,9 +191,11 @@ add `--only-poc v`.
 ### Exit codes
 
 `0` means no findings and `1` means at least one finding **of any tier**,
-counted after `--only-poc` and the collapse above. `2` is a hard error (bad
-input, every target unreachable, `--output` unwritable). A lone `R`, or a
-single `I` from `--detect-outdated-libs`, exits `1` exactly like a `V` does.
+counted after `--only-poc`, a `--baseline` filter, and the collapse above. `2`
+is a hard error (bad input, every target unreachable, `--output` unwritable),
+and also covers a run with no findings that could not finish cleanly: a lost
+session under the default `--on-session-loss abort`, a crashed scan worker, or
+severe transport loss. A lone `R`, or a single `I` from `--detect-outdated-libs`, exits `1` exactly like a `V` does.
 For CI that should fail only on what Dalfox asserts is exploitable, run
 `--only-poc v`.
 

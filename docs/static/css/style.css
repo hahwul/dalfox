@@ -2373,6 +2373,12 @@ body:has(.docs-layout) .site-footer {
     color: var(--text-secondary);
     margin-bottom: 1.5rem;
 }
+.error-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+}
 
 /* ==========================================================================
    Responsive
