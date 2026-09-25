@@ -11,7 +11,7 @@ toc = true
 
 ```bash
 dalfox server
-# listens on http://127.0.0.1:6664 by default
+# 기본값으로 http://127.0.0.1:6664 에서 대기
 ```
 
 자주 쓰는 옵션:
@@ -114,7 +114,7 @@ dalfox server \
 
 ```bash
 dalfox server --jsonp --callback-param-name callback
-# then GET /scan?target=...&callback=myFunction
+# 그다음 GET /scan?target=...&callback=myFunction
 ```
 
 JSONP는 `<script src>` 로드로 전달되는데, 스크립트 로드에는 검증할 `Origin`이 없습니다.
