@@ -23,7 +23,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 | **mXSS** | `<foreignobject>`/DOMPurify 우회 | 새니타이저가 변형한 DOM |
 | **Blind** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` 또는 `--blind-oob`가 설정된 경우 |
 
-각 페이로드 템플릿은 마커(`class={CLASS}` 또는 `id={ID}`)를 지니고 있어, 검증 단계에서 DOM 내에서 자신의 요소를 확실하게 식별할 수 있습니다.
+대부분의 페이로드 템플릿은 마커(`class={CLASS}` 또는 `id={ID}`)를 지니고 있어, 검증 단계에서 DOM 내에서 자신의 요소를 확실하게 식별할 수 있습니다. 길이 제한이 있는 반사를 위해 마커 없는 짧은 페이로드도 몇 개 있는데, 이것만으로는 `R` 결과까지만 나옵니다.
 
 ## 컨텍스트 인식 선택
 
@@ -54,7 +54,7 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 - **`strict-dynamic`.** `strict-dynamic` 하에서는 브라우저가 호스트 허용 목록을 무시하므로, 평범한 `<script src=allowed-host>`는 더 이상 로드되지 않습니다. Dalfox는 DOM 스크립트 가젯(이미 신뢰된 스크립트가 공격자 스크립트를 생성하게 만드는 페이로드)으로 전환하고, 정책이 nonce를 고정(pin)하면 `<script nonce=…>` 재사용 페이로드를 내보냅니다(nonce가 정적이거나 예측 가능하거나 반사될 때 효과적).
 - **Nonce / 해시 고정(pinning).** `'nonce-…'` 및 `'sha256-…'` 토큰이 파싱되어 정책 분류에 사용됩니다. `strict-dynamic`도 없고 가젯 호스트도 없는 순수 무작위 nonce/해시 정책은 *견고함(hardened)*으로 취급됩니다. Dalfox는 그런 정책에 요청을 낭비하지 않습니다.
 
-가젯 세트는 하드코딩된 목록이 아니라 내장되고 확장 가능한 데이터베이스(JSONBee / H5SC / Google CSP-Evaluator 형태)에 담겨 있으므로, 분석기를 건드리지 않고도 커버리지가 늘어납니다.
+가젯은 공개된 CSP 우회 연구(JSONBee, cure53 H5SC, Google CSP Evaluator)에서 가져왔습니다.
 
 ## Trusted Types 인식
 
@@ -176,8 +176,8 @@ dalfox scan https://target.app \
   --custom-alert-type str
 ```
 
-- `--custom-alert-value`: `alert`/`prompt`/`confirm`에 전달되는 값(기본값 `1`).
-- `--custom-alert-type`: `none`은 원래 함수를 유지하고, `str`은 값을 따옴표로 감쌉니다.
+- `--custom-alert-value`: 내장 `alert(1)` / `prompt(1)` / `confirm(1)` 호출(백틱 형태 포함)의 `1`을 이 값으로 바꿉니다. 기본값 `1`.
+- `--custom-alert-type`: `none`(기본값)은 값을 그대로 넣으므로 `document.domain`이 표현식으로 남고, `str`은 값을 작은따옴표로 감싸 문자열 리터럴로 만듭니다.
 
 ## Blind XSS
 
@@ -202,11 +202,13 @@ dalfox scan https://target.app \
 
 ## HTTP 파라미터 오염(HPP)
 
-일부 필터는 파라미터의 *첫 번째* 등장만 검사합니다. Dalfox는 파라미터를 중복시켜 페이로드를 두 번째 슬롯에 밀어 넣을 수 있습니다:
+일부 필터는 같은 이름의 파라미터 중 하나만 검사합니다. `--hpp`를 주면 Dalfox는 각 **쿼리** 파라미터의 처음 다섯 개 페이로드를, 파라미터를 중복시킨 채 다시 보냅니다. 페이로드는 마지막 자리, 첫 자리, 양쪽 모두에 넣어 봅니다:
 
 ```bash
 dalfox scan https://target.app --hpp
 ```
+
+적중하면 `inject_type`이 `inHTML-HPP`인 `R`로 보고됩니다. 중복 파라미터 처리를 통과했다는 뜻일 뿐 실행 가능한 위치에 도달했다는 증거는 아니므로, 직접 확인하세요.
 
 ## Deep scan
 

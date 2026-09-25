@@ -14,7 +14,7 @@ Dalfox respects a small set of environment variables for configuration that does
 | `NO_COLOR` | all modes | Disables ANSI colour output when set to any value, an empty string included. Equivalent to `--no-color`, and to `no_color = true` in the config file. See the [NO_COLOR](https://no-color.org) convention. |
 | `XDG_CONFIG_HOME` | config loader | Base directory for the config file (`$XDG_CONFIG_HOME/dalfox/config.toml`, or `config.json` when there is no TOML file). Falls back to `$HOME/.config` when unset or empty. |
 | `HOME` | config loader | Used when `XDG_CONFIG_HOME` is unset or empty. |
-| `USERPROFILE` | config loader | Windows fallback base directory, used when both `XDG_CONFIG_HOME` and `HOME` are unset. |
+| `USERPROFILE` | config loader | Windows fallback base directory, used when `HOME` is unset and `XDG_CONFIG_HOME` is unset or empty. |
 
 ## Examples
 

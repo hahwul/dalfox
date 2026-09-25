@@ -161,7 +161,7 @@ Two post-processing passes run before anything is printed, so the tier counts
 are not the number of findings recorded during the scan:
 
 - **Redundant `R` collapse** — an `R` is dropped when a `V` exists for the same
-  `(param, inject_type)` on that target. Reporting both would list the same
+  `(param, location, inject_type)` on that target. Reporting both would list the same
   input twice at two different strengths. `V` and `A` are never dropped.
 - **AST deduplication** — the same source→sink flow can be found by the
   preflight, the probe, and the reflection loop. One survives per fingerprint:
@@ -189,10 +189,10 @@ add `--only-poc v`.
 ### Exit codes
 
 `0` means no findings and `1` means at least one finding **of any tier**,
-counted after `--only-poc` and the collapse above. `2` is a hard error (bad
+counted after `--only-poc`, a `--baseline` filter, and the collapse above. `2` is a hard error (bad
 input, every target unreachable, `--output` unwritable), and also covers a run
 with no findings that could not finish cleanly: a lost session under the
-default `--on-session-loss abort`, or severe transport loss. A lone `R`, or a
+default `--on-session-loss abort`, a crashed scan worker, or severe transport loss. A lone `R`, or a
 single `I` from `--detect-outdated-libs`, exits `1` exactly like a `V` does.
 For CI that should fail only on what Dalfox asserts is exploitable, run
 `--only-poc v`.

@@ -21,7 +21,7 @@ npx skills add hahwul/dalfox
 npx skills add hahwul/dalfox -g
 ```
 
-이 CLI는 사용 중인 에이전트(Claude Code, Cursor, Codex, OpenCode, 그리고 [약 45개의 다른 에이전트](https://github.com/vercel-labs/skills#available-agents))를 자동으로 감지해 각각에 스킬을 연결합니다. 하나만 원한다면 특정 에이전트를 지정하세요:
+이 CLI는 사용 중인 에이전트(Claude Code, Cursor, Codex, OpenCode, 그리고 [그 밖의 수십 개 에이전트](https://github.com/vercel-labs/skills#supported-agents))를 자동으로 감지해 각각에 스킬을 연결합니다. 하나만 원한다면 특정 에이전트를 지정하세요:
 
 ```bash
 # Only Claude Code
@@ -68,7 +68,7 @@ done
 - **MCP 플레이북:** `preflight_dalfox` → `scan_with_dalfox` → `get_results_dalfox` 폴링(`suggested_poll_interval_ms` 준수) → `settled: true`가 된 뒤에만 `delete_scan_dalfox`. 취소 직후 worker가 아직 정리 중이면 삭제를 다시 시도해야 합니다. 검증된 입력 범위(timeout 1–299초, delay 0–9999ms)를 포함하여 에이전트가 Dalfox가 거부할 값을 보내지 않게 합니다.
 - **CLI 시나리오:** POST 본문, 인증된 세션, Burp 경유 프록시, 콜백 URL을 사용하는 블라인드 XSS, 저장형 XSS, 파이프 입력, 빠른 스모크 테스트, 최대 커버리지 실행, 기계 판독 가능 출력.
 - **결과 해석:** 세 축 모델 — `type`(`V` 악용 가능 판단 > `A` AST 탐지 > `R` 반사만 확인 > `I` 정보성), `detection_method`, `confidence`. 에이전트가 가장 강한 주장부터 앞세우고, `V`를 브라우저 실행 관측으로는 절대 서술하지 않습니다. [탐지 모델](../../guide/detection-model/) 참고.
-- **실패 모드:** `reachable: false`, 모든 결과가 R인 경우, 멈춘 스캔, `invalid_params` 응답이 실제로 무엇을 의미하는지, 그리고 이를 어떻게 복구하는지.
+- **실패 모드:** `reachable: false`, `CONNECTION_FAILED`나 `SESSION_LOST` 오류, 실제로는 제대로 돌지 않은 스캔의 빈 보고서가 왜 깨끗한 결과가 아닌지, 그리고 `invalid_params` 오류가 에이전트에게 무엇을 고치라는 뜻인지.
 
 ## 사전 요구 사항
 

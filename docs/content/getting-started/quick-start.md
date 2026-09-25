@@ -19,7 +19,8 @@ The first argument is the target. Dalfox auto-detects that it's a URL and runs t
 
 - A banner with the version.
 - `INF` lines as Dalfox discovers parameters and probes contexts.
-- A `WRN XSS found N XSS` summary, then a `[POC][V]…` (vulnerable) or `[POC][R]…` (reflected) line for each finding, with the exact payload that worked.
+- A `WRN XSS found N XSS` summary, then a `[POC][V]…` (vulnerable) or `[POC][R]…` (reflected) line for each finding. Under it come the issue, the exact payload that worked, and the response line it landed in.
+- A closing `INF scan completed in … seconds`.
 
 The bare form only takes a target plus the global flags (`--config`, `--debug`, `--no-color`, `-S`). Every other scan flag needs the explicit subcommand — `dalfox scan <target> …` — which is the form the rest of this page uses.
 
@@ -54,7 +55,7 @@ dalfox scan https://target.app/search?q=test -f json -o report.json
 
 Machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) auto-suppress the banner so the file stays clean.
 
-The exit code is CI-friendly too: `0` means the scan finished with no findings, `1` means it found something, and `2` means an input, configuration, or runtime error.
+The exit code is CI-friendly too: `0` means the scan finished with no findings, `1` means it found something, and `2` means there is no result to trust: an input, configuration, or runtime error, every target unreachable, or a no-finding run that lost too many requests to count as clean (Dalfox prints a `WRN INCOMPLETE` line when that happens).
 
 ## 5. Authenticated scans
 
@@ -91,7 +92,7 @@ dalfox scan https://target.app \
   -b https://your-callback.interact.sh
 ```
 
-Dalfox sends blind-XSS payloads across every discovered parameter; if the payload fires later in an admin panel, your callback server records it.
+Blind payloads go out before parameter discovery runs, so they reach only what the request already carries: its query parameters, a form-encoded `-d` body, the `-H` headers and the cookies. Dalfox also fetches the target page and submits the payload into the text fields of each same-origin POST form on it. Parameters found later by discovery or mining get no blind payloads. If a payload fires later in an admin panel, your callback server records it.
 
 Or let Dalfox manage an [interactsh](https://github.com/projectdiscovery/interactsh) (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:
 
@@ -102,7 +103,7 @@ dalfox scan https://target.app --blind-oob=oast.fun    # pick servers
 
 Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes.
 
-`--insecure` does **not** reach the public mesh. It is a statement about the scan target, which you do not control; the OAST server is infrastructure Dalfox picked, and that channel carries your `--blind-oob-secret` and the session key that reads your callbacks. The public servers present valid certificates, so they are always verified. `--insecure` still applies to a server you named yourself with `--blind-oob=`, which is the case it exists for — a self-hosted interactsh behind a self-signed or hostname-mismatched certificate.
+`--insecure` (on by default) does **not** reach the public mesh. It is a statement about the scan target, which you do not control; the OAST server is infrastructure Dalfox picked, and that channel carries your `--blind-oob-secret` and the session key that reads your callbacks. The public servers present valid certificates, so they are always verified. `--insecure` still applies to a server you named yourself with `--blind-oob=`, which is the case it exists for — a self-hosted interactsh behind a self-signed or hostname-mismatched certificate.
 
 ## 7. Dry-run first
 

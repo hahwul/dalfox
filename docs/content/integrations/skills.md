@@ -21,7 +21,7 @@ npx skills add hahwul/dalfox
 npx skills add hahwul/dalfox -g
 ```
 
-The CLI auto-detects which agents you use (Claude Code, Cursor, Codex, OpenCode, and [~45 others](https://github.com/vercel-labs/skills#available-agents)) and links the skill for each. Pick a specific agent if you only want one:
+The CLI auto-detects which agents you use (Claude Code, Cursor, Codex, OpenCode, and [dozens of others](https://github.com/vercel-labs/skills#supported-agents)) and links the skill for each. Pick a specific agent if you only want one:
 
 ```bash
 # Only Claude Code
@@ -68,7 +68,7 @@ Other clients read from their own skills directory; see your agent's docs for th
 - **MCP playbook:** `preflight_dalfox` → `scan_with_dalfox` → poll `get_results_dalfox` (honoring `suggested_poll_interval_ms`) → `delete_scan_dalfox` only when `settled: true`. After cancellation, retry deletion if the worker is still draining. Includes the validated input bounds (timeout 1–299 s, delay 0–9999 ms) so the agent doesn't send values Dalfox will reject.
 - **CLI scenarios:** POST bodies, authenticated sessions, proxy-through-Burp, blind XSS with a callback URL, stored XSS, pipe input, fast smoke tests, maximum-coverage runs, and machine-readable output.
 - **Result interpretation:** the three-axis model — `type` (`V` asserted vulnerable > `A` AST-detected > `R` reflected-only > `I` informational), `detection_method`, and `confidence`. The agent leads with the strongest claims and never describes `V` as observed browser execution. See [Detection Model](../../guide/detection-model/).
-- **Failure modes:** what `reachable: false`, all-R findings, a stuck scan, or an `invalid_params` response actually mean, and how to recover.
+- **Failure modes:** why `reachable: false`, a `CONNECTION_FAILED` or `SESSION_LOST` error, and an empty report from a scan that never really ran are not clean results, and what an `invalid_params` error is telling the agent to fix.
 
 ## Prerequisite
 

@@ -41,6 +41,8 @@ Exit codes:
 | `1` | Success, findings reported (any tier — combine with `--only-poc v` to gate on `V` only) |
 | `2` | Input / config / runtime error |
 
+`server` and `mcp` exit `2` when they fail to start (for example, the port is already in use). `payload` exits `2` for an unknown selector.
+
 ---
 
 ## `dalfox scan`
@@ -115,11 +117,11 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--include-url` | — | Regex pattern(s) of URLs to include |
-| `--exclude-url` | — | Regex pattern(s) of URLs to exclude |
-| `--ignore-param` | — | Parameter name(s) to skip |
-| `--out-of-scope` | — | Wildcard domain patterns to skip |
-| `--out-of-scope-file` | — | File listing out-of-scope domains. A path that cannot be read is a fatal `FILE_READ_ERROR` — scanning on without the exclusion list would attack every host it named |
+| `--include-url` | — | Scan only URLs matching this regex (unanchored). Repeat the flag for more patterns; a URL must match at least one |
+| `--exclude-url` | — | Skip URLs matching this regex (unanchored). Repeat the flag for more patterns |
+| `--ignore-param` | — | Parameter name to skip (exact match). Repeat the flag for more names |
+| `--out-of-scope` | — | Skip targets whose host matches this pattern. `*.example.com` matches `example.com` and every subdomain; any other value must equal the host (case-insensitive). Repeat the flag for more patterns: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. A comma is not a separator |
+| `--out-of-scope-file` | — | File of out-of-scope patterns, one per line (blank and `#` lines skipped), same matching as `--out-of-scope`. A path that cannot be read is a fatal `FILE_READ_ERROR` — scanning on without the exclusion list would attack every host it named |
 
 ### Discovery
 
@@ -170,12 +172,12 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 |------|-------|---------|-------------|
 | `--encoders` | `-e` | `url,html` | Comma-separated encoders: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `--remote-payloads` | — | — | `portswigger`, `payloadbox` |
-| `--custom-blind-xss-payload` | — | — | Custom blind payload template file |
+| `--custom-blind-xss-payload` | — | — | Blind payload template file, one template per line. Each line must contain `{callback}`, which is replaced with the `-b` URL or an OOB callback URL; lines without it are skipped with a warning, and if no line is usable the built-in templates are sent instead. Used only with `-b` or `--blind-oob` |
 | `--blind` | `-b` | — | Blind XSS callback URL |
 | `--blind-oob[=servers]` | — | — | Enable OOB/OAST blind XSS via interactsh; optional comma-separated server domains (default: public mesh). Requires the `=` form: `--blind-oob=oast.fun,oast.me` |
 | `--blind-oob-secret` | — | — | Auth token for a self-hosted interactsh server (sent as `Authorization` on register/poll/deregister) |
 | `--blind-oob-wait` | — | `30` | Seconds to keep polling for OOB callbacks after all payloads are sent (`0` = no extra end-of-scan wait) |
-| `--custom-payload` | — | — | Custom payload file |
+| `--custom-payload` | — | — | Custom payload file, one payload per line (blank and `#` lines skipped). Added to the built-in payloads unless `--only-custom-payload` is set |
 | `--only-custom-payload` | — | false | Use only custom payloads. Requires `--custom-payload` (exit `2` without it) |
 | `--custom-alert-value` | — | `1` | Value inside `alert()`/`prompt()`/`confirm()` |
 | `--custom-alert-type` | — | `none` | `none` or `str` |
@@ -196,9 +198,9 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--waf-bypass` | `auto` | `auto`, `force`, `off` |
-| `--skip-waf-probe` | false | Skip active WAF fingerprinting |
-| `--force-waf` | — | WAF name when `--waf-bypass force`: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (case-insensitive; aliases such as `cf`, `modsec`, `incapsula`, `netscaler` also work) |
+| `--waf-bypass` | `auto` | `auto` applies bypass mutations and extra encoders for the detected WAF. `off` still detects and reports the WAF but changes no payloads. `force` is accepted and currently behaves like `auto`; use `--force-waf` to choose the WAF |
+| `--skip-waf-probe` | false | Skip the active provocation probe (header-based detection still runs) |
+| `--force-waf` | — | Treat the target as this WAF, replacing whatever detection found. Works under `auto` and `force`; under `off` the WAF is reported but no bypass is applied. Names: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (case-insensitive; aliases such as `cf`, `modsec`, `incapsula`, `netscaler` also work) |
 | `--waf-evasion` | false | Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses. The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. |
 | `--waf-min-confidence` | `0.3` | Drop fingerprints below this confidence (0.0–1.0). The default `0.3` suppresses weak matches like `Server: Google Frontend` (0.15). Set lower to keep weak signals; `1.0` keeps only fingerprints with full confidence. |
 
@@ -218,17 +220,17 @@ dalfox server [FLAGS]
 | `--host` | `-H` | `127.0.0.1` | Bind address |
 | `--api-key` | — | — | Required `X-API-KEY` header value (or `DALFOX_API_KEY`; the flag wins over the variable). An empty `--api-key ""` disables auth |
 | `--log-file` | — | — | Plain-text log file (created mode `0600` on Unix; the server warns at startup if an existing file is group/other-readable) |
-| `--allowed-origins` | — | — | CORS origins (comma-separated, supports `*` and `regex:`) |
+| `--allowed-origins` | — | — | CORS origins (comma-separated). Exact origins, `regex:<pattern>`, or `*`; patterns must match the whole origin, port included |
 | `--jsonp` | — | false | Wrap responses in JSONP |
 | `--callback-param-name` | — | `callback` | JSONP callback param |
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS methods |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS headers |
-| `--rate-limit` | — | `0` | Server-wide cap on **each** scan's outbound request rate (requests/sec, `0` = unlimited). A submitted scan may ask for less, never more |
-| `--scan-timeout` | — | `0` | Server-wide cap on **each** scan's total wall-clock runtime, in seconds (`0` = unbounded). A submitted scan may ask for less, never more |
+| `--rate-limit` | — | — | Server-wide cap on **each** scan's outbound request rate (requests/sec; unset or `0` = unlimited). A submitted scan may ask for less, never more |
+| `--scan-timeout` | — | — | Server-wide cap on **each** scan's total wall-clock runtime, in seconds (unset or `0` = unbounded). A submitted scan may ask for less, never more |
 | `--max-concurrent-scans` | — | `100` | Limit on simultaneous (queued + running) scans; further submissions get `503` (`0` = unlimited) |
-| `--allowed-hosts` | — | — | Extra hostnames accepted in the request `Host` header, on top of the bind host, `localhost`, and any IP literal. Needed behind a reverse proxy that forwards a public hostname |
+| `--allowed-hosts` | — | — | Comma-separated extra hostnames accepted in the request `Host` header, on top of the bind host, `localhost`, and any IP literal. Needed behind a reverse proxy that forwards a public hostname |
 | `--max-retained-scans` | — | `1000` | Cap on *finished* scans kept in memory; the oldest are dropped once exceeded (`0` = unlimited). Queued and running scans are never dropped |
-| `--max-body-bytes` | — | `1048576` | Maximum accepted request body size (bytes) for `POST /scan` and `/preflight`; oversized bodies get `413` |
+| `--max-body-bytes` | — | `1048576` | Maximum accepted request body size (bytes) for `POST /scan` and `/preflight`; an oversized body is rejected with `400` (`invalid request body`) |
 
 See [REST API Server](../../integrations/server/) for endpoints.
 
@@ -272,7 +274,7 @@ Run the MCP stdio server.
 dalfox mcp
 ```
 
-No additional flags. See [MCP Server](../../integrations/mcp/) for tool definitions.
+No flags beyond the global ones. See [MCP Server](../../integrations/mcp/) for tool definitions.
 
 ---
 
@@ -297,9 +299,22 @@ dalfox completion zsh > "${fpath[1]}/_dalfox"
 dalfox completion fish > ~/.config/fish/completions/dalfox.fish
 ```
 
-Nothing else is written to stdout, so the output can always be safely redirected to a file.
+Nothing else is written to stdout, so the output can always be safely redirected to a file. The generated scripts leave out the hidden commands below.
 
-The deprecated `url` / `file` / `pipe` compat commands and the packaging helper `man` are hidden from `--help`, and the generated scripts leave them out too.
+---
+
+## Hidden commands
+
+These are left out of `--help` and the completion scripts.
+
+| Command | Equivalent |
+|---------|------------|
+| `dalfox url -u <URL> [FLAGS]` | `dalfox scan -i url <URL> [FLAGS]` |
+| `dalfox file <FILE> [FLAGS]` | `dalfox scan -i file <FILE> [FLAGS]` |
+| `dalfox pipe [FLAGS]` | `dalfox scan -i pipe [FLAGS]` (targets from stdin) |
+| `dalfox man` | Prints the roff man page to stdout (used for packaging) |
+
+`url`, `file` and `pipe` are kept for v2-era scripts and accept every `dalfox scan` flag. An explicit `-i` still wins, so `dalfox pipe -i har` reads a HAR file from stdin. New scripts should call `dalfox scan`.
 
 ---
 

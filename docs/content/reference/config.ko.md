@@ -5,12 +5,12 @@ weight = 2
 toc = true
 +++
 
-Dalfox는 다음 순서로 설정 디렉터리를 고릅니다.
+Dalfox는 설정 디렉터리를 하나만 고릅니다.
 
-1. `$XDG_CONFIG_HOME/dalfox/` (`XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않을 때)
-2. `$HOME/.config/dalfox/` (`HOME`이 없으면 `%USERPROFILE%\.config\dalfox\`, 예: Windows)
+1. `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG_CONFIG_HOME/dalfox/`
+2. 그렇지 않으면 `$HOME/.config/dalfox/` (`HOME`이 없으면 `%USERPROFILE%\.config\dalfox\`, 예: Windows)
 
-그 디렉터리에서 `config.toml`을 읽고, `config.toml`이 없으면 `config.json`을 읽습니다. 둘 다 없으면 전부 주석 처리된 `config.toml` 템플릿을 만들고 내장 기본값으로 실행합니다.
+첫 번째 디렉터리에 파일이 없다고 두 번째 디렉터리로 넘어가지는 않습니다. 고른 디렉터리에서 `config.toml`을 읽고, `config.toml`이 없으면 `config.json`을 읽습니다. 둘 다 없으면 전부 주석 처리된 `config.toml` 템플릿을 만들고 내장 기본값으로 실행합니다. 이 템플릿은 `scan`뿐 아니라 `completion`과 `man`을 제외한 어떤 서브커맨드를 처음 실행할 때도 만들어집니다.
 
 `--config <path>`로 재정의할 수 있습니다. TOML과 JSON 모두 허용됩니다. `.json` 경로는 JSON으로 먼저, 그 밖의 경로는 TOML로 먼저 파싱하고, 실패하면 다른 형식으로 다시 시도합니다. 존재하지 않는 `--config` 경로는 기본 템플릿(`.json` 경로면 JSON)으로 새로 만들어지고, 실행은 내장 기본값으로 진행되며 stderr에 안내가 출력됩니다. 설정 파일 크기는 최대 1 MiB입니다.
 
@@ -47,10 +47,10 @@ no_color = false
 # TARGETS
 param = []
 # data = "user=test"
-headers = ["Accept: text/html"]
+# headers = ["Accept: text/html"]
 cookies = []
 method = "GET"
-user_agent = "Dalfox/3"
+# user_agent = "Mozilla/5.0"
 # cookie_from_raw = "request.txt"
 
 # SESSION
@@ -62,7 +62,7 @@ on_session_loss = "abort"
 include_url = []
 exclude_url = []
 ignore_param = []
-out_of_scope = []
+out_of_scope = []    # 항목 하나에 패턴 하나: ["*.gov", "cdn.example.com"]
 # out_of_scope_file = "scope.txt"
 
 # DISCOVERY
@@ -188,11 +188,11 @@ debug = false
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `include_url` | array | `[]` | 포함할 URL의 정규식 패턴 |
-| `exclude_url` | array | `[]` | 제외할 URL의 정규식 패턴 |
-| `ignore_param` | array | `[]` | 건너뛸 파라미터 이름 |
-| `out_of_scope` | array | `[]` | 와일드카드 도메인 패턴 |
-| `out_of_scope_file` | string | — | 스코프 외 호스트를 나열한 파일. 읽을 수 없는 경로면 스캔을 중단합니다 |
+| `include_url` | array | `[]` | 정규식 패턴(부분 매칭). 하나 이상에 매칭되는 URL만 스캔합니다 |
+| `exclude_url` | array | `[]` | 건너뛸 URL의 정규식 패턴(부분 매칭) |
+| `ignore_param` | array | `[]` | 건너뛸 파라미터 이름(정확히 일치) |
+| `out_of_scope` | array | `[]` | 건너뛸 호스트 패턴, 항목 하나에 하나씩(`["*.gov", "cdn.example.com"]`). `*.example.com`은 `example.com`과 하위 도메인에 맞고, 그 밖의 값은 호스트와 정확히 같아야 합니다. 한 항목 안의 쉼표는 구분자가 아닙니다 |
+| `out_of_scope_file` | string | — | 스코프 외 패턴을 한 줄에 하나씩 적은 파일. 읽을 수 없는 경로면 스캔을 중단합니다 |
 
 ### 탐색 및 마이닝
 
@@ -238,12 +238,12 @@ debug = false
 |-----|------|---------|-------------|
 | `encoders` | array | `["url","html"]` | 적용할 인코더: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `remote_payloads` | array | `[]` | 원격 페이로드 소스: `portswigger`, `payloadbox` |
-| `custom_blind_xss_payload` | string | — | 커스텀 블라인드 템플릿 파일 |
+| `custom_blind_xss_payload` | string | — | 블라인드 템플릿 파일. 각 줄에 `{callback}`이 있어야 합니다(없는 줄은 건너뜀) |
 | `blind_callback_url` | string | — | 블라인드 XSS 콜백 URL (`--blind` / `-b` 플래그) |
 | `blind_oob` | array | — | interactsh로 OOB/OAST 블라인드 XSS 활성화 (`[]` = 공개 메시; 또는 서버 이름 지정). `--blind-oob`와 동일 |
 | `blind_oob_secret` | string | — | 자체 호스팅 interactsh 서버용 인증 토큰 |
 | `blind_oob_wait` | int | `30` | 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) |
-| `custom_payload` | string | — | 커스텀 페이로드 파일 |
+| `custom_payload` | string | — | 커스텀 페이로드 파일(한 줄에 하나) |
 | `only_custom_payload` | bool | `false` | 커스텀 페이로드만 사용; `custom_payload`(또는 `--custom-payload`)가 함께 없으면 스캔이 종료 코드 `2`로 끝남 |
 | `inject_marker` | string | — | 페이로드로 치환할 토큰 |
 | `custom_alert_value` | string | `"1"` | `alert(X)` 값 |
@@ -264,9 +264,9 @@ debug = false
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `waf_bypass` | string | `"auto"` | `auto`, `force`, `off` |
+| `waf_bypass` | string | `"auto"` | `auto` 또는 `off`(탐지와 보고만). `force`도 받지만 `auto`와 똑같이 동작하며, WAF를 고르는 것은 `force_waf`입니다 |
 | `skip_waf_probe` | bool | `false` | 능동적 핑거프린팅 건너뜀 |
-| `force_waf` | string | — | `waf_bypass = "force"`일 때의 WAF 이름 (`--force-waf`와 같은 이름, 대소문자 무관) |
+| `force_waf` | string | — | 탐지 결과 대신 대상을 이 WAF로 간주 (`--force-waf`와 같은 이름, 대소문자 무관) |
 | `waf_evasion` | bool | `false` | WAF 탐지 시 적응형 회피: 랜덤 지터 + 차단 클러스터에 대한 점증 쿨다운 (`rate_limit`과 함께 사용) |
 | `waf_min_confidence` | float | `0.3` | 이 신뢰도 미만의 핑거프린트 제거 (0.0–1.0); 기본값은 약한 매칭을 억제 |
 
@@ -290,8 +290,9 @@ CLI flag  >  Config file  >  Built-in default
 설정 값은 CLI 인자 파서를 거치지 않으므로, Dalfox는 파일을 읽을 때 따로 검사합니다.
 
 - 선택지가 정해진 키(`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`)에 잘못된 값을 넣거나, 알 수 없는 `method` / `sxss_method` / `force_waf`, 올바른 정규식이 아닌 `session_check`, 절대 URL이 아닌 `session_check_url`, `limit = 0`을 쓰면 stderr에 `Warning:`이 출력됩니다. 해당 키는 내장 기본값으로 돌아가고 스캔은 계속됩니다. `method`, `sxss_method`, `force_waf`는 플래그와 똑같이 대소문자가 정규화됩니다.
+- `proxy`, `sxss_url`, `session_check_url`은 플래그와 같은 시작 검사를 거칩니다. Dalfox가 라우팅할 수 없는 프록시 스킴이나 스킴이 `http`/`https`가 아닌 URL이면 `PARSE_ERROR`(종료 코드 `2`)로 스캔이 중단됩니다.
 - 숫자 키는 대응하는 플래그와 같은 범위 제한을 받습니다(`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). 범위를 벗어나면 `INVALID_INPUT_TYPE`(종료 코드 `2`)으로 스캔이 중단됩니다.
-- 알 수 없는 키는 경고 없이 무시됩니다. 효과가 없는 것 같은 키가 있다면 철자를 확인하세요.
+- 알 수 없는 키와 `[scan]` 테이블 밖에 둔 키는 경고 없이 무시됩니다. 효과가 없는 것 같은 키가 있다면 철자와 위치를 확인하세요.
 - 파싱에 실패한 파일(TOML 문법 오류, `workers = "10"`처럼 타입이 틀린 값 등)은 통째로 무시됩니다. `--config`로 지정한 파일이면 경고가 출력되고, 기본 경로의 파일이면 아무 메시지 없이 무시됩니다.
 
 예시는 [시작하기 → 설정](../../getting-started/configuration/)을 참고하세요.

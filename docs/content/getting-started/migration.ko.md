@@ -20,11 +20,12 @@ v3는 스캔 관련 서브커맨드를 하나의 진입점으로 모았습니다
 | `dalfox pipe` | `cat targets \| dalfox scan` (또는 `dalfox scan --input-type pipe`) | 파이프 입력은 `stdin`에서 그대로 읽습니다 |
 | `dalfox sxss [url]` | `dalfox scan [url] --sxss` | 저장형 XSS는 이제 스캔 옵션입니다 — [저장형 XSS](../../guide/stored-xss/) 참고 |
 | `dalfox server --type mcp` | `dalfox mcp` | MCP는 별도의 stdio 서브커맨드가 되었습니다 — [MCP 서버](../../integrations/mcp/) 참고 |
-| `dalfox payload --entity-event-handler` (그 밖의 `--enum-*` / `--entity-*` / `--remote-*` 스위치) | `dalfox payload <selector>` | 위치 인자 하나로 고릅니다. 예: `event-handlers`, `useful-tags`, `special-chars`, `portswigger`, `payloadbox` — 전체 목록은 `dalfox payload --help` |
+| `dalfox server` | `dalfox server` | 기본 바인딩 주소가 v2의 `0.0.0.0`에서 `127.0.0.1`로 바뀌었습니다. 모든 인터페이스에서 받으려면 `--host 0.0.0.0`을 주세요. 포트는 그대로 `6664`이고 `--type`은 없어졌습니다 — [REST API 서버](../../integrations/server/) 참고 |
+| `dalfox payload --entity-event-handler`, `--entity-useful-tags`, `--entity-special-chars`, `--remote-portswigger`, `--remote-payloadbox` | `dalfox payload event-handlers`, `useful-tags`, `special-chars`, `portswigger`, `payloadbox` | 스위치 대신 위치 인자 하나로 고릅니다. `--enum-*`, `--entity-gf`, `--make-bulk`, `--encoder-url`에 대응하는 셀렉터는 없습니다. 있는 셀렉터는 `dalfox payload --help`로 확인하세요 |
 
 {{ alert(type="info", body="legacy url, file, pipe 서브커맨드는 숨겨진 별칭으로 남아 있습니다. file과 pipe는 v2 형태 그대로입니다. url은 다릅니다. 대상을 -u/--url로 받기 때문에(dalfox url -u URL) v2의 dalfox url URL 형태는 실패하니 dalfox scan URL로 바꾸세요. sxss는 남지 않았습니다. 저장형 XSS 스캔은 scan 서브커맨드의 --sxss 플래그로 옮겨졌습니다.") }}
 
-v2의 `--rawdata`와 `--har` 입력 스위치도 없어졌습니다. 프록시로 잡아둔 원시 HTTP 요청과 HAR 익스포트는 자동으로 판별되며(`dalfox scan request.txt`, `dalfox scan capture.har`), `--input-type raw-http` / `--input-type har`로 강제할 수도 있습니다. [빠른 시작](../quick-start/)을 참고하세요.
+v2의 `--rawdata`, `--har`, `--http` 입력 스위치도 없어졌습니다. 프록시로 잡아둔 원시 HTTP 요청과 HAR 익스포트는 자동으로 판별되며(`dalfox scan request.txt`, `dalfox scan capture.har`), `--input-type raw-http` / `--input-type har`로 강제할 수도 있습니다. 요청 줄에 경로만 있는 원시 요청은 HTTP/2 신호가 있거나 Host가 `:443`이면 `https`로, 아니면 `http`로 보냅니다. 스킴을 고정하려면 요청 줄에 전체 URL을 쓰세요. [빠른 시작](../quick-start/)을 참고하세요.
 
 ## 2. 이름이 바뀐 플래그
 
@@ -33,7 +34,7 @@ v2의 `--rawdata`와 `--har` 입력 스위치도 없어졌습니다. 프록시�
 | `-w, --worker <int>` | `--workers <int>` | 이름이 바뀌었고 `-w` 단축형은 없습니다. 동시에 도는 스캔 워커 수를 정하며, 기본값이 100에서 50으로 줄었습니다. |
 | `-H, --header <string>` | `-H, --headers <string>` | 긴 이름만 복수형이 되었고 `-H`는 그대로입니다. 여러 번 넘길 수 있습니다. |
 | `-C, --cookie <string>` | `--cookies <string>` | 일관성을 위해 복수형으로 바꿨고 `-C` 단축형은 없습니다. 여러 번 넘길 수 있습니다. |
-| `-p, --param <string>` | `-p, --param <string>` | 파라미터 종류까지 지정합니다 — `-p id:query`, `-p sort:body`. |
+| `-p, --param <string>` | `-p, --param <string>` | 같은 플래그지만 위치 접미사를 붙일 수 있습니다: `-p id:query`, `-p sort:body`, `-p token:header`. |
 | `--skip-mining-all` | `--skip-mining` | 이름만 바뀌었습니다. |
 | `--mining-dict=false`, `--mining-dom=false` | `--skip-mining-dict`, `--skip-mining-dom` | `--skip-*` 형태만 남았습니다(v2에도 있던 플래그입니다). |
 | `--output-request`, `--output-response` | `--include-request`, `--include-response` | 이름이 바뀌었고, `--include-all`은 둘 다 켭니다. 여전히 옵트인입니다. |
@@ -52,13 +53,13 @@ v3를 빠르고 안전하게, XSS에만 집중하도록 유지하기 위해 몇�
 | :--- | :--- | :--- |
 | `--use-bav`, `--skip-bav` | 없음. | **범위**. BAV(Basic Another Vulnerability) 점검을 제거했습니다. v3는 오직 XSS 스캐너이며, 다른 취약점 유형은 전용 스캐너를 쓰는 편이 낫습니다. |
 | `--found-action <cmd>`, `--found-action-shell` | [REST API 웹훅](../../integrations/server/), 또는 stdout 파이프(`dalfox scan ... \| post-script.sh`). | **보안**. 결과마다 임의 셸 명령을 실행하는 구조는 RCE 위험을 불러오고 동시성도 발목 잡았습니다. |
-| `--skip-headless`, `--force-headless-verification` | 설정할 것이 없습니다 — 정적 분석이 항상 켜져 있습니다. | **엔진 교체**. Headless Chrome(`chromedp`)을 완전히 없앴습니다. v3는 컴파일러급 JavaScript 파서(`oxc`)로 데이터 흐름과 DOM 싱크를 브라우저 없이 추적합니다. [탐지 모델](../../guide/detection-model/) 참고. |
+| `--skip-headless`, `--force-headless-verification` | 설정할 것이 없습니다 — 정적 분석이 기본으로 켜져 있습니다(`--skip-ast-analysis`로 끌 수 있습니다). | **엔진 교체**. Headless Chrome(`chromedp`)을 완전히 없앴습니다. v3는 컴파일러급 JavaScript 파서(`oxc`)로 데이터 흐름과 DOM 싱크를 브라우저 없이 추적합니다. [탐지 모델](../../guide/detection-model/) 참고. |
 | `--grep <file>`, `--skip-grepping` | 없음. | **엔진 교체**. 정규식 응답 매칭 대신 컨텍스트를 아는 AST 분석을 씁니다. `--only-poc g`(grep 결과)도 함께 사라졌습니다. |
 | `--report`, `--report-format` | `-f markdown -o <file>`, `-f sarif -o <file>`. | **표준화**. 리포트 전용 플래그를 출력 형식 플래그로 합쳤습니다 — [출력과 리포트](../../guide/output/) 참고. |
 | `--max-cpu` | 자동. | **구조 변화**. 비동기 스케줄러(`tokio`)가 코어에 작업을 알아서 분배하므로 수동 CPU 고정은 의미가 없습니다. |
-| `--no-spinner` | 자동. | **UI**. 파이프, 조용한 모드(`-S`), 기계가 읽는 출력 형식(`json`, `sarif` 등)에서는 배너와 스피너가 알아서 억제됩니다. |
+| `--no-spinner` | 자동. | **UI**. 스피너와 진행 표시줄은 stdout이 터미널이고 `-S`가 꺼져 있을 때만 그려집니다. 배너는 `-S`와 기계가 읽는 출력 형식(`json`, `jsonl`, `sarif`, `toml`)에서 빠집니다. |
 | `--context-aware`, `--magic-char-test` | 설정할 것이 없습니다. | **기본 내장**. 반사되는 모든 파라미터에 문자별 프로브(`valid_specials` / `invalid_specials`)를 보내고, 그 결과로 페이로드를 고릅니다. |
-| `--deep-domxss`, `--detailed-analysis`, `--fast-scan`, `--har-file-path` | 없음. | **제거됨**. 대신할 v3 플래그가 없습니다. v3는 HAR 파일을 입력으로 읽지만 기록하지는 않습니다. |
+| `--deep-domxss`, `--detailed-analysis`, `--fast-scan`, `--har-file-path`, `--output-all` | 없음. | **제거됨**. 대신할 v3 플래그가 없습니다. v3는 HAR 파일을 입력으로 읽지만 기록하지는 않습니다. |
 
 헤드리스 검증이 없어졌기 때문에 결과의 증거 등급이 v2보다 중요해졌습니다. `[V]`는 파싱한 응답에서 DOM 수준으로 확인된 것이고, `[A]`는 정적 분석이 찾아낸 소스→싱크 흐름으로 브라우저에서 한 번 확인해볼 값입니다. 등급 판정은 [탐지 모델](../../guide/detection-model/)에서 설명합니다.
 

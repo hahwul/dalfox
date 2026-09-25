@@ -30,30 +30,31 @@ if [[ -z "$RAW" ]]; then
     exit 0
 fi
 
-# Write to temp file (robust for multiline + special chars)
+# raw-http reads a regular file (not stdin or a process substitution),
+# so write the request to a temp file first.
 TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
 printf '%s' "$RAW" > "$TMP"
 
-# Run Dalfox (tune flags to taste).
+# Run Dalfox (tune flags to taste) and capture its stdout.
 # Dalfox exits 1 when it has findings, so capture the status with `|| FOUND=$?`
 # instead of letting `set -e` abort the script on the case we care about.
 FOUND=0
-"$DALFOX" scan --input-type raw-http "$TMP" \
+OUT=$("$DALFOX" scan --input-type raw-http "$TMP" \
     -S \
     --no-color \
     --poc-type curl \
-    --timeout 8 || FOUND=$?
+    --timeout 8) || FOUND=$?
 
-rm -f "$TMP"
-
-# Exit codes: 0 = clean, 1 = findings, 2 = error (bad input, unreachable target, ...)
+# Exit codes: 0 = clean, 1 = findings, 2 = error (bad input, unreachable
+# target, or too many requests lost for the scan to count as clean)
 if [[ $FOUND -eq 1 ]]; then
-    # Caido If/Else: route this to the "finding" branch
-    echo "XSS detected"
+    # Caido If/Else: the PoC lines are not a truthy string -> "False" branch
+    printf '%s\n' "$OUT"
 else
     # An error is not a clean result; leave a trace in the workflow log
     if [[ $FOUND -ne 0 ]]; then echo "dalfox failed (exit $FOUND)" >&2; fi
-    # Emit a truthy value so Caido treats it as "no finding"
+    # Emit exactly one truthy token so Caido treats it as "no finding"
     echo "1"
 fi
 ```
@@ -71,7 +72,8 @@ Caido의 Workflow If/Else 노드는 자체 [bool 규칙](https://docs.caido.io/a
 - `False` → **Create Finding**
 - `True` → (선택) Set Color / Tag / Continue
 
-이것이 위 예시들이 탐지 경로에서만 의도적으로 결과를 출력하는 이유입니다.
+그래서 위 스크립트는 Dalfox의 stdout을 변수에 담아 두었다가 탐지 경로에서만
+출력합니다. 깨끗한 경로에서는 단계의 출력 전체가 `1` 한 토큰뿐입니다.
 
 ## Caido 권장 플래그
 
@@ -81,11 +83,14 @@ Caido의 Workflow If/Else 노드는 자체 [bool 규칙](https://docs.caido.io/a
 | `--no-color`      | 탐지 결과, 검색, 내보내기를 위한 깔끔한 텍스트 (커뮤니티 워크플로 예시에서 제안됨) |
 | `--poc-type curl` (또는 `httpie`, `http-request`) | Caido Finding에서 바로 사용할 수 있는 재현 코드 |
 | `--timeout 6-10`  | 요청별 예산; 워크플로를 빠르게 유지 |
-| `--waf-bypass auto` | 프록시 안에서도 여전히 유용함 |
+| `--waf-bypass auto` | 이미 기본값입니다. 트래픽이 프록시를 거친다고 `off`로 끌 필요는 없습니다 |
 
 Finding 증거에 전체 마크다운 보고서를 담고 싶다면 `-f markdown`을 추가할 수도 있습니다.
 
-**silence 참고:** `-S`는 대부분의 로그를 억제하지만 탐지 결과가 있을 때는 검증된 POC 라인이 여전히 나타납니다. (연결된 논의의 커뮤니티 피드백에서는 더 깔끔한 워크플로 결과를 위해 `-S`가 POC 출력도 완전히 억제하도록 요청하기도 했습니다.) 깨끗한 실행에서 출력이 전혀 없기를 원한다면, 위 패턴(탐지 경로에서만 내보내기)으로 이미 그렇게 됩니다.
+**silence 참고:** `-S`는 로그를 억제하지만, 탐지 결과가 있으면 PoC 라인은
+여전히 stdout으로 나가고, 깨끗한 실행에서도 빈 줄 하나는 출력됩니다. 이 빈 줄
+하나만으로도 `1`이 Caido가 `true`로 읽지 않는 값이 되어 버립니다. 스크립트가
+Dalfox 출력을 단계 결과로 그대로 흘려보내지 않고 변수에 담는 이유입니다.
 
 ## 전체 예시: If/Else + Create Finding
 
@@ -123,7 +128,7 @@ Finding 증거에 전체 마크다운 보고서를 담고 싶다면 `-f markdown
 
 ## v2 가이드에서 업데이트하기
 
-이전 Dalfox v2 문서는 `dalfox pipe --rawdata`를 사용했습니다. v3에서 이에 해당하는 것은 `dalfox scan --input-type raw-http`(또는 입력 처리가 조정된 숨겨진 `dalfox pipe` 호환 명령)입니다. 위에 보인 임시 파일이나 프로세스 치환 방식이 가장 이식성이 높습니다.
+이전 Dalfox v2 문서는 `dalfox pipe --rawdata`를 사용했습니다. v3에서 이에 해당하는 것은 `dalfox scan --input-type raw-http <파일>`입니다. 일반 파일 경로만 받습니다. 원시 요청을 stdin으로 넘기면(`dalfox pipe -i raw-http`) 대상을 찾지 못하고, 프로세스 치환(`<(...)`)은 "not a regular file"로 거부됩니다. 위 스크립트가 임시 파일을 쓰는 이유가 이것입니다.
 
 표준 raw-http 사용법은 [스캔 모드](../../guide/scanning-modes/#raw-http-모드) 페이지를 참조하세요.
 

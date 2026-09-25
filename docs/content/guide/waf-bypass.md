@@ -150,11 +150,11 @@ dalfox scan https://target.app -e url,base64
 # Effective: url, base64, unicode, 4url, zwsp
 ```
 
-De-duplicates automatically, preserves order.
+Duplicates are dropped. Structural mutations are sent as-is: Dalfox does not run a mutated payload through the encoders as well, so the two kinds of variant add up rather than multiply.
 
 ## Rate limiting & backoff
 
-Dalfox tracks consecutive blocked responses per worker. After three 429 or 503 responses in a row it backs off with an exponential sleep (2 s, doubling, capped at 30 s) to avoid permanent blocks. A 403 or 406 is treated as a block on that one payload, so Dalfox moves straight on to the next payload; the same cooldown applies to those only under `--waf-evasion`. You can help it along with `--delay` (per-request ms) and smaller `--workers` for fragile targets.
+Dalfox tracks consecutive blocked responses per worker. After three 429 or 503 responses in a row it backs off with an exponential sleep (2 s, doubling, capped at 30 s) to avoid permanent blocks. A 403 or 406 is treated as a block on that one payload, so Dalfox moves straight on to the next payload; the same cooldown applies to those only under `--waf-evasion`. You can help it along with `--delay` (per-request ms) and smaller `--workers` for fragile targets. Any `--delay` above 0 also makes each parameter send its payloads one at a time.
 
 ```bash
 dalfox scan https://target.app --delay 500 --workers 10

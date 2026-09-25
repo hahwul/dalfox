@@ -15,7 +15,7 @@ brew install dalfox
 
 The Homebrew formula tracks the latest stable release. Source: [formulae.brew.sh/formula/dalfox](https://formulae.brew.sh/formula/dalfox).
 
-The project's own tap builds the same release and also installs the man page and shell completions:
+The project's own tap builds the same release from source (so it pulls in Rust) and also installs the man page and shell completions:
 
 ```bash
 brew install hahwul/dalfox/dalfox
@@ -109,7 +109,14 @@ docker run --rm hahwul/dalfox:latest ./dalfox scan https://example.com
 docker run --rm ghcr.io/hahwul/dalfox:latest ./dalfox scan https://example.com
 ```
 
-Release tags are available as `v3.2.3` (plus `v3.2` and `v3` on Docker Hub). `ghcr.io/hahwul/dalfox:main` tracks the `main` branch.
+A bare `dalfox` fails: `/app` is not on the image's `PATH`. To scan a URL list, mount it into the container, or pipe it in with `-i`:
+
+```bash
+docker run --rm -v "$PWD:/data" hahwul/dalfox:latest ./dalfox scan /data/urls.txt
+cat urls.txt | docker run --rm -i hahwul/dalfox:latest ./dalfox scan
+```
+
+`latest` is the newest release. Each release is also tagged `v<major>.<minor>.<patch>`, and Docker Hub adds `v<major>.<minor>` and `v<major>`. `ghcr.io/hahwul/dalfox:main` tracks the `main` branch.
 
 ## Cargo (from crates.io)
 

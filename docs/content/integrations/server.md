@@ -144,13 +144,16 @@ name must be 1–64 characters from `[A-Za-z0-9_$.]`, starting with a letter,
 | `POST` | `/preflight` | Discover parameters without sending payloads |
 | `GET` | `/health` | Server info + capability list |
 
-Every response, success or failure, is the same `{code, msg, data}` envelope
-served as `application/json`. On an error `code` repeats the HTTP status, `msg`
-says what went wrong, and `data` is absent. The statuses you will see are `400`
-(invalid body or option), `401` (missing or wrong API key), `403` (cross-site or
+Every response from these endpoints, success or failure, is the same
+`{code, msg, data}` envelope served as `application/json`. On an error `code`
+repeats the HTTP status, `msg` says what went wrong, and `data` is absent. The
+statuses you will see are `400` (invalid body or option, including a body over
+`--max-body-bytes`), `401` (missing or wrong API key), `403` (cross-site or
 untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown scan
-id), `409` (purge of a scan that is still active), `413` (body over
-`--max-body-bytes`) and `503` (at capacity).
+id), `409` (purge of a scan that is still active), `500` (a preflight that
+failed inside the server) and `503` (at capacity). The exceptions are a CORS
+preflight (`OPTIONS`), which answers `204` with no body, and a path or method
+not in the table, which gets a bare `404` / `405`.
 
 ### Submit a scan
 
@@ -221,8 +224,10 @@ Response (while running):
 }
 ```
 
-`results` appears once the scan reaches a terminal state: `done`, or the
-partial findings of an `error` / `cancelled` scan. `error_message` is added when
+`results` appears once the scan's worker has finished: the findings of a `done`
+scan, or the partial findings of an `error` / `cancelled` one. A scan cancelled
+while running reports `cancelled` at once but only gains `results` when the
+worker drains, which can take a few seconds. `error_message` is added when
 a scan failed or ran out of its `scan_timeout`. `progress` is absent while the scan is still
 `queued`. `requests_failed` counts requests that never reached the target
 (connect, TLS, timeout); when it is a large share of `requests_sent`, the scan
@@ -426,7 +431,10 @@ flag caps every submitted scan the same way `--rate-limit` does.
 
 ### GET /scan query parameters
 
-`GET /scan` takes the same option names as query parameters. List options
+`GET /scan` takes the same option names as query parameters, `url` for
+`target` included; the MCP aliases (`workers`, `headers`, `cookies`,
+`blind_callback_url`) are not read here. Unlike the JSON body, an unknown query
+parameter is ignored rather than rejected, so check the spelling. List options
 (`encoders`, `param`, `remote_payloads`, `remote_wordlists`) are
 comma-separated. `header` packs several headers into one value and is split
 only at a comma that starts a new `Name:`, so a comma inside a value such as
@@ -437,9 +445,10 @@ to `url,html`.
 
 ### Completion webhook
 
-When `callback_url` is set, the server POSTs one JSON body to it as soon as the
-scan reaches a terminal state, whichever it is (including a scan cancelled
-before it started):
+When `callback_url` is set, the server POSTs one JSON body to it when the scan
+ends, whichever way it ends (including a scan cancelled before it started). For
+a scan cancelled mid-run the POST goes out once the worker has drained, not at
+the moment of the `DELETE`:
 
 ```json
 { "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [] }
@@ -457,9 +466,12 @@ retried.
   `deep_scan` jobs so one target can't pin a worker indefinitely.
 - `--max-concurrent-scans <n>` — reject new submissions with `503` once `n`
   scans are queued/running (default `100`, `0` = unlimited). Bounds memory and
-  the blocking pool against a flood of submissions.
+  the blocking pool against a flood of submissions. A cancelled scan keeps its
+  slot until its worker has actually stopped (at most five minutes), so a
+  cancel does not free capacity instantly.
 - `--max-body-bytes <n>` — explicit request-body cap for `POST /scan` and
-  `/preflight` (default `1048576` = 1 MiB); oversized bodies get `413`.
+  `/preflight` (default `1048576` = 1 MiB); an oversized body is refused with
+  `400` (`invalid request body: ... length limit exceeded`).
 - `--max-retained-scans <n>` — cap on *finished* scans kept in memory (default
   `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
   so without this a flood of quick scans holds every result — response bodies
@@ -484,6 +496,11 @@ Terminal states (`done`, `error`, `cancelled`) are sticky. A queued scan can be
 cancelled before it starts. Jobs live in memory only: a finished scan is kept
 for one hour (or until `--max-retained-scans` evicts it) and nothing survives a
 restart.
+
+A single scan tests at most 512 parameters. On a target that exposes more, the
+discovered set is truncated and the scan still ends `done`; the only trace is a
+`discovered params capped to 512` warning in the server log. Split such a
+target with `param` if every parameter matters.
 
 A target that can't be connected to (DNS failure, connection refused, TLS
 error, timeout) ends as `error` with an `error_message` of

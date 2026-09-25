@@ -141,12 +141,15 @@ JSONP는 `<script src>` 로드로 전달되는데, 스크립트 로드에는 검
 | `POST` | `/preflight` | 페이로드를 보내지 않고 파라미터 탐색 |
 | `GET` | `/health` | 서버 정보 + 기능 목록 |
 
-성공이든 실패든 모든 응답은 같은 `{code, msg, data}` 구조이며 `application/json`으로
-나갑니다. 오류일 때 `code`는 HTTP 상태 코드와 같고, `msg`가 무엇이 잘못됐는지 알려 주며,
-`data`는 없습니다. 볼 수 있는 상태 코드는 `400`(잘못된 본문이나 옵션), `401`(API 키
-없음 또는 불일치), `403`(크로스사이트 요청 또는 신뢰하지 않는 `Host`,
+이 엔드포인트들의 응답은 성공이든 실패든 모두 같은 `{code, msg, data}` 구조이며
+`application/json`으로 나갑니다. 오류일 때 `code`는 HTTP 상태 코드와 같고, `msg`가
+무엇이 잘못됐는지 알려 주며, `data`는 없습니다. 볼 수 있는 상태 코드는 `400`(잘못된
+본문이나 옵션. `--max-body-bytes`를 넘는 본문도 여기에 해당), `401`(API 키 없음 또는
+불일치), `403`(크로스사이트 요청 또는 신뢰하지 않는 `Host`,
 [브라우저 요청](#브라우저-요청) 참고), `404`(알 수 없는 스캔 id), `409`(아직 활성
-상태인 스캔의 purge), `413`(`--max-body-bytes` 초과 본문), `503`(용량 초과)입니다.
+상태인 스캔의 purge), `500`(서버 내부에서 실패한 preflight), `503`(용량 초과)입니다.
+예외는 두 가지입니다. CORS 사전 요청(`OPTIONS`)은 본문 없이 `204`로 답하고, 표에 없는
+경로나 메서드는 본문 없는 `404` / `405`를 받습니다.
 
 ### 스캔 제출
 
@@ -216,8 +219,10 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" http://127.0.0.1:6664/scan
 }
 ```
 
-`results`는 스캔이 종료 상태에 이르러야 나타납니다. `done`이거나, `error` /
-`cancelled` 스캔의 부분 탐지 결과입니다. 스캔이 실패했거나 `scan_timeout`을 다 썼다면
+`results`는 스캔의 worker가 끝난 뒤에 나타납니다. `done` 스캔의 탐지 결과이거나,
+`error` / `cancelled` 스캔의 부분 탐지 결과입니다. 실행 중에 취소한 스캔은 곧바로
+`cancelled`로 보고되지만, `results`는 worker가 정리를 마친 뒤(몇 초 걸릴 수 있음)에야
+붙습니다. 스캔이 실패했거나 `scan_timeout`을 다 썼다면
 `error_message`가 붙습니다. 스캔이 아직 `queued`이면 `progress`는 없습니다.
 `requests_failed`는 대상에 닿지 못한 요청(연결, TLS, 타임아웃) 수입니다. 이 값이
 `requests_sent`의 큰 비중을 차지한다면 스캔이 사실상 돌지 않은 것이므로, 탐지 결과
@@ -416,7 +421,10 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 
 ### GET /scan 쿼리 파라미터
 
-`GET /scan`은 같은 옵션 이름을 쿼리 파라미터로 받습니다. 리스트 옵션(`encoders`,
+`GET /scan`은 같은 옵션 이름을 쿼리 파라미터로 받습니다. `target` 대신 `url`도
+받지만, MCP 별칭(`workers`, `headers`, `cookies`, `blind_callback_url`)은 읽지
+않습니다. JSON 본문과 달리 모르는 쿼리 파라미터는 거부하지 않고 무시하므로 철자를
+확인하세요. 리스트 옵션(`encoders`,
 `param`, `remote_payloads`, `remote_wordlists`)은 쉼표로 구분합니다. `header`는 여러
 헤더를 한 값에 담으며, 새 `Name:`이 시작되는 쉼표에서만 나눕니다. 그래서
 `Accept: text/html,application/xhtml+xml`처럼 값 안에 든 쉼표는 그대로 남습니다.
@@ -426,8 +434,9 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 
 ### 완료 웹훅
 
-`callback_url`을 설정하면, 스캔이 어떤 종료 상태에 이르든(시작 전에 취소된 경우 포함)
-그 즉시 서버가 JSON 본문 하나를 POST 합니다:
+`callback_url`을 설정하면, 스캔이 어떻게 끝나든(시작 전에 취소된 경우 포함) 서버가
+JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE` 시점이 아니라 worker가
+정리를 마친 뒤에 POST가 나갑니다:
 
 ```json
 { "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [] }
@@ -444,9 +453,11 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
   작업을 제한하여 하나의 대상이 워커를 무한정 점유하지 못하게 합니다.
 - `--max-concurrent-scans <n>` — `n`개의 스캔이 큐에 있거나 실행 중이면 새 제출을
   `503`으로 거부합니다 (기본값 `100`, `0` = 무제한). 제출 폭주에 대비해 메모리와
-  블로킹 풀을 제한합니다.
+  블로킹 풀을 제한합니다. 취소한 스캔은 worker가 실제로 멈출 때까지(최대 5분) 자리를
+  계속 차지하므로, 취소한다고 곧바로 여유가 생기지는 않습니다.
 - `--max-body-bytes <n>` — `POST /scan` 및 `/preflight`의 명시적 요청 본문 상한
-  (기본값 `1048576` = 1 MiB). 크기를 초과하는 본문은 `413`을 받습니다.
+  (기본값 `1048576` = 1 MiB). 크기를 초과하는 본문은 `400`
+  (`invalid request body: ... length limit exceeded`)으로 거부됩니다.
 - `--max-retained-scans <n>` — 메모리에 보관하는 *종료된* 스캔 수 상한 (기본값 `1000`,
   `0` = 무제한). `--max-concurrent-scans`는 활성 스캔만 세기 때문에, 이 상한이 없으면
   짧은 스캔이 몰릴 때 모든 결과가(`include_response`를 켰다면 응답 본문까지) 1시간
@@ -468,6 +479,11 @@ queued → cancelled
 종료 상태(`done`, `error`, `cancelled`)는 고정되어 변하지 않습니다. 대기 중인 스캔은
 시작 전에 취소될 수 있습니다. 작업은 메모리에만 존재합니다. 종료된 스캔은 1시간 동안(또는
 `--max-retained-scans`가 밀어낼 때까지) 보관되며, 재시작하면 아무것도 남지 않습니다.
+
+스캔 하나가 테스트하는 파라미터는 최대 512개입니다. 그보다 많은 파라미터를 드러내는
+대상에서는 발견한 목록이 잘리고 스캔은 그대로 `done`으로 끝나며, 흔적은 서버 로그의
+`discovered params capped to 512` 경고 한 줄뿐입니다. 모든 파라미터가 중요하다면
+`param`으로 나눠서 스캔하세요.
 
 연결할 수 없는 대상(DNS 실패, 연결 거부, TLS 오류, 타임아웃)은
 `target unreachable: connection failed (CONNECTION_FAILED)`라는 `error_message`와

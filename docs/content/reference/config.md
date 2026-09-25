@@ -5,12 +5,12 @@ weight = 2
 toc = true
 +++
 
-Dalfox picks its config directory in this order:
+Dalfox picks one config directory:
 
-1. `$XDG_CONFIG_HOME/dalfox/` (when `XDG_CONFIG_HOME` is set and non-empty)
-2. `$HOME/.config/dalfox/` (`%USERPROFILE%\.config\dalfox\` when `HOME` is unset, e.g. on Windows)
+1. `$XDG_CONFIG_HOME/dalfox/` when `XDG_CONFIG_HOME` is set and non-empty
+2. otherwise `$HOME/.config/dalfox/` (`%USERPROFILE%\.config\dalfox\` when `HOME` is unset, e.g. on Windows)
 
-Inside that directory it reads `config.toml`, or `config.json` when there is no `config.toml`. If neither exists, it writes a commented-out `config.toml` template there and runs with built-in defaults.
+It does not fall through to the second directory when the first holds no file. Inside the chosen directory it reads `config.toml`, or `config.json` when there is no `config.toml`. If neither exists, it writes a commented-out `config.toml` template there and runs with built-in defaults. This happens on the first run of any subcommand except `completion` and `man`, not only `scan`.
 
 Override with `--config <path>`. TOML and JSON are both accepted: a `.json` path is parsed as JSON first, anything else as TOML first, and the other format is tried if that fails. A `--config` path that does not exist is created from a default template (JSON for a `.json` path) and the run uses built-in defaults, with a notice on stderr. Config files are capped at 1 MiB.
 
@@ -47,10 +47,10 @@ no_color = false
 # TARGETS
 param = []
 # data = "user=test"
-headers = ["Accept: text/html"]
+# headers = ["Accept: text/html"]
 cookies = []
 method = "GET"
-user_agent = "Dalfox/3"
+# user_agent = "Mozilla/5.0"
 # cookie_from_raw = "request.txt"
 
 # SESSION
@@ -62,7 +62,7 @@ on_session_loss = "abort"
 include_url = []
 exclude_url = []
 ignore_param = []
-out_of_scope = []
+out_of_scope = []    # one pattern per entry: ["*.gov", "cdn.example.com"]
 # out_of_scope_file = "scope.txt"
 
 # DISCOVERY
@@ -188,11 +188,11 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `include_url` | array | `[]` | Regex patterns of URLs to include |
-| `exclude_url` | array | `[]` | Regex patterns of URLs to exclude |
-| `ignore_param` | array | `[]` | Parameter names to skip |
-| `out_of_scope` | array | `[]` | Wildcard domain patterns |
-| `out_of_scope_file` | string | — | File listing out-of-scope hosts. Unreadable path aborts the scan |
+| `include_url` | array | `[]` | Regex patterns (unanchored); only URLs matching at least one are scanned |
+| `exclude_url` | array | `[]` | Regex patterns (unanchored) of URLs to skip |
+| `ignore_param` | array | `[]` | Parameter names to skip (exact match) |
+| `out_of_scope` | array | `[]` | Host patterns to skip, one per entry (`["*.gov", "cdn.example.com"]`). `*.example.com` matches `example.com` and its subdomains; other values must equal the host. A comma inside an entry is not a separator |
+| `out_of_scope_file` | string | — | File of out-of-scope patterns, one per line. Unreadable path aborts the scan |
 
 ### Discovery & mining
 
@@ -238,12 +238,12 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 |-----|------|---------|-------------|
 | `encoders` | array | `["url","html"]` | Encoders to apply: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `remote_payloads` | array | `[]` | Remote payload sources: `portswigger`, `payloadbox` |
-| `custom_blind_xss_payload` | string | — | Custom blind template file |
+| `custom_blind_xss_payload` | string | — | Blind template file; each line must contain `{callback}` (lines without it are skipped) |
 | `blind_callback_url` | string | — | Blind XSS callback URL (the `--blind` / `-b` flag) |
 | `blind_oob` | array | — | Enable OOB/OAST blind XSS via interactsh (`[]` = public mesh; or name servers). Mirrors `--blind-oob` |
 | `blind_oob_secret` | string | — | Auth token for a self-hosted interactsh server |
 | `blind_oob_wait` | int | `30` | Seconds to keep polling for OOB callbacks after payloads are sent |
-| `custom_payload` | string | — | Custom payload file |
+| `custom_payload` | string | — | Custom payload file, one payload per line |
 | `only_custom_payload` | bool | `false` | Use only custom payloads; the scan exits `2` unless `custom_payload` (or `--custom-payload`) is also set |
 | `inject_marker` | string | — | Token to replace with payloads |
 | `custom_alert_value` | string | `"1"` | `alert(X)` value |
@@ -264,9 +264,9 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `waf_bypass` | string | `"auto"` | `auto`, `force`, `off` |
+| `waf_bypass` | string | `"auto"` | `auto` or `off` (detect and report only). `force` is accepted and behaves like `auto`; `force_waf` is what picks the WAF |
 | `skip_waf_probe` | bool | `false` | Skip active fingerprinting |
-| `force_waf` | string | — | WAF name when `waf_bypass = "force"` (same names as `--force-waf`, case-insensitive) |
+| `force_waf` | string | — | Treat the target as this WAF instead of what detection found (same names as `--force-waf`, case-insensitive) |
 | `waf_evasion` | bool | `false` | Adaptive evasion on WAF detection: randomized jitter + escalating cooldown on block clusters (pairs with `rate_limit`) |
 | `waf_min_confidence` | float | `0.3` | Drop fingerprints below this confidence (0.0–1.0); default suppresses weak matches |
 
@@ -290,8 +290,9 @@ CLI flag  >  Config file  >  Built-in default
 Config values skip the CLI's argument parser, so Dalfox checks them when it loads the file:
 
 - An invalid value for a fixed-choice key (`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`), an unknown `method` / `sxss_method` / `force_waf`, a `session_check` that is not a valid regex, a `session_check_url` that is not an absolute URL, or `limit = 0` prints a `Warning:` on stderr. That key then falls back to its built-in default and the scan continues. `method`, `sxss_method` and `force_waf` are case-normalised the same way the flags are.
+- `proxy`, `sxss_url` and `session_check_url` go through the same startup checks as their flags. A proxy scheme Dalfox cannot route, or a URL whose scheme is not `http`/`https`, stops the scan with `PARSE_ERROR` (exit `2`).
 - Numeric keys have the same limits as their flags (`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). An out-of-range value stops the scan with `INVALID_INPUT_TYPE` (exit `2`).
-- Unknown keys are ignored without a warning, so check the spelling of a key that seems to have no effect.
+- Unknown keys, and keys placed outside the `[scan]` table, are ignored without a warning, so check the spelling and placement of a key that seems to have no effect.
 - A file that fails to parse (a TOML syntax error, or a value of the wrong type such as `workers = "10"`) is dropped whole. With `--config` Dalfox prints a warning. The default-path file is dropped silently.
 
 See [Getting Started → Configuration](../../getting-started/configuration/) for examples.

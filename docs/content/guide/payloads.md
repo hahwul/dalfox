@@ -23,7 +23,7 @@ Dalfox composes payloads from several families:
 | **mXSS** | `<foreignobject>`/DOMPurify bypasses | Sanitizer-mutated DOM |
 | **Blind** | `"'><script src=CALLBACK></script>` | `-b`/`--blind` or `--blind-oob` is set |
 
-Each payload template carries a marker (`class={CLASS}` or `id={ID}`) so the verification stage can positively identify its own element in the DOM.
+Most payload templates carry a marker (`class={CLASS}` or `id={ID}`) so the verification stage can positively identify its own element in the DOM. A few short, marker-free payloads exist for length-capped reflections; on their own they can only produce `R` findings.
 
 ## Context-aware selection
 
@@ -66,9 +66,8 @@ Two shapes deserve a closer look:
   `strict-dynamic` and no gadget host is treated as *hardened* — Dalfox does not
   waste requests on it.
 
-The gadget set lives in an embedded, extensible database (JSONBee / H5SC /
-Google CSP-Evaluator shapes) rather than a hardcoded list, so coverage grows
-without touching the analyzer.
+The gadgets come from public CSP-bypass research (JSONBee, cure53 H5SC, Google
+CSP Evaluator).
 
 ## Trusted Types awareness
 
@@ -200,8 +199,8 @@ dalfox scan https://target.app \
   --custom-alert-type str
 ```
 
-- `--custom-alert-value`: value passed to `alert`/`prompt`/`confirm` (default `1`).
-- `--custom-alert-type`: `none` keeps the original function, `str` wraps the value in quotes.
+- `--custom-alert-value`: replaces the `1` in the built-in `alert(1)` / `prompt(1)` / `confirm(1)` calls (and their backtick forms). Default `1`.
+- `--custom-alert-type`: `none` (default) inserts the value as-is, so `document.domain` stays an expression; `str` wraps it in single quotes, so it becomes a string literal.
 
 ## Blind XSS
 
@@ -226,11 +225,13 @@ Without a callback server of your own, `--blind-oob` registers with interactsh a
 
 ## HTTP Parameter Pollution (HPP)
 
-Some filters only inspect the *first* occurrence of a parameter. Dalfox can duplicate parameters to slip a payload into the second slot:
+Some filters only inspect one occurrence of a parameter. With `--hpp`, Dalfox re-sends the first five payloads of each **query** parameter with the parameter duplicated, putting the payload in the last slot, the first slot, and both:
 
 ```bash
 dalfox scan https://target.app --hpp
 ```
+
+A hit is reported as `R` with `inject_type` `inHTML-HPP`. It proves the payload survived the duplicate-parameter handling, not that it landed in an executable position, so confirm it manually.
 
 ## Deep scan
 

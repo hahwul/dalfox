@@ -15,7 +15,7 @@ brew install dalfox
 
 Homebrew formula는 최신 안정 버전을 따라갑니다. 출처: [formulae.brew.sh/formula/dalfox](https://formulae.brew.sh/formula/dalfox).
 
-프로젝트 자체 tap은 같은 릴리스를 빌드하면서 man 페이지와 셸 자동완성까지 설치합니다.
+프로젝트 자체 tap은 같은 릴리스를 소스에서 빌드하며(그래서 Rust도 함께 설치됩니다), man 페이지와 셸 자동완성까지 설치합니다.
 
 ```bash
 brew install hahwul/dalfox/dalfox
@@ -109,7 +109,14 @@ docker run --rm hahwul/dalfox:latest ./dalfox scan https://example.com
 docker run --rm ghcr.io/hahwul/dalfox:latest ./dalfox scan https://example.com
 ```
 
-릴리스 태그는 `v3.2.3` 형태로 제공됩니다(Docker Hub에는 `v3.2`, `v3`도 있습니다). `ghcr.io/hahwul/dalfox:main`은 `main` 브랜치를 따라갑니다.
+`/app`이 이미지의 `PATH`에 없으므로 `dalfox`만 쓰면 실행되지 않습니다. URL 목록을 스캔하려면 파일을 컨테이너에 마운트하거나 `-i`로 파이프하세요.
+
+```bash
+docker run --rm -v "$PWD:/data" hahwul/dalfox:latest ./dalfox scan /data/urls.txt
+cat urls.txt | docker run --rm -i hahwul/dalfox:latest ./dalfox scan
+```
+
+`latest`는 최신 릴리스입니다. 릴리스마다 `v<major>.<minor>.<patch>` 태그가 붙고, Docker Hub에는 `v<major>.<minor>`와 `v<major>` 태그도 붙습니다. `ghcr.io/hahwul/dalfox:main`은 `main` 브랜치를 따라갑니다.
 
 ## Cargo (crates.io)
 

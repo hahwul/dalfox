@@ -30,30 +30,31 @@ if [[ -z "$RAW" ]]; then
     exit 0
 fi
 
-# Write to temp file (robust for multiline + special chars)
+# raw-http reads a regular file (not stdin or a process substitution),
+# so write the request to a temp file first.
 TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
 printf '%s' "$RAW" > "$TMP"
 
-# Run Dalfox (tune flags to taste).
+# Run Dalfox (tune flags to taste) and capture its stdout.
 # Dalfox exits 1 when it has findings, so capture the status with `|| FOUND=$?`
 # instead of letting `set -e` abort the script on the case we care about.
 FOUND=0
-"$DALFOX" scan --input-type raw-http "$TMP" \
+OUT=$("$DALFOX" scan --input-type raw-http "$TMP" \
     -S \
     --no-color \
     --poc-type curl \
-    --timeout 8 || FOUND=$?
+    --timeout 8) || FOUND=$?
 
-rm -f "$TMP"
-
-# Exit codes: 0 = clean, 1 = findings, 2 = error (bad input, unreachable target, ...)
+# Exit codes: 0 = clean, 1 = findings, 2 = error (bad input, unreachable
+# target, or too many requests lost for the scan to count as clean)
 if [[ $FOUND -eq 1 ]]; then
-    # Caido If/Else: route this to the "finding" branch
-    echo "XSS detected"
+    # Caido If/Else: the PoC lines are not a truthy string -> "False" branch
+    printf '%s\n' "$OUT"
 else
     # An error is not a clean result; leave a trace in the workflow log
     if [[ $FOUND -ne 0 ]]; then echo "dalfox failed (exit $FOUND)" >&2; fi
-    # Emit a truthy value so Caido treats it as "no finding"
+    # Emit exactly one truthy token so Caido treats it as "no finding"
     echo "1"
 fi
 ```
@@ -71,7 +72,8 @@ Then wire:
 - `False` → **Create Finding**
 - `True` → (optional) Set Color / Tag / Continue
 
-This is why the examples above deliberately echo a result only on the finding path.
+This is why the script above captures Dalfox's stdout and prints it only on the
+finding path: on the clean path the step's whole output is the single token `1`.
 
 ## Recommended flags for Caido
 
@@ -81,11 +83,15 @@ This is why the examples above deliberately echo a result only on the finding pa
 | `--no-color`      | Clean text for findings, search, and exports (suggested in the community workflow example) |
 | `--poc-type curl` (or `httpie`, `http-request`) | Ready-to-use repro in the Caido Finding |
 | `--timeout 6-10`  | Per-request budget; keeps workflows snappy |
-| `--waf-bypass auto` | Still worth it even inside a proxy |
+| `--waf-bypass auto` | The default already; don't turn it `off` just because traffic comes through a proxy |
 
 You can also add `-f markdown` if you want the full markdown report captured in the Finding evidence.
 
-**Note on silence:** `-S` suppresses most logs but the verified POC lines still appear when findings exist. (Community feedback in the linked discussion also requested that `-S` fully suppress POC output for even cleaner workflow results.) If you want zero output on clean runs, the pattern above (only emit on finding path) already achieves that.
+**Note on silence:** `-S` suppresses the logs, but the PoC lines still go to
+stdout when there are findings, and a clean run still prints one empty line.
+That empty line is enough to turn a bare `1` into something Caido no longer
+reads as `true`, which is why the script captures Dalfox's output instead of
+letting it stream into the step result.
 
 ## Full example: If/Else + Create Finding
 
@@ -123,7 +129,7 @@ This adds a step to the workflow graph but is easier to debug.
 
 ## Updating from v2 guides
 
-Older Dalfox v2 documentation used `dalfox pipe --rawdata`. In v3 the equivalent is `dalfox scan --input-type raw-http` (or the hidden `dalfox pipe` compatibility command with adjusted input handling). The temp-file or process-substitution approach shown above is the most portable.
+Older Dalfox v2 documentation used `dalfox pipe --rawdata`. In v3 the equivalent is `dalfox scan --input-type raw-http <file>`. It takes a regular file path: a raw request on stdin (`dalfox pipe -i raw-http`) finds no targets, and a process substitution (`<(...)`) is refused as "not a regular file". That is why the script above writes a temp file.
 
 See the [Scanning Modes](../../guide/scanning-modes/#raw-http-mode) page for the canonical raw-http usage.
 

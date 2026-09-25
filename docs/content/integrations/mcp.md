@@ -189,10 +189,11 @@ list. The canonical MCP names above are what the tool schema advertises; the
 aliases exist so arguments written against the REST docs still run the scan
 they describe.
 
-Two REST options are deliberately absent here rather than aliased, and asking
-for them is an error: `callback_url` (a webhook that would let a model ship
-scan output to a host of its choosing) and `cookie_from_raw` (a server-side
-file read). Pass cookies directly via `cookies`.
+Two options from the other surfaces are deliberately absent here rather than
+aliased, and asking for them is an error: REST's `callback_url` (a webhook that
+would let a model ship scan output to a host of its choosing) and the CLI's
+`--cookie-from-raw` as `cookie_from_raw` (a server-side file read). Pass cookies
+directly via `cookies`.
 
 Three limits on the aliases, so they are not mistaken for a general REST
 compatibility mode:
@@ -212,8 +213,9 @@ compatibility mode:
 `scan_with_dalfox` — it sends no payloads, so options describing pacing,
 workers, WAF handling, blind XSS or waiting have nothing to act on and are
 refused. Its own field list is below. (`POST /preflight` on the REST side
-reuses the full scan body and ignores what it cannot use, so this is the one
-place the two surfaces genuinely differ.) Credentials and the target do reach
+reuses the full scan body: it paces discovery with `delay`, `worker` and
+`rate_limit` and ignores the rest, so this is the one place the two surfaces
+genuinely differ.) Credentials and the target do reach
 it: sending preflight without cookies would under-report the parameters an
 authenticated scan would find.
 
@@ -339,8 +341,8 @@ budget is emitted alone rather than dropped, so paging always advances.
 
 `progress.estimated_completion_pct` and `params_tested` advance live as each
 discovered parameter finishes, so they are usable for pacing polls — honor
-`suggested_poll_interval_ms`. Full status responses also include `settled`:
-it is `false` while a terminal worker is still draining and becomes `true` when
+`suggested_poll_interval_ms`. Once the scan has left `queued`, status responses
+also include `settled`: it is `false` while a terminal worker is still draining and becomes `true` when
 the record is safe to delete. A terminal response that is not yet settled
 keeps a non-zero suggested poll interval; wait for `settled: true` before
 calling `delete_scan_dalfox`.
@@ -444,9 +446,14 @@ The estimate counts both phases the scan runs per parameter — reflection and D
 The MCP server holds at most 100 active (queued or running) scans and 32
 concurrent preflights. A call past either limit is refused with a JSON-RPC
 `-32603` error saying the server is at capacity; unlike `-32602`, it is worth
-retrying once a scan finishes or is cancelled. Up to 1000 finished scans are
-kept; beyond that the oldest are dropped, and every terminal scan is purged an
-hour after it finishes.
+retrying once a scan finishes or is cancelled. A cancelled scan keeps its slot
+until its worker has actually stopped (`settled: true`). Up to 1000 finished
+scans are kept; beyond that the oldest are dropped, and every terminal scan is
+purged an hour after it finishes.
+
+A single scan tests at most 512 parameters. On a target that exposes more, the
+discovered set is truncated and the scan still ends `done`, so pass `param` to
+choose which ones matter.
 
 ## Structured results
 
@@ -476,9 +483,11 @@ read-only either: it sends no attack payloads, but it accepts `method` and `data
 its mining stage fires probe requests, so a `POST` preflight can change state on the
 target.
 
-The `initialize` handshake identifies the server as `dalfox` at its own version and
-returns `instructions` covering the intended tool order, how to read the finding axes,
-and the provenance rule below.
+The `initialize` handshake identifies the server as `dalfox` (display title
+`Dalfox XSS Scanner`) at its own version, with icons and the docs site as
+`websiteUrl`. It advertises the `tools`, `resources`, `prompts` and `completions`
+capabilities, and returns `instructions` covering the intended tool order, how to
+read the finding axes, and the provenance rule below.
 
 ## Progress, resources and prompts
 
@@ -492,8 +501,8 @@ reached the target. Nothing is published for the terminal state: the tool's own 
 that signal.
 
 **Cancellation.** Sending `notifications/cancelled` for an in-flight `wait=true` call
-stops the scan itself, not just the wait — the job settles `cancelled` and keeps whatever
-it found. That is deliberately different from the wait budget simply expiring
+stops the scan itself, not just the wait — the job settles `cancelled` with the
+`error_message` `the client cancelled the tool call` and keeps whatever it found. That is deliberately different from the wait budget simply expiring
 (`wait_timed_out: true`), which leaves the scan running so you can keep polling it.
 
 **Resources.** Scans are addressable, not only callable:
@@ -535,14 +544,15 @@ Because scans are async, the agent stays responsive. To fold a long scan into on
 
 ## Authorization & safety
 
-The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
-
-This includes a scan's `error_message`: when an authenticated session dies mid-scan,
-Dalfox reports the URL the *origin* redirected it to, so that field quotes the target
-even on a scan with no findings. Bodies carrying it — a status poll, a `/scans`-style
-listing, the matching resource — carry `_untrusted_content_notice` for that reason.
+The same rule applies as on the CLI, and Dalfox cannot check it for you: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
 
 **Findings are untrusted input to your agent.** Unlike the CLI and the REST API, MCP hands scan output to a model that acts on what it reads, and every quoted byte in a finding was chosen by the target. Dalfox labels those responses with `_untrusted_content_notice`, but the label is a reminder, not a sandbox — keep the scope decision (which target, which proxy, which callback) with the operator, and never let it be changed by something the scanner read off a page.
+
+The same goes for a scan's `error_message`: when an authenticated session dies
+mid-scan, Dalfox reports the URL the *origin* redirected it to, so that field
+quotes the target even on a scan with no findings. Bodies carrying it — a status
+poll, a `list_scans_dalfox` listing, the matching resource — carry
+`_untrusted_content_notice` for that reason.
 
 ## Troubleshooting
 

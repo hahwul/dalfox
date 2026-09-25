@@ -9,12 +9,7 @@ Dalfox는 시작할 때 설정 파일을 읽으므로 매번 같은 플래그를
 
 ## 파일 위치
 
-Dalfox는 다음 순서로 파일을 찾습니다.
-
-1. `$XDG_CONFIG_HOME/dalfox/config.toml`
-2. `$HOME/.config/dalfox/config.toml`
-
-같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
+Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있으면 `$XDG_CONFIG_HOME/dalfox/config.toml`을, 그렇지 않으면 `$HOME/.config/dalfox/config.toml`을 읽습니다. 같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
 
 `--config`로 다른 위치를 지정할 수 있습니다.
 
@@ -22,7 +17,7 @@ Dalfox는 다음 순서로 파일을 찾습니다.
 dalfox --config ./dalfox.toml scan https://target.app
 ```
 
-파일이 없으면, Dalfox는 처음 실행할 때 기본 경로에 템플릿을 생성합니다.
+파일이 없으면 Dalfox는 처음 실행할 때 기본 경로에 템플릿을 만듭니다. 모든 줄이 주석 처리되어 있으므로 직접 고치기 전까지는 아무것도 바꾸지 않습니다.
 
 ## 최소 설정
 
@@ -38,7 +33,7 @@ encoders = ["url", "html"]
 스캔을 실행하면 해당 플래그가 자동으로 적용됩니다.
 
 ```bash
-dalfox https://target.app?q=test
+dalfox 'https://target.app/?q=test'
 # → writes JSON results to results.json with workers=100
 ```
 
@@ -55,7 +50,7 @@ CLI flag  >  Config file  >  Built-in defaults
 dalfox scan --workers 20 https://target.app
 ```
 
-스캔 플래그를 쓰려면 `scan` 서브커맨드를 명시해야 합니다. `dalfox <TARGET>` 축약형은 대상과 전역 플래그만 받습니다. 켜고 끄는 스위치는 명령줄에서 켜기만 할 수 있으므로, 설정 파일의 `deep_scan = true`는 모든 실행에 적용됩니다. 자세한 내용은 [우선순위](../../reference/config/#우선순위)를 참고하세요.
+스캔 플래그를 쓰려면 `scan` 서브커맨드를 명시해야 합니다. `dalfox <TARGET>` 축약형은 대상과 전역 플래그만 받습니다. `deep_scan = true`처럼 설정 파일에서 켠 스위치는 끄는 명령줄 플래그가 없어서 모든 실행에 그대로 적용됩니다. 자세한 내용은 [우선순위](../../reference/config/#우선순위)를 참고하세요.
 
 ## 형식
 
@@ -94,7 +89,7 @@ silence = true
 | `remote_wordlists` | `["burp"]` | 원격 파라미터 워드리스트 |
 | `headers` | `["Accept: text/html"]` | 추가 요청 헤더 |
 | `user_agent` | `"Dalfox Scanner"` | 기본 User-Agent |
-| `waf_bypass` | `"auto"` | WAF 우회 모드(`auto`, `force`, `off`) |
+| `waf_bypass` | `"auto"` | WAF 우회 모드(`auto`, 탐지만 하려면 `off`) |
 | `insecure` | `true` | TLS 인증서 검증 건너뛰기(`false`면 검증 수행) |
 | `follow_redirects` | `true` | 3xx 응답 따라가기 |
 

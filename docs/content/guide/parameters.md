@@ -14,7 +14,7 @@ Finding XSS starts with finding the right parameter. Dalfox's discovery engine i
 3. **Active probing:** Fire a probe for each parameter to learn which special characters survive, refine the injection context, and detect servers that URL-decode more than once.
 4. **Payload generation:** Build context-aware payload sets (HTML, JS, attribute, CSS). Before a parameter's payloads go out, a **fast probe** sends one sandwich-marker request (plus a numeric-only fallback for filters that strip letters). If nothing reflects, the heavy payload loops are skipped for that parameter unless `--deep-scan` is set. When active probing already saw the marker come back, the fast probe reuses that answer instead of sending its own request.
 5. **Reflection check:** Send the payload, then see whether it comes back.
-6. **DOM verification:** Parse the response and confirm the payload reached an executable position. AST-based DOM-XSS analysis runs once per parameter on the fast-probe response, or on the first reflection response when the fast probe was skipped.
+6. **DOM verification:** Parse the response and confirm the payload reached an executable position. AST-based DOM-XSS analysis runs once over the landing page itself, then once per parameter on the fast-probe response (or on the first reflection response when the fast probe was skipped).
 
 ## Targeting specific parameters
 
@@ -51,23 +51,9 @@ dalfox scan https://target.app --remote-wordlists burp,assetnote
 
 Only one list is used per scan. When `--remote-wordlists` loads, it wins and `-W` is ignored; `-W` is the fallback if the remote fetch fails. Mined names are tested as query parameters.
 
-Dictionary and DOM candidates are tested in bounded query buckets instead of
-one request per name. The default bucket carries up to 64 canaries and stays
-under an approximately 8 KiB request-line budget. Reflected canaries identify
-their own parameter names in one response; when a bucket changes the response
-without reflecting a canary, Dalfox sends a same-width control and recursively
-splits the positive bucket four ways. This keeps a large wordlist broad while
-spending extra requests only on ambiguous, metric-only hits.
+Dictionary and DOM candidates are tested in buckets of up to 64 names per request (kept under an ~8 KiB request line), not one request per name. A name whose canary reflects is identified from that one response. When a bucket changes the response without reflecting anything, Dalfox compares it with a same-size control request and splits the bucket to find the name behind the change. Only those ambiguous buckets cost extra requests, so a large wordlist stays cheap.
 
-Attribution stays per name. Metric-only hits are trusted only when two
-identical clean requests return the same response; on a page whose body varies
-between requests (a rotating widget, a render-time footer) only a status-code
-change counts, and a single name is re-sent once before it is accepted. The
-names left in a bucket where another name reflected are re-probed without it.
-A bucket whose request fails, or that the server refuses the same way as its
-control (a query-length limit, for example), is split and retried instead of
-dropped, and names that show up together in one redirect `Location` are
-confirmed in smaller groups rather than all credited to the redirect.
+On a page whose body differs between identical requests (a rotating widget, a timestamp), only a status-code change counts as such a response change. A bucket that fails, or that the server rejects for its size (a query-length limit), is split and retried rather than dropped.
 
 With no custom or remote wordlist selected, the built-in seed keeps Dalfox's
 historical XSS-oriented names and adds an attributed, broader Param Miner seed
@@ -155,7 +141,7 @@ dalfox scan https://target.app/api \
   -d '{"filter":"FUZZ"}'
 ```
 
-With a marker set, discovery and mining are skipped. Every query value, form-body value, top-level JSON string value, header value, and cookie value that contains `FUZZ` becomes a parameter, and each payload replaces that whole value. A marker anywhere else (a path segment, a nested JSON field) is not picked up.
+With a marker set, discovery, mining, and active probing are skipped. Every query value, form-body value, top-level JSON string value, header value, and cookie value that contains `FUZZ` becomes a parameter, and each payload replaces that whole value. A marker anywhere else (a path segment, a nested JSON field) is not picked up.
 
 You can also target a query parameter or a header directly:
 
@@ -251,7 +237,7 @@ All four are treated as "reflected": discovery records the parameter and the sca
 
 A reflection whose every occurrence sits inside `<textarea>`, `<title>`, `<noscript>`, `<xmp>`, or `<plaintext>` is not reported: content there renders as text, so it would only produce false positives. The parameter is still scanned, so a payload that closes the element first (`</textarea><svg onload=…>`) can still be found.
 
-The same gate drops a few other inert shapes: a reflection that only lands inside `<script>` where the parsed JavaScript shows it produces no sink call, and an echo the server escaped (percent- or entity-encoded) outside a URL-valued attribute.
+The same gate drops a few other inert shapes: a reflection that only lands inside `<script>` where the parsed JavaScript shows it produces no sink call, an echo the server escaped (percent- or entity-encoded) outside a URL-valued attribute, and a `javascript:` / `data:` payload that never lands at the start of a URL-valued attribute. Responses a browser would not render as markup (JSON, `text/plain`, …) are gated separately, by [content type](../detection-model/#what-the-response-content-type-allows).
 
 ## Next
 

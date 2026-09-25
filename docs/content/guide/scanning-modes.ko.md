@@ -121,8 +121,8 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 | 기록된 상태 | 언제 | 다음 실행 |
 |------------|------|----------|
 | `completed` | 세션이 살아 있는 상태로 끝까지 스캔됨 | 건너뜀 |
-| `cancelled` | Ctrl-C, `--scan-timeout` 만료, 스캔 도중 세션 끊김, 심각한 전송 손실(`meta.incomplete`) | 재시도 |
-| `error` | 프리플라이트에서 제외됨 — 도달 불가, content-type 불일치, `--max-targets-per-host` 상한 | 재시도 |
+| `cancelled` | Ctrl-C, `--scan-timeout` 만료, `--limit` 도달로 인한 중단, 스캔 도중 세션 끊김, 심각한 전송 손실(`meta.incomplete`) | 재시도 |
+| `error` | 프리플라이트에서 제외됨(도달 불가, content-type 불일치, `--max-targets-per-host` 상한), 또는 스캔 워커 크래시 | 재시도 |
 
 대상의 식별자는 URL, 메서드, 그리고 요청에 실리는 데이터(본문, 헤더, 쿠키, user-agent)의 해시입니다. raw HTTP·HAR 입력에 캡처된 값뿐 아니라 `-H`, `--cookies`, `--user-agent`로 준 값도 포함되므로, 캡처가 바뀌면 다시 스캔합니다. **실행 전체에 적용되는 자격 증명 값은 제외됩니다**: `--cookies`와 `--cookie-from-raw`의 모든 쿠키 값, 그리고 `-H`로 준 `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key` / `*-Api-Key`, `X-Auth-Token` / `*-Token`, `X-CSRF-Token` / `X-XSRF-Token`, `*-Session-Id` / `X-Session-Token`, `X-Access-Key`, `X-JWT-Assertion`의 값입니다. 이 플래그들은 모든 대상에 적용되고 다시 로그인할 때 갱신하는 값이므로, 세션을 교체해도 다시 스캔하지 않고 이어서 진행합니다. 헤더나 쿠키를 추가·삭제하면 여전히 다시 스캔합니다. 반면 raw HTTP·HAR 캡처 **안에** 들어 있는 자격 증명은 식별자에 포함됩니다. `Authorization`만 다른 두 캡처(테넌트 A와 B)는 서로 다른 요청이므로 따로 기록됩니다. 같은 플래그로 다른 *계정*을 넘겨도 이어서 진행되므로, 계정마다 별도의 `--state-file`을 쓰세요. 파일에는 해시만 저장되고 값 자체는 기록되지 않습니다. 같은 플래그로 실행하면 식별자도 같으므로, 하나의 state 파일로 `--input-type file` 한 번짜리 실행뿐 아니라 URL 하나씩 도는 셸 루프도 그대로 커버할 수 있습니다.
 
@@ -152,9 +152,9 @@ Burp, Caido, ZAP에서 캡처한 요청을 파일로 저장한 뒤 Dalfox에 넘
 dalfox scan --input-type raw-http request.txt
 ```
 
-이 파일은 표준 raw HTTP 요청(메서드 + 경로 + 헤더 + 빈 줄 + 본문)입니다. Dalfox는 헤더, 쿠키, 본문 파라미터를 보존합니다. 꼭 필요한 헤더만 버리는데, 주입할 본문마다 다시 계산하는 `Content-Length` / `Transfer-Encoding`, hop-by-hop 헤더와 `Accept-Encoding`, 그리고 copy-as-cURL 캡처에 흔히 섞이는 HTTP/2 `:authority` 가상 헤더처럼 HTTP 클라이언트가 보낼 수 없는 줄입니다.
+이 파일은 표준 raw HTTP 요청(메서드 + 경로 + 헤더 + 빈 줄 + 본문)입니다. Dalfox는 헤더, 쿠키, 본문 파라미터를 보존합니다. 꼭 필요한 헤더만 버리는데, URL에서 가져오는 `Host`, 주입할 본문마다 다시 계산하는 `Content-Length` / `Transfer-Encoding`, hop-by-hop 헤더와 `Accept-Encoding`, 그리고 HTTP/1.1 클라이언트가 보낼 수 없는 줄입니다. copy-as-cURL이나 HTTP/2 캡처에 흔히 섞이는 HTTP/2 가상 헤더(`:authority`, `:scheme`)는 호스트와 스킴을 정하는 데만 쓰고 전송하지 않습니다.
 
-요청 라인에 경로만 있으면(`GET /search HTTP/1.1`) HTTP와 HTTPS 중 무엇으로 보낸 요청인지 알 수 없으므로, Dalfox는 캡처 내용에서 스킴을 정합니다. HTTP/2 `:scheme` 가상 헤더가 가장 우선하고, 그다음 `HTTP/2` / `HTTP/3` 요청 라인이면 HTTPS, 그다음 `Host`가 `:443`으로 끝나면 HTTPS이며, 그 밖에는 `http://`로 스캔합니다. 요청 라인에 절대 URL(`GET https://app/search HTTP/1.1`)이 있으면 그대로 사용합니다.
+요청 라인에 경로만 있으면(`GET /search HTTP/1.1`) HTTP와 HTTPS 중 무엇으로 보낸 요청인지 알 수 없으므로, Dalfox는 캡처 내용에서 스킴을 정합니다. `:scheme` 가상 헤더가 가장 우선하고, 그다음 다른 HTTP/2 흔적(`HTTP/2` / `HTTP/3` 요청 라인이나 `:authority` 가상 헤더)이 있으면 HTTPS, 그다음 `Host`가 `:443`으로 끝나면 HTTPS이며, 그 밖에는 `http://`로 스캔합니다. 요청 라인에 절대 URL(`GET https://app/search HTTP/1.1`)이 있으면 그대로 사용합니다.
 
 실시간 프록시 워크플로, 그중에서도 Caido Active Workflows는 전용 [Caido 연동 가이드](../../integrations/caido/)를 참고하세요. 정확한 셸 패턴, If/Else 노드에서의 Caido 불리언 함정, 결과를 자동으로 Findings로 전환하는 방법을 다룹니다.
 
@@ -171,9 +171,9 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 요청은 URL + 메서드로 중복 제거되고 다른 모든 모드와 동일한 스코프 필터를 거칩니다. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
+HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드로 판단하고 본문은 비교하지 않으므로, 같은 URL에 본문만 다른 POST 두 개는 첫 번째 것 하나로 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
-CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
+CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`는 캡처에 이미 있는 헤더를 대체하지 않고 두 값을 모두 보내므로, 오래된 헤더는 덮어쓰려 하지 말고 캡처에서 지우세요. 예외는 `-H 'Cookie: …'`로, 캡처된 쿠키를 통째로 대체합니다. 캡처된 쿠키에 하나를 더하려면 `--cookies`를 쓰세요. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
 
 ## 저장형 XSS 모드 (SXSS)
 

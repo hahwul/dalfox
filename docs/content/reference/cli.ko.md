@@ -41,6 +41,8 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 | `1` | 성공, 탐지 결과 보고됨 (티어 무관 — `V`만 게이트하려면 `--only-poc v`와 함께) |
 | `2` | 입력 / 설정 / 런타임 오류 |
 
+`server`와 `mcp`는 시작하지 못하면(예: 포트가 이미 사용 중) `2`로 종료합니다. `payload`는 알 수 없는 선택자를 받으면 `2`로 종료합니다.
+
 ---
 
 ## `dalfox scan`
@@ -114,11 +116,11 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
-| `--include-url` | — | 포함할 URL의 정규식 패턴 |
-| `--exclude-url` | — | 제외할 URL의 정규식 패턴 |
-| `--ignore-param` | — | 건너뛸 파라미터 이름 |
-| `--out-of-scope` | — | 건너뛸 와일드카드 도메인 패턴 |
-| `--out-of-scope-file` | — | 범위 외 도메인을 나열한 파일. 읽을 수 없는 경로는 치명적 오류(`FILE_READ_ERROR`)입니다 — 제외 목록 없이 계속 진행하면 그 목록에 적힌 호스트를 전부 공격하게 됩니다 |
+| `--include-url` | — | 이 정규식에 매칭되는 URL만 스캔합니다(부분 매칭). 패턴을 더 주려면 플래그를 반복하며, URL은 그중 하나 이상에 매칭되어야 합니다 |
+| `--exclude-url` | — | 이 정규식에 매칭되는 URL을 건너뜁니다(부분 매칭). 패턴을 더 주려면 플래그를 반복합니다 |
+| `--ignore-param` | — | 건너뛸 파라미터 이름(정확히 일치). 이름을 더 주려면 플래그를 반복합니다 |
+| `--out-of-scope` | — | 호스트가 이 패턴에 맞는 대상을 건너뜁니다. `*.example.com`은 `example.com`과 모든 하위 도메인에 맞고, 그 밖의 값은 호스트와 정확히 같아야 합니다(대소문자 무관). 패턴을 더 주려면 플래그를 반복합니다: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. 쉼표는 구분자가 아닙니다 |
+| `--out-of-scope-file` | — | 범위 외 패턴을 한 줄에 하나씩 적은 파일(빈 줄과 `#` 줄은 무시). 매칭 방식은 `--out-of-scope`와 같습니다. 읽을 수 없는 경로는 치명적 오류(`FILE_READ_ERROR`)입니다 — 제외 목록 없이 계속 진행하면 그 목록에 적힌 호스트를 전부 공격하게 됩니다 |
 
 ### 탐색
 
@@ -169,12 +171,12 @@ dalfox scan [TARGETS]... [FLAGS]
 |------|-------|---------|-------------|
 | `--encoders` | `-e` | `url,html` | 쉼표로 구분된 인코더: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `--remote-payloads` | — | — | `portswigger`, `payloadbox` |
-| `--custom-blind-xss-payload` | — | — | 사용자 지정 블라인드 페이로드 템플릿 파일 |
+| `--custom-blind-xss-payload` | — | — | 블라인드 페이로드 템플릿 파일(한 줄에 템플릿 하나). 각 줄에는 `{callback}`이 있어야 하며, 이 자리에 `-b` URL이나 OOB 콜백 URL이 들어갑니다. `{callback}`이 없는 줄은 경고와 함께 건너뛰고, 쓸 수 있는 줄이 하나도 없으면 내장 템플릿을 대신 보냅니다. `-b`나 `--blind-oob`와 함께일 때만 사용됩니다 |
 | `--blind` | `-b` | — | 블라인드 XSS 콜백 URL |
 | `--blind-oob[=servers]` | — | — | interactsh로 OOB/OAST 블라인드 XSS를 활성화합니다; 선택적으로 쉼표로 구분된 서버 도메인 (기본값: 공용 메시). `=` 형식이 필요합니다: `--blind-oob=oast.fun,oast.me` |
 | `--blind-oob-secret` | — | — | 자체 호스팅 interactsh 서버용 인증 토큰 (register/poll/deregister 시 `Authorization`으로 전송) |
 | `--blind-oob-wait` | — | `30` | 모든 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) (`0` = 스캔 종료 후 추가 대기 없음) |
-| `--custom-payload` | — | — | 사용자 지정 페이로드 파일 |
+| `--custom-payload` | — | — | 사용자 지정 페이로드 파일(한 줄에 하나, 빈 줄과 `#` 줄은 무시). `--only-custom-payload`가 없으면 내장 페이로드에 추가됩니다 |
 | `--only-custom-payload` | — | false | 사용자 지정 페이로드만 사용합니다. `--custom-payload`가 필요합니다 (없으면 종료 코드 `2`) |
 | `--custom-alert-value` | — | `1` | `alert()`/`prompt()`/`confirm()` 안에 들어가는 값 |
 | `--custom-alert-type` | — | `none` | `none` 또는 `str` |
@@ -195,9 +197,9 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
-| `--waf-bypass` | `auto` | `auto`, `force`, `off` |
-| `--skip-waf-probe` | false | 능동 WAF 핑거프린팅을 건너뜁니다 |
-| `--force-waf` | — | `--waf-bypass force`일 때 사용할 WAF 이름: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (대소문자 무관; `cf`, `modsec`, `incapsula`, `netscaler` 같은 별칭도 허용) |
+| `--waf-bypass` | `auto` | `auto`는 탐지된 WAF에 맞는 우회 변형과 추가 인코더를 적용합니다. `off`는 WAF를 탐지해 보고만 하고 페이로드는 바꾸지 않습니다. `force`도 받지만 현재는 `auto`와 똑같이 동작하므로, WAF를 지정하려면 `--force-waf`를 쓰세요 |
+| `--skip-waf-probe` | false | 능동 자극 프로브를 건너뜁니다(헤더 기반 탐지는 그대로 실행) |
+| `--force-waf` | — | 탐지 결과 대신 대상을 이 WAF로 간주합니다. `auto`와 `force`에서 동작하며, `off`에서는 WAF를 보고만 하고 우회는 적용하지 않습니다. 이름: `cloudflare`, `aws`, `akamai`, `imperva`, `modsecurity`, `owasp-crs`, `sucuri`, `f5`, `barracuda`, `fortiweb`, `azure`, `cloudarmor`, `fastly`, `wordfence`, `citrix` (대소문자 무관; `cf`, `modsec`, `incapsula`, `netscaler` 같은 별칭도 허용) |
 | `--waf-evasion` | false | WAF 탐지 시 적응형 회피: 요청 간 무작위 지터 + 차단된 응답이 몰릴 때 점증하는 쿨다운. 이 플래그가 없어도 WAF별 페이싱 힌트는 탐지 시 자동으로 적용됩니다. `--rate-limit`와 함께 쓰면 좋습니다. |
 | `--waf-min-confidence` | `0.3` | 이 신뢰도 미만의 핑거프린트를 제거합니다 (0.0–1.0). 기본값 `0.3`은 `Server: Google Frontend`(0.15) 같은 약한 매칭을 억제합니다. 약한 신호를 유지하려면 더 낮게 설정하고, `1.0`은 완전한 신뢰도를 가진 핑거프린트만 유지합니다. |
 
@@ -217,17 +219,17 @@ dalfox server [FLAGS]
 | `--host` | `-H` | `127.0.0.1` | 바인딩 주소 |
 | `--api-key` | — | — | 필수 `X-API-KEY` 헤더 값 (또는 `DALFOX_API_KEY`; 둘 다 있으면 플래그가 우선). 빈 값 `--api-key ""`는 인증을 끕니다 |
 | `--log-file` | — | — | 일반 텍스트 로그 파일 (Unix에서는 `0600` 권한으로 생성; 기존 파일을 그룹/기타 사용자가 읽을 수 있으면 서버가 시작 시 경고) |
-| `--allowed-origins` | — | — | CORS 오리진 (쉼표로 구분, `*` 및 `regex:` 지원) |
+| `--allowed-origins` | — | — | CORS 오리진(쉼표로 구분). 정확한 오리진, `regex:<pattern>`, `*`를 쓸 수 있으며, 패턴은 포트를 포함한 오리진 전체와 맞아야 합니다 |
 | `--jsonp` | — | false | 응답을 JSONP로 감쌉니다 |
 | `--callback-param-name` | — | `callback` | JSONP 콜백 파라미터 |
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS 메서드 |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS 헤더 |
-| `--rate-limit` | — | `0` | **스캔마다** 적용되는 서버 전역 아웃바운드 요청 속도 상한 (초당 요청 수, `0` = 무제한). 제출된 스캔은 더 낮게 요청할 수는 있어도 이 값을 넘을 수는 없습니다 |
-| `--scan-timeout` | — | `0` | **스캔마다** 적용되는 서버 전역 전체 실행 시간 상한(초, `0` = 무제한). 제출된 스캔은 더 짧게 요청할 수는 있어도 이 값을 넘을 수는 없습니다 |
+| `--rate-limit` | — | — | **스캔마다** 적용되는 서버 전역 아웃바운드 요청 속도 상한 (초당 요청 수, 지정하지 않거나 `0`이면 무제한). 제출된 스캔은 더 낮게 요청할 수는 있어도 이 값을 넘을 수는 없습니다 |
+| `--scan-timeout` | — | — | **스캔마다** 적용되는 서버 전역 전체 실행 시간 상한(초, 지정하지 않거나 `0`이면 무제한). 제출된 스캔은 더 짧게 요청할 수는 있어도 이 값을 넘을 수는 없습니다 |
 | `--max-concurrent-scans` | — | `100` | 동시(큐 대기 + 실행 중) 스캔 수 제한. 초과하면 새 제출은 `503`을 받습니다 (`0` = 무제한) |
-| `--allowed-hosts` | — | — | 요청 `Host` 헤더에서 추가로 허용할 호스트명. 바인딩 호스트, `localhost`, IP 리터럴은 기본 허용입니다. 리버스 프록시가 공개 호스트명을 전달할 때 필요합니다 |
+| `--allowed-hosts` | — | — | 요청 `Host` 헤더에서 추가로 허용할 호스트명(쉼표로 구분). 바인딩 호스트, `localhost`, IP 리터럴은 기본 허용입니다. 리버스 프록시가 공개 호스트명을 전달할 때 필요합니다 |
 | `--max-retained-scans` | — | `1000` | 메모리에 보관하는 *종료된* 스캔 수 상한. 초과하면 가장 오래된 것부터 제거됩니다 (`0` = 무제한). 큐에 있거나 실행 중인 스캔은 제거되지 않습니다 |
-| `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 `413` 응답 |
+| `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 `400`(`invalid request body`)으로 거부 |
 
 엔드포인트는 [REST API 서버](../../integrations/server/)를 참고하세요.
 
@@ -271,7 +273,7 @@ MCP stdio 서버를 실행합니다.
 dalfox mcp
 ```
 
-추가 플래그는 없습니다. 도구 정의는 [MCP 서버](../../integrations/mcp/)를 참고하세요.
+전역 플래그 외에는 플래그가 없습니다. 도구 정의는 [MCP 서버](../../integrations/mcp/)를 참고하세요.
 
 ---
 
@@ -296,9 +298,22 @@ dalfox completion zsh > "${fpath[1]}/_dalfox"
 dalfox completion fish > ~/.config/fish/completions/dalfox.fish
 ```
 
-stdout에는 스크립트 외에 아무것도 출력되지 않으므로, 출력을 그대로 파일로 리다이렉트해도 안전합니다.
+stdout에는 스크립트 외에 아무것도 출력되지 않으므로, 출력을 그대로 파일로 리다이렉트해도 안전합니다. 아래의 숨김 명령은 생성된 스크립트에 포함되지 않습니다.
 
-숨김 서브커맨드(구버전 호환용 `url` / `file` / `pipe`와 패키징 헬퍼 `man`)는 `--help`에서와 마찬가지로 생성된 스크립트에도 포함되지 않습니다.
+---
+
+## 숨김 명령
+
+`--help`와 자동완성 스크립트에는 나오지 않는 명령입니다.
+
+| 명령 | 같은 동작 |
+|------|-----------|
+| `dalfox url -u <URL> [FLAGS]` | `dalfox scan -i url <URL> [FLAGS]` |
+| `dalfox file <FILE> [FLAGS]` | `dalfox scan -i file <FILE> [FLAGS]` |
+| `dalfox pipe [FLAGS]` | `dalfox scan -i pipe [FLAGS]` (stdin에서 대상 읽기) |
+| `dalfox man` | roff 형식 man 페이지를 stdout으로 출력 (패키징용) |
+
+`url`, `file`, `pipe`는 v2 시절 스크립트를 위해 남아 있으며 `dalfox scan` 플래그를 모두 받습니다. `-i`를 명시하면 그 값이 우선하므로 `dalfox pipe -i har`는 stdin에서 HAR 파일을 읽습니다. 새로 작성하는 스크립트에서는 `dalfox scan`을 쓰세요.
 
 ---
 

@@ -9,12 +9,7 @@ Dalfox reads a config file on startup so you don't have to pass the same flags e
 
 ## Where the file lives
 
-Dalfox looks in this order:
-
-1. `$XDG_CONFIG_HOME/dalfox/config.toml`
-2. `$HOME/.config/dalfox/config.toml`
-
-A `config.json` in the same directory is read when there is no `config.toml`.
+Dalfox reads `$XDG_CONFIG_HOME/dalfox/config.toml` when `XDG_CONFIG_HOME` is set, and `$HOME/.config/dalfox/config.toml` otherwise. A `config.json` in the same directory is read when there is no `config.toml`.
 
 You can point anywhere else with `--config`:
 
@@ -22,7 +17,7 @@ You can point anywhere else with `--config`:
 dalfox --config ./dalfox.toml scan https://target.app
 ```
 
-If no file exists, Dalfox creates a template at the default path the first time you run it.
+If no file exists, Dalfox creates a template at the default path the first time you run it. Every line in it is commented out, so it changes nothing until you edit it.
 
 ## A minimal config
 
@@ -38,7 +33,7 @@ encoders = ["url", "html"]
 Run a scan and those flags apply automatically:
 
 ```bash
-dalfox https://target.app?q=test
+dalfox 'https://target.app/?q=test'
 # → writes JSON results to results.json with workers=100
 ```
 
@@ -55,7 +50,7 @@ Anything on the command line wins. This lets you keep sensible defaults in the c
 dalfox scan --workers 20 https://target.app
 ```
 
-Scan flags need the explicit `scan` subcommand; the bare `dalfox <TARGET>` form accepts only targets and the global flags. On/off switches can only be turned on from the command line, so a `deep_scan = true` in the config holds for every run. See [Precedence](../../reference/config/#precedence) for the details.
+Scan flags need the explicit `scan` subcommand; the bare `dalfox <TARGET>` form accepts only targets and the global flags. A switch the config turns on, such as `deep_scan = true`, stays on for every run, because there is no command-line flag that turns it off. See [Precedence](../../reference/config/#precedence) for the details.
 
 ## Formats
 
@@ -94,7 +89,7 @@ Anything that has a CLI flag under `dalfox scan` can live in the `[scan]` table 
 | `remote_wordlists` | `["burp"]` | Remote parameter wordlists |
 | `headers` | `["Accept: text/html"]` | Extra request headers |
 | `user_agent` | `"Dalfox Scanner"` | Default User-Agent |
-| `waf_bypass` | `"auto"` | WAF bypass mode (`auto`, `force`, `off`) |
+| `waf_bypass` | `"auto"` | WAF bypass mode (`auto`, or `off` to detect only) |
 | `insecure` | `true` | Skip TLS certificate verification (`false` to enforce) |
 | `follow_redirects` | `true` | Follow 3xx responses |
 

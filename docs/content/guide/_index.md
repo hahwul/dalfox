@@ -4,7 +4,7 @@ description = "Deep dives into how Dalfox works and how to drive it for real tar
 weight = 2
 +++
 
-The guide covers the concepts that make Dalfox effective: how parameters are discovered, which payloads run where, how Stored XSS detection works, and how to handle WAFs.
+The guide covers the concepts that make Dalfox effective: how parameters are discovered, which payloads run where, how Stored XSS detection works, how to handle WAFs, and what each finding actually proves.
 
 Each page is self-contained. Read them in order the first time, then come back as reference.
 

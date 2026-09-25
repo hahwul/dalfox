@@ -5,7 +5,7 @@ weight = 6
 toc = true
 +++
 
-모든 스캔은 동일한 내부 결과 구조를 만듭니다. Dalfox는 이를 선택한 형식으로 렌더링합니다. 기계 판독 형식은 배너를 자동으로 빼므로 파일이 깔끔하게 유지됩니다.
+모든 스캔은 동일한 내부 결과 구조를 만듭니다. Dalfox는 이를 선택한 형식으로 렌더링합니다. `plain`을 제외한 모든 형식은 배너를 빼므로, 파일로 리디렉션한 리포트가 깔끔하게 유지됩니다.
 
 ## 형식 선택
 
@@ -36,7 +36,7 @@ dalfox scan https://target.app -f jsonl -o findings.jsonl
 
 | 필드 | 예시 | 의미 |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R`, `I` | 신뢰도: Vulnerable / AST 탐지 / Reflected / Informational |
+| `type` | `V`, `A`, `R`, `I` | 탐지 등급: Vulnerable / AST 탐지 / Reflected / Informational |
 | `type_description` | `"Vulnerable - dalfox asserts this input is exploitable; act on it"` | 사람이 읽는 라벨(한 단어가 아니라 문장 전체) |
 | `detection_method` | `"ast"` | 어떻게 찾았는지: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | 취약점이라고 주장할 수 있는지 (`high` / `low`). `I`에는 없음 |
@@ -135,7 +135,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 - `total_requests`
 - `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃). 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다
 - `findings_count`
-- `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 도중에 끊긴 경우 `error_code` / `error_message`, 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
+- `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 도중에 끊긴 경우 `error_code`(세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`도), 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/) 모드와 그것이 병합한 타깃 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
 - `targets_unparsable` — 타깃 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/) 참고
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
@@ -144,11 +144,11 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 
 세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)에 `"error_code": "SESSION_LOST"`, 그리고 감지된 신호가 `"error_message"`에 담겨 보고됩니다. 절대 `"clean"`으로는 표시되지 않습니다.
 
-**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복으로 실려, GitHub 코드 스캐닝을 비롯한 소비 도구가 컨텍스트를 잃지 않습니다. 각 결과의 `ruleId`는 `dalfox/cwe-<n>`(XSS는 `dalfox/cwe-79`, 오래된 라이브러리는 `dalfox/cwe-1104`)이고, `level`은 `severity`를 따르며(High → `error`, Medium → `warning`, Low / Info → `note`), PoC URL은 location의 `uri`에 들어갑니다. `partialFingerprints["vulnIdentity/v1"]`은 코드 스캐닝이 실행 간에 같은 건을 맞춰 볼 수 있게 하는 안정적인 해시입니다. 탐지 결과 필드(`type`, `inject_type`, `param`, `payload`, `severity` 등)는 결과의 `properties` 아래에 있습니다.
+**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복으로 실려, GitHub 코드 스캐닝을 비롯한 소비 도구가 컨텍스트를 잃지 않습니다. 각 결과의 `ruleId`는 `dalfox/cwe-<n>`(XSS는 `dalfox/cwe-79`, 오래된 라이브러리는 `dalfox/cwe-1104`)이고, `level`은 `severity`를 따르며(High → `error`, Medium → `warning`, Low / Info → `note`), PoC URL은 location의 `uri`에 들어갑니다. `partialFingerprints["vulnIdentity/v1"]`은 코드 스캐닝이 실행 간에 같은 건을 맞춰 볼 수 있게 하는 안정적인 해시입니다. 탐지 결과 필드(`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence` 등)는 결과의 `properties` 아래에 있고, `message.text`에는 `message_str`과 근거가 함께 담깁니다.
 
 **TOML**에서는 최상위 `[meta]` 테이블로 나타납니다(탐지 결과는 `[[results]]` 아래).
 
-**Markdown**에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다.
+**Markdown**에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다. 실패한 요청, incomplete, 중복 제거된 대상, 베이스라인, 재개처럼 무슨 일이 있었을 때만 의미 있는 행은 그때만 나타납니다.
 
 Plain 텍스트 출력은 탐지 결과만 담습니다.
 

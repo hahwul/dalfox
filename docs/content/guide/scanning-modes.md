@@ -121,8 +121,8 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 | Recorded outcome | When | Next run |
 |------------------|------|----------|
 | `completed` | The target was scanned to the end with a live session | Skipped |
-| `cancelled` | Ctrl-C, `--scan-timeout` expiry, a session that died mid-scan, or severe transport loss (`meta.incomplete`) | Retried |
-| `error` | Dropped during preflight — unreachable, content-type mismatch, `--max-targets-per-host` cap | Retried |
+| `cancelled` | Ctrl-C, `--scan-timeout` expiry, a `--limit` stop, a session that died mid-scan, or severe transport loss (`meta.incomplete`) | Retried |
+| `error` | Dropped during preflight (unreachable, content-type mismatch, `--max-targets-per-host` cap), or a scan worker crashed | Retried |
 
 A target's resume identity is its URL, its method, and a hash of the request data it is sent with: body, headers, cookies, and user-agent. That covers data captured in raw HTTP and HAR inputs as well as `-H`, `--cookies`, and `--user-agent`, so a changed capture is scanned again. **Run-wide credential values are left out**: every `--cookies` and `--cookie-from-raw` cookie value, and the `-H` values of `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key` / `*-Api-Key`, `X-Auth-Token` / `*-Token`, `X-CSRF-Token` / `X-XSRF-Token`, `*-Session-Id` / `X-Session-Token`, `X-Access-Key`, and `X-JWT-Assertion`. Those flags apply to every target and are what you refresh when you log in again, so a rotated session resumes instead of rescanning; adding or removing a header or cookie still counts. Credentials *inside* an imported raw HTTP or HAR capture do count: two captures that differ only by `Authorization` (tenant A vs tenant B) are distinct requests and are tracked separately. Supplying a different *account* through the same flags also resumes, so use a separate `--state-file` per account. Only the hash is stored; the values never reach the state file. Invocations with the same flags produce the same identity, so one state file can back a shell loop of per-URL invocations as easily as a single `--input-type file` run.
 
@@ -152,9 +152,9 @@ Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalf
 dalfox scan --input-type raw-http request.txt
 ```
 
-The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves the headers, cookies, and body parameters. It drops only the headers it has to: `Content-Length` / `Transfer-Encoding` (recomputed for each injected body), hop-by-hop and `Accept-Encoding` headers, and lines an HTTP client cannot send, such as the HTTP/2 `:authority` pseudo-header a copy-as-cURL capture often includes.
+The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves the headers, cookies, and body parameters. It drops only the headers it has to: `Host` (taken from the URL), `Content-Length` / `Transfer-Encoding` (recomputed for each injected body), hop-by-hop and `Accept-Encoding` headers, and lines an HTTP/1.1 client cannot send. HTTP/2 pseudo-headers (`:authority`, `:scheme`), which copy-as-cURL and HTTP/2 captures often include, are read for the host and scheme but never sent.
 
-A request line with a bare path (`GET /search HTTP/1.1`) does not say whether the request went over HTTP or HTTPS, so Dalfox takes the scheme from the capture: an HTTP/2 `:scheme` pseudo-header wins, then an `HTTP/2` / `HTTP/3` request line means HTTPS, then a `Host` ending in `:443`; anything else is scanned over `http://`. An absolute URL in the request line (`GET https://app/search HTTP/1.1`) is used as is.
+A request line with a bare path (`GET /search HTTP/1.1`) does not say whether the request went over HTTP or HTTPS, so Dalfox takes the scheme from the capture: a `:scheme` pseudo-header wins, then any other HTTP/2 sign (an `HTTP/2` / `HTTP/3` request line or an `:authority` pseudo-header) means HTTPS, then a `Host` ending in `:443`; anything else is scanned over `http://`. An absolute URL in the request line (`GET https://app/search HTTP/1.1`) is used as is.
 
 For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../../integrations/caido/)**. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
 
@@ -171,9 +171,9 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target; requests are deduplicated by URL + method and run through the same scope filters as every other mode. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
+Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped by URL + method; bodies are not compared, so two POSTs to the same URL with different bodies collapse into the first. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
 
-CLI request flags still apply on top, for HAR and raw HTTP alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
+CLI request flags still apply on top, for HAR and raw HTTP alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). `-H` does not replace a header the capture already carries: both values are sent, so remove a stale header from the capture rather than overriding it. The exception is `-H 'Cookie: …'`, which replaces the captured cookies outright; use `--cookies` to add a cookie alongside them. Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
 
 ## Stored XSS mode (SXSS)
 

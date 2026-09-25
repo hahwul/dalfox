@@ -25,36 +25,28 @@ A payload that comes back on a retrieval page is reported as `R`; one that also 
 
 Stored mode is strictly serial: one parameter at a time, one request at a time, because write ordering and the retrieval retries assume it. `--workers` does not speed it up.
 
-The write endpoint does not need to echo what you submit. Dalfox keeps a stored
-field even when the submit response just says "saved", and it does not use that
-non-rendering response to decide which characters the sink filters — so a
-form-backed stored sink is tested with the full payload set rather than skipped.
+The write endpoint does not need to echo what you submit. A submit response that
+just says "saved" is fine, and Dalfox does not use it to decide which characters
+the sink filters.
 
-Every parameter is sent the same payloads, and a stored sink keeps whatever it
-is given, so once one field has stored a payload the retrieval page shows it for
-the rest of the scan. To keep findings on the right field, before a parameter
-injects anything Dalfox snapshots the retrieval page(s) once; a payload is
-credited to that parameter only when its injection makes the payload appear
-*more* often than the snapshot already showed. A copy another field stored
-earlier is already in the snapshot, so it is never mis-credited. The snapshot
-costs one extra GET per retrieval URL per parameter.
+Every field gets the same payloads, and a stored value stays on the page, so
+before a parameter sends its payloads Dalfox does two things:
 
-Right after the snapshot, Dalfox re-probes the field once: if that probe's own
-injection does not raise the marker count on the retrieval page (or in the write
-response), the field does not store here and its payload catalog is skipped. This
-stops a form's non-storing fields — which would otherwise pass the reflection
-probe on the marker a sibling field stored — from running the whole catalog. The
-probe tries both a long and a short marker, so a sink that only keeps short
-values is not mistaken for a non-storing one.
+- **Snapshot.** It fetches each retrieval page once. A payload is credited to the
+  parameter only when that parameter's injection makes it appear *more* often
+  than the snapshot showed, so a copy another field stored earlier is never
+  mis-credited. This costs one GET per retrieval URL per parameter.
+- **Store probe.** It injects a marker, a long one and then a short one for sinks
+  that keep only short values. If neither raises the count on a retrieval page
+  (or in the write response), the field does not store and its payloads are
+  skipped.
 
-The probe also observes *when* the store becomes visible. A synchronous sink
-(visible immediately) lets Dalfox skip re-fetching a payload that does not
-appear, keeping the request count low. A write-behind sink (visible only after a
-delay) keeps the full per-payload retrieval retries so a delayed payload is not
-missed; if your target stores slower than the default retry window, raise
-`--sxss-retries` (default `3`, maximum `20`). Retry *n* waits 500 ms × *n*,
-capped at 5 s per wait. `--deep-scan` skips the store probe and runs the full
-catalog on every field.
+The probe also shows *when* the store becomes visible. If it is visible at once,
+Dalfox checks each payload with a single retrieval pass. If it shows up only
+after a delay (a write-behind store), every payload keeps the full retrieval
+retries. For a target that stores slower than that, raise `--sxss-retries`
+(default `3`, maximum `20`); retry *n* waits 500 ms × *n*, at most 5 s per wait.
+`--deep-scan` skips the store probe and runs every payload on every field.
 
 ## Choosing the retrieval URL
 

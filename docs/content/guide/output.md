@@ -5,7 +5,7 @@ weight = 6
 toc = true
 +++
 
-Every scan produces the same internal result structure. Dalfox renders it in whichever format you pick. Machine-readable formats automatically suppress the banner so your file stays clean.
+Every scan produces the same internal result structure. Dalfox renders it in whichever format you pick. Every format except `plain` suppresses the banner, so a report redirected to a file stays clean.
 
 ## Choosing a format
 
@@ -36,7 +36,7 @@ Every finding includes:
 
 | Field | Example | Meaning |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R`, `I` | Confidence: Vulnerable / AST-detected / Reflected / Informational |
+| `type` | `V`, `A`, `R`, `I` | Finding tier: Vulnerable / AST-detected / Reflected / Informational |
 | `type_description` | `"Vulnerable - dalfox asserts this input is exploitable; act on it"` | Human label (the full sentence, not the bare word) |
 | `detection_method` | `"ast"` | How it was found: `reflection`, `dom-verification`, `ast`, `oob`, `library` |
 | `confidence` | `"high"` | Whether Dalfox can claim a vulnerability (`high` / `low`); absent on `I` |
@@ -136,7 +136,7 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `total_requests`
 - `failed_requests` — requests that never got a response (reset, refused, timed out) after their retries. A payload that never reached the target was never tested
 - `findings_count`
-- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` / `error_message` when it was skipped or cut short, and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
+- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or cut short (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
 - `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
@@ -145,11 +145,11 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 
 A target whose session died is reported as `"status": "incomplete"` (or `"skipped"` if it never ran) with `"error_code": "SESSION_LOST"` and the signal that fired in `"error_message"` — never as `"clean"`.
 
-In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context. Each result's `ruleId` is `dalfox/cwe-<n>` (`dalfox/cwe-79` for XSS, `dalfox/cwe-1104` for outdated libraries), its `level` follows `severity` (High → `error`, Medium → `warning`, Low / Info → `note`), the PoC URL is the location `uri`, and `partialFingerprints["vulnIdentity/v1"]` is a stable hash that lets code scanning match a finding across runs. The finding fields (`type`, `inject_type`, `param`, `payload`, `severity`, …) are under the result's `properties`.
+In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context. Each result's `ruleId` is `dalfox/cwe-<n>` (`dalfox/cwe-79` for XSS, `dalfox/cwe-1104` for outdated libraries), its `level` follows `severity` (High → `error`, Medium → `warning`, Low / Info → `note`), the PoC URL is the location `uri`, and `partialFingerprints["vulnIdentity/v1"]` is a stable hash that lets code scanning match a finding across runs. The finding fields (`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence`, …) are under the result's `properties`, and `message.text` carries `message_str` plus the evidence.
 
 In **TOML** it appears as a top-level `[meta]` table (findings under `[[results]]`).
 
-In **Markdown** it is rendered as human-readable tables (`## Scan Metadata` + `### Target Summary`) above the findings summary.
+In **Markdown** it is rendered as human-readable tables (`## Scan Metadata` + `### Target Summary`) above the findings summary. Rows that only matter when something happened (failed requests, incomplete, deduplicated targets, baseline, resume) appear only then.
 
 Plain text output stays findings-only.
 
