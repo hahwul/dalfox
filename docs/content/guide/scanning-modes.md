@@ -16,7 +16,7 @@ Under the hood there are four working subcommands: `scan` (the scanner), `server
 Just give Dalfox a URL. It figures out the rest.
 
 ```bash
-dalfox https://target.app/search?q=test
+dalfox 'https://target.app/search?q=test'
 ```
 
 Under the hood, Dalfox uses the `scan` subcommand with `--input-type auto`. It auto-detects whether the argument is a URL, a URL-list file, a raw HTTP request file, a HAR file, or a stream on `stdin`.
@@ -193,10 +193,10 @@ For a payload that fires later, somewhere you can't see (an admin panel, a suppo
 
 ```bash
 # Your own listener: hits arrive there, Dalfox records nothing
-dalfox scan https://target.app/?q=1 -b https://your-callback.example
+dalfox scan 'https://target.app/?q=1' -b https://your-callback.example
 
 # Dalfox-managed interactsh session: callbacks come back as findings
-dalfox scan https://target.app/?q=1 --blind-oob
+dalfox scan 'https://target.app/?q=1' --blind-oob
 ```
 
 `--blind-oob` registers with an interactsh server (the public mesh, or the ones you name with `--blind-oob=oast.fun`), mints a callback host per payload, and after the scan keeps polling for `--blind-oob-wait` seconds (default `30`). A callback that arrives becomes a `V` finding with `detection_method: oob`. Blind payloads are stored attack traffic, so they are not sent under `--dry-run`, `--only-discovery`, or `--skip-xss-scanning`. Templates and custom payloads are covered in [Payloads & Encoding](../payloads/#blind-xss).
@@ -221,7 +221,7 @@ proves nothing.)
 
 ```bash
 # Nothing to configure: credentials switch it on.
-dalfox scan https://app.example.com/dashboard?q=1 --cookies "sid=$SESSION"
+dalfox scan 'https://app.example.com/dashboard?q=1' --cookies "sid=$SESSION"
 ```
 
 A session is reported lost when any of these fires:
@@ -245,7 +245,7 @@ positive costs a whole scan. When you know exactly what an authenticated
 response looks like, say so and the heuristics step aside:
 
 ```bash
-dalfox scan https://app.example.com/dashboard?q=1 \
+dalfox scan 'https://app.example.com/dashboard?q=1' \
   --cookies "sid=$SESSION" \
   --session-check 'Signed in as' \
   --session-check-url https://app.example.com/api/me

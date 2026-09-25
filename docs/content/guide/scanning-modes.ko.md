@@ -16,7 +16,7 @@ Dalfox는 여러 형태의 대상을 받아들입니다. 모든 모드는 동일
 Dalfox에 URL만 넘겨주세요. 나머지는 알아서 판단합니다.
 
 ```bash
-dalfox https://target.app/search?q=test
+dalfox 'https://target.app/search?q=test'
 ```
 
 내부적으로는 `scan` 서브커맨드를 `--input-type auto`로 실행합니다. 인자가 URL인지, URL 목록 파일인지, raw HTTP 요청 파일인지, HAR 파일인지, `stdin`으로 들어오는 스트림인지는 알아서 판별합니다.
@@ -193,10 +193,10 @@ Dalfox는 첫 번째 URL에 주입한 다음, 두 번째 URL을 가져와 페이
 
 ```bash
 # 직접 운영하는 리스너: 호출은 그쪽으로 가고, Dalfox는 아무것도 기록하지 않습니다
-dalfox scan https://target.app/?q=1 -b https://your-callback.example
+dalfox scan 'https://target.app/?q=1' -b https://your-callback.example
 
 # Dalfox가 관리하는 interactsh 세션: 콜백이 탐지 결과로 돌아옵니다
-dalfox scan https://target.app/?q=1 --blind-oob
+dalfox scan 'https://target.app/?q=1' --blind-oob
 ```
 
 `--blind-oob`는 interactsh 서버(공개 메시, 또는 `--blind-oob=oast.fun`처럼 지정한 서버)에 등록하고, 페이로드마다 콜백 호스트를 새로 발급하며, 스캔이 끝난 뒤에도 `--blind-oob-wait`초(기본값 `30`) 동안 폴링을 계속합니다. 도착한 콜백은 `detection_method: oob`인 `V` 탐지 결과가 됩니다. Blind 페이로드는 저장되는 공격 트래픽이므로 `--dry-run`, `--only-discovery`, `--skip-xss-scanning`에서는 보내지 않습니다. 템플릿과 커스텀 페이로드는 [페이로드와 인코딩](../payloads/#blind-xss)에서 다룹니다.
@@ -209,7 +209,7 @@ dalfox scan https://target.app/?q=1 --blind-oob
 
 ```bash
 # 별도 설정이 필요 없습니다. 자격증명이 있으면 자동으로 켜집니다.
-dalfox scan https://app.example.com/dashboard?q=1 --cookies "sid=$SESSION"
+dalfox scan 'https://app.example.com/dashboard?q=1' --cookies "sid=$SESSION"
 ```
 
 다음 중 하나라도 감지되면 세션이 끊어진 것으로 보고합니다:
@@ -227,7 +227,7 @@ dalfox scan https://app.example.com/dashboard?q=1 --cookies "sid=$SESSION"
 휴리스틱은 의도적으로 좁게 잡혀 있습니다 — 기본 동작이 중단(abort)이므로 오탐 하나가 스캔 전체를 날립니다. 인증된 응답이 어떤 모습인지 정확히 안다면 그것을 지정하세요. 그러면 휴리스틱은 물러납니다:
 
 ```bash
-dalfox scan https://app.example.com/dashboard?q=1 \
+dalfox scan 'https://app.example.com/dashboard?q=1' \
   --cookies "sid=$SESSION" \
   --session-check 'Signed in as' \
   --session-check-url https://app.example.com/api/me
