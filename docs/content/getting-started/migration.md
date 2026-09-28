@@ -1,6 +1,6 @@
 +++
 title = "Migrating from v2"
-description = "What changed between Dalfox v2 (Go) and v3 (Rust): consolidated subcommands, renamed flags, retired features, and their replacements."
+description = "Migrate from Dalfox v2 (Go) to v3 (Rust) with the new scan subcommand, renamed flags, retired features, and replacements."
 weight = 5
 toc = true
 +++

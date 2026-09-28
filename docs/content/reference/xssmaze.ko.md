@@ -1,6 +1,6 @@
 +++
 title = "XSSMaze 점수"
-description = "Dalfox가 XSSMaze 랩을 얼마나 탐지하는지, main 브랜치를 기준으로 측정한 값."
+description = "main 브랜치를 기준으로 측정한 Dalfox의 XSSMaze 커버리지 점수와 방법론, 카테고리별 결과를 보여줍니다."
 weight = 4
 toc = true
 +++

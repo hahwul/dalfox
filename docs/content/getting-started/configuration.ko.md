@@ -1,6 +1,6 @@
 +++
 title = "설정"
-description = "즐겨 쓰는 플래그를 Dalfox 설정 파일에 저장합니다."
+description = "Dalfox 스캔 플래그를 TOML 또는 JSON 설정 파일에 저장하고 기본값, 우선순위, CLI 재정의를 이해합니다."
 weight = 4
 toc = true
 +++

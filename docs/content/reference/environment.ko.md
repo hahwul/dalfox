@@ -1,6 +1,6 @@
 +++
 title = "환경 변수"
-description = "Dalfox가 런타임에 읽는 환경 변수."
+description = "Dalfox API 서버, stdin, 색상, 설정 파일, 원격 리소스 동작을 바꾸는 환경 변수를 설명합니다."
 weight = 3
 toc = true
 +++

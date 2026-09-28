@@ -1,6 +1,6 @@
 +++
 title = "REST API 서버"
-description = "비동기 작업 관리, CORS, JSONP, API 키 인증을 갖춘 HTTP 서비스로 Dalfox를 실행합니다."
+description = "비동기 스캔 작업, 폴링, 취소, CORS, JSONP, 웹훅, API 키 인증을 지원하는 Dalfox REST API 서버를 실행합니다."
 weight = 1
 toc = true
 +++

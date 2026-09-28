@@ -19,31 +19,38 @@
      the site one rather than emitting an empty tag. #}
   {% set meta_desc = site.description %}{% if page.description %}{% set meta_desc = page.description %}{% endif %}
   <meta name="description" content="{{ meta_desc | e }}">
-  {% if noindex %}<meta name="robots" content="noindex">{% endif %}
+  <meta name="author" content="hahwul">
+  {% if noindex %}<meta name="robots" content="noindex, nofollow">{% endif %}
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0b0d18">
   <title>{{ page.title | e }} · {{ site.title | e }}</title>
   {{ og_all_tags }}
+  <meta property="og:image:alt" content="{{ page.title | e }}">
   <meta property="og:site_name" content="{{ site.title | e }}">
   <meta property="og:locale" content="{% if ko %}ko_KR{% else %}en_US{% endif %}">
   {{ hreflang_tags }}
-  {% if page.translations and page.translations | length > 1 %}{% for t in page.translations %}{% if t.code == "en" %}<link rel="alternate" hreflang="x-default" href="{{ base_url }}{{ t.url }}">{% endif %}{% endfor %}{% endif %}
+  {% if page.translations and page.translations | length > 1 %}
+  {% for t in page.translations %}{% if not t.is_current %}<meta property="og:locale:alternate" content="{% if t.code == "ko" %}ko_KR{% else %}en_US{% endif %}">{% endif %}{% endfor %}
+  {% for t in page.translations %}{% if t.code == "en" %}<link rel="alternate" hreflang="x-default" href="{{ base_url }}{{ t.url }}">{% endif %}{% endfor %}
+  {% endif %}
+  {% if not noindex %}
   <link rel="canonical" href="{{ seo.canonical_url }}">
-  <link rel="alternate" type="application/rss+xml" title="{{ site.title | e }}" href="{{ base_url }}/rss.xml">
+  <link rel="alternate" type="application/rss+xml" title="{{ site.title | e }}{% if ko %} (한국어){% endif %}" href="{{ base_url }}{{ lp }}/rss.xml">
+  {% endif %}
   {% if page.url == "/" or page.url == "/ko/" %}
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Dalfox","applicationCategory":"SecurityApplication","operatingSystem":"macOS, Linux, Windows","inLanguage":"{{ page_language }}","description":{{ meta_desc | jsonify }},"url":"{{ base_url }}{{ lp }}/","downloadUrl":"https://github.com/hahwul/dalfox/releases","softwareHelp":"{{ base_url }}{{ lp }}/getting-started/","softwareVersion":"{{ site.data.dalfox.version }}","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"codeRepository":"https://github.com/hahwul/dalfox","author":{"@type":"Person","name":"hahwul","url":"https://www.hahwul.com"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Dalfox","applicationCategory":"SecurityApplication","applicationSubCategory":"XSS scanner","operatingSystem":"macOS, Linux, Windows","inLanguage":"{{ page_language }}","description":{{ meta_desc | jsonify }},"url":"{{ base_url }}{{ lp }}/","image":"{{ base_url }}/images/logo.png","downloadUrl":"https://github.com/hahwul/dalfox/releases","softwareHelp":"{{ base_url }}{{ lp }}/getting-started/","softwareVersion":"{{ site.data.dalfox.version }}","featureList":["Reflected XSS scanning","Stored XSS scanning","DOM XSS verification","WAF-aware payloads"],"license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"codeRepository":"https://github.com/hahwul/dalfox","author":{"@type":"Person","name":"hahwul","url":"https://www.hahwul.com"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   {% else %}
   {{ jsonld }}
   {% endif %}
   <link rel="stylesheet" href="{{ base_url }}/css/fonts.css">
   <link rel="stylesheet" href="{{ base_url }}/css/style.css">
   <script src="{{ base_url }}/js/sidebar-init.js"></script>
-  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
-  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
-  <link rel="shortcut icon" href="/icons/favicon.ico" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="{{ base_url }}/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="{{ base_url }}/icons/favicon.svg" />
+  <link rel="shortcut icon" href="{{ base_url }}/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ base_url }}/icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-title" content="Dalfox" />
-  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="manifest" href="{{ base_url }}/icons/site.webmanifest" />
   {{ highlight_css }}
   {{ auto_includes_css }}
 </head>
@@ -56,7 +63,7 @@
           <span></span><span></span><span></span>
         </button>
         <a href="{{ base_url }}{{ lp }}/" class="header-logo">
-          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <img src="{{ base_url }}/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
           <span class="header-logo-text">DALFOX</span>
         </a>
         <nav class="header-nav">

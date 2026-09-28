@@ -1,6 +1,6 @@
 +++
-title = "강력한 XSS 스캐너"
-description = "오픈소스 XSS 스캐너이자 자동화 도구. 반사형, 저장형, DOM 기반 XSS를 AST 수준으로 검증합니다."
+title = "Dalfox: 오픈소스 XSS 스캐너"
+description = "Dalfox는 반사형, 저장형, DOM 기반 XSS를 탐지하고 AST 수준으로 검증하는 오픈소스 스캐너이자 자동화 도구입니다."
 template = "landing"
 +++
 

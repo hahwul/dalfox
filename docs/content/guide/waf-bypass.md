@@ -1,6 +1,6 @@
 +++
 title = "WAF Bypass"
-description = "Detect WAFs automatically and apply per-WAF evasion strategies."
+description = "Configure Dalfox WAF detection, bypass strategies, evasion encoders, rate limits, and confidence thresholds."
 weight = 4
 toc = true
 +++

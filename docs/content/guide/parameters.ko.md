@@ -1,6 +1,6 @@
 +++
 title = "파라미터와 탐색"
-description = "Dalfox가 중요한 입력값을 찾아내는 방식과 탐색 단계를 제어하는 방법을 설명합니다."
+description = "Dalfox가 query, body, header, cookie, path, fragment, GraphQL, XML 파라미터를 찾고 필터링하고 테스트하는 방식을 설명합니다."
 weight = 2
 toc = true
 +++

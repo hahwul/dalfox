@@ -1,6 +1,6 @@
 +++
 title = "Guide"
-description = "Deep dives into how Dalfox works and how to drive it for real targets."
+description = "Learn how Dalfox discovers parameters, selects XSS payloads, verifies reflected and DOM findings, handles WAFs, and formats reports."
 weight = 2
 +++
 

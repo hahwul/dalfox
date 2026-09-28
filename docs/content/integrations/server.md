@@ -1,6 +1,6 @@
 +++
 title = "REST API Server"
-description = "Run Dalfox as an HTTP service with async job management, CORS, JSONP, and API-key auth."
+description = "Run Dalfox as a REST API server with asynchronous scan jobs, polling, cancellation, CORS, JSONP, webhooks, and API-key auth."
 weight = 1
 toc = true
 +++

@@ -1,6 +1,6 @@
 +++
 title = "Configuration"
-description = "Save your favorite flags in a Dalfox config file."
+description = "Save Dalfox scan flags in a TOML or JSON config file and understand precedence, defaults, and CLI overrides."
 weight = 4
 toc = true
 +++

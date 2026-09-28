@@ -1,6 +1,6 @@
 +++
 title = "Agent Skill"
-description = "Drop-in SKILL.md for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents."
+description = "Install the Dalfox SKILL.md for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents."
 weight = 4
 toc = true
 +++

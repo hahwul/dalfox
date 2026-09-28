@@ -1,6 +1,6 @@
 +++
 title = "가이드"
-description = "Dalfox의 작동 방식과 실제 대상에서 구동하는 방법을 깊이 있게 다룹니다."
+description = "Dalfox의 파라미터 탐색, XSS 페이로드 선택, 반사형·DOM 결과 검증, WAF 처리, 리포트 출력을 설명합니다."
 weight = 2
 +++
 

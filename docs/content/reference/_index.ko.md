@@ -1,6 +1,6 @@
 +++
 title = "레퍼런스"
-description = "Dalfox가 인식하는 모든 플래그, 키, 환경 변수."
+description = "Dalfox CLI 플래그, 설정 키, 환경 변수, 출력 형식, 호환 명령을 한곳에서 찾습니다."
 weight = 4
 +++
 

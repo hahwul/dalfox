@@ -1,6 +1,6 @@
 +++
 title = "Integrations"
-description = "Drive Dalfox from your pipeline, your dashboard, or your AI assistant."
+description = "Connect Dalfox to CI/CD pipelines, dashboards, Caido, REST clients, MCP clients, and AI coding agents."
 weight = 3
 +++
 

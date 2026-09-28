@@ -1,6 +1,6 @@
 +++
 title = "Quick Start"
-description = "Your first Dalfox scan in five minutes."
+description = "Run your first Dalfox XSS scan in five minutes, then try files, pipelines, JSON output, authentication, and blind XSS."
 weight = 3
 toc = true
 +++

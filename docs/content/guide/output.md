@@ -1,6 +1,6 @@
 +++
 title = "Output & Reports"
-description = "Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline."
+description = "Export Dalfox XSS findings as plain text, JSON, JSONL, Markdown, SARIF, or TOML for CI and security pipelines."
 weight = 6
 toc = true
 +++

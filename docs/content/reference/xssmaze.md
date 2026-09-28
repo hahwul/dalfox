@@ -1,6 +1,6 @@
 +++
 title = "XSSMaze Score"
-description = "How much of the XSSMaze lab Dalfox detects, measured against the main branch."
+description = "Dalfox XSSMaze coverage score, methodology, and category breakdown measured against the main branch."
 weight = 4
 toc = true
 +++

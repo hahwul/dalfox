@@ -4,6 +4,7 @@
     <main class="docs-main" id="main">
       <div class="docs-content-container">
         <article class="docs-article">
+          {% include "breadcrumbs.html" %}
           <h1>{{ page.title | e }}</h1>
           {{ content }}
         </article>

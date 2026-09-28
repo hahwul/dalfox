@@ -1,6 +1,6 @@
 +++
 title = "Reference"
-description = "Every flag, key, and environment variable Dalfox understands."
+description = "Find every Dalfox CLI flag, config key, environment variable, output format, and compatibility command."
 weight = 4
 +++
 

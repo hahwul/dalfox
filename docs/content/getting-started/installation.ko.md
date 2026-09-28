@@ -1,6 +1,6 @@
 +++
 title = "설치"
-description = "macOS, Linux, Windows, NixOS, Arch Linux에 Dalfox를 설치하거나 소스에서 직접 빌드합니다."
+description = "macOS, Linux, Windows, NixOS, Arch Linux에 오픈소스 XSS 스캐너 Dalfox를 설치하거나 소스에서 빌드합니다."
 weight = 2
 toc = true
 +++

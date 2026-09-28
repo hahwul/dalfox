@@ -3,7 +3,7 @@
 # =============================================================================
 
 title = "Dalfox"
-description = "Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification."
+description = "Powerful open-source XSS scanner and automation utility for reflected, stored, and DOM-based XSS with AST-level verification."
 base_url = "https://dalfox.hahwul.com"
 
 # =============================================================================

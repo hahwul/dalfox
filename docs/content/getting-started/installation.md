@@ -1,6 +1,6 @@
 +++
 title = "Installation"
-description = "Install Dalfox on macOS, Linux, Windows, NixOS, Arch Linux, or build from source."
+description = "Install Dalfox, an open-source XSS scanner, on macOS, Linux, Windows, NixOS, Arch Linux, or from source."
 weight = 2
 toc = true
 +++

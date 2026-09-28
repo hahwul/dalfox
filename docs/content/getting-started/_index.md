@@ -1,6 +1,6 @@
 +++
 title = "Getting Started"
-description = "Install Dalfox, run your first scan, and learn the basics."
+description = "Install Dalfox, run your first XSS scan, and learn the core workflow from URL to verified finding."
 weight = 1
 +++
 
