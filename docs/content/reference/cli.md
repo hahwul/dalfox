@@ -230,7 +230,7 @@ dalfox server [FLAGS]
 | `--max-concurrent-scans` | — | `100` | Limit on simultaneous (queued + running) scans; further submissions get `503` (`0` = unlimited) |
 | `--allowed-hosts` | — | — | Comma-separated extra hostnames accepted in the request `Host` header, on top of the bind host, `localhost`, and any IP literal. Needed behind a reverse proxy that forwards a public hostname |
 | `--max-retained-scans` | — | `1000` | Cap on *finished* scans kept in memory; the oldest are dropped once exceeded (`0` = unlimited). Queued and running scans are never dropped |
-| `--max-body-bytes` | — | `1048576` | Maximum accepted request body size (bytes) for `POST /scan` and `/preflight`; an oversized body is rejected with `400` (`invalid request body`) |
+| `--max-body-bytes` | — | `1048576` | Maximum accepted request body size (bytes) for `POST /scan` and `/preflight`; an oversized body is rejected with `413` before the handler parses it |
 
 See [REST API Server](../../integrations/server/) for endpoints.
 
