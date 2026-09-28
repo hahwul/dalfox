@@ -229,7 +229,7 @@ dalfox server [FLAGS]
 | `--max-concurrent-scans` | — | `100` | 동시(큐 대기 + 실행 중) 스캔 수 제한. 초과하면 새 제출은 `503`을 받습니다 (`0` = 무제한) |
 | `--allowed-hosts` | — | — | 요청 `Host` 헤더에서 추가로 허용할 호스트명(쉼표로 구분). 바인딩 호스트, `localhost`, IP 리터럴은 기본 허용입니다. 리버스 프록시가 공개 호스트명을 전달할 때 필요합니다 |
 | `--max-retained-scans` | — | `1000` | 메모리에 보관하는 *종료된* 스캔 수 상한. 초과하면 가장 오래된 것부터 제거됩니다 (`0` = 무제한). 큐에 있거나 실행 중인 스캔은 제거되지 않습니다 |
-| `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 `400`(`invalid request body`)으로 거부 |
+| `--max-body-bytes` | — | `1048576` | `POST /scan` 및 `/preflight`가 허용하는 최대 요청 본문 크기(바이트). 초과 시 핸들러가 파싱하기 전에 `413`으로 거부 |
 
 엔드포인트는 [REST API 서버](../../integrations/server/)를 참고하세요.
 

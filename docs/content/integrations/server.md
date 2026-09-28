@@ -147,11 +147,13 @@ name must be 1–64 characters from `[A-Za-z0-9_$.]`, starting with a letter,
 Every response from these endpoints, success or failure, is the same
 `{code, msg, data}` envelope served as `application/json`. On an error `code`
 repeats the HTTP status, `msg` says what went wrong, and `data` is absent. The
-statuses you will see are `400` (invalid body or option, including a body over
-`--max-body-bytes`), `401` (missing or wrong API key), `403` (cross-site or
+handler-generated statuses you will see are `400` (invalid body or option),
+`401` (missing or wrong API key), `403` (cross-site or
 untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown scan
 id), `409` (purge of a scan that is still active), `500` (a preflight that
-failed inside the server) and `503` (at capacity). The exceptions are a CORS
+failed inside the server) and `503` (at capacity). A body over
+`--max-body-bytes` is rejected by Axum before the handler runs with `413`, so it
+may not use the normal envelope. The other exceptions are a CORS
 preflight (`OPTIONS`), which answers `204` with no body (or a bare `403` when the
 browser gate refuses it), and a path or method not in the table, which gets a
 bare `404` / `405`.
@@ -468,7 +470,7 @@ retried.
   cancel does not free capacity instantly.
 - `--max-body-bytes <n>` — explicit request-body cap for `POST /scan` and
   `/preflight` (default `1048576` = 1 MiB); an oversized body is refused with
-  `400` (`invalid request body: ... length limit exceeded`).
+  `413` before the handler parses it.
 - `--max-retained-scans <n>` — cap on *finished* scans kept in memory (default
   `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
   so without this a flood of quick scans holds every result — response bodies
