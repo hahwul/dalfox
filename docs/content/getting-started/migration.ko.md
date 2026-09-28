@@ -1,6 +1,6 @@
 +++
 title = "v2에서 마이그레이션"
-description = "Dalfox v2(Go)와 v3(Rust) 사이에 바뀐 것들 — 통합된 서브커맨드, 이름이 바뀐 플래그, 사라진 기능과 그 대안."
+description = "Dalfox v2(Go)에서 v3(Rust)로 옮기면서 바뀐 scan 서브커맨드, 플래그, 제거된 기능과 대안을 확인합니다."
 weight = 5
 toc = true
 +++

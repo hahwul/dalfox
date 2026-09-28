@@ -1,6 +1,6 @@
 +++
 title = "WAF 우회"
-description = "WAF를 자동으로 탐지하고 WAF별 회피 전략을 적용합니다."
+description = "Dalfox의 WAF 탐지, 우회 전략, 회피 인코더, 요청 속도 제한, 신뢰도 임계값을 설정합니다."
 weight = 4
 toc = true
 +++

@@ -1,6 +1,6 @@
 +++
 title = "Detection Model"
-description = "The three axes of a Dalfox finding (confidence, method, impact) and what each evidence tier actually proves."
+description = "Understand Dalfox finding confidence, detection method, severity, evidence tiers, DOM verification, and AST-based XSS results."
 weight = 7
 toc = true
 +++

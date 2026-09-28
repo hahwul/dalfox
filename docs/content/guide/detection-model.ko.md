@@ -1,6 +1,6 @@
 +++
 title = "탐지 모델"
-description = "Dalfox 탐지 결과의 세 축(신뢰도, 방식, 영향도)과 각 증거 등급이 실제로 무엇을 증명하는지."
+description = "Dalfox 결과의 신뢰도, 탐지 방식, 심각도, 증거 등급, DOM 검증, AST 기반 XSS 결과를 이해합니다."
 weight = 7
 toc = true
 +++

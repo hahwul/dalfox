@@ -1,6 +1,6 @@
 +++
 title = "MCP 서버"
-description = "Dalfox를 Claude 및 기타 MCP 클라이언트에 스캐너 도구(tool) 모음으로 노출합니다."
+description = "Dalfox를 Claude, Cursor 등 MCP 클라이언트에서 구조화된 XSS 스캔 도구로 사용할 수 있는 MCP 서버로 실행합니다."
 weight = 2
 toc = true
 +++

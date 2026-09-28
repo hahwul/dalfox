@@ -1,6 +1,6 @@
 +++
 title = "MCP Server"
-description = "Expose Dalfox to Claude and other MCP clients as a set of scanner tools."
+description = "Run Dalfox as an MCP server for Claude, Cursor, and other clients with structured XSS scanning tools."
 weight = 2
 toc = true
 +++

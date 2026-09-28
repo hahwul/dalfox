@@ -1,6 +1,6 @@
 +++
 title = "시작하기"
-description = "Dalfox를 설치하고 첫 스캔을 실행하며 기본기를 익힙니다."
+description = "Dalfox를 설치하고 첫 XSS 스캔을 실행해 URL부터 검증된 탐지 결과까지 기본 흐름을 익힙니다."
 weight = 1
 +++
 

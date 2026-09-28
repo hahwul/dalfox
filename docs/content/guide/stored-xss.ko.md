@@ -1,6 +1,6 @@
 +++
 title = "저장형 XSS"
-description = "한 URL에서 주입하고, 다른 URL에서 페이로드가 실행되는지 검증합니다."
+description = "Dalfox로 한 URL에 저장형 XSS를 주입하고 다른 조회 URL에서 실행 여부를 검증합니다."
 weight = 5
 toc = true
 +++

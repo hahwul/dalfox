@@ -1,6 +1,6 @@
 +++
 title = "Config File"
-description = "All keys supported in Dalfox's TOML/JSON config file."
+description = "Reference for every TOML and JSON key accepted by Dalfox scan configuration files, including defaults and precedence."
 weight = 2
 toc = true
 +++

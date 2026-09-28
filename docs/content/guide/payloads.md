@@ -1,6 +1,6 @@
 +++
 title = "Payloads & Encoding"
-description = "Built-in payload families, encoders, custom payloads, and remote wordlists."
+description = "Configure Dalfox XSS payload families, context-aware encoders, custom payloads, remote wordlists, blind XSS, and deep scans."
 weight = 3
 toc = true
 +++

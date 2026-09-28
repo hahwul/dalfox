@@ -1,6 +1,6 @@
 +++
-title = "Powerful XSS Scanner"
-description = "A powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based with AST-level verification."
+title = "Dalfox: Open-Source XSS Scanner"
+description = "Dalfox is an open-source XSS scanner and automation tool for reflected, stored, and DOM-based XSS, with parameter discovery and AST-level verification."
 template = "landing"
 +++
 

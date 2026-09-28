@@ -1,6 +1,6 @@
 +++
 title = "설정 파일"
-description = "Dalfox의 TOML/JSON 설정 파일이 지원하는 모든 키."
+description = "Dalfox 스캔 설정 파일에서 지원하는 TOML·JSON 키와 기본값, 우선순위를 정리한 레퍼런스입니다."
 weight = 2
 toc = true
 +++

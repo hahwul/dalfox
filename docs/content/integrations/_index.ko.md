@@ -1,6 +1,6 @@
 +++
 title = "연동"
-description = "파이프라인, 대시보드 또는 AI 어시스턴트에서 Dalfox를 구동합니다."
+description = "Dalfox를 CI/CD 파이프라인, 대시보드, Caido, REST 클라이언트, MCP 클라이언트, AI 코딩 에이전트에 연결합니다."
 weight = 3
 +++
 

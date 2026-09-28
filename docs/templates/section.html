@@ -3,6 +3,7 @@
 {% include "sidebar.html" %}
     <main class="docs-main" id="main">
       <article class="docs-article">
+        {% include "breadcrumbs.html" %}
         <h1>{{ page.title | e }}</h1>
         {{ content }}
         <h2 class="section-children-heading">{% if page_language == "ko" %}이 섹션의 문서{% else %}In This Section{% endif %}</h2>

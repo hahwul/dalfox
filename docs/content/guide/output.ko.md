@@ -1,6 +1,6 @@
 +++
 title = "출력과 리포트"
-description = "Plain, JSON, JSONL, Markdown, SARIF, TOML 형식과 탐지 결과를 파이프라인에 통합하는 방법을 다룹니다."
+description = "Dalfox XSS 탐지 결과를 plain text, JSON, JSONL, Markdown, SARIF, TOML로 내보내 CI와 보안 파이프라인에 연결합니다."
 weight = 6
 toc = true
 +++

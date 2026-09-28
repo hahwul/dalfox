@@ -1,6 +1,6 @@
 +++
 title = "Scanning Modes"
-description = "Single URL, file batch, pipeline, raw HTTP, HAR, stored and blind XSS, server, and MCP. Pick the mode that fits your workflow."
+description = "Choose a Dalfox scan mode for URLs, files, pipelines, raw HTTP, HAR, stored XSS, blind XSS, REST, or MCP."
 weight = 1
 toc = true
 +++

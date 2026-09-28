@@ -1,6 +1,6 @@
 +++
 title = "Stored XSS"
-description = "Inject on one URL, verify the payload fires on another."
+description = "Use Dalfox to inject stored XSS on one URL and verify execution on a different retrieval URL."
 weight = 5
 toc = true
 +++

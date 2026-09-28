@@ -1,6 +1,6 @@
 +++
 title = "Parameters & Discovery"
-description = "How Dalfox finds the inputs that matter, and how to steer the discovery phase."
+description = "Learn how Dalfox discovers, mines, filters, and tests query, body, header, cookie, path, fragment, GraphQL, and XML parameters."
 weight = 2
 toc = true
 +++

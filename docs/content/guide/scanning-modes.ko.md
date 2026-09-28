@@ -1,6 +1,6 @@
 +++
 title = "스캔 모드"
-description = "단일 URL, 파일 배치, 파이프라인, raw HTTP, HAR, 저장형·블라인드 XSS, 서버, MCP까지. 워크플로에 맞는 모드를 선택하세요."
+description = "URL, 파일, 파이프라인, raw HTTP, HAR, 저장형·블라인드 XSS, REST, MCP 중 Dalfox 스캔 모드를 선택합니다."
 weight = 1
 toc = true
 +++

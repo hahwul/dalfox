@@ -1,0 +1,12 @@
+{% set ko = page_language == "ko" %}
+{% if page.url != "/" and page.url != "/ko/" %}
+<nav class="breadcrumbs" aria-label="{% if ko %}현재 위치{% else %}Breadcrumb{% endif %}">
+  <a href="{{ base_url }}{% if ko %}/ko{% endif %}/">Dalfox</a>
+  {% for ancestor in page.ancestors %}
+  <span class="breadcrumbs-separator" aria-hidden="true">/</span>
+  <a href="{{ base_url }}{{ ancestor.url }}">{{ ancestor.title | e }}</a>
+  {% endfor %}
+  <span class="breadcrumbs-separator" aria-hidden="true">/</span>
+  <span class="breadcrumbs-current" aria-current="page">{{ page.title | e }}</span>
+</nav>
+{% endif %}

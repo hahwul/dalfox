@@ -1,6 +1,6 @@
 +++
 title = "빠른 시작"
-description = "5분 만에 첫 Dalfox 스캔을 실행합니다."
+description = "5분 안에 첫 Dalfox XSS 스캔을 실행하고 파일, 파이프라인, JSON 출력, 인증, 블라인드 XSS를 시도합니다."
 weight = 3
 toc = true
 +++

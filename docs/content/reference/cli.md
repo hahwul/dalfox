@@ -1,6 +1,6 @@
 +++
 title = "CLI Reference"
-description = "Every subcommand and flag Dalfox accepts."
+description = "Complete Dalfox CLI reference for scan, server, payload, MCP, completion, hidden compatibility commands, and every flag."
 weight = 1
 toc = true
 +++

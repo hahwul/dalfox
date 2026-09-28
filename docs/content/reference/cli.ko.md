@@ -1,6 +1,6 @@
 +++
 title = "CLI 레퍼런스"
-description = "Dalfox가 지원하는 모든 서브커맨드와 플래그."
+description = "scan, server, payload, MCP, completion, 숨겨진 호환 명령과 모든 플래그를 다루는 Dalfox CLI 레퍼런스입니다."
 weight = 1
 toc = true
 +++

@@ -1,6 +1,6 @@
 +++
 title = "Environment"
-description = "Environment variables Dalfox reads at runtime."
+description = "Reference for environment variables that change Dalfox API server, stdin, color, config, and remote resource behavior."
 weight = 3
 toc = true
 +++

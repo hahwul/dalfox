@@ -1,6 +1,6 @@
 +++
 title = "에이전트 스킬"
-description = "Claude Code, Cursor, OpenCode, Codex 등 스킬을 인식하는 에이전트에 그대로 넣어 쓰는 SKILL.md."
+description = "Claude Code, Cursor, OpenCode, Codex 등 스킬 인식 에이전트에 Dalfox SKILL.md를 설치합니다."
 weight = 4
 toc = true
 +++
