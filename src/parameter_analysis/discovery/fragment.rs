@@ -35,6 +35,11 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
     }
 
     let mut params = reflection_params.lock().await;
+    let mut known: std::collections::HashSet<String> = params
+        .iter()
+        .filter(|p| p.location == Location::Fragment)
+        .map(|p| p.name.clone())
+        .collect();
     for pair in query_part.split('&') {
         if pair.is_empty() {
             continue;
@@ -48,10 +53,7 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
             continue;
         }
         // Avoid duplicates
-        if params
-            .iter()
-            .any(|p| p.name == key && p.location == Location::Fragment)
-        {
+        if !known.insert(key.clone()) {
             continue;
         }
         params.push(Param::new(key, value, Location::Fragment));

@@ -52,20 +52,25 @@ impl<'a> DomXssVisitor<'a> {
             },
         );
 
-        let saved_tainted = self.tainted_vars.clone();
-        let saved_aliases = self.var_aliases.clone();
-        let saved_instance_classes = self.instance_classes.clone();
-        let saved_bound_aliases = self.bound_function_aliases.clone();
-        let saved_response_vars = self.response_object_vars.clone();
+        // The summary walk starts from empty taint/alias state (each pass
+        // clears it below), so the live maps are moved out and moved back
+        // rather than cloned; the state the walk only reads is journaled and
+        // rolled back. Cloning it all made every hoisted declaration cost
+        // O(live state) — O(N²) across a bundle of them.
+        let saved_tainted = std::mem::take(&mut self.tainted_vars);
+        let saved_aliases = std::mem::take(&mut self.var_aliases);
+        let instance_classes_checkpoint = self.instance_classes.checkpoint();
+        let bound_aliases_checkpoint = self.bound_function_aliases.checkpoint();
+        let response_vars_checkpoint = self.response_object_vars.checkpoint();
         // The summary walk is *hypothetical* — it assumes each parameter in
         // turn is tainted — so any state it records must not leak into the real
         // walk. The CSS custom-property map is keyed by a global property name
         // rather than by a variable, so a helper that writes a parameter into
         // `--label` would otherwise leave every later `getPropertyValue('--label')`
         // reading tainted no matter what the helper was actually called with.
-        let saved_css_custom_properties = self.css_custom_property_sources.clone();
-        let saved_idb_requests = self.idb_request_vars.clone();
-        let saved_idb_stores = self.idb_object_store_vars.clone();
+        let css_custom_properties_checkpoint = self.css_custom_property_sources.checkpoint();
+        let idb_requests_checkpoint = self.idb_request_vars.checkpoint();
+        let idb_stores_checkpoint = self.idb_object_store_vars.checkpoint();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -117,12 +122,14 @@ impl<'a> DomXssVisitor<'a> {
 
         self.tainted_vars = saved_tainted;
         self.var_aliases = saved_aliases;
-        self.instance_classes = saved_instance_classes;
-        self.bound_function_aliases = saved_bound_aliases;
-        self.response_object_vars = saved_response_vars;
-        self.css_custom_property_sources = saved_css_custom_properties;
-        self.idb_request_vars = saved_idb_requests;
-        self.idb_object_store_vars = saved_idb_stores;
+        self.instance_classes.rollback(instance_classes_checkpoint);
+        self.bound_function_aliases
+            .rollback(bound_aliases_checkpoint);
+        self.response_object_vars.rollback(response_vars_checkpoint);
+        self.css_custom_property_sources
+            .rollback(css_custom_properties_checkpoint);
+        self.idb_request_vars.rollback(idb_requests_checkpoint);
+        self.idb_object_store_vars.rollback(idb_stores_checkpoint);
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;

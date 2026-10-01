@@ -575,11 +575,14 @@ pub(crate) async fn render_results(
         let stats_map = target_mutation_stats.lock().await;
         let session_lost = state.session_lost.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
+        // Same attribution as `finding_belongs_to_target`, but indexed: the
+        // per-target filter over every finding was O(targets × findings),
+        // seconds of CPU on a large list scan with many findings.
+        let attribution = crate::utils::FindingAttributionIndex::new(
+            display_results.iter().map(|r| r.data.as_str()),
+        );
         for url in all_target_urls {
-            let finding_count = display_results
-                .iter()
-                .filter(|r| crate::utils::finding_belongs_to_target(url, &r.data))
-                .count();
+            let finding_count = attribution.count_for(url);
             // Session loss outranks `findings` and `clean`: a target whose
             // session died was not fully tested, and reporting it as either
             // would recreate exactly the ambiguity issue #1273 is about.

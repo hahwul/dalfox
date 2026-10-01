@@ -121,7 +121,7 @@ pub async fn check_discovery(
 /// slot, or in a header vs cookie, is two different sinks, but two pushes of
 /// `?query=` from the URL and from a `<form>` echo are not.
 pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
-    use std::collections::HashSet;
+    use std::collections::HashMap;
 
     if params.len() <= 1 {
         return;
@@ -146,22 +146,23 @@ pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
     // First pass: collect indexes per key so we can merge metadata into
     // the canonical entry (the first occurrence) before discarding the
     // rest. Using stable ordering by index keeps deterministic output.
-    let mut seen: HashSet<String> = HashSet::with_capacity(params.len());
+    // Key -> slot in `keep`. A map rather than a set plus a linear search for
+    // the slot, which rebuilt the key of every kept entry for each duplicate
+    // (O(unique × duplicates)).
+    let mut slot_of: HashMap<String, usize> = HashMap::with_capacity(params.len());
     let mut keep: Vec<usize> = Vec::with_capacity(params.len());
     let mut merge_into: Vec<Vec<usize>> = Vec::with_capacity(params.len());
 
     for (idx, p) in params.iter().enumerate() {
-        let key = key_of(p);
-        if seen.insert(key.clone()) {
-            keep.push(idx);
-            merge_into.push(Vec::new());
-        } else {
-            // Find the canonical slot for this key.
-            let canonical = keep
-                .iter()
-                .position(|&i| key_of(&params[i]) == key)
-                .expect("key was inserted above");
-            merge_into[canonical].push(idx);
+        match slot_of.entry(key_of(p)) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(keep.len());
+                keep.push(idx);
+                merge_into.push(Vec::new());
+            }
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                merge_into[*entry.get()].push(idx);
+            }
         }
     }
 

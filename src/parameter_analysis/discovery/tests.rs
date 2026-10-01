@@ -1469,3 +1469,86 @@ async fn test_check_form_discovery_keeps_unreflected_fields_only_when_asked() {
         }
     }
 }
+
+/// Serve `html` at `/` and count every other request (probes), including
+/// POSTs to `/` itself (the inline-JSON / `JSON.stringify` probes target the
+/// page URL).
+async fn probe_count_for_page(html: String) -> usize {
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = hits.clone();
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("local addr");
+    let app = Router::new().fallback(any(move |method: axum::http::Method, uri: Uri| {
+        let html = html.clone();
+        let counter = counter.clone();
+        async move {
+            if method == axum::http::Method::GET && uri.path() == "/" {
+                return html;
+            }
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            "no reflection here".to_string()
+        }
+    }));
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{}/?q=test", addr)).unwrap();
+    target.delay = 0;
+    check_form_discovery(
+        &target,
+        Arc::new(Mutex::new(Vec::<Param>::new())),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+    hits.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A page's forms, inline JSON objects and `JSON.stringify` calls each cost a
+/// probe per field, and nothing bounded how many a page could declare: K
+/// identical forms were 2K requests. Identical ones fold; distinct ones cap.
+#[tokio::test]
+async fn test_check_form_discovery_folds_repeated_forms_and_caps_distinct_ones() {
+    let repeated = format!(
+        "<html><body>{}</body></html>",
+        "<form action=\"/s\"><input name=\"a\"></form>".repeat(50)
+    );
+    // One field probe + one JSON-body probe for the single distinct form.
+    assert_eq!(probe_count_for_page(repeated).await, 2);
+
+    let distinct: String = (0..300)
+        .map(|i| format!("<form action=\"/s{i}\"><input name=\"a\"></form>"))
+        .collect();
+    let probed = probe_count_for_page(format!("<html><body>{distinct}</body></html>")).await;
+    assert_eq!(probed, 200, "100 distinct forms x (field + JSON probe)");
+
+    let json = format!(
+        "<html><body>{}<script>{}</script></body></html>",
+        "<pre>{\"a\":\"b\"}</pre>".repeat(50),
+        "fetch('/x', {body: JSON.stringify({\"c\":1})});".repeat(50)
+    );
+    assert_eq!(probe_count_for_page(json).await, 2);
+}
+
+#[test]
+fn dedupe_reflection_params_is_linear_in_duplicates() {
+    // Every duplicate used to search the kept list, rebuilding each kept
+    // entry's key (O(unique x duplicates): 4 000 + 4 000 took ~1.8 s).
+    let mut params: Vec<Param> = (0..20_000)
+        .map(|i| Param::new(format!("p{i}"), "v".to_string(), Location::Query))
+        .collect();
+    params
+        .extend((0..20_000).map(|i| Param::new(format!("p{i}"), "w".to_string(), Location::Query)));
+    let start = std::time::Instant::now();
+    dedupe_reflection_params(&mut params);
+    assert_eq!(params.len(), 20_000);
+    assert_eq!(params[0].value, "v", "first occurrence stays canonical");
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(3),
+        "dedupe took {:?}",
+        start.elapsed()
+    );
+}

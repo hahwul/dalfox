@@ -215,7 +215,7 @@ pub(crate) async fn get_result_handler(
             let payload = ResultPayload {
                 target: j.target_url.clone(),
                 status: j.status.clone(),
-                results: j.results.as_deref().cloned(),
+                results: j.results.as_deref().map(Vec::as_slice),
                 error_message: j.error_message.clone(),
                 progress: progress_data,
                 queued_at_ms: j.queued_at_ms,
@@ -238,7 +238,7 @@ pub(crate) async fn get_result_handler(
             make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
         }
         None => {
-            let resp = ApiResponse::<ResultPayload> {
+            let resp = ApiResponse::<ResultPayload<'_>> {
                 code: 404,
                 msg: "not found".to_string(),
                 data: None,

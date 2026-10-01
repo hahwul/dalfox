@@ -422,9 +422,12 @@ impl<'a> DomXssVisitor<'a> {
         params: &FormalParameters<'a>,
         statements: &[Statement<'a>],
     ) {
-        let saved_tainted = self.tainted_vars.clone();
-        let saved_aliases = self.var_aliases.clone();
-        let saved_response_vars = self.response_object_vars.clone();
+        // Journal checkpoints rather than clones: a clone per body made `N`
+        // tainted bindings followed by `N` callbacks O(N²). The rollback below
+        // restores exactly what a clone would have held.
+        let tainted_checkpoint = self.tainted_vars.checkpoint();
+        let aliases_checkpoint = self.var_aliases.checkpoint();
+        let response_vars_checkpoint = self.response_object_vars.checkpoint();
         let param_names = self.function_param_bindings(params);
         // `global_taints` is deliberately *not* saved wholesale — see the
         // escape handling below. Only the shadowed parameter names are lifted
@@ -448,16 +451,22 @@ impl<'a> DomXssVisitor<'a> {
         // an unrelated outer name of the same spelling.
         let mut locals: HashSet<String> = param_names.into_iter().collect();
         Self::collect_declared_names(statements, &mut locals);
+        // Names tainted now but not at entry, read off the journal so the scan
+        // costs what the body wrote, not the size of the whole tainted set.
         let escaped: Vec<(String, Option<String>)> = self
             .tainted_vars
-            .iter()
-            .filter(|name| !saved_tainted.contains(*name) && !locals.contains(*name))
-            .map(|name| (name.clone(), self.var_aliases.get(name).cloned()))
+            .keys_added_since(&tainted_checkpoint)
+            .into_iter()
+            .filter(|name| !locals.contains(name))
+            .map(|name| {
+                let source = self.var_aliases.get(&name).cloned();
+                (name, source)
+            })
             .collect();
 
-        self.tainted_vars = saved_tainted;
-        self.var_aliases = saved_aliases;
-        self.response_object_vars = saved_response_vars;
+        self.tainted_vars.rollback(tainted_checkpoint);
+        self.var_aliases.rollback(aliases_checkpoint);
+        self.response_object_vars.rollback(response_vars_checkpoint);
         self.global_taints.extend(shadowed_globals);
         for (name, source) in escaped {
             if let Some(source) = source {

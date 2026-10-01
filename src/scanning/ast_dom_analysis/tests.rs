@@ -5419,6 +5419,7 @@ open.onsuccess = function (e) {
     );
 }
 mod expression_regressions;
+mod scope_cost;
 
 #[test]
 fn numeric_coercion_clears_taint() {

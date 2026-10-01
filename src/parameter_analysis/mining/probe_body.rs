@@ -31,6 +31,20 @@ pub async fn probe_body_params(
         // Spawn tasks returning Option<Param> for batching
         let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
 
+        // Slot keys already present, collected once rather than re-scanned
+        // under the lock for every body key.
+        let already_found: HashSet<String> = reflection_params
+            .lock()
+            .await
+            .iter()
+            .filter(|p| p.location == Location::Body)
+            .map(|p| p.name.clone())
+            .collect();
+        // Shared by every task; each one builds its mutated body only after
+        // it holds a permit. Building all N bodies up front kept N full-size
+        // copies of the request body alive at once (quadratic memory).
+        let shared_data: Arc<str> = Arc::from(data.as_str());
+
         for (param_name, _) in params {
             // Early stop if collapsed
             {
@@ -45,29 +59,11 @@ pub async fn probe_body_params(
             // because Stage 1 had already discovered the query `q`: a
             // vulnerable body parameter was not just unreported, it was never
             // probed. See `param_slot_key`.
-            let exists = reflection_params
-                .lock()
-                .await
-                .iter()
-                .any(|p| p.name == param_name && p.location == Location::Body);
-            if exists {
+            if already_found.contains(&param_name) {
                 continue;
             }
 
-            // Build mutated body with this param set to marker
-            let new_data = form_urlencoded::parse(data.as_bytes())
-                .map(|(k, v)| {
-                    if k == param_name {
-                        (k, crate::scanning::markers::bracketed_marker().to_string())
-                    } else {
-                        (k, v.to_string())
-                    }
-                })
-                .collect::<Vec<_>>();
-            let body = form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(new_data)
-                .finish();
-
+            let data_clone = shared_data.clone();
             let client_clone = client.clone();
             let url = target.url.clone();
 
@@ -86,6 +82,19 @@ pub async fn probe_body_params(
                         .acquire()
                         .await
                         .expect("acquire semaphore permit");
+                    // Build mutated body with this param set to marker
+                    let new_data = form_urlencoded::parse(data_clone.as_bytes())
+                        .map(|(k, v)| {
+                            if k == param_name_cloned {
+                                (k, crate::scanning::markers::bracketed_marker().to_string())
+                            } else {
+                                (k, v.to_string())
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let body = form_urlencoded::Serializer::new(String::new())
+                        .extend_pairs(new_data)
+                        .finish();
                     let m = parsed_method;
                     let base = crate::utils::build_body_request_base(
                         &client_clone,

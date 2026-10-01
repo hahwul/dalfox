@@ -2336,3 +2336,21 @@ fn deeply_nested_payload_does_not_stall_the_sink_check() {
         "nesting guard is not applied to the payload parse: took {elapsed:?}"
     );
 }
+
+#[test]
+fn test_payload_has_handler_sink_text_is_linear_in_handler_count() {
+    // Each `on*=` used to re-check the whole remaining suffix.
+    let many = format!("\"{} onclick=alert(1) x=\"", " onx=a".repeat(40_000));
+    let start = std::time::Instant::now();
+    assert!(payload_has_handler_sink_text(&many));
+    assert!(!payload_has_handler_sink_text(&" onx=a".repeat(40_000)));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(2),
+        "took {:?}",
+        start.elapsed()
+    );
+    // A sink in a later handler is still found through the first suffix.
+    assert!(payload_has_handler_sink_text(
+        "\" onmouseover=x onfocus=alert(1) \""
+    ));
+}

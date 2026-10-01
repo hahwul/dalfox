@@ -36,6 +36,7 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 pub use reflected_markup::PageMarkup;
+use scoped_state::{ScopedMap, ScopedSet};
 
 mod async_flow;
 mod bindings;
@@ -43,6 +44,7 @@ mod bound_calls;
 mod events;
 mod reflected_markup;
 mod resolve;
+mod scoped_state;
 mod script_element;
 mod sinks;
 mod sources;
@@ -65,6 +67,18 @@ mod walk;
 /// analysis fn, so the bound holds across helper boundaries (e.g.
 /// `call_taint_and_source`) that would reset a per-call depth parameter.
 const MAX_AST_VISIT_DEPTH: u32 = 256;
+
+/// Total analysis steps (entries into [`DomXssVisitor::enter_recursion`]) one
+/// [`AstDomAnalyzer::analyze`] call may take before the walk stops and returns
+/// the findings gathered so far. The depth cap bounds the stack, not the time:
+/// the walk re-visits function bodies (once per summarized parameter, once per
+/// callback scope), so a hostile script can still multiply work without ever
+/// nesting deeply. Measured on real bundles: vue.global.js (525 KB) takes
+/// ~350k steps, katex/vueuse/the vue-eslint-parser bundle ~170–205k, and a
+/// 1.2 MB Vue app bundle (over the length cap, so never analyzed) ~520k. This
+/// sits ~30x above the largest of those while capping a pathological block
+/// at a few seconds.
+const MAX_AST_WORK_STEPS: u64 = 10_000_000;
 
 /// Upper bound on the size of a single JavaScript block handed to [`analyze`].
 /// oxc's recursive-descent parser has no depth guard, and some constructs the
@@ -323,9 +337,9 @@ enum TtParam {
 /// AST visitor for DOM XSS analysis
 struct DomXssVisitor<'a> {
     /// Set of tainted variable names
-    tainted_vars: HashSet<String>,
+    tainted_vars: ScopedSet<String>,
     /// Map of variable aliases (e.g., var x = location.search)
-    var_aliases: HashMap<String, String>,
+    var_aliases: ScopedMap<String, String>,
     /// List of detected vulnerabilities
     vulnerabilities: Vec<DomXssVulnerability>,
     /// Known DOM sources (untrusted input sources)
@@ -341,7 +355,7 @@ struct DomXssVisitor<'a> {
     /// `parseInt = …` — so the name no longer coerces to a number.
     overridden_coercions: HashSet<String>,
     /// Track `instanceVar -> ClassName` for class instance method summary resolution.
-    instance_classes: HashMap<String, String>,
+    instance_classes: ScopedMap<String, String>,
     /// `"Class.field" -> constructor parameter index`, for fields a class
     /// constructor stores straight from one of its parameters
     /// (`constructor(v) { this._value = v; }`). Together with
@@ -359,7 +373,7 @@ struct DomXssVisitor<'a> {
     /// field the constructor wrote.
     class_getter_fields: HashMap<String, String>,
     /// Track aliases produced by `.bind()` calls.
-    bound_function_aliases: HashMap<String, BoundCallableAlias>,
+    bound_function_aliases: ScopedMap<String, BoundCallableAlias>,
     /// Internal flag for summary collection of tainted return values
     collecting_tainted_returns: bool,
     /// Internal buffer for tainted return sources while collecting summaries
@@ -369,7 +383,7 @@ struct DomXssVisitor<'a> {
     /// Precomputed byte offsets of line starts for O(log n) span → line/column lookup
     line_starts: Vec<usize>,
     /// Field-level taint tracking: "obj.field" -> source
-    field_taints: HashMap<String, String>,
+    field_taints: ScopedMap<String, String>,
     /// Top-level global variable taint tracking
     global_taints: HashSet<String>,
     /// Track `urlVar -> base source` for `new URL(tainted)` instances.
@@ -390,12 +404,12 @@ struct DomXssVisitor<'a> {
     /// write, so reading a custom property the page never fed untrusted data
     /// into stays clean. Standard CSS properties are deliberately excluded:
     /// the CSSOM normalizes those, so what comes back is not the input.
-    css_custom_property_sources: HashMap<String, String>,
+    css_custom_property_sources: ScopedMap<String, String>,
     /// Variables bound to an IndexedDB object store or index
     /// (`tx.objectStore('notes')`). Real code names the store before reading
     /// from it, so without this only the fully-chained
     /// `…objectStore(…).get(k)` spelling would resolve.
-    idb_object_store_vars: HashSet<String>,
+    idb_object_store_vars: ScopedSet<String>,
     /// Variables bound to an IndexedDB *value* request — the object an
     /// `objectStore(...).get(...)` / `.getAll()` / `.openCursor()` call
     /// returns. Its `onsuccess` handler receives the stored record, which is
@@ -404,7 +418,7 @@ struct DomXssVisitor<'a> {
     /// seeded parameter, another page on the origin) is not this page's
     /// literal text. The database handle from `indexedDB.open(...)` is
     /// deliberately *not* in here — its `result` is a connection, not data.
-    idb_request_vars: HashSet<String>,
+    idb_request_vars: ScopedSet<String>,
     /// Variables that hold a `<script>` element created via
     /// `document.createElement('script')`. Assigning a tainted value to
     /// `.text` / `.textContent` / `.innerText` / `.innerHTML` on these
@@ -430,7 +444,7 @@ struct DomXssVisitor<'a> {
     /// network response body, which is an untrusted DOM-XSS source. The
     /// set is pushed/popped as the promise-chain driver enters and leaves
     /// each callback so the binding never leaks past its callback.
-    response_object_vars: HashSet<String>,
+    response_object_vars: ScopedSet<String>,
     /// Nesting depth of conditional/loop/switch/try branch bodies currently
     /// being walked. The analysis is flow-insensitive, so taint is a *union*
     /// over paths: it is always added, but only *cleared* on an unconditional
@@ -451,6 +465,15 @@ struct DomXssVisitor<'a> {
     /// borrowing `self` — the walkers take `&mut self`, which a `&self`-borrow
     /// held across the call would conflict with.
     recursion_depth: Rc<Cell<u32>>,
+    /// Steps taken so far by this walk, against [`work_budget`].
+    /// Counted in [`DomXssVisitor::enter_recursion`], so once the budget is
+    /// spent every recursive analysis fn bails with the same safe default the
+    /// depth guard uses and the walk unwinds with what it already found.
+    ///
+    /// [`work_budget`]: DomXssVisitor::work_budget
+    work_steps: Cell<u64>,
+    /// Step budget for this walk — [`MAX_AST_WORK_STEPS`] outside tests.
+    work_budget: u64,
     /// Whether `require-trusted-types-for 'script'` is enforced for this page
     /// (threaded from the response CSP). Gates the program-wide default-policy
     /// suppression: without enforcement a `'default'` policy is inert, so we
@@ -708,39 +731,41 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
         Self {
-            tainted_vars: HashSet::new(),
-            var_aliases: HashMap::new(),
+            tainted_vars: Default::default(),
+            var_aliases: Default::default(),
             vulnerabilities: Vec::new(),
             sources: &*STATIC_SOURCES,
             sinks: &*STATIC_SINKS,
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
             overridden_coercions: HashSet::new(),
-            instance_classes: HashMap::new(),
+            instance_classes: Default::default(),
             class_ctor_param_fields: HashMap::new(),
             class_getter_fields: HashMap::new(),
-            bound_function_aliases: HashMap::new(),
+            bound_function_aliases: Default::default(),
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),
             source_code,
             line_starts,
-            field_taints: HashMap::new(),
+            field_taints: Default::default(),
             global_taints: HashSet::new(),
             url_object_sources: HashMap::new(),
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
-            css_custom_property_sources: HashMap::new(),
-            idb_object_store_vars: HashSet::new(),
-            idb_request_vars: HashSet::new(),
+            css_custom_property_sources: Default::default(),
+            idb_object_store_vars: Default::default(),
+            idb_request_vars: Default::default(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),
             reflected_markup: PageMarkup::default(),
             reflected_element_vars: HashMap::new(),
             form_element_vars: HashSet::new(),
-            response_object_vars: HashSet::new(),
+            response_object_vars: Default::default(),
             branch_depth: 0,
             recursion_depth: Rc::new(Cell::new(0)),
+            work_steps: Cell::new(0),
+            work_budget: MAX_AST_WORK_STEPS,
             trusted_types_enforced: false,
             tt_policies: HashMap::new(),
             default_tt_policy: None,
@@ -764,14 +789,17 @@ impl<'a> DomXssVisitor<'a> {
     }
     /// Enter one recursive analysis step. Returns `None` — telling the caller to
     /// bail with a safe default (`false` / `None` / stop walking) — once the
-    /// shared recursion depth has reached [`MAX_AST_VISIT_DEPTH`]; otherwise
-    /// increments the counter and hands back a [`RecursionGuard`] that restores
-    /// it on scope exit. See [`recursion_depth`](DomXssVisitor::recursion_depth).
+    /// shared recursion depth has reached [`MAX_AST_VISIT_DEPTH`] or the walk has
+    /// spent its [`MAX_AST_WORK_STEPS`] budget; otherwise increments the counter
+    /// and hands back a [`RecursionGuard`] that restores it on scope exit. See
+    /// [`recursion_depth`](DomXssVisitor::recursion_depth).
     fn enter_recursion(&self) -> Option<RecursionGuard> {
         let depth = self.recursion_depth.get();
-        if depth >= MAX_AST_VISIT_DEPTH {
+        let steps = self.work_steps.get();
+        if depth >= MAX_AST_VISIT_DEPTH || steps >= self.work_budget {
             return None;
         }
+        self.work_steps.set(steps + 1);
         self.recursion_depth.set(depth + 1);
         Some(RecursionGuard {
             depth: Rc::clone(&self.recursion_depth),
@@ -928,6 +956,14 @@ impl AstDomAnalyzer {
             .with_reflected_markup(reflected_markup)
             .with_trusted_types_enforced(trusted_types_enforced);
         visitor.walk_statements(&ret.program.body);
+        if visitor.work_steps.get() >= visitor.work_budget {
+            crate::dbg_log!(
+                "[ast] DOM-XSS analysis of a {}-byte script stopped at its {}-step work budget; {} finding(s) kept",
+                source_code.len(),
+                visitor.work_budget,
+                visitor.vulnerabilities.len()
+            );
+        }
 
         Ok(visitor.vulnerabilities)
     }

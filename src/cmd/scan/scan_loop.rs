@@ -386,34 +386,16 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
     } = ctx;
     // Released when this group finishes, admitting the next one.
     let _group_permit = group_permit;
-    // Skip the (expensive) payload-counting loop entirely when no
-    // overall progress bar will be drawn — generating ~10k payloads
-    // per param twice (here and again inside run_scanning) added a
-    // measurable CPU tax for every --silence / non-TTY scan.
+    // The bar starts empty: each target's `run_scanning` grows it by the
+    // exact tick count `generate_param_jobs` computes for that target (see
+    // `inc_length` there). This used to be a synchronous precount here —
+    // regenerating every parameter's reflection + DOM payload set (~8 ms of
+    // CPU per parameter, no yield) before the group dispatched a single
+    // target — and it still disagreed with the real tick count, since it
+    // ignored the payload cap, WAF expansion, shared payloads and
+    // fragment-only params.
     let overall_pb: Option<Arc<indicatif::ProgressBar>> = if let Some(ref mp) = multi_pb_clone {
-        // Calculate total overall tasks for this group. Must mirror what
-        // run_scanning actually increments — one tick per reflection
-        // payload, one per DOM payload — otherwise the overall bar rolls
-        // past 100% (the previous reflection-only count was the cause).
-        let mut total_overall_tasks = 0u64;
-        for target in &group {
-            for param in &target.reflection_params {
-                let reflection_payloads = if let Some(context) = &param.injection_context {
-                    crate::scanning::xss_common::get_dynamic_payloads(context, &args_arc)
-                        .unwrap_or_else(|_| vec![])
-                } else {
-                    crate::scanning::xss_common::get_dynamic_payloads(
-                        &crate::parameter_analysis::InjectionContext::Html(None),
-                        &args_arc,
-                    )
-                    .unwrap_or_else(|_| vec![])
-                };
-                let dom_payloads =
-                    crate::scanning::get_dom_payloads(param, &args_arc).unwrap_or_else(|_| vec![]);
-                total_overall_tasks += reflection_payloads.len() as u64 + dom_payloads.len() as u64;
-            }
-        }
-        let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
+        let pb = mp.add(indicatif::ProgressBar::new(0));
         // See `crate::scanning::req_per_sec_tracker` for why we
         // replace `{per_sec}` (pb-position rate, inflated by
         // skipped-payload `inc(1)` calls) with a `REQUEST_COUNT`-delta

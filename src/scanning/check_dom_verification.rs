@@ -315,9 +315,12 @@ fn payload_has_handler_sink_text(payload: &str) -> bool {
         if eq >= bytes.len() || bytes[eq] != b'=' {
             continue;
         }
-        if value_carries_js_sink(&payload[eq + 1..]) {
-            return true;
-        }
+        // Only the first handler needs checking: every later handler's value
+        // suffix is a substring of this one, and the sink test is a
+        // conjunction of `contains` checks (also after lowercasing/entity
+        // decoding, which a cut right after `=` cannot split). Re-checking
+        // each later suffix cost O(payload²) on a payload of many `on*=`.
+        return value_carries_js_sink(&payload[eq + 1..]);
     }
     false
 }
@@ -753,15 +756,19 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
     if !needs_markers && !needs_attrs && !needs_html_struct && !needs_js {
         return None;
     }
+    // One parse shared by the tree checks and the handler-breakout check; the
+    // latter used to re-parse the identical body (the common escaped-echo
+    // "no V" path paid two full parses per payload response).
+    let mut document: Option<scraper::Html> = None;
     if needs_markers || needs_attrs || needs_html_struct {
-        let document = crate::utils::html::parse_document_bounded(text);
-        if needs_markers && has_marker_evidence_in_doc(payload, &document) {
+        let document = document.insert(crate::utils::html::parse_document_bounded(text));
+        if needs_markers && has_marker_evidence_in_doc(payload, document) {
             return Some(DomEvidenceKind::Marker);
         }
-        if needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, &document) {
+        if needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, document) {
             return Some(DomEvidenceKind::ExecutableUrl);
         }
-        if needs_html_struct && has_html_structural_evidence_in_doc(payload, &document) {
+        if needs_html_struct && has_html_structural_evidence_in_doc(payload, document) {
             return Some(DomEvidenceKind::HtmlStructural);
         }
     }
@@ -770,8 +777,12 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
     {
         return Some(DomEvidenceKind::JsContext);
     }
-    if needs_js && has_inline_handler_breakout_evidence(payload, text) {
-        return Some(DomEvidenceKind::InlineHandlerBreakout);
+    if needs_js && payload.len() >= MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN {
+        let document =
+            document.get_or_insert_with(|| crate::utils::html::parse_document_bounded(text));
+        if has_inline_handler_breakout_evidence_in_doc(payload, document) {
+            return Some(DomEvidenceKind::InlineHandlerBreakout);
+        }
     }
     None
 }
@@ -1140,6 +1151,14 @@ fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
     // first decoded twice, turning a server's `&amp;#39;` (a literal `&#39;`
     // in the handler's JS) into a quote that never reaches the JS engine.
     let document = crate::utils::html::parse_document_bounded(text);
+    has_inline_handler_breakout_evidence_in_doc(payload, &document)
+}
+
+/// [`has_inline_handler_breakout_evidence`] over an already-parsed raw body.
+fn has_inline_handler_breakout_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
+    if payload.len() < MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN {
+        return false;
+    }
     let selector = selectors::universal();
     for node in document.select(selector) {
         // Issue #1183: a handler on a `<input type="hidden">` — even one the

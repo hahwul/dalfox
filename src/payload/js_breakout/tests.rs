@@ -355,3 +355,27 @@ fn enclosing_js_quote_skips_regex_literals() {
     assert_eq!(enclosing_js_quote("x = a / 2 / \""), Some('"'));
     assert_eq!(enclosing_js_quote("return /'/.test(s) ? `"), Some('`'));
 }
+
+#[test]
+fn enclosing_js_quote_stays_linear_on_unclosed_regex_candidates() {
+    // Every `/` here looks like a regex start, and the `[` keeps each scan
+    // from finding a closing `/` before the line ends.
+    let prefix = format!("var x = '{}'; s = '", "/[".repeat(100_000));
+    let code_prefix = format!("x = {}; s = '", "(/[".repeat(100_000));
+    let start = std::time::Instant::now();
+    assert_eq!(enclosing_js_quote(&prefix), Some('\''));
+    assert_eq!(enclosing_js_quote(&code_prefix), Some('\''));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(2),
+        "took {:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn enclosing_js_quote_regex_detection_resumes_on_the_next_line() {
+    // A burst of failed regex guesses on one line must not stop a real regex
+    // on the next line from hiding its quote.
+    let prefix = format!("x = {};\ns.replace(/\"/g, ''); y = '", "(/[".repeat(50));
+    assert_eq!(enclosing_js_quote(&prefix), Some('\''));
+}

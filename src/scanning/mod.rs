@@ -1831,6 +1831,12 @@ pub async fn run_scanning(
         generate_param_jobs(target, &args, waf_strategy.as_ref(), &shared_payloads);
 
     let pb = build_scan_progress_bar(&multi_pb, total_tasks, target);
+    // The CLI's per-host-group overall bar is created empty and sized here, by
+    // the same count that sizes this target's own bar: both are ticked
+    // together by `inc_progress`, so they cannot disagree.
+    if let Some(ref opb) = overall_pb {
+        opb.inc_length(total_tasks);
+    }
 
     let found_params = Arc::new(RwLock::new(FoundParams {
         reflection: HashSet::new(),

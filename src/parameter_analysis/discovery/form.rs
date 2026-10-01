@@ -56,6 +56,14 @@ pub(crate) async fn check_form_discovery_with(
     /// single hostile (or generated) page can make a scan spend.
     const MAX_FORM_FIELDS: usize = 200;
 
+    /// Most distinct forms probed per page, and most distinct inline-JSON /
+    /// `JSON.stringify` key sets. Each costs a probe per field, and nothing
+    /// else bounded how many a page could declare: a page of 400 000 tiny
+    /// forms was 800 000 discovery requests. Identical forms (same action,
+    /// method, encoding and field names — a product grid's add-to-cart forms)
+    /// are folded first, so the cap only bites on genuinely distinct ones.
+    const MAX_DISTINCT_FORMS: usize = 100;
+
     // Fully-owned form descriptor extracted from the HTML. Keeping these as
     // Send-safe `String` / `Url` lets the scraper document get dropped before
     // the async probing loop below, which is a prerequisite for ever moving
@@ -75,7 +83,16 @@ pub(crate) async fn check_form_discovery_with(
         let input_sel = selectors::input_textarea_select();
 
         let mut out = Vec::new();
+        let mut seen_forms: HashSet<(String, bool, bool, Vec<String>)> = HashSet::new();
         for form in document.select(form_sel) {
+            if out.len() >= MAX_DISTINCT_FORMS {
+                crate::dbg_log!(
+                    "page declares more than {} distinct forms; probing the first {}",
+                    MAX_DISTINCT_FORMS,
+                    MAX_DISTINCT_FORMS
+                );
+                break;
+            }
             let form_method = form.value().attr("method").unwrap_or("get");
             let is_post = form_method.eq_ignore_ascii_case("post");
             let enctype = form.value().attr("enctype").unwrap_or("");
@@ -125,6 +142,18 @@ pub(crate) async fn check_form_discovery_with(
                     fields.len(),
                     MAX_FORM_FIELDS
                 );
+            }
+
+            // The same form repeated (one per product row, per comment, …)
+            // probes the same slots with the same request shape.
+            let form_key = (
+                form_url.to_string(),
+                is_post,
+                is_multipart,
+                fields.iter().map(|(name, _)| name.clone()).collect(),
+            );
+            if !seen_forms.insert(form_key) {
+                continue;
             }
 
             out.push(FormInfo {
@@ -390,7 +419,11 @@ pub(crate) async fn check_form_discovery_with(
             regex::Regex::new(r#"\{["\s]*"(\w+)"["\s]*:["\s]*"[^"]*"[^}]*\}"#)
                 .expect("inline JSON regex is valid")
         });
+        let mut seen_key_sets: HashSet<Vec<String>> = HashSet::new();
         for caps in inline_re.captures_iter(&html) {
+            if seen_key_sets.len() >= MAX_DISTINCT_FORMS {
+                break;
+            }
             let full = caps.get(0).map_or("", |m| m.as_str());
             // Try to parse as JSON
             if let Ok(serde_json::Value::Object(obj)) =
@@ -410,6 +443,13 @@ pub(crate) async fn check_form_discovery_with(
                     })
                 };
                 if all_known {
+                    continue;
+                }
+                // The same object repeated on the page (a list of records,
+                // a documented example) probes the same keys again.
+                let mut key_set = keys.clone();
+                key_set.sort();
+                if !seen_key_sets.insert(key_set) {
                     continue;
                 }
 
@@ -469,7 +509,11 @@ pub(crate) async fn check_form_discovery_with(
     // Look for patterns like: JSON.stringify({"key":"value",...})
     {
         let re = json_stringify_regex();
+        let mut seen_key_sets: HashSet<Vec<String>> = HashSet::new();
         for caps in re.captures_iter(&html) {
+            if seen_key_sets.len() >= MAX_DISTINCT_FORMS {
+                break;
+            }
             if let Some(inner) = caps.get(1) {
                 // Parse key names from the JSON-like object literal
                 let key_re = json_key_regex();
@@ -480,6 +524,10 @@ pub(crate) async fn check_form_discovery_with(
                     }
                 }
                 if json_fields.is_empty() {
+                    continue;
+                }
+                let key_set: Vec<String> = json_fields.iter().map(|(k, _)| k.clone()).collect();
+                if !seen_key_sets.insert(key_set) {
                     continue;
                 }
 

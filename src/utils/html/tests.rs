@@ -70,12 +70,31 @@ fn void_elements_do_not_accumulate_depth() {
 }
 
 #[test]
-fn self_closing_tags_do_not_accumulate_depth() {
+fn foreign_self_closing_tags_do_not_accumulate_depth() {
     let html = format!(
-        "<html><body>{}</body></html>",
-        "<custom-tag/>".repeat(5_000)
+        "<html><body><svg>{}</svg><math>{}</math></body></html>",
+        "<path d=\"M0 0\"/><circle r=1 />".repeat(5_000),
+        "<mspace/>".repeat(5_000)
     );
     assert_eq!(bound_html_nesting(&html).len(), html.len());
+}
+
+#[test]
+fn html_self_closing_flag_is_ignored_like_the_tree_builder() {
+    // html5ever ignores `/>` on a non-void HTML element, so `<div/>` opens a
+    // `<div>` and n of them nest n deep. Honouring the flag let this read as
+    // depth 0 while the parse went quadratic.
+    assert_truncated("div_self_closing", &"<div/>".repeat(5_000));
+    assert_truncated("custom_self_closing", &"<custom-tag/>".repeat(5_000));
+    // Once a breakout tag leaves foreign content, `/>` stops counting again.
+    assert_truncated(
+        "svg_breakout_self_closing",
+        &format!("<svg>{}", "<div/>".repeat(5_000)),
+    );
+    assert_truncated(
+        "foreign_object_self_closing",
+        &format!("<svg><foreignObject>{}", "<x-a/>".repeat(5_000)),
+    );
 }
 
 #[test]
@@ -404,4 +423,78 @@ fn script_open_tag_pattern_spans_quoted_gt() {
         re.find(html).unwrap().as_str(),
         r#"<script data-x="a>b" type="text/template">"#
     );
+}
+
+// --- tokenizer shapes that used to hide markup from the estimator ----------
+
+#[test]
+fn estimator_bypass_shapes_are_caught() {
+    let deep = "<div>".repeat(5_000);
+    for (name, prefix) in [
+        // `<!-->` is a complete empty comment, not the start of one that runs
+        // to the next `-->`.
+        ("empty_comment", "<!-->"),
+        ("empty_comment_dash", "<!--->"),
+        ("bang_comment_end", "<!-- x --!>"),
+        // Bogus comments and doctypes end at the first `>`, quotes and all.
+        ("bogus_comment_quote", "<?\">"),
+        ("doctype_quote", "<!DOCTYPE html PUBLIC \">"),
+        // A quote only opens a value after `=`.
+        ("quote_in_attr_name", "<div x\">"),
+        ("quote_in_end_tag", "</p x\">"),
+        // `<style>` is not raw text inside foreign content.
+        ("svg_style", "<svg><style>"),
+    ] {
+        assert_truncated(name, &format!("{prefix}{deep}"));
+    }
+    // Same for foreign nesting that never leaves SVG.
+    assert_truncated(
+        "svg_style_g",
+        &format!("<svg><style>{}", "<g>".repeat(5_000)),
+    );
+}
+
+#[test]
+fn estimator_bypass_shapes_parse_promptly() {
+    let deep = "<div>".repeat(20_000);
+    for prefix in ["<!-->", "<?\">", "<div x\">", "", "<svg><style>"] {
+        let html = format!("{prefix}{deep}");
+        let start = std::time::Instant::now();
+        let _ = parse_document_bounded(&html);
+        let _ = parse_document_bounded(&"<div/>".repeat(20_000));
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(3),
+            "{prefix:?}: bounded parse took {:?}",
+            start.elapsed()
+        );
+    }
+}
+
+#[test]
+fn legitimate_tokenizer_shapes_are_not_truncated() {
+    let filler = "<div><span>x</span></div>".repeat(600);
+    for (name, html) in [
+        (
+            "comment_with_dashes",
+            format!("<!-- a -- b --->{filler}<div id=late>MARK</div>"),
+        ),
+        (
+            "doctype",
+            format!(
+                "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0//EN\" \"x.dtd\">{filler}<div id=late>MARK</div>"
+            ),
+        ),
+        (
+            "svg_cdata",
+            format!(
+                "<svg><script><![CDATA[ if (a<b) {{ x = '<div>'.repeat(9) }} ]]></script></svg>{filler}<div id=late>MARK</div>"
+            ),
+        ),
+        (
+            "quote_in_unquoted_value",
+            format!("<a href=x\"y>link</a>{filler}<div id=late>MARK</div>"),
+        ),
+    ] {
+        assert_not_truncated(name, &html);
+    }
 }
