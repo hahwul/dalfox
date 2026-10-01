@@ -188,6 +188,22 @@ fn explicit_args_for(matches: &clap::ArgMatches, name: &str) -> cmd::scan::Expli
         .unwrap_or_default()
 }
 
+/// Exit a daemon (`server` / `mcp`) once it has stopped serving.
+///
+/// Scans run on `spawn_blocking` threads, and returning from `main` drops the
+/// runtime, which waits for every blocking thread to finish. So after SIGTERM
+/// (or MCP stdin EOF) the process lingered until each in-flight scan ended —
+/// forever under the default `scan_timeout` of 0 — still firing payloads at
+/// targets with no client attached, and a second Ctrl-C could not stop it.
+/// Jobs live only in memory, so nothing is lost by not waiting for them.
+fn exit_daemon(outcome: ScanOutcome) -> ! {
+    std::process::exit(match outcome {
+        ScanOutcome::Clean => 0,
+        ScanOutcome::Findings => 1,
+        ScanOutcome::Error => 2,
+    })
+}
+
 #[tokio::main]
 async fn main() {
     // Install the rustls crypto provider (ring) before anything builds a
@@ -552,6 +568,7 @@ async fn main() {
                     Ok(()) => ScanOutcome::Clean,
                     Err(_) => ScanOutcome::Error,
                 };
+                exit_daemon(outcome);
             }
             Commands::Payload(args) => {
                 outcome = cmd::payload::run_payload(args);
@@ -570,6 +587,7 @@ async fn main() {
                         ScanOutcome::Error
                     }
                 };
+                exit_daemon(outcome);
             }
 
             Commands::Completion { .. } => unreachable!(),

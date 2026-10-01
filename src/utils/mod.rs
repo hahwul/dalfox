@@ -172,6 +172,61 @@ pub(crate) fn finding_belongs_to_target(target_url: &str, finding_url: &str) -> 
     false
 }
 
+/// Counts, for many targets, how many of a fixed set of finding URLs
+/// [`finding_belongs_to_target`] attributes to each — without the O(targets ×
+/// findings) predicate scan.
+///
+/// After the scheme strip, the predicate reduces to a test on the finding's
+/// path-without-query (`f_path`) alone:
+///
+///   - target **with** a query: `f_path == t_path` (an exact `t == f` match
+///     implies equal paths, so it adds nothing);
+///   - target **without** a query, containing a `/`: `f_path` starts with the
+///     target's parent (`t[..=last '/']`) — which also covers `f_path == t`,
+///     since `t` itself starts with its parent;
+///   - target **without** a query or any `/`: `f_path == t`.
+///
+/// So the findings' `f_path`s are sorted once and each target becomes an
+/// equal-range or prefix-range count by binary search: in sorted order every
+/// string with a given prefix is contiguous and sits at or after the prefix.
+/// `finding_attribution_index_matches_predicate` keeps this pinned to the
+/// predicate.
+pub(crate) struct FindingAttributionIndex<'a> {
+    sorted_paths: Vec<&'a str>,
+}
+
+impl<'a> FindingAttributionIndex<'a> {
+    pub(crate) fn new(finding_urls: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut sorted_paths: Vec<&'a str> = finding_urls
+            .into_iter()
+            .map(|f| {
+                let f = strip_url_scheme(f);
+                f.split('?').next().unwrap_or(f)
+            })
+            .collect();
+        sorted_paths.sort_unstable();
+        Self { sorted_paths }
+    }
+
+    /// Number of indexed findings `finding_belongs_to_target(target_url, _)`
+    /// accepts.
+    pub(crate) fn count_for(&self, target_url: &str) -> usize {
+        let t = strip_url_scheme(target_url);
+        let paths = &self.sorted_paths;
+        let lo_of = |key: &str| paths.partition_point(|p| *p < key);
+        if !t.contains('?')
+            && let Some(i) = t.rfind('/')
+        {
+            let parent = &t[..=i];
+            let lo = lo_of(parent);
+            let hi = paths.partition_point(|p| *p < parent || p.starts_with(parent));
+            return hi - lo;
+        }
+        let key = t.split('?').next().unwrap_or(t);
+        paths.partition_point(|p| *p <= key) - lo_of(key)
+    }
+}
+
 /// Initialize remote resources based on CLI flags. Safe to call multiple times.
 /// This default variant uses no proxy and default timeout. To customize, use
 /// `init_remote_resources_with_options`.

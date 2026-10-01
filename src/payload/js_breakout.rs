@@ -251,6 +251,16 @@ pub(crate) fn enclosing_js_quote(prefix: &str) -> Option<char> {
         }
         !matches!(prev, ')' | ']' | '\'' | '"' | '`' | '.')
     };
+    // A regex candidate that finds no closing `/` before the line ends was not
+    // a regex, and the scan resumes just past it. Each such failed scan reads
+    // to the end of the line, so a long line of `/[` would cost quadratic
+    // time (32 000 repeats: 7 s per probe response). After a few failures on
+    // one line, stop guessing regexes until the next line: real code almost
+    // never misfires the heuristic even once.
+    const MAX_FAILED_REGEX_SCANS_PER_LINE: usize = 8;
+    let mut failed_scan_line_end = usize::MAX;
+    let mut failed_scans_on_line = 0usize;
+    let mut regex_disabled_until = 0usize;
     let mut state = State::Code;
     // `true` for a `${` expression brace, `false` for an ordinary `{`.
     let mut braces: Vec<bool> = Vec::new();
@@ -276,7 +286,7 @@ pub(crate) fn enclosing_js_quote(prefix: &str) -> Option<char> {
                     state = State::Block;
                     i += 1;
                 }
-                '/' if regex_starts_at(i) => {
+                '/' if i >= regex_disabled_until && regex_starts_at(i) => {
                     // Skip to the closing `/`, honouring escapes and `[…]`
                     // classes. A line break (or the end of the prefix) means
                     // it was not a regex after all; resume after the `/`.
@@ -294,6 +304,16 @@ pub(crate) fn enclosing_js_quote(prefix: &str) -> Option<char> {
                     }
                     if j < chars.len() && chars[j] == '/' {
                         i = j;
+                    } else {
+                        if j == failed_scan_line_end {
+                            failed_scans_on_line += 1;
+                        } else {
+                            failed_scan_line_end = j;
+                            failed_scans_on_line = 1;
+                        }
+                        if failed_scans_on_line >= MAX_FAILED_REGEX_SCANS_PER_LINE {
+                            regex_disabled_until = j;
+                        }
                     }
                 }
                 _ => {}

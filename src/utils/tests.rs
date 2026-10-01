@@ -395,3 +395,85 @@ fn finding_belongs_to_target_follows_a_same_host_tls_upgrade() {
         "https://example.com/other/bar?q=1"
     ));
 }
+
+/// Every target/finding URL shape the attribution predicate distinguishes:
+/// schemes it strips (and one it does not), query/no-query, trailing and
+/// missing slashes, sibling segments, prefix-but-not-segment names, and
+/// degenerate strings with no `/` or no host at all.
+fn attribution_corpus() -> Vec<String> {
+    let schemes = ["", "http://", "https://", "ftp://"];
+    let hosts = ["h", "h2", "hh"];
+    let paths = [
+        "", "/", "/a", "/a/", "/a/b", "/a/b/", "/a/bc", "/ab", "/a/b/c", "/b", "/a%2Fb", "/é/x",
+    ];
+    let queries = ["", "?", "?q=1", "?q=2", "?id=1/x", "?q=1?r=/"];
+    let mut out = Vec::new();
+    for s in schemes {
+        for h in hosts {
+            for p in paths {
+                for q in queries {
+                    out.push(format!("{s}{h}{p}{q}"));
+                }
+            }
+        }
+    }
+    out.extend(
+        [
+            "",
+            "?",
+            "/",
+            "//",
+            "noslash",
+            "?/x",
+            "h?",
+            "http://",
+            "https://h",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
+    // Pseudo-random strings over the alphabet the predicate reacts to.
+    let alphabet: Vec<char> = "/?ab:hps.".chars().collect();
+    let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+    for _ in 0..400 {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let len = (seed >> 59) as usize; // 0..=31
+        let mut s = String::new();
+        let mut x = seed;
+        for _ in 0..len {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
+            s.push(alphabet[(x >> 33) as usize % alphabet.len()]);
+        }
+        out.push(s);
+    }
+    out
+}
+
+#[test]
+fn finding_attribution_index_matches_predicate() {
+    let corpus = attribution_corpus();
+    let index = super::FindingAttributionIndex::new(corpus.iter().map(String::as_str));
+    for target in &corpus {
+        let expected = corpus
+            .iter()
+            .filter(|f| finding_belongs_to_target(target, f))
+            .count();
+        assert_eq!(
+            index.count_for(target),
+            expected,
+            "attribution index disagrees with finding_belongs_to_target for target {target:?}"
+        );
+    }
+    // And on a finding subset that leaves some targets with zero matches.
+    let subset: Vec<&str> = corpus.iter().step_by(7).map(String::as_str).collect();
+    let index = super::FindingAttributionIndex::new(subset.iter().copied());
+    for target in &corpus {
+        let expected = subset
+            .iter()
+            .filter(|f| finding_belongs_to_target(target, f))
+            .count();
+        assert_eq!(index.count_for(target), expected, "target {target:?}");
+    }
+}

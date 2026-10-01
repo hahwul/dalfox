@@ -803,3 +803,28 @@ async fn test_blind_scanning_skips_a_json_body() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_blind_scan_forms_caps_fields_and_folds_repeated_forms() {
+    // 300 injectable fields: one POST each (every one re-serializing all 300)
+    // was uncapped, and the same form repeated was injected again per copy.
+    let inputs: String = (0..300)
+        .map(|i| format!("<input name=\"f{i}\" value=\"v\">"))
+        .collect();
+    let form = format!("<form method=\"POST\" action=\"/submit\">{inputs}</form>");
+    let html: &'static str =
+        Box::leak(format!("<html><body>{}</body></html>", form.repeat(3)).into_boxed_str());
+    let (addr, state) = start_form_server(html).await;
+    let target = make_target(addr, "/");
+
+    blind_scan_forms(&target, "https://cb.example", None).await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(
+        records.len(),
+        200,
+        "first 200 injectable fields of one form"
+    );
+    // Every field is still submitted with each request.
+    assert!(records.iter().all(|r| r.body.contains("f299=v")));
+}

@@ -126,7 +126,10 @@ fn cached_parsed_spans_returns_same_result_for_identical_blocks() {
     let second =
         cached_parsed_spans(block, SourceType::default()).expect("parses cleanly (cache hit)");
     assert_eq!(first, second);
-    assert!(!first.0.is_empty(), "should record at least one sink span");
+    assert!(
+        !first.sinks.is_empty(),
+        "should record at least one sink span"
+    );
 }
 
 #[test]
@@ -660,4 +663,56 @@ fn script_open_tag_with_quoted_gt_keeps_the_body_intact() {
     // a data block never runs.
     let html = format!(r#"<script data-x="a>b" type="text/template">var q="{payload}";</script>"#);
     assert!(!has_js_context_evidence(payload, &html));
+}
+
+#[test]
+fn span_index_matches_linear_containment_rules() {
+    // The indexed lookup must agree with the original linear rules, including
+    // nested string spans (a literal inside a template `${…}`).
+    let naive = |sinks: &[(u32, u32)], strings: &[(u32, u32)], ps: u32, pe: u32| {
+        !strings.iter().any(|&(s, e)| ps > s && pe < e)
+            && sinks.iter().any(|&(s, e)| s >= ps && e <= pe)
+    };
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = |m: u32| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % u64::from(m)) as u32
+    };
+    for _ in 0..2_000 {
+        let span = |next: &mut dyn FnMut(u32) -> u32| {
+            let s = next(60);
+            (s, s + next(30))
+        };
+        let sinks: Vec<_> = (0..next(6)).map(|_| span(&mut next)).collect();
+        let strings: Vec<_> = (0..next(6)).map(|_| span(&mut next)).collect();
+        let index = SpanIndex::new(sinks.clone(), strings.clone());
+        let ps = next(70);
+        let pe = ps + next(30);
+        assert_eq!(
+            index.payload_range_hits_sink(ps, pe),
+            naive(&sinks, &strings, ps, pe),
+            "sinks={sinks:?} strings={strings:?} range=({ps},{pe})"
+        );
+    }
+}
+
+#[test]
+fn many_in_string_echoes_stay_linear() {
+    // Each echo used to re-hash the whole block and scan every span.
+    let payload = "'-alert(1)-'";
+    let mut html = String::from("<html><script>\n");
+    for i in 0..20_000 {
+        html.push_str(&format!("var a{i}=\"x'-alert(1)-'y\";\n"));
+    }
+    html.push_str("</script></html>");
+    let _ = has_inline_script_context_evidence(payload, &html); // warm the parse cache
+    let start = std::time::Instant::now();
+    assert!(!has_inline_script_context_evidence(payload, &html));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(2),
+        "took {:?}",
+        start.elapsed()
+    );
 }

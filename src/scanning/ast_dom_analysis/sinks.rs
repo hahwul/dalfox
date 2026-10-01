@@ -1272,9 +1272,10 @@ impl<'a> DomXssVisitor<'a> {
         params: &FormalParameters<'a>,
         statements: &[Statement<'a>],
     ) {
-        let saved_field_taints = self.field_taints.clone();
+        // A journal checkpoint, not a clone — see `walk_function_literal_body`.
+        let field_taints_checkpoint = self.field_taints.checkpoint();
         self.walk_function_literal_body(params, statements);
-        self.field_taints = saved_field_taints;
+        self.field_taints.rollback(field_taints_checkpoint);
     }
 }
 

@@ -13,9 +13,10 @@ impl<'a> DomXssVisitor<'a> {
         event_source: &str,
         statements: &oxc_allocator::Vec<'a, Statement<'a>>,
     ) {
-        let saved_tainted = self.tainted_vars.clone();
-        let saved_aliases = self.var_aliases.clone();
-        let saved_field_taints = self.field_taints.clone();
+        // Journal checkpoints, not clones — see `walk_function_literal_body`.
+        let tainted_checkpoint = self.tainted_vars.checkpoint();
+        let aliases_checkpoint = self.var_aliases.checkpoint();
+        let field_taints_checkpoint = self.field_taints.checkpoint();
 
         self.tainted_vars.insert(param_name.to_string());
         self.var_aliases
@@ -44,9 +45,9 @@ impl<'a> DomXssVisitor<'a> {
 
         self.walk_statements(statements);
 
-        self.tainted_vars = saved_tainted;
-        self.var_aliases = saved_aliases;
-        self.field_taints = saved_field_taints;
+        self.tainted_vars.rollback(tainted_checkpoint);
+        self.var_aliases.rollback(aliases_checkpoint);
+        self.field_taints.rollback(field_taints_checkpoint);
     }
     pub(super) fn message_event_source_for_receiver(&self, receiver: &Expression<'a>) -> String {
         // Descends a `.`-chain receiver outside the main walkers (reached from

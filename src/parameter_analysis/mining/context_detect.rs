@@ -87,7 +87,11 @@ pub(crate) fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option
     // Guard the multi-`<script>` edge: if a `</script>` closes between this
     // opener and the marker, the marker isn't inside this script body — bail to
     // the fixed catalog rather than computing a bogus closer.
-    if prefix.to_ascii_lowercase().contains("</script") {
+    if prefix
+        .as_bytes()
+        .windows(b"</script".len())
+        .any(|w| w.eq_ignore_ascii_case(b"</script"))
+    {
         return None;
     }
     let closer = crate::payload::js_breakout::compute_js_breakout(prefix);
@@ -306,6 +310,18 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
 ///   * the attribute name isn't in the recognised innerHTML-sink set.
 pub(crate) fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static str> {
     if marker.is_empty() || !text.contains(marker) {
+        return None;
+    }
+    // Every sink below is an attribute name, and html5ever only ASCII-
+    // lowercases names, so a body spelling none of them (in any ASCII case)
+    // cannot match. Skips a full parse on the per-payload gate path, which
+    // calls this for every decoded view of every response.
+    const SINK_NAME_NEEDLES: [&[u8]; 4] = [b"v-html", b"ng-bind-html", b"innerhtml", b"data-bind"];
+    if !SINK_NAME_NEEDLES.iter().any(|needle| {
+        text.as_bytes()
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle))
+    }) {
         return None;
     }
     let document = crate::utils::html::parse_document_bounded(text);

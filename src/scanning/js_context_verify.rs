@@ -140,7 +140,68 @@ const SINK_CACHE_CAPACITY: usize = 1024;
 /// thousands of `(u32, u32)` spans, and this is on the per-payload JS-context
 /// hot path, so cloning the whole bundle under the cache mutex on every hit was
 /// a real (avoidable) cost.
-type ParsedSpans = Option<Arc<(Vec<(u32, u32)>, Vec<(u32, u32)>)>>;
+type ParsedSpans = Option<Arc<SpanIndex>>;
+
+/// Sink-call and string-literal spans of one parsed block, sorted by start so
+/// each payload occurrence is answered by binary search. A linear scan of both
+/// lists per occurrence made a block echoing the payload K times cost
+/// O(K × spans) (16 000 echoes: ~2 s per payload response).
+#[derive(Debug, PartialEq)]
+struct SpanIndex {
+    sinks: Vec<(u32, u32)>,
+    strings: Vec<(u32, u32)>,
+    /// `strings_max_end[i]` = largest end among `strings[..=i]`. String spans
+    /// can nest (a literal inside a template `${…}`), so the latest-starting
+    /// literal alone does not decide containment.
+    strings_max_end: Vec<u32>,
+}
+
+impl SpanIndex {
+    fn new(mut sinks: Vec<(u32, u32)>, mut strings: Vec<(u32, u32)>) -> Self {
+        sinks.sort_unstable();
+        strings.sort_unstable();
+        let strings_max_end = strings
+            .iter()
+            .scan(0u32, |max, &(_, e)| {
+                *max = (*max).max(e);
+                Some(*max)
+            })
+            .collect();
+        Self {
+            sinks,
+            strings,
+            strings_max_end,
+        }
+    }
+
+    /// Returns true when the payload range introduced a real sink call into
+    /// the parsed script. Two guards:
+    ///
+    /// - String-literal containment: if the payload range sits *strictly*
+    ///   inside any string literal (i.e. the payload did not consume the
+    ///   opening or closing quote), the reflection never broke out of the
+    ///   string. Any sink-call token inside is just string content the JS
+    ///   engine will not evaluate. Without this guard, a reflection like
+    ///   `decodeURIComponent("…'-alert(1)-'…")` — where the payload is a
+    ///   literal `'-alert(1)-'` inside a *double-quoted* string — would be
+    ///   verified, because the payload bytes happen to overlap a sink span
+    ///   that lives inside the surrounding string literal.
+    /// - Sink containment: a sink-call span lies fully within the payload's
+    ///   byte range, meaning the payload itself produced the call.
+    fn payload_range_hits_sink(&self, payload_start: u32, payload_end: u32) -> bool {
+        // Strict containment: some literal with `s < payload_start` and
+        // `e > payload_end`.
+        let before = self.strings.partition_point(|&(s, _)| s < payload_start);
+        if before > 0 && self.strings_max_end[before - 1] > payload_end {
+            return false;
+        }
+        let first = self.sinks.partition_point(|&(s, _)| s < payload_start);
+        self.sinks[first..]
+            .iter()
+            .take_while(|&&(s, _)| s <= payload_end)
+            .any(|&(_, e)| e <= payload_end)
+    }
+}
 type SinkCache = Mutex<HashMap<u64, ParsedSpans>>;
 
 fn sink_cache() -> &'static SinkCache {
@@ -193,7 +254,7 @@ fn collect_spans_on_stack(script_src: &str, source_type: SourceType) -> ParsedSp
     for stmt in &ret.program.body {
         gather_sink_spans_in_statement(stmt, &mut sinks, &mut strings);
     }
-    Some(Arc::new((sinks, strings)))
+    Some(Arc::new(SpanIndex::new(sinks, strings)))
 }
 
 /// Cached `collect_parsed_spans`. The same `<script>` body often appears
@@ -225,44 +286,6 @@ fn cached_parsed_spans(script_src: &str, source_type: SourceType) -> ParsedSpans
     }
     cache.insert(key, result.clone());
     result
-}
-
-/// Returns true when the payload range introduced a real sink call into
-/// the parsed script. Two guards:
-///
-/// - String-literal containment: if the payload range sits *strictly*
-///   inside any string literal (i.e. the payload did not consume the
-///   opening or closing quote), the reflection never broke out of the
-///   string. Any sink-call token inside is just string content the JS
-///   engine will not evaluate. Without this guard, a reflection like
-///   `decodeURIComponent("…'-alert(1)-'…")` — where the payload is a
-///   literal `'-alert(1)-'` inside a *double-quoted* string — would be
-///   verified, because the payload bytes happen to overlap a sink span
-///   that lives inside the surrounding string literal.
-/// - Sink containment: a sink-call span lies fully within the payload's
-///   byte range, meaning the payload itself produced the call.
-fn script_block_has_sink_call_in_range(
-    script_src: &str,
-    source_type: SourceType,
-    payload_start: u32,
-    payload_end: u32,
-) -> bool {
-    let Some(spans) = cached_parsed_spans(script_src, source_type) else {
-        return false;
-    };
-    let (sinks, strings) = &*spans;
-    // Strict containment: payload range must sit *between* the quotes,
-    // not touch them — otherwise the payload broke the string and the
-    // surrounding literal is no longer a literal.
-    if strings
-        .iter()
-        .any(|&(s, e)| payload_start > s && payload_end < e)
-    {
-        return false;
-    }
-    sinks
-        .iter()
-        .any(|&(s, e)| s >= payload_start && e <= payload_end)
 }
 
 fn callee_is_js_sink(call: &CallExpression<'_>) -> bool {
@@ -689,9 +712,18 @@ fn any_payload_occurrence_hits_sink(src: &str, payload: &str) -> bool {
     if payload.is_empty() {
         return false;
     }
-    src.match_indices(payload).any(|(start, _)| {
+    // Look the block up once, not per occurrence: the lookup hashes the whole
+    // block, so per-occurrence lookups were O(occurrences × block).
+    let mut occurrences = src.match_indices(payload).peekable();
+    if occurrences.peek().is_none() {
+        return false;
+    }
+    let Some(spans) = cached_parsed_spans(src, SourceType::default()) else {
+        return false;
+    };
+    occurrences.any(|(start, _)| {
         let end = start + payload.len();
-        script_block_has_sink_call_in_range(src, SourceType::default(), start as u32, end as u32)
+        spans.payload_range_hits_sink(start as u32, end as u32)
     })
 }
 
@@ -708,11 +740,18 @@ pub(crate) fn handler_payload_hits_sink(handler: &str, payload: &str) -> bool {
     if payload.is_empty() {
         return false;
     }
+    let mut occurrences = handler.match_indices(payload).peekable();
+    if occurrences.peek().is_none() {
+        return false;
+    }
     let src = format!("{PREFIX}{handler}\n}}");
-    handler.match_indices(payload).any(|(start, _)| {
+    let Some(spans) = cached_parsed_spans(&src, SourceType::script()) else {
+        return false;
+    };
+    occurrences.any(|(start, _)| {
         let start = PREFIX.len() + start;
         let end = start + payload.len();
-        script_block_has_sink_call_in_range(&src, SourceType::script(), start as u32, end as u32)
+        spans.payload_range_hits_sink(start as u32, end as u32)
     })
 }
 

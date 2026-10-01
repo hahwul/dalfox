@@ -303,12 +303,14 @@ pub(crate) struct ScanOptions {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct ResultPayload {
+pub(crate) struct ResultPayload<'a> {
     /// The original target URL submitted for scanning.
     pub(crate) target: String,
     pub(crate) status: JobStatus,
+    /// Borrowed from the job snapshot: polls used to deep-clone the whole
+    /// finding list just to serialize it once.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) results: Option<Vec<SanitizedResult>>,
+    pub(crate) results: Option<&'a [SanitizedResult]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

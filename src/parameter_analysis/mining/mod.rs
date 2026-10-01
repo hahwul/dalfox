@@ -28,6 +28,7 @@ use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param};
 use crate::target_parser::Target;
 use crate::utils::shimmer::ShimmerSpinner;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tokio::sync::{Mutex, Semaphore};

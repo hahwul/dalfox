@@ -969,7 +969,10 @@ pub(crate) async fn read_body_capped(
             break;
         }
     }
-    Ok(String::from_utf8_lossy(&buf).into_owned())
+    // Take ownership on the common valid-UTF-8 path; `from_utf8_lossy(&buf)
+    // .into_owned()` copied every body (up to the 16 MiB cap) a second time.
+    Ok(String::from_utf8(buf)
+        .unwrap_or_else(|invalid| String::from_utf8_lossy(invalid.as_bytes()).into_owned()))
 }
 
 /// Convenience over [`read_body_capped`] using the default

@@ -52,7 +52,7 @@ pub(crate) type DiscoveredParams = Vec<Param>;
 #[allow(dead_code)]
 pub(crate) type ProbedParams = Vec<Param>;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Location {
     Query,
     Body,
@@ -1522,16 +1522,18 @@ fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: 
         }
     }
 
+    // Keep whatever discovery produced for a slot — it carries probed
+    // specials / injection context that a bare synthesis does not. A set, not
+    // a scan of `params` per candidate: both grow with the URL/body size.
+    let mut present: std::collections::HashSet<(String, Location)> = params
+        .iter()
+        .map(|p| (p.name.clone(), p.location.clone()))
+        .collect();
     for (name, location) in candidates {
         if name.is_empty() || args.ignore_param.iter().any(|ignored| ignored == &name) {
             continue;
         }
-        // Keep whatever discovery produced for this slot — it carries probed
-        // specials / injection context that a bare synthesis does not.
-        if params
-            .iter()
-            .any(|p| p.name == name && p.location == location)
-        {
+        if !present.insert((name.clone(), location.clone())) {
             continue;
         }
         push_synthesized_param(params, &name, location, None);

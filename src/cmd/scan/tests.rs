@@ -1682,6 +1682,72 @@ async fn test_render_results_json_writes_envelope() {
     assert_eq!(v["meta"]["target_summary"][0]["status"], "findings");
 }
 
+// `target_summary` attribution used to filter every finding once per target
+// (O(targets x findings): ~4.3 s in a release build at 8000 x 8000). It is
+// indexed now; this pins both the counts and that the summary no longer scales
+// quadratically.
+#[tokio::test]
+async fn test_render_results_target_summary_scales_with_many_targets_and_findings() {
+    const N: usize = 6000;
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls: Vec<String> = (0..N)
+        .map(|i| format!("https://example.com/p{i}?q=1"))
+        .collect();
+    // Two findings for even targets, none for odd ones.
+    let results: Vec<ScanResult> = (0..N)
+        .map(|i| {
+            let t = (i / 2) * 2;
+            // Non-zero message_id + unique evidence: not folded by the
+            // render-time AST dedup, so every finding reaches the summary.
+            ScanResult::builder(FindingType::Reflected)
+                .inject_type("inHTML")
+                .method("GET")
+                .data(format!("https://example.com/p{t}?q=x{i}"))
+                .param("q".to_string())
+                .payload("<x>".to_string())
+                .evidence(format!("evidence {i}"))
+                .cwe("CWE-79")
+                .severity("Info")
+                .message_id(1)
+                .message_str("msg")
+                .build()
+        })
+        .collect();
+    let state = make_scan_state(results);
+    let path = temp_out_path("summary_scaling");
+    args.output = Some(path.clone());
+    let t = std::time::Instant::now();
+    let _ = render_results(
+        &args,
+        &state,
+        &urls,
+        std::time::Duration::from_millis(7),
+        crate::cmd::scan::output::RequestTally { sent: 1, failed: 0 },
+        false,
+        None,
+    )
+    .await;
+    let elapsed = t.elapsed();
+    let content = std::fs::read_to_string(&path).expect("output written");
+    let _ = std::fs::remove_file(&path);
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    let summary = v["meta"]["target_summary"]
+        .as_array()
+        .expect("summary array");
+    assert_eq!(summary.len(), N);
+    assert_eq!(summary[0]["findings_count"], 2);
+    assert_eq!(summary[1]["findings_count"], 0);
+    assert_eq!(summary[1]["status"], "clean");
+    assert_eq!(summary[N - 2]["findings_count"], 2);
+    // Debug build: the quadratic version spent well over this on attribution
+    // alone; the indexed one is dominated by serialization.
+    assert!(
+        elapsed < std::time::Duration::from_secs(4),
+        "render_results took {elapsed:?} for {N} targets x {N} findings"
+    );
+}
+
 // Regression: `--limit N` combined with `--limit-result-type T` must not hide
 // the T-typed findings behind earlier non-T ones. The scan-time stop condition
 // counts only T findings, so a run that stops after N verified findings then
@@ -2941,6 +3007,153 @@ async fn test_run_preflight_and_analysis_analyze_external_js_produces_finding() 
         "finding evidence must reference the external script; findings: {:?}",
         *results
     );
+}
+
+/// A `text/html` server whose every response takes `delay_ms`, counting the
+/// peak number of requests in flight at once.
+async fn spawn_slow_counting_server(delay_ms: u64) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    use std::sync::atomic::Ordering;
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let (in_flight_h, peak_h) = (in_flight.clone(), peak.clone());
+    let app = Router::new().route(
+        "/",
+        get(move || {
+            let (in_flight, peak) = (in_flight_h.clone(), peak_h.clone());
+            async move {
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                let mut h = HeaderMap::new();
+                h.insert("content-type", HeaderValue::from_static("text/html"));
+                (h, "<html><body>ok</body></html>")
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (addr, peak)
+}
+
+fn analysis_only_args(max_concurrent_targets: usize) -> ScanArgs {
+    let mut args = default_scan_args();
+    args.skip_xss_scanning = true;
+    args.skip_mining = true;
+    args.skip_waf_probe = true;
+    args.skip_discovery = true;
+    args.max_concurrent_targets = max_concurrent_targets;
+    args
+}
+
+// Preflight/analysis used to build a fresh semaphore + LocalSet per host group
+// and await it before starting the next group, so `--max-concurrent-targets`
+// never let two *different* hosts overlap: a mass scan (one URL per host) ran
+// the whole stage strictly serially. 6 groups x 300 ms was ~1.8 s+; under one
+// shared bound it is a single round.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn analysis_runs_host_groups_concurrently() {
+    use super::analysis::run_preflight_and_analysis;
+    let (addr, peak) = spawn_slow_counting_server(300).await;
+    let args = analysis_only_args(8);
+    let mut groups = std::collections::BTreeMap::new();
+    for i in 0..6 {
+        groups.insert(
+            format!("h{i}"),
+            vec![parse_target(&format!("http://{addr}/?q={i}")).unwrap()],
+        );
+    }
+    let t = std::time::Instant::now();
+    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![])).await;
+    let elapsed = t.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_millis(1500),
+        "host groups must overlap under --max-concurrent-targets; took {elapsed:?}"
+    );
+    assert!(peak.load(std::sync::atomic::Ordering::SeqCst) > 1);
+    assert!(groups.values().all(|g| g.len() == 1));
+}
+
+// The shared bound is still a bound: with `--max-concurrent-targets 1`, targets
+// from different host groups must never be in flight together.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn analysis_bound_applies_across_host_groups() {
+    use super::analysis::run_preflight_and_analysis;
+    let (addr, peak) = spawn_slow_counting_server(100).await;
+    let args = analysis_only_args(1);
+    let mut groups = std::collections::BTreeMap::new();
+    for i in 0..4 {
+        groups.insert(
+            format!("h{i}"),
+            vec![
+                parse_target(&format!("http://{addr}/?q={i}a")).unwrap(),
+                parse_target(&format!("http://{addr}/?q={i}b")).unwrap(),
+            ],
+        );
+    }
+    let t = std::time::Instant::now();
+    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![])).await;
+    assert_eq!(peak.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(t.elapsed() >= std::time::Duration::from_millis(800));
+    assert!(groups.values().all(|g| g.len() == 2));
+}
+
+// Survivors go back into their own group, in original order, and dropped
+// targets (unreachable / over the per-host cap) are recorded, not lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn analysis_restores_survivors_per_group_in_order() {
+    use super::analysis::run_preflight_and_analysis;
+    let (addr, _peak) = spawn_slow_counting_server(20).await;
+    // A port nothing listens on: preflight drops the target as unreachable.
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap()
+    };
+    let mut args = analysis_only_args(4);
+    args.max_targets_per_host = 3;
+    let url = |s: &str| parse_target(s).unwrap();
+    let mut groups = std::collections::BTreeMap::new();
+    groups.insert(
+        "a".to_string(),
+        vec![
+            url(&format!("http://{addr}/?q=a1")),
+            url(&format!("http://{dead}/?q=a2")),
+            url(&format!("http://{addr}/?q=a3")),
+            url(&format!("http://{addr}/?q=a4")), // over the per-host cap
+        ],
+    );
+    groups.insert("b".to_string(), vec![url(&format!("http://{dead}/?q=b1"))]);
+    groups.insert(
+        "c".to_string(),
+        vec![
+            url(&format!("http://{addr}/?q=c1")),
+            url(&format!("http://{addr}/?q=c2")),
+        ],
+    );
+    let state = make_scan_state(vec![]);
+    run_preflight_and_analysis(&args, &mut groups, &state).await;
+
+    let urls = |k: &str| -> Vec<String> {
+        groups[k]
+            .iter()
+            .map(|t| t.url.query().unwrap_or("").to_string())
+            .collect()
+    };
+    assert_eq!(urls("a"), vec!["q=a1", "q=a3"]);
+    assert!(urls("b").is_empty());
+    assert_eq!(urls("c"), vec!["q=c1", "q=c2"]);
+
+    let skipped = state.skipped_targets.lock().await;
+    assert_eq!(
+        skipped.get(&format!("http://{addr}/?q=a4")).copied(),
+        Some(crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP)
+    );
+    assert!(skipped.contains_key(&format!("http://{dead}/?q=a2")));
+    assert!(skipped.contains_key(&format!("http://{dead}/?q=b1")));
+    assert_eq!(skipped.len(), 3);
 }
 
 // finalize_scan_args — the shared preamble that the bare `scan` path and the

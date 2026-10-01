@@ -303,9 +303,10 @@ impl<'a> DomXssVisitor<'a> {
             _ => return PromiseValueKind::Unknown,
         };
 
-        let saved_tainted = self.tainted_vars.clone();
-        let saved_aliases = self.var_aliases.clone();
-        let saved_response_vars = self.response_object_vars.clone();
+        // Journal checkpoints, not clones — see `walk_function_literal_body`.
+        let tainted_checkpoint = self.tainted_vars.checkpoint();
+        let aliases_checkpoint = self.var_aliases.checkpoint();
+        let response_vars_checkpoint = self.response_object_vars.checkpoint();
 
         if let Some(name) = &param_name {
             // A fresh parameter binding shadows any same-named outer state.
@@ -334,9 +335,9 @@ impl<'a> DomXssVisitor<'a> {
             _ => PromiseValueKind::Unknown,
         };
 
-        self.tainted_vars = saved_tainted;
-        self.var_aliases = saved_aliases;
-        self.response_object_vars = saved_response_vars;
+        self.tainted_vars.rollback(tainted_checkpoint);
+        self.var_aliases.rollback(aliases_checkpoint);
+        self.response_object_vars.rollback(response_vars_checkpoint);
 
         result_kind
     }

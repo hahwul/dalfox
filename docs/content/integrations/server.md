@@ -494,7 +494,9 @@ queued → cancelled
 Terminal states (`done`, `error`, `cancelled`) are sticky. A queued scan can be
 cancelled before it starts. Jobs live in memory only: a finished scan is kept
 for one hour (or until `--max-retained-scans` evicts it) and nothing survives a
-restart.
+restart. On `SIGINT`/`SIGTERM` the server stops accepting connections, finishes
+the HTTP responses already in flight, and exits; scans still running are
+abandoned rather than waited for (no completion webhook fires for them).
 
 A single scan tests at most 512 parameters. On a target that exposes more, the
 discovered set is truncated and the scan still ends `done`; the only trace is a

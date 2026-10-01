@@ -2885,6 +2885,49 @@ fn generate_param_jobs_skips_fragment_params() {
     assert_eq!(jobs[0].0.name, "a");
 }
 
+// The CLI's overall bar is created empty and sized by `run_scanning` from
+// `generate_param_jobs` (replacing a synchronous per-group payload precount).
+// Cancelled up front so no request is sent: sizing happens before dispatch.
+#[tokio::test]
+async fn run_scanning_sizes_overall_bar_from_param_jobs() {
+    let mut target = parse_target("http://127.0.0.1:9/?a=1").unwrap();
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        ..Param::new("a".to_string(), "1".to_string(), Location::Query)
+    });
+    let args = crate::cmd::scan::ScanArgs {
+        insecure: Some(true),
+        format: "json".to_string(),
+        silence: true,
+        max_payloads_per_param: 5,
+        waf_min_confidence: 0.0,
+        ..Default::default()
+    };
+    let (_, expected) = generate_param_jobs(
+        &target,
+        &args,
+        compute_waf_strategy(&target, &args).as_ref(),
+        &build_shared_payloads(&target),
+    );
+    assert!(expected > 0);
+    let mp = Arc::new(MultiProgress::with_draw_target(
+        indicatif::ProgressDrawTarget::hidden(),
+    ));
+    let overall = Arc::new(mp.add(indicatif::ProgressBar::new(0)));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(AtomicUsize::new(0)),
+        )
+        .with_progress(Some(mp), Some(overall.clone()))
+        .with_cancel(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+    )
+    .await;
+    assert_eq!(overall.length(), Some(expected));
+}
+
 #[test]
 fn generate_param_jobs_total_tasks_matches_payload_counts() {
     // `total_tasks` must equal the sum of reflection + DOM payloads across all

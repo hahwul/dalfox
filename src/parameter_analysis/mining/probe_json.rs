@@ -53,6 +53,21 @@ pub async fn probe_json_body_params(
     // Spawn tasks returning Option<Param> for batching
     let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
 
+    // Slot-scoped, not name-scoped: a query or form `q` must not suppress
+    // mining of the JSON body's `q`. See `param_slot_key`. Collected once
+    // rather than re-scanned under the lock for every key.
+    let already_found: HashSet<String> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .filter(|p| p.location == Location::JsonBody)
+        .map(|p| p.name.clone())
+        .collect();
+    // One shared copy of the parsed body. Each task clones it only once it
+    // holds a permit; cloning it per key up front kept a full copy alive per
+    // pending task (4 000 keys: ~1.5 GB RSS before the first response).
+    let base_json = Arc::new(base_json);
+
     for param_name in keys {
         {
             // Early collapse stop
@@ -61,14 +76,7 @@ pub async fn probe_json_body_params(
                 break;
             }
         }
-        // Slot-scoped, not name-scoped: a query or form `q` must not suppress
-        // mining of the JSON body's `q`. See `param_slot_key`.
-        let exists = reflection_params
-            .lock()
-            .await
-            .iter()
-            .any(|p| p.name == param_name && p.location == Location::JsonBody);
-        if exists {
+        if already_found.contains(&param_name) {
             continue;
         }
 
@@ -93,7 +101,7 @@ pub async fn probe_json_body_params(
                     .expect("acquire semaphore permit");
 
                 // Build mutated JSON with this key set to marker
-                let mut root = base_json_clone;
+                let mut root = (*base_json_clone).clone();
                 if let Some(map) = root.as_object_mut() {
                     map.insert(
                         param_name_cloned.clone(),
