@@ -4,33 +4,8 @@
 
 use super::GLOBAL_ENCODERS;
 use super::postprocess::extract_context;
-use crate::encoding::{
-    base64_encode, double_url_encode, html_entity_encode, quadruple_url_encode, triple_url_encode,
-    url_encode,
-};
 use crate::scanning::result::FindingType;
 use crate::utils::term::{sanitize_display, sanitize_display_block};
-
-// Kept around for unit-test coverage of the message-shape contract.
-// The actual scan, server, and MCP paths now go through
-// `ast_integration::run_initial_ast_dom_analysis`, which inlines the
-// same hint logic. If the contract drifts the unit tests under
-// `src/cmd/scan/tests.rs` will catch it.
-#[allow(dead_code)]
-pub(crate) fn build_ast_dom_message(
-    description: &str,
-    source: &str,
-    target_url: &str,
-    payload: &str,
-) -> String {
-    if let Some(hint) =
-        crate::scanning::ast_integration::build_dom_xss_manual_poc_hint(target_url, source, payload)
-    {
-        format!("{description} (needs runtime confirmation) [manual POC: {hint}]")
-    } else {
-        format!("{description} (needs runtime confirmation)")
-    }
-}
 
 /// Short label used in the plain POC line so a reader can tell at a glance
 /// whether the param lived in the URL, an HTTP header (or cookie jar),
@@ -86,17 +61,13 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
         let Some(encs) = GLOBAL_ENCODERS.get() else {
             return selective_path_encode(payload);
         };
-        // Priority order: explicit user order (stop at first transforming encoder that is not 'none')
+        // Priority order: explicit user order (stop at the first of these
+        // transforming encoders; htmlpad/unicode/zwsp never apply to a path).
         for enc in encs {
-            match enc.as_str() {
-                "none" => continue,
-                "url" => return url_encode(payload),
-                "2url" => return double_url_encode(payload),
-                "3url" => return triple_url_encode(payload),
-                "4url" => return quadruple_url_encode(payload),
-                "html" => return html_entity_encode(payload),
-                "base64" => return base64_encode(payload),
-                _ => {}
+            if matches!(enc.as_str(), "url" | "2url" | "3url" | "4url" | "html" | "base64")
+                && let Some(v) = crate::encoding::encode_named(enc, payload)
+            {
+                return v;
             }
         }
         // Fallback to selective path encode
