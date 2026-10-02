@@ -25,7 +25,9 @@
 //! **Skippable via:** `--skip-mining`, `--skip-mining-dict`, `--skip-mining-dom`.
 
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param};
+use crate::parameter_analysis::{
+    DelimiterType, InjectionContext, Location, Param, extend_with_joined,
+};
 use crate::target_parser::Target;
 use crate::utils::shimmer::ShimmerSpinner;
 use std::collections::HashSet;

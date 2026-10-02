@@ -562,7 +562,7 @@ fn test_results_to_toml() {
         .build();
 
     let results = vec![result];
-    let toml_output = Result::results_to_toml(&results, false, false);
+    let toml_output = Result::results_to_toml_with_meta(&results, false, false, None);
 
     assert!(toml_output.contains("type = \"V\""));
     assert!(toml_output.contains("inject_type = \"inHTML\""));
@@ -685,32 +685,6 @@ fn test_to_json_value_respects_include_flags() {
     assert!(without_optional.get("response").is_none());
     // type_description always present
     assert!(without_optional.get("type_description").is_some());
-}
-
-#[test]
-fn test_results_to_json_compact_and_jsonl() {
-    let mut result = Result::builder(FindingType::Reflected)
-        .inject_type("inJS")
-        .method("POST")
-        .data("https://example.com/api")
-        .param("data")
-        .payload("alert(1)")
-        .evidence("reflected")
-        .cwe("CWE-79")
-        .severity("Medium")
-        .message_id(2)
-        .message_str("reflection")
-        .build();
-    result.request = Some("POST /api HTTP/1.1".to_string());
-
-    let results = vec![result];
-    let compact = Result::results_to_json(&results, true, false, false);
-    assert!(compact.starts_with("["));
-    assert!(compact.contains("\"request\":\"POST /api HTTP/1.1\""));
-
-    let jsonl = Result::results_to_jsonl(&results, true, false);
-    assert!(jsonl.contains("\"type\":\"R\""));
-    assert!(jsonl.ends_with('\n'));
 }
 
 // ─────────────────────────────────────────────────────────────────────────

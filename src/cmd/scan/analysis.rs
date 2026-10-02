@@ -12,6 +12,7 @@ use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_cont
 use super::session::SessionBaseline;
 use crate::parameter_analysis::analyze_parameters;
 use crate::target_parser::Target;
+use crate::utils::log::log_prefix;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -88,10 +89,9 @@ pub(crate) async fn run_preflight_and_analysis(
                 .collect();
             if !dropped.is_empty() {
                 if !args.silence {
-                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                     crate::ceprintln!(
-                        "\x1b[90m{}\x1b[0m \x1b[33mWARN\x1b[0m max-targets-per-host cap ({}) reached; {} target(s) skipped",
-                        ts,
+                        "{} max-targets-per-host cap ({}) reached; {} target(s) skipped",
+                        log_prefix("33", "WARN"),
                         args.max_targets_per_host,
                         dropped.len()
                     );
@@ -285,14 +285,10 @@ pub(crate) async fn preflight_and_analyze_target(
     // render a single overall progress line instead of this per-target block,
     // so the whole block is gated on `total_targets_copy == 1`.
     if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
-        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-        crate::cprintln!(
-            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m start scan to {}",
-            ts,
-            target.url
-        );
+        let inf = log_prefix("36", "INF");
+        crate::cprintln!("{} start scan to {}", inf, target.url);
         if __preflight_csp_present {
-            crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m CSP: enabled", ts);
+            crate::cprintln!("{} CSP: enabled", inf);
             if let Some((hn, hv)) = &__preflight_csp_header {
                 crate::cprintln!(
                     "  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m",
@@ -305,8 +301,8 @@ pub(crate) async fn preflight_and_analyze_target(
         if let Some(ref waf_info) = target.waf_info {
             for fp in &waf_info.detected {
                 crate::cprintln!(
-                    "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m {} detected (confidence: {:.0}%, evidence: {})",
-                    ts,
+                    "{} {} detected (confidence: {:.0}%, evidence: {})",
+                    log_prefix("33", "WAF"),
                     fp.waf_type,
                     fp.confidence * 100.0,
                     fp.evidence
@@ -337,11 +333,7 @@ pub(crate) async fn preflight_and_analyze_target(
                 .map(|d| format!("{}", d.tech))
                 .collect();
             if !tech_names.is_empty() {
-                crate::cprintln!(
-                    "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m tech: {}",
-                    ts,
-                    tech_names.join(", ")
-                );
+                crate::cprintln!("{} tech: {}", inf, tech_names.join(", "));
             }
         }
     }
@@ -456,10 +448,9 @@ pub(crate) async fn preflight_and_analyze_target(
     // Pretty reflection summary (plain only)
     if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
         let n = target.reflection_params.len();
-        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
         crate::cprintln!(
-            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m found reflected \x1b[33m{}\x1b[0m params",
-            ts,
+            "{} found reflected \x1b[33m{}\x1b[0m params",
+            log_prefix("36", "INF"),
             n
         );
         for (i, p) in target.reflection_params.iter().enumerate() {
@@ -758,10 +749,9 @@ async fn run_target_preflight(
                     && args_clone.format == "plain"
                     && total_targets_copy == 1
                 {
-                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                     crate::cprintln!(
-                        "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m evasion activated: adaptive jitter + cooldown",
-                        ts
+                        "{} evasion activated: adaptive jitter + cooldown",
+                        log_prefix("33", "WAF")
                     );
                 }
             }

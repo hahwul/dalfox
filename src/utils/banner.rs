@@ -4,10 +4,7 @@ use std::sync::Once;
 /// Simple banner renderer for Dalfox.
 /// This module centralizes the ASCII banner so it can be reused across commands.
 ///
-/// Usage:
-/// - Print always:
-///   banner::print_banner(env!("CARGO_PKG_VERSION"), true);
-/// - Print only once (even if called multiple times):
+/// Usage (prints only once, even if called multiple times):
 ///   banner::print_banner_once(env!("CARGO_PKG_VERSION"), true);
 ///
 /// When color is enabled, core parts are colorized with ANSI escape codes.
@@ -61,18 +58,12 @@ pub(crate) fn render_banner(version: &str, color: bool) -> String {
     out
 }
 
-/// Print the banner to stdout (no trailing extra newline beyond what render_banner includes).
-/// Flushes stdout after printing.
-pub(crate) fn print_banner(version: &str, color: bool) {
-    let s = render_banner(version, color);
-    print!("{}", s);
-    let _ = io::stdout().flush();
-}
-
-/// Print the banner once per process. Additional calls are no-ops.
+/// Print the banner to stdout once per process (flushed; no trailing newline
+/// beyond what render_banner includes). Additional calls are no-ops.
 pub fn print_banner_once(version: &str, color: bool) {
     PRINT_ONCE.call_once(|| {
-        print_banner(version, color);
+        print!("{}", render_banner(version, color));
+        let _ = io::stdout().flush();
     });
 }
 

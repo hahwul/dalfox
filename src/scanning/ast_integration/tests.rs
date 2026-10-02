@@ -245,7 +245,7 @@ fn test_analyze_javascript_for_dom_xss() {
 let param = location.search;
 document.getElementById('x').innerHTML = param;
 "#;
-    let findings = analyze_javascript_for_dom_xss(js, "https://example.com");
+    let findings = analyze_javascript_for_dom_xss(js);
     assert!(!findings.is_empty());
     let (_vuln, payload, description) = &findings[0];
     assert!(description.contains("DOM-based XSS"));
@@ -1498,8 +1498,6 @@ fn test_vuln(
         column: 1,
         source: source.to_string(),
         sink: sink.to_string(),
-        snippet: String::new(),
-        description: String::new(),
         guarded,
     }
 }
@@ -1749,13 +1747,7 @@ fn reflected_markup_flow_is_found_and_graded_reachable() {
         let (js, ids, markup) = extract_js_script_ids_and_reflected_markup(html);
         js.iter()
             .flat_map(|code| {
-                analyze_javascript_for_dom_xss_with_html_context(
-                    code,
-                    "http://t/",
-                    &ids,
-                    &markup,
-                    false,
-                )
+                analyze_javascript_for_dom_xss_with_html_context(code, &ids, &markup, false)
             })
             .map(|(v, _, _)| v)
             .collect::<Vec<_>>()

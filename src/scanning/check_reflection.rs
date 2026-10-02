@@ -529,7 +529,7 @@ fn decoded_is_dangerous_scheme(s: &str) -> bool {
         // verbatim (no server strip), the mutation is not a real scheme and is
         // inert — but it must still be RECOGNIZED here so the inert-position
         // gates (`dangerous_scheme_reflection_is_inert`) demote a `value="…"`
-        // echo to None, while `scan_dangerous_scheme_occurrences` keeps it when
+        // echo to None, while its scheme-start scan keeps it when
         // it lands at a URL-attr scheme-start (a live WAF-bypass finding).
         || crate::payload::xss_html::JS_SCHEME_STRIP_MUTATION_PREFIXES
             .iter()
@@ -580,12 +580,16 @@ fn scheme_at_url_attr_value_start(bytes: &[u8], at: usize) -> bool {
     url_valued_attr_name_before_eq(bytes, eq_at)
 }
 
-/// Scan `hay` for any reflected variant of a dangerous-scheme payload. Returns
-/// `(found, executable)`: `found` is set once any variant appears; `executable`
-/// is set when an occurrence sits at a URL-attr scheme-start (browser would
-/// navigate to the scheme). Bails toward `executable=true` past the occurrence
-/// budget so the cap can only cost extra [R] noise, never a missed bug.
-fn scan_dangerous_scheme_occurrences(hay: &str, variants: &[String]) -> (bool, bool) {
+/// Scan `hay` for every occurrence of each of `variants`. Returns
+/// `(found, hit)`: `found` is set once any variant appears; `hit` is set (and
+/// the scan stops) as soon as `is_hit(bytes, offset)` holds for an occurrence.
+/// Bails toward `hit=true` past the occurrence budget so the cap can only cost
+/// extra [R] noise, never a missed bug.
+fn scan_variant_occurrences(
+    hay: &str,
+    variants: &[String],
+    is_hit: impl Fn(&[u8], usize) -> bool,
+) -> (bool, bool) {
     let bytes = hay.as_bytes();
     let mut found = false;
     for v in variants {
@@ -601,7 +605,7 @@ fn scan_dangerous_scheme_occurrences(hay: &str, variants: &[String]) -> (bool, b
                 return (true, true);
             }
             let abs = start + pos;
-            if scheme_at_url_attr_value_start(bytes, abs) {
+            if is_hit(bytes, abs) {
                 return (true, true);
             }
             start = next_char_boundary(hay, abs + 1);
@@ -641,7 +645,8 @@ fn dangerous_scheme_reflection_is_inert(html: &str, payload: &str) -> bool {
     }
     // Scan the raw response and its URL-decoded view (the self-link echo carries
     // the scheme percent-encoded). Any executable occurrence keeps the finding.
-    let (mut found, executable) = scan_dangerous_scheme_occurrences(html, &variants);
+    let (mut found, executable) =
+        scan_variant_occurrences(html, &variants, scheme_at_url_attr_value_start);
     if executable {
         return false;
     }
@@ -652,7 +657,8 @@ fn dangerous_scheme_reflection_is_inert(html: &str, payload: &str) -> bool {
         && let Ok(decoded) = urlencoding::decode(html)
         && decoded.as_ref() != html
     {
-        let (f2, x2) = scan_dangerous_scheme_occurrences(&decoded, &variants);
+        let (f2, x2) =
+            scan_variant_occurrences(&decoded, &variants, scheme_at_url_attr_value_start);
         if x2 {
             return false;
         }
@@ -693,38 +699,6 @@ fn occurrence_inside_url_attr_value(bytes: &[u8], at: usize) -> bool {
         }
     }
     false
-}
-
-/// Scan helper for [`reflection_trapped_in_url_value`]. Returns
-/// `(found, escaped)`: `escaped` is set if any occurrence is at a URL-attr
-/// scheme-start (potentially executable) or outside a quoted URL-attr value
-/// (body text, non-URL attribute, …) — either means the payload is NOT safely
-/// trapped. Bails toward `escaped=true` past the occurrence budget.
-fn scan_url_value_trapping(hay: &str, variants: &[String]) -> (bool, bool) {
-    let bytes = hay.as_bytes();
-    let mut found = false;
-    for v in variants {
-        if v.is_empty() {
-            continue;
-        }
-        let mut start = 0;
-        let mut scanned = 0usize;
-        while let Some(pos) = hay[start..].find(v.as_str()) {
-            found = true;
-            scanned += 1;
-            if scanned > MAX_PAYLOAD_OCCURRENCES {
-                return (true, true);
-            }
-            let abs = start + pos;
-            if scheme_at_url_attr_value_start(bytes, abs)
-                || !occurrence_inside_url_attr_value(bytes, abs)
-            {
-                return (true, true);
-            }
-            start = next_char_boundary(hay, abs + 1);
-        }
-    }
-    (found, false)
 }
 
 /// True when any of `variants` (the break-out-bearing forms — each carrying a
@@ -778,7 +752,13 @@ fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
     if any_variant_reflected_literally(html, &risky) {
         return false;
     }
-    let (mut found, escaped) = scan_url_value_trapping(html, &safe);
+    // An occurrence escapes the trap at a URL-attr scheme-start (potentially
+    // executable) or outside a quoted URL-attr value (body text, non-URL
+    // attribute, …) — either means the payload is NOT safely trapped.
+    let escapes = |bytes: &[u8], at: usize| {
+        scheme_at_url_attr_value_start(bytes, at) || !occurrence_inside_url_attr_value(bytes, at)
+    };
+    let (mut found, escaped) = scan_variant_occurrences(html, &safe, escapes);
     if escaped {
         return false;
     }
@@ -788,7 +768,7 @@ fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
         && let Ok(decoded) = urlencoding::decode(html)
         && decoded.as_ref() != html
     {
-        let (f2, e2) = scan_url_value_trapping(&decoded, &safe);
+        let (f2, e2) = scan_variant_occurrences(&decoded, &safe, escapes);
         if e2 {
             return false;
         }
@@ -2214,7 +2194,7 @@ impl ReflectionBody {
 /// before a reflection may be recorded from it.
 ///
 /// Shared by the normal reflection branch and the `--sxss` branch of
-/// [`fetch_injection_response_with_client`]. The `--sxss` branch used to apply
+/// [`fetch_injection_response`]. The `--sxss` branch used to apply
 /// none of them, so a stored-XSS run reported reflections the plain run drops:
 /// echoes into `application/json` / `text/csv` / nosniff `text/plain` bodies,
 /// responses whose status the operator excluded with `--ignore-return`, and
@@ -2585,24 +2565,6 @@ pub(crate) async fn sxss_store_probe(
 }
 
 async fn fetch_injection_response(
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-    streak: &std::sync::atomic::AtomicU32,
-) -> FetchedInjection {
-    if args.skip_xss_scanning {
-        return FetchedInjection {
-            body: None,
-            status: 0,
-            xml_content_type: false,
-        };
-    }
-    let client = target.build_client_or_default();
-    fetch_injection_response_with_client(&client, target, param, payload, args, streak).await
-}
-
-async fn fetch_injection_response_with_client(
     client: &Client,
     target: &Target,
     param: &Param,
@@ -2949,60 +2911,20 @@ async fn fetch_injection_response_with_client(
     }
 }
 
-/// Inject `payload`, then classify reflection in the response. Convenience
-/// entry for tests / one-shot callers: uses a throwaway per-call WAF streak.
-/// Production scan workers call [`check_reflection_with_response_tracked`] with
-/// their own per-worker streak so the adaptive backoff escalates correctly.
-pub async fn check_reflection_with_response(
-    client: Option<&Client>,
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> (Option<ReflectionKind>, Option<String>) {
-    let streak = std::sync::atomic::AtomicU32::new(0);
-    let (kind, body) =
-        check_reflection_with_response_tracked(client, target, param, payload, args, &streak).await;
-    (kind, body.map(|b| b.text))
-}
-
 /// Inject `payload`, then classify reflection in the response.
 ///
-/// Pass `Some(client)` to reuse a pooled HTTP client (MCP / REST runners);
-/// pass `None` on the CLI path to build a default client per request from
-/// the target. Returns the reflection kind (suppressed to `None` when the
-/// match lands only in a known-safe context) together with the response
-/// body, or `(None, None)` when no response was obtained.
+/// Returns the reflection kind (suppressed to `None` when the match lands only
+/// in a known-safe context), the response body, the HTTP status of the
+/// injection response (`0` for a request error, a `--skip-xss-scanning` no-op,
+/// or the `--sxss` path) and whether the response was XML. The status lets the
+/// reflection phase's transformed-inert-echo budget skip a 4xx block page that
+/// echoes the payload.
 ///
 /// `streak` is the caller's per-worker consecutive-WAF-block counter (see
 /// [`apply_injection_waf_accounting`]); one per param worker keeps the
 /// `--waf-evasion` backoff escalation from being reset by sibling workers.
-pub async fn check_reflection_with_response_tracked(
-    client: Option<&Client>,
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-    streak: &std::sync::atomic::AtomicU32,
-) -> (Option<ReflectionKind>, Option<ReflectionBody>) {
-    // The public contract returns only `(kind, body)`. The status-aware path
-    // computes the same values plus the injection status; drop the status here
-    // so this signature and return type stay byte-for-byte compatible.
-    let (kind, body, _status, _xml_content_type) =
-        check_reflection_with_response_status(client, target, param, payload, args, streak).await;
-    (kind, body)
-}
-
-/// Crate-private status-aware sibling of [`check_reflection_with_response_tracked`].
-///
-/// Identical classification, plus the HTTP status of the injection response
-/// (`0` for a request error, a `--skip-xss-scanning` no-op, or the `--sxss`
-/// path). Production scan workers use this so the reflection phase's
-/// transformed-inert-echo budget can skip a 4xx block page that echoes the
-/// payload — without exposing the status on the public [`ReflectionBody`], whose
-/// field set is part of the crate's public API.
-pub(crate) async fn check_reflection_with_response_status(
-    client: Option<&Client>,
+pub async fn check_reflection_with_response(
+    client: &Client,
     target: &Target,
     param: &Param,
     payload: &str,
@@ -3013,12 +2935,7 @@ pub(crate) async fn check_reflection_with_response_status(
         body,
         status,
         xml_content_type,
-    } = match client {
-        Some(client) => {
-            fetch_injection_response_with_client(client, target, param, payload, args, streak).await
-        }
-        None => fetch_injection_response(target, param, payload, args, streak).await,
-    };
+    } = fetch_injection_response(client, target, param, payload, args, streak).await;
     if let Some(body) = body {
         let kind = classify_reflection(&body.text, payload);
         let kind = match kind {
@@ -3035,23 +2952,6 @@ pub(crate) async fn check_reflection_with_response_status(
     } else {
         (None, None, status, xml_content_type)
     }
-}
-
-/// Test-only convenience wrapper over [`check_reflection_with_response`]:
-/// discards the body and reports only whether a (non-safe-context) reflection
-/// was found, always building a default client. Production code calls
-/// [`check_reflection_with_response`] directly with a pooled client.
-#[cfg(test)]
-async fn check_reflection(
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> bool {
-    check_reflection_with_response(None, target, param, payload, args)
-        .await
-        .0
-        .is_some()
 }
 
 /// HPP reflection check: send a request using a pre-built HPP URL (with duplicate params)

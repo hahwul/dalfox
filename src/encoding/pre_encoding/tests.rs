@@ -1,4 +1,5 @@
 use super::*;
+use crate::encoding::url_encode;
 
 #[test]
 fn test_apply_pre_encoding_none() {
@@ -80,14 +81,15 @@ fn test_waf_window_pad_prepends_inert_prefix() {
 
 #[test]
 fn test_encoding_probes_cover_all_types() {
-    let probes = encoding_probes();
-    assert_eq!(probes.len(), 4);
-
-    // Verify each probe encodes correctly
-    let payload = "<test>";
-    for (enc_type, encode_fn) in probes {
-        assert_eq!(encode_fn(payload), enc_type.encode(payload));
-    }
+    assert_eq!(
+        encoding_probes(),
+        &[
+            PreEncodingType::Base64,
+            PreEncodingType::DoubleBase64,
+            PreEncodingType::DoubleUrl,
+            PreEncodingType::TripleUrl,
+        ]
+    );
 }
 
 #[test]

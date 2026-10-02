@@ -345,7 +345,6 @@ impl<'a> DomXssVisitor<'a> {
                                 self.report_vulnerability_with_source(
                                     new_expr.span(),
                                     callee_name,
-                                    "Tainted data passed to constructor",
                                     source,
                                 );
                                 break;
@@ -619,12 +618,7 @@ impl<'a> DomXssVisitor<'a> {
     pub(super) fn walk_import_expression(&mut self, import_expr: &ImportExpression<'a>) {
         if self.is_tainted(&import_expr.source) {
             let source = self.find_source_in_expr(&import_expr.source);
-            self.report_vulnerability_with_source(
-                import_expr.span,
-                "import",
-                "Tainted module specifier passed to dynamic import() runs attacker-controlled module code",
-                source,
-            );
+            self.report_vulnerability_with_source(import_expr.span, "import", source);
         }
         self.walk_expression(&import_expr.source);
     }

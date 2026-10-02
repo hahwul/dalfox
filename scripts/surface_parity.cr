@@ -288,7 +288,7 @@ apply_body = slice_between(config_src, "fn apply_to_scan_args_if_default", "    
 normalize_body = slice_between(config_src, "impl ScanConfig {", "\npub fn load_or_init")
 # The commented TOML template `dalfox --init-config` writes. Every config key the
 # precedence logic honors should be documented here, or the option is invisible.
-template_body = slice_between(config_src, "fn default_toml_template", "fn default_json_template")
+template_body = slice_between(config_src, "const DEFAULT_TOML_TEMPLATE", "const DEFAULT_JSON_TEMPLATE")
 
 rest_options = struct_fields(server_src, "ScanOptions")
 mcp_params = struct_fields(mcp_src, "ScanWithDalfoxParams")
@@ -338,7 +338,7 @@ report.check("dalfox server --help parsed", "got #{server_flags.size} flags") { 
 report.check("ScanConfig fields parsed", "got #{config_keys.size} from #{CONFIG_RS}") { config_keys.size >= 50 }
 report.check("apply_to_scan_args_if_default body located", "empty slice from #{CONFIG_RS}") { apply_body.size > 1000 }
 report.check("normalize_and_validate body located", "empty slice from #{CONFIG_RS}") { normalize_body.size > 1000 }
-report.check("default_toml_template body located", "empty slice from #{CONFIG_RS}") { template_body.size > 1000 }
+report.check("DEFAULT_TOML_TEMPLATE body located", "empty slice from #{CONFIG_RS}") { template_body.size > 1000 }
 report.check("REST ScanOptions parsed", "got #{rest_options.size} from #{SERVER_TYPES_RS}") { rest_options.size >= 20 }
 report.check("MCP ScanWithDalfoxParams parsed", "got #{mcp_params.size} from #{MCP_RS}") { mcp_params.size >= 20 }
 report.check("MCP tool list parsed", "got #{mcp_tools.size} from #{MCP_RS}") { mcp_tools.size >= 5 }
@@ -362,7 +362,7 @@ report.check_empty("every config key is read by apply_to_scan_args_if_default",
 # Same silent-option class, one layer out: the key is honored by the config path
 # but never shown in the template `--init-config` writes, so a user cannot
 # discover it. Anchored per line so `sxss_retries` cannot satisfy `retries`.
-report.check_empty("every config key appears in default_toml_template",
+report.check_empty("every config key appears in DEFAULT_TOML_TEMPLATE",
   config_keys.reject { |k| template_body.lines.any? { |ln| ln.matches?(/^\s*#?\s*#{Regex.escape(k)}\s*=/) } }, MAX_LIST)
 
 report.check_empty("every scan CLI flag has a config key",

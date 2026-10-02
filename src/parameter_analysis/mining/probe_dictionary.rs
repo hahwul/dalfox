@@ -20,7 +20,11 @@ pub async fn probe_dictionary_params(
     let mut loaded = false;
 
     if !args.remote_wordlists.is_empty() {
-        if let Err(e) = crate::payload::init_remote_wordlists(&args.remote_wordlists).await
+        if let Err(e) = crate::payload::init_remote_wordlists_with(
+            &args.remote_wordlists,
+            crate::payload::RemoteFetchOptions::default(),
+        )
+        .await
             && !args.silence
         {
             eprintln!("Error initializing remote wordlists: {}", e);

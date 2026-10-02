@@ -58,8 +58,8 @@ fn test_each_payload_encoder_known_output() {
 
 #[test]
 fn test_expand_single_payload() {
-    let out = expand_payload_with_encoders(
-        "<",
+    let out = apply_encoders_to_payloads(
+        &["<".to_string()],
         &["2url".to_string(), "3url".to_string(), "base64".to_string()],
     );
     assert!(out.contains(&"<".to_string()));

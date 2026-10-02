@@ -252,10 +252,6 @@ pub struct DomXssVulnerability {
     pub source: String,
     /// The sink where tainted data is used (e.g., "innerHTML")
     pub sink: String,
-    /// Code snippet showing the vulnerable operation
-    pub snippet: String,
-    /// Description of the vulnerability
-    pub description: String,
     /// True when the sink was reached from inside a conditional / loop / try
     /// body — the flow exists but is not taken unconditionally. A confidence
     /// signal only; it never suppresses the finding.

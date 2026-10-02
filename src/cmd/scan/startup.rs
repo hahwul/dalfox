@@ -68,9 +68,13 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // Validate numeric args up front so misconfigurations (workers: 0,
     // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
     // message instead of producing cryptic mid-scan failures.
-    if let Err((code, msg)) = validate_numeric_args(args) {
+    if let Err(msg) = validate_numeric_args(args) {
         if !args.silence {
-            emit_error(&args.format, code, &msg);
+            emit_error(
+                &args.format,
+                crate::cmd::error_codes::INVALID_INPUT_TYPE,
+                &msg,
+            );
         }
         return Err(ScanOutcome::Error);
     }
@@ -183,64 +187,45 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // unreadable file silently produces zero custom payloads mid-scan. With
     // --only-custom-payload that's catastrophic (no payloads at all, scan
     // reports clean), so fail fast. In additive mode it just degrades
-    // detection, so warn and continue.
+    // detection, so warn and continue. Each problem carries its fatal message
+    // and its additive-mode warning.
     if let Some(path) = &args.custom_payload {
-        match fs::metadata(path) {
-            Ok(m) if !m.is_file() => {
-                if args.only_custom_payload {
-                    emit_error(
-                        &args.format,
-                        crate::cmd::error_codes::FILE_READ_ERROR,
-                        &format!("--custom-payload is not a regular file: {}", path),
-                    );
-                    return Err(ScanOutcome::Error);
-                }
-                log_warn(
-                    args,
-                    &format!(
-                        "--custom-payload is not a regular file ({}) — built-in payloads only",
-                        path
-                    ),
+        let problem = match fs::metadata(path) {
+            Ok(m) if !m.is_file() => Some((
+                format!("--custom-payload is not a regular file: {}", path),
+                format!(
+                    "--custom-payload is not a regular file ({}) — built-in payloads only",
+                    path
+                ),
+            )),
+            Err(e) => Some((
+                format!("--custom-payload not readable ({}): {}", path, e),
+                format!(
+                    "--custom-payload not readable ({}: {}) — built-in payloads only",
+                    path, e
+                ),
+            )),
+            // The stat above only proves a regular file exists. An empty,
+            // comment-only, non-UTF-8, or over-budget file passes it yet
+            // yields zero usable payloads — load_custom_payloads rejects
+            // those, but the scan driver swallows that error via
+            // `.unwrap_or_else(|_| vec![])`, so --only-custom-payload would
+            // "succeed" having scanned nothing. Validate the content here
+            // (this also warms the shared cache the scan reuses).
+            Ok(_) => crate::scanning::xss_common::load_custom_payloads(path)
+                .err()
+                .map(|e| (e.to_string(), format!("{} — built-in payloads only", e))),
+        };
+        if let Some((fatal, warning)) = problem {
+            if args.only_custom_payload {
+                emit_error(
+                    &args.format,
+                    crate::cmd::error_codes::FILE_READ_ERROR,
+                    &fatal,
                 );
+                return Err(ScanOutcome::Error);
             }
-            Err(e) => {
-                if args.only_custom_payload {
-                    emit_error(
-                        &args.format,
-                        crate::cmd::error_codes::FILE_READ_ERROR,
-                        &format!("--custom-payload not readable ({}): {}", path, e),
-                    );
-                    return Err(ScanOutcome::Error);
-                }
-                log_warn(
-                    args,
-                    &format!(
-                        "--custom-payload not readable ({}: {}) — built-in payloads only",
-                        path, e
-                    ),
-                );
-            }
-            Ok(_) => {
-                // The stat above only proves a regular file exists. An empty,
-                // comment-only, non-UTF-8, or over-budget file passes it yet
-                // yields zero usable payloads — load_custom_payloads rejects
-                // those, but the scan driver swallows that error via
-                // `.unwrap_or_else(|_| vec![])`, so --only-custom-payload would
-                // "succeed" having scanned nothing. Validate the content here
-                // (this also warms the shared cache the scan reuses): fatal
-                // under --only-custom-payload, a warning in additive mode.
-                if let Err(e) = crate::scanning::xss_common::load_custom_payloads(path) {
-                    if args.only_custom_payload {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::FILE_READ_ERROR,
-                            &e.to_string(),
-                        );
-                        return Err(ScanOutcome::Error);
-                    }
-                    log_warn(args, &format!("{} — built-in payloads only", e));
-                }
-            }
+            log_warn(args, &warning);
         }
     }
     Ok(())
@@ -258,30 +243,29 @@ pub(crate) async fn init_remote_providers(args: &ScanArgs) {
     // call swallows them as silent no-ops. Previously a typo like
     // `--remote-payloads payloadboxx` would just not fetch anything and
     // the user would never know.
-    if !args.remote_payloads.is_empty() {
-        let known: std::collections::HashSet<String> = crate::payload::list_payload_providers()
-            .into_iter()
-            .collect();
-        for p in &args.remote_payloads {
-            if !known.contains(&p.to_ascii_lowercase()) {
-                eprintln!(
-                    "Warning: unknown --remote-payloads provider '{}' (known: {})",
-                    p,
-                    crate::payload::list_payload_providers().join(", ")
-                );
-            }
+    for (flag, names, list_known) in [
+        (
+            "--remote-payloads",
+            &args.remote_payloads,
+            crate::payload::list_payload_providers as fn() -> Vec<String>,
+        ),
+        (
+            "--remote-wordlists",
+            &args.remote_wordlists,
+            crate::payload::list_wordlist_providers,
+        ),
+    ] {
+        if names.is_empty() {
+            continue;
         }
-    }
-    if !args.remote_wordlists.is_empty() {
-        let known: std::collections::HashSet<String> = crate::payload::list_wordlist_providers()
-            .into_iter()
-            .collect();
-        for p in &args.remote_wordlists {
+        let known = list_known();
+        for p in names {
             if !known.contains(&p.to_ascii_lowercase()) {
                 eprintln!(
-                    "Warning: unknown --remote-wordlists provider '{}' (known: {})",
+                    "Warning: unknown {} provider '{}' (known: {})",
+                    flag,
                     p,
-                    crate::payload::list_wordlist_providers().join(", ")
+                    known.join(", ")
                 );
             }
         }

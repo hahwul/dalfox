@@ -89,7 +89,7 @@ When writing user-facing docs, refer to the 6-stage model from `src/lib.rs`. Whe
 
 When working on docs, double-check that these are reflected:
 
-- **Bracketed sandwich marker** — discovery/mining probes inject `OPEN+INNER+CLOSE`, response classified as Full / PrefixOnly / SuffixOnly / InnerOnly. See `src/scanning/markers.rs::classify_probe_reflection`.
+- **Bracketed sandwich marker** — discovery/mining probes inject `OPEN+INNER+CLOSE`, a response counts as reflected when INNER survives (intact, prefix- or suffix-stripped). See `src/scanning/markers.rs::probe_reflected`.
 - **Composable EncodingPipeline** — `src/encoding/pipeline.rs`. Supports `JsonField{pointer}`, `Base64`, `Base64Url`, `Url`, `JwtAssemble`. Inferred automatically from existing parameter values.
 - **Nested sub-param naming** — bracket style (`qs[move_url]`, `qs[items][0]`). The `Param.wire_name` field carries the parent param when this kicks in.
 - **Sentinel pre-probe** — `src/parameter_analysis/mining/collapse.rs::pre_collapse_query_probe`. Mining's first defence against reflect-everything pages.

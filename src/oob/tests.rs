@@ -202,3 +202,13 @@ async fn oob_session_start_fails_soft_when_no_server_registers() {
     };
     assert!(OobSession::start(&config).await.is_err());
 }
+
+#[test]
+fn interaction_reads_null_and_missing_fields_as_empty() {
+    let it: crate::oob::OobInteraction =
+        serde_json::from_str(r#"{"protocol":"dns","full-id":"abc.oast.fun","timestamp":null}"#)
+            .expect("lenient interaction parse");
+    assert_eq!(it.protocol, "dns");
+    assert_eq!(it.full_id, "abc.oast.fun");
+    assert!(it.remote_address.is_empty() && it.timestamp.is_empty());
+}

@@ -68,7 +68,7 @@ pub async fn check_cookie_discovery(
                 let mut discovered: Option<Param> = None;
                 if let Ok(resp) = crate::utils::http::send_counted(request).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                    && crate::scanning::markers::probe_reflected(&text)
                 {
                     discovered = Some(
                         Param::new(
@@ -90,17 +90,5 @@ pub async fn check_cookie_discovery(
         handles.push(handle);
     }
 
-    // Batch collect cookie params
-    let mut batch: Vec<Param> = Vec::new();
-    for handle in handles {
-        if let Ok(opt) = handle.await
-            && let Some(p) = opt
-        {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        let mut guard = reflection_params.lock().await;
-        guard.extend(batch);
-    }
+    extend_with_joined(&reflection_params, handles).await;
 }

@@ -78,8 +78,7 @@ pub mod target_parser;
 pub mod utils;
 pub(crate) mod waf;
 
-pub use std::sync::atomic::AtomicBool;
-pub use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 pub static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);

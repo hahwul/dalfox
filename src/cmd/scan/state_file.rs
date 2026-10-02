@@ -304,15 +304,10 @@ pub(crate) fn config_hash(args: &ScanArgs) -> String {
     // `ScanArgs: Debug` is the whole struct by construction, which is what
     // makes the denylist above self-maintaining.
     let mut hasher = Sha256::new();
-    hasher.update(major_of(env!("CARGO_PKG_VERSION")).as_bytes());
+    hasher.update(super::baseline::major_of(env!("CARGO_PKG_VERSION")).as_bytes());
     hasher.update([0u8]);
     hasher.update(format!("{:?}", a).as_bytes());
     hex::encode(&hasher.finalize()[..8])
-}
-
-/// Major-version component of a semver-ish string (`"3.1.0"` → `"3"`).
-fn major_of(v: &str) -> &str {
-    v.split('.').next().unwrap_or(v)
 }
 
 #[derive(Serialize, Deserialize)]

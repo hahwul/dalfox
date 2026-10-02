@@ -35,13 +35,10 @@ pub(crate) use serde::{Deserialize, Serialize};
 
 pub(crate) use crate::cmd::scan::ScanArgs;
 pub(crate) use crate::job::{
-    JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS, MAX_SCAN_TIMEOUT_SECS,
-    MAX_TIMEOUT_SECS, MAX_WORKERS, WorkerLease, cap_reflection_params, effective_rate_limit,
-    effective_scan_timeout, enforce_retention_cap, has_http_scheme, now_ms, parse_job_status,
-    purge_expired_jobs as purge_jobs_map, send_reachability_probe, split_cookie_pairs,
-    unreachable_error_message,
+    JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_CONCURRENT_PREFLIGHT, ProgressPayload,
+    WorkerLease, effective_rate_limit, effective_scan_timeout, has_http_scheme,
+    purge_expired_jobs as purge_jobs_map, split_cookie_pairs, unreachable_error_message,
 };
-pub(crate) use crate::parameter_analysis::analyze_parameters;
 pub(crate) use crate::scanning::result::SanitizedResult;
 pub(crate) use crate::target_parser::parse_target;
 
@@ -170,10 +167,10 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         .route("/preflight", post(preflight_handler))
         .route("/preflight", options(options_scan_handler))
         .route("/result/{id}", get(get_result_handler))
-        .route("/result/{id}", options(options_result_handler))
+        .route("/result/{id}", options(options_scan_handler))
         .route("/scan/{id}", get(get_result_handler))
         .route("/scan/{id}", axum::routing::delete(cancel_scan_handler))
-        .route("/scan/{id}", options(options_result_handler))
+        .route("/scan/{id}", options(options_scan_handler))
         .route("/health", get(health_handler))
         .route("/health", options(options_scan_handler))
         // Explicit request-body cap for every route. Replaces axum's implicit

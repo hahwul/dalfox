@@ -5,128 +5,29 @@ use super::*;
 
 /// Normalize and range-check scan options so callers get a precise 400 instead
 /// of having the server silently substitute defaults — or, worse, run a scan
-/// that quietly does the wrong thing.
-///
-/// Normalization matters because the REST body bypasses clap's value parsers
-/// exactly like a config file does (see `ScanConfig::normalize_and_validate`).
-/// `method` is the important one: it is compared case-sensitively downstream
-/// and is put on the wire verbatim, so `"post"` used to be sent as the literal
-/// extension verb `post` (which real servers answer with 405/501) while
-/// `"GET junk"` failed `Method::from_str` and silently degraded to GET. Both
-/// produced a `done` scan with zero findings and no error.
+/// that quietly does the wrong thing. The shared checks live in
+/// [`crate::job::ScanOptionChecks`]; only `callback_url` is REST-specific.
 pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String> {
-    // Uppercase + validate against the same method set `--method` accepts.
-    if let Some(m) = &opts.method {
-        opts.method = Some(crate::cmd::scan::parse_http_method_arg(m)?);
+    crate::job::ScanOptionChecks {
+        method: opts.method.as_mut(),
+        encoders: opts.encoders.as_deref().unwrap_or_default(),
+        remote_payloads: opts.remote_payloads.as_deref().unwrap_or_default(),
+        remote_wordlists: opts.remote_wordlists.as_deref().unwrap_or_default(),
+        timeout: opts.timeout,
+        delay: opts.delay,
+        workers: opts.worker.map(|w| (w, "worker")),
+        max_payloads_per_param: opts.max_payloads_per_param,
+        scan_timeout: opts.scan_timeout,
+        waf_bypass: opts.waf_bypass.as_deref(),
+        force_waf: opts.force_waf.as_mut(),
+        waf_min_confidence: opts.waf_min_confidence,
+        headers: opts.header.as_deref().unwrap_or_default(),
+        user_agent: opts.user_agent.as_deref(),
+        cookies: opts.cookie.as_slice(),
+        proxy: Some(&mut opts.proxy),
+        blind: Some((&mut opts.blind, "blind")),
     }
-    if let Some(encs) = &opts.encoders {
-        crate::job::validate_encoders(encs)?;
-    }
-    // Same silent-coverage-loss hazard as an unknown encoder: an unrecognized
-    // provider name caches an empty list and the scan runs on the built-in
-    // catalog alone, then settles `done`. Shared with MCP.
-    crate::job::validate_remote_providers(
-        opts.remote_payloads.as_deref().unwrap_or(&[]),
-        opts.remote_wordlists.as_deref().unwrap_or(&[]),
-    )?;
-    if let Some(t) = opts.timeout
-        && (t == 0 || t > MAX_TIMEOUT_SECS)
-    {
-        return Err(format!(
-            "timeout must be between 1 and {} seconds (got {})",
-            MAX_TIMEOUT_SECS, t
-        ));
-    }
-    if let Some(d) = opts.delay
-        && d > MAX_DELAY_MS
-    {
-        return Err(format!(
-            "delay must be between 0 and {} ms (got {})",
-            MAX_DELAY_MS, d
-        ));
-    }
-    if let Some(w) = opts.worker
-        && (w == 0 || w > MAX_WORKERS)
-    {
-        return Err(format!(
-            "worker must be between 1 and {} (got {})",
-            MAX_WORKERS, w
-        ));
-    }
-    if let Some(m) = opts.max_payloads_per_param
-        && m > crate::job::MAX_PAYLOADS_PER_PARAM
-    {
-        return Err(format!(
-            "max_payloads_per_param must be between 0 and {} (got {})",
-            crate::job::MAX_PAYLOADS_PER_PARAM,
-            m
-        ));
-    }
-    if let Some(st) = opts.scan_timeout
-        && st > MAX_SCAN_TIMEOUT_SECS
-    {
-        return Err(format!(
-            "scan_timeout must be between 0 and {} seconds (got {})",
-            MAX_SCAN_TIMEOUT_SECS, st
-        ));
-    }
-    // Shared value list (also backing clap's parser and the config validator)
-    // so the accepted set can't drift between the three entry points.
-    if let Some(mode) = opts.waf_bypass.as_deref()
-        && !crate::cmd::scan::WAF_BYPASS_VALUES.contains(&mode)
-    {
-        return Err(format!(
-            "waf_bypass must be one of {} (got '{}')",
-            crate::cmd::scan::WAF_BYPASS_VALUES.join(", "),
-            mode
-        ));
-    }
-    // Reuse the CLI's WAF-name normalizer so server/CLI accept the same set.
-    if let Some(name) = opts.force_waf.as_deref() {
-        crate::cmd::scan::parse_force_waf_arg(name)?;
-    }
-    if let Some(c) = opts.waf_min_confidence
-        && !(0.0..=1.0).contains(&c)
-    {
-        return Err(format!(
-            "waf_min_confidence must be between 0.0 and 1.0 (got {})",
-            c
-        ));
-    }
-    // Header syntax, checked here rather than discovered mid-scan. Shared with
-    // MCP so both front ends refuse the same inputs.
-    if let Some(headers) = &opts.header {
-        crate::job::validate_header_list(headers)?;
-    }
-    // `user_agent` and `cookie` become header values too (User-Agent / Cookie),
-    // and the same reqwest builder-failure that `validate_header_list` guards
-    // against makes a live target look unreachable. Checked here so both front
-    // ends reject a control byte in either at submission rather than mid-scan.
-    if let Some(ua) = opts.user_agent.as_deref().filter(|s| !s.is_empty()) {
-        crate::job::validate_header_value("user_agent", ua)?;
-    }
-    if let Some(cookie) = opts.cookie.as_deref().filter(|s| !s.is_empty()) {
-        crate::job::validate_header_value("cookie", cookie)?;
-    }
-    // An unusable proxy is resolved away to "no proxy" when the scan's client is
-    // built, so the scan silently went *direct* to the target instead of through
-    // the tunnel the caller asked for — and still reported `done`. The
-    // normalized value is written back because that is what the client builder
-    // later resolves; see `crate::job::normalize_proxy`. Shared with MCP.
-    if let Some(proxy) = &opts.proxy {
-        opts.proxy = crate::job::normalize_proxy(proxy)?;
-    }
-    // `blind` arms stored blind-XSS injection, which writes `<script src=…>`
-    // payloads into every parameter of the target and leaves them there. A
-    // value that can never receive a callback (empty, or not an absolute
-    // http(s) URL with a host) still armed it, so the job modified the target
-    // permanently for nothing
-    // and reported `done`. Empty normalizes to "no blind XSS" — which is what
-    // it already meant — and the trimmed value is written back because that is
-    // the string interpolated into the payload. Shared with MCP.
-    if let Some(blind) = &opts.blind {
-        opts.blind = crate::job::normalize_blind_callback(blind, "blind")?;
-    }
+    .validate()?;
     // `send_terminal_webhook` dials http(s) only and returns silently for
     // anything else, so a `callback_url` with another scheme was accepted with
     // `200 OK` and then never fired — leaving the subscriber waiting forever for
@@ -155,37 +56,14 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     Ok(())
 }
 
-/// Minimum interval between job-retention sweeps. Retention is hours-granular,
-/// so deferring a sweep by up to a minute is invisible to clients while keeping
-/// the O(n) scan off the hot per-request path. Mirrors the MCP server.
-pub(crate) const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
-
-/// Cap on concurrent `/preflight` operations. Each preflight pins a blocking-pool
-/// thread for the full request timeout, so this is sized well below tokio's
-/// default 512-thread blocking pool to guarantee scan jobs always have threads.
-pub(crate) const MAX_CONCURRENT_PREFLIGHT: usize = 32;
-
 /// Thin wrapper over `crate::job::purge_expired_jobs` that acquires the jobs
-/// lock for the caller. Throttled to at most once per [`PURGE_MIN_INTERVAL_MS`]
-/// so the O(n) retention sweep doesn't run (and serialize all handlers on the
-/// jobs lock) on every request, including the high-frequency poll path.
+/// lock for the caller. Throttled by [`crate::job::purge_due`] so the O(n)
+/// retention sweep doesn't run (and serialize all handlers on the jobs lock)
+/// on every request, including the high-frequency poll path.
 pub(crate) async fn purge_expired_jobs(state: &AppState) {
-    use std::sync::atomic::Ordering;
-    let now = crate::job::now_ms();
-    let last = state.last_purge_ms.load(Ordering::Relaxed);
-    if now - last < PURGE_MIN_INTERVAL_MS {
-        return;
+    if crate::job::purge_due(&state.last_purge_ms) {
+        purge_jobs_map(&mut *state.jobs.lock().await, JOB_RETENTION_SECS);
     }
-    // CAS so concurrent requests can't both decide to sweep.
-    if state
-        .last_purge_ms
-        .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
-        .is_err()
-    {
-        return;
-    }
-    let mut jobs = state.jobs.lock().await;
-    purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
 }
 
 /// Parse an optional numeric query parameter, distinguishing "absent" (→
@@ -221,13 +99,7 @@ where
 /// only the exact string `"true"` while DELETE's `?purge` accepted `"1"` and
 /// `"true"`, so the same `?include_request=1` silently did nothing.
 pub(crate) fn parse_bool_query(params: &HashMap<String, String>, key: &str) -> bool {
-    params.get(key).is_some_and(|v| {
-        let v = v.trim();
-        v == "1"
-            || v.eq_ignore_ascii_case("true")
-            || v.eq_ignore_ascii_case("yes")
-            || v.eq_ignore_ascii_case("on")
-    })
+    parse_opt_bool_query(params, key).unwrap_or(false)
 }
 
 /// Like [`parse_bool_query`] but preserves the present/absent distinction:
@@ -245,50 +117,30 @@ pub(crate) fn parse_opt_bool_query(params: &HashMap<String, String>, key: &str) 
     })
 }
 
-/// Admit a new scan and insert a queued `Job` for `url` under a single
-/// jobs-lock, or return `None` when the server is already at its
-/// `max_concurrent_scans` capacity (`0` = unlimited). Counting active
-/// (non-terminal) jobs and inserting under the *same* lock keeps the check
-/// race-free. Shared by POST and GET /scan so both paths enforce the cap and
-/// build the queued job identically.
-///
-/// On success returns the reserved scan_id together with the worker lease the
-/// caller must move into the scan task (see [`crate::job::Job::is_evictable`]).
+/// Admit a new scan for `url` under the server's `max_concurrent_scans` /
+/// `max_retained_scans` caps, or `None` when at capacity. Shared by POST and
+/// GET /scan; see [`crate::job::admit_job`].
 pub(crate) async fn try_admit_and_queue(
     state: &AppState,
     url: &str,
     callback_url: Option<String>,
 ) -> Option<(String, WorkerLease)> {
-    let mut jobs = state.jobs.lock().await;
-    if state.max_concurrent_scans > 0
-        && jobs.values().filter(|j| j.occupies_capacity()).count() >= state.max_concurrent_scans
-    {
-        return None;
-    }
-    let id = crate::utils::make_unique_scan_id(url, |id| jobs.contains_key(id));
-    let mut job = Job::new_queued(url.to_string());
-    job.callback_url = callback_url;
-    let lease = job.issue_worker_lease();
-    jobs.insert(id.clone(), job);
-    // Bound retained finished scans. The admission cap above counts only active
-    // jobs, so without this the map grows with every quick scan until the
-    // retention TTL expires. Applied after the insert so the steady state is
-    // exactly `max_retained_scans`; the job just added is non-terminal and so
-    // is never a candidate for eviction.
-    enforce_retention_cap(&mut jobs, state.max_retained_scans);
-    Some((id, lease))
+    crate::job::admit_job(
+        &mut *state.jobs.lock().await,
+        url,
+        callback_url,
+        state.max_concurrent_scans,
+        state.max_retained_scans,
+    )
+    .ok()
 }
 
-/// Build the standard 503 "at capacity" response body for a rejected admission.
-pub(crate) fn at_capacity_response(state: &AppState) -> ApiResponse<serde_json::Value> {
-    ApiResponse::<serde_json::Value> {
-        code: 503,
-        msg: format!(
-            "server at capacity: {} concurrent scans already in flight (raise or disable with --max-concurrent-scans)",
-            state.max_concurrent_scans
-        ),
-        data: None,
-    }
+/// The 503 "at capacity" message for a rejected admission.
+pub(crate) fn at_capacity_message(state: &AppState) -> String {
+    format!(
+        "server at capacity: {} concurrent scans already in flight (raise or disable with --max-concurrent-scans)",
+        state.max_concurrent_scans
+    )
 }
 
 /// Open (creating if needed) the `--log-file` for appending.

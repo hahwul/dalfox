@@ -46,7 +46,6 @@ pub(crate) async fn run_ast_dom_analysis(
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &js_code,
-                target.url.as_str(),
                 &script_element_ids,
                 &reflected_markup,
                 posture.trusted_types_enforced,
@@ -280,7 +279,6 @@ pub(crate) async fn fetch_and_analyze_external_js(
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &body,
-                target.url.as_str(),
                 &script_element_ids,
                 &Default::default(),
                 trusted_types_enforced,

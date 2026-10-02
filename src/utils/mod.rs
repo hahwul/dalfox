@@ -227,21 +227,6 @@ impl<'a> FindingAttributionIndex<'a> {
     }
 }
 
-/// Initialize remote resources based on CLI flags. Safe to call multiple times.
-/// This default variant uses no proxy and default timeout. To customize, use
-/// `init_remote_resources_with_options`.
-pub async fn init_remote_resources(
-    payload_providers: &[String],
-    wordlist_providers: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Default options: no proxy, default timeout handled by fetcher
-    let opts = crate::payload::RemoteFetchOptions {
-        timeout_secs: None,
-        proxy: None,
-    };
-    fetch_both(payload_providers, wordlist_providers, opts).await
-}
-
 /// Fetch both remote lists, **not** short-circuiting on the first failure, and
 /// report every failure together.
 ///

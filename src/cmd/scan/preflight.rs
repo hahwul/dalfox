@@ -214,10 +214,9 @@ pub(crate) async fn preflight_content_type(
                 let reason = describe_reqwest_failure(&e);
                 crate::dbg_log!("preflight unreachable: {} ({})", target.url, reason);
                 if !args.silence {
-                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                     crate::ceprintln!(
-                        "\x1b[90m{}\x1b[0m \x1b[31mUNREACHABLE\x1b[0m {} ({})",
-                        ts,
+                        "{} {} ({})",
+                        crate::utils::log::log_prefix("31", "UNREACHABLE"),
                         target.url,
                         reason
                     );

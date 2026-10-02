@@ -21,10 +21,10 @@ use std::sync::atomic::AtomicBool;
 
 use tokio::sync::Mutex;
 
-use super::{AbortOnDrop, JobProgress, cap_reflection_params, run_within_scan_budget};
+use super::{AbortOnDrop, JobProgress, JobStatus, cap_reflection_params, run_within_scan_budget};
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::analyze_parameters;
-use crate::scanning::result::Result as ScanResult;
+use crate::scanning::result::{Result as ScanResult, SanitizedResult};
 use crate::target_parser::{Target, parse_target};
 
 /// Ceiling on parameters carried into the scan phase, named in the warning
@@ -99,6 +99,153 @@ impl ScanRun {
     pub(crate) fn lost_session(&self) -> bool {
         !self.was_cancelled && self.session_lost.is_some()
     }
+
+    /// The findings as the job stores them, publishing the final tally to
+    /// `progress.findings_so_far` on the way.
+    pub(crate) async fn sanitized_results(
+        &self,
+        progress: &JobProgress,
+        include_request: bool,
+        include_response: bool,
+    ) -> Arc<Vec<SanitizedResult>> {
+        let locked = self.results.lock().await;
+        progress
+            .findings_so_far
+            .store(locked.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        Arc::new(
+            locked
+                .iter()
+                .map(|r| r.to_sanitized(include_request, include_response))
+                .collect(),
+        )
+    }
+
+    /// Record this run's results and final status on `job`, returning the
+    /// status stored. A cancel that already landed stays; otherwise the run's
+    /// cancel flag (also tripped by `scan_timeout`) → `Cancelled`, a worker
+    /// panic or lost session → `Error`, else `Done`.
+    ///
+    /// Why an incomplete run is incomplete goes into `error_message`, prefixed
+    /// with the shared error code where one exists so a poller can match on it
+    /// the way the CLI's `target_summary[].error_code` is matched. REST only
+    /// fills an empty message; MCP passes `append_note` because its
+    /// client-cancelled `wait=true` path records a reason *before* the worker
+    /// winds down, and dropping the note would hide that a worker died.
+    pub(crate) fn settle(
+        &self,
+        job: &mut super::Job,
+        results: Arc<Vec<SanitizedResult>>,
+        scan_timeout: u64,
+        append_note: bool,
+    ) -> JobStatus {
+        job.results = Some(results);
+        if job.status != JobStatus::Cancelled {
+            job.status = if self.was_cancelled {
+                JobStatus::Cancelled
+            } else if self.panicked || self.lost_session() {
+                JobStatus::Error
+            } else {
+                JobStatus::Done
+            };
+        }
+        // Session loss, a worker panic and a timeout are mutually exclusive in
+        // practice (a timeout trips the cancel flag, so `panicked` is false).
+        let note = if self.lost_session() {
+            Some(format!(
+                "{}: {}",
+                crate::cmd::error_codes::SESSION_LOST,
+                self.session_lost.clone().unwrap_or_default()
+            ))
+        } else if self.panicked {
+            Some(format!(
+                "{} scan worker task(s) panicked; results are partial",
+                self.worker_panics
+            ))
+        } else if self.timed_out {
+            Some(format!(
+                "scan exceeded scan_timeout ({}s); returning partial results",
+                scan_timeout
+            ))
+        } else {
+            None
+        };
+        match (note, &mut job.error_message) {
+            (Some(note), None) => job.error_message = Some(note),
+            (Some(note), Some(existing)) if append_note => {
+                existing.push_str("; ");
+                existing.push_str(&note);
+            }
+            _ => {}
+        }
+        // An earlier finished_at_ms (set at cancel time) is kept: it records
+        // when the user asked to stop, not when the task noticed.
+        job.finished_at_ms.get_or_insert_with(super::now_ms);
+        job.status.clone()
+    }
+}
+
+/// The preflight body shared by REST `/preflight` and MCP `preflight_dalfox`.
+///
+/// Reachability is a bodyless HEAD through the hydrated target's HTTP stack
+/// (proxy, TLS, headers, cookies, User-Agent) so the caller's scan method/body
+/// is not sent prematurely. Discovery is capped like a real scan, and each
+/// parameter's request estimate mirrors the scan's encoder fan-out and
+/// per-parameter payload cap — shared with the CLI's `--dry-run` estimate so
+/// the three cannot quote different numbers for the same target.
+pub(crate) async fn preflight(
+    target: &mut Target,
+    target_url: &str,
+    scan_args: &ScanArgs,
+    max_payloads_per_param: usize,
+    deep_scan: bool,
+) -> serde_json::Value {
+    if !super::send_reachability_probe(target).await {
+        return serde_json::json!({
+            "target": target_url,
+            "reachable": false,
+            "error_code": crate::cmd::error_codes::CONNECTION_FAILED,
+            "params_discovered": 0,
+            "estimated_total_requests": 0,
+            "params": [],
+        });
+    }
+
+    analyze_parameters(target, scan_args, None).await;
+    cap_reflection_params(target);
+
+    let enc_factor = crate::encoding::encoder_expansion_factor(&scan_args.encoders);
+    let cap = crate::scanning::effective_payload_cap(max_payloads_per_param, deep_scan);
+    let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
+    let mut estimated_requests: usize = 0;
+    let params: Vec<serde_json::Value> = target
+        .reflection_params
+        .iter()
+        .map(|p| {
+            // Fragment params are client-side only: the HTTP scan phase sends
+            // no requests for them, so the estimate bills none (they stay
+            // listed as discovered).
+            let payload_count = if crate::scanning::param_is_http_scannable(p) {
+                crate::scanning::estimate_param_requests(p, scan_args, enc_factor, &apply_cap)
+            } else {
+                0
+            };
+            estimated_requests = estimated_requests.saturating_add(payload_count);
+            serde_json::json!({
+                "name": p.name,
+                "location": format!("{:?}", p.location),
+                "estimated_requests": payload_count,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "target": target_url,
+        "reachable": true,
+        "method": target.method,
+        "params_discovered": params.len(),
+        "estimated_total_requests": estimated_requests,
+        "params": params,
+    })
 }
 
 /// Run one job's scan to completion and report what it left behind.
@@ -220,9 +367,9 @@ pub(crate) async fn execute_scan(
                     }
 
                     if let Some(callback_url) = &args.blind_callback_url {
-                        crate::scanning::blind_scanning(
+                        crate::scanning::blind_scanning_with(
                             target,
-                            callback_url,
+                            crate::scanning::CallbackSource::Static(callback_url),
                             args.custom_blind_xss_payload.as_deref(),
                         )
                         .await;

@@ -126,7 +126,7 @@ pub async fn probe_xml_body_params(
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = crate::utils::http::send_counted(request).await
                     && let Ok(text) = crate::utils::http::read_body(r).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                    && crate::scanning::markers::probe_reflected(&text)
                 {
                     if !silence {
                         eprintln!("Discovered XML injection point: {}", name_for_task);
@@ -153,13 +153,5 @@ pub async fn probe_xml_body_params(
         handles.push(handle);
     }
 
-    let mut batch: Vec<Param> = Vec::new();
-    for h in handles {
-        if let Ok(Some(p)) = h.await {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        reflection_params.lock().await.extend(batch);
-    }
+    extend_with_joined(&reflection_params, handles).await;
 }

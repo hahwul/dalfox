@@ -17,57 +17,39 @@ use crate::target_parser::Target;
 use reqwest::Client;
 use std::borrow::Cow;
 
-const HEX: &[u8; 16] = b"0123456789ABCDEF";
-
-fn is_hex(byte: u8) -> bool {
-    byte.is_ascii_hexdigit()
-}
-
-/// Percent-encode a query component directly into `out`.
-fn encode_query_component_into(raw: &str, out: &mut String, preserve_pct: bool) {
-    let bytes = raw.as_bytes();
-    let mut idx = 0;
-
-    while idx < bytes.len() {
-        if preserve_pct
-            && bytes[idx] == b'%'
-            && idx + 2 < bytes.len()
-            && is_hex(bytes[idx + 1])
-            && is_hex(bytes[idx + 2])
-        {
-            out.push('%');
-            out.push(bytes[idx + 1] as char);
-            out.push(bytes[idx + 2] as char);
-            idx += 3;
-            continue;
-        }
-
-        let ch = raw[idx..].chars().next().expect("valid utf-8 char");
-        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~') {
-            out.push(ch);
-        } else {
-            let mut buf = [0u8; 4];
-            for byte in ch.encode_utf8(&mut buf).as_bytes() {
-                out.push('%');
-                out.push(HEX[(*byte >> 4) as usize] as char);
-                out.push(HEX[(*byte & 0xF) as usize] as char);
-            }
-        }
-        idx += ch.len_utf8();
-    }
-}
-
-/// Encode a decoded query component. Existing URL components come from
+/// Encode a decoded query component: RFC 3986 unreserved bytes pass through,
+/// everything else becomes uppercase `%XX`. Existing URL components come from
 /// `Url::query_pairs()`, which has already decoded `%25`; their literal percent
 /// signs must be escaped again rather than treated as preserved wire encoding.
 fn encode_decoded_query_component_into(raw: &str, out: &mut String) {
-    encode_query_component_into(raw, out, false);
+    urlencoding::Encoded(raw).append_to(out);
 }
 
 /// Encode an injected query component while preserving valid `%XX` sequences.
 /// Payload encoders can intentionally hand this function pre-escaped bytes.
 fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
-    encode_query_component_into(raw, out, true);
+    let bytes = raw.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        if bytes[idx] == b'%'
+            && idx + 2 < bytes.len()
+            && bytes[idx + 1].is_ascii_hexdigit()
+            && bytes[idx + 2].is_ascii_hexdigit()
+        {
+            out.push_str(&raw[idx..idx + 3]);
+            idx += 3;
+            continue;
+        }
+
+        let len = raw[idx..]
+            .chars()
+            .next()
+            .expect("valid utf-8 char")
+            .len_utf8();
+        encode_decoded_query_component_into(&raw[idx..idx + len], out);
+        idx += len;
+    }
 }
 
 /// Replace the zero-based `idx`th non-empty path segment without changing any
@@ -430,62 +412,40 @@ pub(crate) fn build_hpp_url(
     result.push_str(prefix);
     result.push('?');
 
+    // `true` = the payload, `false` = the safe decoy, in wire order.
+    let order = match position {
+        HppPosition::Last => [false, true],
+        HppPosition::First => [true, false],
+        HppPosition::Both => [true, true],
+    };
+    let push_hpp_pairs = |result: &mut String| {
+        for (i, is_payload) in order.into_iter().enumerate() {
+            if i > 0 {
+                result.push('&');
+            }
+            encode_decoded_query_component_into(&param.name, result);
+            result.push('=');
+            if is_payload {
+                encode_query_component_preserving_pct_into(injected, result);
+            } else {
+                encode_decoded_query_component_into(safe_value, result);
+            }
+        }
+    };
+
     let mut first = true;
     let mut replaced = false;
 
     // Rebuild existing query pairs, replacing the target param's value
     for (k, v) in base.query_pairs() {
+        if !first {
+            result.push('&');
+        }
+        first = false;
         if k == param.name && !replaced {
             replaced = true;
-            match position {
-                HppPosition::Last => {
-                    // safe value first, payload second
-                    if !first {
-                        result.push('&');
-                    }
-                    first = false;
-                    encode_decoded_query_component_into(&k, &mut result);
-                    result.push('=');
-                    encode_decoded_query_component_into(safe_value, &mut result);
-                    result.push('&');
-                    encode_decoded_query_component_into(&k, &mut result);
-                    result.push('=');
-                    encode_query_component_preserving_pct_into(injected, &mut result);
-                }
-                HppPosition::First => {
-                    // payload first, safe value second
-                    if !first {
-                        result.push('&');
-                    }
-                    first = false;
-                    encode_decoded_query_component_into(&k, &mut result);
-                    result.push('=');
-                    encode_query_component_preserving_pct_into(injected, &mut result);
-                    result.push('&');
-                    encode_decoded_query_component_into(&k, &mut result);
-                    result.push('=');
-                    encode_decoded_query_component_into(safe_value, &mut result);
-                }
-                HppPosition::Both => {
-                    // payload in both positions
-                    if !first {
-                        result.push('&');
-                    }
-                    first = false;
-                    encode_decoded_query_component_into(&k, &mut result);
-                    result.push('=');
-                    encode_query_component_preserving_pct_into(injected, &mut result);
-                    result.push('&');
-                    encode_decoded_query_component_into(&k, &mut result);
-                    result.push('=');
-                    encode_query_component_preserving_pct_into(injected, &mut result);
-                }
-            }
+            push_hpp_pairs(&mut result);
         } else {
-            if !first {
-                result.push('&');
-            }
-            first = false;
             encode_decoded_query_component_into(&k, &mut result);
             result.push('=');
             encode_decoded_query_component_into(&v, &mut result);
@@ -494,44 +454,10 @@ pub(crate) fn build_hpp_url(
 
     // If param wasn't in the original query, append the HPP pair
     if !replaced {
-        match position {
-            HppPosition::Last => {
-                if !first {
-                    result.push('&');
-                }
-                encode_decoded_query_component_into(&param.name, &mut result);
-                result.push('=');
-                encode_decoded_query_component_into(safe_value, &mut result);
-                result.push('&');
-                encode_decoded_query_component_into(&param.name, &mut result);
-                result.push('=');
-                encode_query_component_preserving_pct_into(injected, &mut result);
-            }
-            HppPosition::First => {
-                if !first {
-                    result.push('&');
-                }
-                encode_decoded_query_component_into(&param.name, &mut result);
-                result.push('=');
-                encode_query_component_preserving_pct_into(injected, &mut result);
-                result.push('&');
-                encode_decoded_query_component_into(&param.name, &mut result);
-                result.push('=');
-                encode_decoded_query_component_into(safe_value, &mut result);
-            }
-            HppPosition::Both => {
-                if !first {
-                    result.push('&');
-                }
-                encode_decoded_query_component_into(&param.name, &mut result);
-                result.push('=');
-                encode_query_component_preserving_pct_into(injected, &mut result);
-                result.push('&');
-                encode_decoded_query_component_into(&param.name, &mut result);
-                result.push('=');
-                encode_query_component_preserving_pct_into(injected, &mut result);
-            }
+        if !first {
+            result.push('&');
         }
+        push_hpp_pairs(&mut result);
     }
 
     if let Some(frag) = fragment {
@@ -820,6 +746,22 @@ pub(crate) fn xml_request_content_type(target: &Target) -> String {
         .unwrap_or_else(|| "application/xml".to_string())
 }
 
+/// Shared tail of the typed body builders: send `body` to the form-action (or
+/// target) URL with the body-location method and `content_type`.
+fn typed_body_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    body: String,
+    content_type: String,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let method = body_location_method_for_param(&target.method, param);
+    let base =
+        crate::utils::build_body_request_base(client, target, method, parsed_url, Some(body));
+    crate::utils::apply_header_overrides(base, &[("Content-Type".to_string(), content_type)])
+}
+
 /// GraphQL body injection. The param's `pre_encoding_pipeline` has already
 /// rebuilt the full request body (query + all variables, the target variable
 /// carrying `value`), so it ships verbatim as `application/json`.
@@ -829,18 +771,12 @@ pub(crate) fn build_graphql_body_request(
     param: &Param,
     value: &str,
 ) -> reqwest::RequestBuilder {
-    let parsed_url = resolve_form_action_url(param, target);
-    let method = body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_body_request_base(
+    typed_body_request(
         client,
         target,
-        method,
-        parsed_url,
-        Some(value.to_string()),
-    );
-    crate::utils::apply_header_overrides(
-        base,
-        &[("Content-Type".to_string(), "application/json".to_string())],
+        param,
+        value.to_string(),
+        "application/json".to_string(),
     )
 }
 
@@ -854,19 +790,8 @@ pub(crate) fn build_xml_body_request(
     param: &Param,
     value: &str,
 ) -> reqwest::RequestBuilder {
-    let parsed_url = resolve_form_action_url(param, target);
-    let method = body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_body_request_base(
-        client,
-        target,
-        method,
-        parsed_url,
-        Some(value.to_string()),
-    );
-    crate::utils::apply_header_overrides(
-        base,
-        &[("Content-Type".to_string(), xml_request_content_type(target))],
-    )
+    let content_type = xml_request_content_type(target);
+    typed_body_request(client, target, param, value.to_string(), content_type)
 }
 
 /// `application/x-www-form-urlencoded` body injection.
@@ -876,17 +801,9 @@ pub(crate) fn build_body_request(
     param: &Param,
     value: &str,
 ) -> reqwest::RequestBuilder {
-    let parsed_url = resolve_form_action_url(param, target);
-    let body = Some(urlencoded_body(target.data.as_deref(), &param.name, value));
-    let method = body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_body_request_base(client, target, method, parsed_url, body);
-    crate::utils::apply_header_overrides(
-        base,
-        &[(
-            "Content-Type".to_string(),
-            "application/x-www-form-urlencoded".to_string(),
-        )],
-    )
+    let body = urlencoded_body(target.data.as_deref(), &param.name, value);
+    let content_type = "application/x-www-form-urlencoded".to_string();
+    typed_body_request(client, target, param, body, content_type)
 }
 
 /// `application/json` body injection.
@@ -896,19 +813,8 @@ pub(crate) fn build_json_body_request(
     param: &Param,
     value: &str,
 ) -> reqwest::RequestBuilder {
-    let parsed_url = resolve_form_action_url(param, target);
-    let body = Some(json_body(
-        target.data.as_deref(),
-        &param.name,
-        &param.value,
-        value,
-    ));
-    let method = body_location_method_for_param(&target.method, param);
-    let base = crate::utils::build_body_request_base(client, target, method, parsed_url, body);
-    crate::utils::apply_header_overrides(
-        base,
-        &[("Content-Type".to_string(), "application/json".to_string())],
-    )
+    let body = json_body(target.data.as_deref(), &param.name, &param.value, value);
+    typed_body_request(client, target, param, body, "application/json".to_string())
 }
 
 /// `multipart/form-data` body injection. No explicit `Content-Type` override:

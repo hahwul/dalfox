@@ -78,19 +78,12 @@ enum Commands {
     Man,
 
     #[clap(hide = true)]
-    Url(cmd::url::UrlArgs),
+    Url(cmd::compat::UrlArgs),
     #[clap(hide = true)]
-    File(cmd::file::FileArgs),
+    File(cmd::compat::FileArgs),
     #[clap(hide = true)]
-    Pipe(cmd::pipe::PipeArgs),
+    Pipe(cmd::compat::PipeArgs),
 }
-
-// Bounded file/stdin readers moved to `crate::utils::fs` so the
-// auto-detect / target-list / pipe paths can share the same cap (a
-// 5 MB config and a 256 MB target list have very different ceilings,
-// but the safety model — refuse non-regular files, enforce a hard
-// byte budget — is identical).
-use dalfox::utils::fs::read_bounded;
 
 /// Hand a fully rendered artifact (man page, completion script) to stdout.
 ///
@@ -197,11 +190,7 @@ fn explicit_args_for(matches: &clap::ArgMatches, name: &str) -> cmd::scan::Expli
 /// targets with no client attached, and a second Ctrl-C could not stop it.
 /// Jobs live only in memory, so nothing is lost by not waiting for them.
 fn exit_daemon(outcome: ScanOutcome) -> ! {
-    std::process::exit(match outcome {
-        ScanOutcome::Clean => 0,
-        ScanOutcome::Findings => 1,
-        ScanOutcome::Error => 2,
-    })
+    std::process::exit(outcome.exit_code())
 }
 
 #[tokio::main]
@@ -325,97 +314,10 @@ async fn main() {
     // suppresses it the same way the `--silence` CLI flag does.
 
     // Load configuration with optional --config override
-    let mut config_load = if let Some(cfg_path) = &cli.config {
-        let p = std::path::Path::new(cfg_path);
-        if let Some(parent) = p.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if !p.exists() {
-            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if ext.eq_ignore_ascii_case("json") {
-                let s = config::default_json_template();
-                let _ = std::fs::write(p, &s);
-                match serde_json::from_str::<config::Config>(&s) {
-                    Ok(cfg) => Ok(config::LoadResult {
-                        config: cfg,
-                        path: p.to_path_buf(),
-                        format: config::ConfigFormat::Json,
-                        created: true,
-                    }),
-                    Err(e) => Err(Box::<dyn std::error::Error>::from(e)),
-                }
-            } else {
-                let s = config::default_toml_template();
-                let _ = std::fs::write(p, &s);
-                match toml::from_str::<config::Config>(&s) {
-                    Ok(cfg) => Ok(config::LoadResult {
-                        config: cfg,
-                        path: p.to_path_buf(),
-                        format: config::ConfigFormat::Toml,
-                        created: true,
-                    }),
-                    Err(e) => Err(Box::<dyn std::error::Error>::from(e)),
-                }
-            }
-        } else {
-            // Bound the read so `--config /dev/zero` (or any other
-            // non-regular file that streams forever) can't hang dalfox
-            // indefinitely. Config files are TOML/JSON — 1 MiB is more
-            // than two orders of magnitude over what any real
-            // operator-curated config will ever be.
-            match read_bounded(p, dalfox::config::MAX_CONFIG_BYTES, "config file") {
-                Ok(content) => {
-                    let is_json_ext = p
-                        .extension()
-                        .and_then(|s| s.to_str())
-                        .map(|e| e.eq_ignore_ascii_case("json"))
-                        .unwrap_or(false);
-                    if is_json_ext {
-                        if let Ok(cfg) = serde_json::from_str::<config::Config>(&content) {
-                            Ok(config::LoadResult {
-                                config: cfg,
-                                path: p.to_path_buf(),
-                                format: config::ConfigFormat::Json,
-                                created: false,
-                            })
-                        } else if let Ok(cfg) = toml::from_str::<config::Config>(&content) {
-                            Ok(config::LoadResult {
-                                config: cfg,
-                                path: p.to_path_buf(),
-                                format: config::ConfigFormat::Toml,
-                                created: false,
-                            })
-                        } else {
-                            Err(Box::<dyn std::error::Error>::from(
-                                "Failed to parse config as JSON or TOML",
-                            ))
-                        }
-                    } else if let Ok(cfg) = toml::from_str::<config::Config>(&content) {
-                        Ok(config::LoadResult {
-                            config: cfg,
-                            path: p.to_path_buf(),
-                            format: config::ConfigFormat::Toml,
-                            created: false,
-                        })
-                    } else if let Ok(cfg) = serde_json::from_str::<config::Config>(&content) {
-                        Ok(config::LoadResult {
-                            config: cfg,
-                            path: p.to_path_buf(),
-                            format: config::ConfigFormat::Json,
-                            created: false,
-                        })
-                    } else {
-                        Err(Box::<dyn std::error::Error>::from(
-                            "Failed to parse config as TOML or JSON",
-                        ))
-                    }
-                }
-                Err(e) => Err(Box::<dyn std::error::Error>::from(e)),
-            }
-        }
-    } else {
+    let mut config_load = match &cli.config {
+        Some(cfg_path) => config::load_path(std::path::Path::new(cfg_path)),
         // Default path behavior: $XDG_CONFIG_HOME/dalfox/config.* or $HOME/.config/dalfox/config.*
-        config::load_or_init()
+        None => config::load_or_init(),
     };
 
     // When the user explicitly passes `--config <path>`, a parse failure
@@ -538,118 +440,89 @@ async fn main() {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), banner_color);
     }
 
-    // Exit codes:
+    // Exit codes (`ScanOutcome::exit_code`):
     //   0 = success, no findings
     //   1 = success, findings found
     //   2 = input/configuration/runtime error
-    let outcome;
-
-    if let Some(command) = cli.command {
-        match command {
-            Commands::Scan(mut args) => {
-                args.explicit = explicit_args_for(&matches, "scan");
-                // `--no-color`/`--silence` are global on `Cli`, config defaults
-                // overlay, and `--include-all` expands — all folded in one shared
-                // helper so this path and `url`/`file`/`pipe` stay identical.
-                let args = cmd::scan::finalize_scan_args(
-                    args,
-                    cli.no_color,
-                    cli.silence,
-                    config_load.as_ref().ok().map(|r| &r.config),
-                );
-                outcome = cmd::scan::run_scan(&args).await;
-            }
-            Commands::Server(args) => {
-                // A server that never bound — or whose `axum::serve` failed —
-                // has to reach the exit code. A supervisor reads status, not
-                // stderr, so the hard-coded `Clean` made "the port was already
-                // in use" indistinguishable from a clean shutdown.
-                outcome = match server::run_server(args).await {
-                    Ok(()) => ScanOutcome::Clean,
-                    Err(_) => ScanOutcome::Error,
-                };
-                exit_daemon(outcome);
-            }
-            Commands::Payload(args) => {
-                outcome = cmd::payload::run_payload(args);
-            }
-            Commands::Mcp => {
-                // Run MCP stdio server (no banner already). A failed handshake
-                // or transport error has to reach the exit code: an MCP host or
-                // a supervisor (systemd, a process manager, `dalfox mcp || …`)
-                // reads status, not stderr, and a hard-coded `Clean` made "the
-                // server never came up" indistinguishable from a clean
-                // shutdown.
-                outcome = match mcp::run_mcp_server().await {
-                    Ok(()) => ScanOutcome::Clean,
-                    Err(e) => {
-                        eprintln!("MCP server error: {e}");
-                        ScanOutcome::Error
-                    }
-                };
-                exit_daemon(outcome);
-            }
-
-            Commands::Completion { .. } => unreachable!(),
-
-            // `dalfox man` is handled immediately after parsing so this arm
-            // should never execute. It exists only for match exhaustiveness.
-            Commands::Man => unreachable!(),
-
-            // The compat subcommands flatten `ScanArgs`, so their own matches
-            // carry the same argument ids the `scan` arm reads above.
-            Commands::Url(mut args) => {
-                args.scan_args.explicit = explicit_args_for(&matches, "url");
-                let config = config_load.as_ref().ok().map(|r| &r.config);
-                outcome = cmd::url::run_url(args, cli.no_color, cli.silence, config).await;
-            }
-            Commands::File(mut args) => {
-                args.scan_args.explicit = explicit_args_for(&matches, "file");
-                let config = config_load.as_ref().ok().map(|r| &r.config);
-                outcome = cmd::file::run_file(args, cli.no_color, cli.silence, config).await;
-            }
-            Commands::Pipe(mut args) => {
-                args.scan_args.explicit = explicit_args_for(&matches, "pipe");
-                let config = config_load.as_ref().ok().map(|r| &r.config);
-                outcome = cmd::pipe::run_pipe(args, cli.no_color, cli.silence, config).await;
-            }
+    //
+    // The compat subcommands flatten `ScanArgs`, so their own matches carry
+    // the same argument ids the `scan` arm reads; the explicit set is recorded
+    // before `into_scan_args` adds the subcommand's own `input_type` to it.
+    let compat = |mut scan_args: cmd::scan::ScanArgs, name: &str, targets| {
+        scan_args.explicit = explicit_args_for(&matches, name);
+        cmd::compat::into_scan_args(scan_args, name, targets)
+    };
+    let outcome = match cli.command {
+        Some(Commands::Server(args)) => {
+            // A server that never bound — or whose `axum::serve` failed —
+            // has to reach the exit code. A supervisor reads status, not
+            // stderr, so the hard-coded `Clean` made "the port was already
+            // in use" indistinguishable from a clean shutdown.
+            exit_daemon(match server::run_server(args).await {
+                Ok(()) => ScanOutcome::Clean,
+                Err(_) => ScanOutcome::Error,
+            })
         }
-    } else {
-        // Default to scan
-        let args = cmd::scan::ScanArgs {
-            targets: cli.targets,
-            // No-subcommand path (`dalfox <TARGET>`); read the global
-            // flags from `Cli` so `dalfox URL --silence` and
-            // `dalfox URL --no-color` flow through to scan.
-            no_color: cli.no_color,
-            silence: cli.silence,
-            // Everything else is the plain CLI default. Note `insecure` stays
-            // `None`: this path accepts no `--insecure` flag, so leaving it
-            // unspecified lets config set it via apply_to_scan_args_if_default,
-            // and the effective value falls back to insecure (true) when
-            // targets are built.
-            ..Default::default()
-        };
-        // Same config-overlay + `--include-all` expansion as every other entry
-        // point. `no_color`/`silence` were already set from `cli` above, so the
-        // helper's fold is a no-op here.
-        let args = cmd::scan::finalize_scan_args(
-            args,
-            cli.no_color,
-            cli.silence,
-            config_load.as_ref().ok().map(|r| &r.config),
-        );
+        Some(Commands::Mcp) => {
+            // Run MCP stdio server (no banner already). A failed handshake
+            // or transport error has to reach the exit code: an MCP host or
+            // a supervisor (systemd, a process manager, `dalfox mcp || …`)
+            // reads status, not stderr, and a hard-coded `Clean` made "the
+            // server never came up" indistinguishable from a clean
+            // shutdown.
+            exit_daemon(match mcp::run_mcp_server().await {
+                Ok(()) => ScanOutcome::Clean,
+                Err(e) => {
+                    eprintln!("MCP server error: {e}");
+                    ScanOutcome::Error
+                }
+            })
+        }
+        Some(Commands::Payload(args)) => cmd::payload::run_payload(args).await,
+        // `man` and `completion` are handled immediately after parsing, so
+        // this arm exists only for match exhaustiveness.
+        Some(Commands::Completion { .. } | Commands::Man) => unreachable!(),
+        command => {
+            let args = match command {
+                Some(Commands::Scan(mut args)) => {
+                    args.explicit = explicit_args_for(&matches, "scan");
+                    args
+                }
+                Some(Commands::Url(a)) => compat(a.scan_args, "url", vec![a.url]),
+                Some(Commands::File(a)) => compat(a.scan_args, "file", vec![a.file]),
+                Some(Commands::Pipe(a)) => compat(a.scan_args, "pipe", vec![]),
+                // Default to scan (`dalfox <TARGET>`); read the global flags
+                // from `Cli` so `dalfox URL --silence` and `dalfox URL
+                // --no-color` flow through to scan. Everything else is the
+                // plain CLI default. Note `insecure` stays `None`: this path
+                // accepts no `--insecure` flag, so leaving it unspecified lets
+                // config set it via apply_to_scan_args_if_default, and the
+                // effective value falls back to insecure (true) when targets
+                // are built.
+                None => cmd::scan::ScanArgs {
+                    targets: cli.targets,
+                    no_color: cli.no_color,
+                    silence: cli.silence,
+                    ..Default::default()
+                },
+                Some(_) => unreachable!("dispatched above"),
+            };
+            // `--no-color`/`--silence` are global on `Cli`, config defaults
+            // overlay, and `--include-all` expands — all folded in one shared
+            // helper so every scan entry point (scan / default / url / file /
+            // pipe) stays identical. No banner here — the post-config-load
+            // block above already made the full `effective_silence` decision.
+            let args = cmd::scan::finalize_scan_args(
+                args,
+                cli.no_color,
+                cli.silence,
+                config_load.as_ref().ok().map(|r| &r.config),
+            );
+            cmd::scan::run_scan(&args).await
+        }
+    };
 
-        // No redundant banner emission here — the earlier
-        // post-config-load block already called `print_banner_once`
-        // with the full `effective_silence` decision (CLI, scan
-        // subcommand, and config-file silence all OR-folded).
-        outcome = cmd::scan::run_scan(&args).await;
-    }
-
-    match outcome {
-        ScanOutcome::Clean => {} // exit 0
-        ScanOutcome::Findings => std::process::exit(1),
-        ScanOutcome::Error => std::process::exit(2),
+    if outcome != ScanOutcome::Clean {
+        std::process::exit(outcome.exit_code());
     }
 }

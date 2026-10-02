@@ -390,7 +390,7 @@ pub(crate) async fn check_form_discovery_with(
             crate::record_outbound_request().await;
             if let Ok(resp) = crate::utils::http::send_counted(rb).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                && crate::scanning::markers::probe_reflected(&text)
             {
                 let analysis = ReflectionAnalysis::of(&text);
                 for (field_name, field_value) in &fields {
@@ -482,7 +482,7 @@ pub(crate) async fn check_form_discovery_with(
                     crate::record_outbound_request().await;
                     if let Ok(resp) = crate::utils::http::send_counted(rb).await
                         && let Ok(text) = crate::utils::http::read_body(resp).await
-                        && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                        && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
                             Param {
@@ -561,7 +561,7 @@ pub(crate) async fn check_form_discovery_with(
                     crate::record_outbound_request().await;
                     if let Ok(resp) = crate::utils::http::send_counted(rb).await
                         && let Ok(text) = crate::utils::http::read_body(resp).await
-                        && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                        && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
                             Param {
@@ -601,7 +601,7 @@ async fn form_field_param(
     param: Param,
 ) -> Option<Param> {
     let text = crate::utils::http::read_body(sent.ok()?).await.ok()?;
-    if crate::scanning::markers::classify_probe_reflection(&text).detected() {
+    if crate::scanning::markers::probe_reflected(&text) {
         Some(param.with_reflection_analysis(&text))
     } else {
         keep_unreflected.then_some(param)

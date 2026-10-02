@@ -392,8 +392,8 @@ async fn safe_truncated(Query(p): Query<HashMap<String, String>>) -> impl IntoRe
 /// chars), the server would echo only `<8hex>`, and the legacy
 /// `text.contains(open_marker())` check would miss it. With the sandwich
 /// probe (OPEN+INNER+CLOSE), the server still strips the first 4 bytes of
-/// OPEN — but INNER and CLOSE survive, so `classify_probe_reflection`
-/// reports `SuffixOnly` and the param is recorded.
+/// OPEN — but INNER and CLOSE survive, so `probe_reflected`
+/// still sees the inner marker and the param is recorded.
 async fn vuln_strip_prefix4(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
     let q = p.get("q").cloned().unwrap_or_default();
     let trimmed: String = q.chars().skip(4).collect();
@@ -405,7 +405,7 @@ async fn vuln_strip_prefix4(Query(p): Query<HashMap<String, String>>) -> impl In
 /// Strip the last 4 characters of every query value before reflecting —
 /// mirror of `vuln_strip_prefix4`. With the sandwich probe, OPEN and
 /// INNER survive while the trailing 4 bytes of CLOSE are removed, so
-/// `classify_probe_reflection` reports `PrefixOnly`.
+/// `probe_reflected` still sees the inner marker.
 async fn vuln_strip_suffix4(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
     let q = p.get("q").cloned().unwrap_or_default();
     let kept_chars = q.chars().count().saturating_sub(4);
@@ -1291,8 +1291,7 @@ async fn test_partial_reflection_suffix_strip() {
 /// Server extracts a hex-only substring — drops every non-hex byte.
 /// `dlx` / `xld` / `dlxmid` non-hex letters are stripped, but the
 /// random hex segments survive concatenated. `inner_marker()` is
-/// `dlxmid<8hex>`, whose 8-hex tail survives as a contiguous run and
-/// is detected by `classify_probe_reflection`'s InnerOnly branch.
+/// `dlxmid<8hex>`, whose 8-hex tail survives as a contiguous run.
 #[tokio::test]
 async fn test_partial_reflection_hex_extract() {
     let addr = start_test_server().await;

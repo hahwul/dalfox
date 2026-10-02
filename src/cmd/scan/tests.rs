@@ -2,7 +2,7 @@ use super::logging::{log_info, log_warn, start_spinner};
 use super::output::{
     plain_findings_summary, render_dry_run, render_only_discovery, render_results,
 };
-use super::poc::{build_ast_dom_message, generate_poc, render_finding_block};
+use super::poc::{generate_poc, render_finding_block};
 use super::postprocess::{dedupe_ast_results, extract_context};
 use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
 use super::validation::validate_numeric_args;
@@ -82,7 +82,7 @@ fn validate_numeric_args_rejects_zero_workers() {
     let mut args = default_scan_args();
     args.workers = 0;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("workers"));
+    assert!(err.contains("workers"));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn validate_numeric_args_rejects_zero_timeout() {
     let mut args = default_scan_args();
     args.timeout = 0;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("timeout"));
+    assert!(err.contains("timeout"));
 }
 
 #[test]
@@ -123,9 +123,9 @@ fn validate_numeric_args_rejects_sxss_retries_over_cap() {
     args.sxss_retries = crate::cmd::scan::CLI_MAX_SXSS_RETRIES + 1;
     let err = validate_numeric_args(&args).unwrap_err();
     assert!(
-        err.1.contains("sxss-retries"),
+        err.contains("sxss-retries"),
         "message must name the flag, got: {}",
-        err.1
+        err
     );
 }
 
@@ -172,7 +172,7 @@ fn validate_numeric_args_rejects_rate_limit_over_cap() {
     let mut args = default_scan_args();
     args.rate_limit = CLI_MAX_RATE_LIMIT + 1;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("rate-limit"), "got: {}", err.1);
+    assert!(err.contains("rate-limit"), "got: {}", err);
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn validate_numeric_args_rejects_retries_over_cap() {
     let mut args = default_scan_args();
     args.retries = CLI_MAX_RETRIES + 1;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("retries"), "got: {}", err.1);
+    assert!(err.contains("retries"), "got: {}", err);
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn validate_numeric_args_rejects_retry_delay_over_cap() {
     let mut args = default_scan_args();
     args.retry_delay = CLI_MAX_RETRY_DELAY_MS + 1;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("retry-delay"), "got: {}", err.1);
+    assert!(err.contains("retry-delay"), "got: {}", err);
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn validate_numeric_args_rejects_zero_targets_per_host() {
     let mut args = default_scan_args();
     args.max_targets_per_host = 0;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("max-targets-per-host"));
+    assert!(err.contains("max-targets-per-host"));
 }
 
 #[test]
@@ -720,75 +720,6 @@ fn test_generate_poc_leaves_complete_ast_poc_url_untouched() {
         !poc.contains('?'),
         "must not synthesize a query on a complete POC URL: {}",
         poc
-    );
-}
-
-#[test]
-fn test_build_ast_dom_message_keeps_url_source_wording() {
-    let message = build_ast_dom_message(
-        "DOM-based XSS via location.hash to innerHTML",
-        "location.hash",
-        "https://example.com/dom/level2/",
-        "<img src=x onerror=alert(1)>",
-    );
-    // URL-carried sources get no manual-setup hint — the finding's POC URL is
-    // the reproduction step, so no internal `[light check: …]` tail (#1238).
-    assert_eq!(
-        message,
-        "DOM-based XSS via location.hash to innerHTML (needs runtime confirmation)"
-    );
-}
-
-#[test]
-fn test_build_ast_dom_message_adds_postmessage_manual_hint() {
-    let message = build_ast_dom_message(
-        "DOM-based XSS via e.data to innerHTML",
-        "e.data",
-        "https://example.com/dom/level23/",
-        "<img src=x onerror=alert(1)>",
-    );
-    assert!(message.contains("[manual POC:"));
-    assert!(message.contains("window.open"));
-    assert!(message.contains("postMessage"));
-}
-
-#[test]
-fn test_build_ast_dom_message_adds_referrer_manual_hint() {
-    let message = build_ast_dom_message(
-        "DOM-based XSS via document.referrer to document.write",
-        "document.referrer",
-        "https://example.com/dom/level14/",
-        "<img src=x onerror=alert(1)>",
-    );
-    assert!(message.contains("[manual POC:"));
-    assert!(message.contains("document.referrer"));
-    assert!(message.contains("attacker-controlled page"));
-}
-
-#[test]
-fn test_build_ast_dom_message_adds_cookie_manual_hint() {
-    let message = build_ast_dom_message(
-        "DOM-based XSS via document.cookie to document.write",
-        "document.cookie",
-        "https://example.com/dom/level12/",
-        "<img src=x onerror=alert(1)>",
-    );
-    assert!(message.contains("[manual POC:"));
-    assert!(message.contains("same-origin cookie"));
-    assert!(message.contains("cookie-safe variant may be needed"));
-}
-
-#[test]
-fn test_build_ast_dom_message_keeps_pathname_wording() {
-    let message = build_ast_dom_message(
-        "DOM-based XSS via location.pathname to document.write",
-        "location.pathname",
-        "https://example.com/dom/level28/",
-        "<img src=x onerror=alert(1)>",
-    );
-    assert_eq!(
-        message,
-        "DOM-based XSS via location.pathname to document.write (needs runtime confirmation)"
     );
 }
 

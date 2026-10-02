@@ -139,10 +139,9 @@ pub(crate) async fn run_scan_loop(
         && (args.session_check.is_some() || args.session_check_url.is_some())
         && !args.silence
     {
-        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
         crate::ceprintln!(
-            "\x1b[90m{}\x1b[0m \x1b[33mWARN\x1b[0m --session-check requested but no baseline could be captured for any target; session monitoring is INACTIVE for this run",
-            ts
+            "{} --session-check requested but no baseline could be captured for any target; session monitoring is INACTIVE for this run",
+            crate::utils::log::log_prefix("33", "WARN")
         );
     }
 

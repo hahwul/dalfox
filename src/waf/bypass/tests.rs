@@ -996,3 +996,12 @@ fn mutations_never_panic_on_multibyte_payloads() {
         }
     }
 }
+
+#[test]
+fn mutation_type_display_is_variant_name() {
+    assert_eq!(
+        MutationType::HtmlCommentSplit.to_string(),
+        "HtmlCommentSplit"
+    );
+    assert_eq!(MutationType::EntityScheme.to_string(), "EntityScheme");
+}

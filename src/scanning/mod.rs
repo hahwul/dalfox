@@ -108,7 +108,6 @@ pub(crate) use waf_strategy::*;
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification_with_evidence;
-use crate::scanning::check_reflection::check_reflection_with_response_tracked;
 use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -334,10 +333,9 @@ const BLOCKED_STREAK_LIMIT: u32 = 64;
 /// *Consecutive* 3xx-redirect responses that end the DOM phase.
 ///
 /// A redirect can never produce a DOM verification: browsers do not render a
-/// 3xx response body (only `Location:` drives navigation), and
-/// [`check_dom_verification::check_redirect_location`] returns `None` for every
-/// `javascript:` / `data:` / reflected-`next=` redirect (see its doc — modern
-/// browsers refuse to execute those from a `Location:` header). So a DOM payload
+/// 3xx response body (only `Location:` drives navigation), and DOM verification
+/// never treats a `javascript:` / `data:` / reflected-`next=` `Location:` as
+/// evidence (modern browsers refuse to execute those from a redirect header). So a DOM payload
 /// sent to a redirecting response is guaranteed non-verifying, and a long run of
 /// them is pure waste — the reflection phase already recorded any `R` the
 /// `Location:` echo warrants.
@@ -532,9 +530,7 @@ impl ScanWorkerCtx {
     ///
     /// Returns the injection status alongside the classified reflection so the
     /// reflection phase's transformed-inert-echo budget can exclude 4xx block
-    /// pages. Uses the crate-private status-aware path
-    /// ([`check_reflection::check_reflection_with_response_status`]); the public
-    /// `_tracked` entry keeps its `(kind, body)` contract for external callers.
+    /// pages (see [`check_reflection::check_reflection_with_response`]).
     async fn fetch_reflection(
         &self,
         param: &Param,
@@ -547,8 +543,8 @@ impl ScanWorkerCtx {
         bool,
     ) {
         let _permit = self.req_budget.acquire().await;
-        check_reflection::check_reflection_with_response_status(
-            Some(self.client.as_ref()),
+        check_reflection::check_reflection_with_response(
+            self.client.as_ref(),
             &self.target,
             param,
             payload,
@@ -846,8 +842,8 @@ impl ScanWorkerCtx {
                 break;
             }
             let (kind, response_text, _, xml_content_type) =
-                check_reflection::check_reflection_with_response_status(
-                    Some(client),
+                check_reflection::check_reflection_with_response(
+                    client,
                     &self.target,
                     param,
                     pp,
@@ -874,7 +870,7 @@ impl ScanWorkerCtx {
                 // check if the probe marker actually appears in the response.
                 // This ensures breakout payloads get a chance to be tried
                 // for params reflected inside safe tags (title, textarea, etc.).
-                if crate::scanning::markers::classify_probe_reflection(text).detected() {
+                if crate::scanning::markers::probe_reflected(text) {
                     probe_reflected = true;
                     probe_response_text = response_text;
                     probe_response_is_javascript = is_javascript;
@@ -916,8 +912,8 @@ impl ScanWorkerCtx {
         // scan is cancelled — it is a second HTTP request per parameter.
         if !probe_reflected && !self.cancelled() {
             let numeric_probe = crate::scanning::check_reflection::NUMERIC_PROBE_MARKER;
-            let (kind, _) = check_reflection_with_response_tracked(
-                Some(client),
+            let (kind, ..) = check_reflection::check_reflection_with_response(
+                client,
                 &self.target,
                 param,
                 numeric_probe,
@@ -2027,9 +2023,7 @@ fn collapse_redundant_reflected(
         .collect()
 }
 
-pub(crate) use xss_blind::{
-    CallbackSource, blind_scan_forms_with, blind_scanning, blind_scanning_with,
-};
+pub(crate) use xss_blind::{CallbackSource, blind_scan_forms_with, blind_scanning_with};
 
 #[cfg(test)]
 mod tests;

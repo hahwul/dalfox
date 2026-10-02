@@ -4,8 +4,8 @@
 //! and the encoder policy application.
 
 use dalfox::encoding::{
-    apply_encoders_to_payloads, base64_encode, double_url_encode, expand_payload_with_encoders,
-    html_entity_encode, quadruple_url_encode, triple_url_encode, url_encode,
+    apply_encoders_to_payloads, base64_encode, double_url_encode, html_entity_encode,
+    quadruple_url_encode, triple_url_encode, url_encode,
 };
 
 mod url_encoding {
@@ -207,8 +207,8 @@ mod encoder_policy {
 
     #[test]
     fn test_expand_single_payload() {
-        let out = expand_payload_with_encoders(
-            "<",
+        let out = apply_encoders_to_payloads(
+            &["<".to_string()],
             &["2url".to_string(), "3url".to_string(), "4url".to_string()],
         );
         assert!(out.contains(&"<".to_string()));

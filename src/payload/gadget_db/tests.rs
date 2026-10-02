@@ -223,27 +223,13 @@ fn test_pure_dom_gadget_has_no_host_patterns() {
 }
 
 #[test]
-fn test_render_substitutes_markers() {
-    let out = render("<x class={CLASS} id={ID}>", "CLS", "IDN");
-    assert_eq!(out, "<x class=CLS id=IDN>");
-    assert!(!out.contains("{CLASS}"));
-    assert!(!out.contains("{ID}"));
-}
-
-#[test]
-fn test_render_handles_repeated_markers() {
-    let out = render("{CLASS}-{CLASS}-{ID}", "C", "I");
-    assert_eq!(out, "C-C-I");
-}
-
-#[test]
 fn test_no_template_leaves_unrendered_marker_after_render() {
     // Sanity: every embedded template, once rendered, has no leftover
     // reflection-marker placeholders (guards against a typo like `{CLAS}`).
     // Note: framework gadgets legitimately contain `{{ }}` interpolation, so we
     // check specifically for the `{CLASS}` / `{ID}` tokens, not bare braces.
     for g in all() {
-        let rendered = render(g.template, "cm", "im");
+        let rendered = crate::scanning::markers::fill_markers(g.template);
         assert!(
             !rendered.contains("{CLASS}") && !rendered.contains("{ID}"),
             "gadget {} left an unrendered marker: {rendered}",

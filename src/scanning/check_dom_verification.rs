@@ -962,26 +962,8 @@ fn xml_script_type_is_javascript(node: roxmltree::Node<'_, '_>) -> bool {
     let Some(script_type) = node.attribute("type") else {
         return true;
     };
-    matches!(
-        script_type.trim().to_ascii_lowercase().as_str(),
-        "" | "module"
-            | "application/ecmascript"
-            | "application/javascript"
-            | "application/x-ecmascript"
-            | "application/x-javascript"
-            | "text/ecmascript"
-            | "text/javascript"
-            | "text/javascript1.0"
-            | "text/javascript1.1"
-            | "text/javascript1.2"
-            | "text/javascript1.3"
-            | "text/javascript1.4"
-            | "text/javascript1.5"
-            | "text/jscript"
-            | "text/livescript"
-            | "text/x-ecmascript"
-            | "text/x-javascript"
-    )
+    let script_type = script_type.trim().to_ascii_lowercase();
+    script_type.is_empty() || crate::scanning::ast_integration::is_js_mime_essence(&script_type)
 }
 
 fn xml_node_carries_sink(node: roxmltree::Node<'_, '_>) -> bool {
@@ -1189,19 +1171,6 @@ pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
     classify_dom_evidence(payload, text).is_some()
 }
 
-pub async fn check_dom_verification(
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> (bool, Option<String>) {
-    if args.skip_xss_scanning {
-        return (false, None);
-    }
-    let client = target.build_client_or_default();
-    check_dom_verification_with_client(&client, target, param, payload, args).await
-}
-
 // The injection request builders live in `url_inject` so the reflection,
 // light-verify, and DOM-verify paths cannot drift apart again (they had:
 // light-verify was omitting the urlencoded `Content-Type`). Re-exported so
@@ -1340,30 +1309,19 @@ pub(crate) struct DomVerifyEvidenceOutcome {
 /// Special-case for 3xx responses: browsers do not render the response body
 /// of a redirect — only the `Location:` header drives navigation. So body
 /// content can never become an exploitable DOM in a redirect, and any apparent
-/// "DOM evidence" inside it is structurally a false positive. We still inspect
-/// `Location:` (an executable-URL protocol there is a real sink) but skip
-/// body-based DOM verification entirely.
+/// "DOM evidence" inside it is structurally a false positive. `Location:` is
+/// not evidence either: modern browsers refuse to navigate to `javascript:`,
+/// `data:text/html` and `vbscript:` URLs from a 3xx header (treating them as
+/// verified produced High findings no browser fires — xssmaze
+/// `/redirect/level{1..4}`), and a payload reflected inside a `?next=…` target
+/// merely forwards the bytes; the reflection path still reports it as R. So a
+/// redirect never verifies.
 async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyEvidenceOutcome {
     let status = resp.status();
     let status_code = status.as_u16();
     let headers = resp.headers().clone();
 
     if status.is_redirection() {
-        if let Some(location) = headers.get(reqwest::header::LOCATION)
-            && let Ok(loc_str) = location.to_str()
-            && let Some((verified, response_text)) = check_redirect_location(loc_str, payload)
-        {
-            return DomVerifyEvidenceOutcome {
-                outcome: DomVerifyOutcome {
-                    verified,
-                    response_text,
-                    reflected: false,
-                    live_reflection: false,
-                    status: status_code,
-                },
-                evidence_kind: None,
-            };
-        }
         return DomVerifyEvidenceOutcome {
             outcome: DomVerifyOutcome {
                 status: status_code,
@@ -1461,56 +1419,9 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyE
     }
 }
 
-/// Inspect a redirect's `Location:` header for evidence that the payload
-/// itself drives the navigation.
-///
-/// Returns `None` in every case today: modern browsers (Chrome, Firefox,
-/// Safari, all Chromium derivatives) refuse to navigate to `javascript:`,
-/// `data:text/html`, and `vbscript:` URLs supplied via a 3xx `Location:`
-/// header — the redirect is silently dropped without executing the URL.
-/// Treating such a redirect as DOM-verified produced High-severity findings
-/// that no real browser actually fires (observed on xssmaze
-/// `/redirect/level{1..4}`), so the V upgrade is removed.
-///
-/// A bare reflection of the payload *inside* a redirect target URL (typically
-/// inside a `?next=…`-style query parameter) is also not verified evidence:
-/// it merely forwards the attacker-controlled bytes to the next endpoint,
-/// which may or may not turn into a sink there. The reflection-finding path
-/// still surfaces these as R when the body contains the payload, which is
-/// the appropriate severity tier.
-fn check_redirect_location(_loc_str: &str, _payload: &str) -> Option<(bool, Option<String>)> {
-    None
-}
-
-pub async fn check_dom_verification_with_client(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> (bool, Option<String>) {
-    let outcome =
-        check_dom_verification_with_client_outcome(client, target, param, payload, args).await;
-    (outcome.verified, outcome.response_text)
-}
-
-/// Same as [`check_dom_verification_with_client`] but returns the full
-/// [`DomVerifyOutcome`] (verdict + response body + reflected/status signals)
-/// so the DOM phase can drive its recall-preserving early exit (issue #1156).
-pub async fn check_dom_verification_with_client_outcome(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> DomVerifyOutcome {
-    check_dom_verification_with_evidence(client, target, param, payload, args)
-        .await
-        .outcome
-}
-
-/// Scan-worker entry point that also carries the typed parser evidence for the
-/// finding label. The public outcome API above remains unchanged.
+/// DOM-verify one injected `payload`: the verdict, response body,
+/// reflected/status signals (which drive the DOM phase's recall-preserving early
+/// exit, issue #1156) and the typed parser evidence for the finding label.
 pub(crate) async fn check_dom_verification_with_evidence(
     client: &Client,
     target: &Target,

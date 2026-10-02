@@ -79,17 +79,8 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
         }
         // Then encoder variants in fixed order gated by encoders set
         for &e in &active_encoders {
-            let v = match e {
-                "url" => url_encode(p),
-                "html" => html_entity_encode(p),
-                "htmlpad" => html_entity_zero_padded_encode(p),
-                "2url" => double_url_encode(p),
-                "3url" => triple_url_encode(p),
-                "4url" => quadruple_url_encode(p),
-                "base64" => base64_encode(p),
-                "unicode" => unicode_fullwidth_encode(p),
-                "zwsp" => zero_width_encode(p),
-                _ => continue,
+            let Some(v) = encode_named(e, p) else {
+                continue;
             };
             if out_seen.insert(v.clone()) {
                 out.push(v);
@@ -99,9 +90,21 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
     out
 }
 
-/// Convenience helper to expand a single payload with encoders using the same policy.
-pub fn expand_payload_with_encoders(payload: &str, encoders: &[String]) -> Vec<String> {
-    apply_encoders_to_payloads(&[payload.to_string()], encoders)
+/// Apply one `--encoders` encoder by name; `None` for an unknown name
+/// (including `"none"`).
+pub(crate) fn encode_named(name: &str, payload: &str) -> Option<String> {
+    Some(match name {
+        "url" => url_encode(payload),
+        "html" => html_entity_encode(payload),
+        "htmlpad" => html_entity_zero_padded_encode(payload),
+        "2url" => double_url_encode(payload),
+        "3url" => triple_url_encode(payload),
+        "4url" => quadruple_url_encode(payload),
+        "base64" => base64_encode(payload),
+        "unicode" => unicode_fullwidth_encode(payload),
+        "zwsp" => zero_width_encode(payload),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -113,7 +116,7 @@ pub fn url_encode(payload: &str) -> String {
     urlencoding::encode(payload).to_string()
 }
 
-fn repeat_url_encode(payload: &str, rounds: usize) -> String {
+pub(crate) fn repeat_url_encode(payload: &str, rounds: usize) -> String {
     let mut encoded = payload.to_string();
     for _ in 0..rounds {
         encoded = url_encode(&encoded);
@@ -218,47 +221,6 @@ fn selective_html_encode(payload: &str, chars_to_encode: &[char]) -> String {
         }
     }
     out
-}
-
-/// Generate adaptive encoding variants based on which special characters are
-/// filtered vs. allowed by the target.  Returns a list of encoding function names
-/// that should be applied to payloads.
-///
-/// * `invalid_specials` – characters that the server filters/blocks (e.g. `<`, `>`)
-/// * `valid_specials`   – characters that pass through unmodified
-pub fn generate_adaptive_encodings(
-    invalid_specials: &[char],
-    _valid_specials: &[char],
-) -> Vec<String> {
-    let mut encoders: Vec<String> = Vec::new();
-
-    let angle_blocked = invalid_specials.contains(&'<') || invalid_specials.contains(&'>');
-    let quote_blocked = invalid_specials.contains(&'"') || invalid_specials.contains(&'\'');
-    let paren_blocked = invalid_specials.contains(&'(') || invalid_specials.contains(&')');
-
-    if angle_blocked {
-        encoders.push("html".to_string());
-        encoders.push("url".to_string());
-        encoders.push("2url".to_string());
-        encoders.push("3url".to_string());
-        encoders.push("4url".to_string());
-        encoders.push("unicode".to_string());
-    }
-
-    if quote_blocked && !angle_blocked {
-        encoders.push("html".to_string());
-    }
-
-    if paren_blocked && !angle_blocked {
-        encoders.push("html".to_string());
-    }
-
-    // Always include url as a baseline
-    if !encoders.contains(&"url".to_string()) {
-        encoders.push("url".to_string());
-    }
-
-    encoders
 }
 
 /// Apply adaptive encoding to a single payload based on which chars are blocked.
