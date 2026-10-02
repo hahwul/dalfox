@@ -184,7 +184,6 @@ impl<'a> DomXssVisitor<'a> {
                     self.report_vulnerability_with_source(
                         span,
                         &sink_name,
-                        "Tainted message event data may reach sink through callback",
                         Some(self.message_event_source_for_receiver(receiver)),
                     );
                 }

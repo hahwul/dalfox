@@ -364,12 +364,7 @@ impl<'a> DomXssVisitor<'a> {
                 .and_then(|summary| summary.tainted_param_sinks.get(&0))
                 .cloned()
         {
-            self.report_vulnerability_with_source(
-                span,
-                &sink_name,
-                "Tainted fetch response reaches sink through named .then() callback",
-                Some(source.clone()),
-            );
+            self.report_vulnerability_with_source(span, &sink_name, Some(source.clone()));
         }
 
         if let Some(summary) = self.function_summaries.get(fn_name) {

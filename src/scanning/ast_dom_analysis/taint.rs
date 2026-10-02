@@ -751,7 +751,6 @@ impl<'a> DomXssVisitor<'a> {
         &mut self,
         span: oxc_span::Span,
         sink: &str,
-        description: &str,
         explicit_source: Option<String>,
     ) {
         // An enforced, strict `'default'` Trusted Types policy auto-sanitizes
@@ -769,18 +768,6 @@ impl<'a> DomXssVisitor<'a> {
         let line = (line_idx + 1) as u32;
         let column = (offset - self.line_starts[line_idx] + 1) as u32;
 
-        let snippet = {
-            let start = self.line_starts[line_idx];
-            let end = self
-                .line_starts
-                .get(line_idx + 1)
-                .copied()
-                .unwrap_or(self.source_code.len());
-            // Trim trailing newline from line slice
-            let line_slice = &self.source_code[start..end];
-            line_slice.trim().to_string()
-        };
-
         // Find the source that led to this
         let source = explicit_source
             .or_else(|| {
@@ -797,8 +784,6 @@ impl<'a> DomXssVisitor<'a> {
             column,
             source,
             sink: sink.to_string(),
-            snippet,
-            description: description.to_string(),
             // Reported from inside a conditional / loop / try body, so the flow
             // is only taken on some paths. Consumed as a confidence signal by
             // `ast_integration::grade_ast_finding`; the analysis itself stays

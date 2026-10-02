@@ -1498,8 +1498,6 @@ fn test_vuln(
         column: 1,
         source: source.to_string(),
         sink: sink.to_string(),
-        snippet: String::new(),
-        description: String::new(),
         guarded,
     }
 }

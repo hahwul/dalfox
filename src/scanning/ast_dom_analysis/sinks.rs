@@ -61,7 +61,6 @@ impl<'a> DomXssVisitor<'a> {
                     self.report_vulnerability_with_source(
                         assign.span(),
                         "form.action",
-                        "Assignment of a form action runs a javascript: URL on submit",
                         right_source.clone(),
                     );
                 }
@@ -69,7 +68,6 @@ impl<'a> DomXssVisitor<'a> {
                     self.report_vulnerability_with_source(
                         assign.span(),
                         &format!("script.{prop_name}"),
-                        "Assignment to script-element body executes as JS",
                         right_source.clone(),
                     );
                 }
@@ -99,7 +97,6 @@ impl<'a> DomXssVisitor<'a> {
                     self.report_vulnerability_with_source(
                         assign.span(),
                         &sink_name,
-                        "Assignment to sink property",
                         right_source.clone(),
                     );
                 }
@@ -153,7 +150,6 @@ impl<'a> DomXssVisitor<'a> {
                     self.report_vulnerability_with_source(
                         assign.span(),
                         &sink_name,
-                        "Assignment to sink property",
                         right_source.clone(),
                     );
                 }
@@ -236,7 +232,6 @@ impl<'a> DomXssVisitor<'a> {
                     self.report_vulnerability_with_source(
                         assign.span(),
                         target_name,
-                        "Assignment to sink",
                         right_source.clone(),
                     );
                 }
@@ -272,7 +267,6 @@ impl<'a> DomXssVisitor<'a> {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 &format!("setAttribute:{}", name),
-                                "Tainted data assigned to dangerous attribute",
                                 source_hint,
                             );
                             return true;
@@ -301,7 +295,6 @@ impl<'a> DomXssVisitor<'a> {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 &format!("setAttributeNS:{}", name),
-                                "Tainted data assigned to dangerous namespaced attribute",
                                 source_hint,
                             );
                             return true;
@@ -327,11 +320,10 @@ impl<'a> DomXssVisitor<'a> {
                     let (tainted, source_hint) = self.argument_taint_and_source(arg0);
                     if tainted {
                         self.report_vulnerability_with_source(
-                                call.span(),
-                                "parseFromString",
-                                "Tainted data parsed as HTML (executes once the nodes are adopted into the live document)",
-                                source_hint,
-                            );
+                            call.span(),
+                            "parseFromString",
+                            source_hint,
+                        );
                         return true;
                     }
                 }
@@ -351,7 +343,6 @@ impl<'a> DomXssVisitor<'a> {
                         self.report_vulnerability_with_source(
                             call.span(),
                             "execCommand:insertHTML",
-                            "Tainted data passed to insertHTML command",
                             source_hint,
                         );
                         return true;
@@ -394,7 +385,6 @@ impl<'a> DomXssVisitor<'a> {
                     self.report_vulnerability_with_source(
                         call.span(),
                         &method_name,
-                        "Tainted data passed to sink method",
                         tainted_source,
                     );
                     return true;
@@ -436,12 +426,7 @@ impl<'a> DomXssVisitor<'a> {
                 let (tainted, source_hint) =
                     self.resolve_param_argument_taint(call, alias_owned.as_ref(), idx);
                 if tainted {
-                    self.report_vulnerability_with_source(
-                        call.span(),
-                        &sink_name,
-                        "Tainted argument reaches sink through function call",
-                        source_hint,
-                    );
+                    self.report_vulnerability_with_source(call.span(), &sink_name, source_hint);
                     break;
                 }
             }
@@ -480,7 +465,6 @@ impl<'a> DomXssVisitor<'a> {
                         self.report_vulnerability_with_source(
                             call.span(),
                             &func_name,
-                            "Tainted pre-bound argument reaches sink function",
                             bound_arg.source.clone(),
                         );
                         return true;
@@ -513,12 +497,7 @@ impl<'a> DomXssVisitor<'a> {
                 let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
 
                 if is_arg_tainted {
-                    self.report_vulnerability_with_source(
-                        call.span(),
-                        &func_name,
-                        "Tainted data passed to sink function",
-                        source_hint,
-                    );
+                    self.report_vulnerability_with_source(call.span(), &func_name, source_hint);
                     break;
                 }
             }
@@ -635,17 +614,7 @@ impl<'a> DomXssVisitor<'a> {
                         idx,
                     );
                     if tainted {
-                        let description = if wrapper_name == "call" {
-                            "Tainted argument reaches sink through function.call wrapper"
-                        } else {
-                            "Tainted argument reaches sink through function.apply wrapper"
-                        };
-                        self.report_vulnerability_with_source(
-                            call.span(),
-                            &sink_name,
-                            description,
-                            source_hint,
-                        );
+                        self.report_vulnerability_with_source(call.span(), &sink_name, source_hint);
                         return true;
                     }
                 }
@@ -672,7 +641,6 @@ impl<'a> DomXssVisitor<'a> {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 &target_func_name,
-                                "Tainted pre-bound argument reaches sink function via wrapper",
                                 bound_arg.source.clone(),
                             );
                             return true;
@@ -687,7 +655,6 @@ impl<'a> DomXssVisitor<'a> {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 &target_func_name,
-                                "Tainted data passed to sink function via .call wrapper",
                                 source_hint,
                             );
                             return true;
@@ -699,7 +666,6 @@ impl<'a> DomXssVisitor<'a> {
                         self.report_vulnerability_with_source(
                             call.span(),
                             &target_func_name,
-                            "Tainted data passed to sink function via .apply wrapper",
                             source_hint,
                         );
                         return true;
@@ -725,12 +691,7 @@ impl<'a> DomXssVisitor<'a> {
             {
                 let (tainted, source_hint) = self.resolve_apply_argument_taint_at(arg_array, 0);
                 if tainted {
-                    self.report_vulnerability_with_source(
-                        call.span(),
-                        "Function",
-                        "Tainted data passed to Function constructor via Reflect.construct",
-                        source_hint,
-                    );
+                    self.report_vulnerability_with_source(call.span(), "Function", source_hint);
                     return true;
                 }
             }
@@ -778,12 +739,7 @@ impl<'a> DomXssVisitor<'a> {
                         idx,
                     );
                     if tainted {
-                        self.report_vulnerability_with_source(
-                            call.span(),
-                            &sink_name,
-                            "Tainted argument reaches sink through Reflect.apply",
-                            source_hint,
-                        );
+                        self.report_vulnerability_with_source(call.span(), &sink_name, source_hint);
                         return true;
                     }
                 }
@@ -805,11 +761,10 @@ impl<'a> DomXssVisitor<'a> {
                     for bound_arg in &target_alias.bound_args {
                         if bound_arg.tainted {
                             self.report_vulnerability_with_source(
-                                    call.span(),
-                                    &sink_name,
-                                    "Tainted pre-bound argument reaches sink function via Reflect.apply",
-                                    bound_arg.source.clone(),
-                                );
+                                call.span(),
+                                &sink_name,
+                                bound_arg.source.clone(),
+                            );
                             return true;
                         }
                     }
@@ -840,11 +795,10 @@ impl<'a> DomXssVisitor<'a> {
                                     self.resolve_apply_argument_taint_at(arg_array, 1);
                                 if tainted {
                                     self.report_vulnerability_with_source(
-                                            call.span(),
-                                            &format!("setAttribute:{name}"),
-                                            "Tainted data assigned to dangerous attribute via Reflect.apply",
-                                            source_hint,
-                                        );
+                                        call.span(),
+                                        &format!("setAttribute:{name}"),
+                                        source_hint,
+                                    );
                                     return true;
                                 }
                             }
@@ -862,7 +816,6 @@ impl<'a> DomXssVisitor<'a> {
                                 self.report_vulnerability_with_source(
                                     call.span(),
                                     "execCommand:insertHTML",
-                                    "Tainted data passed to insertHTML command via Reflect.apply",
                                     source_hint,
                                 );
                                 return true;
@@ -875,7 +828,6 @@ impl<'a> DomXssVisitor<'a> {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 "insertAdjacentHTML",
-                                "Tainted HTML argument passed to sink method via Reflect.apply",
                                 source_hint,
                             );
                             return true;
@@ -886,7 +838,6 @@ impl<'a> DomXssVisitor<'a> {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 &sink_name,
-                                "Tainted data passed to sink function via Reflect.apply",
                                 source_hint,
                             );
                             return true;
@@ -945,7 +896,6 @@ impl<'a> DomXssVisitor<'a> {
                 self.report_vulnerability_with_source(
                     call.span(),
                     &sink_name,
-                    "Tainted message event data may reach sink through callback",
                     Some(event_source.to_string()),
                 );
                 return true;
@@ -968,12 +918,7 @@ impl<'a> DomXssVisitor<'a> {
             && !self.jquery_arg_forces_selector(arg_expr)
         {
             let source = self.find_source_in_expr(arg_expr);
-            self.report_vulnerability_with_source(
-                    call.span(),
-                    "jQuery$",
-                    "Tainted HTML string passed to jQuery $() constructor builds DOM nodes (selector-to-HTML)",
-                    source,
-                );
+            self.report_vulnerability_with_source(call.span(), "jQuery$", source);
             // Walk the (tainted) argument so a nested sink inside it — e.g.
             // `$(eval(location.hash))` — is also reported; the trailing
             // `walk_expression(&call.callee)` only descends the `$` callee,
@@ -1033,12 +978,7 @@ impl<'a> DomXssVisitor<'a> {
                 } else {
                     key
                 };
-                self.report_vulnerability_with_source(
-                    call.span(),
-                    &sink_name,
-                    "Tainted value merged onto a sink property by Object.assign",
-                    source,
-                );
+                self.report_vulnerability_with_source(call.span(), &sink_name, source);
                 return true;
             }
         }
@@ -1123,12 +1063,7 @@ impl<'a> DomXssVisitor<'a> {
             return false;
         }
         let source = self.find_source_in_expr(receiver);
-        self.report_vulnerability_with_source(
-            call.span(),
-            &name,
-            "Code-execution sink passed as an iteration callback over tainted elements",
-            source,
-        );
+        self.report_vulnerability_with_source(call.span(), &name, source);
         // Consuming the call skips the trailing callee walk, so descend the
         // receiver here — a sink nested inside it (`eval(t).split(',').map(eval)`)
         // would otherwise go unreported.
