@@ -183,6 +183,13 @@ fn extract_js_and_script_ids_from_xml_document(
     let mut js_blocks = Vec::new();
     let mut script_ids = HashSet::new();
     let mut seen = HashSet::new();
+    // Keep the first copy of each JS body, deduped by its trimmed text.
+    let mut push_js = |code: String| {
+        let key = code.trim().to_string();
+        if !key.is_empty() && seen.insert(key) {
+            js_blocks.push(code);
+        }
+    };
 
     match document {
         crate::utils::xml::XmlDocument::Parsed(document) => {
@@ -207,42 +214,20 @@ fn extract_js_and_script_ids_from_xml_document(
                             .any(|attr| attr.name() == "href" && attr.namespace().is_some());
                     let script_type = node.attribute("type").unwrap_or("");
                     if !has_external_source && xml_script_type_is_javascript(script_type) {
-                        let code: String = node
-                            .descendants()
-                            .filter(|child| child.is_text())
-                            .filter_map(|child| child.text())
-                            .collect();
-                        let key = code.trim().to_string();
-                        if !key.is_empty() && seen.insert(key) {
-                            js_blocks.push(code);
-                        }
+                        push_js(
+                            node.descendants()
+                                .filter(|child| child.is_text())
+                                .filter_map(|child| child.text())
+                                .collect(),
+                        );
                     }
                 }
 
                 for attr in node.attributes() {
-                    let name = attr.name();
-                    let value = attr.value().trim();
-                    if value.is_empty() {
-                        continue;
-                    }
-                    let code = if name.starts_with("on") && name.len() > 2 {
-                        Some(value.to_string())
-                    } else if name == "href"
-                        && (attr.namespace().is_none()
-                            || attr.namespace() == Some("http://www.w3.org/1999/xlink"))
-                        && value
-                            .get(..11)
-                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
-                    {
-                        Some(value[11..].trim().to_string())
-                    } else {
-                        None
-                    };
-                    if let Some(code) = code {
-                        let key = code.trim().to_string();
-                        if !key.is_empty() && seen.insert(key) {
-                            js_blocks.push(code);
-                        }
+                    let href_ok = attr.namespace().is_none()
+                        || attr.namespace() == Some("http://www.w3.org/1999/xlink");
+                    if let Some(code) = xml_attr_js(attr.name(), attr.value(), href_ok) {
+                        push_js(code.to_string());
                     }
                 }
             }
@@ -268,32 +253,13 @@ fn extract_js_and_script_ids_from_xml_document(
                         }
                     }
                     if element.attr("src").is_none() && script_type_is_javascript(element) {
-                        let code: String = node.text().collect();
-                        let key = code.trim().to_string();
-                        if !key.is_empty() && seen.insert(key) {
-                            js_blocks.push(code);
-                        }
+                        push_js(node.text().collect());
                     }
                 }
 
                 for (name, value) in element.attrs() {
-                    let value = value.trim();
-                    let code = if name.starts_with("on") && name.len() > 2 {
-                        Some(value.to_string())
-                    } else if name == "href"
-                        && value
-                            .get(..11)
-                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
-                    {
-                        Some(value[11..].trim().to_string())
-                    } else {
-                        None
-                    };
-                    if let Some(code) = code {
-                        let key = code.trim().to_string();
-                        if !key.is_empty() && seen.insert(key) {
-                            js_blocks.push(code);
-                        }
+                    if let Some(code) = xml_attr_js(name, value, true) {
+                        push_js(code.to_string());
                     }
                 }
             }
@@ -302,6 +268,25 @@ fn extract_js_and_script_ids_from_xml_document(
     }
 
     (js_blocks, script_ids)
+}
+
+/// The JS an XML attribute carries: an `on*` handler's (trimmed) body, or the
+/// body of a `javascript:` `href` when `href_ok` (the attribute's namespace
+/// allows it to navigate).
+fn xml_attr_js<'v>(name: &str, value: &'v str, href_ok: bool) -> Option<&'v str> {
+    let value = value.trim();
+    if name.starts_with("on") && name.len() > 2 {
+        Some(value)
+    } else if name == "href"
+        && href_ok
+        && value
+            .get(..11)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("javascript:"))
+    {
+        Some(value[11..].trim())
+    } else {
+        None
+    }
 }
 
 fn xml_script_type_is_javascript(script_type: &str) -> bool {
@@ -1271,7 +1256,6 @@ pub(crate) fn has_self_bootstrap_verification_normalized(
 #[cfg(test)]
 pub(crate) fn analyze_javascript_for_dom_xss(
     js_code: &str,
-    _url: &str,
 ) -> Vec<(
     crate::scanning::ast_dom_analysis::DomXssVulnerability,
     String,
@@ -1279,7 +1263,6 @@ pub(crate) fn analyze_javascript_for_dom_xss(
 )> {
     analyze_javascript_for_dom_xss_with_html_context(
         js_code,
-        _url,
         &HashSet::new(),
         &Default::default(),
         false,
@@ -1297,7 +1280,6 @@ pub(crate) fn analyze_javascript_for_dom_xss(
 /// TrustedHTML-sink findings it neutralizes.
 pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     js_code: &str,
-    _url: &str,
     script_element_ids: &HashSet<String>,
     reflected_markup: &crate::scanning::ast_dom_analysis::PageMarkup,
     trusted_types_enforced: bool,
@@ -1461,7 +1443,6 @@ pub(crate) fn run_initial_ast_dom_analysis_for_response(
     for js_code in js_blocks {
         let findings = analyze_javascript_for_dom_xss_with_html_context(
             &js_code,
-            target_url,
             &script_element_ids,
             &page_markup,
             posture.trusted_types_enforced,
