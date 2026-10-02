@@ -1353,3 +1353,30 @@ async fn reachability_probe_sends_each_header_once() {
     server.abort();
     assert_eq!(*seen.lock().unwrap(), vec![(1, 1)]);
 }
+
+/// REST only fills an empty `error_message`; MCP appends to an earlier reason.
+#[test]
+fn settle_note_fills_empty_message_and_appends_only_when_asked() {
+    let run = runner::ScanRun {
+        results: Default::default(),
+        reachability_failed: false,
+        timed_out: true,
+        was_cancelled: true,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+    };
+    let note = "scan exceeded scan_timeout (5s); returning partial results";
+    for (prior, append, want) in [
+        (None, false, note.to_string()),
+        (Some("client gone"), false, "client gone".to_string()),
+        (Some("client gone"), true, format!("client gone; {note}")),
+    ] {
+        let mut job = Job::new_queued("http://t/".into());
+        job.error_message = prior.map(String::from);
+        let status = run.settle(&mut job, Arc::new(Vec::new()), 5, append);
+        assert_eq!(status, JobStatus::Cancelled);
+        assert_eq!(job.error_message.as_deref(), Some(want.as_str()));
+        assert!(job.finished_at_ms.is_some() && job.results.is_some());
+    }
+}

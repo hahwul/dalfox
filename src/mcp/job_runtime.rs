@@ -1,5 +1,5 @@
-//! MCP job-runtime helpers: current-thread runtime bridge, sync error
-//! marking, and job -> JSON snapshotting.
+//! MCP job-runtime helpers: current-thread runtime bridge and sync error
+//! marking.
 
 use super::*;
 
@@ -49,45 +49,11 @@ pub(super) fn mark_job_error_sync(
     job_id: &str,
     msg: String,
 ) {
-    let mut guard = match jobs.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if let Some(job) = guard.get_mut(job_id)
-        && !job.is_terminal()
+    if let Some(job) = jobs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_mut(job_id)
     {
-        job.status = JobStatus::Error;
-        job.error_message = Some(msg);
-        if job.finished_at_ms.is_none() {
-            job.finished_at_ms = Some(now_ms());
-        }
+        job.fail(msg);
     }
-}
-
-/// Cheap view of a `Job` containing only what a tool response needs. Built
-/// while holding the jobs lock so the lock can be released before any
-/// JSON serialization or computation runs.
-pub(super) struct JobSnapshot {
-    pub(super) status: JobStatus,
-    /// True only when the job is terminal and its worker has released the
-    /// record. A terminal status alone is not enough after cancellation.
-    pub(super) settled: bool,
-    pub(super) target_url: String,
-    pub(super) results: Option<Arc<Vec<SanitizedResult>>>,
-    pub(super) progress: crate::job::JobProgress,
-    pub(super) error_message: Option<String>,
-    pub(super) queued_at_ms: i64,
-    pub(super) started_at_ms: Option<i64>,
-    pub(super) finished_at_ms: Option<i64>,
-}
-
-/// Render timestamp/duration fields into the given JSON object.
-pub(super) fn write_timestamps(job: &Job, out: &mut serde_json::Map<String, serde_json::Value>) {
-    out.insert("queued_at_ms".into(), serde_json::json!(job.queued_at_ms));
-    out.insert("started_at_ms".into(), serde_json::json!(job.started_at_ms));
-    out.insert(
-        "finished_at_ms".into(),
-        serde_json::json!(job.finished_at_ms),
-    );
-    out.insert("duration_ms".into(), serde_json::json!(job.duration_ms()));
 }

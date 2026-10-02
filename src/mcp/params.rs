@@ -342,9 +342,6 @@ pub(super) fn default_wait_timeout_sec() -> u64 {
     300
 }
 
-/// Hard upper bound for MCP `max_payloads_per_param` (protects against absurd
-/// values). Shared with the REST server so both front-ends bound it identically.
-pub(super) const MAX_PAYLOADS_PER_PARAM_MCP: usize = crate::job::MAX_PAYLOADS_PER_PARAM;
 /// Hard upper bound for MCP wait wall-clock (matches scan_timeout ceiling).
 pub(super) const MAX_WAIT_TIMEOUT_SECS: u64 = 86_400;
 

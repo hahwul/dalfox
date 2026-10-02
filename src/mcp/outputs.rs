@@ -137,14 +137,14 @@ pub(super) fn execution_error(message: impl Into<String>) -> CallToolResult {
 /// conversation or another one — instead of requiring the model to re-fetch
 /// and re-quote them. It is additive: the text block and `structuredContent`
 /// are unchanged, and clients too old to know the block type never see it
-/// (see [`super::resources::links_supported`]).
+/// (see [`super::call_scope::links_supported`]).
 pub(super) fn structured_linking_scan(
     body: serde_json::Value,
     scan_id: &str,
     target: &str,
 ) -> CallToolResult {
     let mut result = structured(body);
-    if super::resources::links_supported() {
+    if super::call_scope::links_supported() {
         result
             .content
             .push(super::resources::scan_link(scan_id, target));

@@ -50,7 +50,7 @@ fn test_job(status: JobStatus, results: Option<Vec<SanitizedResult>>, target_url
         status,
         JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
     ) {
-        job.finished_at_ms = Some(now_ms());
+        job.finished_at_ms = Some(crate::job::now_ms());
     }
     job
 }
@@ -684,10 +684,9 @@ async fn test_options_preflight_headers() {
     let mut headers = HeaderMap::new();
     headers.insert("Origin", HeaderValue::from_static("http://any.example"));
 
-    let resp =
-        super::options_result_handler(State(state.clone()), headers, Path("any".to_string()))
-            .await
-            .into_response();
+    let resp = super::options_scan_handler(State(state.clone()), headers)
+        .await
+        .into_response();
 
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
@@ -2476,7 +2475,7 @@ fn test_validate_scan_options_rejects_out_of_range() {
     };
     assert!(validate_scan_options(&mut ok_disabled).is_ok());
     let mut bad_scan_timeout = ScanOptions {
-        scan_timeout: Some(MAX_SCAN_TIMEOUT_SECS + 1),
+        scan_timeout: Some(crate::job::MAX_SCAN_TIMEOUT_SECS + 1),
         ..ScanOptions::default()
     };
     assert!(validate_scan_options(&mut bad_scan_timeout).is_err());
@@ -2781,7 +2780,7 @@ async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     {
         let mut jobs = state.jobs.lock().await;
         let mut old = test_job(JobStatus::Done, None, "");
-        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
         jobs.insert("old".to_string(), old);
         jobs.insert("fresh".to_string(), test_job(JobStatus::Done, None, ""));
         jobs.insert("active".to_string(), test_job(JobStatus::Running, None, ""));
@@ -2811,7 +2810,7 @@ async fn test_purge_expired_jobs_is_throttled() {
     {
         let mut jobs = state.jobs.lock().await;
         let mut old = test_job(JobStatus::Done, None, "");
-        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
         jobs.insert("old1".to_string(), old);
     }
     purge_expired_jobs(&state).await;
@@ -2825,7 +2824,7 @@ async fn test_purge_expired_jobs_is_throttled() {
     {
         let mut jobs = state.jobs.lock().await;
         let mut old = test_job(JobStatus::Done, None, "");
-        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
         jobs.insert("old2".to_string(), old);
     }
     purge_expired_jobs(&state).await;
@@ -5291,7 +5290,7 @@ async fn test_options_preflights_are_source_gated() {
 
     let mut cross = HeaderMap::new();
     cross.insert("Origin", HeaderValue::from_static("https://evil.example"));
-    let resp = super::options_result_handler(State(state.clone()), cross, Path("id".to_string()))
+    let resp = super::options_scan_handler(State(state.clone()), cross)
         .await
         .into_response();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);

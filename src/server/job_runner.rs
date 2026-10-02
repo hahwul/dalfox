@@ -60,14 +60,7 @@ pub(crate) fn spawn_scan_task(
         }));
 
         if let Err(panic) = result {
-            let payload = if let Some(s) = panic.downcast_ref::<String>() {
-                s.clone()
-            } else if let Some(s) = panic.downcast_ref::<&str>() {
-                (*s).to_string()
-            } else {
-                "unknown panic payload".to_string()
-            };
-            let msg = format!("scan task panicked: {}", payload);
+            let msg = format!("scan task panicked: {}", crate::job::panic_message(panic));
             log(
                 &state_for_recovery,
                 "ERR",
@@ -117,15 +110,8 @@ fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, url: &str, msg: St
         // max_concurrent_scans permanently until a manual DELETE or restart.
         // `state.jobs` is a tokio Mutex, but this runs on a spawn_blocking
         // thread with no runtime entered, so `blocking_lock` is safe here.
-        let mut jobs = state.jobs.blocking_lock();
-        if let Some(job) = jobs.get_mut(job_id)
-            && !job.is_terminal()
-        {
-            job.status = JobStatus::Error;
-            job.error_message = Some(msg);
-            if job.finished_at_ms.is_none() {
-                job.finished_at_ms = Some(now_ms());
-            }
+        if let Some(job) = state.jobs.blocking_lock().get_mut(job_id) {
+            job.fail(msg);
         }
         return;
     };
@@ -159,22 +145,9 @@ pub(crate) async fn mark_job_error(
     msg: String,
     client: Option<reqwest::Client>,
 ) {
-    let (transitioned, callback_url) = {
-        let mut jobs = state.jobs.lock().await;
-        if let Some(job) = jobs.get_mut(job_id)
-            && !job.is_terminal()
-        {
-            job.status = JobStatus::Error;
-            job.error_message = Some(msg);
-            if job.finished_at_ms.is_none() {
-                job.finished_at_ms = Some(now_ms());
-            }
-            (true, job.callback_url.clone())
-        } else {
-            (false, None)
-        }
-    };
-    if transitioned {
+    let transitioned = (state.jobs.lock().await.get_mut(job_id))
+        .and_then(|job| job.fail(msg).then(|| job.callback_url.clone()));
+    if let Some(callback_url) = transitioned {
         send_terminal_webhook(state, callback_url, job_id, url, "error", &[], client).await;
     }
 }
@@ -208,22 +181,15 @@ pub(crate) async fn run_scan_job(
     let decision = {
         let mut jobs = state.jobs.lock().await;
         match jobs.get_mut(&job_id) {
-            Some(job) => {
-                if job.status == JobStatus::Cancelled
-                    || job.cancelled.load(std::sync::atomic::Ordering::Relaxed)
-                {
-                    StartDecision::PreCancelled {
-                        callback_url: job.callback_url.clone(),
-                    }
-                } else {
-                    job.status = JobStatus::Running;
-                    job.started_at_ms = Some(now_ms());
-                    StartDecision::Run {
-                        progress: job.progress.clone(),
-                        cancel_flag: job.cancelled.clone(),
-                    }
-                }
-            }
+            Some(job) => match job.start() {
+                Some((progress, cancel_flag)) => StartDecision::Run {
+                    progress,
+                    cancel_flag,
+                },
+                None => StartDecision::PreCancelled {
+                    callback_url: job.callback_url.clone(),
+                },
+            },
             None => StartDecision::Missing,
         }
     };
@@ -355,74 +321,15 @@ pub(crate) async fn run_scan_job(
         return;
     }
 
-    let results = run.results.clone();
-    let timed_out = run.timed_out;
-    let was_cancelled = run.was_cancelled;
-    let panicked = run.panicked;
-    let lost_session = run.lost_session();
-    let session_lost = run.session_lost.clone();
-    let worker_panics = run.worker_panics;
-
-    let final_results = {
-        let locked = results.lock().await;
-        progress
-            .findings_so_far
-            .store(locked.len() as u64, std::sync::atomic::Ordering::Relaxed);
-        locked
-            .iter()
-            .map(|r| r.to_sanitized(include_request, include_response))
-            .collect::<Vec<_>>()
-    };
-
-    let final_results_arc = Arc::new(final_results);
-    let (callback_url, final_status) = {
-        let mut jobs = state.jobs.lock().await;
-
-        if let Some(job) = jobs.get_mut(&job_id) {
-            job.results = Some(final_results_arc.clone());
-            if job.status != JobStatus::Cancelled {
-                job.status = if was_cancelled {
-                    JobStatus::Cancelled
-                } else if panicked || lost_session {
-                    JobStatus::Error
-                } else {
-                    JobStatus::Done
-                };
-            }
-            // A worker panic and a scan_timeout are mutually exclusive (a
-            // timeout trips the cancel flag, so `panicked` is false then), so a
-            // simple if/else-if records whichever applies without clobbering an
-            // error_message a prior path already set.
-            // Prefixed with the shared error code so a poller can match on it
-            // the same way the CLI's `target_summary[].error_code` is matched;
-            // `Job` carries no separate code field, and `error_message` is
-            // already how panics and timeouts identify themselves here.
-            if lost_session && job.error_message.is_none() {
-                job.error_message = Some(format!(
-                    "{}: {}",
-                    crate::cmd::error_codes::SESSION_LOST,
-                    session_lost.clone().unwrap_or_default()
-                ));
-            } else if panicked && job.error_message.is_none() {
-                job.error_message = Some(format!(
-                    "{} scan worker task(s) panicked; results are partial",
-                    worker_panics
-                ));
-            } else if timed_out && job.error_message.is_none() {
-                job.error_message = Some(format!(
-                    "scan exceeded scan_timeout ({}s); returning partial results",
-                    args.scan_timeout
-                ));
-            }
-            // Preserve an earlier finished_at_ms set by cancel_scan_handler
-            // (which records when the user asked to stop, not when the task noticed).
-            if job.finished_at_ms.is_none() {
-                job.finished_at_ms = Some(now_ms());
-            }
-            (job.callback_url.clone(), Some(job.status.clone()))
-        } else {
-            (None, None)
-        }
+    let final_results_arc = run
+        .sanitized_results(&progress, include_request, include_response)
+        .await;
+    let (callback_url, final_status) = match state.jobs.lock().await.get_mut(&job_id) {
+        Some(job) => (
+            job.callback_url.clone(),
+            Some(run.settle(job, final_results_arc.clone(), args.scan_timeout, false)),
+        ),
+        None => (None, None),
     };
     // Derive the webhook/log label from the status actually stored, not from the
     // pre-lock `was_cancelled`/`panicked` snapshot: a DELETE cancel landing in
@@ -441,7 +348,7 @@ pub(crate) async fn run_scan_job(
         &format!(
             "{}{} id={} url={}",
             status_label,
-            if timed_out { " (scan_timeout)" } else { "" },
+            if run.timed_out { " (scan_timeout)" } else { "" },
             job_id,
             url
         ),

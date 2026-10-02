@@ -3,6 +3,7 @@
 //! so CORS headers and JSONP behave identically across endpoints.
 
 use super::*;
+use axum::http::HeaderValue;
 
 // Validate JSONP callback name to prevent XSS via callback parameter.
 // Rules:
@@ -87,10 +88,7 @@ pub(crate) fn make_api_response<T: Serialize>(
     // `application/json` for the normal path, `application/javascript` for
     // JSONP (chosen by `build_response_body`).
     let content_type = ct.unwrap_or("application/json; charset=utf-8");
-    cors.insert(
-        "Content-Type",
-        content_type.parse().expect("static content-type"),
-    );
+    cors.insert("Content-Type", HeaderValue::from_static(content_type));
     // Forbid MIME sniffing on every API response. The body reflects
     // attacker-influenced input (target URLs, payload/evidence strings, error
     // messages); `nosniff` stops a browser from re-interpreting a JSON or
@@ -98,7 +96,7 @@ pub(crate) fn make_api_response<T: Serialize>(
     // XSS path regardless of how a client loads the response.
     cors.insert(
         "X-Content-Type-Options",
-        "nosniff".parse().expect("static nosniff header"),
+        HeaderValue::from_static("nosniff"),
     );
     // Every response with a body is per-caller and sensitive: `GET /scan/{id}`
     // and `/scans` return findings — including full request/response bodies
@@ -108,9 +106,37 @@ pub(crate) fn make_api_response<T: Serialize>(
     // and replay it to a caller who never presented the key, and the browser
     // disk cache keeps a JSONP result around for whoever reads the profile
     // next. `no-store` is the only directive that keeps it out of both.
-    cors.insert(
-        "Cache-Control",
-        "no-store".parse().expect("static cache-control header"),
-    );
+    cors.insert("Cache-Control", HeaderValue::from_static("no-store"));
     (status, cors, body)
+}
+
+/// `{code, msg}` error envelope whose `code` mirrors the HTTP status.
+pub(crate) fn api_error(
+    state: &AppState,
+    req_headers: &HeaderMap,
+    params: &std::collections::HashMap<String, String>,
+    status: StatusCode,
+    msg: impl Into<String>,
+) -> (StatusCode, HeaderMap, String) {
+    let resp = ApiResponse::<serde_json::Value> {
+        code: status.as_u16() as i32,
+        msg: msg.into(),
+        data: None,
+    };
+    make_api_response(state, req_headers, params, status, &resp)
+}
+
+/// `{code: 200, msg: "ok", data}` success envelope.
+pub(crate) fn api_ok<T: Serialize>(
+    state: &AppState,
+    req_headers: &HeaderMap,
+    params: &std::collections::HashMap<String, String>,
+    data: T,
+) -> (StatusCode, HeaderMap, String) {
+    let resp = ApiResponse {
+        code: 200,
+        msg: "ok".to_string(),
+        data: Some(data),
+    };
+    make_api_response(state, req_headers, params, StatusCode::OK, &resp)
 }

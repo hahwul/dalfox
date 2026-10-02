@@ -250,16 +250,9 @@ impl InteractshClient {
             let Ok(plain) = crypto::decrypt_interaction(&aes_key, item) else {
                 continue;
             };
-            let Ok(inter) = serde_json::from_slice::<wire::Interaction>(&plain) else {
-                continue;
-            };
-            out.push(OobInteraction {
-                protocol: inter.protocol.unwrap_or_default(),
-                full_id: inter.full_id.unwrap_or_default(),
-                remote_address: inter.remote_address.unwrap_or_default(),
-                timestamp: inter.timestamp.unwrap_or_default(),
-                raw_request: inter.raw_request.unwrap_or_default(),
-            });
+            if let Ok(inter) = serde_json::from_slice::<OobInteraction>(&plain) {
+                out.push(inter);
+            }
         }
         Ok(out)
     }
