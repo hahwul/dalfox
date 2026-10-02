@@ -689,15 +689,14 @@ pub(crate) async fn capture_baseline(target: &Target, args: &ScanArgs) -> Option
 /// sanitized: `reason` embeds a `Location` header the origin controls, and the
 /// URL can come from a target list of arbitrary provenance.
 pub(crate) fn report_loss(target_url: &str, reason: &str, abort_on_loss: bool) {
-    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
     let action = if abort_on_loss {
         "aborting this target and the rest of this host (--on-session-loss abort)"
     } else {
         "continuing; results for this target are incomplete (--on-session-loss continue)"
     };
     crate::ceprintln!(
-        "\x1b[90m{}\x1b[0m \x1b[31mSESSION LOST\x1b[0m {} — {}; {}",
-        ts,
+        "{} {} — {}; {}",
+        crate::utils::log::log_prefix("31", "SESSION LOST"),
         crate::utils::log::sanitize_log_message(target_url),
         crate::utils::log::sanitize_log_message(reason),
         action
@@ -708,10 +707,9 @@ pub(crate) fn report_loss(target_url: &str, reason: &str, abort_on_loss: bool) {
 /// deliberately not the same word. `SESSION LOST` is a verdict that costs an
 /// exit code; this one is `SESSION?` — a thing to look at, not a failure.
 pub(crate) fn report_baseline_advisory(target_url: &str, note: &str) {
-    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
     crate::ceprintln!(
-        "\x1b[90m{}\x1b[0m \x1b[33mSESSION?\x1b[0m {} — {}",
-        ts,
+        "{} {} — {}",
+        crate::utils::log::log_prefix("33", "SESSION?"),
         crate::utils::log::sanitize_log_message(target_url),
         crate::utils::log::sanitize_log_message(note)
     );

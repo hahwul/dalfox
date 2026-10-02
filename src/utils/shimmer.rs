@@ -149,15 +149,7 @@ pub(crate) fn wave_tracker(
     label: String,
     reserve: usize,
 ) -> impl Fn(&indicatif::ProgressState, &mut dyn std::fmt::Write) + Send + Sync + Clone + 'static {
-    move |state, w| {
-        let phase = (state.elapsed().as_millis() / FRAME_MS) as usize;
-        // indicatif draws to stderr, so measure stderr (see `term_cols_stderr`).
-        let avail = crate::utils::term::term_cols_stderr()
-            .saturating_sub(reserve)
-            .max(6);
-        let shown = console::truncate_str(&label, avail, "…");
-        let _ = write!(w, "{}", shimmer(shown.as_ref(), phase));
-    }
+    wave_tracker_shared(Arc::new(Mutex::new(label)), reserve)
 }
 
 /// Like [`wave_tracker`] but reads its text from a shared cell on every render

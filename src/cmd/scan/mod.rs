@@ -77,6 +77,17 @@ pub enum ScanOutcome {
     Error,
 }
 
+impl ScanOutcome {
+    /// CLI exit code.
+    pub fn exit_code(self) -> i32 {
+        match self {
+            ScanOutcome::Clean => 0,
+            ScanOutcome::Findings => 1,
+            ScanOutcome::Error => 2,
+        }
+    }
+}
+
 /// Shared scan state threaded through the preflight/analysis loop
 /// ([`analysis`]), the scanning loop ([`scan_loop`]), and result rendering
 /// ([`output`]). Bundles the cross-task `Arc` handles plus the few scalars the

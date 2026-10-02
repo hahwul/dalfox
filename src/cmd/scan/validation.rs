@@ -29,48 +29,31 @@ pub(crate) fn domain_matches_pattern(host: &str, pattern: &str) -> bool {
 /// semaphore, or hanging on an absurd timeout — long after the user
 /// had already invested time in mining/discovery.
 ///
-/// Returns `Err((error_code, message))` when invalid; the caller emits
-/// the structured error and exits.
-pub(crate) fn validate_numeric_args(
-    args: &ScanArgs,
-) -> std::result::Result<(), (&'static str, String)> {
+/// Returns `Err(message)` when invalid; the caller emits it as an
+/// `INVALID_INPUT_TYPE` error and exits.
+pub(crate) fn validate_numeric_args(args: &ScanArgs) -> std::result::Result<(), String> {
     if args.workers == 0 {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            "--workers must be at least 1".to_string(),
-        ));
+        return Err("--workers must be at least 1".to_string());
     }
     if args.workers > CLI_MAX_WORKERS {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--workers must be at most {} (got {})",
-                CLI_MAX_WORKERS, args.workers
-            ),
+        return Err(format!(
+            "--workers must be at most {} (got {})",
+            CLI_MAX_WORKERS, args.workers
         ));
     }
     if args.timeout == 0 {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            "--timeout must be at least 1 second".to_string(),
-        ));
+        return Err("--timeout must be at least 1 second".to_string());
     }
     if args.timeout > CLI_MAX_TIMEOUT_SECS {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--timeout must be at most {} seconds (got {})",
-                CLI_MAX_TIMEOUT_SECS, args.timeout
-            ),
+        return Err(format!(
+            "--timeout must be at most {} seconds (got {})",
+            CLI_MAX_TIMEOUT_SECS, args.timeout
         ));
     }
     if args.delay > CLI_MAX_DELAY_MS {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--delay must be at most {} ms (got {})",
-                CLI_MAX_DELAY_MS, args.delay
-            ),
+        return Err(format!(
+            "--delay must be at most {} ms (got {})",
+            CLI_MAX_DELAY_MS, args.delay
         ));
     }
     // `--scan-timeout` (0 = disabled) feeds `Instant::now() + Duration::from_secs`
@@ -78,12 +61,9 @@ pub(crate) fn validate_numeric_args(
     // the scan task. Range-check it like every other duration arg so an absurd
     // value fails fast with a clear message instead of a mid-scan panic.
     if args.scan_timeout > CLI_MAX_SCAN_TIMEOUT_SECS {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--scan-timeout must be at most {} seconds (got {}); use 0 to disable",
-                CLI_MAX_SCAN_TIMEOUT_SECS, args.scan_timeout
-            ),
+        return Err(format!(
+            "--scan-timeout must be at most {} seconds (got {}); use 0 to disable",
+            CLI_MAX_SCAN_TIMEOUT_SECS, args.scan_timeout
         ));
     }
     // The rate-limit / retry caps below intentionally reuse
@@ -94,61 +74,40 @@ pub(crate) fn validate_numeric_args(
     // rather than a per-flag taxonomy; the human-facing message carries the
     // specific flag and bound.
     if args.rate_limit > CLI_MAX_RATE_LIMIT {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--rate-limit must be at most {} req/sec (got {}); use 0 for unlimited",
-                CLI_MAX_RATE_LIMIT, args.rate_limit
-            ),
+        return Err(format!(
+            "--rate-limit must be at most {} req/sec (got {}); use 0 for unlimited",
+            CLI_MAX_RATE_LIMIT, args.rate_limit
         ));
     }
     if args.retries > CLI_MAX_RETRIES {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--retries must be at most {} (got {})",
-                CLI_MAX_RETRIES, args.retries
-            ),
+        return Err(format!(
+            "--retries must be at most {} (got {})",
+            CLI_MAX_RETRIES, args.retries
         ));
     }
     if args.sxss_retries > crate::cmd::scan::CLI_MAX_SXSS_RETRIES {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--sxss-retries must be at most {} (got {}); the re-check backoff is 500ms × attempt, so the total wait grows quadratically",
-                crate::cmd::scan::CLI_MAX_SXSS_RETRIES,
-                args.sxss_retries
-            ),
+        return Err(format!(
+            "--sxss-retries must be at most {} (got {}); the re-check backoff is 500ms × attempt, so the total wait grows quadratically",
+            crate::cmd::scan::CLI_MAX_SXSS_RETRIES,
+            args.sxss_retries
         ));
     }
     if args.retry_delay > CLI_MAX_RETRY_DELAY_MS {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--retry-delay must be at most {} ms (got {})",
-                CLI_MAX_RETRY_DELAY_MS, args.retry_delay
-            ),
+        return Err(format!(
+            "--retry-delay must be at most {} ms (got {})",
+            CLI_MAX_RETRY_DELAY_MS, args.retry_delay
         ));
     }
     if args.max_concurrent_targets == 0 {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            "--max-concurrent-targets must be at least 1".to_string(),
-        ));
+        return Err("--max-concurrent-targets must be at least 1".to_string());
     }
     if args.max_targets_per_host == 0 {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            "--max-targets-per-host must be at least 1".to_string(),
-        ));
+        return Err("--max-targets-per-host must be at least 1".to_string());
     }
     if !(0.0..=1.0).contains(&args.waf_min_confidence) || args.waf_min_confidence.is_nan() {
-        return Err((
-            crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            format!(
-                "--waf-min-confidence must be in 0.0..=1.0 (got {})",
-                args.waf_min_confidence
-            ),
+        return Err(format!(
+            "--waf-min-confidence must be in 0.0..=1.0 (got {})",
+            args.waf_min_confidence
         ));
     }
     Ok(())

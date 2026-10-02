@@ -22,17 +22,10 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigFormat {
-    Toml,
-    Json,
-}
-
 #[derive(Debug, Clone)]
 pub struct LoadResult {
     pub config: Config,
     pub path: PathBuf,
-    pub format: ConfigFormat,
     // Whether a new config file was created on this load
     pub created: bool,
 }
@@ -608,43 +601,76 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
 
     let toml_path = base_dir.join("config.toml");
     let json_path = base_dir.join("config.json");
+    let read = |p: &Path| crate::utils::fs::read_bounded(p, MAX_CONFIG_BYTES, "config file");
 
-    if toml_path.exists() {
-        let s = crate::utils::fs::read_bounded(&toml_path, MAX_CONFIG_BYTES, "config file")?;
-        let cfg: Config = toml::from_str(&s)?;
-        return Ok(LoadResult {
-            config: cfg,
-            path: toml_path,
-            format: ConfigFormat::Toml,
-            created: false,
-        });
-    }
-
-    if json_path.exists() {
-        let s = crate::utils::fs::read_bounded(&json_path, MAX_CONFIG_BYTES, "config file")?;
-        let cfg: Config = serde_json::from_str(&s)?;
-        return Ok(LoadResult {
-            config: cfg,
-            path: json_path,
-            format: ConfigFormat::Json,
-            created: false,
-        });
-    }
-
-    // Neither exists: create TOML by default
-    let template = default_toml_template();
-    {
+    let (config, path, created) = if toml_path.exists() {
+        (toml::from_str(&read(&toml_path)?)?, toml_path, false)
+    } else if json_path.exists() {
+        (serde_json::from_str(&read(&json_path)?)?, json_path, false)
+    } else {
+        // Neither exists: create TOML by default
         let mut f = fs::File::create(&toml_path)?;
-        f.write_all(template.as_bytes())?;
+        f.write_all(DEFAULT_TOML_TEMPLATE.as_bytes())?;
         f.sync_all()?;
-    }
-    // Load the template back as Config (will parse to defaults)
-    let cfg: Config = toml::from_str(&template)?;
+        // Load the template back as Config (will parse to defaults)
+        (toml::from_str(DEFAULT_TOML_TEMPLATE)?, toml_path, true)
+    };
     Ok(LoadResult {
-        config: cfg,
-        path: toml_path,
-        format: ConfigFormat::Toml,
-        created: true,
+        config,
+        path,
+        created,
+    })
+}
+
+/// Load an explicit `--config <path>`. A missing file is created (best-effort)
+/// from the default template — JSON for a `.json` extension, TOML otherwise —
+/// and reported as `created`. An existing file is parsed in the format its
+/// extension names first, then the other one.
+pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let is_json = p
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    let path = p.to_path_buf();
+    if !p.exists() {
+        let template = if is_json {
+            DEFAULT_JSON_TEMPLATE
+        } else {
+            DEFAULT_TOML_TEMPLATE
+        };
+        let _ = fs::write(p, template);
+        let config = if is_json {
+            serde_json::from_str(template)?
+        } else {
+            toml::from_str(template)?
+        };
+        return Ok(LoadResult {
+            config,
+            path,
+            created: true,
+        });
+    }
+    // Bound the read so `--config /dev/zero` (or any other non-regular file
+    // that streams forever) can't hang dalfox indefinitely.
+    let content = crate::utils::fs::read_bounded(p, MAX_CONFIG_BYTES, "config file")?;
+    let as_json = || serde_json::from_str::<Config>(&content).ok();
+    let as_toml = || toml::from_str::<Config>(&content).ok();
+    let config = if is_json {
+        as_json()
+            .or_else(as_toml)
+            .ok_or("Failed to parse config as JSON or TOML")?
+    } else {
+        as_toml()
+            .or_else(as_json)
+            .ok_or("Failed to parse config as TOML or JSON")?
+    };
+    Ok(LoadResult {
+        config,
+        path,
+        created: false,
     })
 }
 
@@ -668,29 +694,8 @@ pub(crate) fn resolve_config_dir() -> Result<PathBuf, io::Error> {
     Ok(Path::new(&home).join(".config").join("dalfox"))
 }
 
-// Save a config back to disk in the detected format.
-#[cfg(test)]
-pub(crate) fn save(
-    config: &Config,
-    path: &Path,
-    format: ConfigFormat,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match format {
-        ConfigFormat::Toml => {
-            let s = toml::to_string_pretty(config)?;
-            fs::write(path, s)?;
-        }
-        ConfigFormat::Json => {
-            let s = serde_json::to_string_pretty(config)?;
-            fs::write(path, s)?;
-        }
-    }
-    Ok(())
-}
-
-// Generate a commented TOML template with most flags represented for pre-configuration.
-pub fn default_toml_template() -> String {
-    let tpl = r#"# Dalfox configuration (TOML)
+// A commented TOML template with most flags represented for pre-configuration.
+pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 # Docs: https://github.com/hahwul/dalfox
 # Predefine most flags here. CLI flags can override these at runtime.
 
@@ -804,16 +809,9 @@ pub fn default_toml_template() -> String {
 # waf_evasion = false
 # waf_min_confidence = 0.3    # 0.0..=1.0 floor for WAF fingerprint confidence
 "#;
-    tpl.to_string()
-}
 
-// Optional helpers for JSON (rarely used because TOML is preferred)
-pub fn default_json_template() -> String {
-    let obj = serde_json::json!({
-        "scan": serde_json::Value::Object(serde_json::Map::new())
-    });
-    serde_json::to_string_pretty(&obj).unwrap_or_else(|_| "{\n  \"scan\": {}\n}".to_string())
-}
+// The JSON template (rarely used because TOML is preferred).
+pub const DEFAULT_JSON_TEMPLATE: &str = "{\n  \"scan\": {}\n}";
 
 #[cfg(test)]
 mod tests;

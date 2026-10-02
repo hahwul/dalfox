@@ -54,8 +54,8 @@ fn test_curated_selector_lists_are_nonempty_and_clean() {
     assert!(awesome_alert_payloads().contains(&"alert(document.domain)"));
 }
 
-#[test]
-fn test_run_payload_known_selectors_return_clean() {
+#[tokio::test]
+async fn test_run_payload_known_selectors_return_clean() {
     for selector in [
         "javascript",
         "event-handlers",
@@ -71,7 +71,8 @@ fn test_run_payload_known_selectors_return_clean() {
         let outcome = run_payload(PayloadArgs {
             selector: Some(selector.to_string()),
             json: false,
-        });
+        })
+        .await;
         assert_eq!(
             outcome,
             ScanOutcome::Clean,
@@ -81,12 +82,13 @@ fn test_run_payload_known_selectors_return_clean() {
     }
 }
 
-#[test]
-fn test_run_payload_unknown_selector_returns_error() {
+#[tokio::test]
+async fn test_run_payload_unknown_selector_returns_error() {
     let outcome = run_payload(PayloadArgs {
         selector: Some("not-a-selector".to_string()),
         json: false,
-    });
+    })
+    .await;
     assert_eq!(outcome, ScanOutcome::Error);
 }
 
@@ -96,53 +98,59 @@ fn test_closest_selector_suggests_only_near_matches() {
     assert_eq!(closest_selector("not-a-selector"), None);
 }
 
-#[test]
-fn test_run_payload_none_returns_clean() {
+#[tokio::test]
+async fn test_run_payload_none_returns_clean() {
     let outcome = run_payload(PayloadArgs {
         selector: None,
         json: false,
-    });
+    })
+    .await;
     assert_eq!(outcome, ScanOutcome::Clean);
 }
 
-#[test]
-fn test_run_payload_debug_paths_do_not_panic() {
+#[tokio::test]
+async fn test_run_payload_debug_paths_do_not_panic() {
     let prev = crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed);
     crate::DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let _ = run_payload(PayloadArgs {
         selector: Some("event-handlers".to_string()),
         json: false,
-    });
+    })
+    .await;
     let _ = run_payload(PayloadArgs {
         selector: Some("useful-tags".to_string()),
         json: false,
-    });
+    })
+    .await;
     let _ = run_payload(PayloadArgs {
         selector: Some("uri-scheme".to_string()),
         json: false,
-    });
+    })
+    .await;
 
     crate::DEBUG.store(prev, std::sync::atomic::Ordering::Relaxed);
 }
 
-#[test]
-fn test_run_payload_remote_selectors_dispatch_without_network_after_unknown_init() {
+#[tokio::test]
+async fn test_run_payload_remote_selectors_dispatch_without_network_after_unknown_init() {
     // Prime remote cache to empty so provider selectors avoid network fetch in tests.
-    let _ = fetch_and_print_remote("__unknown_provider__", false);
+    let _ = fetch_and_print_remote("__unknown_provider__", false).await;
     let _ = run_payload(PayloadArgs {
         selector: Some("payloadbox".to_string()),
         json: false,
-    });
+    })
+    .await;
     let _ = run_payload(PayloadArgs {
         selector: Some("portswigger".to_string()),
         json: false,
-    });
+    })
+    .await;
 }
 
-#[test]
-fn test_fetch_and_print_remote_unknown_provider_no_network_path() {
-    let _ = fetch_and_print_remote("__unknown_provider__", false);
+#[tokio::test]
+async fn test_fetch_and_print_remote_unknown_provider_no_network_path() {
+    let _ = fetch_and_print_remote("__unknown_provider__", false).await;
 }
 
 #[test]
@@ -244,12 +252,13 @@ fn test_summary_block_renders_a_line_per_static_selector() {
     }
 }
 
-#[test]
-fn test_run_payload_all_selector_returns_clean() {
+#[tokio::test]
+async fn test_run_payload_all_selector_returns_clean() {
     let outcome = run_payload(PayloadArgs {
         selector: Some("all".to_string()),
         json: false,
-    });
+    })
+    .await;
     assert_eq!(outcome, ScanOutcome::Clean);
 }
 
@@ -287,7 +296,7 @@ fn test_all_selector_groups_cover_every_static_selector_in_order() {
     assert!(
         static_selector_groups()
             .iter()
-            .all(|(_, lines)| lines.len() != 0),
+            .all(|(_, lines)| !lines.is_empty()),
         "an empty group would print a header with nothing under it"
     );
 }

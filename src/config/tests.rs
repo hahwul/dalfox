@@ -109,19 +109,9 @@ fn test_resolve_config_dir_returns_dalfox_path() {
 }
 
 #[test]
-fn test_default_toml_parses() {
-    let s = default_toml_template();
-    let cfg: Config = toml::from_str(&s).expect("template must parse");
-    // Empty or partial config is fine; ensure not panicking
-    let _ = cfg.scan.as_ref().and_then(|s| s.format.clone());
-}
-
-#[test]
-fn test_default_json_parses() {
-    let s = default_json_template();
-    let cfg: Config = serde_json::from_str(&s).expect("json template must parse");
-    // Touch a field to avoid unused variable warning
-    let _ = cfg.scan.as_ref().and_then(|scan| scan.format.clone());
+fn test_default_templates_parse() {
+    toml::from_str::<Config>(DEFAULT_TOML_TEMPLATE).expect("template must parse");
+    serde_json::from_str::<Config>(DEFAULT_JSON_TEMPLATE).expect("json template must parse");
 }
 
 #[test]
@@ -375,47 +365,40 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
 }
 
 #[test]
-fn test_save_writes_toml_and_json_formats() {
-    let cfg = Config {
-        scan: Some(ScanConfig {
-            format: Some("json".to_string()),
-            timeout: Some(3),
-            ..Default::default()
-        }),
-    };
-
+fn test_load_path_creates_missing_and_falls_back_across_formats() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time moved backwards")
         .as_nanos();
-    let base = std::env::temp_dir().join(format!("dalfox-config-save-{nonce}"));
-    std::fs::create_dir_all(&base).expect("create temp directory");
+    let base = std::env::temp_dir().join(format!("dalfox-config-load-{nonce}"));
 
-    let toml_path = base.join("config.toml");
-    save(&cfg, &toml_path, ConfigFormat::Toml).expect("save toml config");
-    let toml_content = std::fs::read_to_string(&toml_path).expect("read toml file");
-    let loaded_toml: Config = toml::from_str(&toml_content).expect("parse saved toml");
+    // Missing: created from the template matching the extension.
+    let created = load_path(&base.join("sub/new.json")).expect("create json config");
+    assert!(created.created);
     assert_eq!(
-        loaded_toml
-            .scan
-            .as_ref()
-            .and_then(|s| s.format.as_deref())
-            .expect("saved toml should keep scan.format"),
-        "json"
+        std::fs::read_to_string(&created.path).expect("read created file"),
+        DEFAULT_JSON_TEMPLATE
     );
 
-    let json_path = base.join("config.json");
-    save(&cfg, &json_path, ConfigFormat::Json).expect("save json config");
-    let json_content = std::fs::read_to_string(&json_path).expect("read json file");
-    let loaded_json: Config = serde_json::from_str(&json_content).expect("parse saved json");
+    // Existing: the extension's format first, then the other one.
+    let json_in_toml = base.join("json.toml");
+    std::fs::write(&json_in_toml, r#"{"scan":{"timeout":3}}"#).expect("write");
+    let loaded = load_path(&json_in_toml).expect("json falls back from toml ext");
+    assert!(!loaded.created);
+    assert_eq!(loaded.config.scan.and_then(|s| s.timeout), Some(3));
+
+    let toml_in_json = base.join("toml.json");
+    std::fs::write(&toml_in_json, "[scan]\nformat = \"json\"\n").expect("write");
+    let loaded = load_path(&toml_in_json).expect("toml falls back from json ext");
     assert_eq!(
-        loaded_json
-            .scan
-            .as_ref()
-            .and_then(|s| s.timeout)
-            .expect("saved json should keep scan.timeout"),
-        3
+        loaded.config.scan.and_then(|s| s.format).as_deref(),
+        Some("json")
     );
+
+    let bad = base.join("bad.json");
+    std::fs::write(&bad, "garbage {{{").expect("write");
+    let err = load_path(&bad).expect_err("garbage must not parse");
+    assert_eq!(err.to_string(), "Failed to parse config as JSON or TOML");
 
     let _ = std::fs::remove_dir_all(base);
 }
