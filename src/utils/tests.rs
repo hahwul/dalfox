@@ -1,6 +1,5 @@
 use super::{
-    finding_belongs_to_target, init_remote_resources, init_remote_resources_with_options,
-    stable_finding_fingerprint,
+    finding_belongs_to_target, init_remote_resources_with_options, stable_finding_fingerprint,
 };
 
 #[test]
@@ -95,9 +94,7 @@ fn finding_belongs_query_target_does_not_borrow_path_parent_fallback() {
 
 #[tokio::test]
 async fn test_init_remote_resources_noop_when_no_providers() {
-    let payloads: Vec<String> = vec![];
-    let wordlists: Vec<String> = vec![];
-    let result = init_remote_resources(&payloads, &wordlists).await;
+    let result = init_remote_resources_with_options(&[], &[], None, None).await;
     assert!(result.is_ok());
 }
 
@@ -106,14 +103,6 @@ async fn test_init_remote_resources_with_options_accepts_unknown_provider_tokens
     let payloads = vec!["__unknown_payload_provider__".to_string()];
     let wordlists = vec!["__unknown_wordlist_provider__".to_string()];
     let result = init_remote_resources_with_options(&payloads, &wordlists, Some(1), None).await;
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn test_init_remote_resources_accepts_unknown_provider_tokens() {
-    let payloads = vec!["__unknown_payload_provider__".to_string()];
-    let wordlists = vec!["__unknown_wordlist_provider__".to_string()];
-    let result = init_remote_resources(&payloads, &wordlists).await;
     assert!(result.is_ok());
 }
 

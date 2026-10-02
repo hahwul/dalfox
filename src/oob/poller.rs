@@ -170,11 +170,11 @@ fn live_line(it: &OobInteraction, record: Option<&InjectionRecord>) -> String {
     } else {
         &it.protocol
     };
-    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+    let head = crate::utils::log::log_prefix("31", "OOB");
     match record {
         Some(r) => format!(
-            "\x1b[90m{}\x1b[0m \x1b[31mOOB\x1b[0m {} callback: param '{}' ({}) on {} — payload {}",
-            ts,
+            "{} {} callback: param '{}' ({}) on {} — payload {}",
+            head,
             proto,
             r.param,
             if r.location.is_empty() {
@@ -186,8 +186,8 @@ fn live_line(it: &OobInteraction, record: Option<&InjectionRecord>) -> String {
             r.payload,
         ),
         None => format!(
-            "\x1b[90m{}\x1b[0m \x1b[31mOOB\x1b[0m {} callback to {} (no correlated payload)",
-            ts, proto, it.full_id
+            "{} {} callback to {} (no correlated payload)",
+            head, proto, it.full_id
         ),
     }
 }

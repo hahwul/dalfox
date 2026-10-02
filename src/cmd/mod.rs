@@ -1,8 +1,6 @@
-pub mod file;
+pub mod compat;
 pub mod payload;
-pub mod pipe;
 pub mod scan;
-pub mod url;
 
 /// Application-level error codes shared across CLI, REST API, and MCP interfaces.
 /// These codes appear in JSON output (`error.code`, `target_summary.error_code`,

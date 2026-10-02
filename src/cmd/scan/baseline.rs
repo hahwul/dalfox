@@ -316,7 +316,7 @@ pub(crate) fn load(path: &str, mode: &str) -> Baseline {
 }
 
 /// Major-version component of a semver-ish string (`"3.1.0"` → `"3"`).
-fn major_of(v: &str) -> &str {
+pub(super) fn major_of(v: &str) -> &str {
     v.split('.').next().unwrap_or(v)
 }
 

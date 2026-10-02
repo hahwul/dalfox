@@ -82,7 +82,7 @@ fn validate_numeric_args_rejects_zero_workers() {
     let mut args = default_scan_args();
     args.workers = 0;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("workers"));
+    assert!(err.contains("workers"));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn validate_numeric_args_rejects_zero_timeout() {
     let mut args = default_scan_args();
     args.timeout = 0;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("timeout"));
+    assert!(err.contains("timeout"));
 }
 
 #[test]
@@ -123,9 +123,9 @@ fn validate_numeric_args_rejects_sxss_retries_over_cap() {
     args.sxss_retries = crate::cmd::scan::CLI_MAX_SXSS_RETRIES + 1;
     let err = validate_numeric_args(&args).unwrap_err();
     assert!(
-        err.1.contains("sxss-retries"),
+        err.contains("sxss-retries"),
         "message must name the flag, got: {}",
-        err.1
+        err
     );
 }
 
@@ -172,7 +172,7 @@ fn validate_numeric_args_rejects_rate_limit_over_cap() {
     let mut args = default_scan_args();
     args.rate_limit = CLI_MAX_RATE_LIMIT + 1;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("rate-limit"), "got: {}", err.1);
+    assert!(err.contains("rate-limit"), "got: {}", err);
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn validate_numeric_args_rejects_retries_over_cap() {
     let mut args = default_scan_args();
     args.retries = CLI_MAX_RETRIES + 1;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("retries"), "got: {}", err.1);
+    assert!(err.contains("retries"), "got: {}", err);
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn validate_numeric_args_rejects_retry_delay_over_cap() {
     let mut args = default_scan_args();
     args.retry_delay = CLI_MAX_RETRY_DELAY_MS + 1;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("retry-delay"), "got: {}", err.1);
+    assert!(err.contains("retry-delay"), "got: {}", err);
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn validate_numeric_args_rejects_zero_targets_per_host() {
     let mut args = default_scan_args();
     args.max_targets_per_host = 0;
     let err = validate_numeric_args(&args).unwrap_err();
-    assert!(err.1.contains("max-targets-per-host"));
+    assert!(err.contains("max-targets-per-host"));
 }
 
 #[test]
