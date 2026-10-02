@@ -38,9 +38,9 @@ use rmcp::{
 use crate::{
     cmd::scan::ScanArgs,
     job::{
-        JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_RETAINED_SCANS_MCP,
-        has_http_scheme, purge_expired_jobs as purge_jobs_map, spec::ScanRequestSpec,
-        split_cookie_pairs, unreachable_error_message,
+        JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_CONCURRENT_PREFLIGHT,
+        MAX_RETAINED_SCANS_MCP, has_http_scheme, purge_expired_jobs as purge_jobs_map,
+        spec::ScanRequestSpec, split_cookie_pairs, unreachable_error_message,
     },
     scanning::result::SanitizedResult,
     target_parser::parse_target,
@@ -103,9 +103,7 @@ impl DalfoxMcp {
         Self {
             jobs: Arc::new(StdMutex::new(HashMap::new())),
             last_purge_ms: Arc::new(AtomicI64::new(0)),
-            preflight_sem: Arc::new(tokio::sync::Semaphore::new(
-                crate::job::MAX_CONCURRENT_PREFLIGHT,
-            )),
+            preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
             tool_router: Self::tool_router(),
         }
     }
