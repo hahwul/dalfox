@@ -118,7 +118,7 @@ pub async fn probe_body_params(
                     {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
-                        if crate::scanning::markers::classify_probe_reflection(&text).detected() {
+                        if crate::scanning::markers::probe_reflected(&text) {
                             st.record_reflection();
                             if !st.collapsed {
                                 discovered = Some(

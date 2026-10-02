@@ -2209,3 +2209,16 @@ async fn sxss_discards_the_no_echo_special_char_verdict() {
         c.invalid_specials
     );
 }
+
+#[test]
+fn with_query_param_replaces_every_match_or_appends() {
+    let base = url::Url::parse("http://x/?a=1&b=2&a=3").unwrap();
+    assert_eq!(
+        with_query_param(&base, "a", "<v>").as_str(),
+        "http://x/?a=%3Cv%3E&b=2&a=%3Cv%3E"
+    );
+    assert_eq!(
+        with_query_param(&base, "c", "z").as_str(),
+        "http://x/?a=1&b=2&a=3&c=z"
+    );
+}

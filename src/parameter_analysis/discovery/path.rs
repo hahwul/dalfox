@@ -111,7 +111,7 @@ pub async fn check_path_discovery(
                     let status = resp.status().as_u16();
                     if !(300..400).contains(&status)
                         && let Ok(text) = crate::utils::http::read_body(resp).await
-                        && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                        && crate::scanning::markers::probe_reflected(&text)
                     {
                         let exploitable_context = (200..300).contains(&status)
                             || !crate::scanning::check_reflection::marker_reflects_in_url_attr_only(

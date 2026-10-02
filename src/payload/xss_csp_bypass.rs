@@ -435,22 +435,14 @@ pub(crate) fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
         }
         // DOM script-gadgets that survive strict-dynamic.
         for gadget in crate::payload::gadget_db::strict_dynamic_gadgets() {
-            payloads.push(crate::payload::gadget_db::render(
-                gadget.template,
-                class_marker,
-                id_marker,
-            ));
+            payloads.push(markers::fill_markers(gadget.template));
         }
     } else {
         // Host-allowlist CSP: emit the gadgets whose host pattern matches an
         // allowed origin (replaces the former hardcoded CDN branches).
         for domain in &analysis.whitelisted_domains {
             for gadget in crate::payload::gadget_db::gadgets_for_host(domain) {
-                payloads.push(crate::payload::gadget_db::render(
-                    gadget.template,
-                    class_marker,
-                    id_marker,
-                ));
+                payloads.push(markers::fill_markers(gadget.template));
             }
         }
     }

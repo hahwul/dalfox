@@ -874,7 +874,7 @@ impl ScanWorkerCtx {
                 // check if the probe marker actually appears in the response.
                 // This ensures breakout payloads get a chance to be tried
                 // for params reflected inside safe tags (title, textarea, etc.).
-                if crate::scanning::markers::classify_probe_reflection(text).detected() {
+                if crate::scanning::markers::probe_reflected(text) {
                     probe_reflected = true;
                     probe_response_text = response_text;
                     probe_response_is_javascript = is_javascript;

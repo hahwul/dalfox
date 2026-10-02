@@ -191,12 +191,5 @@ pub(crate) fn strict_dynamic_gadgets() -> impl Iterator<Item = &'static ScriptGa
     GADGETS.iter().filter(|g| g.strict_dynamic)
 }
 
-/// Render a gadget template, substituting the reflection markers.
-pub(crate) fn render(template: &str, class_marker: &str, id_marker: &str) -> String {
-    template
-        .replace("{CLASS}", class_marker)
-        .replace("{ID}", id_marker)
-}
-
 #[cfg(test)]
 mod tests;

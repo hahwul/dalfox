@@ -4,8 +4,8 @@
 //! and the encoder policy application.
 
 use dalfox::encoding::{
-    apply_encoders_to_payloads, base64_encode, double_url_encode,
-    html_entity_encode, quadruple_url_encode, triple_url_encode, url_encode,
+    apply_encoders_to_payloads, base64_encode, double_url_encode, html_entity_encode,
+    quadruple_url_encode, triple_url_encode, url_encode,
 };
 
 mod url_encoding {

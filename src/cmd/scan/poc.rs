@@ -64,8 +64,10 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
         // Priority order: explicit user order (stop at the first of these
         // transforming encoders; htmlpad/unicode/zwsp never apply to a path).
         for enc in encs {
-            if matches!(enc.as_str(), "url" | "2url" | "3url" | "4url" | "html" | "base64")
-                && let Some(v) = crate::encoding::encode_named(enc, payload)
+            if matches!(
+                enc.as_str(),
+                "url" | "2url" | "3url" | "4url" | "html" | "base64"
+            ) && let Some(v) = crate::encoding::encode_named(enc, payload)
             {
                 return v;
             }

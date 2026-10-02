@@ -1100,38 +1100,15 @@ pub async fn active_probe_param(
 
         for (enc_type, rounds) in crate::encoding::pre_encoding::multi_url_decode_probes() {
             let enc_name = enc_type.as_str();
-            let mut encoded = raw_marker.clone();
             // For Query: append_pair adds one URL-encoding layer automatically,
             // so we encode (N-1) times for N-decode detection.
             // For Path: selective_path_segment_encode encodes '%' to '%25' (one layer),
             // so we also encode (N-1) extra times.
-            for _ in 0..*rounds {
-                encoded = crate::encoding::url_encode(&encoded);
-            }
+            let encoded = crate::encoding::repeat_url_encode(&raw_marker, usize::from(*rounds));
 
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let url = match param.location {
-                Location::Query => {
-                    let mut url = target.url.clone();
-                    let mut new_pairs: Vec<(String, String)> = Vec::new();
-                    let mut replaced = false;
-                    for (k, val) in url.query_pairs() {
-                        if k == param.name {
-                            new_pairs.push((k.to_string(), encoded.clone()));
-                            replaced = true;
-                        } else {
-                            new_pairs.push((k.to_string(), val.to_string()));
-                        }
-                    }
-                    if !replaced {
-                        new_pairs.push((param.name.clone(), encoded.clone()));
-                    }
-                    url.query_pairs_mut().clear();
-                    for (k, val) in &new_pairs {
-                        url.query_pairs_mut().append_pair(k, val);
-                    }
-                    url
-                }
+                Location::Query => with_query_param(&target.url, &param.name, &encoded),
                 Location::Path => {
                     let mut url = target.url.clone();
                     if let Some(idx_str) = param.name.strip_prefix("path_segment_")
@@ -1620,6 +1597,29 @@ pub(crate) fn unresolved_explicit_param_specs(
         }
     }
     missing
+}
+
+/// `base` with every `name` query pair's value set to `value`, or the pair
+/// appended when `name` is absent. Other pairs keep their order.
+pub(crate) fn with_query_param(base: &url::Url, name: &str, value: &str) -> url::Url {
+    let mut url = base.clone();
+    let mut replaced = false;
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.clear();
+        for (k, v) in base.query_pairs() {
+            if k == name {
+                pairs.append_pair(&k, value);
+                replaced = true;
+            } else {
+                pairs.append_pair(&k, &v);
+            }
+        }
+        if !replaced {
+            pairs.append_pair(name, value);
+        }
+    }
+    url
 }
 
 /// Await every discovery/mining probe task and append the params they found

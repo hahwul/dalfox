@@ -116,7 +116,7 @@ pub fn url_encode(payload: &str) -> String {
     urlencoding::encode(payload).to_string()
 }
 
-fn repeat_url_encode(payload: &str, rounds: usize) -> String {
+pub(crate) fn repeat_url_encode(payload: &str, rounds: usize) -> String {
     let mut encoded = payload.to_string();
     for _ in 0..rounds {
         encoded = url_encode(&encoded);

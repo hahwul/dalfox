@@ -87,9 +87,7 @@ pub async fn check_query_discovery(
                         resp.headers()
                             .get("location")
                             .and_then(|v| v.to_str().ok())
-                            .is_some_and(|loc| {
-                                crate::scanning::markers::classify_probe_reflection(loc).detected()
-                            })
+                            .is_some_and(crate::scanning::markers::probe_reflected)
                     } else {
                         false
                     };
@@ -104,7 +102,7 @@ pub async fn check_query_discovery(
                             ..Param::new(name, value, crate::parameter_analysis::Location::Query)
                         });
                     } else if let Ok(text) = crate::utils::http::read_body(resp).await
-                        && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                        && crate::scanning::markers::probe_reflected(&text)
                     {
                         discovered = Some(
                             Param::new(name, value, crate::parameter_analysis::Location::Query)
@@ -144,25 +142,18 @@ pub async fn check_query_discovery(
         if discovered_names.contains(&name) {
             continue;
         }
-        for (enc_type, encode_fn) in encoding_probes {
+        for enc_type in encoding_probes {
             let enc_name = enc_type.as_str();
-            let encoded_marker = encode_fn(test_value);
-            let mut url = target.url.clone();
-            url.query_pairs_mut().clear();
-            for (n, v) in target.url.query_pairs() {
-                if n.as_ref() == name.as_str() {
-                    url.query_pairs_mut().append_pair(&n, &encoded_marker);
-                } else {
-                    url.query_pairs_mut().append_pair(&n, &v);
-                }
-            }
+            let encoded_marker = enc_type.encode(test_value);
+            let url =
+                crate::parameter_analysis::with_query_param(&target.url, &name, &encoded_marker);
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
             if let Ok(resp) = crate::utils::http::send_counted(request).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                && crate::scanning::markers::probe_reflected(&text)
             {
                 // For pre-encoded params (base64/2base64), skip special char
                 // classification. The encoding bypasses HTTP-level filtering,
@@ -226,22 +217,14 @@ pub async fn check_query_discovery(
             let Ok(wire_value) = nf.pipeline.apply(test_value) else {
                 continue;
             };
-            let mut url = target.url.clone();
-            url.query_pairs_mut().clear();
-            for (n, v) in target.url.query_pairs() {
-                if n.as_ref() == name.as_str() {
-                    url.query_pairs_mut().append_pair(&n, &wire_value);
-                } else {
-                    url.query_pairs_mut().append_pair(&n, &v);
-                }
-            }
+            let url = crate::parameter_analysis::with_query_param(&target.url, &name, &wire_value);
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
             if let Ok(resp) = crate::utils::http::send_counted(request).await
                 && let Ok(text) = crate::utils::http::read_body(resp).await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                && crate::scanning::markers::probe_reflected(&text)
             {
                 discovered_names.insert(display_name.clone());
                 batch.push(
@@ -329,7 +312,7 @@ pub async fn check_query_discovery(
         crate::record_outbound_request().await;
         if let Ok(resp) = crate::utils::http::send_counted(request).await
             && let Ok(text) = crate::utils::http::read_body(resp).await
-            && crate::scanning::markers::classify_probe_reflection(&text).detected()
+            && crate::scanning::markers::probe_reflected(&text)
         {
             batch.push(
                 Param::new(

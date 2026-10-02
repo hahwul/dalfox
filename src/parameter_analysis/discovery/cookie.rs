@@ -68,7 +68,7 @@ pub async fn check_cookie_discovery(
                 let mut discovered: Option<Param> = None;
                 if let Ok(resp) = crate::utils::http::send_counted(request).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                    && crate::scanning::markers::probe_reflected(&text)
                 {
                     discovered = Some(
                         Param::new(
