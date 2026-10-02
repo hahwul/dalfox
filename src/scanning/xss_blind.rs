@@ -173,21 +173,6 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
     templates
 }
 
-/// Backward-compatible entry: inject a blind payload built from a single static
-/// callback URL (`-b/--blind`). Thin shim over [`blind_scanning_with`].
-pub async fn blind_scanning(
-    target: &Target,
-    callback_url: &str,
-    custom_template_path: Option<&str>,
-) {
-    blind_scanning_with(
-        target,
-        CallbackSource::Static(callback_url),
-        custom_template_path,
-    )
-    .await;
-}
-
 /// Inject blind payloads into every query/body/header/cookie param. For an OOB
 /// (or `Both`) source, each (param × template) gets a fresh per-payload callback
 /// URL recorded for later correlation.
@@ -371,7 +356,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
 /// and similar state survive the injection.
 ///
 /// GET forms are skipped because their fields overlap with the existing
-/// query-param blind injection in [`blind_scanning`]. Cross-origin form
+/// query-param blind injection in [`blind_scanning_with`]. Cross-origin form
 /// actions are skipped to avoid unintended outbound requests. Multipart
 /// forms are also skipped in this first pass.
 ///

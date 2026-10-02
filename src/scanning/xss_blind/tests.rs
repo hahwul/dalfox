@@ -425,7 +425,7 @@ async fn test_blind_scanning_sends_requests_for_query_body_header_and_cookie() {
     target.headers = vec![("x-h".to_string(), "v".to_string())];
     target.cookies = vec![("c".to_string(), "3".to_string())];
 
-    blind_scanning(&target, "https://cb.example", None).await;
+    blind_scanning_with(&target, CallbackSource::Static("https://cb.example"), None).await;
 
     let records = state.lock().await.clone();
     // 4 params (query, body, header, cookie) × every built-in template.
@@ -711,7 +711,12 @@ async fn test_blind_scanning_injects_percent_encoded_body_names_in_place() {
     target.method = "POST".to_string();
     target.data = Some("user%5Bname%5D=alice&first+name=bob".to_string());
 
-    blind_scanning(&target, "https://cb.example/hook", None).await;
+    blind_scanning_with(
+        &target,
+        CallbackSource::Static("https://cb.example/hook"),
+        None,
+    )
+    .await;
 
     let records = state.lock().await.clone();
     let bodies: Vec<&str> = records.iter().map(|r| r.body.as_str()).collect();
@@ -789,7 +794,12 @@ async fn test_blind_scanning_skips_a_json_body() {
     target.method = "POST".to_string();
     target.data = Some(r#"{"next":"/a?x=1"}"#.to_string());
 
-    blind_scanning(&target, "https://cb.example/hook", None).await;
+    blind_scanning_with(
+        &target,
+        CallbackSource::Static("https://cb.example/hook"),
+        None,
+    )
+    .await;
 
     let records = state.lock().await.clone();
     // Query has no params and the JSON body yields none, so no body-injection

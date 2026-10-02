@@ -411,7 +411,7 @@ async fn test_mark_job_error_sync_preserves_terminal_status() {
 #[tokio::test]
 async fn test_run_job_dispatches_blind_xss_when_callback_set() {
     // Regression: MCP previously accepted `blind_callback_url` but never
-    // invoked blind_scanning (silent no-op). blind_scanning emits one extra
+    // invoked blind_scanning_with (silent no-op). blind_scanning_with emits one extra
     // probe per query/body/header/cookie param, all counted in
     // `progress.requests_sent`, so a scan with a callback URL must issue
     // strictly more requests than the same scan without one.
