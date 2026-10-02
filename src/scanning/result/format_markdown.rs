@@ -36,17 +36,7 @@ fn md_cell(value: &str) -> String {
 /// inline code spans.
 fn md_code_cell(value: &str) -> String {
     let body = crate::utils::term::sanitize_display(value).replace('|', "\\|");
-    let mut longest = 0usize;
-    let mut run = 0usize;
-    for ch in body.chars() {
-        if ch == '`' {
-            run += 1;
-            longest = longest.max(run);
-        } else {
-            run = 0;
-        }
-    }
-    let fence = "`".repeat(longest + 1);
+    let fence = "`".repeat(longest_backtick_run(&body) + 1);
     let padding =
         if !body.trim_matches(' ').is_empty() && (body.starts_with(' ') || body.ends_with(' ')) {
             " "
@@ -60,6 +50,11 @@ fn md_code_cell(value: &str) -> String {
 /// `--include-response` can contain ``` and would otherwise close the fence
 /// early, spilling the rest of the body into the document as Markdown.
 fn code_fence_for(body: &str) -> String {
+    "`".repeat(longest_backtick_run(body).max(2) + 1)
+}
+
+/// Length of the longest run of consecutive backticks in `body`.
+fn longest_backtick_run(body: &str) -> usize {
     let mut longest = 0usize;
     let mut run = 0usize;
     for ch in body.chars() {
@@ -70,7 +65,7 @@ fn code_fence_for(body: &str) -> String {
             run = 0;
         }
     }
-    "`".repeat(longest.max(2) + 1)
+    longest
 }
 
 impl Result {
