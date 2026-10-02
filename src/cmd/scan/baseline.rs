@@ -320,8 +320,7 @@ pub(super) fn major_of(v: &str) -> &str {
     v.split('.').next().unwrap_or(v)
 }
 
-/// Accept both report shapes dalfox emits, plus the bare findings array the
-/// `results_to_json` helper produces:
+/// Accept both report shapes dalfox emits, plus a bare findings array:
 ///   - `--format json`  → `{ "meta": {...}, "findings": [...] }`
 ///   - `--format jsonl` → a `{"meta": {...}}` line followed by one finding/line
 ///   - bare `[ {...}, ... ]`
