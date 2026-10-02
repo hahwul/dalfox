@@ -161,7 +161,13 @@ async fn test_verify_dom_xss_light_marker_reflected() {
     let param = make_param(Location::Query, "q");
     let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
 
-    let (verified, response, note) = verify_dom_xss_light(&target, &param, &payload).await;
+    let (verified, response, note) = verify_dom_xss_light_with_client(
+        &target.build_client_or_default(),
+        &target,
+        &param,
+        &payload,
+    )
+    .await;
 
     assert!(verified);
     assert!(response.expect("response").contains(&payload));

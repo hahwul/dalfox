@@ -11,15 +11,6 @@ use reqwest::Client;
 /// - Else, if CSP likely blocks inline handlers ('unsafe-inline' missing), add note.
 ///
 /// Returns: (verified, response_text, note)
-pub async fn verify_dom_xss_light(
-    target: &Target,
-    param: &Param,
-    payload: &str,
-) -> (bool, Option<String>, Option<String>) {
-    let client = target.build_client_or_default();
-    verify_dom_xss_light_with_client(&client, target, param, payload).await
-}
-
 pub async fn verify_dom_xss_light_with_client(
     client: &Client,
     target: &Target,
