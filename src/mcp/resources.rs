@@ -198,12 +198,3 @@ fn decode_cursor(cursor: Option<&Cursor>) -> Result<usize, ErrorData> {
         }),
     }
 }
-
-/// Whether to attach a `resource_link` to the result being built.
-///
-/// A tool result's content array is a closed union on the client side, and
-/// `resource_link` only arrived in 2025-06-18 — see [`super::call_scope`],
-/// which decides this from the revision the client negotiated.
-pub(super) fn links_supported() -> bool {
-    super::call_scope::links_supported()
-}

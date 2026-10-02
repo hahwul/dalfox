@@ -281,7 +281,6 @@ mod tests {
             full_id: "corrnonce.oast.fun".to_string(),
             remote_address: "203.0.113.5".to_string(),
             timestamp: "2026-06-12T00:00:00Z".to_string(),
-            raw_request: "GET / HTTP/1.1".to_string(),
         };
         let rec = InjectionRecord {
             target_url: "https://t/?q=1".to_string(),
@@ -306,7 +305,6 @@ mod tests {
             full_id: "abc123.oast.fun".to_string(),
             remote_address: "203.0.113.5".to_string(),
             timestamp: String::new(),
-            raw_request: String::new(),
         };
         // Same nonce + protocol => same key (repeat callbacks collapse to one).
         assert_eq!(dedup_key("abc123", &it), dedup_key("abc123", &it));
@@ -326,7 +324,6 @@ mod tests {
             full_id: "aaa.oast.fun".to_string(),
             remote_address: "203.0.113.5".to_string(),
             timestamp: String::new(),
-            raw_request: String::new(),
         };
         let mut b = a.clone();
         b.full_id = "bbb.oast.fun".to_string();
@@ -343,7 +340,6 @@ mod tests {
             full_id: "abc.oast.fun".to_string(),
             remote_address: String::new(),
             timestamp: String::new(),
-            raw_request: String::new(),
         };
         let r = build_finding(&it, None, "oast.fun");
         assert_eq!(r.result_type, FindingType::Verified);

@@ -170,10 +170,10 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
         .route("/preflight", post(preflight_handler))
         .route("/preflight", options(options_scan_handler))
         .route("/result/{id}", get(get_result_handler))
-        .route("/result/{id}", options(options_result_handler))
+        .route("/result/{id}", options(options_scan_handler))
         .route("/scan/{id}", get(get_result_handler))
         .route("/scan/{id}", axum::routing::delete(cancel_scan_handler))
-        .route("/scan/{id}", options(options_result_handler))
+        .route("/scan/{id}", options(options_scan_handler))
         .route("/health", get(health_handler))
         .route("/health", options(options_scan_handler))
         // Explicit request-body cap for every route. Replaces axum's implicit

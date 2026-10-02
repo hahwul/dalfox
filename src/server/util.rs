@@ -221,13 +221,7 @@ where
 /// only the exact string `"true"` while DELETE's `?purge` accepted `"1"` and
 /// `"true"`, so the same `?include_request=1` silently did nothing.
 pub(crate) fn parse_bool_query(params: &HashMap<String, String>, key: &str) -> bool {
-    params.get(key).is_some_and(|v| {
-        let v = v.trim();
-        v == "1"
-            || v.eq_ignore_ascii_case("true")
-            || v.eq_ignore_ascii_case("yes")
-            || v.eq_ignore_ascii_case("on")
-    })
+    parse_opt_bool_query(params, key).unwrap_or(false)
 }
 
 /// Like [`parse_bool_query`] but preserves the present/absent distinction:

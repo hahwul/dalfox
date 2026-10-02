@@ -220,9 +220,9 @@ pub(crate) async fn execute_scan(
                     }
 
                     if let Some(callback_url) = &args.blind_callback_url {
-                        crate::scanning::blind_scanning(
+                        crate::scanning::blind_scanning_with(
                             target,
-                            callback_url,
+                            crate::scanning::CallbackSource::Static(callback_url),
                             args.custom_blind_xss_payload.as_deref(),
                         )
                         .await;

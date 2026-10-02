@@ -91,17 +91,19 @@ pub(crate) const MAX_RETAINED_SCANS_MCP: usize = 1000;
 ///   This lets an operator bound the load every submitted scan can put on a
 ///   target, regardless of what an (authenticated) client requests.
 pub(crate) fn effective_rate_limit(requested: Option<u32>, server_cap: Option<u32>) -> u32 {
-    match (requested, server_cap.filter(|c| *c > 0)) {
-        (Some(r), Some(cap)) => {
-            if r == 0 {
-                cap
-            } else {
-                r.min(cap)
-            }
-        }
+    clamp_to_server_cap(requested, server_cap)
+}
+
+/// Shared body of [`effective_rate_limit`] / [`effective_scan_timeout`]: `0`
+/// means unbounded, and a positive server cap is an upper bound a request can
+/// lower but neither raise nor disable.
+fn clamp_to_server_cap<T: Copy + Ord + Default>(requested: Option<T>, server_cap: Option<T>) -> T {
+    let zero = T::default();
+    match (requested, server_cap.filter(|c| *c > zero)) {
+        (Some(r), Some(cap)) if r == zero => cap,
+        (Some(r), Some(cap)) => r.min(cap),
         (Some(r), None) => r,
-        (None, Some(cap)) => cap,
-        (None, None) => 0,
+        (None, cap) => cap.unwrap_or(zero),
     }
 }
 
@@ -720,18 +722,7 @@ pub(crate) fn unreachable_error_message() -> String {
 /// Shared by the REST server (per-request option + `--scan-timeout` cap) and the
 /// MCP scan tool (per-call value, no server cap) so the budget semantics match.
 pub(crate) fn effective_scan_timeout(requested: Option<u64>, server_cap: Option<u64>) -> u64 {
-    match (requested, server_cap.filter(|c| *c > 0)) {
-        (Some(r), Some(cap)) => {
-            if r == 0 {
-                cap
-            } else {
-                r.min(cap)
-            }
-        }
-        (Some(r), None) => r,
-        (None, Some(cap)) => cap,
-        (None, None) => 0,
-    }
+    clamp_to_server_cap(requested, server_cap)
 }
 
 /// Drive `fut` to completion, but abort it after `budget_secs` of wall-clock
@@ -798,14 +789,9 @@ async fn send_reachability_probe_inner(
     // HEAD. Agent-facing scans share that target setting, so the reachability
     // gate has to honor it too.
     if target.delay > 0 {
-        let delay = tokio::time::sleep(std::time::Duration::from_millis(target.delay));
-        if let Some(cancel_flag) = cancel_flag {
-            tokio::select! {
-                _ = delay => {},
-                _ = wait_for_cancellation(cancel_flag) => return None,
-            }
-        } else {
-            delay.await;
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(target.delay)) => {},
+            _ = wait_for_cancellation(cancel_flag) => return None,
         }
     }
 
@@ -814,18 +800,16 @@ async fn send_reachability_probe_inner(
     // logical probe if its retry budget is exhausted.
     const MAX_ATTEMPTS: u32 = 2;
     const RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(200);
+    let cancelled =
+        || cancel_flag.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed));
 
     for attempt in 1..=MAX_ATTEMPTS {
-        if cancel_flag.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+        if cancelled() {
             return None;
         }
-        if let Some(cancel_flag) = cancel_flag {
-            tokio::select! {
-                _ = crate::rate_limit_acquire() => {},
-                _ = wait_for_cancellation(cancel_flag) => return None,
-            }
-        } else {
-            crate::rate_limit_acquire().await;
+        tokio::select! {
+            _ = crate::rate_limit_acquire() => {},
+            _ = wait_for_cancellation(cancel_flag) => return None,
         }
         if let Some(progress) = progress {
             progress
@@ -833,16 +817,11 @@ async fn send_reachability_probe_inner(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
-        let response = if let Some(cancel_flag) = cancel_flag {
-            tokio::select! {
-                response = build_reachability_request(target).send() => Some(response),
-                _ = wait_for_cancellation(cancel_flag) => None,
-            }
-        } else {
-            Some(build_reachability_request(target).send().await)
+        let response = tokio::select! {
+            response = build_reachability_request(target).send() => response,
+            _ = wait_for_cancellation(cancel_flag) => return None,
         };
-        let response = response?;
-        if cancel_flag.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+        if cancelled() {
             return None;
         }
 
@@ -851,13 +830,9 @@ async fn send_reachability_probe_inner(
             Err(error) => {
                 let transient = error.is_connect() || error.is_timeout();
                 if transient && attempt < MAX_ATTEMPTS {
-                    if let Some(cancel_flag) = cancel_flag {
-                        tokio::select! {
-                            _ = tokio::time::sleep(RETRY_BACKOFF) => {},
-                            _ = wait_for_cancellation(cancel_flag) => return None,
-                        }
-                    } else {
-                        tokio::time::sleep(RETRY_BACKOFF).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(RETRY_BACKOFF) => {},
+                        _ = wait_for_cancellation(cancel_flag) => return None,
                     }
                     continue;
                 }
@@ -874,7 +849,12 @@ async fn send_reachability_probe_inner(
     Some(false)
 }
 
-async fn wait_for_cancellation(cancel_flag: &AtomicBool) {
+/// Resolves once `cancel_flag` is set; never resolves for `None`, so a
+/// `select!` against it degrades to a plain `.await` of the other branch.
+async fn wait_for_cancellation(cancel_flag: Option<&AtomicBool>) {
+    let Some(cancel_flag) = cancel_flag else {
+        return std::future::pending().await;
+    };
     while !cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }

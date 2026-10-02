@@ -684,10 +684,9 @@ async fn test_options_preflight_headers() {
     let mut headers = HeaderMap::new();
     headers.insert("Origin", HeaderValue::from_static("http://any.example"));
 
-    let resp =
-        super::options_result_handler(State(state.clone()), headers, Path("any".to_string()))
-            .await
-            .into_response();
+    let resp = super::options_scan_handler(State(state.clone()), headers)
+        .await
+        .into_response();
 
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
@@ -5291,7 +5290,7 @@ async fn test_options_preflights_are_source_gated() {
 
     let mut cross = HeaderMap::new();
     cross.insert("Origin", HeaderValue::from_static("https://evil.example"));
-    let resp = super::options_result_handler(State(state.clone()), cross, Path("id".to_string()))
+    let resp = super::options_scan_handler(State(state.clone()), cross)
         .await
         .into_response();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);

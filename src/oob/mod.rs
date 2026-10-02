@@ -6,9 +6,9 @@
 //! decrypt the interactions, and correlate each callback back to the exact
 //! (target, param, payload) that triggered it.
 //!
-//! The backend is pluggable via [`OobBackend`]; interactsh is the first and only
-//! backend today. Adding another OAST provider is a new enum variant plus its
-//! match arms — no changes to the injection or reporting paths.
+//! interactsh is the only backend; a second OAST provider would wrap the
+//! client in [`OobSession`] behind an enum — no changes to the injection or
+//! reporting paths.
 
 pub mod interactsh;
 mod poller;
@@ -21,6 +21,8 @@ pub(crate) use poller::spawn_poller;
 pub(crate) use registry::{CorrelationRegistry, InjectionRecord};
 
 use std::sync::Arc;
+
+use serde::Deserialize;
 
 /// Default public interactsh server mesh, tried in order when the user enables
 /// `--blind-oob` without naming a server.
@@ -66,55 +68,34 @@ pub struct OobConfig {
     pub insecure: bool,
 }
 
-/// One decrypted OAST interaction.
-#[derive(Debug, Clone)]
+/// One decrypted OAST interaction, deserialized straight from interactsh's
+/// JSON. interactsh always sets `protocol`, `full-id`, and `remote-address`;
+/// the rest are best-effort, so absent or `null` fields read as empty.
+/// (`unique-id` / `raw-request` are on the wire too but unused here —
+/// callbacks are de-duped per (nonce, protocol).)
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct OobInteraction {
     /// `"http"`, `"dns"`, `"smtp"`, …
+    #[serde(deserialize_with = "null_as_empty")]
     pub protocol: String,
     /// The 33-char host that was hit (`<corr><nonce>.<server>`).
+    #[serde(deserialize_with = "null_as_empty")]
     pub full_id: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub remote_address: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub timestamp: String,
-    pub raw_request: String,
 }
 
-/// Pluggable OAST backend. Dispatch is a `match`; add a variant per provider.
-pub enum OobBackend {
-    Interactsh(interactsh::InteractshClient),
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
 }
 
-impl OobBackend {
-    fn new_payload_url(&self) -> (String, String) {
-        match self {
-            OobBackend::Interactsh(c) => c.new_payload_url(),
-        }
-    }
-    fn extract_nonce(&self, full_id: &str) -> Option<String> {
-        match self {
-            OobBackend::Interactsh(c) => c.extract_nonce(full_id),
-        }
-    }
-    async fn poll(&self) -> Result<Vec<OobInteraction>, Box<dyn std::error::Error + Send + Sync>> {
-        match self {
-            OobBackend::Interactsh(c) => c.poll().await,
-        }
-    }
-    async fn deregister(&self) {
-        match self {
-            OobBackend::Interactsh(c) => c.deregister().await,
-        }
-    }
-    fn server_domain(&self) -> &str {
-        match self {
-            OobBackend::Interactsh(c) => c.server_domain(),
-        }
-    }
-}
-
-/// A live OOB session: a registered backend plus the correlation registry that
-/// maps per-payload nonces back to what was injected.
+/// A live OOB session: a registered interactsh client plus the correlation
+/// registry that maps per-payload nonces back to what was injected.
 pub struct OobSession {
-    backend: OobBackend,
+    client: interactsh::InteractshClient,
     registry: Arc<CorrelationRegistry>,
 }
 
@@ -125,11 +106,9 @@ impl OobSession {
     pub async fn start(
         config: &OobConfig,
     ) -> Result<OobSession, Box<dyn std::error::Error + Send + Sync>> {
-        let registry = Arc::new(CorrelationRegistry::new());
-        let client = interactsh::register_first(config).await?;
         Ok(OobSession {
-            backend: OobBackend::Interactsh(client),
-            registry,
+            client: interactsh::register_first(config).await?,
+            registry: Arc::new(CorrelationRegistry::new()),
         })
     }
 
@@ -137,7 +116,7 @@ impl OobSession {
     /// The caller substitutes the URL into the payload, then records the final
     /// payload against `nonce` via [`registry`](Self::registry).
     pub fn mint_url(&self) -> (String, String) {
-        self.backend.new_payload_url()
+        self.client.new_payload_url()
     }
 
     pub fn registry(&self) -> &Arc<CorrelationRegistry> {
@@ -145,20 +124,20 @@ impl OobSession {
     }
 
     pub fn server_domain(&self) -> &str {
-        self.backend.server_domain()
+        self.client.server_domain()
     }
 
     pub fn extract_nonce(&self, full_id: &str) -> Option<String> {
-        self.backend.extract_nonce(full_id)
+        self.client.extract_nonce(full_id)
     }
 
     pub async fn poll(
         &self,
     ) -> Result<Vec<OobInteraction>, Box<dyn std::error::Error + Send + Sync>> {
-        self.backend.poll().await
+        self.client.poll().await
     }
 
     pub async fn deregister(&self) {
-        self.backend.deregister().await
+        self.client.deregister().await
     }
 }

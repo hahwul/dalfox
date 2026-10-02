@@ -1541,7 +1541,7 @@ async fn test_scan_with_dalfox_accepts_scan_timeout_zero() {
 async fn test_scan_with_dalfox_rejects_max_payloads_over_cap() {
     let mcp = DalfoxMcp::new();
     let params = ScanWithDalfoxParams {
-        max_payloads_per_param: MAX_PAYLOADS_PER_PARAM_MCP + 1,
+        max_payloads_per_param: crate::job::MAX_PAYLOADS_PER_PARAM + 1,
         ..default_scan_params("http://127.0.0.1:1/?q=a")
     };
     let err = mcp
