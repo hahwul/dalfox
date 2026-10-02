@@ -6,22 +6,9 @@
 use super::*;
 
 impl Result {
-    /// Serialize a slice of Result into TOML string.
-    ///
-    /// For backward compatibility (public API surface under `dalfox::scanning::result`),
-    /// the 3-argument form omits the scan metadata envelope (equivalent to `meta=None`).
-    /// Use the `_with_meta` variant to carry `ScanMetadata` (targets, duration, WAF in
-    /// `target_summary`, etc.) for parity with the JSON/JSONL render path.
-    #[allow(dead_code)]
-    pub(crate) fn results_to_toml(
-        results: &[Result],
-        include_request: bool,
-        include_response: bool,
-    ) -> String {
-        Self::results_to_toml_with_meta(results, include_request, include_response, None)
-    }
-
-    /// Serialize ... with optional scan metadata (see `results_to_toml`).
+    /// Serialize a slice of Result into TOML string, with the optional scan
+    /// metadata envelope (targets, duration, WAF in `target_summary`, etc.) for
+    /// parity with the JSON/JSONL render path.
     pub(crate) fn results_to_toml_with_meta(
         results: &[Result],
         include_request: bool,
