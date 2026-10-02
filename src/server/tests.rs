@@ -2475,7 +2475,7 @@ fn test_validate_scan_options_rejects_out_of_range() {
     };
     assert!(validate_scan_options(&mut ok_disabled).is_ok());
     let mut bad_scan_timeout = ScanOptions {
-        scan_timeout: Some(MAX_SCAN_TIMEOUT_SECS + 1),
+        scan_timeout: Some(crate::job::MAX_SCAN_TIMEOUT_SECS + 1),
         ..ScanOptions::default()
     };
     assert!(validate_scan_options(&mut bad_scan_timeout).is_err());

@@ -1470,7 +1470,7 @@ async fn test_scan_with_dalfox_rejects_zero_workers() {
 async fn test_scan_with_dalfox_rejects_workers_over_max() {
     let mcp = DalfoxMcp::new();
     let params = ScanWithDalfoxParams {
-        workers: MAX_WORKERS + 1,
+        workers: crate::job::MAX_WORKERS + 1,
         ..default_scan_params("http://127.0.0.1:1/?q=a")
     };
     let err = mcp
@@ -1485,7 +1485,7 @@ async fn test_scan_with_dalfox_rejects_workers_over_max() {
 async fn test_scan_with_dalfox_accepts_workers_at_max() {
     let mcp = DalfoxMcp::new();
     let params = ScanWithDalfoxParams {
-        workers: MAX_WORKERS,
+        workers: crate::job::MAX_WORKERS,
         ..default_scan_params("http://127.0.0.1:1/?q=a")
     };
     mcp.scan_with_dalfox(Parameters(params))
@@ -1513,7 +1513,7 @@ async fn test_scan_with_dalfox_accepts_rate_limit() {
 async fn test_scan_with_dalfox_rejects_scan_timeout_over_max() {
     let mcp = DalfoxMcp::new();
     let params = ScanWithDalfoxParams {
-        scan_timeout: MAX_SCAN_TIMEOUT_SECS + 1,
+        scan_timeout: crate::job::MAX_SCAN_TIMEOUT_SECS + 1,
         ..default_scan_params("http://127.0.0.1:1/?q=a")
     };
     let err = mcp

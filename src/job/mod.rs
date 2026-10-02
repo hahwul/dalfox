@@ -350,6 +350,137 @@ pub(crate) fn validate_remote_providers(
     )
 }
 
+/// Scan options borrowed from a REST body or an MCP tool call, for
+/// [`ScanOptionChecks::validate`] — the one bounds/normalization pass every
+/// agent-facing surface runs before queuing work. `None` / empty means
+/// "absent" and is not checked. Request bodies bypass clap's value parsers the
+/// same way a config file does, so each unchecked field here used to become a
+/// scan that silently did the wrong thing and still settled `done`.
+///
+/// The `&mut` fields are normalized in place, because the normalized value is
+/// what the scan later uses: `method` uppercased (an un-normalized `"post"`
+/// went on the wire as a literal extension verb), `force_waf` lowercased,
+/// `proxy` / `blind` trimmed or cleared (see [`normalize_proxy`],
+/// [`normalize_blind_callback`]). Field names that the surfaces spell
+/// differently travel with their value.
+#[derive(Default)]
+pub(crate) struct ScanOptionChecks<'a, F = f32> {
+    pub method: Option<&'a mut String>,
+    pub encoders: &'a [String],
+    pub remote_payloads: &'a [String],
+    pub remote_wordlists: &'a [String],
+    pub timeout: Option<u64>,
+    pub delay: Option<u64>,
+    /// REST spells it `worker`, MCP `workers`.
+    pub workers: Option<(usize, &'static str)>,
+    pub max_payloads_per_param: Option<usize>,
+    pub scan_timeout: Option<u64>,
+    pub waf_bypass: Option<&'a str>,
+    pub force_waf: Option<&'a mut String>,
+    /// Generic so the error echoes the value at the precision the surface
+    /// parsed it (REST `f32`, MCP `f64`).
+    pub waf_min_confidence: Option<F>,
+    pub headers: &'a [String],
+    pub user_agent: Option<&'a str>,
+    pub cookies: &'a [String],
+    pub proxy: Option<&'a mut Option<String>>,
+    /// REST spells it `blind`, MCP `blind_callback_url`.
+    pub blind: Option<(&'a mut Option<String>, &'static str)>,
+}
+
+impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
+    pub(crate) fn validate(self) -> Result<(), String> {
+        if let Some(m) = self.method {
+            *m = crate::cmd::scan::parse_http_method_arg(m)?;
+        }
+        validate_encoders(self.encoders)?;
+        validate_remote_providers(self.remote_payloads, self.remote_wordlists)?;
+        if let Some(t) = self.timeout
+            && (t == 0 || t > MAX_TIMEOUT_SECS)
+        {
+            return Err(format!(
+                "timeout must be between 1 and {} seconds (got {})",
+                MAX_TIMEOUT_SECS, t
+            ));
+        }
+        if let Some(d) = self.delay
+            && d > MAX_DELAY_MS
+        {
+            return Err(format!(
+                "delay must be between 0 and {} ms (got {})",
+                MAX_DELAY_MS, d
+            ));
+        }
+        if let Some((w, field)) = self.workers
+            && (w == 0 || w > MAX_WORKERS)
+        {
+            return Err(format!(
+                "{} must be between 1 and {} (got {})",
+                field, MAX_WORKERS, w
+            ));
+        }
+        if let Some(m) = self.max_payloads_per_param
+            && m > MAX_PAYLOADS_PER_PARAM
+        {
+            return Err(format!(
+                "max_payloads_per_param must be between 0 and {} (got {})",
+                MAX_PAYLOADS_PER_PARAM, m
+            ));
+        }
+        if let Some(st) = self.scan_timeout
+            && st > MAX_SCAN_TIMEOUT_SECS
+        {
+            return Err(format!(
+                "scan_timeout must be between 0 and {} seconds (got {})",
+                MAX_SCAN_TIMEOUT_SECS, st
+            ));
+        }
+        // Shared value list (also backing clap's parser and the config
+        // validator) so the accepted set can't drift between entry points.
+        if let Some(mode) = self.waf_bypass
+            && !crate::cmd::scan::WAF_BYPASS_VALUES.contains(&mode)
+        {
+            return Err(format!(
+                "waf_bypass must be one of {} (got '{}')",
+                crate::cmd::scan::WAF_BYPASS_VALUES.join(", "),
+                mode
+            ));
+        }
+        if let Some(name) = self.force_waf {
+            *name = crate::cmd::scan::parse_force_waf_arg(name)?;
+        }
+        if let Some(c) = self.waf_min_confidence
+            && !(0.0..=1.0).contains(&c.into())
+        {
+            return Err(format!(
+                "waf_min_confidence must be between 0.0 and 1.0 (got {})",
+                c
+            ));
+        }
+        // A malformed header — or a control byte in a User-Agent / cookie,
+        // which become header values too — fails reqwest on the builder for
+        // every request, so the target would be reported unreachable.
+        validate_header_list(self.headers)?;
+        if let Some(ua) = self.user_agent {
+            validate_header_value("user_agent", ua)?;
+        }
+        for cookie in self.cookies {
+            validate_header_value("cookie", cookie)?;
+        }
+        if let Some(p) = self.proxy {
+            *p = p.as_deref().map(normalize_proxy).transpose()?.flatten();
+        }
+        if let Some((b, field)) = self.blind {
+            *b = b
+                .as_deref()
+                .map(|v| normalize_blind_callback(v, field))
+                .transpose()?
+                .flatten();
+        }
+        Ok(())
+    }
+}
+
 /// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],
 /// returning how many were dropped (0 if already under the cap). Shared by the
 /// REST server, MCP, and both preflight paths so every async front-end bounds
