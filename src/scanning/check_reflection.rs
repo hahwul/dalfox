@@ -529,7 +529,7 @@ fn decoded_is_dangerous_scheme(s: &str) -> bool {
         // verbatim (no server strip), the mutation is not a real scheme and is
         // inert — but it must still be RECOGNIZED here so the inert-position
         // gates (`dangerous_scheme_reflection_is_inert`) demote a `value="…"`
-        // echo to None, while `scan_dangerous_scheme_occurrences` keeps it when
+        // echo to None, while its scheme-start scan keeps it when
         // it lands at a URL-attr scheme-start (a live WAF-bypass finding).
         || crate::payload::xss_html::JS_SCHEME_STRIP_MUTATION_PREFIXES
             .iter()
@@ -580,12 +580,16 @@ fn scheme_at_url_attr_value_start(bytes: &[u8], at: usize) -> bool {
     url_valued_attr_name_before_eq(bytes, eq_at)
 }
 
-/// Scan `hay` for any reflected variant of a dangerous-scheme payload. Returns
-/// `(found, executable)`: `found` is set once any variant appears; `executable`
-/// is set when an occurrence sits at a URL-attr scheme-start (browser would
-/// navigate to the scheme). Bails toward `executable=true` past the occurrence
-/// budget so the cap can only cost extra [R] noise, never a missed bug.
-fn scan_dangerous_scheme_occurrences(hay: &str, variants: &[String]) -> (bool, bool) {
+/// Scan `hay` for every occurrence of each of `variants`. Returns
+/// `(found, hit)`: `found` is set once any variant appears; `hit` is set (and
+/// the scan stops) as soon as `is_hit(bytes, offset)` holds for an occurrence.
+/// Bails toward `hit=true` past the occurrence budget so the cap can only cost
+/// extra [R] noise, never a missed bug.
+fn scan_variant_occurrences(
+    hay: &str,
+    variants: &[String],
+    is_hit: impl Fn(&[u8], usize) -> bool,
+) -> (bool, bool) {
     let bytes = hay.as_bytes();
     let mut found = false;
     for v in variants {
@@ -601,7 +605,7 @@ fn scan_dangerous_scheme_occurrences(hay: &str, variants: &[String]) -> (bool, b
                 return (true, true);
             }
             let abs = start + pos;
-            if scheme_at_url_attr_value_start(bytes, abs) {
+            if is_hit(bytes, abs) {
                 return (true, true);
             }
             start = next_char_boundary(hay, abs + 1);
@@ -641,7 +645,8 @@ fn dangerous_scheme_reflection_is_inert(html: &str, payload: &str) -> bool {
     }
     // Scan the raw response and its URL-decoded view (the self-link echo carries
     // the scheme percent-encoded). Any executable occurrence keeps the finding.
-    let (mut found, executable) = scan_dangerous_scheme_occurrences(html, &variants);
+    let (mut found, executable) =
+        scan_variant_occurrences(html, &variants, scheme_at_url_attr_value_start);
     if executable {
         return false;
     }
@@ -652,7 +657,8 @@ fn dangerous_scheme_reflection_is_inert(html: &str, payload: &str) -> bool {
         && let Ok(decoded) = urlencoding::decode(html)
         && decoded.as_ref() != html
     {
-        let (f2, x2) = scan_dangerous_scheme_occurrences(&decoded, &variants);
+        let (f2, x2) =
+            scan_variant_occurrences(&decoded, &variants, scheme_at_url_attr_value_start);
         if x2 {
             return false;
         }
@@ -693,38 +699,6 @@ fn occurrence_inside_url_attr_value(bytes: &[u8], at: usize) -> bool {
         }
     }
     false
-}
-
-/// Scan helper for [`reflection_trapped_in_url_value`]. Returns
-/// `(found, escaped)`: `escaped` is set if any occurrence is at a URL-attr
-/// scheme-start (potentially executable) or outside a quoted URL-attr value
-/// (body text, non-URL attribute, …) — either means the payload is NOT safely
-/// trapped. Bails toward `escaped=true` past the occurrence budget.
-fn scan_url_value_trapping(hay: &str, variants: &[String]) -> (bool, bool) {
-    let bytes = hay.as_bytes();
-    let mut found = false;
-    for v in variants {
-        if v.is_empty() {
-            continue;
-        }
-        let mut start = 0;
-        let mut scanned = 0usize;
-        while let Some(pos) = hay[start..].find(v.as_str()) {
-            found = true;
-            scanned += 1;
-            if scanned > MAX_PAYLOAD_OCCURRENCES {
-                return (true, true);
-            }
-            let abs = start + pos;
-            if scheme_at_url_attr_value_start(bytes, abs)
-                || !occurrence_inside_url_attr_value(bytes, abs)
-            {
-                return (true, true);
-            }
-            start = next_char_boundary(hay, abs + 1);
-        }
-    }
-    (found, false)
 }
 
 /// True when any of `variants` (the break-out-bearing forms — each carrying a
@@ -778,7 +752,13 @@ fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
     if any_variant_reflected_literally(html, &risky) {
         return false;
     }
-    let (mut found, escaped) = scan_url_value_trapping(html, &safe);
+    // An occurrence escapes the trap at a URL-attr scheme-start (potentially
+    // executable) or outside a quoted URL-attr value (body text, non-URL
+    // attribute, …) — either means the payload is NOT safely trapped.
+    let escapes = |bytes: &[u8], at: usize| {
+        scheme_at_url_attr_value_start(bytes, at) || !occurrence_inside_url_attr_value(bytes, at)
+    };
+    let (mut found, escaped) = scan_variant_occurrences(html, &safe, escapes);
     if escaped {
         return false;
     }
@@ -788,7 +768,7 @@ fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
         && let Ok(decoded) = urlencoding::decode(html)
         && decoded.as_ref() != html
     {
-        let (f2, e2) = scan_url_value_trapping(&decoded, &safe);
+        let (f2, e2) = scan_variant_occurrences(&decoded, &safe, escapes);
         if e2 {
             return false;
         }
