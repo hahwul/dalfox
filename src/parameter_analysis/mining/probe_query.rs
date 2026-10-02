@@ -31,12 +31,10 @@ use url::Url;
 /// so `initial_buckets` also cuts a bucket early on long candidate names.
 const MAX_QUERY_PROBE_URL_BYTES: usize = 8 * 1024;
 const CANARY_ID_LEN: usize = 17; // `m` + 16 lower-case hex characters
-const DEFAULT_LENGTH_TOLERANCE: usize = 0;
-const DEFAULT_COUNT_TOLERANCE: usize = 0;
 
 static NEXT_MINING_CANARY: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct QueryFingerprint {
     status: u16,
     body_len: usize,
@@ -46,17 +44,8 @@ pub(super) struct QueryFingerprint {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct QueryTolerance {
-    length: usize,
-    words: usize,
-    lines: usize,
-    location: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
 pub(super) struct QueryBaseline {
     fingerprint: QueryFingerprint,
-    tolerance: QueryTolerance,
     /// Two identical clean requests produced the same fingerprint. Only then
     /// can a response difference be attributed to a candidate name, so
     /// metric-only discovery (a name that changes the page without echoing
@@ -76,30 +65,8 @@ impl QueryBaseline {
     pub(super) fn from_response(status: u16, body: &str, location: Option<&str>) -> Self {
         Self {
             fingerprint: fingerprint(status, body, location),
-            tolerance: QueryTolerance::zero(),
             stable: false,
         }
-    }
-}
-
-impl QueryTolerance {
-    fn zero() -> Self {
-        Self {
-            length: DEFAULT_LENGTH_TOLERANCE,
-            words: DEFAULT_COUNT_TOLERANCE,
-            lines: DEFAULT_COUNT_TOLERANCE,
-            location: DEFAULT_LENGTH_TOLERANCE,
-        }
-    }
-}
-
-impl QueryFingerprint {
-    fn differs(self, other: Self, tolerance: QueryTolerance) -> bool {
-        self.status != other.status
-            || self.body_len.abs_diff(other.body_len) > tolerance.length
-            || self.words.abs_diff(other.words) > tolerance.words
-            || self.lines.abs_diff(other.lines) > tolerance.lines
-            || self.location_len.abs_diff(other.location_len) > tolerance.location
     }
 }
 
@@ -371,7 +338,6 @@ async fn calibrate_baseline(
             .fingerprint
         }
     };
-    let tolerance = QueryTolerance::zero();
     // Only a *successful* second sample that differs proves the page is
     // unstable. A failed second sample (transient timeout / 5xx) is not
     // evidence of instability, so it must not flip `stable` off — doing so
@@ -388,12 +354,11 @@ async fn calibrate_baseline(
     )
     .await
     {
-        Some(second) => !first.differs(second.fingerprint, tolerance),
+        Some(second) => first == second.fingerprint,
         None => true,
     };
     Some(QueryBaseline {
         fingerprint: first,
-        tolerance,
         stable,
     })
 }
@@ -509,13 +474,8 @@ async fn probe_bucket(
         // silently disabling metric-only discovery for the whole run, which is
         // what dropping the control fallback here used to do.
         let stable = baseline.is_none_or(|b| b.stable);
-        let tolerance = baseline.map_or_else(QueryTolerance::zero, |b| b.tolerance);
         let same = |a: QueryFingerprint, b: QueryFingerprint| {
-            if stable {
-                !a.differs(b, tolerance)
-            } else {
-                a.status == b.status
-            }
+            if stable { a == b } else { a.status == b.status }
         };
         if baseline.is_some_and(|base| same(base.fingerprint, response.fingerprint)) {
             // The candidate response matches the clean page: nothing moved it.
@@ -689,12 +649,7 @@ async fn send_query_request(
 
 fn append_query_pairs(target: &Target, pairs: &[(String, String)]) -> Url {
     let mut url = target.url.clone();
-    {
-        let mut query = url.query_pairs_mut();
-        for (name, value) in pairs {
-            query.append_pair(name, value);
-        }
-    }
+    url.query_pairs_mut().extend_pairs(pairs);
     url
 }
 

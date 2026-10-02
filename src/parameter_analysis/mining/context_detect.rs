@@ -3,9 +3,9 @@
 use super::*;
 
 pub(crate) fn detect_injection_context(text: &str) -> InjectionContext {
-    // Inner marker survives every reflection form classified by
-    // `classify_probe_reflection` (Full / PrefixOnly / SuffixOnly /
-    // InnerOnly), so it's the most reliable anchor for context inference
+    // Inner marker survives every reflection form `probe_reflected` accepts
+    // (intact, prefix- or suffix-stripped, inner only), so it's the most
+    // reliable anchor for context inference
     // on bracketed probes. Fall back to the open marker for callers that
     // still inject it directly (older tests, legacy probe sites).
     let inner = crate::scanning::markers::inner_marker();

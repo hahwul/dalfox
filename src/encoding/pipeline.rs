@@ -77,11 +77,12 @@ impl EncodingStep {
             EncodingStep::Splice { prefix, suffix } => Ok(format!("{prefix}{payload}{suffix}")),
             EncodingStep::JsonField { pointer, template } => {
                 let mut value = template.clone();
-                set_by_pointer(
-                    &mut value,
-                    pointer,
-                    serde_json::Value::String(payload.to_string()),
-                )?;
+                // Pointers come from `walk_json` over this same template, so
+                // they always resolve to an existing leaf.
+                let slot = value
+                    .pointer_mut(pointer)
+                    .ok_or_else(|| format!("unresolvable JSON pointer: {pointer}"))?;
+                *slot = serde_json::Value::String(payload.to_string());
                 serde_json::to_string(&value).map_err(|e| e.to_string())
             }
             EncodingStep::JwtAssemble {
@@ -117,58 +118,6 @@ impl EncodingPipeline {
         }
         Ok(current)
     }
-}
-
-/// Set the value at `pointer` (RFC 6901) inside `root`. Creates the leaf
-/// entry on objects when it doesn't exist; for arrays the index must already
-/// be in range. Empty pointer replaces `root` itself.
-fn set_by_pointer(
-    root: &mut serde_json::Value,
-    pointer: &str,
-    new_val: serde_json::Value,
-) -> Result<(), String> {
-    if pointer.is_empty() {
-        *root = new_val;
-        return Ok(());
-    }
-    if !pointer.starts_with('/') {
-        return Err(format!("pointer must start with '/': {pointer}"));
-    }
-    let segs: Vec<String> = pointer[1..]
-        .split('/')
-        .map(|s| s.replace("~1", "/").replace("~0", "~"))
-        .collect();
-    let last_idx = segs.len() - 1;
-    let mut cur = root;
-    for (i, seg) in segs.iter().enumerate() {
-        let last = i == last_idx;
-        match cur {
-            serde_json::Value::Object(map) => {
-                if last {
-                    map.insert(seg.clone(), new_val);
-                    return Ok(());
-                }
-                cur = map
-                    .get_mut(seg)
-                    .ok_or_else(|| format!("missing key {seg}"))?;
-            }
-            serde_json::Value::Array(arr) => {
-                let idx: usize = seg
-                    .parse()
-                    .map_err(|_| format!("array segment is not an index: {seg}"))?;
-                if idx >= arr.len() {
-                    return Err(format!("index out of range: {idx}"));
-                }
-                if last {
-                    arr[idx] = new_val;
-                    return Ok(());
-                }
-                cur = &mut arr[idx];
-            }
-            _ => return Err(format!("cannot descend into scalar at segment {seg}")),
-        }
-    }
-    Ok(())
 }
 
 /// One inferred injection point inside a structurally-encoded parameter.
@@ -231,31 +180,43 @@ fn infer_b64_or_b64url_json(value: &str) -> Vec<NestedField> {
     let has_url_safe = trimmed.contains('-') || trimmed.contains('_');
     let has_standard = trimmed.contains('+') || trimmed.contains('/');
     if has_url_safe && !has_standard {
-        infer_b64url_json(value)
+        infer_base64_json(value, true)
     } else {
-        let result = infer_b64_json(value);
+        let result = infer_base64_json(value, false);
         if !result.is_empty() {
             return result;
         }
         // Fall back to url-safe in the ambiguous (shared-alphabet) case.
-        infer_b64url_json(value)
+        infer_base64_json(value, true)
     }
 }
 
-/// Strategy: standard-alphabet base64 wrapping a JSON object/array.
-fn infer_b64_json(value: &str) -> Vec<NestedField> {
+/// Strategy: base64 wrapping a JSON object/array — standard alphabet with
+/// padding, or (`url_safe`) URL-safe without padding. The alphabet is kept
+/// when re-encoding so the wire shape round-trips byte-for-byte.
+fn infer_base64_json(value: &str, url_safe: bool) -> Vec<NestedField> {
     // `query_pairs()` URL-decoding turns a raw `+` in the value into a space, so
     // a standard-alphabet base64 value carrying `+` arrives space-mangled and
     // would be rejected. Undo that for the standard-alphabet attempt (url-safe
     // base64 has no `+`, so its path is unaffected). A non-base64/non-JSON value
     // still bails at the decode/JSON checks below, so this can't cause a false
     // discovery.
-    let restored = value.replace(' ', "+");
-    let value = restored.as_str();
-    if !looks_like_b64(value, /*allow_url_safe=*/ false) {
+    let restored;
+    let value = if url_safe {
+        value
+    } else {
+        restored = value.replace(' ', "+");
+        restored.as_str()
+    };
+    if !looks_like_b64(value, url_safe) {
         return Vec::new();
     }
-    let Ok(decoded_bytes) = STANDARD.decode(value) else {
+    let decoded = if url_safe {
+        URL_SAFE_NO_PAD.decode(value.trim_end_matches('='))
+    } else {
+        STANDARD.decode(value)
+    };
+    let Ok(decoded_bytes) = decoded else {
         return Vec::new();
     };
     let Ok(decoded) = std::str::from_utf8(&decoded_bytes) else {
@@ -264,33 +225,10 @@ fn infer_b64_json(value: &str) -> Vec<NestedField> {
     let Some(json) = parse_json_object_or_array(decoded) else {
         return Vec::new();
     };
-    let leaves = collect_leaves(&json);
-    attach_pipelines(leaves, move |pointer| {
-        EncodingPipeline::new(vec![
-            EncodingStep::JsonField {
-                pointer,
-                template: json.clone(),
-            },
-            EncodingStep::Base64,
-        ])
-    })
-}
-
-/// Strategy: URL-safe base64 (no padding) wrapping a JSON object/array.
-/// Distinct from `infer_b64_json` because the alphabet (`-_` vs `+/`) is
-/// preserved when re-encoding so the wire shape round-trips byte-for-byte.
-fn infer_b64url_json(value: &str) -> Vec<NestedField> {
-    if !looks_like_b64(value, /*allow_url_safe=*/ true) {
-        return Vec::new();
-    }
-    let Ok(decoded_bytes) = URL_SAFE_NO_PAD.decode(value.trim_end_matches('=')) else {
-        return Vec::new();
-    };
-    let Ok(decoded) = std::str::from_utf8(&decoded_bytes) else {
-        return Vec::new();
-    };
-    let Some(json) = parse_json_object_or_array(decoded) else {
-        return Vec::new();
+    let step = if url_safe {
+        EncodingStep::Base64Url
+    } else {
+        EncodingStep::Base64
     };
     let leaves = collect_leaves(&json);
     attach_pipelines(leaves, move |pointer| {
@@ -299,7 +237,7 @@ fn infer_b64url_json(value: &str) -> Vec<NestedField> {
                 pointer,
                 template: json.clone(),
             },
-            EncodingStep::Base64Url,
+            step.clone(),
         ])
     })
 }

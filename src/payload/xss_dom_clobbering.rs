@@ -1,9 +1,6 @@
 /// DOM Clobbering payloads that exploit named property access on DOM elements
 /// to override global variables and object properties used by application logic.
 pub(crate) fn get_dom_clobbering_payloads() -> Vec<String> {
-    let class_marker = crate::scanning::markers::class_marker();
-    let id_marker = crate::scanning::markers::id_marker();
-
     let templates = [
         // Anchor id/name chain to clobber properties like x.y
         "<a id={ID} name={ID} href=\"javascript:alert(1)\">",
@@ -23,13 +20,10 @@ pub(crate) fn get_dom_clobbering_payloads() -> Vec<String> {
         "<form id={ID} class={CLASS}><output name=innerHTML>clobbered</output></form>",
     ];
 
-    let mut out = Vec::new();
-    for tmpl in templates.iter() {
-        let with_class = tmpl.replace("{CLASS}", class_marker);
-        let with_id = with_class.replace("{ID}", id_marker);
-        out.push(with_id);
-    }
-    out
+    templates
+        .iter()
+        .map(|t| crate::scanning::markers::fill_markers(t))
+        .collect()
 }
 
 #[cfg(test)]

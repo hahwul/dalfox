@@ -92,62 +92,33 @@ fn test_bracketed_marker_concatenation() {
 }
 
 #[test]
-fn classify_full_reflection() {
-    let body = format!("<p>echo: {}</p>", bracketed_marker());
-    assert_eq!(classify_probe_reflection(&body), ProbeReflection::Full);
-}
-
-#[test]
-fn classify_prefix_only_reflection() {
-    // server stripped the close segment off the input
-    let body = format!("<p>echo: {}{}</p>", open_marker(), inner_marker());
+fn fill_markers_substitutes_every_placeholder() {
     assert_eq!(
-        classify_probe_reflection(&body),
-        ProbeReflection::PrefixOnly
+        fill_markers("<x class={CLASS} id={ID}>{CLASS}-{ID}"),
+        format!(
+            "<x class={c} id={i}>{c}-{i}",
+            c = class_marker(),
+            i = id_marker()
+        )
     );
 }
 
 #[test]
-fn classify_suffix_only_reflection() {
-    // server stripped the open segment
-    let body = format!("<p>echo: {}{}</p>", inner_marker(), close_marker());
-    assert_eq!(
-        classify_probe_reflection(&body),
-        ProbeReflection::SuffixOnly
-    );
+fn probe_reflected_accepts_every_stripped_form() {
+    // intact, close stripped, open stripped, both wraps stripped
+    for body in [
+        format!("<p>echo: {}</p>", bracketed_marker()),
+        format!("<p>echo: {}{}</p>", open_marker(), inner_marker()),
+        format!("<p>echo: {}{}</p>", inner_marker(), close_marker()),
+        format!("<p>echo: {}</p>", inner_marker()),
+    ] {
+        assert!(probe_reflected(&body), "{body}");
+    }
 }
 
 #[test]
-fn classify_inner_only_reflection() {
-    // server extracted a regex middle, both wraps gone
-    let body = format!("<p>echo: {}</p>", inner_marker());
-    assert_eq!(classify_probe_reflection(&body), ProbeReflection::InnerOnly);
-}
-
-#[test]
-fn classify_none_for_unrelated_body() {
-    let body = "<p>nothing here</p>".to_string();
-    assert_eq!(classify_probe_reflection(&body), ProbeReflection::None);
-    // even when individual marker prefix shows up incidentally without
-    // the inner anchor, it's still None — single-prefix collisions don't
-    // count as reflection.
-    let body2 = format!("<p>{} alone</p>", open_marker());
-    assert_eq!(classify_probe_reflection(&body2), ProbeReflection::None);
-}
-
-#[test]
-fn classify_full_wins_over_partial() {
-    // Full bracketed AND a stray open_marker elsewhere — should still
-    // classify as Full (it's the strongest signal).
-    let body = format!("<a>{}</a><p>{}</p>", open_marker(), bracketed_marker());
-    assert_eq!(classify_probe_reflection(&body), ProbeReflection::Full);
-}
-
-#[test]
-fn detected_helper() {
-    assert!(ProbeReflection::Full.detected());
-    assert!(ProbeReflection::PrefixOnly.detected());
-    assert!(ProbeReflection::SuffixOnly.detected());
-    assert!(ProbeReflection::InnerOnly.detected());
-    assert!(!ProbeReflection::None.detected());
+fn probe_reflected_rejects_unrelated_body() {
+    assert!(!probe_reflected("<p>nothing here</p>"));
+    // A lone open marker without the inner anchor is not a reflection.
+    assert!(!probe_reflected(&format!("<p>{} alone</p>", open_marker())));
 }

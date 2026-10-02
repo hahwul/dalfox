@@ -5,7 +5,7 @@
 //! discovery, active probing, reflection checking, and DOM verification
 //! share a single source of truth.
 
-use super::{base64_encode, url_encode};
+use super::{base64_encode, repeat_url_encode};
 
 /// Length of the benign prefix prepended to overflow a size-limited WAF
 /// inspection window (the `WafWindowPad` transform). Must exceed the WAF's
@@ -74,8 +74,8 @@ impl PreEncodingType {
         match self {
             Self::Base64 => base64_encode(payload),
             Self::DoubleBase64 => base64_encode(&base64_encode(payload)),
-            Self::DoubleUrl => url_encode(&url_encode(payload)),
-            Self::TripleUrl => url_encode(&url_encode(&url_encode(payload))),
+            Self::DoubleUrl => repeat_url_encode(payload, 2),
+            Self::TripleUrl => repeat_url_encode(payload, 3),
             Self::WafWindowPad => format!("{}{}", waf_window_pad(), payload),
         }
     }
@@ -122,11 +122,7 @@ pub(crate) fn apply_param_encoding(
             _ => None,
         }
     {
-        let mut encoded = payload.to_string();
-        for _ in 0..rounds {
-            encoded = url_encode(&encoded);
-        }
-        return encoded;
+        return repeat_url_encode(payload, rounds);
     }
     apply_pre_encoding(payload, &param.pre_encoding)
 }
@@ -135,29 +131,14 @@ fn pre_encoding_type(pre_encoding: &Option<String>) -> Option<PreEncodingType> {
     pre_encoding.as_deref().and_then(PreEncodingType::parse)
 }
 
-/// A single pre-encoding probe: the encoding type and a function that
-/// applies it to a raw payload.
-pub(crate) type EncodingProbe = (PreEncodingType, fn(&str) -> String);
-
 /// Encoding probes used during discovery to detect parameters that require
-/// pre-encoding. Each probe has a type and its corresponding encode function.
-///
-/// Returns all known pre-encoding types in probe order (base64 variants first,
-/// then URL variants).
-pub(crate) fn encoding_probes() -> &'static [EncodingProbe] {
+/// pre-encoding, in probe order (base64 variants first, then URL variants).
+pub(crate) fn encoding_probes() -> &'static [PreEncodingType] {
     &[
-        (PreEncodingType::Base64, |s: &str| {
-            PreEncodingType::Base64.encode(s)
-        }),
-        (PreEncodingType::DoubleBase64, |s: &str| {
-            PreEncodingType::DoubleBase64.encode(s)
-        }),
-        (PreEncodingType::DoubleUrl, |s: &str| {
-            PreEncodingType::DoubleUrl.encode(s)
-        }),
-        (PreEncodingType::TripleUrl, |s: &str| {
-            PreEncodingType::TripleUrl.encode(s)
-        }),
+        PreEncodingType::Base64,
+        PreEncodingType::DoubleBase64,
+        PreEncodingType::DoubleUrl,
+        PreEncodingType::TripleUrl,
     ]
 }
 

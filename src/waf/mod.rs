@@ -95,11 +95,9 @@ impl WafDetectionResult {
     /// Return the highest-confidence WAF detected, if any.
     #[cfg(test)]
     pub(crate) fn primary(&self) -> Option<&WafFingerprint> {
-        self.detected.iter().max_by(|a, b| {
-            a.confidence
-                .partial_cmp(&b.confidence)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        self.detected
+            .iter()
+            .max_by(|a, b| a.confidence.total_cmp(&b.confidence))
     }
 
     /// Return all detected WAF types.
@@ -256,11 +254,9 @@ pub(crate) fn fingerprint_from_response(
     }
 
     // Sort by confidence descending
-    result.detected.sort_by(|a, b| {
-        b.confidence
-            .partial_cmp(&a.confidence)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    result
+        .detected
+        .sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
     result
 }
 
@@ -362,11 +358,8 @@ pub(crate) fn merge_results(a: &mut WafDetectionResult, b: WafDetectionResult) {
     for fp in b.detected {
         merge_fingerprint(a, fp);
     }
-    a.detected.sort_by(|x, y| {
-        y.confidence
-            .partial_cmp(&x.confidence)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    a.detected
+        .sort_by(|x, y| y.confidence.total_cmp(&x.confidence));
 }
 
 #[cfg(test)]

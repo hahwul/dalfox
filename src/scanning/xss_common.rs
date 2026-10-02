@@ -380,10 +380,6 @@ pub(crate) fn generate_adaptive_payloads(
         }
     }
 
-    // Use adaptive encoders from the encoding module
-    let adaptive_encoders =
-        crate::encoding::generate_adaptive_encodings(invalid_specials, valid_specials);
-
     // Issue #1075: filter-constrained generative synthesis. Build payloads from
     // building blocks gated on exactly which characters this parameter's
     // server-side filter reflects unchanged, and emit them *before* the broad
@@ -431,10 +427,12 @@ pub(crate) fn generate_adaptive_payloads(
     // co-survival: a global `<` strip collapses `<<` to inert text.
     let doubled = crate::payload::synthesis::sub_filter_doubled_payloads(context);
 
-    // Apply adaptive encoders with pre-allocated capacity
+    // A full-entity variant is worth adding whenever anything is blocked.
+    let any_blocked = invalid_specials
+        .iter()
+        .any(|c| matches!(c, '<' | '>' | '"' | '\'' | '(' | ')'));
     let estimated_cap =
-        (positional.len() + doubled.len() + synthesized.len() + filtered_payloads.len())
-            * (2 + adaptive_encoders.len());
+        (positional.len() + doubled.len() + synthesized.len() + filtered_payloads.len()) * 3;
     let mut out = Vec::with_capacity(estimated_cap);
     let mut seen = std::collections::HashSet::with_capacity(estimated_cap);
     for p in synthesized {
@@ -457,25 +455,14 @@ pub(crate) fn generate_adaptive_payloads(
         if seen.insert(p.clone()) {
             out.push(p.clone());
         }
-        // Adaptive variants based on what's blocked
-        let adaptive_variants = crate::encoding::apply_adaptive_encoding(p, invalid_specials);
-        for v in adaptive_variants {
-            if seen.insert(v.clone()) {
-                out.push(v);
-            }
+        // Adaptive variants based on what's blocked, then the full-entity
+        // variant and the url baseline.
+        let mut variants = crate::encoding::apply_adaptive_encoding(p, invalid_specials);
+        if any_blocked {
+            variants.push(crate::encoding::html_entity_encode(p));
         }
-        // Standard encoder variants
-        for enc in &adaptive_encoders {
-            let v = match enc.as_str() {
-                "url" => crate::encoding::url_encode(p),
-                "html" => crate::encoding::html_entity_encode(p),
-                "2url" => crate::encoding::double_url_encode(p),
-                "3url" => crate::encoding::triple_url_encode(p),
-                "4url" => crate::encoding::quadruple_url_encode(p),
-                "unicode" => crate::encoding::unicode_fullwidth_encode(p),
-                "zwsp" => crate::encoding::zero_width_encode(p),
-                _ => continue,
-            };
+        variants.push(crate::encoding::url_encode(p));
+        for v in variants {
             if seen.insert(v.clone()) {
                 out.push(v);
             }

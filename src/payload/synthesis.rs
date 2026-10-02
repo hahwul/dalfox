@@ -416,9 +416,6 @@ pub(crate) fn synthesize_payloads(
     let _ = valid_specials;
 
     let profile = FilterProfile::new(invalid_specials);
-    let class = crate::scanning::markers::class_marker();
-    let id = crate::scanning::markers::id_marker();
-
     // Candidate templates, highest-confidence first.
     let mut templates: Vec<String> = Vec::new();
     // Issue #1073: for a reflection inside a JS string, lead with nested-closer
@@ -474,10 +471,7 @@ pub(crate) fn synthesize_payloads(
 
     'outer: for template in &templates {
         for func in JS_FUNCS {
-            let payload = template
-                .replace("{JS}", func)
-                .replace("{CLASS}", class)
-                .replace("{ID}", id);
+            let payload = crate::scanning::markers::fill_markers(&template.replace("{JS}", func));
 
             // Filter-constraint guarantee: never emit a payload that uses a
             // character the server's filter strips. This single check is what

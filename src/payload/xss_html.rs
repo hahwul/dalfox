@@ -111,11 +111,9 @@ pub(crate) fn get_dynamic_xss_html_payloads() -> Vec<String> {
         );
         for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
             for tmpl in templates.iter() {
-                let with_js = tmpl.replace("{JS}", js);
-                let with_class =
-                    with_js.replace("{CLASS}", crate::scanning::markers::class_marker());
-                let with_id = with_class.replace("{ID}", crate::scanning::markers::id_marker());
-                out.push(with_id);
+                out.push(crate::scanning::markers::fill_markers(
+                    &tmpl.replace("{JS}", js),
+                ));
             }
         }
         out
@@ -157,11 +155,9 @@ pub(crate) fn get_mxss_payloads() -> Vec<String> {
         );
         for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
             for tmpl in templates.iter() {
-                let with_js = tmpl.replace("{JS}", js);
-                let with_class =
-                    with_js.replace("{CLASS}", crate::scanning::markers::class_marker());
-                let with_id = with_class.replace("{ID}", crate::scanning::markers::id_marker());
-                out.push(with_id);
+                out.push(crate::scanning::markers::fill_markers(
+                    &tmpl.replace("{JS}", js),
+                ));
             }
         }
         out

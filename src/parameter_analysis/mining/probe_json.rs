@@ -146,7 +146,7 @@ pub async fn probe_json_body_params(
                 {
                     let mut st = stats_clone.lock().await;
                     st.record_attempt();
-                    if crate::scanning::markers::classify_probe_reflection(&text).detected() {
+                    if crate::scanning::markers::probe_reflected(&text) {
                         st.record_reflection();
                         if !st.collapsed {
                             discovered = Some(
@@ -192,19 +192,7 @@ pub async fn probe_json_body_params(
         handles.push(handle);
     }
 
-    // Batch collect discovered params
-    let mut batch: Vec<Param> = Vec::new();
-    for h in handles {
-        if let Ok(opt) = h.await
-            && let Some(p) = opt
-        {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        let mut guard = reflection_params.lock().await;
-        guard.extend(batch);
-    }
+    extend_with_joined(&reflection_params, handles).await;
 
     // Collapse normalization to single 'any' JSON param if triggered. Only the
     // JsonBody params this stage mined fold in; everything else is preserved.

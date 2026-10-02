@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use dalfox::payload::{
-    RemoteFetchOptions, get_remote_payloads, get_remote_words, has_remote_payloads,
-    has_remote_wordlists, init_remote_payloads, init_remote_payloads_with, init_remote_wordlists,
-    list_payload_providers, list_wordlist_providers, register_payload_provider,
+    RemoteFetchOptions, get_remote_payloads_for, get_remote_words_for, init_remote_payloads_with,
+    init_remote_wordlists_with, list_payload_providers, list_wordlist_providers,
+    register_payload_provider,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -66,26 +66,24 @@ async fn test_payload_fetch_path_and_wordlist_unknown_path() {
     .await
     .expect("initialize remote payloads");
 
-    assert!(has_remote_payloads());
-    let payloads = get_remote_payloads().expect("payload cache should exist");
+    let payloads = get_remote_payloads_for(&providers).expect("payload cache should exist");
     assert_eq!(
         payloads.as_ref(),
         &vec!["bar".to_string(), "baz".to_string(), "foo".to_string()]
     );
 
     // idempotent path (already initialized)
-    init_remote_payloads(&providers)
+    init_remote_payloads_with(&providers, RemoteFetchOptions::default())
         .await
         .expect("idempotent payload init");
 
     // unknown-provider path for wordlists in a fresh wordlist cache
     let unknown_wordlist = vec!["definitely-unknown-wordlist-provider".to_string()];
-    init_remote_wordlists(&unknown_wordlist)
+    init_remote_wordlists_with(&unknown_wordlist, RemoteFetchOptions::default())
         .await
         .expect("unknown wordlist provider should yield empty cache");
-    assert!(has_remote_wordlists());
     assert!(
-        get_remote_words()
+        get_remote_words_for(&unknown_wordlist)
             .expect("wordlist cache should exist")
             .is_empty()
     );

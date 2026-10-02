@@ -157,31 +157,6 @@ fn test_htmlpad_in_apply_encoders() {
 }
 
 #[test]
-fn test_generate_adaptive_encodings_angle_blocked() {
-    let encoders = generate_adaptive_encodings(&['<', '>'], &['"', '\'']);
-    assert!(encoders.contains(&"html".to_string()));
-    assert!(encoders.contains(&"url".to_string()));
-    assert!(encoders.contains(&"2url".to_string()));
-    assert!(encoders.contains(&"3url".to_string()));
-    assert!(encoders.contains(&"4url".to_string()));
-    assert!(encoders.contains(&"unicode".to_string()));
-}
-
-#[test]
-fn test_generate_adaptive_encodings_quote_blocked() {
-    let encoders = generate_adaptive_encodings(&['"'], &['<', '>']);
-    assert!(encoders.contains(&"html".to_string()));
-    assert!(encoders.contains(&"url".to_string()));
-}
-
-#[test]
-fn test_generate_adaptive_encodings_nothing_blocked() {
-    let encoders = generate_adaptive_encodings(&[], &['<', '>', '"']);
-    // Should at least have url as baseline
-    assert!(encoders.contains(&"url".to_string()));
-}
-
-#[test]
 fn test_apply_adaptive_encoding_angle_blocked() {
     let variants = apply_adaptive_encoding("<img src=x>", &['<', '>']);
     assert!(variants.len() > 1, "should produce multiple variants");

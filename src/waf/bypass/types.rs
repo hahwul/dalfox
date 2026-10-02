@@ -68,26 +68,10 @@ pub enum MutationType {
     EntityScheme,
 }
 
+// The variant name is the stable key; renaming a variant changes the JSON.
 impl std::fmt::Display for MutationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            MutationType::HtmlCommentSplit => "HtmlCommentSplit",
-            MutationType::WhitespaceMutation => "WhitespaceMutation",
-            MutationType::BacktickParens => "BacktickParens",
-            MutationType::ConstructorChain => "ConstructorChain",
-            MutationType::UnicodeJsEscape => "UnicodeJsEscape",
-            MutationType::MixedHtmlEntities => "MixedHtmlEntities",
-            MutationType::CaseAlternation => "CaseAlternation",
-            MutationType::SlashSeparator => "SlashSeparator",
-            MutationType::HtmlEntityParens => "HtmlEntityParens",
-            MutationType::SvgAnimateExec => "SvgAnimateExec",
-            MutationType::ExoticWhitespace => "ExoticWhitespace",
-            MutationType::KeywordEntityEncode => "KeywordEntityEncode",
-            MutationType::MultiSlash => "MultiSlash",
-            MutationType::SchemeBreak => "SchemeBreak",
-            MutationType::EntityScheme => "EntityScheme",
-        };
-        f.write_str(name)
+        write!(f, "{self:?}")
     }
 }
 

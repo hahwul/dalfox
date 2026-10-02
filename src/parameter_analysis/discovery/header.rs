@@ -52,7 +52,7 @@ async fn detect_blanket_header_echo(target: &Target) -> bool {
     crate::record_outbound_request().await;
     match crate::utils::http::send_counted(request).await {
         Ok(resp) => match crate::utils::http::read_body(resp).await {
-            Ok(text) => crate::scanning::markers::classify_probe_reflection(&text).detected(),
+            Ok(text) => crate::scanning::markers::probe_reflected(&text),
             Err(_) => false,
         },
         Err(_) => false,
@@ -145,7 +145,7 @@ pub async fn check_header_discovery(
                 let mut discovered: Option<Param> = None;
                 if let Ok(resp) = crate::utils::http::send_counted(request).await
                     && let Ok(text) = crate::utils::http::read_body(resp).await
-                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                    && crate::scanning::markers::probe_reflected(&text)
                 {
                     discovered = Some(
                         Param::new(
@@ -168,17 +168,5 @@ pub async fn check_header_discovery(
         handles.push(handle);
     }
 
-    // Batch collect
-    let mut batch: Vec<Param> = Vec::new();
-    for handle in handles {
-        if let Ok(opt) = handle.await
-            && let Some(p) = opt
-        {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        let mut guard = reflection_params.lock().await;
-        guard.extend(batch);
-    }
+    extend_with_joined(&reflection_params, handles).await;
 }
