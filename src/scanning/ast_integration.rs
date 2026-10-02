@@ -308,26 +308,7 @@ fn xml_script_type_is_javascript(script_type: &str) -> bool {
     let script_type = script_type
         .trim_matches(|c| matches!(c, '\t' | '\n' | '\u{000C}' | '\r' | ' '))
         .to_ascii_lowercase();
-    matches!(
-        script_type.as_str(),
-        "" | "module"
-            | "application/ecmascript"
-            | "application/javascript"
-            | "application/x-ecmascript"
-            | "application/x-javascript"
-            | "text/ecmascript"
-            | "text/javascript"
-            | "text/javascript1.0"
-            | "text/javascript1.1"
-            | "text/javascript1.2"
-            | "text/javascript1.3"
-            | "text/javascript1.4"
-            | "text/javascript1.5"
-            | "text/jscript"
-            | "text/livescript"
-            | "text/x-ecmascript"
-            | "text/x-javascript"
-    )
+    script_type.is_empty() || is_js_mime_essence(&script_type)
 }
 
 /// Extract JS blocks (inline `<script>` bodies, `on*` handler bodies, and
@@ -412,8 +393,14 @@ pub(crate) fn script_type_is_javascript(element: &scraper::node::Element) -> boo
             Some(language) => format!("text/{}", language.to_ascii_lowercase()),
         },
     };
+    is_js_mime_essence(&script_type)
+}
+
+/// Whether a lowercased, trimmed script `type` is a JavaScript MIME essence
+/// (or `module`) per HTML's script preparation rules.
+pub(crate) fn is_js_mime_essence(script_type: &str) -> bool {
     matches!(
-        script_type.as_str(),
+        script_type,
         "module"
             | "application/ecmascript"
             | "application/javascript"

@@ -18,6 +18,20 @@ struct TestState {
     stored_payload: String,
 }
 
+/// DOM-verify through a default client; `(verified, response_text)`.
+async fn dom_verify(
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> (bool, Option<String>) {
+    let client = target.build_client_or_default();
+    let outcome = check_dom_verification_with_evidence(&client, target, param, payload, args)
+        .await
+        .outcome;
+    (outcome.verified, outcome.response_text)
+}
+
 fn make_param() -> Param {
     Param::new("q".to_string(), "seed".to_string(), Location::Query)
 }
@@ -261,7 +275,7 @@ async fn test_check_dom_verification_early_return_when_skip() {
     let param = make_param();
     let mut args = default_scan_args();
     args.skip_xss_scanning = true;
-    let res = check_dom_verification(&target, &param, "PAY", &args).await;
+    let res = dom_verify(&target, &param, "PAY", &args).await;
     assert_eq!(res, (false, None));
 }
 
@@ -276,7 +290,7 @@ async fn test_check_dom_verification_detects_html_reflection() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(found, "text/html responses with payload should be detected");
     assert!(body.unwrap_or_default().contains(&payload));
 }
@@ -360,8 +374,9 @@ async fn test_dom_outcome_verified_threads_reflected_and_status() {
     let args = default_scan_args();
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(outcome.verified, "executable reflection must verify");
     assert!(
         outcome.reflected,
@@ -386,8 +401,9 @@ async fn test_dom_outcome_inert_echo_reflected_but_not_verified() {
     let args = default_scan_args();
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(!outcome.verified, "plain text must not verify");
     assert!(
         outcome.reflected,
@@ -418,8 +434,9 @@ async fn test_dom_outcome_escaped_echo_counts_as_reflected() {
     let args = default_scan_args();
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(!outcome.verified, "an escaped echo must never verify");
     assert!(
         outcome.reflected,
@@ -448,8 +465,9 @@ async fn test_dom_outcome_sanitized_strip_is_not_reflected() {
     let args = default_scan_args();
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(!outcome.verified, "stripped markup must not verify");
     assert!(
         !outcome.reflected,
@@ -473,8 +491,9 @@ async fn test_dom_outcome_4xx_block_echo_is_not_reflected() {
     let args = default_scan_args();
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(!outcome.verified, "a 403 block page must not verify");
     assert!(
         !outcome.reflected,
@@ -495,8 +514,9 @@ async fn test_dom_outcome_blocked_threads_5xx_status() {
     let args = default_scan_args();
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(!outcome.verified, "a 503 must not verify");
     assert!(!outcome.reflected, "an empty 503 body reflects nothing");
     assert_eq!(outcome.status, 503, "the 5xx status must be threaded out");
@@ -517,7 +537,7 @@ async fn test_check_dom_verification_marker_survives_case_fold() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(
         found,
         "uppercased marker class should still satisfy DOM evidence via case-insensitive scan"
@@ -541,7 +561,7 @@ async fn test_check_dom_verification_accepts_xhtml_content_type() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, _) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, _) = dom_verify(&target, &param, &payload, &args).await;
     assert!(
         found,
         "well-formed XHTML with an executable payload should verify"
@@ -557,7 +577,7 @@ async fn test_check_dom_verification_rejects_non_html_without_marker() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, payload, &args).await;
     assert!(
         !found,
         "application/json without marker should not pass DOM verification"
@@ -581,7 +601,7 @@ async fn test_check_dom_verification_rejects_json_with_marker() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, _body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, _body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(
         !found,
         "JSON is not parsed as HTML even when its string contains marker markup"
@@ -599,7 +619,7 @@ async fn test_check_dom_verification_returns_false_when_payload_missing() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(!found);
     assert!(body.is_none());
 }
@@ -616,7 +636,7 @@ async fn test_check_dom_verification_injects_header_params() {
     let param = Param::new("X-Test".to_string(), "seed".to_string(), Location::Header);
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(found);
     assert!(body.unwrap_or_default().contains(&payload));
 }
@@ -636,7 +656,7 @@ async fn test_check_dom_verification_injects_cookie_params() {
     let param = Param::new("session".to_string(), "seed".to_string(), Location::Header);
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(found);
     assert!(
         body.unwrap_or_default()
@@ -658,7 +678,7 @@ async fn test_check_dom_verification_injects_form_body_params() {
     let param = Param::new("q".to_string(), "seed".to_string(), Location::Body);
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(found);
     assert!(body.unwrap_or_default().contains(&payload));
 }
@@ -681,7 +701,7 @@ async fn test_check_dom_verification_injects_json_body_params() {
     let param = Param::new("q".to_string(), "seed".to_string(), Location::JsonBody);
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(found);
     assert!(body.unwrap_or_default().contains(&payload));
 }
@@ -699,7 +719,7 @@ async fn test_check_dom_verification_sxss_uses_secondary_url() {
     args.sxss = true;
     args.sxss_url = Some(format!("http://{}:{}/sxss/html", addr.ip(), addr.port()));
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(found, "sxss should verify stored payload at secondary URL");
     assert!(body.unwrap_or_default().contains(&payload));
 }
@@ -722,8 +742,9 @@ async fn test_dom_outcome_sxss_never_drives_early_exit() {
     args.sxss_url = Some(format!("http://{}:{}/sxss/html", addr.ip(), addr.port()));
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(
         outcome.verified,
         "sxss should still verify the stored payload"
@@ -751,7 +772,7 @@ async fn test_check_dom_verification_sxss_rejects_non_html_secondary_content() {
     args.sxss = true;
     args.sxss_url = Some(format!("http://{}:{}/sxss/json", addr.ip(), addr.port()));
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(!found);
     assert!(body.is_none());
 }
@@ -769,7 +790,7 @@ async fn test_check_dom_verification_sxss_without_url_returns_false() {
     args.sxss = true;
     args.sxss_url = None;
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(!found);
     assert!(body.is_none());
 }
@@ -1699,7 +1720,7 @@ async fn test_check_dom_verification_accepts_executable_url_attribute_protocol()
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, "javascript:alert(1)", &args).await;
+    let (found, body) = dom_verify(&target, &param, "javascript:alert(1)", &args).await;
 
     assert!(
         found,
@@ -1722,7 +1743,7 @@ async fn test_check_dom_verification_accepts_decoded_payload_variant_with_marker
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(
         found,
         "decoded payload variants with DOM markers should verify"
@@ -1742,8 +1763,7 @@ async fn test_check_dom_verification_rejects_javascript_url_in_img_src() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, _body) =
-        check_dom_verification(&target, &param, "javascript:alert(1)", &args).await;
+    let (found, _body) = dom_verify(&target, &param, "javascript:alert(1)", &args).await;
     assert!(
         !found,
         "javascript: scheme reflected into img@src must not be a verified finding"
@@ -1765,7 +1785,7 @@ async fn test_check_dom_verification_skips_body_on_redirect_response() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(
         !found,
         "DOM evidence in a 3xx response body must not be treated as verified"
@@ -1788,8 +1808,9 @@ async fn test_dom_outcome_redirect_is_not_reflected_and_threads_3xx_status() {
     let args = default_scan_args();
     let client = target.build_client_or_default();
 
-    let outcome =
-        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
     assert!(!outcome.verified, "a 3xx body must not verify");
     assert!(
         !outcome.reflected,

@@ -333,10 +333,9 @@ const BLOCKED_STREAK_LIMIT: u32 = 64;
 /// *Consecutive* 3xx-redirect responses that end the DOM phase.
 ///
 /// A redirect can never produce a DOM verification: browsers do not render a
-/// 3xx response body (only `Location:` drives navigation), and
-/// [`check_dom_verification::check_redirect_location`] returns `None` for every
-/// `javascript:` / `data:` / reflected-`next=` redirect (see its doc — modern
-/// browsers refuse to execute those from a `Location:` header). So a DOM payload
+/// 3xx response body (only `Location:` drives navigation), and DOM verification
+/// never treats a `javascript:` / `data:` / reflected-`next=` `Location:` as
+/// evidence (modern browsers refuse to execute those from a redirect header). So a DOM payload
 /// sent to a redirecting response is guaranteed non-verifying, and a long run of
 /// them is pure waste — the reflection phase already recorded any `R` the
 /// `Location:` echo warrants.

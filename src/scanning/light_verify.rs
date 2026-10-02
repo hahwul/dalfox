@@ -39,9 +39,7 @@ pub async fn verify_dom_xss_light_with_client(
     if let Ok(resp) = request.send().await {
         // Browsers do not render the body of a 3xx response, so any apparent
         // reflection/marker evidence inside that body cannot be exploited.
-        // Skip body-based verification entirely on redirects — `Location`
-        // header inspection is handled by `check_dom_verification`'s
-        // `check_redirect_location` and does not belong here.
+        // Skip body-based verification entirely on redirects.
         if resp.status().is_redirection() {
             return (
                 false,
