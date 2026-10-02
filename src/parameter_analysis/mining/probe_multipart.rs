@@ -119,13 +119,5 @@ pub async fn probe_multipart_params(
         handles.push(handle);
     }
 
-    let mut batch: Vec<Param> = Vec::new();
-    for handle in handles {
-        if let Ok(Some(p)) = handle.await {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        reflection_params.lock().await.extend(batch);
-    }
+    extend_with_joined(&reflection_params, handles).await;
 }

@@ -1622,5 +1622,22 @@ pub(crate) fn unresolved_explicit_param_specs(
     missing
 }
 
+/// Await every discovery/mining probe task and append the params they found
+/// to `reflection_params` in one lock acquisition, in spawn order.
+pub(crate) async fn extend_with_joined(
+    reflection_params: &Mutex<Vec<Param>>,
+    handles: Vec<tokio::task::JoinHandle<Option<Param>>>,
+) {
+    let mut batch: Vec<Param> = Vec::new();
+    for handle in handles {
+        if let Ok(Some(p)) = handle.await {
+            batch.push(p);
+        }
+    }
+    if !batch.is_empty() {
+        reflection_params.lock().await.extend(batch);
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -167,19 +167,7 @@ pub async fn probe_body_params(
             handles.push(handle);
         }
 
-        // Batch collect discovered params
-        let mut batch: Vec<Param> = Vec::new();
-        for h in handles {
-            if let Ok(opt) = h.await
-                && let Some(p) = opt
-            {
-                batch.push(p);
-            }
-        }
-        if !batch.is_empty() {
-            let mut guard = reflection_params.lock().await;
-            guard.extend(batch);
-        }
+        extend_with_joined(&reflection_params, handles).await;
 
         // If collapsed after attempts, normalize the Body params this stage
         // mined to a single 'any' param. Params discovered via other channels

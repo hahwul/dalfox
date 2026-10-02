@@ -17,7 +17,7 @@
 //! Respects `--skip-discovery`, `--skip-reflection-header`, etc.
 
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::{Location, Param, ReflectionAnalysis};
+use crate::parameter_analysis::{Location, Param, ReflectionAnalysis, extend_with_joined};
 use crate::scanning::url_inject::build_injected_url;
 use crate::target_parser::Target;
 use std::sync::{Arc, OnceLock};

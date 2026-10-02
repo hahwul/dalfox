@@ -90,17 +90,5 @@ pub async fn check_cookie_discovery(
         handles.push(handle);
     }
 
-    // Batch collect cookie params
-    let mut batch: Vec<Param> = Vec::new();
-    for handle in handles {
-        if let Ok(opt) = handle.await
-            && let Some(p) = opt
-        {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        let mut guard = reflection_params.lock().await;
-        guard.extend(batch);
-    }
+    extend_with_joined(&reflection_params, handles).await;
 }
