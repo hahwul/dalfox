@@ -18,6 +18,21 @@ struct TestState {
     stored_payload: String,
 }
 
+/// Inject through a default client and a throwaway WAF streak; returns the
+/// classified kind and the response text.
+async fn reflect(
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> (Option<ReflectionKind>, Option<String>) {
+    let client = target.build_client_or_default();
+    let streak = std::sync::atomic::AtomicU32::new(0);
+    let (kind, body, ..) =
+        check_reflection_with_response(&client, target, param, payload, args, &streak).await;
+    (kind, body.map(|b| b.text))
+}
+
 fn make_param() -> Param {
     Param::new("q".to_string(), "seed".to_string(), Location::Query)
 }
@@ -183,7 +198,7 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
 /// The reflection-scan multipart injection must send the payload even when the
 /// scanned param is absent from the captured body, or the request carries no
 /// injection and a real reflection is missed. Exercises the `if !found`
-/// fallback in `fetch_injection_response_with_client`'s MultipartBody arm.
+/// fallback in `fetch_injection_response`'s MultipartBody arm.
 #[tokio::test]
 async fn test_fetch_injection_multipart_injects_absent_param() {
     let addr = start_mock_server("stored").await;
@@ -197,11 +212,10 @@ async fn test_fetch_injection_multipart_injects_absent_param() {
     let streak = std::sync::atomic::AtomicU32::new(0);
     let client = target.build_client_or_default();
 
-    let body =
-        fetch_injection_response_with_client(&client, &target, &param, "PAYMARK", &args, &streak)
-            .await
-            .body
-            .expect("injection response");
+    let body = fetch_injection_response(&client, &target, &param, "PAYMARK", &args, &streak)
+        .await
+        .body
+        .expect("injection response");
     let text = body.renderable_text().unwrap_or_default();
     assert!(
         text.contains("PAYMARK"),
@@ -215,7 +229,7 @@ async fn test_check_reflection_early_return_when_skip() {
     let param = make_param();
     let mut args = default_scan_args();
     args.skip_xss_scanning = true;
-    let res = check_reflection(&target, &param, "PAY", &args).await;
+    let res = reflect(&target, &param, "PAY", &args).await.0.is_some();
     assert!(
         !res,
         "should early-return false when skip_xss_scanning=true"
@@ -228,7 +242,7 @@ async fn test_check_reflection_with_response_early_return_when_skip() {
     let param = make_param();
     let mut args = default_scan_args();
     args.skip_xss_scanning = true;
-    let res = check_reflection_with_response(None, &target, &param, "PAY", &args).await;
+    let res = reflect(&target, &param, "PAY", &args).await;
     assert_eq!(
         res,
         (None, None),
@@ -726,7 +740,7 @@ async fn test_check_reflection_detects_raw_response() {
     let param = make_param();
     let args = default_scan_args();
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(found, "raw reflection should be detected");
 }
 
@@ -742,7 +756,7 @@ async fn test_check_reflection_demotes_html_entity_response_in_safe_context() {
     let param = make_param();
     let args = default_scan_args();
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(
         !found,
         "entity-encoded reflection inside a safe body context should be demoted"
@@ -761,7 +775,7 @@ async fn test_check_reflection_suppresses_inert_js_string_apos_reflection() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
+    let (kind, body) = reflect(&target, &param, payload, &args).await;
     assert_eq!(
         kind, None,
         "apos-encoded JS-string reflection should be classified inert (no R)"
@@ -787,7 +801,7 @@ async fn test_check_reflection_demotes_url_encoded_tag_echo() {
     let param = make_param();
     let args = default_scan_args();
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(
         !found,
         "percent-encoded tag echo in element content is inert — no [R]"
@@ -805,7 +819,7 @@ async fn test_check_reflection_demotes_form_urlencoded_tag_echo_but_keeps_body()
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
+    let (kind, body) = reflect(&target, &param, payload, &args).await;
     assert_eq!(kind, None, "form-encoded tag echo is an inert escaped echo");
     assert!(
         body.unwrap_or_default()
@@ -822,7 +836,7 @@ async fn test_check_reflection_returns_false_when_not_reflected() {
     let param = make_param();
     let args = default_scan_args();
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(!found, "non-reflective response should not be detected");
 }
 
@@ -838,7 +852,7 @@ async fn test_check_reflection_with_response_demotes_safe_html_entity_reflection
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
+    let (kind, body) = reflect(&target, &param, payload, &args).await;
     assert_eq!(
         kind, None,
         "safe-context entity reflection must not produce a reflection kind"
@@ -857,7 +871,7 @@ async fn test_check_reflection_with_response_not_reflected() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
+    let (kind, body) = reflect(&target, &param, payload, &args).await;
     assert_eq!(kind, None);
     assert!(
         body.is_some(),
@@ -875,7 +889,7 @@ async fn test_check_reflection_sxss_uses_secondary_url() {
     args.sxss = true;
     args.sxss_url = Some(format!("http://{}:{}/sxss/stored", addr.ip(), addr.port()));
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(found, "sxss mode should verify reflection via sxss_url");
 }
 
@@ -903,7 +917,7 @@ async fn test_check_reflection_sxss_skips_junk_url_and_finds_later_candidate() {
     // Single retry per candidate keeps the test fast.
     args.sxss_retries = 1;
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(
         found,
         "sxss retrieval must continue past a candidate URL whose body lacks the payload"
@@ -931,7 +945,7 @@ async fn test_check_reflection_sxss_falls_back_to_inject_response_body() {
     args.sxss_url = None;
     args.sxss_retries = 1;
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(
         found,
         "sxss must fall back to the inject-response body when retrieval URLs miss the payload"
@@ -953,7 +967,7 @@ async fn test_check_reflection_sxss_without_url_returns_false() {
     args.sxss = true;
     args.sxss_url = None;
 
-    let found = check_reflection(&target, &param, payload, &args).await;
+    let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(!found, "sxss mode without sxss_url should return false");
 }
 
@@ -968,7 +982,7 @@ async fn test_check_reflection_catches_decoded_payload_in_redirect_location() {
     let param = make_param();
     let args = default_scan_args();
     assert!(
-        check_reflection(&target, &param, payload, &args).await,
+        reflect(&target, &param, payload, &args).await.0.is_some(),
         "reflection check must catch the raw payload appearing in Location"
     );
 }
@@ -989,8 +1003,13 @@ async fn test_redirect_location_body_is_not_renderable_and_carries_no_markup() {
     let args = default_scan_args();
     let streak = std::sync::atomic::AtomicU32::new(0);
 
-    let (kind, body) = crate::scanning::check_reflection::check_reflection_with_response_tracked(
-        None, &target, &param, payload, &args, &streak,
+    let (kind, body, ..) = check_reflection_with_response(
+        &target.build_client_or_default(),
+        &target,
+        &param,
+        payload,
+        &args,
+        &streak,
     )
     .await;
 
@@ -1033,8 +1052,13 @@ async fn test_redirect_location_stand_in_yields_no_dom_marker_evidence() {
     let args = default_scan_args();
     let streak = std::sync::atomic::AtomicU32::new(0);
 
-    let (_, body) = crate::scanning::check_reflection::check_reflection_with_response_tracked(
-        None, &target, &param, payload, &args, &streak,
+    let (_, body, ..) = check_reflection_with_response(
+        &target.build_client_or_default(),
+        &target,
+        &param,
+        payload,
+        &args,
+        &streak,
     )
     .await;
     let body = body.expect("redirect reflection must return a body");
@@ -1060,7 +1084,7 @@ async fn test_inert_data_gate_does_not_swallow_redirect_location_reflection() {
     let param = make_param();
     let args = default_scan_args();
     assert!(
-        check_reflection(&target, &param, payload, &args).await,
+        reflect(&target, &param, payload, &args).await.0.is_some(),
         "inert-data gate must not suppress a Location-header reflection on a JSON-CT redirect"
     );
 }
@@ -1078,7 +1102,7 @@ async fn test_check_reflection_suppresses_json_content_type_reflection() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, _body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
+    let (kind, _body) = reflect(&target, &param, payload, &args).await;
     assert_eq!(kind, None, "application/json reflection must be suppressed");
 }
 
@@ -1558,9 +1582,7 @@ async fn test_path_reflection_suppressed_on_non_html_content_type() {
     param.location = Location::Path;
     let args = default_scan_args();
 
-    let (kind, _body) =
-        check_reflection_with_response(None, &target, &param, "<script>alert(1)</script>", &args)
-            .await;
+    let (kind, _body) = reflect(&target, &param, "<script>alert(1)</script>", &args).await;
     assert_eq!(
         kind, None,
         "path-injection reflection on application/javascript should be suppressed"
@@ -2633,16 +2655,15 @@ mod injection_response_gates {
 /// most coverage here — a sanitizer that strips markup, a truncated echo, a
 /// `+`→space form decode, an event handler, a URL scheme position, an already
 /// executable URL value, an HTML-parsed `srcdoc`, a framework innerHTML sink.
-/// The status the reflection-phase budget needs rides on a crate-private path
-/// (`check_reflection_with_response_status`), NOT on the public `ReflectionBody`
-/// — adding a required field there would break external exhaustive matches.
-/// These pin (a) the status is threaded correctly and (b) the public
-/// `_tracked` entry still returns the identical `(kind, body)`.
+/// The status the reflection-phase budget needs rides on the return tuple of
+/// `check_reflection_with_response`, NOT on the public `ReflectionBody` —
+/// adding a required field there would break external exhaustive matches.
+/// These pin that the status is threaded correctly.
 mod status_path {
     use super::*;
 
     #[tokio::test]
-    async fn status_path_threads_200_and_matches_public_tracked() {
+    async fn status_path_threads_200() {
         let payload = "<svg/onload=alert(1)>";
         let addr = start_mock_server("stored").await;
         let target = make_target(addr, "/reflect/raw");
@@ -2650,33 +2671,20 @@ mod status_path {
         let args = default_scan_args();
         let streak = std::sync::atomic::AtomicU32::new(0);
 
-        let (kind, body, status, _) =
-            crate::scanning::check_reflection::check_reflection_with_response_status(
-                None, &target, &param, payload, &args, &streak,
-            )
-            .await;
+        let (kind, _body, status, _) = check_reflection_with_response(
+            &target.build_client_or_default(),
+            &target,
+            &param,
+            payload,
+            &args,
+            &streak,
+        )
+        .await;
         assert_eq!(
             status, 200,
             "a 200 injection response must thread status 200"
         );
         assert!(kind.is_some(), "raw reflection must classify");
-
-        // The public entry returns the same (kind, body), status dropped.
-        let streak2 = std::sync::atomic::AtomicU32::new(0);
-        let (pk, pb) = crate::scanning::check_reflection::check_reflection_with_response_tracked(
-            None, &target, &param, payload, &args, &streak2,
-        )
-        .await;
-        assert_eq!(
-            format!("{:?}", pk),
-            format!("{:?}", kind),
-            "public tracked kind must match the status path"
-        );
-        assert_eq!(
-            pb.map(|b| b.text),
-            body.map(|b| b.text),
-            "public tracked body must match the status path"
-        );
     }
 
     #[tokio::test]
@@ -2691,11 +2699,15 @@ mod status_path {
         let args = default_scan_args();
         let streak = std::sync::atomic::AtomicU32::new(0);
 
-        let (_kind, _body, status, _) =
-            crate::scanning::check_reflection::check_reflection_with_response_status(
-                None, &target, &param, payload, &args, &streak,
-            )
-            .await;
+        let (_kind, _body, status, _) = check_reflection_with_response(
+            &target.build_client_or_default(),
+            &target,
+            &param,
+            payload,
+            &args,
+            &streak,
+        )
+        .await;
         assert_eq!(status, 403, "a 4xx block must thread its status out");
     }
 }

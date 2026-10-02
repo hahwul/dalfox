@@ -108,7 +108,6 @@ pub(crate) use waf_strategy::*;
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification_with_evidence;
-use crate::scanning::check_reflection::check_reflection_with_response_tracked;
 use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -532,9 +531,7 @@ impl ScanWorkerCtx {
     ///
     /// Returns the injection status alongside the classified reflection so the
     /// reflection phase's transformed-inert-echo budget can exclude 4xx block
-    /// pages. Uses the crate-private status-aware path
-    /// ([`check_reflection::check_reflection_with_response_status`]); the public
-    /// `_tracked` entry keeps its `(kind, body)` contract for external callers.
+    /// pages (see [`check_reflection::check_reflection_with_response`]).
     async fn fetch_reflection(
         &self,
         param: &Param,
@@ -547,8 +544,8 @@ impl ScanWorkerCtx {
         bool,
     ) {
         let _permit = self.req_budget.acquire().await;
-        check_reflection::check_reflection_with_response_status(
-            Some(self.client.as_ref()),
+        check_reflection::check_reflection_with_response(
+            self.client.as_ref(),
             &self.target,
             param,
             payload,
@@ -846,8 +843,8 @@ impl ScanWorkerCtx {
                 break;
             }
             let (kind, response_text, _, xml_content_type) =
-                check_reflection::check_reflection_with_response_status(
-                    Some(client),
+                check_reflection::check_reflection_with_response(
+                    client,
                     &self.target,
                     param,
                     pp,
@@ -916,8 +913,8 @@ impl ScanWorkerCtx {
         // scan is cancelled — it is a second HTTP request per parameter.
         if !probe_reflected && !self.cancelled() {
             let numeric_probe = crate::scanning::check_reflection::NUMERIC_PROBE_MARKER;
-            let (kind, _) = check_reflection_with_response_tracked(
-                Some(client),
+            let (kind, ..) = check_reflection::check_reflection_with_response(
+                client,
                 &self.target,
                 param,
                 numeric_probe,

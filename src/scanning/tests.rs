@@ -3948,7 +3948,7 @@ async fn test_run_scanning_cancel_stops_probe_and_hpp_requests() {
     );
 }
 
-/// The `--sxss` branch of `fetch_injection_response_with_client` used to return
+/// The `--sxss` branch of `fetch_injection_response` used to return
 /// candidate bodies without applying any of the response gates the normal
 /// reflection branch applies. An `application/json` echo is inert — a browser
 /// renders it as data, never as markup — so the plain path suppresses it, while

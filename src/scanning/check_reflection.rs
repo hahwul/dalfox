@@ -2214,7 +2214,7 @@ impl ReflectionBody {
 /// before a reflection may be recorded from it.
 ///
 /// Shared by the normal reflection branch and the `--sxss` branch of
-/// [`fetch_injection_response_with_client`]. The `--sxss` branch used to apply
+/// [`fetch_injection_response`]. The `--sxss` branch used to apply
 /// none of them, so a stored-XSS run reported reflections the plain run drops:
 /// echoes into `application/json` / `text/csv` / nosniff `text/plain` bodies,
 /// responses whose status the operator excluded with `--ignore-return`, and
@@ -2585,24 +2585,6 @@ pub(crate) async fn sxss_store_probe(
 }
 
 async fn fetch_injection_response(
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-    streak: &std::sync::atomic::AtomicU32,
-) -> FetchedInjection {
-    if args.skip_xss_scanning {
-        return FetchedInjection {
-            body: None,
-            status: 0,
-            xml_content_type: false,
-        };
-    }
-    let client = target.build_client_or_default();
-    fetch_injection_response_with_client(&client, target, param, payload, args, streak).await
-}
-
-async fn fetch_injection_response_with_client(
     client: &Client,
     target: &Target,
     param: &Param,
@@ -2949,60 +2931,20 @@ async fn fetch_injection_response_with_client(
     }
 }
 
-/// Inject `payload`, then classify reflection in the response. Convenience
-/// entry for tests / one-shot callers: uses a throwaway per-call WAF streak.
-/// Production scan workers call [`check_reflection_with_response_tracked`] with
-/// their own per-worker streak so the adaptive backoff escalates correctly.
-pub async fn check_reflection_with_response(
-    client: Option<&Client>,
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> (Option<ReflectionKind>, Option<String>) {
-    let streak = std::sync::atomic::AtomicU32::new(0);
-    let (kind, body) =
-        check_reflection_with_response_tracked(client, target, param, payload, args, &streak).await;
-    (kind, body.map(|b| b.text))
-}
-
 /// Inject `payload`, then classify reflection in the response.
 ///
-/// Pass `Some(client)` to reuse a pooled HTTP client (MCP / REST runners);
-/// pass `None` on the CLI path to build a default client per request from
-/// the target. Returns the reflection kind (suppressed to `None` when the
-/// match lands only in a known-safe context) together with the response
-/// body, or `(None, None)` when no response was obtained.
+/// Returns the reflection kind (suppressed to `None` when the match lands only
+/// in a known-safe context), the response body, the HTTP status of the
+/// injection response (`0` for a request error, a `--skip-xss-scanning` no-op,
+/// or the `--sxss` path) and whether the response was XML. The status lets the
+/// reflection phase's transformed-inert-echo budget skip a 4xx block page that
+/// echoes the payload.
 ///
 /// `streak` is the caller's per-worker consecutive-WAF-block counter (see
 /// [`apply_injection_waf_accounting`]); one per param worker keeps the
 /// `--waf-evasion` backoff escalation from being reset by sibling workers.
-pub async fn check_reflection_with_response_tracked(
-    client: Option<&Client>,
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-    streak: &std::sync::atomic::AtomicU32,
-) -> (Option<ReflectionKind>, Option<ReflectionBody>) {
-    // The public contract returns only `(kind, body)`. The status-aware path
-    // computes the same values plus the injection status; drop the status here
-    // so this signature and return type stay byte-for-byte compatible.
-    let (kind, body, _status, _xml_content_type) =
-        check_reflection_with_response_status(client, target, param, payload, args, streak).await;
-    (kind, body)
-}
-
-/// Crate-private status-aware sibling of [`check_reflection_with_response_tracked`].
-///
-/// Identical classification, plus the HTTP status of the injection response
-/// (`0` for a request error, a `--skip-xss-scanning` no-op, or the `--sxss`
-/// path). Production scan workers use this so the reflection phase's
-/// transformed-inert-echo budget can skip a 4xx block page that echoes the
-/// payload — without exposing the status on the public [`ReflectionBody`], whose
-/// field set is part of the crate's public API.
-pub(crate) async fn check_reflection_with_response_status(
-    client: Option<&Client>,
+pub async fn check_reflection_with_response(
+    client: &Client,
     target: &Target,
     param: &Param,
     payload: &str,
@@ -3013,12 +2955,7 @@ pub(crate) async fn check_reflection_with_response_status(
         body,
         status,
         xml_content_type,
-    } = match client {
-        Some(client) => {
-            fetch_injection_response_with_client(client, target, param, payload, args, streak).await
-        }
-        None => fetch_injection_response(target, param, payload, args, streak).await,
-    };
+    } = fetch_injection_response(client, target, param, payload, args, streak).await;
     if let Some(body) = body {
         let kind = classify_reflection(&body.text, payload);
         let kind = match kind {
@@ -3035,23 +2972,6 @@ pub(crate) async fn check_reflection_with_response_status(
     } else {
         (None, None, status, xml_content_type)
     }
-}
-
-/// Test-only convenience wrapper over [`check_reflection_with_response`]:
-/// discards the body and reports only whether a (non-safe-context) reflection
-/// was found, always building a default client. Production code calls
-/// [`check_reflection_with_response`] directly with a pooled client.
-#[cfg(test)]
-async fn check_reflection(
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> bool {
-    check_reflection_with_response(None, target, param, payload, args)
-        .await
-        .0
-        .is_some()
 }
 
 /// HPP reflection check: send a request using a pre-built HPP URL (with duplicate params)
