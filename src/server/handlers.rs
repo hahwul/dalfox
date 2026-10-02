@@ -237,6 +237,15 @@ pub(crate) fn split_header_query_param(raw: &str) -> Vec<String> {
     out
 }
 
+/// Split a comma-separated `GET /scan` list value, trimming each item and
+/// dropping empty ones.
+fn split_csv(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
+}
+
 pub(crate) async fn get_scan_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -294,16 +303,11 @@ pub(crate) async fn get_scan_handler(
     // Build ScanOptions from query parameters
     let headers_param = params.get("header").cloned().unwrap_or_default();
     let opt_headers: Vec<String> = split_header_query_param(&headers_param);
-    let encoders_param = params.get("encoders").cloned().unwrap_or_default();
-    let encoders: Vec<String> = if encoders_param.is_empty() {
-        vec!["url".to_string(), "html".to_string()]
-    } else {
-        encoders_param
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    };
+    let encoders: Vec<String> = params
+        .get("encoders")
+        .filter(|s| !s.is_empty())
+        .map(|s| split_csv(s))
+        .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]);
     let cookie = params.get("cookie").cloned();
     // A present-but-unparseable numeric query param is a 400, not a silent
     // fallback to the default (which is what `.parse().ok()` used to do).
@@ -338,12 +342,7 @@ pub(crate) async fn get_scan_handler(
     let include_request = parse_bool_query(&params, "include_request");
     let include_response = parse_bool_query(&params, "include_response");
 
-    let param_list: Option<Vec<String>> = params.get("param").map(|s| {
-        s.split(',')
-            .map(|x| x.trim().to_string())
-            .filter(|x| !x.is_empty())
-            .collect()
-    });
+    let param_list: Option<Vec<String>> = params.get("param").map(|s| split_csv(s));
     let proxy = params.get("proxy").cloned();
     let follow_redirects = parse_bool_query(&params, "follow_redirects");
     let skip_mining = parse_bool_query(&params, "skip_mining");
@@ -376,18 +375,8 @@ pub(crate) async fn get_scan_handler(
         data: data_opt,
         user_agent,
         encoders: Some(encoders),
-        remote_payloads: params.get("remote_payloads").map(|s| {
-            s.split(',')
-                .map(|x| x.trim().to_string())
-                .filter(|x| !x.is_empty())
-                .collect::<Vec<_>>()
-        }),
-        remote_wordlists: params.get("remote_wordlists").map(|s| {
-            s.split(',')
-                .map(|x| x.trim().to_string())
-                .filter(|x| !x.is_empty())
-                .collect::<Vec<_>>()
-        }),
+        remote_payloads: params.get("remote_payloads").map(|s| split_csv(s)),
+        remote_wordlists: params.get("remote_wordlists").map(|s| split_csv(s)),
         include_request: Some(include_request),
         include_response: Some(include_response),
         callback_url: params.get("callback_url").cloned(),
