@@ -109,3 +109,34 @@ pub(crate) fn make_api_response<T: Serialize>(
     cors.insert("Cache-Control", HeaderValue::from_static("no-store"));
     (status, cors, body)
 }
+
+/// `{code, msg}` error envelope whose `code` mirrors the HTTP status.
+pub(crate) fn api_error(
+    state: &AppState,
+    req_headers: &HeaderMap,
+    params: &std::collections::HashMap<String, String>,
+    status: StatusCode,
+    msg: impl Into<String>,
+) -> (StatusCode, HeaderMap, String) {
+    let resp = ApiResponse::<serde_json::Value> {
+        code: status.as_u16() as i32,
+        msg: msg.into(),
+        data: None,
+    };
+    make_api_response(state, req_headers, params, status, &resp)
+}
+
+/// `{code: 200, msg: "ok", data}` success envelope.
+pub(crate) fn api_ok<T: Serialize>(
+    state: &AppState,
+    req_headers: &HeaderMap,
+    params: &std::collections::HashMap<String, String>,
+    data: T,
+) -> (StatusCode, HeaderMap, String) {
+    let resp = ApiResponse {
+        code: 200,
+        msg: "ok".to_string(),
+        data: Some(data),
+    };
+    make_api_response(state, req_headers, params, StatusCode::OK, &resp)
+}

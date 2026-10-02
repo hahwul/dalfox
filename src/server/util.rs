@@ -174,16 +174,12 @@ pub(crate) async fn try_admit_and_queue(
     Some((id, lease))
 }
 
-/// Build the standard 503 "at capacity" response body for a rejected admission.
-pub(crate) fn at_capacity_response(state: &AppState) -> ApiResponse<serde_json::Value> {
-    ApiResponse::<serde_json::Value> {
-        code: 503,
-        msg: format!(
-            "server at capacity: {} concurrent scans already in flight (raise or disable with --max-concurrent-scans)",
-            state.max_concurrent_scans
-        ),
-        data: None,
-    }
+/// The 503 "at capacity" message for a rejected admission.
+pub(crate) fn at_capacity_message(state: &AppState) -> String {
+    format!(
+        "server at capacity: {} concurrent scans already in flight (raise or disable with --max-concurrent-scans)",
+        state.max_concurrent_scans
+    )
 }
 
 /// Open (creating if needed) the `--log-file` for appending.

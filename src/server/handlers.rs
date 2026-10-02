@@ -31,12 +31,13 @@ pub(crate) async fn start_scan_handler(
     let req = match req {
         Ok(Json(r)) => r,
         Err(rej) => {
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 400,
-                msg: format!("invalid request body: {}", rej),
-                data: None,
-            };
-            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+            return api_error(
+                &state,
+                &headers,
+                &params,
+                StatusCode::BAD_REQUEST,
+                format!("invalid request body: {}", rej),
+            );
         }
     };
 
@@ -44,36 +45,33 @@ pub(crate) async fn start_scan_handler(
     // stored target, dispatch) so whitespace variants stay consistent.
     let url = req.target.trim().to_string();
     if url.is_empty() {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg: "url is required".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::BAD_REQUEST,
+            "url is required",
+        );
     }
     // Require an http(s) scheme, matching /preflight and the MCP scan tool.
     // Without this, a garbage target (e.g. "ftp://x" or a bare host) was
     // queued and "scanned", silently finishing as `done` with 0 findings —
     // indistinguishable from a real target that simply had no XSS.
     if !has_http_scheme(&url) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg: "url must start with http:// or https://".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::BAD_REQUEST,
+            "url must start with http:// or https://",
+        );
     }
 
     // `&mut`: validation also normalizes (e.g. uppercases `method`), and the
     // normalized options are what gets dispatched to the scan below.
     let mut opts = req.options.clone().unwrap_or_default();
     if let Err(msg) = validate_scan_options(&mut opts) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg,
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
     }
     let include_request = opts.include_request.unwrap_or(false);
     let include_response = opts.include_response.unwrap_or(false);
@@ -86,13 +84,12 @@ pub(crate) async fn start_scan_handler(
     let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
         Some(admitted) => admitted,
         None => {
-            let resp = at_capacity_response(&state);
-            return make_api_response(
+            return api_error(
                 &state,
                 &headers,
                 &params,
                 StatusCode::SERVICE_UNAVAILABLE,
-                &resp,
+                at_capacity_message(&state),
             );
         }
     };
@@ -108,12 +105,12 @@ pub(crate) async fn start_scan_handler(
         lease,
     );
 
-    let resp = ApiResponse::<serde_json::Value> {
-        code: 200,
-        msg: "ok".to_string(),
-        data: Some(serde_json::json!({ "scan_id": id, "target": url })),
-    };
-    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+    api_ok(
+        &state,
+        &headers,
+        &params,
+        serde_json::json!({ "scan_id": id, "target": url }),
+    )
 }
 
 pub(crate) async fn get_result_handler(
@@ -230,21 +227,15 @@ pub(crate) async fn get_result_handler(
             if j.is_terminal() {
                 log(&state, "RESULT", &format!("id={} status={}", id, j.status));
             }
-            let resp = ApiResponse {
-                code: 200,
-                msg: "ok".to_string(),
-                data: Some(payload),
-            };
-            make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+            api_ok(&state, &headers, &params, payload)
         }
-        None => {
-            let resp = ApiResponse::<ResultPayload<'_>> {
-                code: 404,
-                msg: "not found".to_string(),
-                data: None,
-            };
-            make_api_response(&state, &headers, &params, StatusCode::NOT_FOUND, &resp)
-        }
+        None => api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::NOT_FOUND,
+            "not found",
+        ),
     }
 }
 
@@ -349,21 +340,23 @@ pub(crate) async fn get_scan_handler(
         .trim()
         .to_string();
     if url.is_empty() {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg: "url is required".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::BAD_REQUEST,
+            "url is required",
+        );
     }
     // Require an http(s) scheme, matching POST /scan, /preflight, and MCP.
     if !has_http_scheme(&url) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg: "url must start with http:// or https://".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::BAD_REQUEST,
+            "url must start with http:// or https://",
+        );
     }
 
     // Build ScanOptions from query parameters
@@ -399,12 +392,7 @@ pub(crate) async fn get_scan_handler(
         | (_, _, _, Err(msg), ..)
         | (_, _, _, _, Err(msg), _)
         | (.., Err(msg)) => {
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 400,
-                msg,
-                data: None,
-            };
-            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
         }
     };
     let blind = params.get("blind").cloned();
@@ -441,12 +429,7 @@ pub(crate) async fn get_scan_handler(
     let waf_min_confidence = match parse_num_query::<f32>(&params, "waf_min_confidence") {
         Ok(v) => v,
         Err(msg) => {
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 400,
-                msg,
-                data: None,
-            };
-            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
         }
     };
 
@@ -499,12 +482,7 @@ pub(crate) async fn get_scan_handler(
     };
 
     if let Err(msg) = validate_scan_options(&mut opts) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg,
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
     }
 
     let callback_url = opts.callback_url.clone();
@@ -513,13 +491,12 @@ pub(crate) async fn get_scan_handler(
     let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
         Some(admitted) => admitted,
         None => {
-            let resp = at_capacity_response(&state);
-            return make_api_response(
+            return api_error(
                 &state,
                 &headers,
                 &params,
                 StatusCode::SERVICE_UNAVAILABLE,
-                &resp,
+                at_capacity_message(&state),
             );
         }
     };
@@ -536,12 +513,12 @@ pub(crate) async fn get_scan_handler(
         lease,
     );
 
-    let resp = ApiResponse::<serde_json::Value> {
-        code: 200,
-        msg: "ok".to_string(),
-        data: Some(serde_json::json!({ "scan_id": id_for_resp, "target": url })),
-    };
-    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+    api_ok(
+        &state,
+        &headers,
+        &params,
+        serde_json::json!({ "scan_id": id_for_resp, "target": url }),
+    )
 }
 
 // GET /health — server info and capability discovery
@@ -565,10 +542,11 @@ pub(crate) async fn health_handler(
         );
     }
 
-    let resp = ApiResponse {
-        code: 200,
-        msg: "ok".to_string(),
-        data: Some(serde_json::json!({
+    api_ok(
+        &state,
+        &headers,
+        &params,
+        serde_json::json!({
             "status": "ok",
             "version": env!("CARGO_PKG_VERSION"),
             // Match `check_api_key`: an empty `Some("")` falls through to
@@ -587,9 +565,8 @@ pub(crate) async fn health_handler(
                 {"method": "POST", "path": "/preflight", "description": "Parameter discovery without attack payloads"},
                 {"method": "GET",  "path": "/health", "description": "Server info and capability discovery"},
             ],
-        })),
-    };
-    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+        }),
+    )
 }
 
 // DELETE /scan/{id} — cancel a scan
@@ -622,39 +599,29 @@ pub(crate) async fn cancel_scan_handler(
         Some(job) => {
             if purge_requested {
                 if !job.is_terminal() {
-                    let resp = ApiResponse::<serde_json::Value> {
-                        code: 409,
-                        msg: format!(
-                            "cannot purge scan in status '{}' — cancel it first and wait for it to settle",
-                            job.status
-                        ),
-                        data: None,
-                    };
-                    drop(jobs);
-                    return make_api_response(
-                        &state,
-                        &headers,
-                        &params,
-                        StatusCode::CONFLICT,
-                        &resp,
+                    let msg = format!(
+                        "cannot purge scan in status '{}' — cancel it first and wait for it to settle",
+                        job.status
                     );
+                    drop(jobs);
+                    return api_error(&state, &headers, &params, StatusCode::CONFLICT, msg);
                 }
                 let previous_status = job.status.clone();
                 let target_url = job.target_url.clone();
                 jobs.remove(&id);
                 drop(jobs);
                 log(&state, "JOB", &format!("purged id={}", id));
-                let resp = ApiResponse {
-                    code: 200,
-                    msg: "ok".to_string(),
-                    data: Some(serde_json::json!({
+                return api_ok(
+                    &state,
+                    &headers,
+                    &params,
+                    serde_json::json!({
                         "scan_id": id,
                         "target": target_url,
                         "deleted": true,
                         "previous_status": previous_status,
-                    })),
-                };
-                return make_api_response(&state, &headers, &params, StatusCode::OK, &resp);
+                    }),
+                );
             }
 
             let previous_status = job.status.clone();
@@ -679,26 +646,27 @@ pub(crate) async fn cancel_scan_handler(
             let target_url = job.target_url.clone();
             drop(jobs);
             log(&state, "JOB", &format!("cancelled id={}", id));
-            let resp = ApiResponse {
-                code: 200,
-                msg: "ok".to_string(),
-                data: Some(serde_json::json!({
+            api_ok(
+                &state,
+                &headers,
+                &params,
+                serde_json::json!({
                     "scan_id": id,
                     "target": target_url,
                     "cancelled": was_active,
                     "previous_status": previous_status
-                })),
-            };
-            make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+                }),
+            )
         }
         None => {
             drop(jobs);
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 404,
-                msg: "not found".to_string(),
-                data: None,
-            };
-            make_api_response(&state, &headers, &params, StatusCode::NOT_FOUND, &resp)
+            api_error(
+                &state,
+                &headers,
+                &params,
+                StatusCode::NOT_FOUND,
+                "not found",
+            )
         }
     }
 }
@@ -730,20 +698,15 @@ pub(crate) async fn list_scans_handler(
         Some(ref s) => match parse_job_status(s) {
             Some(js) => Some(js),
             None => {
-                let resp = ApiResponse::<serde_json::Value> {
-                    code: 400,
-                    msg: format!(
-                        "invalid status filter '{}' — must be one of: queued, running, done, error, cancelled",
-                        s
-                    ),
-                    data: None,
-                };
-                return make_api_response(
+                return api_error(
                     &state,
                     &headers,
                     &params,
                     StatusCode::BAD_REQUEST,
-                    &resp,
+                    format!(
+                        "invalid status filter '{}' — must be one of: queued, running, done, error, cancelled",
+                        s
+                    ),
                 );
             }
         },
@@ -760,12 +723,7 @@ pub(crate) async fn list_scans_handler(
     ) {
         (Ok(o), Ok(l)) => (o.unwrap_or(0), l.unwrap_or(0)),
         (Err(msg), _) | (_, Err(msg)) => {
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 400,
-                msg,
-                data: None,
-            };
-            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
         }
     };
 
@@ -829,10 +787,11 @@ pub(crate) async fn list_scans_handler(
         (total, end, entries)
     };
 
-    let resp = ApiResponse {
-        code: 200,
-        msg: "ok".to_string(),
-        data: Some(serde_json::json!({
+    api_ok(
+        &state,
+        &headers,
+        &params,
+        serde_json::json!({
             "total": total,
             "scans": entries,
             "pagination": {
@@ -841,9 +800,8 @@ pub(crate) async fn list_scans_handler(
                 "returned": entries.len(),
                 "has_more": end < total,
             }
-        })),
-    };
-    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+        }),
+    )
 }
 
 /// Internal error surface for the preflight pipeline. Produces the right
@@ -884,23 +842,25 @@ pub(crate) async fn preflight_handler(
     let req = match req {
         Ok(Json(r)) => r,
         Err(rej) => {
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 400,
-                msg: format!("invalid request body: {}", rej),
-                data: None,
-            };
-            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+            return api_error(
+                &state,
+                &headers,
+                &params,
+                StatusCode::BAD_REQUEST,
+                format!("invalid request body: {}", rej),
+            );
         }
     };
 
     let target_url = req.target.trim().to_string();
     if target_url.is_empty() || !has_http_scheme(&target_url) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg: "url must start with http:// or https://".to_string(),
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::BAD_REQUEST,
+            "url must start with http:// or https://",
+        );
     }
 
     // `&mut`: validation normalizes too (see start_scan_handler), and the
@@ -908,12 +868,7 @@ pub(crate) async fn preflight_handler(
     // estimate are built from.
     let mut opts = req.options.clone().unwrap_or_default();
     if let Err(msg) = validate_scan_options(&mut opts) {
-        let resp = ApiResponse::<serde_json::Value> {
-            code: 400,
-            msg,
-            data: None,
-        };
-        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
     }
 
     let timeout_secs = opts
@@ -940,17 +895,12 @@ pub(crate) async fn preflight_handler(
     let preflight_permit = match state.preflight_sem.clone().try_acquire_owned() {
         Ok(p) => p,
         Err(_) => {
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 503,
-                msg: "preflight capacity reached; retry shortly".to_string(),
-                data: None,
-            };
-            return make_api_response(
+            return api_error(
                 &state,
                 &headers,
                 &params,
                 StatusCode::SERVICE_UNAVAILABLE,
-                &resp,
+                "preflight capacity reached; retry shortly",
             );
         }
     };
@@ -1069,54 +1019,36 @@ pub(crate) async fn preflight_handler(
         .unwrap_or(Err(PreflightError::TaskPanicked));
 
     match outcome {
-        Ok(body) => {
-            let resp = ApiResponse {
-                code: 200,
-                msg: "ok".to_string(),
-                data: Some(body),
-            };
-            make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
-        }
-        Err(PreflightError::BadUrl(msg)) => {
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 400,
-                msg: format!("invalid target URL: {}", msg),
-                data: None,
-            };
-            make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp)
-        }
+        Ok(body) => api_ok(&state, &headers, &params, body),
+        Err(PreflightError::BadUrl(msg)) => api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::BAD_REQUEST,
+            format!("invalid target URL: {}", msg),
+        ),
         Err(PreflightError::RuntimeUnavailable(msg)) => {
             log(
                 &state,
                 "ERR",
                 &format!("preflight runtime build failed: {}", msg),
             );
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 500,
-                msg: "preflight runtime unavailable".to_string(),
-                data: None,
-            };
-            make_api_response(
+            api_error(
                 &state,
                 &headers,
                 &params,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &resp,
+                "preflight runtime unavailable",
             )
         }
         Err(PreflightError::TaskPanicked) => {
             log(&state, "ERR", "preflight task panicked");
-            let resp = ApiResponse::<serde_json::Value> {
-                code: 500,
-                msg: "preflight task panicked".to_string(),
-                data: None,
-            };
-            make_api_response(
+            api_error(
                 &state,
                 &headers,
                 &params,
                 StatusCode::INTERNAL_SERVER_ERROR,
-                &resp,
+                "preflight task panicked",
             )
         }
     }
