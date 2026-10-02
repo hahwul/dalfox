@@ -47,16 +47,14 @@ fn test_dedup_and_sort_empty() {
 }
 
 #[test]
-fn test_ensure_default_registries_seeds_providers() {
-    ensure_default_registries();
+fn test_default_registry_seeds_providers() {
     let providers = list_payload_providers();
     assert!(providers.contains(&"payloadbox".to_string()));
     assert!(providers.contains(&"portswigger".to_string()));
 }
 
 #[test]
-fn test_ensure_default_registries_seeds_wordlists() {
-    ensure_default_registries();
+fn test_default_registry_seeds_wordlists() {
     let providers = list_wordlist_providers();
     assert!(providers.contains(&"assetnote".to_string()));
     assert!(providers.contains(&"burp".to_string()));
@@ -81,14 +79,13 @@ fn test_register_payload_provider_case_insensitive() {
 
 #[test]
 fn test_collect_payload_urls_unknown_provider_returns_empty() {
-    let urls = collect_payload_provider_urls(&["nonexistent".to_string()]);
+    let urls = PAYLOADS.collect_urls(&["nonexistent".to_string()]);
     assert!(urls.is_empty());
 }
 
 #[test]
 fn test_collect_payload_urls_known_provider() {
-    ensure_default_registries();
-    let urls = collect_payload_provider_urls(&["payloadbox".to_string()]);
+    let urls = PAYLOADS.collect_urls(&["payloadbox".to_string()]);
     assert!(!urls.is_empty());
     assert!(urls[0].contains("payloadbox"));
 }
@@ -106,23 +103,12 @@ fn test_collect_payload_urls_dedups_repeated_provider_names() {
         ],
     );
     let repeated = vec!["dedup_probe".to_string(); 50];
-    let urls = collect_payload_provider_urls(&repeated);
+    let urls = PAYLOADS.collect_urls(&repeated);
     assert_eq!(
         urls.len(),
         2,
         "repeated provider names must collapse to the distinct URL set"
     );
-}
-
-#[test]
-fn test_has_remote_payloads_initially_depends_on_test_order() {
-    // This just checks that the function doesn't panic
-    let _ = has_remote_payloads();
-}
-
-#[test]
-fn test_has_remote_wordlists_does_not_panic() {
-    let _ = has_remote_wordlists();
 }
 
 #[test]
@@ -141,7 +127,7 @@ fn test_register_wordlist_provider_case_insensitive() {
     let providers = list_wordlist_providers();
     assert!(providers.contains(&"mywordlist".to_string()));
     // The lowercased key resolves back to the registered URL.
-    let urls = collect_wordlist_provider_urls(&["MYWORDLIST".to_string()]);
+    let urls = WORDLISTS.collect_urls(&["MYWORDLIST".to_string()]);
     assert_eq!(urls, vec!["https://example.com/w.txt".to_string()]);
 }
 
@@ -149,29 +135,26 @@ fn test_register_wordlist_provider_case_insensitive() {
 fn test_register_wordlist_provider_overwrites_existing_urls() {
     register_wordlist_provider("dupword", vec!["https://example.com/v1.txt".to_string()]);
     register_wordlist_provider("dupword", vec!["https://example.com/v2.txt".to_string()]);
-    let urls = collect_wordlist_provider_urls(&["dupword".to_string()]);
+    let urls = WORDLISTS.collect_urls(&["dupword".to_string()]);
     assert_eq!(urls, vec!["https://example.com/v2.txt".to_string()]);
 }
 
 #[test]
 fn test_collect_wordlist_urls_unknown_provider_returns_empty() {
-    let urls = collect_wordlist_provider_urls(&["definitely_not_registered".to_string()]);
+    let urls = WORDLISTS.collect_urls(&["definitely_not_registered".to_string()]);
     assert!(urls.is_empty());
 }
 
 #[test]
 fn test_collect_wordlist_urls_known_provider() {
-    ensure_default_registries();
-    let urls = collect_wordlist_provider_urls(&["burp".to_string()]);
+    let urls = WORDLISTS.collect_urls(&["burp".to_string()]);
     assert!(!urls.is_empty());
     assert!(urls[0].contains("wl-params"));
 }
 
 #[test]
 fn test_collect_payload_urls_multiple_providers_concatenated() {
-    ensure_default_registries();
-    let urls =
-        collect_payload_provider_urls(&["payloadbox".to_string(), "portswigger".to_string()]);
+    let urls = PAYLOADS.collect_urls(&["payloadbox".to_string(), "portswigger".to_string()]);
     // Both known providers contribute one URL each, in request order.
     assert_eq!(urls.len(), 2);
     assert!(urls.iter().any(|u| u.contains("payloadbox")));
