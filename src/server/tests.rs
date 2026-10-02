@@ -50,7 +50,7 @@ fn test_job(status: JobStatus, results: Option<Vec<SanitizedResult>>, target_url
         status,
         JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
     ) {
-        job.finished_at_ms = Some(now_ms());
+        job.finished_at_ms = Some(crate::job::now_ms());
     }
     job
 }
@@ -2780,7 +2780,7 @@ async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     {
         let mut jobs = state.jobs.lock().await;
         let mut old = test_job(JobStatus::Done, None, "");
-        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
         jobs.insert("old".to_string(), old);
         jobs.insert("fresh".to_string(), test_job(JobStatus::Done, None, ""));
         jobs.insert("active".to_string(), test_job(JobStatus::Running, None, ""));
@@ -2810,7 +2810,7 @@ async fn test_purge_expired_jobs_is_throttled() {
     {
         let mut jobs = state.jobs.lock().await;
         let mut old = test_job(JobStatus::Done, None, "");
-        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
         jobs.insert("old1".to_string(), old);
     }
     purge_expired_jobs(&state).await;
@@ -2824,7 +2824,7 @@ async fn test_purge_expired_jobs_is_throttled() {
     {
         let mut jobs = state.jobs.lock().await;
         let mut old = test_job(JobStatus::Done, None, "");
-        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
         jobs.insert("old2".to_string(), old);
     }
     purge_expired_jobs(&state).await;

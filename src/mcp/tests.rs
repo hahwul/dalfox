@@ -19,7 +19,7 @@ fn test_job(status: JobStatus, results: Option<Vec<SanitizedResult>>) -> Job {
         status,
         JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
     ) {
-        job.finished_at_ms = Some(now_ms());
+        job.finished_at_ms = Some(crate::job::now_ms());
     }
     job
 }
@@ -379,7 +379,7 @@ async fn test_mark_job_error_sync_preserves_terminal_status() {
     let jobs: Arc<std::sync::Mutex<std::collections::HashMap<String, Job>>> =
         Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
     let scan_id = "job-cancel-race".to_string();
-    let cancel_finished_at = now_ms();
+    let cancel_finished_at = crate::job::now_ms();
     {
         let mut guard = jobs.lock().expect("jobs mutex poisoned");
         let mut job = Job::new_queued("http://[bad".to_string());
@@ -1197,7 +1197,8 @@ async fn test_delete_scan_rejects_a_cancelled_job_while_worker_drains() {
         // Exercise the distinction between strict explicit deletion and the
         // retention-only grace reclamation: even a wedged-looking worker must
         // not be deleted while it still owns the record.
-        job.finished_at_ms = Some(now_ms() - (crate::job::WORKER_DRAIN_GRACE_SECS + 1) * 1000);
+        job.finished_at_ms =
+            Some(crate::job::now_ms() - (crate::job::WORKER_DRAIN_GRACE_SECS + 1) * 1000);
         let lease = job.issue_worker_lease();
         jobs.insert("cancel-draining-del".to_string(), job);
         lease
@@ -1628,11 +1629,11 @@ async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
         let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         // Old terminal job — outside retention window
         let mut old = test_job(JobStatus::Done, Some(vec![]));
-        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        old.finished_at_ms = Some(crate::job::now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
         jobs.insert("old".to_string(), old);
         // Recent terminal job — within retention window
         let mut fresh = test_job(JobStatus::Done, Some(vec![]));
-        fresh.finished_at_ms = Some(now_ms());
+        fresh.finished_at_ms = Some(crate::job::now_ms());
         jobs.insert("fresh".to_string(), fresh);
         // Active job — must never be purged
         jobs.insert("active".to_string(), test_job(JobStatus::Running, None));
@@ -2040,7 +2041,7 @@ async fn test_scan_with_dalfox_bounds_retained_finished_scans() {
         let mut jobs = mcp.lock_jobs();
         // Recent timestamps: scan_with_dalfox purges by retention TTL first, so
         // epoch-ish values would be swept before the cap ever applies.
-        let base = now_ms() - MAX_RETAINED_SCANS_MCP as i64;
+        let base = crate::job::now_ms() - MAX_RETAINED_SCANS_MCP as i64;
         for i in 0..MAX_RETAINED_SCANS_MCP {
             let mut job = test_job(JobStatus::Done, None);
             job.finished_at_ms = Some(base + i as i64);
@@ -2943,7 +2944,7 @@ async fn get_results_conforms_in_every_lifecycle_state() {
                 job.error_message = Some("boom".to_string());
             }
             if status != JobStatus::Queued {
-                job.started_at_ms = Some(now_ms());
+                job.started_at_ms = Some(crate::job::now_ms());
             }
             jobs.insert(scan_id.clone(), job);
         }

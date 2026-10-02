@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -519,27 +519,6 @@ pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// Non-negative elapsed-ms duration from optional start/finish wall-clock
-/// samples, falling back to `now` when not yet finished. Returns `None` when the
-/// scan never started.
-///
-/// Both endpoints are wall-clock (`now_ms`) samples, so an NTP/VM clock
-/// step-back between them could otherwise yield a negative duration in the
-/// serialized API output; clamp to non-negative. The timestamps themselves stay
-/// wall-clock because they are API-exposed as unix-ms fields. Shared by
-/// [`Job::duration_ms`] and the MCP poll path (which reads a snapshot, not a
-/// `Job`) so the clamp policy has a single source of truth.
-pub(crate) fn duration_ms_between(
-    started_at_ms: Option<i64>,
-    finished_at_ms: Option<i64>,
-) -> Option<i64> {
-    match (started_at_ms, finished_at_ms) {
-        (Some(s), Some(f)) => Some((f - s).max(0)),
-        (Some(s), None) => Some((now_ms() - s).max(0)),
-        _ => None,
-    }
-}
-
 /// Parse a lowercase status string back into `JobStatus`. Returns `None` for
 /// unknown values so callers can surface a precise error instead of silently
 /// matching nothing.
@@ -554,6 +533,20 @@ pub(crate) fn parse_job_status(s: &str) -> Option<JobStatus> {
     }
 }
 
+/// Parse the optional `status` filter of a scan listing: trimmed and
+/// case-insensitive, with an empty value meaning "no filter".
+pub(crate) fn parse_status_filter(raw: Option<&str>) -> Result<Option<JobStatus>, String> {
+    match raw.map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()) {
+        Some(s) => parse_job_status(&s).map(Some).ok_or_else(|| {
+            format!(
+                "invalid status filter '{}' — must be one of: queued, running, done, error, cancelled",
+                s
+            )
+        }),
+        None => Ok(None),
+    }
+}
+
 /// Progress counters shared with a running scan task.
 #[derive(Clone, Default)]
 pub(crate) struct JobProgress {
@@ -565,6 +558,22 @@ pub(crate) struct JobProgress {
     pub findings_so_far: Arc<AtomicU64>,
     pub params_total: Arc<AtomicU32>,
     pub params_tested: Arc<AtomicU32>,
+}
+
+/// The `progress` object of a scan status response (REST `/scan/{id}`, MCP
+/// `get_results_dalfox`).
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProgressPayload {
+    pub(crate) params_total: u32,
+    pub(crate) params_tested: u32,
+    pub(crate) requests_sent: u64,
+    /// Requests that never reached the target (connect/TLS/timeout/transport).
+    /// A large share of these means "not scanned", not "nothing found".
+    pub(crate) requests_failed: u64,
+    pub(crate) findings_so_far: u64,
+    pub(crate) estimated_completion_pct: u32,
+    /// Recommended delay (ms) before next poll; 0 when done/cancelled.
+    pub(crate) suggested_poll_interval_ms: u64,
 }
 
 /// Single in-memory representation of an asynchronous scan used by both the
@@ -733,8 +742,97 @@ impl Job {
 
     /// Total elapsed ms from `started_at_ms` to `finished_at_ms` (or now, for
     /// still-running jobs). `None` if the scan never started.
+    ///
+    /// Both endpoints are wall-clock (`now_ms`) samples, so an NTP/VM clock
+    /// step-back between them could otherwise yield a negative duration in the
+    /// serialized API output; clamp to non-negative. The timestamps themselves
+    /// stay wall-clock because they are API-exposed as unix-ms fields.
     pub(crate) fn duration_ms(&self) -> Option<i64> {
-        duration_ms_between(self.started_at_ms, self.finished_at_ms)
+        let start = self.started_at_ms?;
+        Some((self.finished_at_ms.unwrap_or_else(now_ms) - start).max(0))
+    }
+
+    /// Claim the job for its worker: flip it to `Running` and hand back the
+    /// shared progress counters and cancel flag. `None` when it was cancelled
+    /// before the worker got to it.
+    pub(crate) fn start(&mut self) -> Option<(JobProgress, Arc<AtomicBool>)> {
+        if self.status == JobStatus::Cancelled || self.cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.status = JobStatus::Running;
+        self.started_at_ms = Some(now_ms());
+        Some((self.progress.clone(), self.cancelled.clone()))
+    }
+
+    /// Move a still-active job to `Error` with `msg`. Gated on
+    /// `!is_terminal()` so a panic / cancel race never clobbers a real
+    /// outcome; returns whether the transition happened.
+    pub(crate) fn fail(&mut self, msg: String) -> bool {
+        if self.is_terminal() {
+            return false;
+        }
+        self.status = JobStatus::Error;
+        self.error_message = Some(msg);
+        self.finished_at_ms.get_or_insert_with(now_ms);
+        true
+    }
+
+    /// Signal cancellation and, for a queued/running job, stamp `Cancelled`
+    /// right away (a running worker stops at its next checkpoint and stores
+    /// partial results). Returns whether the job was still active; cancelling
+    /// a terminal job is a no-op beyond setting the flag.
+    pub(crate) fn cancel(&mut self) -> bool {
+        self.cancelled.store(true, Ordering::Relaxed);
+        if self.is_terminal() {
+            return false;
+        }
+        self.status = JobStatus::Cancelled;
+        self.finished_at_ms.get_or_insert_with(now_ms);
+        true
+    }
+
+    /// Live progress plus completion/poll hints; `None` while still queued.
+    /// Error is included so an early infra failure still exposes the counters
+    /// gathered before it failed. `terminal_poll_ms` is the poll advice once
+    /// terminal: REST says 0, MCP keeps advising 1000 until the worker has
+    /// drained (`settled`), so a client can safely retry its delete.
+    pub(crate) fn progress_payload(&self, terminal_poll_ms: u64) -> Option<ProgressPayload> {
+        if self.status == JobStatus::Queued {
+            return None;
+        }
+        let p = &self.progress;
+        let params_total = p.params_total.load(Ordering::Relaxed);
+        let params_tested = p.params_tested.load(Ordering::Relaxed);
+        let pct = (params_tested as f64 / params_total as f64) * 100.0;
+        let estimated_completion_pct = if self.status == JobStatus::Done {
+            100
+        } else if params_total == 0 {
+            0
+        } else if self.is_terminal() {
+            pct as u32
+        } else {
+            pct.min(99.0) as u32
+        };
+        // Monotonically decreasing with progress: back off while there is
+        // little to see, then poll faster as the scan nears the finish.
+        let suggested_poll_interval_ms = if self.is_terminal() {
+            terminal_poll_ms
+        } else if estimated_completion_pct > 80 {
+            1000
+        } else if estimated_completion_pct > 10 {
+            2000
+        } else {
+            3000
+        };
+        Some(ProgressPayload {
+            params_total,
+            params_tested,
+            requests_sent: p.requests_sent.load(Ordering::Relaxed),
+            requests_failed: p.requests_failed.load(Ordering::Relaxed),
+            findings_so_far: p.findings_so_far.load(Ordering::Relaxed),
+            estimated_completion_pct,
+            suggested_poll_interval_ms,
+        })
     }
 }
 
@@ -794,6 +892,144 @@ pub(crate) fn enforce_retention_cap(jobs: &mut HashMap<String, Job>, cap: usize)
         }
         jobs.remove(&id);
         excess -= 1;
+    }
+}
+
+/// Admit a new scan for `url` and insert it queued, or `Err(active)` when
+/// `max_active` (0 = unlimited) jobs already hold a concurrency slot. Callers
+/// run this under the jobs lock so counting and inserting are race-free.
+///
+/// The scan_id is regenerated on collision so a same-target resubmission in
+/// the same nanosecond cannot clobber an in-flight job. The returned
+/// [`WorkerLease`] must be moved into the scan task (see [`Job::is_evictable`]).
+/// Retained finished scans are then capped at `max_retained`: admission counts
+/// only active jobs, so without it every quick scan's results would be held
+/// until the retention TTL. The job just added is active, never a candidate.
+pub(crate) fn admit_job(
+    jobs: &mut HashMap<String, Job>,
+    url: &str,
+    callback_url: Option<String>,
+    max_active: usize,
+    max_retained: usize,
+) -> Result<(String, WorkerLease), usize> {
+    if max_active > 0 {
+        let active = jobs.values().filter(|j| j.occupies_capacity()).count();
+        if active >= max_active {
+            return Err(active);
+        }
+    }
+    let id = crate::utils::make_unique_scan_id(url, |id| jobs.contains_key(id));
+    let mut job = Job::new_queued(url.to_string());
+    job.callback_url = callback_url;
+    let lease = job.issue_worker_lease();
+    jobs.insert(id.clone(), job);
+    enforce_retention_cap(jobs, max_retained);
+    Ok((id, lease))
+}
+
+/// Minimum interval between job-retention sweeps. Retention is hours-granular,
+/// so deferring a sweep by up to a minute is invisible to clients while keeping
+/// the O(n) scan off the hot per-request path.
+pub(crate) const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
+
+/// Cap on concurrent preflight operations (REST `/preflight`, MCP
+/// `preflight_dalfox`). Each pins a blocking-pool thread for the full probe +
+/// analysis against a caller-supplied target, so this is sized well below
+/// tokio's default 512-thread blocking pool to keep threads for scan jobs.
+pub(crate) const MAX_CONCURRENT_PREFLIGHT: usize = 32;
+
+/// Claim the next retention sweep: true at most once per
+/// [`PURGE_MIN_INTERVAL_MS`], and (CAS) for only one of several concurrent
+/// callers.
+pub(crate) fn purge_due(last_purge_ms: &AtomicI64) -> bool {
+    let now = now_ms();
+    let last = last_purge_ms.load(Ordering::Relaxed);
+    now - last >= PURGE_MIN_INTERVAL_MS
+        && last_purge_ms
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+}
+
+/// Jobs newest first, scan_id ascending as a tiebreak. Without the tiebreak,
+/// jobs sharing a `queued_at_ms` millisecond fall back to HashMap order, so a
+/// paged listing could show an entry twice or skip it.
+pub(crate) fn jobs_newest_first<'a>(
+    jobs: impl Iterator<Item = (&'a String, &'a Job)>,
+) -> Vec<(&'a String, &'a Job)> {
+    let mut rows: Vec<_> = jobs.collect();
+    rows.sort_by(|a, b| {
+        b.1.queued_at_ms
+            .cmp(&a.1.queued_at_ms)
+            .then_with(|| a.0.cmp(b.0))
+    });
+    rows
+}
+
+/// The scan-listing body shared by REST `/scans` and MCP `list_scans_dalfox`:
+/// `{total, scans, pagination}`, newest first, optionally filtered by status,
+/// paged by `offset` / `limit` (0 = all). Each row carries `error_message` on a
+/// failed scan — otherwise `status: "error", result_count: 0` reads exactly
+/// like a clean scan. `with_settled` adds MCP's per-row worker-drain flag.
+pub(crate) fn scan_list_json(
+    jobs: &HashMap<String, Job>,
+    filter: Option<&JobStatus>,
+    offset: usize,
+    limit: usize,
+    with_settled: bool,
+) -> serde_json::Value {
+    let rows = jobs_newest_first(
+        jobs.iter()
+            .filter(|(_, job)| filter.is_none_or(|f| &job.status == f)),
+    );
+    let total = rows.len();
+    let start = offset.min(total);
+    let end = if limit == 0 {
+        total
+    } else {
+        start.saturating_add(limit).min(total)
+    };
+    let scans: Vec<serde_json::Value> = rows[start..end]
+        .iter()
+        .map(|(id, job)| {
+            let mut row = serde_json::json!({
+                "scan_id": id,
+                "target": job.target_url,
+                "status": job.status,
+                "result_count": job.results.as_ref().map_or(0, |r| r.len()),
+                "queued_at_ms": job.queued_at_ms,
+                "started_at_ms": job.started_at_ms,
+                "finished_at_ms": job.finished_at_ms,
+                "duration_ms": job.duration_ms(),
+            });
+            if with_settled {
+                row["settled"] = serde_json::json!(job.is_settled());
+            }
+            if let Some(msg) = &job.error_message {
+                row["error_message"] = serde_json::json!(msg);
+            }
+            row
+        })
+        .collect();
+    serde_json::json!({
+        "total": total,
+        "pagination": {
+            "offset": offset,
+            "limit": limit,
+            "returned": scans.len(),
+            "has_more": end < total,
+        },
+        "scans": scans,
+    })
+}
+
+/// Text of a caught panic payload, for the job's error message.
+pub(crate) fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = panic.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else {
+        "unknown panic payload".to_string()
     }
 }
 

@@ -139,75 +139,7 @@ pub(crate) async fn get_result_handler(
 
     match job {
         Some(j) => {
-            // Include Error so an early infra failure (parse/reachability/panic)
-            // still exposes params_total / requests_sent gathered before it
-            // failed, instead of an opaque error_message with no progress.
-            let progress_data = if matches!(
-                j.status,
-                JobStatus::Running | JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
-            ) {
-                let params_total = j
-                    .progress
-                    .params_total
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                let params_tested = j
-                    .progress
-                    .params_tested
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                let estimated_completion_pct = if matches!(
-                    j.status,
-                    JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
-                ) {
-                    if j.status == JobStatus::Done {
-                        100
-                    } else if params_total > 0 {
-                        ((params_tested as f64 / params_total as f64) * 100.0) as u32
-                    } else {
-                        0
-                    }
-                } else if params_total > 0 {
-                    ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
-                } else {
-                    0
-                };
-                // Monotonically decreasing with progress: back off while there
-                // is little to see, then poll faster as the scan nears the
-                // finish. The ladder used to advise 2000ms below 10% but 3000ms
-                // between 10% and 80%, i.e. a client that made progress was told
-                // to poll *less* often. Mirrored in the MCP poll payload.
-                let suggested_poll_interval_ms: u64 = if matches!(
-                    j.status,
-                    JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
-                ) {
-                    0
-                } else if estimated_completion_pct > 80 {
-                    1000
-                } else if estimated_completion_pct > 10 {
-                    2000
-                } else {
-                    3000
-                };
-                Some(ProgressPayload {
-                    params_total,
-                    params_tested,
-                    requests_sent: j
-                        .progress
-                        .requests_sent
-                        .load(std::sync::atomic::Ordering::Relaxed),
-                    requests_failed: j
-                        .progress
-                        .requests_failed
-                        .load(std::sync::atomic::Ordering::Relaxed),
-                    findings_so_far: j
-                        .progress
-                        .findings_so_far
-                        .load(std::sync::atomic::Ordering::Relaxed),
-                    estimated_completion_pct,
-                    suggested_poll_interval_ms,
-                })
-            } else {
-                None
-            };
+            let progress_data = j.progress_payload(0);
             let duration_ms = j.duration_ms();
             let payload = ResultPayload {
                 target: j.target_url.clone(),
@@ -625,20 +557,9 @@ pub(crate) async fn cancel_scan_handler(
             }
 
             let previous_status = job.status.clone();
-            // Only a queued/running job actually stops as a result of this
-            // call — cancelling an already-terminal job (done/error/cancelled)
-            // is a no-op, so `cancelled` must reflect that instead of always
-            // reporting `true`, which previously made a cancel on a finished
-            // scan look indistinguishable from a real one.
-            let was_active = matches!(previous_status, JobStatus::Queued | JobStatus::Running);
-            job.cancelled
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            if was_active {
-                job.status = JobStatus::Cancelled;
-                if job.finished_at_ms.is_none() {
-                    job.finished_at_ms = Some(now_ms());
-                }
-            }
+            // `cancelled` is false for an already-terminal job: that cancel was
+            // a no-op, and reporting `true` made it look like a real one.
+            let was_active = job.cancel();
             // Release the jobs lock before serializing the response, the same
             // way the purge branch above does — otherwise the scan task (and
             // every other handler) is blocked on the mutex while we build
@@ -690,28 +611,11 @@ pub(crate) async fn list_scans_handler(
 
     purge_expired_jobs(&state).await;
 
-    let filter_status: Option<JobStatus> = match params
-        .get("status")
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-    {
-        Some(ref s) => match parse_job_status(s) {
-            Some(js) => Some(js),
-            None => {
-                return api_error(
-                    &state,
-                    &headers,
-                    &params,
-                    StatusCode::BAD_REQUEST,
-                    format!(
-                        "invalid status filter '{}' — must be one of: queued, running, done, error, cancelled",
-                        s
-                    ),
-                );
-            }
-        },
-        None => None,
-    };
+    let filter_status =
+        match crate::job::parse_status_filter(params.get("status").map(String::as_str)) {
+            Ok(f) => f,
+            Err(msg) => return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg),
+        };
 
     // Optional pagination. offset defaults to 0, limit == 0 means return all.
     // A present-but-unparseable value is a 400, not a silent fallback — matching
@@ -727,81 +631,17 @@ pub(crate) async fn list_scans_handler(
         }
     };
 
-    // Build all owned response data while holding the lock, then release it
-    // BEFORE the (synchronous, O(n)) JSON serialization in make_api_response.
-    // Holding the shared `state.jobs` mutex across serialization stalls the hot
-    // get_result poll path and concurrent scans' terminal status writes — the
-    // sibling MCP list/get handlers scope their lock the same way.
-    let (total, end, entries) = {
-        let jobs = state.jobs.lock().await;
-
-        // Collect matching entries with their sort key, then apply offset/limit
-        // deterministically by queued_at_ms descending (newest first).
-        let mut matching: Vec<(&String, &Job)> = jobs
-            .iter()
-            .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
-            .collect();
-        // Total, deterministic order: newest first, then scan_id ascending as a
-        // tiebreak. Without the tiebreak, jobs sharing a queued_at_ms
-        // millisecond fall back to nondeterministic HashMap iteration order, so
-        // an entry could appear on two pages or be skipped across paginated
-        // calls (offset/limit over an unstable ordering).
-        matching.sort_by(|a, b| {
-            b.1.queued_at_ms
-                .cmp(&a.1.queued_at_ms)
-                .then_with(|| a.0.cmp(b.0))
-        });
-
-        let total = matching.len();
-        let start = offset.min(total);
-        let end = if limit == 0 {
-            total
-        } else {
-            start.saturating_add(limit).min(total)
-        };
-        let entries: Vec<serde_json::Value> = matching[start..end]
-            .iter()
-            .map(|(id, job)| {
-                let mut entry = serde_json::json!({
-                    "scan_id": id,
-                    "target": job.target_url,
-                    "status": job.status,
-                    "result_count": job.results.as_ref().map_or(0, |r| r.len()),
-                    "queued_at_ms": job.queued_at_ms,
-                    "started_at_ms": job.started_at_ms,
-                    "finished_at_ms": job.finished_at_ms,
-                    "duration_ms": job.duration_ms(),
-                });
-                // A row reading `status: "error", result_count: 0` is shaped
-                // exactly like a clean `done` one, and the listing was the only
-                // place that said nothing about why. Additive, and it keeps
-                // `/scans` in step with `list_scans_dalfox`.
-                if let Some(msg) = job.error_message.as_deref()
-                    && let Some(obj) = entry.as_object_mut()
-                {
-                    obj.insert("error_message".into(), serde_json::json!(msg));
-                }
-                entry
-            })
-            .collect();
-        (total, end, entries)
-    };
-
-    api_ok(
-        &state,
-        &headers,
-        &params,
-        serde_json::json!({
-            "total": total,
-            "scans": entries,
-            "pagination": {
-                "offset": offset,
-                "limit": limit,
-                "returned": entries.len(),
-                "has_more": end < total,
-            }
-        }),
-    )
+    // Built under the lock, serialized after it is released: holding the
+    // shared `state.jobs` mutex across serialization stalls the hot get_result
+    // poll path and concurrent scans' terminal status writes.
+    let body = crate::job::scan_list_json(
+        &*state.jobs.lock().await,
+        filter_status.as_ref(),
+        offset,
+        limit,
+        false,
+    );
+    api_ok(&state, &headers, &params, body)
 }
 
 /// Internal error surface for the preflight pipeline. Produces the right
@@ -925,20 +765,6 @@ pub(crate) async fn preflight_handler(
                 let mut target = hydrate_preflight_target(&target_url, &opts, timeout_secs)
                     .map_err(PreflightError::BadUrl)?;
 
-                // Reachability uses a bodyless HEAD probe through the hydrated
-                // target client, preserving proxy, TLS, headers, and User-Agent
-                // without sending the caller's scan method/body before scanning.
-                if !send_reachability_probe(&target).await {
-                    return Ok(serde_json::json!({
-                        "target": target_url,
-                        "reachable": false,
-                        "error_code": crate::cmd::error_codes::CONNECTION_FAILED,
-                        "params_discovered": 0,
-                        "estimated_total_requests": 0,
-                        "params": [],
-                    }));
-                }
-
                 let scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
                     target: target_url.clone(),
                     param: vec![],
@@ -962,57 +788,14 @@ pub(crate) async fn preflight_handler(
                         .clone()
                         .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]),
                 });
-
-                analyze_parameters(&mut target, &scan_args, None).await;
-                // Apply the same per-scan parameter cap a real scan would, so
-                // the estimate reflects what scanning actually fans out to.
-                cap_reflection_params(&mut target);
-
-                // Shared with the expansion itself, so an encoder the scan
-                // applies can't be missing from the estimate (the hand-rolled
-                // list here used to omit htmlpad/unicode/zwsp).
-                let enc_factor = crate::encoding::encoder_expansion_factor(&scan_args.encoders);
-                // Mirror the per-parameter payload cap the scan enforces
-                // (`run_scanning` truncates each param's payload set to it).
-                // Without this the estimate quoted a number the scan would
-                // never send — 3912 requests for a parameter capped at 3000.
-                let cap = crate::scanning::effective_payload_cap(
+                Ok(crate::job::runner::preflight(
+                    &mut target,
+                    &target_url,
+                    &scan_args,
                     opts.max_payloads_per_param.unwrap_or(0),
                     opts.deep_scan.unwrap_or(false),
-                );
-                let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
-                let mut estimated_requests: usize = 0;
-                let discovered_params: Vec<serde_json::Value> = target
-                    .reflection_params
-                    .iter()
-                    .map(|p| {
-                        let payload_count = if !crate::scanning::param_is_http_scannable(p) {
-                            // Fragment params are client-side only: the HTTP scan
-                            // phase sends no requests for them, so the estimate
-                            // must not bill any (they stay listed as discovered).
-                            0
-                        } else {
-                            crate::scanning::estimate_param_requests(
-                                p, &scan_args, enc_factor, &apply_cap,
-                            )
-                        };
-                        estimated_requests = estimated_requests.saturating_add(payload_count);
-                        serde_json::json!({
-                            "name": p.name,
-                            "location": format!("{:?}", p.location),
-                            "estimated_requests": payload_count,
-                        })
-                    })
-                    .collect();
-
-                Ok(serde_json::json!({
-                    "target": target_url,
-                    "reachable": true,
-                    "method": target.method,
-                    "params_discovered": discovered_params.len(),
-                    "estimated_total_requests": estimated_requests,
-                    "params": discovered_params,
-                }))
+                )
+                .await)
             }))
         })
         .await

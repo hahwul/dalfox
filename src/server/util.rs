@@ -56,37 +56,14 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
     Ok(())
 }
 
-/// Minimum interval between job-retention sweeps. Retention is hours-granular,
-/// so deferring a sweep by up to a minute is invisible to clients while keeping
-/// the O(n) scan off the hot per-request path. Mirrors the MCP server.
-pub(crate) const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
-
-/// Cap on concurrent `/preflight` operations. Each preflight pins a blocking-pool
-/// thread for the full request timeout, so this is sized well below tokio's
-/// default 512-thread blocking pool to guarantee scan jobs always have threads.
-pub(crate) const MAX_CONCURRENT_PREFLIGHT: usize = 32;
-
 /// Thin wrapper over `crate::job::purge_expired_jobs` that acquires the jobs
-/// lock for the caller. Throttled to at most once per [`PURGE_MIN_INTERVAL_MS`]
-/// so the O(n) retention sweep doesn't run (and serialize all handlers on the
-/// jobs lock) on every request, including the high-frequency poll path.
+/// lock for the caller. Throttled by [`crate::job::purge_due`] so the O(n)
+/// retention sweep doesn't run (and serialize all handlers on the jobs lock)
+/// on every request, including the high-frequency poll path.
 pub(crate) async fn purge_expired_jobs(state: &AppState) {
-    use std::sync::atomic::Ordering;
-    let now = crate::job::now_ms();
-    let last = state.last_purge_ms.load(Ordering::Relaxed);
-    if now - last < PURGE_MIN_INTERVAL_MS {
-        return;
+    if crate::job::purge_due(&state.last_purge_ms) {
+        purge_jobs_map(&mut *state.jobs.lock().await, JOB_RETENTION_SECS);
     }
-    // CAS so concurrent requests can't both decide to sweep.
-    if state
-        .last_purge_ms
-        .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
-        .is_err()
-    {
-        return;
-    }
-    let mut jobs = state.jobs.lock().await;
-    purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
 }
 
 /// Parse an optional numeric query parameter, distinguishing "absent" (→
@@ -140,38 +117,22 @@ pub(crate) fn parse_opt_bool_query(params: &HashMap<String, String>, key: &str) 
     })
 }
 
-/// Admit a new scan and insert a queued `Job` for `url` under a single
-/// jobs-lock, or return `None` when the server is already at its
-/// `max_concurrent_scans` capacity (`0` = unlimited). Counting active
-/// (non-terminal) jobs and inserting under the *same* lock keeps the check
-/// race-free. Shared by POST and GET /scan so both paths enforce the cap and
-/// build the queued job identically.
-///
-/// On success returns the reserved scan_id together with the worker lease the
-/// caller must move into the scan task (see [`crate::job::Job::is_evictable`]).
+/// Admit a new scan for `url` under the server's `max_concurrent_scans` /
+/// `max_retained_scans` caps, or `None` when at capacity. Shared by POST and
+/// GET /scan; see [`crate::job::admit_job`].
 pub(crate) async fn try_admit_and_queue(
     state: &AppState,
     url: &str,
     callback_url: Option<String>,
 ) -> Option<(String, WorkerLease)> {
-    let mut jobs = state.jobs.lock().await;
-    if state.max_concurrent_scans > 0
-        && jobs.values().filter(|j| j.occupies_capacity()).count() >= state.max_concurrent_scans
-    {
-        return None;
-    }
-    let id = crate::utils::make_unique_scan_id(url, |id| jobs.contains_key(id));
-    let mut job = Job::new_queued(url.to_string());
-    job.callback_url = callback_url;
-    let lease = job.issue_worker_lease();
-    jobs.insert(id.clone(), job);
-    // Bound retained finished scans. The admission cap above counts only active
-    // jobs, so without this the map grows with every quick scan until the
-    // retention TTL expires. Applied after the insert so the steady state is
-    // exactly `max_retained_scans`; the job just added is non-terminal and so
-    // is never a candidate for eviction.
-    enforce_retention_cap(&mut jobs, state.max_retained_scans);
-    Some((id, lease))
+    crate::job::admit_job(
+        &mut *state.jobs.lock().await,
+        url,
+        callback_url,
+        state.max_concurrent_scans,
+        state.max_retained_scans,
+    )
+    .ok()
 }
 
 /// The 503 "at capacity" message for a rejected admission.
