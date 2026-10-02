@@ -88,6 +88,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # install-crystal apt-installs its build deps without refreshing the
+      # index; a stale runner image then 404s on superseded .debs.
+      - run: sudo apt-get update -q
       - uses: crystal-lang/install-crystal@v1
       # Reads files only (no binary needed), so it runs first and fails fast:
       # every version-bearing file must agree, catching a partial bump before
@@ -130,6 +133,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # install-crystal apt-installs its build deps without refreshing the
+      # index; a stale runner image then 404s on superseded .debs.
+      - run: sudo apt-get update -q
       - uses: crystal-lang/install-crystal@v1
       - run: cargo build --release
       - name: Server + MCP smoke
