@@ -376,6 +376,12 @@ async fn main() {
     // formats). The default `~/.config/dalfox/config.toml` is all-commented, so
     // this is silent unless the operator set a real value.
     if let Ok(lr) = config_load.as_mut() {
+        for key in &lr.unknown_keys {
+            eprintln!(
+                "Warning: config {}: unknown key `{key}` ignored",
+                lr.path.display()
+            );
+        }
         for warning in lr.config.normalize_and_validate() {
             eprintln!("Warning: {warning}");
         }

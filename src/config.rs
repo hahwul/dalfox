@@ -28,6 +28,59 @@ pub struct LoadResult {
     pub path: PathBuf,
     // Whether a new config file was created on this load
     pub created: bool,
+    /// Keys in the file that no `Config` field reads (`scan.header` for
+    /// `scan.headers`). Serde drops them without a word, so a typo'd setting
+    /// silently does nothing; the caller warns about each one.
+    pub unknown_keys: Vec<String>,
+}
+
+/// Dotted paths of the keys in `raw` that `Config` does not define.
+fn unknown_keys(raw: &serde_json::Value) -> Vec<String> {
+    let known = serde_json::to_value(Config {
+        scan: Some(ScanConfig::default()),
+    })
+    .unwrap_or_default();
+    let (Some(raw), Some(known)) = (raw.as_object(), known.as_object()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (key, value) in raw {
+        match known.get(key).and_then(|k| k.as_object()) {
+            None => out.push(key.clone()),
+            Some(fields) => out.extend(
+                value
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|m| m.keys())
+                    .filter(|k| !fields.contains_key(*k))
+                    .map(|k| format!("{key}.{k}")),
+            ),
+        }
+    }
+    out
+}
+
+/// Parse `content` as JSON or TOML, trying the format `is_json` names first.
+/// The error is the preferred format's own (with its line / column), not a
+/// generic "failed to parse": a single mistyped value fails the whole file,
+/// so the operator has to be told which one.
+fn parse_config(content: &str, is_json: bool) -> Result<(Config, Vec<String>), String> {
+    let json = || {
+        serde_json::from_str::<Config>(content)
+            .map(|c| (c, serde_json::from_str(content).unwrap_or_default()))
+            .map_err(|e| format!("invalid JSON config: {e}"))
+    };
+    let toml = || {
+        toml::from_str::<Config>(content)
+            .map(|c| (c, toml::from_str(content).unwrap_or_default()))
+            .map_err(|e| format!("invalid TOML config: {e}"))
+    };
+    let (config, raw): (Config, serde_json::Value) = if is_json {
+        json().or_else(|e| toml().map_err(|_| e))
+    } else {
+        toml().or_else(|e| json().map_err(|_| e))
+    }?;
+    Ok((config, unknown_keys(&raw)))
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -603,22 +656,27 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     let json_path = base_dir.join("config.json");
     let read = |p: &Path| crate::utils::fs::read_bounded(p, MAX_CONFIG_BYTES, "config file");
 
-    let (config, path, created) = if toml_path.exists() {
-        (toml::from_str(&read(&toml_path)?)?, toml_path, false)
+    let ((config, unknown_keys), path, created) = if toml_path.exists() {
+        (parse_config(&read(&toml_path)?, false)?, toml_path, false)
     } else if json_path.exists() {
-        (serde_json::from_str(&read(&json_path)?)?, json_path, false)
+        (parse_config(&read(&json_path)?, true)?, json_path, false)
     } else {
         // Neither exists: create TOML by default
         let mut f = fs::File::create(&toml_path)?;
         f.write_all(DEFAULT_TOML_TEMPLATE.as_bytes())?;
         f.sync_all()?;
         // Load the template back as Config (will parse to defaults)
-        (toml::from_str(DEFAULT_TOML_TEMPLATE)?, toml_path, true)
+        (
+            (toml::from_str(DEFAULT_TOML_TEMPLATE)?, Vec::new()),
+            toml_path,
+            true,
+        )
     };
     Ok(LoadResult {
         config,
         path,
         created,
+        unknown_keys,
     })
 }
 
@@ -651,26 +709,18 @@ pub fn load_path(p: &Path) -> Result<LoadResult, Box<dyn std::error::Error>> {
             config,
             path,
             created: true,
+            unknown_keys: Vec::new(),
         });
     }
     // Bound the read so `--config /dev/zero` (or any other non-regular file
     // that streams forever) can't hang dalfox indefinitely.
     let content = crate::utils::fs::read_bounded(p, MAX_CONFIG_BYTES, "config file")?;
-    let as_json = || serde_json::from_str::<Config>(&content).ok();
-    let as_toml = || toml::from_str::<Config>(&content).ok();
-    let config = if is_json {
-        as_json()
-            .or_else(as_toml)
-            .ok_or("Failed to parse config as JSON or TOML")?
-    } else {
-        as_toml()
-            .or_else(as_json)
-            .ok_or("Failed to parse config as TOML or JSON")?
-    };
+    let (config, unknown_keys) = parse_config(&content, is_json)?;
     Ok(LoadResult {
         config,
         path,
         created: false,
+        unknown_keys,
     })
 }
 

@@ -292,7 +292,7 @@ CLI 플래그  >  설정 파일  >  내장 기본값
 - 선택지가 정해진 키(`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`)에 잘못된 값을 넣거나, 알 수 없는 `method` / `sxss_method` / `force_waf`, 올바른 정규식이 아닌 `session_check`, 절대 URL이 아닌 `session_check_url`, `limit = 0`을 쓰면 stderr에 `Warning:`이 출력됩니다. 해당 키는 내장 기본값으로 돌아가고 스캔은 계속됩니다. `method`, `sxss_method`, `force_waf`는 플래그와 똑같이 대소문자가 정규화됩니다.
 - `proxy`, `sxss_url`, `session_check_url`은 플래그와 같은 시작 검사를 거칩니다. Dalfox가 라우팅할 수 없는 프록시 스킴이나 스킴이 `http`/`https`가 아닌 URL이면 `PARSE_ERROR`(종료 코드 `2`)로 스캔이 중단됩니다.
 - 숫자 키는 대응하는 플래그와 같은 범위 제한을 받습니다(`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). 범위를 벗어나면 `INVALID_INPUT_TYPE`(종료 코드 `2`)으로 스캔이 중단됩니다.
-- 알 수 없는 키와 `[scan]` 테이블 밖에 둔 키는 경고 없이 무시됩니다. 효과가 없는 것 같은 키가 있다면 철자와 위치를 확인하세요.
-- 파싱에 실패한 파일(TOML 문법 오류, `workers = "10"`처럼 타입이 틀린 값 등)은 통째로 무시됩니다. `--config`로 지정한 파일이면 경고가 출력되고, 기본 경로의 파일이면 아무 메시지 없이 무시됩니다.
+- 알 수 없는 키와 `[scan]` 테이블 밖에 둔 키는 무시되며, stderr에 `Warning: config <path>: unknown key `scan.header` ignored` 경고가 출력되므로 철자나 위치가 틀린 키를 알아챌 수 있습니다.
+- 파싱에 실패한 파일(TOML 문법 오류, `workers = "10"`처럼 타입이 틀린 값 등)은 통째로 무시됩니다. `--config`로 지정한 파일이면 문제가 된 줄과 값을 짚은 경고가 출력되고, 기본 경로의 파일이면 아무 메시지 없이 무시됩니다.
 
 예시는 [시작하기 → 설정](../../getting-started/configuration/)을 참고하세요.
