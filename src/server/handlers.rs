@@ -50,7 +50,7 @@ pub(crate) async fn start_scan_handler(
             &headers,
             &params,
             StatusCode::BAD_REQUEST,
-            "url is required",
+            "target is required",
         );
     }
     // Require an http(s) scheme, matching /preflight and the MCP scan tool.
@@ -63,7 +63,7 @@ pub(crate) async fn start_scan_handler(
             &headers,
             &params,
             StatusCode::BAD_REQUEST,
-            "url must start with http:// or https://",
+            "target must start with http:// or https://",
         );
     }
 
@@ -286,7 +286,7 @@ pub(crate) async fn get_scan_handler(
             &headers,
             &params,
             StatusCode::BAD_REQUEST,
-            "url is required",
+            "target is required",
         );
     }
     // Require an http(s) scheme, matching POST /scan, /preflight, and MCP.
@@ -296,7 +296,7 @@ pub(crate) async fn get_scan_handler(
             &headers,
             &params,
             StatusCode::BAD_REQUEST,
-            "url must start with http:// or https://",
+            "target must start with http:// or https://",
         );
     }
 
@@ -688,7 +688,7 @@ pub(crate) async fn preflight_handler(
             &headers,
             &params,
             StatusCode::BAD_REQUEST,
-            "url must start with http:// or https://",
+            "target must start with http:// or https://",
         );
     }
 
