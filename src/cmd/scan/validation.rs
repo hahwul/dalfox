@@ -8,16 +8,41 @@ use super::args::{
 };
 
 /// Check if a domain matches an out-of-scope pattern.
-/// Supports simple wildcard: `*.example.com` matches `sub.example.com` but not `notexample.com`.
+/// `*.example.com` matches `example.com` and every subdomain but not
+/// `notexample.com`; any other `*` matches any run of characters
+/// (`127.0.0.*`, `*.example.*`). Matching a `*` literally would make such a
+/// pattern exclude nothing, and the scan would hit the hosts it names.
 pub(crate) fn domain_matches_pattern(host: &str, pattern: &str) -> bool {
     let host_lower = host.to_lowercase();
     let pattern_lower = pattern.to_lowercase();
-    if let Some(base) = pattern_lower.strip_prefix("*.") {
+    if let Some(base) = pattern_lower.strip_prefix("*.")
+        && !base.contains('*')
+    {
         // Match exact subdomain boundary: host must end with ".base" or equal "base"
         host_lower == base || host_lower.ends_with(&format!(".{}", base))
     } else {
-        host_lower == pattern_lower
+        glob_match(&host_lower, &pattern_lower)
     }
+}
+
+/// `*`-only glob: `*` matches any run of characters, everything else itself.
+fn glob_match(text: &str, pattern: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let Some(mut rest) = text.strip_prefix(parts.next().unwrap_or_default()) else {
+        return false;
+    };
+    let mut parts: Vec<&str> = parts.collect();
+    // No `*` at all: the prefix must have been the whole text.
+    let Some(last) = parts.pop() else {
+        return rest.is_empty();
+    };
+    for part in parts {
+        match rest.find(part) {
+            Some(i) => rest = &rest[i + part.len()..],
+            None => return false,
+        }
+    }
+    rest.ends_with(last)
 }
 
 /// Range-check numeric scan args before launching any network work.
@@ -291,6 +316,24 @@ mod input_shape_tests {
         assert!(domain_matches_pattern("example.com", "*.example.com"));
         // Must respect the label boundary — `notexample.com` is not a subdomain.
         assert!(!domain_matches_pattern("notexample.com", "*.example.com"));
+    }
+
+    #[test]
+    fn domain_matches_wildcard_anywhere() {
+        assert!(domain_matches_pattern("127.0.0.1", "127.0.0.*"));
+        assert!(!domain_matches_pattern("127.0.1.1", "127.0.0.*"));
+        assert!(domain_matches_pattern("api.example.co.uk", "*.example.*"));
+        assert!(domain_matches_pattern(
+            "dev-api.example.com",
+            "dev-*.example.com"
+        ));
+        assert!(!domain_matches_pattern(
+            "api.example.com",
+            "dev-*.example.com"
+        ));
+        assert!(domain_matches_pattern("ab", "a*b"));
+        assert!(!domain_matches_pattern("aXbX", "a*b"));
+        assert!(domain_matches_pattern("anything", "*"));
     }
 
     #[test]

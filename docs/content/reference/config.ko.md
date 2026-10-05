@@ -191,7 +191,7 @@ debug = false
 | `include_url` | array | `[]` | 정규식 패턴(부분 매칭). 하나 이상에 매칭되는 URL만 스캔합니다 |
 | `exclude_url` | array | `[]` | 건너뛸 URL의 정규식 패턴(부분 매칭) |
 | `ignore_param` | array | `[]` | 건너뛸 파라미터 이름(정확히 일치) |
-| `out_of_scope` | array | `[]` | 건너뛸 호스트 패턴, 항목 하나에 하나씩(`["*.gov", "cdn.example.com"]`). `*.example.com`은 `example.com`과 하위 도메인에 맞고, 그 밖의 값은 호스트와 정확히 같아야 합니다. 한 항목 안의 쉼표는 구분자가 아닙니다 |
+| `out_of_scope` | array | `[]` | 건너뛸 호스트 패턴, 항목 하나에 하나씩(`["*.gov", "cdn.example.com"]`). `*.example.com`은 `example.com`과 하위 도메인에 맞고, 그 밖의 위치에 있는 `*`는 임의의 문자열에 맞으며, `*`가 없는 값은 호스트와 정확히 같아야 합니다. 한 항목 안의 쉼표는 구분자가 아닙니다 |
 | `out_of_scope_file` | string | — | 스코프 외 패턴을 한 줄에 하나씩 적은 파일. 읽을 수 없는 경로면 스캔을 중단합니다 |
 
 ### 탐색 및 마이닝

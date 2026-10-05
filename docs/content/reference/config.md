@@ -191,7 +191,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `include_url` | array | `[]` | Regex patterns (unanchored); only URLs matching at least one are scanned |
 | `exclude_url` | array | `[]` | Regex patterns (unanchored) of URLs to skip |
 | `ignore_param` | array | `[]` | Parameter names to skip (exact match) |
-| `out_of_scope` | array | `[]` | Host patterns to skip, one per entry (`["*.gov", "cdn.example.com"]`). `*.example.com` matches `example.com` and its subdomains; other values must equal the host. A comma inside an entry is not a separator |
+| `out_of_scope` | array | `[]` | Host patterns to skip, one per entry (`["*.gov", "cdn.example.com"]`). `*.example.com` matches `example.com` and its subdomains; any other `*` matches any run of characters; a value without `*` must equal the host. A comma inside an entry is not a separator |
 | `out_of_scope_file` | string | — | File of out-of-scope patterns, one per line. Unreadable path aborts the scan |
 
 ### Discovery & mining
