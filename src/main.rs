@@ -494,7 +494,7 @@ async fn main() {
                     args.explicit = explicit_args_for(&matches, "scan");
                     args
                 }
-                Some(Commands::Url(a)) => compat(a.scan_args, "url", vec![a.url]),
+                Some(Commands::Url(a)) => compat(a.scan_args, "url", a.url.into_iter().collect()),
                 Some(Commands::File(a)) => compat(a.scan_args, "file", vec![a.file]),
                 Some(Commands::Pipe(a)) => compat(a.scan_args, "pipe", vec![]),
                 // Default to scan (`dalfox <TARGET>`); read the global flags

@@ -308,7 +308,7 @@ stdout에는 스크립트 외에 아무것도 출력되지 않으므로, 출력�
 
 | 명령 | 같은 동작 |
 |------|-----------|
-| `dalfox url -u <URL> [FLAGS]` | `dalfox scan -i url <URL> [FLAGS]` |
+| `dalfox url <URL> [FLAGS]` (또는 `-u <URL>`) | `dalfox scan -i url <URL> [FLAGS]` |
 | `dalfox file <FILE> [FLAGS]` | `dalfox scan -i file <FILE> [FLAGS]` |
 | `dalfox pipe [FLAGS]` | `dalfox scan -i pipe [FLAGS]` (stdin에서 대상 읽기) |
 | `dalfox man` | roff 형식 man 페이지를 stdout으로 출력 (패키징용) |

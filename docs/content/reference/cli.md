@@ -309,7 +309,7 @@ These are left out of `--help` and the completion scripts.
 
 | Command | Equivalent |
 |---------|------------|
-| `dalfox url -u <URL> [FLAGS]` | `dalfox scan -i url <URL> [FLAGS]` |
+| `dalfox url <URL> [FLAGS]` (or `-u <URL>`) | `dalfox scan -i url <URL> [FLAGS]` |
 | `dalfox file <FILE> [FLAGS]` | `dalfox scan -i file <FILE> [FLAGS]` |
 | `dalfox pipe [FLAGS]` | `dalfox scan -i pipe [FLAGS]` (targets from stdin) |
 | `dalfox man` | Prints the roff man page to stdout (used for packaging) |

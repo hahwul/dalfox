@@ -8,9 +8,10 @@ use crate::cmd::scan::ScanArgs;
 
 #[derive(Args)]
 pub struct UrlArgs {
-    /// Target URL to scan
+    /// Target URL to scan. Optional: the v2 positional form
+    /// (`dalfox url <URL>`) lands in the flattened `targets` instead.
     #[arg(short = 'u', long = "url", value_name = "URL")]
-    pub url: String,
+    pub url: Option<String>,
 
     #[clap(flatten)]
     pub scan_args: ScanArgs,
@@ -45,7 +46,10 @@ pub fn into_scan_args(mut scan_args: ScanArgs, input_type: &str, targets: Vec<St
         // exactly as it would not overwrite a typed `-i url`.
         scan_args.explicit.insert("input_type");
     }
-    scan_args.targets = targets;
+    // The subcommand's own target first, then any positional ones
+    // (`dalfox url A B`, `dalfox file a.txt b.txt`) — kept, not dropped.
+    let positional = std::mem::take(&mut scan_args.targets);
+    scan_args.targets = targets.into_iter().chain(positional).collect();
     scan_args
 }
 
