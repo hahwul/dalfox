@@ -134,26 +134,26 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
                     } else {
                         bad_lines += 1;
                         if bad_lines <= 3 {
-                            eprintln!(
+                            crate::utils::log::eprintln_once(format!(
                                 "Warning: --custom-blind-xss-payload line {} skipped (no {{callback}} placeholder)",
                                 lineno + 1
-                            );
+                            ));
                         }
                     }
                 }
                 if !templates.is_empty() {
                     return templates;
                 }
-                eprintln!(
+                crate::utils::log::eprintln_once(format!(
                     "Warning: --custom-blind-xss-payload {} had no usable lines — falling back to built-in",
                     path
-                );
+                ));
             }
             Err(e) => {
-                eprintln!(
+                crate::utils::log::eprintln_once(format!(
                     "Warning: failed to read --custom-blind-xss-payload {}: {} — falling back to built-in",
                     path, e
-                );
+                ));
             }
         }
     }
