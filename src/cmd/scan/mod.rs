@@ -110,6 +110,10 @@ pub(crate) struct ScanState {
     /// the meta envelope and the non-zero exit code, so "0 findings" can be
     /// told apart from "0 findings because we were logged out".
     pub(crate) session_lost: Arc<Mutex<HashMap<String, String>>>,
+    /// Targets whose injection stage was cut short — Ctrl-C, `--limit`,
+    /// `--scan-timeout` — or never dispatched because the run stopped first.
+    /// Reported `incomplete` rather than `clean` when they found nothing.
+    pub(crate) interrupted_targets: Arc<Mutex<std::collections::HashSet<String>>>,
     pub(crate) multi_pb: Option<Arc<MultiProgress>>,
     pub(crate) preflight_idx: Arc<AtomicUsize>,
     pub(crate) analyze_idx: Arc<AtomicUsize>,
@@ -502,6 +506,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         target_mutation_stats,
         session_baselines,
         session_lost,
+        interrupted_targets: Arc::new(Mutex::new(std::collections::HashSet::new())),
         multi_pb,
         preflight_idx,
         analyze_idx,

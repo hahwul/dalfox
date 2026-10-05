@@ -574,12 +574,17 @@ pub(crate) async fn render_results(
         let meta = target_meta.lock().await;
         let stats_map = target_mutation_stats.lock().await;
         let session_lost = state.session_lost.lock().await;
+        let interrupted = state.interrupted_targets.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
         // Same attribution as `finding_belongs_to_target`, but indexed: the
         // per-target filter over every finding was O(targets × findings),
         // seconds of CPU on a large list scan with many findings.
+        //
+        // Over every finding, not the `--limit`-truncated display slice: a
+        // target whose finding fell past the display cut still has one, and
+        // calling it `clean` would contradict the scan.
         let attribution = crate::utils::FindingAttributionIndex::new(
-            display_results.iter().map(|r| r.data.as_str()),
+            final_results.iter().map(|r| r.data.as_str()),
         );
         for url in all_target_urls {
             let finding_count = attribution.count_for(url);
@@ -594,6 +599,10 @@ pub(crate) async fn render_results(
                 ("incomplete", Some(crate::cmd::error_codes::SESSION_LOST))
             } else if finding_count > 0 {
                 ("findings", None)
+            } else if interrupted.contains(url) {
+                // Cut short by Ctrl-C / `--limit` / `--scan-timeout`, or never
+                // dispatched: "nothing found" is not "clean".
+                ("incomplete", None)
             } else {
                 ("clean", None)
             };
@@ -671,7 +680,8 @@ pub(crate) async fn render_results(
         .iter()
         .any(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST);
     let lost_too_many_requests = requests.is_incomplete();
-    let scan_incomplete = session_died || lost_too_many_requests;
+    let stopped_early = !state.interrupted_targets.lock().await.is_empty();
+    let scan_incomplete = session_died || lost_too_many_requests || stopped_early;
 
     // One envelope, built once and rendered by every format. Previously the
     // `json` and `jsonl` arms each inlined their own copy of this object next

@@ -234,7 +234,7 @@ exists so a report is never read as full coverage of the input list.
 
 ## Incomplete Runs
 
-`meta.incomplete: true` means the run was **not fully tested**. Two causes:
+`meta.incomplete: true` means the run was **not fully tested**. Three causes:
 
 - **Severe transport loss** — at least 10% of requests (and at least 3) got no
   answer. `meta.failed_requests` has the count.
@@ -243,6 +243,10 @@ exists so a report is never read as full coverage of the input list.
   `"status": "incomplete"` (ran, session gone by the end) or `"status":
   "skipped"` (never ran, aborted with its host), plus `"error_code":
   "SESSION_LOST"` and the triggering signal in `"error_message"`.
+- **Stopped early** — Ctrl-C, `--limit`, or `--scan-timeout` cut a target
+  short, or the run stopped before reaching it. Such a target that found
+  nothing carries `"status": "incomplete"` with no `error_code`. This one
+  leaves the exit code alone.
 
 **Agent guidance: never report `findings_count: 0` as "no XSS found" when
 `meta.incomplete` is true.** Say the scan could not complete (session expired,
