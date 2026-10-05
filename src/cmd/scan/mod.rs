@@ -324,9 +324,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             match opened {
                 Ok(sf) => Some(Arc::new(sf)),
                 Err(e) => {
-                    if !args.silence {
-                        emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &e);
-                    }
+                    emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &e);
                     return ScanOutcome::Error;
                 }
             }
