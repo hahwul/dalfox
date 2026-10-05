@@ -1946,12 +1946,15 @@ fn test_stream_findings_disabled_by_end_of_scan_transforms() {
             "{} must disable --stream-findings",
             label
         );
+        // ...and is the flag the startup warning names.
+        assert_eq!(super::stream_findings_blocker(&args), Some(label));
     }
 
     // Streaming is plain-only regardless.
     let mut json = base();
     json.format = "json".to_string();
     assert!(!super::stream_findings_enabled(&json));
+    assert_eq!(super::stream_findings_blocker(&json), Some("--format"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────

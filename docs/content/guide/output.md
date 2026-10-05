@@ -181,7 +181,8 @@ dalfox scan https://target.app --stream-findings
 
 `--stream-findings` only affects the `plain` format and is auto-disabled
 when the end-of-scan path needs to apply filters the streamer can't
-mirror cleanly (`--output`, `--limit`, `--only-poc`, `--baseline`).
+mirror cleanly (`--output`, `--limit`, `--only-poc`, `--baseline`). Either way
+Dalfox prints a `Warning:` on stderr naming the flag that switched it off.
 
 ## POC styles
 

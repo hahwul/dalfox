@@ -179,7 +179,7 @@ dalfox scan https://target.app --stream-findings
 
 `--stream-findings`는 `plain` 형식에만 영향을 미칩니다. 스캔 종료 시점에 스트리머가 그대로
 반영할 수 없는 필터(`--output`, `--limit`, `--only-poc`, `--baseline`)를 적용해야 하면 자동으로
-비활성화됩니다.
+비활성화됩니다. 어느 경우든 이를 끈 플래그를 짚은 `Warning:`이 stderr에 출력됩니다.
 
 ## POC 스타일
 

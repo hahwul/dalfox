@@ -203,12 +203,25 @@ pub fn finalize_scan_args(
 /// baseline, so it would print every triaged finding's full POC block mid-scan
 /// while the summary reports only the new ones.
 pub(crate) fn stream_findings_enabled(args: &ScanArgs) -> bool {
-    args.format == "plain"
-        && args.stream_findings
-        && args.output.is_none()
-        && args.limit.is_none()
-        && args.only_poc.is_empty()
-        && args.baseline.is_none()
+    args.stream_findings && stream_findings_blocker(args).is_none()
+}
+
+/// The flag that switches a requested `--stream-findings` off, if any — named
+/// in the startup warning so the flag is not ignored without a word.
+pub(crate) fn stream_findings_blocker(args: &ScanArgs) -> Option<&'static str> {
+    if args.format != "plain" {
+        Some("--format")
+    } else if args.output.is_some() {
+        Some("--output")
+    } else if args.limit.is_some() {
+        Some("--limit")
+    } else if !args.only_poc.is_empty() {
+        Some("--only-poc")
+    } else if args.baseline.is_some() {
+        Some("--baseline")
+    } else {
+        None
+    }
 }
 
 /// Run a scan and return the outcome: `Clean` (no findings), `Findings`, or `Error`.
@@ -575,6 +588,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Computed once here so the scan loop and the end-of-scan renderer agree on
     // whether streaming ran.
     let stream_findings_enabled = stream_findings_enabled(args);
+    if args.stream_findings
+        && !args.silence
+        && let Some(flag) = stream_findings_blocker(args)
+    {
+        eprintln!(
+            "Warning: --stream-findings has no effect with {flag}; findings are reported at the end of the scan"
+        );
+    }
 
     // Spawn the OOB poller now that we know whether streaming is on. It writes
     // correlated callbacks straight into the shared results vector and runs
