@@ -800,7 +800,7 @@ pub(crate) async fn detect_outdated_libs(
     if args_clone.detect_outdated_libs
         && let Some(body) = preflight_response_body
     {
-        let lib_findings = crate::scanning::vuln_libs::library_findings(
+        let mut lib_findings = crate::scanning::vuln_libs::library_findings(
             crate::scanning::vuln_libs::detect_vulnerable_libraries(body),
             target.url.as_str(),
             &target.method,
@@ -813,6 +813,7 @@ pub(crate) async fn detect_outdated_libs(
                 &lib_findings,
                 &args_clone.limit_result_type.to_uppercase(),
             );
+            crate::scanning::result::stamp_origin(&mut lib_findings, target.url.as_str());
             let mut guard = results_clone.lock().await;
             guard.extend(lib_findings);
             findings_count_clone.fetch_add(added, Ordering::Relaxed);
@@ -843,18 +844,20 @@ async fn run_initial_ast_pass(
     if !args_clone.skip_ast_analysis
         && let Some(response_text) = preflight_response_body
     {
-        let ast_batch = crate::scanning::ast_integration::run_initial_ast_dom_analysis_for_response(
-            response_text,
-            response_content_type,
-            target.url.as_str(),
-            &target.method,
-            crate::scanning::ast_integration::PageSecurityPosture::from_target(target),
-        );
+        let mut ast_batch =
+            crate::scanning::ast_integration::run_initial_ast_dom_analysis_for_response(
+                response_text,
+                response_content_type,
+                target.url.as_str(),
+                &target.method,
+                crate::scanning::ast_integration::PageSecurityPosture::from_target(target),
+            );
         if !ast_batch.is_empty() {
             let added = crate::scanning::count_matching_results(
                 &ast_batch,
                 &args_clone.limit_result_type.to_uppercase(),
             );
+            crate::scanning::result::stamp_origin(&mut ast_batch, target.url.as_str());
             let mut guard = results_clone.lock().await;
             guard.extend(ast_batch);
             findings_count_clone.fetch_add(added, Ordering::Relaxed);
@@ -863,13 +866,14 @@ async fn run_initial_ast_pass(
             && crate::utils::response_has_markup_document(response_content_type, response_text)
         {
             let ext_client = target.build_client_or_default();
-            let ext_batch = crate::scanning::fetch_and_analyze_external_js(
+            let mut ext_batch = crate::scanning::fetch_and_analyze_external_js(
                 &ext_client,
                 target,
                 response_text,
                 args_clone,
             )
             .await;
+            crate::scanning::result::stamp_origin(&mut ext_batch, target.url.as_str());
             crate::scanning::accumulate_findings(
                 results_clone,
                 findings_count_clone,

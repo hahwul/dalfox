@@ -564,11 +564,12 @@ pub(crate) async fn render_results(
     // MUST agree — if they disagree, a finding can be dropped by dedup but
     // attributed to a different target than where it was actually produced.
     //
-    // Limitation: targets that share a path-without-query
-    // (e.g. `/search?q=a` and `/search?id=b`) or a parent path for
-    // path-injection (e.g. `/api/v1/foo` and `/api/v1/bar`) can both match
-    // a single finding. This mirrors prior behavior. Single-target scans
-    // are unaffected.
+    // Findings stamped with their `origin_target` (everything the scan loop
+    // and preflight produce) are matched exactly. The heuristic's limitation —
+    // targets sharing a path-without-query (`/search?q=a` vs `/search?id=b`)
+    // or a parent directory (`/api/v1/foo` vs `/api/v1/bar`) both match one
+    // finding — now applies only to unstamped ones (OOB callbacks,
+    // deserialized results).
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let meta = target_meta.lock().await;
@@ -583,11 +584,25 @@ pub(crate) async fn render_results(
         // Over every finding, not the `--limit`-truncated display slice: a
         // target whose finding fell past the display cut still has one, and
         // calling it `clean` would contradict the scan.
-        let attribution = crate::utils::FindingAttributionIndex::new(
-            final_results.iter().map(|r| r.data.as_str()),
-        );
+        //
+        // A finding stamped with the target that produced it is counted for
+        // exactly that target; only an unstamped one (OOB callback with no
+        // record, a deserialized result) goes through the URL heuristic.
+        let mut by_origin: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        let attribution =
+            crate::utils::FindingAttributionIndex::new(final_results.iter().filter_map(|r| {
+                match r.origin_target.as_deref() {
+                    Some(origin) => {
+                        *by_origin.entry(origin).or_default() += 1;
+                        None
+                    }
+                    None => Some(r.data.as_str()),
+                }
+            }));
         for url in all_target_urls {
-            let finding_count = attribution.count_for(url);
+            let finding_count =
+                by_origin.get(url.as_str()).copied().unwrap_or(0) + attribution.count_for(url);
             // Session loss outranks `findings` and `clean`: a target whose
             // session died was not fully tested, and reporting it as either
             // would recreate exactly the ambiguity issue #1273 is about.

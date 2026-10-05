@@ -1660,6 +1660,25 @@ async fn test_render_results_stopped_early_targets_are_not_clean() {
 }
 
 #[tokio::test]
+async fn test_render_results_attributes_stamped_findings_to_their_origin() {
+    // Query-less siblings in one directory (a HAR / POST list): the URL
+    // heuristic credits a finding to every sibling; the stamped origin to one.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls: Vec<String> = ["https://h/api/a", "https://h/api/b"]
+        .map(String::from)
+        .to_vec();
+    let mut r = reflected_result("https://h/api/b", "q", "<x>");
+    r.message_id = 606;
+    r.origin_target = Some("https://h/api/b".to_string());
+    let content = render_results_to_file(args, vec![r], urls, "origin_attr").await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    let summary = &v["meta"]["target_summary"];
+    assert_eq!(summary[0]["status"], "clean", "{summary}");
+    assert_eq!(summary[1]["status"], "findings", "{summary}");
+}
+
+#[tokio::test]
 async fn test_render_results_json_writes_envelope() {
     let mut args = default_scan_args();
     args.format = "json".to_string();
