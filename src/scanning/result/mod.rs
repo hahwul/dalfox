@@ -293,17 +293,6 @@ pub(crate) fn stamp_origin(results: &mut [Result], target_url: &str) {
     }
 }
 
-impl Result {
-    /// Whether this finding was produced by scanning `target_url`: its
-    /// recorded origin when set, else the `data`-URL heuristic.
-    pub(crate) fn belongs_to_target(&self, target_url: &str) -> bool {
-        match &self.origin_target {
-            Some(origin) => origin == target_url,
-            None => crate::utils::finding_belongs_to_target(target_url, &self.data),
-        }
-    }
-}
-
 /// Largest response body kept on a finding as evidence.
 ///
 /// Findings accumulate in one in-memory `Vec` for the whole run, and each one

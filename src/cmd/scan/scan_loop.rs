@@ -608,6 +608,11 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     } else {
                         (false, scan_fut.await)
                     };
+                    // Read now, not after the post-scan session probe: a
+                    // sibling host group reaching `--limit` sets this same
+                    // flag, and a target that had already finished must not
+                    // read as cut short.
+                    let cancelled_during_scan = cancel_flag_inner.load(Ordering::Relaxed);
                     if timed_out && !args_clone.silence {
                         eprintln!(
                             "[scan] {} exceeded --scan-timeout ({}s); cancelling target (stops at next checkpoint)",
@@ -648,7 +653,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     let mut session_died = false;
                     if let Some(monitor) = &session_monitor_target
                         && !timed_out
-                        && !cancel_flag_inner.load(Ordering::Relaxed)
+                        && !cancelled_during_scan
                         && monitor.check(&target, ProbePhase::PostScan).await.is_some()
                     {
                         session_died = true;
@@ -671,9 +676,8 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     // `limit` is part of the config hash, so re-running the
                     // identical command would skip this target forever with
                     // most of its parameters never tested.
-                    let cut_short = timed_out
-                        || cancel_flag_inner.load(Ordering::Relaxed)
-                        || scan_report.limit_stopped;
+                    let cut_short =
+                        timed_out || cancelled_during_scan || scan_report.limit_stopped;
                     if cut_short {
                         interrupted_targets_target
                             .lock()

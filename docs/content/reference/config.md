@@ -293,6 +293,6 @@ Config values skip the CLI's argument parser, so Dalfox checks them when it load
 - `proxy`, `sxss_url` and `session_check_url` go through the same startup checks as their flags. A proxy scheme Dalfox cannot route, or a URL whose scheme is not `http`/`https`, stops the scan with `PARSE_ERROR` (exit `2`).
 - Numeric keys have the same limits as their flags (`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). An out-of-range value stops the scan with `INVALID_INPUT_TYPE` (exit `2`).
 - Unknown keys, and keys placed outside the `[scan]` table, are ignored with a ``Warning: config <path>: unknown key `scan.header` ignored`` on stderr, so a misspelled or misplaced key is visible.
-- A file that fails to parse (a TOML syntax error, or a value of the wrong type such as `workers = "10"`) is dropped whole. With `--config` Dalfox prints a warning naming the line and the offending value. The default-path file is dropped silently.
+- A file that fails to parse (a TOML syntax error, or a value of the wrong type such as `workers = "10"`) is dropped whole. With `--config` Dalfox prints a warning naming the line and column (not the value, which may be a credential). The default-path file is dropped silently.
 
 See [Getting Started → Configuration](../../getting-started/configuration/) for examples.

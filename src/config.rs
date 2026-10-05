@@ -61,19 +61,30 @@ fn unknown_keys(raw: &serde_json::Value) -> Vec<String> {
 }
 
 /// Parse `content` as JSON or TOML, trying the format `is_json` names first.
-/// The error is the preferred format's own (with its line / column), not a
-/// generic "failed to parse": a single mistyped value fails the whole file,
-/// so the operator has to be told which one.
+/// The error names the preferred format and the line / column that failed —
+/// a single mistyped value fails the whole file, so the operator has to be
+/// told where. Not the parser's own message: that quotes the offending value,
+/// and a mistyped `headers` / `proxy` would print its credential to the log.
 fn parse_config(content: &str, is_json: bool) -> Result<(Config, Vec<String>), String> {
+    let at = |kind: &str, line: usize, col: usize| {
+        format!(
+            "invalid {kind} config at line {line}, column {col} (syntax error or wrong value type)"
+        )
+    };
     let json = || {
         serde_json::from_str::<Config>(content)
             .map(|c| (c, serde_json::from_str(content).unwrap_or_default()))
-            .map_err(|e| format!("invalid JSON config: {e}"))
+            .map_err(|e| at("JSON", e.line(), e.column()))
     };
     let toml = || {
         toml::from_str::<Config>(content)
             .map(|c| (c, toml::from_str(content).unwrap_or_default()))
-            .map_err(|e| format!("invalid TOML config: {e}"))
+            .map_err(|e| {
+                let before = &content[..e.span().map_or(0, |s| s.start).min(content.len())];
+                let line = before.matches('\n').count() + 1;
+                let col = before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1;
+                at("TOML", line, col)
+            })
     };
     let (config, raw): (Config, serde_json::Value) = if is_json {
         json().or_else(|e| toml().map_err(|_| e))

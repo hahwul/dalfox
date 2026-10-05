@@ -606,7 +606,7 @@ fn body_pocs_replay_the_recorded_body_with_sibling_fields() {
         assert!(curl.contains(&format!("Content-Type: {ct}")), "{curl}");
         let httpie = generate_poc(&r, "httpie");
         assert!(
-            httpie.contains(&format!("<<< '{body}'")),
+            httpie.starts_with(&format!("printf '%s' '{body}' | http ")),
             "httpie {location}: {httpie}"
         );
     }

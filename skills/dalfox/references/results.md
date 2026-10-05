@@ -264,8 +264,9 @@ only under the default `--on-session-loss abort`).
 - `2` — Hard error: bad input, config, runtime failure, every target
   unreachable, `--output` could not be written. Also, **only when there are no
   findings**: a session lost mid-scan (default `--on-session-loss abort`), a
-  target skipped with `INTERNAL_ERROR` (worker panic), or severe transport loss
-  (`meta.incomplete`). A run that did find something still exits `1`
+  target skipped with `INTERNAL_ERROR` (worker panic), or severe transport loss.
+  A run stopped early (Ctrl-C / `--limit` / `--scan-timeout`) sets
+  `meta.incomplete` but keeps its exit code. A run that did find something still exits `1`
 
 With `--baseline` (default `filter` mode), suppressed findings never reach the
 exit-code decision, so the code reports novelty rather than the whole backlog.

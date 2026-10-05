@@ -136,7 +136,7 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `total_requests`
 - `failed_requests` — requests that never got a response (reset, refused, timed out) after their retries. A payload that never reached the target was never tested
 - `findings_count`
-- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or cut short (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
+- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or its session was lost — a target that Ctrl-C / `--limit` / `--scan-timeout` cut short is `incomplete` with none (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/#collapsing-near-duplicate-urls) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
 - `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/#file-mode)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
@@ -181,8 +181,9 @@ dalfox scan https://target.app --stream-findings
 
 `--stream-findings` only affects the `plain` format and is auto-disabled
 when the end-of-scan path needs to apply filters the streamer can't
-mirror cleanly (`--output`, `--limit`, `--only-poc`, `--baseline`). Either way
-Dalfox prints a `Warning:` on stderr naming the flag that switched it off.
+mirror cleanly (`--output`, `--limit`, `--only-poc`, `--baseline`). When you
+passed `--stream-findings` on the command line, Dalfox prints a `Warning:` on
+stderr naming the flag that switched it off.
 
 ## POC styles
 

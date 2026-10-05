@@ -311,13 +311,16 @@ fn json_object_body(param: &str, payload: &str) -> String {
 /// `None` (older / deserialized results with no request text) falls back to
 /// the per-location builders.
 fn recorded_wire_body(result: &crate::scanning::result::Result) -> Option<(String, &str)> {
-    if !matches!(
-        result.location.as_str(),
-        "Body" | "JsonBody" | "GraphqlBody" | "XmlBody"
-    ) {
-        return None;
-    }
+    let structured = match result.location.as_str() {
+        "GraphqlBody" | "XmlBody" => true,
+        "Body" | "JsonBody" => false,
+        _ => return None,
+    };
+    // The scan always records a form / JSON Content-Type for these; without
+    // one (hand-edited request text) the `octet-stream` fallback would make
+    // the server ignore the body, so the per-field builder does better.
     request_content_type_and_body(result.request.as_deref())
+        .filter(|(ct, _)| structured || ct != "application/octet-stream")
 }
 
 /// Extract `(Content-Type, body)` from a recorded raw HTTP request text
@@ -365,13 +368,15 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
     let value = poc_wire_value(result);
     // Feed the exact recorded body to httpie via stdin — its `key=value` field
     // syntax can't express a full GraphQL/XML document or the sibling fields.
+    // `printf '%s'`, not a `<<<` here-string: that appends a newline, which
+    // lands in the last form field's value (a CSRF token that then fails).
     if let Some((ct, body)) = recorded_wire_body(result) {
         return format!(
-            "http {} {} {} <<< {}\n",
+            "printf '%s' {} | http {} {} {}\n",
+            shell_single_quote(body),
             method,
             url,
-            shell_single_quote(&format!("Content-Type:{}", ct)),
-            shell_single_quote(body)
+            shell_single_quote(&format!("Content-Type:{}", ct))
         );
     }
     match result.location.as_str() {

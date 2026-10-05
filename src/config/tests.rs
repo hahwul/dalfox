@@ -399,7 +399,7 @@ fn test_load_path_creates_missing_and_falls_back_across_formats() {
     std::fs::write(&bad, "garbage {{{").expect("write");
     let err = load_path(&bad).expect_err("garbage must not parse");
     assert!(
-        err.to_string().starts_with("invalid JSON config: "),
+        err.to_string().starts_with("invalid JSON config at line 1"),
         "the extension's format names the error: {err}"
     );
 
@@ -968,5 +968,8 @@ fn parse_config_templates_have_no_unknown_keys() {
 #[test]
 fn parse_config_error_names_the_bad_value() {
     let err = parse_config("[scan]\nworkers = \"ten\"\n", false).unwrap_err();
-    assert!(err.contains("line 2") && err.contains("\"ten\""), "{err}");
+    assert!(err.contains("line 2, column 11"), "{err}");
+    // The value itself is never echoed — it may be a credential.
+    let err = parse_config("[scan]\nproxy = [\"http://u:s3cret@p\"]\n", false).unwrap_err();
+    assert!(!err.contains("s3cret"), "{err}");
 }

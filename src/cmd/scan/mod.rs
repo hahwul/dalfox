@@ -415,7 +415,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // URL — possible since `--dedup-urls off` — would emit one summary entry per
     // occurrence, each reporting that URL's *full* finding count and sharing one
     // skip/WAF record. The per-target counts would then no longer sum to
-    // `findings_count`.
+    // `findings_count` (which they do, except under `--limit`).
     let all_target_urls: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
         parsed_targets
@@ -586,7 +586,9 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Computed once here so the scan loop and the end-of-scan renderer agree on
     // whether streaming ran.
     let stream_findings_enabled = stream_findings_enabled(args);
-    if args.stream_findings
+    // Only for the flag typed on the command line: a config-file
+    // `stream_findings = true` would otherwise warn on every `-o` run.
+    if args.explicit.contains("stream_findings")
         && !args.silence
         && let Some(flag) = stream_findings_blocker(args)
     {

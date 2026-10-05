@@ -564,12 +564,9 @@ pub(crate) async fn render_results(
     // MUST agree — if they disagree, a finding can be dropped by dedup but
     // attributed to a different target than where it was actually produced.
     //
-    // Findings stamped with their `origin_target` (everything the scan loop
-    // and preflight produce) are matched exactly. The heuristic's limitation —
-    // targets sharing a path-without-query (`/search?q=a` vs `/search?id=b`)
-    // or a parent directory (`/api/v1/foo` vs `/api/v1/bar`) both match one
-    // finding — now applies only to unstamped ones (OOB callbacks,
-    // deserialized results).
+    // The heuristic's limitation — targets sharing a path-without-query or a
+    // parent directory both match one finding — applies only to findings
+    // without an `origin_target` (OOB callbacks, deserialized results).
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let meta = target_meta.lock().await;
@@ -577,29 +574,23 @@ pub(crate) async fn render_results(
         let session_lost = state.session_lost.lock().await;
         let interrupted = state.interrupted_targets.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
-        // Same attribution as `finding_belongs_to_target`, but indexed: the
-        // per-target filter over every finding was O(targets × findings),
-        // seconds of CPU on a large list scan with many findings.
-        //
-        // Over every finding, not the `--limit`-truncated display slice: a
-        // target whose finding fell past the display cut still has one, and
-        // calling it `clean` would contradict the scan.
-        //
-        // A finding stamped with the target that produced it is counted for
-        // exactly that target; only an unstamped one (OOB callback with no
-        // record, a deserialized result) goes through the URL heuristic.
+        // Counted over every finding, not the `--limit`-truncated display
+        // slice (a target whose finding fell past the cut is not `clean`), so
+        // under `--limit` the per-target counts can exceed `findings_count`.
+        // Stamped findings count for their origin; unstamped ones go through
+        // the indexed `finding_belongs_to_target` heuristic.
+        let (stamped, unstamped): (Vec<_>, Vec<_>) = final_results
+            .iter()
+            .partition(|r| r.origin_target.is_some());
         let mut by_origin: std::collections::HashMap<&str, usize> =
             std::collections::HashMap::new();
+        for r in stamped {
+            *by_origin
+                .entry(r.origin_target.as_deref().unwrap_or_default())
+                .or_default() += 1;
+        }
         let attribution =
-            crate::utils::FindingAttributionIndex::new(final_results.iter().filter_map(|r| {
-                match r.origin_target.as_deref() {
-                    Some(origin) => {
-                        *by_origin.entry(origin).or_default() += 1;
-                        None
-                    }
-                    None => Some(r.data.as_str()),
-                }
-            }));
+            crate::utils::FindingAttributionIndex::new(unstamped.iter().map(|r| r.data.as_str()));
         for url in all_target_urls {
             let finding_count =
                 by_origin.get(url.as_str()).copied().unwrap_or(0) + attribution.count_for(url);

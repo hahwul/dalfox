@@ -2002,7 +2002,11 @@ fn collapse_redundant_reflected(
     target_url: &str,
 ) -> Vec<crate::scanning::result::Result> {
     use std::collections::HashSet;
-    let belongs = |r: &crate::scanning::result::Result| r.belongs_to_target(target_url);
+    // The recorded origin when set, else the `data`-URL heuristic.
+    let belongs = |r: &crate::scanning::result::Result| match &r.origin_target {
+        Some(origin) => origin == target_url,
+        None => crate::utils::finding_belongs_to_target(target_url, &r.data),
+    };
     let key = |r: &crate::scanning::result::Result| {
         (r.param.clone(), r.location.clone(), r.inject_type.clone())
     };
