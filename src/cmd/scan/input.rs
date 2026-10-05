@@ -196,13 +196,11 @@ pub(crate) async fn resolve_targets(
                     }
                 }
                 Err(e) => {
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::STDIN_ERROR,
-                            &format!("Error reading from stdin: {}", e),
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::STDIN_ERROR,
+                        &format!("Error reading from stdin: {}", e),
+                    );
                     return Err(ScanOutcome::Error);
                 }
             }
@@ -264,13 +262,11 @@ pub(crate) async fn resolve_targets(
                     // the code that matches it (see `file_read_error_code`;
                     // this arm used to report every one of them as
                     // `INPUT_TOO_LARGE`).
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            file_read_error_code(&e),
-                            &format!("Error reading target list {}: {}", target, e),
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        file_read_error_code(&e),
+                        &format!("Error reading target list {}: {}", target, e),
+                    );
                     return Err(ScanOutcome::Error);
                 }
                 None => {
@@ -282,16 +278,14 @@ pub(crate) async fn resolve_targets(
                     // long as any other target resolved — the run exits 0 and
                     // reads as a clean scan of a list that was never opened.
                     if names_a_missing_file(target) {
-                        if !args.silence {
-                            emit_error(
-                                &args.format,
-                                crate::cmd::error_codes::FILE_READ_ERROR,
-                                &format!(
-                                    "Target list '{}' does not exist (pass `-i url {}` to scan it as a URL instead)",
-                                    target, target
-                                ),
-                            );
-                        }
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::FILE_READ_ERROR,
+                            &format!(
+                                "Target list '{}' does not exist (pass `-i url {}` to scan it as a URL instead)",
+                                target, target
+                            ),
+                        );
                         return Err(ScanOutcome::Error);
                     }
                     // Otherwise it is a bare host/URL literal.
@@ -308,13 +302,11 @@ pub(crate) async fn resolve_targets(
                 .collect(),
             "file" => {
                 if args.targets.is_empty() {
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::NO_FILE,
-                            "No file specified for input-type=file",
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::NO_FILE,
+                        "No file specified for input-type=file",
+                    );
                     return Err(ScanOutcome::Error);
                 }
                 // Read every path given, not just `targets[0]`. `-i file a b`
@@ -334,13 +326,11 @@ pub(crate) async fn resolve_targets(
                                 .map(|l| (l.to_string(), TargetOrigin::List)),
                         ),
                         Err(e) => {
-                            if !args.silence {
-                                emit_error(
-                                    &args.format,
-                                    file_read_error_code(&e),
-                                    &format!("Error reading file {}: {}", file_path, e),
-                                );
-                            }
+                            emit_error(
+                                &args.format,
+                                file_read_error_code(&e),
+                                &format!("Error reading file {}: {}", file_path, e),
+                            );
                             return Err(ScanOutcome::Error);
                         }
                     }
@@ -353,13 +343,11 @@ pub(crate) async fn resolve_targets(
                 // the operator either forgot the pipe or meant `-i
                 // auto`.
                 if !stdin_is_piped {
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::STDIN_NOT_PIPED,
-                            "`-i pipe` requires data on stdin (no pipe detected)",
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::STDIN_NOT_PIPED,
+                        "`-i pipe` requires data on stdin (no pipe detected)",
+                    );
                     return Err(ScanOutcome::Error);
                 }
                 let mut piped_targets: Vec<(String, TargetOrigin)> = Vec::new();
@@ -374,13 +362,11 @@ pub(crate) async fn resolve_targets(
                         ) {
                             Ok(buf) => buf,
                             Err(e) => {
-                                if !args.silence {
-                                    emit_error(
-                                        &args.format,
-                                        crate::cmd::error_codes::STDIN_ERROR,
-                                        &format!("Error reading from stdin: {}", e),
-                                    );
-                                }
+                                emit_error(
+                                    &args.format,
+                                    crate::cmd::error_codes::STDIN_ERROR,
+                                    &format!("Error reading from stdin: {}", e),
+                                );
                                 return Err(ScanOutcome::Error);
                             }
                         }
@@ -432,52 +418,44 @@ pub(crate) async fn resolve_targets(
                     {
                         Ok(buf) => vec![(buf, TargetOrigin::Argument)],
                         Err(e) => {
-                            if !args.silence {
-                                emit_error(
-                                    &args.format,
-                                    crate::cmd::error_codes::STDIN_ERROR,
-                                    &format!("Error reading from stdin: {}", e),
-                                );
-                            }
+                            emit_error(
+                                &args.format,
+                                crate::cmd::error_codes::STDIN_ERROR,
+                                &format!("Error reading from stdin: {}", e),
+                            );
                             return Err(ScanOutcome::Error);
                         }
                     }
                 } else {
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::NO_FILE,
-                            "No HAR file specified for input-type=har (pass a .har path or pipe HAR on stdin)",
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::NO_FILE,
+                        "No HAR file specified for input-type=har (pass a .har path or pipe HAR on stdin)",
+                    );
                     return Err(ScanOutcome::Error);
                 }
             }
 
             _ => {
-                if !args.silence {
-                    emit_error(
-                        &args.format,
-                        crate::cmd::error_codes::INVALID_INPUT_TYPE,
-                        &format!(
-                            "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', or 'har'",
-                            input_type
-                        ),
-                    );
-                }
+                emit_error(
+                    &args.format,
+                    crate::cmd::error_codes::INVALID_INPUT_TYPE,
+                    &format!(
+                        "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', or 'har'",
+                        input_type
+                    ),
+                );
                 return Err(ScanOutcome::Error);
             }
         };
     }
 
     if target_strings.is_empty() {
-        if !args.silence {
-            emit_error(
-                &args.format,
-                crate::cmd::error_codes::NO_TARGETS,
-                "No targets specified",
-            );
-        }
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::NO_TARGETS,
+            "No targets specified",
+        );
         return Err(ScanOutcome::Error);
     }
 
@@ -508,13 +486,11 @@ pub(crate) async fn resolve_targets(
                     }
                 }
                 Err(e) => {
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::PARSE_ERROR,
-                            &format!("Error parsing HAR '{}': {}", s, e),
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::PARSE_ERROR,
+                        &format!("Error parsing HAR '{}': {}", s, e),
+                    );
                     return Err(ScanOutcome::Error);
                 }
             }
@@ -535,13 +511,11 @@ pub(crate) async fn resolve_targets(
                     parsed_targets.push(target);
                 }
                 Err(e) => {
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::PARSE_ERROR,
-                            &format!("Error parsing raw HTTP request '{}': {}", s, e),
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::PARSE_ERROR,
+                        &format!("Error parsing raw HTTP request '{}': {}", s, e),
+                    );
                     return Err(ScanOutcome::Error);
                 }
             }
@@ -615,13 +589,11 @@ pub(crate) async fn resolve_targets(
                         }
                         continue;
                     }
-                    if !args.silence {
-                        emit_error(
-                            &args.format,
-                            crate::cmd::error_codes::PARSE_ERROR,
-                            &format!("Error parsing target '{}': {}", s, e),
-                        );
-                    }
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::PARSE_ERROR,
+                        &format!("Error parsing target '{}': {}", s, e),
+                    );
                     return Err(ScanOutcome::Error);
                 }
             }
@@ -664,6 +636,7 @@ pub(crate) async fn resolve_targets(
         return Err(ScanOutcome::Error);
     }
 
+    let before_scope = parsed_targets.len();
     apply_url_scope_filters(args, &mut parsed_targets);
 
     apply_out_of_scope_filter(args, &mut parsed_targets)?;
@@ -714,11 +687,17 @@ pub(crate) async fn resolve_targets(
         // noise, not swallow input-validation errors. emit_error writes
         // to stderr, so it doesn't pollute the stdout payload that
         // `--silence` callers are typically piping into another tool.
-        emit_error(
-            &args.format,
-            crate::cmd::error_codes::NO_TARGETS,
-            "No targets specified",
-        );
+        // Targets were given, the scope filters removed every one: say so,
+        // or the operator goes looking for a missing input.
+        let msg = if before_scope > 0 {
+            format!(
+                "All {} target(s) were excluded by --include-url / --exclude-url / --out-of-scope",
+                before_scope
+            )
+        } else {
+            "No targets specified".to_string()
+        };
+        emit_error(&args.format, crate::cmd::error_codes::NO_TARGETS, &msg);
         return Err(ScanOutcome::Error);
     }
 
@@ -1050,13 +1029,11 @@ fn load_request_source(
         match crate::utils::fs::read_bounded(p, crate::utils::fs::MAX_FILE_READ_BYTES, label) {
             Ok(c) => Ok(c),
             Err(e) => {
-                if !args.silence {
-                    emit_error(
-                        &args.format,
-                        file_read_error_code(&e),
-                        &format!("Error reading {} {}: {}", label, s, e),
-                    );
-                }
+                emit_error(
+                    &args.format,
+                    file_read_error_code(&e),
+                    &format!("Error reading {} {}: {}", label, s, e),
+                );
                 Err(ScanOutcome::Error)
             }
         }
@@ -1076,13 +1053,11 @@ fn load_request_source(
         // `-i har ./capture.har` came back as "invalid HAR JSON: expected
         // value at line 1 column 1" — a message that sends the operator to
         // inspect a capture they never opened. Say what actually went wrong.
-        if !args.silence {
-            emit_error(
-                &args.format,
-                crate::cmd::error_codes::FILE_READ_ERROR,
-                &format!("{} '{}' does not exist", label, s),
-            );
-        }
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::FILE_READ_ERROR,
+            &format!("{} '{}' does not exist", label, s),
+        );
         Err(ScanOutcome::Error)
     }
 }
@@ -1404,24 +1379,20 @@ fn detect_input_type(
                         detected.to_string()
                     }
                     Err(e) => {
-                        if !args.silence {
-                            emit_error(
-                                &args.format,
-                                crate::cmd::error_codes::STDIN_ERROR,
-                                &format!("Error reading from stdin: {}", e),
-                            );
-                        }
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::STDIN_ERROR,
+                            &format!("Error reading from stdin: {}", e),
+                        );
                         return Err(ScanOutcome::Error);
                     }
                 }
             } else {
-                if !args.silence {
-                    emit_error(
-                        &args.format,
-                        crate::cmd::error_codes::NO_TARGETS,
-                        "No targets specified",
-                    );
-                }
+                emit_error(
+                    &args.format,
+                    crate::cmd::error_codes::NO_TARGETS,
+                    "No targets specified",
+                );
                 return Err(ScanOutcome::Error);
             }
         } else {
