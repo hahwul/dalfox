@@ -271,10 +271,26 @@ pub struct Result {
     /// hint — never serialized.
     #[serde(skip)]
     pub cookie_param: bool,
+    /// URL of the scan target that produced this finding. `data` is the
+    /// as-sent URL — a form action, an injected path segment — which can only
+    /// be mapped back to its target by guessing, and the guess (same path, or
+    /// same parent directory) credits one finding to every sibling endpoint.
+    /// `target_summary` and per-target dedup match on this when it is set and
+    /// fall back to the `data` heuristic for a deserialized result. Internal —
+    /// never serialized.
+    #[serde(skip)]
+    pub origin_target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<String>,
+}
+
+/// Stamp `origin_target` on findings that don't carry one yet.
+pub(crate) fn stamp_origin(results: &mut [Result], target_url: &str) {
+    for r in results.iter_mut().filter(|r| r.origin_target.is_none()) {
+        r.origin_target = Some(target_url.to_string());
+    }
 }
 
 /// Largest response body kept on a finding as evidence.
@@ -370,6 +386,7 @@ impl Result {
                 poc_url_complete: false,
                 wire_payload: None,
                 cookie_param: false,
+                origin_target: None,
                 request: None,
                 response: None,
             },

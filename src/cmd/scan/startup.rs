@@ -69,13 +69,11 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
     // message instead of producing cryptic mid-scan failures.
     if let Err(msg) = validate_numeric_args(args) {
-        if !args.silence {
-            emit_error(
-                &args.format,
-                crate::cmd::error_codes::INVALID_INPUT_TYPE,
-                &msg,
-            );
-        }
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            &msg,
+        );
         return Err(ScanOutcome::Error);
     }
 

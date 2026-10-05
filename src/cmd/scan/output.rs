@@ -564,25 +564,36 @@ pub(crate) async fn render_results(
     // MUST agree — if they disagree, a finding can be dropped by dedup but
     // attributed to a different target than where it was actually produced.
     //
-    // Limitation: targets that share a path-without-query
-    // (e.g. `/search?q=a` and `/search?id=b`) or a parent path for
-    // path-injection (e.g. `/api/v1/foo` and `/api/v1/bar`) can both match
-    // a single finding. This mirrors prior behavior. Single-target scans
-    // are unaffected.
+    // The heuristic's limitation — targets sharing a path-without-query or a
+    // parent directory both match one finding — applies only to findings
+    // without an `origin_target` (OOB callbacks, deserialized results).
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let meta = target_meta.lock().await;
         let stats_map = target_mutation_stats.lock().await;
         let session_lost = state.session_lost.lock().await;
+        let interrupted = state.interrupted_targets.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
-        // Same attribution as `finding_belongs_to_target`, but indexed: the
-        // per-target filter over every finding was O(targets × findings),
-        // seconds of CPU on a large list scan with many findings.
-        let attribution = crate::utils::FindingAttributionIndex::new(
-            display_results.iter().map(|r| r.data.as_str()),
-        );
+        // Counted over every finding, not the `--limit`-truncated display
+        // slice (a target whose finding fell past the cut is not `clean`), so
+        // under `--limit` the per-target counts can exceed `findings_count`.
+        // Stamped findings count for their origin; unstamped ones go through
+        // the indexed `finding_belongs_to_target` heuristic.
+        let (stamped, unstamped): (Vec<_>, Vec<_>) = final_results
+            .iter()
+            .partition(|r| r.origin_target.is_some());
+        let mut by_origin: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for r in stamped {
+            *by_origin
+                .entry(r.origin_target.as_deref().unwrap_or_default())
+                .or_default() += 1;
+        }
+        let attribution =
+            crate::utils::FindingAttributionIndex::new(unstamped.iter().map(|r| r.data.as_str()));
         for url in all_target_urls {
-            let finding_count = attribution.count_for(url);
+            let finding_count =
+                by_origin.get(url.as_str()).copied().unwrap_or(0) + attribution.count_for(url);
             // Session loss outranks `findings` and `clean`: a target whose
             // session died was not fully tested, and reporting it as either
             // would recreate exactly the ambiguity issue #1273 is about.
@@ -594,6 +605,10 @@ pub(crate) async fn render_results(
                 ("incomplete", Some(crate::cmd::error_codes::SESSION_LOST))
             } else if finding_count > 0 {
                 ("findings", None)
+            } else if interrupted.contains(url) {
+                // Cut short by Ctrl-C / `--limit` / `--scan-timeout`, or never
+                // dispatched: "nothing found" is not "clean".
+                ("incomplete", None)
             } else {
                 ("clean", None)
             };
@@ -671,7 +686,8 @@ pub(crate) async fn render_results(
         .iter()
         .any(|t| t["error_code"] == crate::cmd::error_codes::SESSION_LOST);
     let lost_too_many_requests = requests.is_incomplete();
-    let scan_incomplete = session_died || lost_too_many_requests;
+    let stopped_early = !state.interrupted_targets.lock().await.is_empty();
+    let scan_incomplete = session_died || lost_too_many_requests || stopped_early;
 
     // One envelope, built once and rendered by every format. Previously the
     // `json` and `jsonl` arms each inlined their own copy of this object next

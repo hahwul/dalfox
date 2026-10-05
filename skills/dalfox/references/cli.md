@@ -51,7 +51,7 @@ Every format except `plain` auto-silences the banner.
 | `--include-url` | Regex whitelist (multiple) |
 | `--exclude-url` | Regex blacklist (multiple) |
 | `--ignore-param` | Skip these parameter names entirely |
-| `--out-of-scope` | Domain pattern to exclude (e.g. `*.dev.example.com`). Repeat the flag per pattern — a comma is not a separator. `*.example.com` also matches the apex `example.com` |
+| `--out-of-scope` | Domain pattern to exclude (e.g. `*.dev.example.com`). Repeat the flag per pattern — a comma is not a separator. `*` matches any run of characters (`127.0.0.*`, `*.example.*`); a leading `*.` also matches the apex (`*.example.com` covers `example.com`) |
 | `--out-of-scope-file` | File containing one pattern per line. Unreadable path = fatal `FILE_READ_ERROR` (never a warning: continuing would scan the excluded hosts) |
 
 ## Discovery & Mining

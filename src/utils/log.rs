@@ -71,3 +71,20 @@ pub(crate) fn sanitize_log_message(msg: &str) -> std::borrow::Cow<'_, str> {
     }
     std::borrow::Cow::Owned(out)
 }
+
+/// Print `msg` on stderr the first time this process sees it. For warnings
+/// about a run-wide input (a file named by a flag) raised from code that runs
+/// once per target and per injection surface, which would otherwise repeat
+/// the same line for every target.
+pub(crate) fn eprintln_once(msg: String) {
+    use std::sync::{Mutex, OnceLock, PoisonError};
+    static SEEN: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let first = SEEN
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(msg.clone());
+    if first {
+        eprintln!("{msg}");
+    }
+}

@@ -133,6 +133,27 @@ fn test_only_custom_payload_with_missing_file_emits_structured_error() {
 }
 
 #[test]
+fn test_silence_still_reports_fatal_input_errors() {
+    // `-S` silences scan logs, not the reason the run failed: an unreadable
+    // target list used to exit 2 with nothing on either stream.
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "scan",
+            "-i",
+            "file",
+            "/tmp/dalfox-does-not-exist-2.txt",
+            "--format",
+            "json",
+            "-S",
+        ])
+        .output()
+        .expect("failed to execute dalfox");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("FILE_READ_ERROR"), "stderr: {stderr}");
+}
+
+#[test]
 fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
         .args(["pipe", "--format", "json", "-S"])

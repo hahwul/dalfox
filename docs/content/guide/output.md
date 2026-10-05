@@ -136,14 +136,14 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `total_requests`
 - `failed_requests` — requests that never got a response (reset, refused, timed out) after their retries. A payload that never reached the target was never tested
 - `findings_count`
-- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or cut short (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
+- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or its session was lost — a target that Ctrl-C / `--limit` / `--scan-timeout` cut short is `incomplete` with none (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/#collapsing-near-duplicate-urls) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
 - `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/#file-mode)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
 - `resumed` — only when `--state-file` was used: `state_file` (the path) and `targets_skipped_completed` (targets skipped because an earlier run finished them)
-- `incomplete` — `true` when the run was **not fully tested**: a target's authenticated session died mid-scan (see [Session monitoring](../scanning-modes/#session-monitoring)), or at least 10% of the run's requests (and at least 3) never got a response. Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
+- `incomplete` — `true` when the run was **not fully tested**: a target's authenticated session died mid-scan (see [Session monitoring](../scanning-modes/#session-monitoring)), at least 10% of the run's requests (and at least 3) never got a response, or Ctrl-C / `--limit` / `--scan-timeout` stopped the run before every target finished. Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
 
-A target whose session died is reported as `"status": "incomplete"` (or `"skipped"` if it never ran) with `"error_code": "SESSION_LOST"` and the signal that fired in `"error_message"` — never as `"clean"`.
+A target whose session died is reported as `"status": "incomplete"` (or `"skipped"` if it never ran) with `"error_code": "SESSION_LOST"` and the signal that fired in `"error_message"` — never as `"clean"`. A target that Ctrl-C, `--limit`, or `--scan-timeout` cut short (or that the run stopped before reaching) and that found nothing is likewise `"incomplete"`, with no `error_code`.
 
 In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context. Each result's `ruleId` is `dalfox/cwe-<n>` (`dalfox/cwe-79` for XSS, `dalfox/cwe-1104` for outdated libraries), its `level` follows `severity` (High → `error`, Medium → `warning`, Low / Info → `note`), the PoC URL is the location `uri`, and `partialFingerprints["vulnIdentity/v1"]` is a stable hash that lets code scanning match a finding across runs. The finding fields (`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence`, …) are under the result's `properties`, and `message.text` carries `message_str` plus the evidence.
 
@@ -181,7 +181,9 @@ dalfox scan https://target.app --stream-findings
 
 `--stream-findings` only affects the `plain` format and is auto-disabled
 when the end-of-scan path needs to apply filters the streamer can't
-mirror cleanly (`--output`, `--limit`, `--only-poc`, `--baseline`).
+mirror cleanly (`--output`, `--limit`, `--only-poc`, `--baseline`). When you
+passed `--stream-findings` on the command line, Dalfox prints a `Warning:` on
+stderr naming the flag that switched it off.
 
 ## POC styles
 

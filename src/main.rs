@@ -376,6 +376,12 @@ async fn main() {
     // formats). The default `~/.config/dalfox/config.toml` is all-commented, so
     // this is silent unless the operator set a real value.
     if let Ok(lr) = config_load.as_mut() {
+        for key in &lr.unknown_keys {
+            eprintln!(
+                "Warning: config {}: unknown key `{key}` ignored",
+                lr.path.display()
+            );
+        }
         for warning in lr.config.normalize_and_validate() {
             eprintln!("Warning: {warning}");
         }
@@ -488,7 +494,7 @@ async fn main() {
                     args.explicit = explicit_args_for(&matches, "scan");
                     args
                 }
-                Some(Commands::Url(a)) => compat(a.scan_args, "url", vec![a.url]),
+                Some(Commands::Url(a)) => compat(a.scan_args, "url", a.url.into_iter().collect()),
                 Some(Commands::File(a)) => compat(a.scan_args, "file", vec![a.file]),
                 Some(Commands::Pipe(a)) => compat(a.scan_args, "pipe", vec![]),
                 // Default to scan (`dalfox <TARGET>`); read the global flags

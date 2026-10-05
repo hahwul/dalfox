@@ -120,7 +120,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--include-url` | — | Scan only URLs matching this regex (unanchored). Repeat the flag for more patterns; a URL must match at least one |
 | `--exclude-url` | — | Skip URLs matching this regex (unanchored). Repeat the flag for more patterns |
 | `--ignore-param` | — | Parameter name to skip (exact match). Repeat the flag for more names |
-| `--out-of-scope` | — | Skip targets whose host matches this pattern. `*.example.com` matches `example.com` and every subdomain; any other value must equal the host (case-insensitive). Repeat the flag for more patterns: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. A comma is not a separator |
+| `--out-of-scope` | — | Skip targets whose host matches this pattern. `*.example.com` matches `example.com` and every subdomain; any other `*` matches any run of characters (`127.0.0.*`, `*.example.*`); a value without `*` must equal the host. Case-insensitive. Repeat the flag for more patterns: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. A comma is not a separator |
 | `--out-of-scope-file` | — | File of out-of-scope patterns, one per line (blank and `#` lines skipped), same matching as `--out-of-scope`. A path that cannot be read is a fatal `FILE_READ_ERROR` — scanning on without the exclusion list would attack every host it named |
 
 ### Discovery
@@ -309,7 +309,7 @@ These are left out of `--help` and the completion scripts.
 
 | Command | Equivalent |
 |---------|------------|
-| `dalfox url -u <URL> [FLAGS]` | `dalfox scan -i url <URL> [FLAGS]` |
+| `dalfox url <URL> [FLAGS]` (or `-u <URL>`) | `dalfox scan -i url <URL> [FLAGS]` |
 | `dalfox file <FILE> [FLAGS]` | `dalfox scan -i file <FILE> [FLAGS]` |
 | `dalfox pipe [FLAGS]` | `dalfox scan -i pipe [FLAGS]` (targets from stdin) |
 | `dalfox man` | Prints the roff man page to stdout (used for packaging) |

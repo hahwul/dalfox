@@ -23,7 +23,7 @@ v3는 스캔 관련 서브커맨드를 하나의 진입점으로 모았습니다
 | `dalfox server` | `dalfox server` | 기본 바인딩 주소가 v2의 `0.0.0.0`에서 `127.0.0.1`로 바뀌었습니다. 모든 인터페이스에서 받으려면 `--host 0.0.0.0`을 주세요. 포트는 그대로 `6664`이고 `--type`은 없어졌습니다 — [REST API 서버](../../integrations/server/) 참고 |
 | `dalfox payload --entity-event-handler`, `--entity-useful-tags`, `--entity-special-chars`, `--remote-portswigger`, `--remote-payloadbox` | `dalfox payload event-handlers`, `useful-tags`, `special-chars`, `portswigger`, `payloadbox` | 스위치 대신 위치 인자 하나로 고릅니다. `--enum-*`, `--entity-gf`, `--make-bulk`, `--encoder-url`에 대응하는 셀렉터는 없습니다. 있는 셀렉터는 `dalfox payload --help`로 확인하세요 |
 
-{{ alert(type="info", body="legacy url, file, pipe 서브커맨드는 숨겨진 별칭으로 남아 있습니다. file과 pipe는 v2 형태 그대로입니다. url은 다릅니다. 대상을 -u/--url로 받기 때문에(dalfox url -u URL) v2의 dalfox url URL 형태는 실패하니 dalfox scan URL로 바꾸세요. sxss는 남지 않았습니다. 저장형 XSS 스캔은 scan 서브커맨드의 --sxss 플래그로 옮겨졌습니다.") }}
+{{ alert(type="info", body="legacy url, file, pipe 서브커맨드는 숨겨진 별칭으로 남아 있습니다. 세 가지 모두 v2 형태 그대로 동작합니다. dalfox url URL도, dalfox url -u URL도 됩니다. 새 스크립트에서는 dalfox scan URL을 쓰세요. sxss는 남지 않았습니다. 저장형 XSS 스캔은 scan 서브커맨드의 --sxss 플래그로 옮겨졌습니다.") }}
 
 v2의 `--rawdata`, `--har`, `--http` 입력 스위치도 없어졌습니다. 프록시로 잡아둔 raw HTTP 요청과 HAR 익스포트는 자동으로 판별되며(`dalfox scan request.txt`, `dalfox scan capture.har`), `--input-type raw-http` / `--input-type har`로 강제할 수도 있습니다. 요청 줄에 경로만 있으면 스킴은 `:scheme` 의사 헤더가 있을 때 그 값을 따르고, 없으면 HTTP/2 신호가 있거나 Host가 `:443`일 때 `https`, 그 밖에는 `http`입니다. 스킴을 고정하려면 요청 줄에 전체 URL을 쓰세요. [Raw HTTP 모드](../../guide/scanning-modes/#raw-http-모드)와 [HAR 모드](../../guide/scanning-modes/#har-모드)를 참고하세요.
 

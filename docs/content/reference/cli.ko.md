@@ -119,7 +119,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--include-url` | — | 이 정규식에 매칭되는 URL만 스캔합니다(부분 매칭). 패턴을 더 주려면 플래그를 반복하며, URL은 그중 하나 이상에 매칭되어야 합니다 |
 | `--exclude-url` | — | 이 정규식에 매칭되는 URL을 건너뜁니다(부분 매칭). 패턴을 더 주려면 플래그를 반복합니다 |
 | `--ignore-param` | — | 건너뛸 파라미터 이름(정확히 일치). 이름을 더 주려면 플래그를 반복합니다 |
-| `--out-of-scope` | — | 호스트가 이 패턴에 맞는 대상을 건너뜁니다. `*.example.com`은 `example.com`과 모든 하위 도메인에 맞고, 그 밖의 값은 호스트와 정확히 같아야 합니다(대소문자 무관). 패턴을 더 주려면 플래그를 반복합니다: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. 쉼표는 구분자가 아닙니다 |
+| `--out-of-scope` | — | 호스트가 이 패턴에 맞는 대상을 건너뜁니다. `*.example.com`은 `example.com`과 모든 하위 도메인에 맞고, 그 밖의 위치에 있는 `*`는 임의의 문자열에 맞으며(`127.0.0.*`, `*.example.*`), `*`가 없는 값은 호스트와 정확히 같아야 합니다(대소문자 무관). 패턴을 더 주려면 플래그를 반복합니다: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. 쉼표는 구분자가 아닙니다 |
 | `--out-of-scope-file` | — | 스코프 외 패턴을 한 줄에 하나씩 적은 파일(빈 줄과 `#` 줄은 무시). 매칭 방식은 `--out-of-scope`와 같습니다. 읽을 수 없는 경로는 치명적 오류(`FILE_READ_ERROR`)입니다 — 제외 목록 없이 계속 진행하면 그 목록에 적힌 호스트를 전부 공격하게 됩니다 |
 
 ### 탐색
@@ -308,7 +308,7 @@ stdout에는 스크립트 외에 아무것도 출력되지 않으므로, 출력�
 
 | 명령 | 같은 동작 |
 |------|-----------|
-| `dalfox url -u <URL> [FLAGS]` | `dalfox scan -i url <URL> [FLAGS]` |
+| `dalfox url <URL> [FLAGS]` (또는 `-u <URL>`) | `dalfox scan -i url <URL> [FLAGS]` |
 | `dalfox file <FILE> [FLAGS]` | `dalfox scan -i file <FILE> [FLAGS]` |
 | `dalfox pipe [FLAGS]` | `dalfox scan -i pipe [FLAGS]` (stdin에서 대상 읽기) |
 | `dalfox man` | roff 형식 man 페이지를 stdout으로 출력 (패키징용) |

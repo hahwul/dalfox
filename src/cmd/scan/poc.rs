@@ -224,6 +224,15 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
     let url = shell_single_quote(attack_url);
     let field = |name: &str, value: &str| shell_single_quote(&format!("{}={}", name, value));
     let value = poc_wire_value(result);
+    if let Some((ct, body)) = recorded_wire_body(result) {
+        return format!(
+            "curl -X {} -H {} --data {} {}\n",
+            method,
+            shell_single_quote(&format!("Content-Type: {}", ct)),
+            shell_single_quote(body),
+            url
+        );
+    }
     match result.location.as_str() {
         // A cookie param travels as `Cookie: name=value` (see
         // `url_inject::build_header_request`). A header param that merely
@@ -277,22 +286,6 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
             shell_single_quote(&json_object_body(&result.param, value)),
             url
         ),
-        // GraphQL / XML carry a full structured document as the body — a
-        // faithful one-liner can't be rebuilt from (param, payload) alone, so
-        // replay the exact recorded request body (rebuilt from the param's
-        // pipeline in `build_request_text`). Falls back to a plain-URL curl if
-        // the request text wasn't recorded.
-        "GraphqlBody" | "XmlBody" => match request_content_type_and_body(result.request.as_deref())
-        {
-            Some((ct, body)) => format!(
-                "curl -X {} -H {} --data {} {}\n",
-                method,
-                shell_single_quote(&format!("Content-Type: {}", ct)),
-                shell_single_quote(body),
-                url
-            ),
-            None => format!("curl -X {} {}\n", method, url),
-        },
         _ => format!("curl -X {} {}\n", method, url),
     }
 }
@@ -307,6 +300,27 @@ fn json_object_body(param: &str, payload: &str) -> String {
         serde_json::Value::String(payload.to_string()),
     );
     serde_json::Value::Object(map).to_string()
+}
+
+/// The recorded wire body for a body-borne finding (urlencoded, JSON, GraphQL,
+/// XML), so a curl / httpie POC replays the request the scan actually sent —
+/// sibling fields included. Rebuilding the body from `(param, payload)` alone
+/// dropped every other field (a CSRF token, a required `action`), and a
+/// GraphQL / XML document can't be rebuilt from it at all. Multipart is left
+/// to the per-field builders: its recorded body is bound to one boundary.
+/// `None` (older / deserialized results with no request text) falls back to
+/// the per-location builders.
+fn recorded_wire_body(result: &crate::scanning::result::Result) -> Option<(String, &str)> {
+    let structured = match result.location.as_str() {
+        "GraphqlBody" | "XmlBody" => true,
+        "Body" | "JsonBody" => false,
+        _ => return None,
+    };
+    // The scan always records a form / JSON Content-Type for these; without
+    // one (hand-edited request text) the `octet-stream` fallback would make
+    // the server ignore the body, so the per-field builder does better.
+    request_content_type_and_body(result.request.as_deref())
+        .filter(|(ct, _)| structured || ct != "application/octet-stream")
 }
 
 /// Extract `(Content-Type, body)` from a recorded raw HTTP request text
@@ -352,6 +366,19 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
     let method = shell_single_quote(&result.method.to_lowercase());
     let url = shell_single_quote(attack_url);
     let value = poc_wire_value(result);
+    // Feed the exact recorded body to httpie via stdin — its `key=value` field
+    // syntax can't express a full GraphQL/XML document or the sibling fields.
+    // `printf '%s'`, not a `<<<` here-string: that appends a newline, which
+    // lands in the last form field's value (a CSRF token that then fails).
+    if let Some((ct, body)) = recorded_wire_body(result) {
+        return format!(
+            "printf '%s' {} | http {} {} {}\n",
+            shell_single_quote(body),
+            method,
+            url,
+            shell_single_quote(&format!("Content-Type:{}", ct))
+        );
+    }
     match result.location.as_str() {
         "Header" if result.cookie_param => format!(
             "http {} {} {}\n",
@@ -386,19 +413,6 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
             url,
             shell_single_quote(&format!("{}={}", httpie_escape_name(&result.param), value))
         ),
-        // Feed the exact recorded structured body to httpie via stdin — its
-        // `key=value` field syntax can't express a full GraphQL/XML document.
-        "GraphqlBody" | "XmlBody" => match request_content_type_and_body(result.request.as_deref())
-        {
-            Some((ct, body)) => format!(
-                "http {} {} {} <<< {}\n",
-                method,
-                url,
-                shell_single_quote(&format!("Content-Type:{}", ct)),
-                shell_single_quote(body)
-            ),
-            None => format!("http {} {}\n", method, url),
-        },
         _ => format!("http {} {}\n", method, url),
     }
 }

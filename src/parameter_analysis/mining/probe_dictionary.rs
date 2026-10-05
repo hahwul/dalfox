@@ -59,7 +59,10 @@ pub async fn probe_dictionary_params(
             Err(e) => {
                 // Always surface an unreadable user-supplied wordlist on
                 // stderr; machine-readable stdout remains clean.
-                eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
+                crate::utils::log::eprintln_once(format!(
+                    "Error reading wordlist file {}: {}",
+                    wordlist_path, e
+                ));
                 return;
             }
         }

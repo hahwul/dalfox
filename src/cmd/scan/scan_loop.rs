@@ -118,6 +118,7 @@ pub(crate) async fn run_scan_loop(
     let spinner_allowed = state.spinner_allowed;
     let nc = state.no_color;
     let skipped_targets = state.skipped_targets.clone();
+    let interrupted_targets = state.interrupted_targets.clone();
     // `--state-file` handle (None unless resume is on). Written once per
     // target as it reaches a terminal state, so a kill at any point leaves the
     // completions so far on disk.
@@ -239,18 +240,22 @@ pub(crate) async fn run_scan_loop(
                 .is_some_and(|lim| count.load(Ordering::Relaxed) >= lim)
     };
 
-    for (host, group) in host_groups {
-        if should_stop(&cancel_flag, &findings_count) {
-            break;
-        }
+    let mut pending_groups = host_groups.into_iter();
+    while let Some((host, group)) = pending_groups.next() {
         // Backpressure: block dispatch once `group_slots` groups are live.
-        let Ok(group_permit) = group_semaphore.clone().acquire_owned().await else {
-            break;
+        let group_permit = if should_stop(&cancel_flag, &findings_count) {
+            None
+        } else {
+            group_semaphore.clone().acquire_owned().await.ok()
         };
         // Re-check with the permit in hand — the state above may be stale.
-        if should_stop(&cancel_flag, &findings_count) {
+        let Some(group_permit) =
+            group_permit.filter(|_| !should_stop(&cancel_flag, &findings_count))
+        else {
+            let rest = pending_groups.flat_map(|(_, g)| g);
+            mark_interrupted(&interrupted_targets, group.into_iter().chain(rest)).await;
             break;
-        }
+        };
         let global_semaphore_clone = global_semaphore.clone();
         let multi_pb_clone = multi_pb.clone();
         let args_arc = args_arc.clone();
@@ -263,6 +268,7 @@ pub(crate) async fn run_scan_loop(
         let cancel_flag_group = cancel_flag.clone();
         let session_monitor_group = session_monitor.clone();
         let skipped_targets_group = skipped_targets.clone();
+        let interrupted_targets_group = interrupted_targets.clone();
         let state_file_group = state_file.clone();
         // Set once any target in this host group loses its session under
         // `--on-session-loss abort`. Scoped to the group because a host group
@@ -285,6 +291,7 @@ pub(crate) async fn run_scan_loop(
             cancel_flag_group,
             session_monitor_group,
             skipped_targets_group,
+            interrupted_targets_group,
             state_file_group,
             session_lost_group,
             total_targets,
@@ -355,10 +362,22 @@ pub(crate) struct HostGroupCtx {
     pub(crate) cancel_flag_group: Arc<AtomicBool>,
     pub(crate) session_monitor_group: Option<Arc<SessionMonitor>>,
     pub(crate) skipped_targets_group: Arc<Mutex<HashMap<String, &'static str>>>,
+    pub(crate) interrupted_targets_group: Arc<Mutex<std::collections::HashSet<String>>>,
     pub(crate) state_file_group: Option<Arc<super::state_file::StateFile>>,
     pub(crate) session_lost_group: Arc<AtomicBool>,
     pub(crate) total_targets: usize,
     pub(crate) spinner_allowed: bool,
+}
+
+/// Record targets the run stopped before dispatching (`--limit`, Ctrl-C), so
+/// `target_summary` reports them `incomplete` instead of `clean`.
+async fn mark_interrupted(
+    set: &Mutex<std::collections::HashSet<String>>,
+    targets: impl IntoIterator<Item = Target>,
+) {
+    set.lock()
+        .await
+        .extend(targets.into_iter().map(|t| t.url.to_string()));
 }
 
 /// Scan every target in one host group, under the global concurrency permit.
@@ -378,6 +397,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
         cancel_flag_group,
         session_monitor_group,
         skipped_targets_group,
+        interrupted_targets_group,
         state_file_group,
         session_lost_group,
         total_targets,
@@ -436,19 +456,25 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
     let mut panicked_target_of: std::collections::HashMap<tokio::task::Id, String> =
         std::collections::HashMap::new();
 
-    for target in group {
-        if let Some(lim) = args_arc.limit
-            && findings_count_group.load(Ordering::Relaxed) >= lim
-        {
-            break;
-        }
-        // SIGINT bail-out at the per-target dispatch boundary —
-        // skip queuing any more targets once the user pressed
-        // Ctrl-C, even if some are still pending.
-        if cancel_flag_group.load(std::sync::atomic::Ordering::Relaxed) {
-            break;
-        }
-        let Ok(permit) = global_semaphore_clone.clone().acquire_owned().await else {
+    let mut pending = group.into_iter();
+    while let Some(target) = pending.next() {
+        // `--limit` reached, or SIGINT: skip queuing any more targets, even
+        // if some are still pending.
+        let stop = args_arc
+            .limit
+            .is_some_and(|lim| findings_count_group.load(Ordering::Relaxed) >= lim)
+            || cancel_flag_group.load(std::sync::atomic::Ordering::Relaxed);
+        let permit = if stop {
+            None
+        } else {
+            global_semaphore_clone.clone().acquire_owned().await.ok()
+        };
+        let Some(permit) = permit else {
+            mark_interrupted(
+                &interrupted_targets_group,
+                std::iter::once(target).chain(pending),
+            )
+            .await;
             break;
         };
         // Session-loss bail-out at the same boundary. Once the shared
@@ -489,6 +515,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
         let session_monitor_target = session_monitor_group.clone();
         let session_lost_target = session_lost_group.clone();
         let skipped_targets_target = skipped_targets_group.clone();
+        let interrupted_targets_target = interrupted_targets_group.clone();
         let state_file_target = state_file_group.clone();
 
         let multi_pb_active = multi_pb_clone_inner.is_some();
@@ -581,6 +608,11 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     } else {
                         (false, scan_fut.await)
                     };
+                    // Read now, not after the post-scan session probe: a
+                    // sibling host group reaching `--limit` sets this same
+                    // flag, and a target that had already finished must not
+                    // read as cut short.
+                    let cancelled_during_scan = cancel_flag_inner.load(Ordering::Relaxed);
                     if timed_out && !args_clone.silence {
                         eprintln!(
                             "[scan] {} exceeded --scan-timeout ({}s); cancelling target (stops at next checkpoint)",
@@ -621,7 +653,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     let mut session_died = false;
                     if let Some(monitor) = &session_monitor_target
                         && !timed_out
-                        && !cancel_flag_inner.load(Ordering::Relaxed)
+                        && !cancelled_during_scan
                         && monitor.check(&target, ProbePhase::PostScan).await.is_some()
                     {
                         session_died = true;
@@ -644,14 +676,18 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     // `limit` is part of the config hash, so re-running the
                     // identical command would skip this target forever with
                     // most of its parameters never tested.
+                    let cut_short =
+                        timed_out || cancelled_during_scan || scan_report.limit_stopped;
+                    if cut_short {
+                        interrupted_targets_target
+                            .lock()
+                            .await
+                            .insert(target.url.to_string());
+                    }
                     if let Some(sf) = &state_file_target {
                         let outcome = if worker_panicked {
                             super::state_file::TargetOutcome::Error
-                        } else if timed_out
-                            || cancel_flag_inner.load(Ordering::Relaxed)
-                            || session_died
-                            || scan_report.limit_stopped
-                        {
+                        } else if cut_short || session_died {
                             super::state_file::TargetOutcome::Cancelled
                         } else {
                             super::state_file::TargetOutcome::Completed

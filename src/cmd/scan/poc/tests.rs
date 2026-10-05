@@ -581,3 +581,33 @@ fn curl_body_poc_urlencodes_the_field_value() {
     );
     assert!(!out.contains("--data '"), "got: {out}");
 }
+
+#[test]
+fn body_pocs_replay_the_recorded_body_with_sibling_fields() {
+    // Rebuilding a body POC from (param, payload) dropped every other field —
+    // a CSRF token or a required `action` — so the pasted POC was rejected.
+    for (location, ct, body) in [
+        (
+            "Body",
+            "application/x-www-form-urlencoded",
+            "q=%3Csvg%3E&tok=x%26y",
+        ),
+        ("JsonBody", "application/json", r#"{"n":1,"q":"<svg>"}"#),
+    ] {
+        let mut r = wire_finding(location, "http://h/p", "q", "<svg>");
+        r.request = Some(format!(
+            "POST /p HTTP/1.1\r\nHost: h\r\nContent-Type: {ct}\r\n\r\n{body}"
+        ));
+        let curl = generate_poc(&r, "curl");
+        assert!(
+            curl.contains(&format!("--data '{body}'")),
+            "curl {location}: {curl}"
+        );
+        assert!(curl.contains(&format!("Content-Type: {ct}")), "{curl}");
+        let httpie = generate_poc(&r, "httpie");
+        assert!(
+            httpie.starts_with(&format!("printf '%s' '{body}' | http ")),
+            "httpie {location}: {httpie}"
+        );
+    }
+}

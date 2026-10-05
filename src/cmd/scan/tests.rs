@@ -906,6 +906,7 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         target_mutation_stats: Arc::new(Mutex::new(HashMap::new())),
         session_baselines: Arc::new(Mutex::new(HashMap::new())),
         session_lost: Arc::new(Mutex::new(HashMap::new())),
+        interrupted_targets: Arc::new(Mutex::new(std::collections::HashSet::new())),
         multi_pb: None,
         preflight_idx: Arc::new(AtomicUsize::new(0)),
         analyze_idx: Arc::new(AtomicUsize::new(0)),
@@ -1600,6 +1601,84 @@ async fn test_a_short_scan_that_lost_nearly_everything_is_still_incomplete() {
 }
 
 #[tokio::test]
+async fn test_render_results_stopped_early_targets_are_not_clean() {
+    // `--limit 1` over three targets: `a` found one, `b` found one past the
+    // display cut, `c` was cut short. Neither `b` nor `c` is clean.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.limit = Some(1);
+    let path = temp_out_path("stopped_early");
+    args.output = Some(path.clone());
+    let urls: Vec<String> = [
+        "https://a.example/",
+        "https://b.example/",
+        "https://c.example/",
+    ]
+    .map(String::from)
+    .to_vec();
+    let results = ["https://a.example/", "https://b.example/"].map(|u| {
+        let mut r = reflected_result(u, "q", "<x>");
+        r.message_id = 606; // not the AST-dedup sentinel 0
+        r
+    });
+    let state = make_scan_state(results.to_vec());
+    state
+        .interrupted_targets
+        .lock()
+        .await
+        .extend(["https://b.example/", "https://c.example/"].map(String::from));
+    let _ = render_results(
+        &args,
+        &state,
+        &urls,
+        std::time::Duration::from_millis(7),
+        crate::cmd::scan::output::RequestTally {
+            sent: 42,
+            failed: 0,
+        },
+        false,
+        None,
+    )
+    .await;
+    let content = std::fs::read_to_string(&path).expect("output file written");
+    let _ = std::fs::remove_file(&path);
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    let statuses: Vec<&str> = v["meta"]["target_summary"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["status"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        statuses,
+        ["findings", "findings", "incomplete"],
+        "{}",
+        v["meta"]
+    );
+    assert_eq!(v["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(v["meta"]["incomplete"], true);
+}
+
+#[tokio::test]
+async fn test_render_results_attributes_stamped_findings_to_their_origin() {
+    // Query-less siblings in one directory (a HAR / POST list): the URL
+    // heuristic credits a finding to every sibling; the stamped origin to one.
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let urls: Vec<String> = ["https://h/api/a", "https://h/api/b"]
+        .map(String::from)
+        .to_vec();
+    let mut r = reflected_result("https://h/api/b", "q", "<x>");
+    r.message_id = 606;
+    r.origin_target = Some("https://h/api/b".to_string());
+    let content = render_results_to_file(args, vec![r], urls, "origin_attr").await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    let summary = &v["meta"]["target_summary"];
+    assert_eq!(summary[0]["status"], "clean", "{summary}");
+    assert_eq!(summary[1]["status"], "findings", "{summary}");
+}
+
+#[tokio::test]
 async fn test_render_results_json_writes_envelope() {
     let mut args = default_scan_args();
     args.format = "json".to_string();
@@ -1867,12 +1946,15 @@ fn test_stream_findings_disabled_by_end_of_scan_transforms() {
             "{} must disable --stream-findings",
             label
         );
+        // ...and is the flag the startup warning names.
+        assert_eq!(super::stream_findings_blocker(&args), Some(label));
     }
 
     // Streaming is plain-only regardless.
     let mut json = base();
     json.format = "json".to_string();
     assert!(!super::stream_findings_enabled(&json));
+    assert_eq!(super::stream_findings_blocker(&json), Some("--format"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────

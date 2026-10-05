@@ -110,6 +110,10 @@ pub(crate) struct ScanState {
     /// the meta envelope and the non-zero exit code, so "0 findings" can be
     /// told apart from "0 findings because we were logged out".
     pub(crate) session_lost: Arc<Mutex<HashMap<String, String>>>,
+    /// Targets whose injection stage was cut short — Ctrl-C, `--limit`,
+    /// `--scan-timeout` — or never dispatched because the run stopped first.
+    /// Reported `incomplete` rather than `clean` when they found nothing.
+    pub(crate) interrupted_targets: Arc<Mutex<std::collections::HashSet<String>>>,
     pub(crate) multi_pb: Option<Arc<MultiProgress>>,
     pub(crate) preflight_idx: Arc<AtomicUsize>,
     pub(crate) analyze_idx: Arc<AtomicUsize>,
@@ -199,12 +203,25 @@ pub fn finalize_scan_args(
 /// baseline, so it would print every triaged finding's full POC block mid-scan
 /// while the summary reports only the new ones.
 pub(crate) fn stream_findings_enabled(args: &ScanArgs) -> bool {
-    args.format == "plain"
-        && args.stream_findings
-        && args.output.is_none()
-        && args.limit.is_none()
-        && args.only_poc.is_empty()
-        && args.baseline.is_none()
+    args.stream_findings && stream_findings_blocker(args).is_none()
+}
+
+/// The flag that switches a requested `--stream-findings` off, if any — named
+/// in the startup warning so the flag is not ignored without a word.
+pub(crate) fn stream_findings_blocker(args: &ScanArgs) -> Option<&'static str> {
+    if args.format != "plain" {
+        Some("--format")
+    } else if args.output.is_some() {
+        Some("--output")
+    } else if args.limit.is_some() {
+        Some("--limit")
+    } else if !args.only_poc.is_empty() {
+        Some("--only-poc")
+    } else if args.baseline.is_some() {
+        Some("--baseline")
+    } else {
+        None
+    }
 }
 
 /// Run a scan and return the outcome: `Clean` (no findings), `Findings`, or `Error`.
@@ -307,9 +324,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             match opened {
                 Ok(sf) => Some(Arc::new(sf)),
                 Err(e) => {
-                    if !args.silence {
-                        emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &e);
-                    }
+                    emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &e);
                     return ScanOutcome::Error;
                 }
             }
@@ -400,7 +415,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // URL — possible since `--dedup-urls off` — would emit one summary entry per
     // occurrence, each reporting that URL's *full* finding count and sharing one
     // skip/WAF record. The per-target counts would then no longer sum to
-    // `findings_count`.
+    // `findings_count` (which they do, except under `--limit`).
     let all_target_urls: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
         parsed_targets
@@ -502,6 +517,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         target_mutation_stats,
         session_baselines,
         session_lost,
+        interrupted_targets: Arc::new(Mutex::new(std::collections::HashSet::new())),
         multi_pb,
         preflight_idx,
         analyze_idx,
@@ -570,6 +586,16 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Computed once here so the scan loop and the end-of-scan renderer agree on
     // whether streaming ran.
     let stream_findings_enabled = stream_findings_enabled(args);
+    // Only for the flag typed on the command line: a config-file
+    // `stream_findings = true` would otherwise warn on every `-o` run.
+    if args.explicit.contains("stream_findings")
+        && !args.silence
+        && let Some(flag) = stream_findings_blocker(args)
+    {
+        eprintln!(
+            "Warning: --stream-findings has no effect with {flag}; findings are reported at the end of the scan"
+        );
+    }
 
     // Spawn the OOB poller now that we know whether streaming is on. It writes
     // correlated callbacks straight into the shared results vector and runs

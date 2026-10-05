@@ -608,7 +608,8 @@ impl ScanWorkerCtx {
         if local_results.is_empty() {
             return;
         }
-        let batch = std::mem::take(local_results);
+        let mut batch = std::mem::take(local_results);
+        crate::scanning::result::stamp_origin(&mut batch, self.target.url.as_str());
         let added = count_matching_results(&batch, &self.limit_result_type);
         let mut guard = self.results.lock().await;
         guard.extend(batch);
@@ -2001,13 +2002,17 @@ fn collapse_redundant_reflected(
     target_url: &str,
 ) -> Vec<crate::scanning::result::Result> {
     use std::collections::HashSet;
-    let belongs = |data: &str| crate::utils::finding_belongs_to_target(target_url, data);
+    // The recorded origin when set, else the `data`-URL heuristic.
+    let belongs = |r: &crate::scanning::result::Result| match &r.origin_target {
+        Some(origin) => origin == target_url,
+        None => crate::utils::finding_belongs_to_target(target_url, &r.data),
+    };
     let key = |r: &crate::scanning::result::Result| {
         (r.param.clone(), r.location.clone(), r.inject_type.clone())
     };
     let verified_keys: HashSet<(String, String, String)> = results
         .iter()
-        .filter(|r| r.result_type == FindingType::Verified && belongs(&r.data))
+        .filter(|r| r.result_type == FindingType::Verified && belongs(r))
         .map(key)
         .collect();
     if verified_keys.is_empty() {
@@ -2017,7 +2022,7 @@ fn collapse_redundant_reflected(
         .into_iter()
         .filter(|r| {
             !(r.result_type == FindingType::Reflected
-                && belongs(&r.data)
+                && belongs(r)
                 && verified_keys.contains(&key(r)))
         })
         .collect()
