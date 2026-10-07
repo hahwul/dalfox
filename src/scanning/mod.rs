@@ -214,9 +214,11 @@ async fn collapse_target_results(
 /// reached the cap. The discard is observable whenever the surviving tally
 /// falls back under the limit before rendering, which `collapse_target_results`
 /// does routinely (it decrements `findings_count` for every `R` a `V` covers):
-/// the report then has room for the findings the abort threw away. Flushing
-/// cannot overshoot the cap either, because `--limit` truncation is applied
-/// once more at render time (`cmd::scan::output`).
+/// the report then has room for the findings the abort threw away. Under a
+/// limit the phase loops also flush before every check
+/// (`ScanWorkerCtx::limit_reached_in_phase`), so an abort holds at most what
+/// the current chunk confirmed. The CLI truncates to `--limit` again at render
+/// time (`cmd::scan::output`); server/MCP jobs keep that small overshoot.
 enum PhaseFlow {
     Continue,
     Abort,
@@ -423,7 +425,8 @@ fn dom_phase_should_early_exit(
 #[derive(Default)]
 struct ParamScanState {
     /// Findings batched locally, flushed to the shared vector once at the
-    /// end of the worker (one lock acquisition instead of one per finding).
+    /// end of the worker (one lock acquisition instead of one per finding) —
+    /// or per payload batch under a `--limit`, see `limit_reached_in_phase`.
     local_results: Vec<crate::scanning::result::Result>,
     /// AST findings already recorded for this param (dedup key set).
     ast_seen: HashSet<String>,
@@ -494,6 +497,19 @@ impl ScanWorkerCtx {
         self.args
             .limit
             .is_some_and(|lim| self.findings_count.load(Ordering::Relaxed) >= lim)
+    }
+
+    /// [`Self::limit_reached`] for the per-payload phase loops. Under a
+    /// `--limit`, first publish this parameter's batched findings: they only
+    /// count once flushed, so `--deep-scan` (one finding per reflecting
+    /// payload) could otherwise run a whole catalog — on every concurrent
+    /// parameter — past the limit before any of it was seen. Without a limit
+    /// the batching is left alone.
+    async fn limit_reached_in_phase(&self, state: &mut ParamScanState) -> bool {
+        if self.args.limit.is_some() {
+            self.flush_results(&mut state.local_results).await;
+        }
+        self.limit_reached()
     }
 
     /// How many payload requests this parameter may keep in flight at once.
@@ -965,7 +981,7 @@ impl ScanWorkerCtx {
                 self.inc_progress((total - i) as u64);
                 break;
             }
-            if self.limit_reached() {
+            if self.limit_reached_in_phase(state).await {
                 self.inc_progress((total - i) as u64);
                 return PhaseFlow::Abort;
             }
@@ -1370,7 +1386,7 @@ impl ScanWorkerCtx {
                 self.inc_progress((total - done) as u64);
                 break;
             }
-            if self.limit_reached() {
+            if self.limit_reached_in_phase(state).await {
                 self.inc_progress((total - done) as u64);
                 return PhaseFlow::Abort;
             }
@@ -1676,8 +1692,8 @@ pub(crate) const TEST_WORKER_PANIC_PARAM: &str = "__dalfox_test_worker_panic__";
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ScanRunReport {
     pub worker_panics: usize,
-    /// The dispatch loop stopped early because `--limit` was reached, so this
-    /// target's remaining parameters were never tested. Distinguishing this
+    /// `--limit` was reached — in the dispatch loop or inside a parameter's
+    /// phase loop — so some of this target's catalog was never tested. Distinguishing this
     /// from a clean finish matters for `--state-file`: a target recorded
     /// `completed` is skipped on every later run of the same command, which
     /// would make those parameters permanently unscanned.
@@ -1963,6 +1979,13 @@ pub async fn run_scanning(
     }
 
     log_waf_block_stats(target);
+
+    // A phase loop that hit `--limit` aborts its own parameter mid-catalog
+    // without passing through the dispatch check above, so read the tally
+    // here too — before the collapse below lowers it again.
+    limit_stopped |= args
+        .limit
+        .is_some_and(|lim| findings_count.load(Ordering::Relaxed) >= lim);
 
     // Collapse this target's R findings that are already proven by one of
     // its own V findings on the same (param, location, inject_type), scoped

@@ -16,6 +16,7 @@ const REUSE_TIMEOUT: u64 = 60_001;
 const DISTINCT_TIMEOUT_A: u64 = 60_002;
 const DISTINCT_TIMEOUT_B: u64 = 60_003;
 const INSECURE_TIMEOUT: u64 = 60_004;
+const PROXY_FLOOD_TIMEOUT: u64 = 60_005;
 
 /// Count cached Clients whose key carries `timeout`. Scoping by a
 /// per-test-unique timeout isolates the measurement from any other test
@@ -582,4 +583,29 @@ fn scheme_less_inputs_with_a_colon_still_parse() {
         let t = parse_target(s).unwrap_or_else(|e| panic!("{s} should parse: {e}"));
         assert_eq!(t.url.host_str(), Some(host), "{s}");
     }
+}
+
+/// A server/MCP caller picks the proxy string, so `?k=1`, `?k=2`, … each
+/// minted a permanent Client (~25 KB apiece) — an unbounded leak from one
+/// request loop. Proxy-keyed entries are now capped.
+#[test]
+fn test_client_cache_bounds_distinct_proxy_strings() {
+    let mut t = parse_target("http://example.com").unwrap();
+    t.timeout = PROXY_FLOOD_TIMEOUT;
+    for k in 0..MAX_PROXY_CLIENTS * 2 {
+        t.proxy = Some(format!("http://127.0.0.1:1/?k={k}"));
+        let _ = t.build_client().unwrap();
+    }
+    let proxied = client_cache()
+        .lock()
+        .map(|g| g.keys().filter(|k| k.1.is_some()).count())
+        .unwrap_or(0);
+    assert!(
+        proxied <= MAX_PROXY_CLIENTS,
+        "{proxied} proxy-keyed clients cached"
+    );
+    assert!(
+        cache_entries_with_timeout(PROXY_FLOOD_TIMEOUT) >= 1,
+        "the latest proxy client must still be cached"
+    );
 }

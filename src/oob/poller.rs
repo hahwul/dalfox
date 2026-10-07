@@ -165,6 +165,8 @@ async fn poll_once(
 /// finding) — and routed through `ceprintln!` so the ANSI is stripped under
 /// `--no-color` / `NO_COLOR`.
 fn live_line(it: &OobInteraction, record: Option<&InjectionRecord>) -> String {
+    // Every field is target- or callback-derived; escape control bytes.
+    use crate::utils::term::sanitize_display as clean;
     let proto = if it.protocol.is_empty() {
         "oob"
     } else {
@@ -175,19 +177,21 @@ fn live_line(it: &OobInteraction, record: Option<&InjectionRecord>) -> String {
         Some(r) => format!(
             "{} {} callback: param '{}' ({}) on {} — payload {}",
             head,
-            proto,
-            r.param,
+            clean(proto),
+            clean(&r.param),
             if r.location.is_empty() {
                 "?"
             } else {
                 &r.location
             },
-            r.target_url,
-            r.payload,
+            clean(&r.target_url),
+            clean(&r.payload),
         ),
         None => format!(
             "{} {} callback to {} (no correlated payload)",
-            head, proto, it.full_id
+            head,
+            clean(proto),
+            clean(&it.full_id)
         ),
     }
 }
@@ -273,6 +277,31 @@ fn build_finding(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_line_escapes_terminal_controls() {
+        let it = OobInteraction {
+            protocol: "http\x1b]0;P\x07".to_string(),
+            full_id: "x\x1b]52;c;SEFDSw==\x07.oast.fun".to_string(),
+            remote_address: String::new(),
+            timestamp: String::new(),
+        };
+        let rec = InjectionRecord {
+            target_url: "https://t/\u{9d}".to_string(),
+            param: "q\x1b]8;;https://evil/\x07".to_string(),
+            location: "Query".to_string(),
+            payload: "<x>\r".to_string(),
+            method: "GET".to_string(),
+        };
+        for line in [live_line(&it, Some(&rec)), live_line(&it, None)] {
+            // Only the line's own SGR head may carry ESC.
+            let tail = line.split_once("OOB\x1b[0m").map_or(&*line, |(_, t)| t);
+            assert!(
+                !tail.contains(['\x1b', '\x07', '\r', '\u{9d}']),
+                "raw control in {line:?}"
+            );
+        }
+    }
 
     #[test]
     fn finding_uses_record_attribution() {

@@ -177,6 +177,8 @@ impl ScanRequestSpec {
             blind_callback_url: self.blind_callback_url,
             max_payloads_per_param: self.max_payloads_per_param,
             deep_scan: self.deep_scan,
+            // Server-side ceiling, not a caller option (see the constant).
+            limit: self.deep_scan.then_some(super::MAX_FINDINGS_PER_JOB),
             skip_ast_analysis: self.skip_ast_analysis,
             analyze_external_js: self.analyze_external_js,
             detect_outdated_libs: self.detect_outdated_libs,

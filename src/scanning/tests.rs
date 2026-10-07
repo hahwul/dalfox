@@ -4023,105 +4023,74 @@ async fn test_sxss_applies_the_same_response_gates_as_the_normal_path() {
 /// out of the per-parameter worker *before* `flush_results`, silently
 /// discarding every finding that worker had already confirmed and batched.
 ///
-/// The scan below has two vulnerable parameters and `--limit 1`. `victim`
-/// reflects entity-escaped, so it records an `R` on its first reflection
-/// payload and then grinds through the (never-verifying) DOM payload set;
-/// `trigger` reflects raw and is held back by the mock until `victim` has
-/// confirmed its finding, at which point it verifies and flushes, tripping the
-/// limit while `victim` is still mid-DOM-phase. `victim`'s already-confirmed
-/// finding must survive that: `--limit` is a stop condition, not an instruction
-/// to destroy evidence, and the report truncates to the limit on its own
-/// (`cmd::scan::output`), so flushing here cannot overshoot the cap.
+/// Under a `--limit` the phase loops now flush before every limit check
+/// (`limit_reached_in_phase`), so the abort can no longer be holding a batched
+/// finding. `victim` below reflects entity-escaped: it records an `R` on its
+/// first reflection payload, that `R` alone trips `--limit 1`, and the worker
+/// aborts mid-catalog. The finding that tripped the limit must be in the
+/// results — `--limit` is a stop condition, not an instruction to destroy
+/// evidence.
 #[tokio::test]
 async fn test_run_scanning_limit_abort_keeps_already_confirmed_findings() {
-    use axum::{Router, extract::Query, extract::State, response::Html, routing::get};
+    use axum::{Router, extract::Query, response::Html, routing::get};
     use std::collections::HashMap;
 
-    #[derive(Clone)]
-    struct AppState {
-        victim_requests: Arc<AtomicUsize>,
-    }
-
-    /// `victim` requests to wait for before letting `trigger` verify. High
-    /// enough that `victim` has certainly recorded its `R` and moved on to the
-    /// (never-verifying) DOM payload set, so the limit trips while its worker
-    /// is mid-loop with a batched finding.
-    const VICTIM_REQUESTS_BEFORE_TRIGGER: usize = 60;
-
-    fn escape(s: &str) -> String {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-    }
-
-    async fn handler(
-        State(st): State<AppState>,
-        Query(q): Query<HashMap<String, String>>,
-    ) -> Html<String> {
-        let victim = q.get("victim").cloned().unwrap_or_default();
-        let trigger = q.get("trigger").cloned().unwrap_or_default();
-        if trigger != "b" {
-            // A `trigger` injection: hold it until `victim` has gone past its
-            // reflection phase (probe + first payload) and into the DOM phase,
-            // so the limit trips while `victim` still has a batched finding.
-            while st.victim_requests.load(Ordering::SeqCst) < VICTIM_REQUESTS_BEFORE_TRIGGER {
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            }
-        } else {
-            st.victim_requests.fetch_add(1, Ordering::SeqCst);
+    let requests = Arc::new(AtomicUsize::new(0));
+    let seen = requests.clone();
+    let handler = move |Query(q): Query<HashMap<String, String>>| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        let v = q.get("victim").cloned().unwrap_or_default();
+        async move {
+            let escaped = v
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;");
+            Html(format!("<html><body><div>{escaped}</div></body></html>"))
         }
-        Html(format!(
-            "<html><body><div id=v>{}</div><div id=t>{}</div></body></html>",
-            escape(&victim),
-            trigger
-        ))
-    }
+    };
+    let addr = spawn_regression_app(Router::new().route("/", get(handler))).await;
 
-    let addr = spawn_regression_app(Router::new().route("/", get(handler)).with_state(AppState {
-        victim_requests: Arc::new(AtomicUsize::new(0)),
-    }))
-    .await;
-
-    let url = format!("http://{}/?victim=a&trigger=b", addr);
+    let url = format!("http://{}/?victim=a", addr);
     let mut target = parse_target(&url).expect("parse_target");
     target.workers = 2;
-    target.reflection_params = vec![
-        Param {
-            injection_context: Some(InjectionContext::Html(None)),
-            ..Param::new("victim".to_string(), "a".to_string(), Location::Query)
-        },
-        Param {
-            injection_context: Some(InjectionContext::Html(None)),
-            ..Param::new("trigger".to_string(), "b".to_string(), Location::Query)
-        },
-    ];
+    target.reflection_params = vec![Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        ..Param::new("victim".to_string(), "a".to_string(), Location::Query)
+    }];
 
     let mut raw_args = integration_scan_args(false);
     raw_args.limit = Some(1);
     let results = Arc::new(Mutex::new(Vec::new()));
-    run_scanning(
+    let report = run_scanning(
         &target,
         Arc::new(raw_args),
         ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
     )
     .await;
+    // The stop happened inside the parameter's phase loop, never in the
+    // dispatch loop; `--state-file` must still see the target as cut short,
+    // or it records `completed` and skips the untested catalog forever.
+    assert!(
+        report.limit_stopped,
+        "a phase-level --limit stop must be reported"
+    );
 
     let guard = results.lock().await;
     let params: Vec<(String, String)> = guard
         .iter()
         .map(|r| (r.param.clone(), r.result_type.short().to_string()))
         .collect();
-    assert!(
-        params.iter().any(|(p, _)| p == "trigger"),
-        "sanity: the limit-tripping finding must be present; got {:?}",
-        params
+    assert_eq!(
+        params,
+        vec![("victim".to_string(), "R".to_string())],
+        "the finding that tripped --limit must survive the abort"
     );
+    // Sanity: the limit actually stopped the worker mid-catalog.
     assert!(
-        params.iter().any(|(p, _)| p == "victim"),
-        "a finding confirmed before the --limit stop must not be discarded by \
-         the abort path; got {:?}",
-        params
+        requests.load(Ordering::SeqCst) < 60,
+        "--limit 1 did not stop the scan ({} requests)",
+        requests.load(Ordering::SeqCst)
     );
 }
 
@@ -5281,5 +5250,65 @@ async fn sxss_finds_a_write_behind_store() {
             .any(|r| r.param == "c" && r.result_type == FindingType::Verified),
         "a write-behind store must still be verified: the store-probe window must \
          observe the delayed store and the per-payload retries must be kept"
+    );
+}
+
+/// `--deep-scan` keeps one finding per reflecting payload, batched per
+/// parameter until the parameter finishes. A `--limit` (the server/MCP findings
+/// ceiling) only counted flushed findings, so every concurrent parameter ran
+/// its whole catalog past the limit — thousands of findings, each with 64 KiB
+/// of evidence, from one echo-everything target.
+#[tokio::test]
+async fn test_deep_scan_limit_bounds_findings_across_concurrent_params() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+
+    const LIMIT: usize = 20;
+    const WORKERS: usize = 4;
+    let handler = |Query(q): Query<HashMap<String, String>>| async move {
+        let mut body = String::from("<html><body>");
+        for v in q.values() {
+            body.push_str(v);
+        }
+        body.push_str("</body></html>");
+        Html(body)
+    };
+    let addr = spawn_regression_app(Router::new().route("/", get(handler))).await;
+
+    let names = ["a", "b", "c", "d"];
+    let url = format!("http://{}/?a=1&b=1&c=1&d=1", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.workers = WORKERS;
+    target.reflection_params = names
+        .iter()
+        .map(|n| Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            marker_echoed: true,
+            ..Param::new(n.to_string(), "1".to_string(), Location::Query)
+        })
+        .collect();
+
+    let mut args = integration_scan_args(false);
+    args.deep_scan = true;
+    args.workers = WORKERS;
+    args.limit = Some(LIMIT);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let n = results.lock().await.len();
+    // Unlimited, this target yields thousands; the post-scan collapse may
+    // fold a few, so only require that the scan produced findings at all.
+    assert!(n > 0, "sanity: the echo target must produce findings");
+    // Overshoot is what was already in flight when the limit hit — a chunk
+    // per parameter. Unbounded, this target yields thousands; keep the
+    // ceiling loose so a slow runner cannot flake it.
+    assert!(
+        n <= LIMIT * 5,
+        "deep_scan ran past --limit {LIMIT}: {n} findings"
     );
 }

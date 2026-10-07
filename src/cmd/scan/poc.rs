@@ -184,14 +184,19 @@ pub(crate) fn generate_poc(result: &crate::scanning::result::Result, poc_type: &
 /// scheme) still let the shell see `$`, a backtick or `\`, so a page could
 /// choose a parameter name like `a";id;"b` or `c$(id)d` and have the operator
 /// run it by pasting the POC. Single quotes disable every shell expansion;
-/// the only character needing care is `'` itself, closed and re-opened
-/// around an escaped literal (`'\''`).
+/// POSIX needs care only for `'` itself, closed and re-opened around an
+/// escaped literal (`'\''`). fish also treats `\'` and `\\` as escapes
+/// *inside* single quotes, so a name like `x\'; id #` would close the quote
+/// early there; `\` therefore goes out-of-quote too (`'\\'`), which both
+/// shells read as one literal backslash.
 fn shell_single_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
     for ch in s.chars() {
         if ch == '\'' {
             out.push_str("'\\''");
+        } else if ch == '\\' {
+            out.push_str("'\\\\'");
         } else {
             out.push(ch);
         }

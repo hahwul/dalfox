@@ -485,6 +485,10 @@ queued → cancelled
 `discovered params capped to 512` 경고 한 줄뿐입니다. 모든 파라미터가 중요하다면
 `param`으로 나눠서 스캔하세요.
 
+반사되는 페이로드마다 finding을 남기는 `deep_scan` 스캔은 finding이 2000개 안팎에 이르면
+멈춥니다(이미 보낸 요청에서 몇 개가 더 붙을 수 있습니다). 그래도 `done`으로 끝나며,
+`error_message`에 결과가 부분적이라고 적힙니다.
+
 연결할 수 없는 대상(DNS 실패, 연결 거부, TLS 오류, 타임아웃)은
 `target unreachable: connection failed (CONNECTION_FAILED)`라는 `error_message`와
 함께 `error`로 종료됩니다 — 탐지 결과가 0건인 `done`이 아니므로 "스캔했으나 아무것도

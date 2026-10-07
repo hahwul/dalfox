@@ -71,6 +71,15 @@ pub(crate) const MAX_DISCOVERED_PARAMS: usize = 512;
 /// parameter. Shared by the REST server and MCP so the bound is identical.
 pub(crate) const MAX_PAYLOADS_PER_PARAM: usize = 100_000;
 
+/// Findings ceiling for one async (server/MCP) `deep_scan`, applied as its
+/// `--limit`. `deep_scan` records one finding per reflecting payload, each
+/// carrying up to 64 KiB of response evidence, so an echo-everything target
+/// turned one submission into gigabytes of resident results. Normal scans
+/// dedupe per parameter and are left uncapped: their raw tally (page-level AST
+/// sinks re-found under every parameter, R findings collapsed later) could
+/// trip a fixed cap on a legitimate wide target.
+pub(crate) const MAX_FINDINGS_PER_JOB: usize = 2000;
+
 /// Default ceiling on concurrently active (queued + running) scans for the MCP
 /// runtime, which — unlike the REST server's `--max-concurrent-scans` — has no
 /// config surface. Submissions past this are rejected so an agent loop can't

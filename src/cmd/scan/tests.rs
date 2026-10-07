@@ -1044,13 +1044,13 @@ fn test_generate_poc_curl_multipart_uses_form_string() {
 
 #[test]
 fn test_generate_poc_curl_single_quotes_quotes_and_backslashes() {
-    // Under single quoting `"` and `\` are already literal — they need no
-    // escape and must survive verbatim, or the POC stops reproducing.
+    // Under single quoting `"` is already literal and survives verbatim; `\`
+    // goes out-of-quote (`'\\'`) because fish escapes it inside quotes.
     let mut r = reflected_result("http://example.com/", "X-H", "a\"b\\c");
     r.location = "Header".to_string();
     let out = generate_poc(&r, "curl");
     assert!(
-        out.contains("-H 'X-H: a\"b\\c'"),
+        out.contains("-H 'X-H: a\"b'\\\\'c'"),
         "curl POC mangled quotes/backslashes: {}",
         out
     );

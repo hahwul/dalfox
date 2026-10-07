@@ -17,7 +17,7 @@ Preferred agent pattern: `preflight_dalfox` → `scan_with_dalfox` → poll `get
 
 Terminal jobs auto-purge after 1 hour.
 
-**Capacity.** At most 100 active (queued + running) scans and 32 concurrent preflights; past that the call fails with JSON-RPC `-32603` (`at capacity` / `preflight capacity reached`) — transient, retry later or cancel/delete jobs. Past 1000 retained jobs, the oldest settled ones are evicted. A scan tests at most 512 parameters; the rest are dropped with a log line.
+**Capacity.** At most 100 active (queued + running) scans and 32 concurrent preflights; past that the call fails with JSON-RPC `-32603` (`at capacity` / `preflight capacity reached`) — transient, retry later or cancel/delete jobs. Past 1000 retained jobs, the oldest settled ones are evicted. A scan tests at most 512 parameters; the rest are dropped with a log line. A `deep_scan` stops once it has about 2000 findings; it still ends `done`, and `error_message` says the results are partial.
 
 ## Protocol Surface
 

@@ -334,6 +334,26 @@ fn test_results_to_markdown_with_request_response() {
 }
 
 #[test]
+fn test_results_to_markdown_escapes_terminal_controls_in_request_response() {
+    // Markdown also renders to stdout, so a hostile response must not reach
+    // the terminal with a live OSC 52 (clipboard write) or title escape.
+    let mut result = Result::builder(FindingType::Verified)
+        .param("q")
+        .payload("<x>")
+        .build();
+    result.request = Some("GET /?q=\x1b]0;T\x07 HTTP/1.1\r\nHost: h\r\n".to_string());
+    result.response = Some("HTTP/1.1 200 OK\r\n\r\n\x1b]52;c;SEFDSw==\x07\u{9d}x".to_string());
+
+    let markdown = Result::results_to_markdown(&[result], true, true);
+
+    assert!(!markdown.contains('\x1b') && !markdown.contains('\x07'));
+    assert!(!markdown.contains('\u{9d}'));
+    assert!(markdown.contains("\\x1b]52;c;SEFDSw==\\x07\\u{9d}x"));
+    // Raw HTTP stays pasteable: CRLF line structure survives.
+    assert!(markdown.contains("HTTP/1.1\r\nHost: h\r\n"));
+}
+
+#[test]
 fn test_results_to_markdown_empty() {
     let results: Vec<Result> = vec![];
     let markdown = Result::results_to_markdown(&results, false, false);

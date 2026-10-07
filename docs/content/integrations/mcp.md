@@ -457,6 +457,10 @@ A single scan tests at most 512 parameters. On a target that exposes more, the
 discovered set is truncated and the scan still ends `done`, so pass `param` to
 choose which ones matter.
 
+A `deep_scan` scan, which records one finding per reflecting payload, stops once
+it has about 2000 findings (requests already in flight can add a few more). It
+still ends `done`, and `error_message` says the results are partial.
+
 ## Structured results
 
 Every tool publishes an `outputSchema` in `tools/list` and answers `tools/call` with a

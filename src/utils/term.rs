@@ -175,10 +175,24 @@ fn is_display_safe_control(b: u8) -> bool {
 /// [`sanitize_log_message`](crate::utils::log::sanitize_log_message) — CR/LF
 /// become `\r`/`\n`, other C0 bytes become `\xNN` — except that the display
 /// path additionally keeps the payload whitespace listed in
-/// [`is_display_safe_control`]. Returns a borrowed string on the common
+/// [`is_display_safe_control`]. DEL and the C1 range (U+0080–U+009F, which
+/// includes the single-character CSI/OSC/ST some terminals honor) are escaped
+/// too, as `\xNN` / `\u{NN}`. Returns a borrowed string on the common
 /// (clean) path.
 pub(crate) fn sanitize_display(s: &str) -> std::borrow::Cow<'_, str> {
-    if !s.bytes().any(|b| b < 0x20 && !is_display_safe_control(b)) {
+    escape_controls(s, is_display_safe_control)
+}
+
+/// Shared body of [`sanitize_display`] and
+/// [`sanitize_log_message`](crate::utils::log::sanitize_log_message): escape
+/// every C0 control except those `keep` allows, plus DEL and C1. CR/LF become
+/// `\r`/`\n`.
+pub(crate) fn escape_controls(s: &str, keep: fn(u8) -> bool) -> std::borrow::Cow<'_, str> {
+    let needs_escape = |c: char| {
+        let u = c as u32;
+        (u < 0x20 && !keep(u as u8)) || (0x7f..=0x9f).contains(&u)
+    };
+    if !s.chars().any(needs_escape) {
         return std::borrow::Cow::Borrowed(s);
     }
     let mut out = String::with_capacity(s.len() + 8);
@@ -186,8 +200,10 @@ pub(crate) fn sanitize_display(s: &str) -> std::borrow::Cow<'_, str> {
         match c {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
-            c if (c as u32) < 0x20 && is_display_safe_control(c as u8) => out.push(c),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c if needs_escape(c) => match c as u32 {
+                u @ ..=0x7f => out.push_str(&format!("\\x{u:02x}")),
+                u => out.push_str(&format!("\\u{{{u:02x}}}")),
+            },
             c => out.push(c),
         }
     }
@@ -362,6 +378,13 @@ mod tests {
             "\\x1b]8;;http://evil\\x07l"
         );
         assert_eq!(sanitize_display("a\rb\nc"), "a\\rb\\nc");
+        // DEL and C1 (the one-character OSC/CSI/ST) are controls too; the
+        // printable code points either side of the range are not.
+        assert_eq!(
+            sanitize_display("\u{9d}0;T\u{9c}\u{7f}\u{9b}2J"),
+            "\\u{9d}0;T\\u{9c}\\x7f\\u{9b}2J"
+        );
+        assert_eq!(sanitize_display("~\u{a0}é"), "~\u{a0}é");
     }
 
     #[test]
