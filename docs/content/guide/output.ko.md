@@ -107,7 +107,7 @@ dalfox scan ... --include-response
     }
   ],
   "meta": {
-    "dalfox_version": "3.2.3",
+    "dalfox_version": "3.2.4",
     "dedup_mode": "exact",
     "failed_requests": 0,
     "findings_count": 1,
@@ -289,7 +289,7 @@ JSON과 동일한 데이터 형태이며(다른 형식과의 일관성을 위한
 
 ```toml
 [meta]
-dalfox_version = "3.2.3"
+dalfox_version = "3.2.4"
 dedup_mode = "exact"
 failed_requests = 0
 findings_count = 1

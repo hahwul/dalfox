@@ -108,7 +108,7 @@ the file goes next.
     }
   ],
   "meta": {
-    "dalfox_version": "3.2.3",
+    "dalfox_version": "3.2.4",
     "dedup_mode": "exact",
     "failed_requests": 0,
     "findings_count": 1,
@@ -293,7 +293,7 @@ Same data shape as JSON (plus top-level `[meta]` envelope for parity with other 
 
 ```toml
 [meta]
-dalfox_version = "3.2.3"
+dalfox_version = "3.2.4"
 dedup_mode = "exact"
 failed_requests = 0
 findings_count = 1

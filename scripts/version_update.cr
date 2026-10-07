@@ -1,7 +1,8 @@
 # Bumps the dalfox version across every file that hardcodes it
 # (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, packaging/aur/PKGBUILD,
 # docs/data/dalfox.json, and both language variants of
-# docs/content/getting-started/installation.md — EN and .ko.md).
+# docs/content/getting-started/installation.md — EN and .ko.md — and the
+# sample envelopes in docs/content/guide/output.md + .ko.md).
 # Prompts for the new version interactively and prints a per-file checkmark.
 #
 # flake.nix is deliberately absent: it reads the version out of Cargo.toml at
@@ -17,6 +18,8 @@ AUR_PKGBUILD = "packaging/aur/PKGBUILD"
 DOCS_DATA    = "docs/data/dalfox.json"
 INSTALL_DOC  = "docs/content/getting-started/installation.md"
 INSTALL_DOC_KO = "docs/content/getting-started/installation.ko.md"
+OUTPUT_DOC = "docs/content/guide/output.md"
+OUTPUT_DOC_KO = "docs/content/guide/output.ko.md"
 
 # Read helpers (mirror version_check.cr).
 
@@ -66,6 +69,19 @@ def install_doc_version(path : String) : String?
   content = File.read(path)
   match = content.match(/`dalfox (\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?)`/)
   match ? match[1] : nil
+rescue
+  nil
+end
+
+# docs/content/guide/output.md (and its .ko.md sibling): the sample JSON
+# (`"dalfox_version": "X"`) and TOML (`dalfox_version = "X"`) envelopes. Every
+# occurrence must agree; a split is returned joined ("3.2.3,3.2.4") so it
+# surfaces as a disagreement.
+OUTPUT_DOC_RE = /((?:"dalfox_version"[ \t]*:|^dalfox_version[ \t]*=)[ \t]*")(\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?)(")/m
+
+def output_doc_version(path : String) : String?
+  found = File.read(path).scan(OUTPUT_DOC_RE).map(&.[2]).uniq
+  found.empty? ? nil : found.join(",")
 rescue
   nil
 end
@@ -165,6 +181,19 @@ rescue ex
   false
 end
 
+# docs/content/guide/output.md (and .ko.md): rewrite every sample envelope's
+# `dalfox_version`, JSON and TOML alike.
+def update_output_doc(path : String, new_version : String) : Bool
+  content = File.read(path)
+  updated = content.gsub(OUTPUT_DOC_RE, "\\1#{new_version}\\3")
+  return false if updated == content
+  File.write(path, updated)
+  true
+rescue ex
+  puts "  error: #{ex.message}"
+  false
+end
+
 # Loose semver — allow numeric pre-release suffix (`-dev.1`, `-rc.2`,
 # `-alpha`).
 def valid_version?(version : String) : Bool
@@ -180,6 +209,8 @@ aur_v     = aur_version
 docs_v       = docs_data_version
 install_v    = install_doc_version(INSTALL_DOC)
 install_ko_v = install_doc_version(INSTALL_DOC_KO)
+output_v     = output_doc_version(OUTPUT_DOC)
+output_ko_v  = output_doc_version(OUTPUT_DOC_KO)
 
 puts "Current versions:"
 puts "  #{CARGO_TOML.ljust(46)} #{cargo_v || "Not found"}"
@@ -189,9 +220,11 @@ puts "  #{AUR_PKGBUILD.ljust(46)} #{aur_v || "Not found"}"
 puts "  #{DOCS_DATA.ljust(46)} #{docs_v || "Not found"}"
 puts "  #{INSTALL_DOC.ljust(46)} #{install_v || "Not found"}"
 puts "  #{INSTALL_DOC_KO.ljust(46)} #{install_ko_v || "Not found"}"
+puts "  #{OUTPUT_DOC.ljust(46)} #{output_v || "Not found"}"
+puts "  #{OUTPUT_DOC_KO.ljust(46)} #{output_ko_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v, install_ko_v].compact
+versions = [cargo_v, lock_v, snap_v, aur_v, docs_v, install_v, install_ko_v, output_v, output_ko_v].compact
 unique = versions.uniq
 
 if unique.size > 1
@@ -199,7 +232,7 @@ if unique.size > 1
   puts
 end
 
-current = cargo_v || lock_v || snap_v || aur_v || docs_v || install_v || install_ko_v || "unknown"
+current = cargo_v || lock_v || snap_v || aur_v || docs_v || install_v || install_ko_v || output_v || output_ko_v || "unknown"
 puts "Current: #{current}"
 print "New version (Enter to cancel): "
 input = gets
@@ -234,6 +267,8 @@ total = 0
   {DOCS_DATA, ->{ update_docs_data(new_version) }, !docs_v.nil?},
   {INSTALL_DOC, ->{ update_install_doc(INSTALL_DOC, new_version) }, !install_v.nil?},
   {INSTALL_DOC_KO, ->{ update_install_doc(INSTALL_DOC_KO, new_version) }, !install_ko_v.nil?},
+  {OUTPUT_DOC, ->{ update_output_doc(OUTPUT_DOC, new_version) }, !output_v.nil?},
+  {OUTPUT_DOC_KO, ->{ update_output_doc(OUTPUT_DOC_KO, new_version) }, !output_ko_v.nil?},
 ].each do |tuple|
   path, fn, present = tuple
   next unless present
