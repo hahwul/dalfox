@@ -7,6 +7,26 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./.github/SECURITY.md).
 
+## 3.2.4
+
+Fewer false positives, PoCs that reproduce the request actually sent, a fuller MCP protocol surface, and hardening against target-controlled data.
+
+* **Security**: hardened PoC and report output against target-controlled parameter names and bodies — fish-safe shell quoting, terminal escape sequences stripped, Markdown cells escaped, `-o` reports written `0600` ([#1463](https://github.com/hahwul/dalfox/pull/1463), [#1483](https://github.com/hahwul/dalfox/pull/1483), [#1513](https://github.com/hahwul/dalfox/pull/1513)).
+* **Security**: server / MCP `deep_scan` findings are capped (one job against an echo-everything target could hold gigabytes), the per-proxy client cache is bounded, and OAST TLS verification can no longer be disabled by a port-spelled host ([#1464](https://github.com/hahwul/dalfox/pull/1464), [#1513](https://github.com/hahwul/dalfox/pull/1513)).
+* MCP speaks more of the protocol: structured tool output (`outputSchema` / `structuredContent`), its own `serverInfo` and instructions, progress notifications, resources, prompts, completions, and cancellation. Tool calls accept the REST argument spellings (`cookie`, `header`, ...) and reject unknown keys instead of silently dropping them — previously a scan could run without its cookies and report clean — and draining jobs can no longer be deleted ([#1464](https://github.com/hahwul/dalfox/pull/1464), [#1466](https://github.com/hahwul/dalfox/pull/1466), [#1469](https://github.com/hahwul/dalfox/pull/1469), [#1474](https://github.com/hahwul/dalfox/pull/1474)).
+* Parameter mining batches candidate names into bounded canary buckets with bisection, cutting mining requests, and ships an expanded built-in wordlist ([#1473](https://github.com/hahwul/dalfox/pull/1473)).
+* Wider DOM-XSS recall: reflected-markup sources (`dataset` / `getAttribute` / `textContent` / CSS), `form.action` on a form receiver, and decoded server literals ([#1495](https://github.com/hahwul/dalfox/pull/1495)).
+* Fewer false positives: findings are gated by the response content type (JSON, CSV, `text/plain` and malformed XML are inert; SVG / XHTML still verify), and inline-handler `[V]` requires a real JS breakout rather than a payload sitting in a string ([#1478](https://github.com/hahwul/dalfox/pull/1478), [#1494](https://github.com/hahwul/dalfox/pull/1494)).
+* PoCs reproduce the request the scan sent: no duplicated path segment, pre-encoded / cookie / multi-URL params rendered as sent, and body PoCs replay the full wire body including sibling fields ([#1477](https://github.com/hahwul/dalfox/pull/1477), [#1479](https://github.com/hahwul/dalfox/pull/1479), [#1510](https://github.com/hahwul/dalfox/pull/1510)).
+* Generated HTML / attribute payloads that could reflect but never DOM-verify were repaired, `--only-custom-payload` no longer leaks generated payloads, and invalid WAF mutations were dropped ([#1475](https://github.com/hahwul/dalfox/pull/1475), [#1490](https://github.com/hahwul/dalfox/pull/1490)).
+* Request construction keeps URL semantics: literal `%`-sequences, every duplicate query / form key, empty path segments, same-named header vs cookie params, and raw-HTTP / HAR bodies reaching the miners ([#1480](https://github.com/hahwul/dalfox/pull/1480), [#1484](https://github.com/hahwul/dalfox/pull/1484)).
+* CSP analysis merges every enforcing policy (multiple headers and `<meta>`), and an enforcing `<meta>` beats a report-only header ([#1481](https://github.com/hahwul/dalfox/pull/1481), [#1486](https://github.com/hahwul/dalfox/pull/1486)).
+* Stored XSS (`--sxss`) finds form-backed sinks that don't echo on write, and attributes each finding to the field that stored it ([#1493](https://github.com/hahwul/dalfox/pull/1493)).
+* Honest run outcomes: one unparsable line no longer aborts a whole target list, targets cut short by `--limit` / Ctrl-C / `--scan-timeout` report `incomplete` instead of `clean`, findings are attributed to the target that produced them, and `--state-file` resume keys raw-HTTP / HAR targets by request content ([#1468](https://github.com/hahwul/dalfox/pull/1468), [#1485](https://github.com/hahwul/dalfox/pull/1485), [#1510](https://github.com/hahwul/dalfox/pull/1510)).
+* `--delay` and `-H User-Agent` are honored everywhere, HPP targets the form action with pre-encoded payloads, and REST / MCP reachability probes match the CLI ([#1476](https://github.com/hahwul/dalfox/pull/1476), [#1487](https://github.com/hahwul/dalfox/pull/1487), [#1488](https://github.com/hahwul/dalfox/pull/1488), [#1491](https://github.com/hahwul/dalfox/pull/1491)).
+* Bounded superlinear CPU / memory on hostile responses and inputs (HTML nesting estimator bypasses, XML entity amplification, AST scope cloning) ([#1504](https://github.com/hahwul/dalfox/pull/1504)).
+* Chocolatey package for Windows, published on release ([#1511](https://github.com/hahwul/dalfox/pull/1511)).
+
 ## 3.2.3
 
 A credential-leak fix, large scan-performance cuts, and wider XSS coverage.
