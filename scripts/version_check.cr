@@ -1,5 +1,5 @@
 # Reports the version string declared in each file dalfox keeps in lockstep
-# (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, aur/PKGBUILD,
+# (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, packaging/aur/PKGBUILD,
 # docs/data/dalfox.json, and both language variants of
 # docs/content/getting-started/installation.md — EN and .ko.md).
 # Exits non-zero when they disagree so it can gate a release.
@@ -11,7 +11,7 @@
 CARGO_TOML  = "Cargo.toml"
 CARGO_LOCK  = "Cargo.lock"
 SNAP_YAML   = "snap/snapcraft.yaml"
-AUR_PKGBUILD = "aur/PKGBUILD"
+AUR_PKGBUILD = "packaging/aur/PKGBUILD"
 DOCS_DATA   = "docs/data/dalfox.json"
 INSTALL_DOC = "docs/content/getting-started/installation.md"
 INSTALL_DOC_KO = "docs/content/getting-started/installation.ko.md"
@@ -45,7 +45,7 @@ rescue
   nil
 end
 
-# aur/PKGBUILD: `pkgver=X`. AUR forbids hyphens in pkgver, so pre-release
+# packaging/aur/PKGBUILD: `pkgver=X`. AUR forbids hyphens in pkgver, so pre-release
 # versions are stored with `_` (e.g. 3.0.0_dev.1); normalize back to `-`
 # so it compares equal to the other files.
 def aur_version : String?

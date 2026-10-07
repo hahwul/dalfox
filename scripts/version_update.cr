@@ -1,5 +1,5 @@
 # Bumps the dalfox version across every file that hardcodes it
-# (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, aur/PKGBUILD,
+# (Cargo.toml, Cargo.lock, snap/snapcraft.yaml, packaging/aur/PKGBUILD,
 # docs/data/dalfox.json, and both language variants of
 # docs/content/getting-started/installation.md — EN and .ko.md).
 # Prompts for the new version interactively and prints a per-file checkmark.
@@ -13,7 +13,7 @@
 CARGO_TOML   = "Cargo.toml"
 CARGO_LOCK   = "Cargo.lock"
 SNAP_YAML    = "snap/snapcraft.yaml"
-AUR_PKGBUILD = "aur/PKGBUILD"
+AUR_PKGBUILD = "packaging/aur/PKGBUILD"
 DOCS_DATA    = "docs/data/dalfox.json"
 INSTALL_DOC  = "docs/content/getting-started/installation.md"
 INSTALL_DOC_KO = "docs/content/getting-started/installation.ko.md"

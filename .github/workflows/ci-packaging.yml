@@ -12,7 +12,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - "**/*.rs"
-      - aur/PKGBUILD
+      - packaging/aur/PKGBUILD
       - snap/snapcraft.yaml
       - flake.nix
       - flake.lock
@@ -23,7 +23,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - "**/*.rs"
-      - aur/PKGBUILD
+      - packaging/aur/PKGBUILD
       - snap/snapcraft.yaml
       - flake.nix
       - flake.lock

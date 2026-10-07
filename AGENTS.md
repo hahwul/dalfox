@@ -39,6 +39,11 @@ Primary modules:
 - `src/job/`: shared job model — `JobStatus` enum, `Job` record, progress counters, retention/cap purging, and bounds helpers (`effective_rate_limit`, `effective_scan_timeout`) used by server + MCP
 - `src/mcp/`: MCP stdio tool server — `mod.rs` keeps the `#[tool_router]` impl with the six tool handlers (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`); `params.rs` holds the `*Params` input structs + serde defaults, `outputs.rs` the published `outputSchema` mirror types, `job_runtime.rs` / `pagination.rs` the helpers
 
+Outside `src/`, distribution recipes live under `packaging/` (`aur/`, `chocolatey/`, `docker/`).
+Two stay at the root because their tool only looks there: `flake.nix` + `flake.lock` (a flake
+must sit at the repo root) and `snap/snapcraft.yaml` (snapcraft finds its project file only
+inside the directory it packs).
+
 Top-level commands:
 - `scan`
 - `server`
