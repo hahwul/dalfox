@@ -307,18 +307,22 @@ impl Result {
                 out.push('\n');
 
                 // Include request if requested
+                // Raw target bytes: escape terminal controls (this renders
+                // to stdout too), keeping CRLF line structure.
                 if include_request && let Some(req) = &result.request {
-                    let fence = code_fence_for(req);
+                    let req = crate::utils::term::sanitize_display_block(req);
+                    let fence = code_fence_for(&req);
                     let _ = write!(out, "**Request:**\n\n{}http\n", fence);
-                    out.push_str(req);
+                    out.push_str(&req);
                     let _ = write!(out, "\n{}\n\n", fence);
                 }
 
                 // Include response if requested
                 if include_response && let Some(resp) = &result.response {
-                    let fence = code_fence_for(resp);
+                    let resp = crate::utils::term::sanitize_display_block(resp);
+                    let fence = code_fence_for(&resp);
                     let _ = write!(out, "**Response:**\n\n{}http\n", fence);
-                    out.push_str(resp);
+                    out.push_str(&resp);
                     let _ = write!(out, "\n{}\n\n", fence);
                 }
 

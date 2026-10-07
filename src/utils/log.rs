@@ -30,7 +30,9 @@ macro_rules! dbg_log {
             $crate::ceprintln!(
                 "{} {}",
                 $crate::utils::log::log_prefix("35", "DBG"),
-                ::std::format!($($arg)*)
+                // Messages quote target-derived names; keep their control
+                // bytes off the terminal.
+                $crate::utils::term::sanitize_display(&::std::format!($($arg)*))
             );
         }
     }};
@@ -52,24 +54,11 @@ pub fn log_prefix(color: &str, label: &str) -> String {
 /// embed attacker-supplied bytes in log lines — target URLs and error/panic
 /// strings — and a raw `\n`/`\r` would otherwise let a submitter forge an
 /// entire fabricated `[ts] [LVL] ...` line into the file or onto the operator's
-/// console. CR/LF become `\n`/`\r`; other C0 controls become `\xNN`; tab is
-/// kept. Returns a borrowed string on the common (clean) path so non-injecting
-/// logs allocate nothing.
+/// console. CR/LF become `\n`/`\r`; other C0 controls and DEL become
+/// `\xNN`, C1 becomes `\u{NN}`; tab is kept. Returns a borrowed string on the
+/// common (clean) path so non-injecting logs allocate nothing.
 pub(crate) fn sanitize_log_message(msg: &str) -> std::borrow::Cow<'_, str> {
-    if !msg.bytes().any(|b| b < 0x20 && b != b'\t') {
-        return std::borrow::Cow::Borrowed(msg);
-    }
-    let mut out = String::with_capacity(msg.len() + 8);
-    for c in msg.chars() {
-        match c {
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push('\t'),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    std::borrow::Cow::Owned(out)
+    crate::utils::term::escape_controls(msg, |b| b == b'\t')
 }
 
 /// Print `msg` on stderr the first time this process sees it. For warnings

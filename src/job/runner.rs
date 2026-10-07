@@ -91,6 +91,8 @@ pub(crate) struct ScanRun {
     pub(crate) worker_panics: usize,
     /// The authenticated session was gone, with the signal that fired.
     pub(crate) session_lost: Option<String>,
+    /// The scan stopped at [`super::MAX_FINDINGS_PER_JOB`] (`deep_scan` only).
+    pub(crate) findings_capped: bool,
 }
 
 impl ScanRun {
@@ -165,6 +167,11 @@ impl ScanRun {
             Some(format!(
                 "scan exceeded scan_timeout ({}s); returning partial results",
                 scan_timeout
+            ))
+        } else if self.findings_capped {
+            Some(format!(
+                "findings reached the per-scan cap ({}); scan stopped early, results are partial",
+                super::MAX_FINDINGS_PER_JOB
             ))
         } else {
             None
@@ -657,10 +664,11 @@ pub(crate) async fn execute_scan(
     // Cancellation takes precedence (it's already a partial-by-design state).
     let panicked = !was_cancelled && scan_report.worker_panics > 0;
 
-    if !was_cancelled && !panicked {
+    if !was_cancelled && !panicked && !scan_report.limit_stopped {
         // After a clean, complete run every discovered parameter was processed
         // by `run_scanning`, so pin `params_tested` to `params_total` (exactly
-        // 100%). Skip this on cancellation AND on a worker panic: both stop
+        // 100%). Skip this on cancellation, a findings-cap stop, AND on a
+        // worker panic: all three stop
         // short of finishing every parameter — a panicked worker never bumps
         // the live counter — so promoting to params_total would report
         // estimated_completion_pct = 100 for a job whose status is
@@ -680,5 +688,6 @@ pub(crate) async fn execute_scan(
         was_cancelled,
         panicked,
         session_lost,
+        findings_capped: scan_report.limit_stopped,
     }
 }

@@ -1086,6 +1086,46 @@ fn mcp_rest_spellings_reach_scan_args() {
     assert_eq!(rest.blind_callback_url, args.blind_callback_url);
 }
 
+/// A REST/MCP `deep_scan` carries the findings ceiling — against an
+/// echo-everything target it otherwise held gigabytes of results — and a job
+/// that hit it says so instead of reading as a complete `done`. Normal scans
+/// stay uncapped.
+#[test]
+fn async_jobs_cap_findings_and_say_so() {
+    let deep = ScanRequestSpec {
+        deep_scan: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        deep.into_scan_args().limit,
+        Some(super::MAX_FINDINGS_PER_JOB)
+    );
+    assert_eq!(ScanRequestSpec::default().into_scan_args().limit, None);
+
+    let run = runner::ScanRun {
+        results: Default::default(),
+        reachability_failed: false,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+        findings_capped: true,
+    };
+    let mut job = Job::new_queued("http://t/".into());
+    assert_eq!(
+        run.settle(&mut job, Arc::new(Vec::new()), 0, false),
+        JobStatus::Done
+    );
+    assert!(
+        job.error_message
+            .as_deref()
+            .is_some_and(|m| m.contains("per-scan cap")),
+        "{:?}",
+        job.error_message
+    );
+}
+
 /// `preflight_dalfox` deliberately accepts a *subset* of the scan options: it
 /// sends no payloads, so most of them describe nothing it does. REST has no
 /// such tool — `POST /preflight` deserializes the same `ScanRequest` as
@@ -1365,6 +1405,7 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         panicked: false,
         worker_panics: 0,
         session_lost: None,
+        findings_capped: false,
     };
     let note = "scan exceeded scan_timeout (5s); returning partial results";
     for (prior, append, want) in [

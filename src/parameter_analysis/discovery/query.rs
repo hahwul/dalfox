@@ -52,9 +52,7 @@ pub async fn check_query_discovery(
         // abort every target in the run — skip it (same fallback posture as
         // `url_inject::build_inject_request` and `check_reflection`).
         let Ok(url) = url::Url::parse(&url_str) else {
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[discovery] skipping param {name}: unparseable probe URL {url_str}");
-            }
+            crate::dbg_log!("[discovery] skipping param {name}: unparseable probe URL {url_str}");
             continue;
         };
         let client_clone = client.clone();
@@ -259,11 +257,9 @@ pub async fn check_query_discovery(
             let tmp_param = Param::new(name.clone(), String::new(), Location::Query);
             let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
             let Ok(url) = url::Url::parse(&url_str) else {
-                if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                    eprintln!(
-                        "[discovery] skipping numeric probe for {name}: unparseable probe URL {url_str}"
-                    );
-                }
+                crate::dbg_log!(
+                    "[discovery] skipping numeric probe for {name}: unparseable probe URL {url_str}"
+                );
                 continue;
             };
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");

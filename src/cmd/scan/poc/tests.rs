@@ -230,6 +230,8 @@ const HOSTILE_PARAMS: &[&str] = &[
     "k;l",
     "m$IFS$9n",
     "o\\p",
+    // fish reads `\'` as an escape inside single quotes.
+    "x\\'; echo INJECTED #",
 ];
 
 fn hostile_result(location: &str, param: &str) -> Result {
@@ -246,11 +248,14 @@ fn hostile_result(location: &str, param: &str) -> Result {
 }
 
 #[test]
-fn shell_single_quote_wraps_and_escapes_only_single_quotes() {
+fn shell_single_quote_wraps_and_escapes_quotes_and_backslashes() {
     assert_eq!(shell_single_quote("abc"), "'abc'");
-    // `"`, `$`, backtick and `\` are literal inside single quotes — they must
+    // `"`, `$` and backtick are literal inside single quotes — they must
     // survive untouched or the POC stops reproducing the finding.
-    assert_eq!(shell_single_quote("a\"$`\\b"), "'a\"$`\\b'");
+    assert_eq!(shell_single_quote("a\"$`b"), "'a\"$`b'");
+    // `\` is escaped out-of-quote: fish treats `\'` / `\\` as escapes even
+    // inside single quotes.
+    assert_eq!(shell_single_quote("a\\b"), "'a'\\\\'b'");
     // The one character that needs care: close, escape, reopen.
     assert_eq!(shell_single_quote("a'b"), "'a'\\''b'");
     assert_eq!(shell_single_quote(""), "''");
@@ -278,6 +283,29 @@ fn shell_argv(command: &str) -> Vec<String> {
     let mut argv: Vec<String> = stdout.split('\0').map(str::to_string).collect();
     argv.pop(); // trailing separator
     argv
+}
+
+/// fish is not POSIX: `\'` and `\\` are escapes inside its single quotes. A
+/// quoted word must still come back byte-identical there. Skips when fish is
+/// not installed.
+#[cfg(unix)]
+#[test]
+fn shell_single_quote_round_trips_in_fish() {
+    for param in HOSTILE_PARAMS {
+        let Ok(out) = std::process::Command::new("fish")
+            .arg("-c")
+            .arg(format!("printf '%s' {}", shell_single_quote(param)))
+            .output()
+        else {
+            return;
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            *param,
+            "fish mis-tokenized {param:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -360,16 +388,18 @@ fn curl_poc_does_not_run_an_injected_command() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn json_body_poc_is_valid_json_for_hostile_param_and_payload() {
     let mut r = hostile_result("JsonBody", "a\"b\\c");
     r.payload = "\"</script><svg onload=alert(1)>".to_string();
     let rendered = render_curl_poc(&r, "http://h:8899/x");
-    // Pull the single-quoted body back out and parse it.
-    let body = rendered
-        .split("--data '")
-        .nth(1)
-        .and_then(|rest| rest.split("' '").next())
+    // Let the shell unquote the body, then parse it.
+    let argv = shell_argv(&rendered);
+    let body = argv
+        .iter()
+        .position(|a| a == "--data")
+        .and_then(|i| argv.get(i + 1))
         .expect("json body present");
     let parsed: serde_json::Value = serde_json::from_str(body).expect("body must be valid JSON");
     assert_eq!(parsed[&r.param], serde_json::Value::String(r.payload));

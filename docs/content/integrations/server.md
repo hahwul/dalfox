@@ -503,6 +503,10 @@ discovered set is truncated and the scan still ends `done`; the only trace is a
 `discovered params capped to 512` warning in the server log. Split such a
 target with `param` if every parameter matters.
 
+A `deep_scan` scan, which records one finding per reflecting payload, stops once
+it has about 2000 findings (requests already in flight can add a few more). It
+still ends `done`, and `error_message` says the results are partial.
+
 A target that can't be connected to (DNS failure, connection refused, TLS
 error, timeout) ends as `error` with an `error_message` of
 `target unreachable: connection failed (CONNECTION_FAILED)` — not `done` with

@@ -293,7 +293,9 @@ pub(crate) async fn preflight_and_analyze_target(
                 crate::cprintln!(
                     "  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m",
                     hn,
-                    hv
+                    // A `<meta>` CSP is page text, not a header value, so
+                    // nothing upstream rejected control bytes in it.
+                    crate::utils::term::sanitize_display(hv)
                 );
             }
         }
@@ -305,7 +307,7 @@ pub(crate) async fn preflight_and_analyze_target(
                     log_prefix("33", "WAF"),
                     fp.waf_type,
                     fp.confidence * 100.0,
-                    fp.evidence
+                    crate::utils::term::sanitize_display(&fp.evidence)
                 );
             }
             if args_clone.waf_bypass != "off" {
@@ -466,7 +468,7 @@ pub(crate) async fn preflight_and_analyze_target(
             crate::cprintln!(
                 "  \x1b[90m{}\x1b[0m \x1b[38;5;247m{}\x1b[0m \x1b[38;5;247mvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\" \x1b[38;5;247minvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\"",
                 bullet,
-                p.name,
+                crate::utils::term::sanitize_display(&p.name),
                 valid,
                 invalid
             );

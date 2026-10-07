@@ -15,6 +15,13 @@ pub use har::{is_har_content, parse_har};
 /// pools internally — one Client safely serves any number of hosts.
 type ClientCacheKey = (u64, Option<String>, bool, bool);
 
+/// Most proxy-keyed Clients the cache holds. The no-proxy keyspace is bounded
+/// by the timeout caps, but a server/MCP caller chooses the proxy string
+/// freely (any host, port or query), and each distinct one used to mint a
+/// permanent entry. Past this, one proxy-keyed entry is evicted per insert;
+/// in-flight clones keep working, a later build just re-pools.
+const MAX_PROXY_CLIENTS: usize = 64;
+
 /// Process-wide cache of reqwest::Clients keyed by ClientCacheKey. Each
 /// cached entry is cheap to clone (reqwest::Client is internally Arc'd).
 /// This collapses what was previously one fresh Client per call site
@@ -204,6 +211,13 @@ impl Target {
 
         let client = client_builder.build()?;
         if let Ok(mut guard) = client_cache().lock() {
+            if key.1.is_some()
+                && !guard.contains_key(&key)
+                && guard.keys().filter(|k| k.1.is_some()).count() >= MAX_PROXY_CLIENTS
+                && let Some(old) = guard.keys().find(|k| k.1.is_some()).cloned()
+            {
+                guard.remove(&old);
+            }
             guard.insert(key, client.clone());
         }
         Ok(client)
