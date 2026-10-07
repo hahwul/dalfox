@@ -79,8 +79,8 @@ jobs:
         shell: pwsh
         run: |
           $utf8 = [Text.UTF8Encoding]::new($false)
-          $nuspec = (Get-Content chocolatey/dalfox.nuspec.tmpl -Raw).Replace('__VERSION__', $env:VERSION)
-          $install = (Get-Content chocolatey/tools/chocolateyinstall.ps1.tmpl -Raw).Replace('__VERSION__', $env:VERSION).Replace('__SHA256__', $env:SHA256)
+          $nuspec = (Get-Content packaging/chocolatey/dalfox.nuspec.tmpl -Raw).Replace('__VERSION__', $env:VERSION)
+          $install = (Get-Content packaging/chocolatey/tools/chocolateyinstall.ps1.tmpl -Raw).Replace('__VERSION__', $env:VERSION).Replace('__SHA256__', $env:SHA256)
           New-Item -ItemType Directory -Force -Path out/tools | Out-Null
           [IO.File]::WriteAllText((Join-Path $PWD 'out/dalfox.nuspec'), $nuspec, $utf8)
           [IO.File]::WriteAllText((Join-Path $PWD 'out/tools/chocolateyinstall.ps1'), $install, $utf8)
