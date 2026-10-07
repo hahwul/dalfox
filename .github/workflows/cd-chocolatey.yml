@@ -90,8 +90,13 @@ jobs:
       - name: Pack Chocolatey package
         shell: pwsh
         run: |
-          choco pack out/dalfox.nuspec --outputdirectory .
-          if ($LASTEXITCODE -ne 0) { throw 'choco pack failed.' }
+          Push-Location out
+          try {
+            choco pack dalfox.nuspec --outputdirectory ..
+            if ($LASTEXITCODE -ne 0) { throw 'choco pack failed.' }
+          } finally {
+            Pop-Location
+          }
 
       - name: Smoke-test local package
         shell: pwsh
