@@ -43,6 +43,12 @@ yay -S dalfox
 paru -S dalfox
 ```
 
+### Chocolatey (Windows)
+
+```powershell
+choco install dalfox
+```
+
 See the [Installation guide](https://dalfox.hahwul.com/getting-started/installation/) for manual build instructions.
 
 ### Nixpkgs (NixOS)

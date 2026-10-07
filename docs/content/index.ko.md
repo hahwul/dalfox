@@ -89,6 +89,7 @@ template = "landing"
             <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
             <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
             <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
+            <li role="option" aria-selected="false" data-label="choco" data-cmd="choco install dalfox">Chocolatey</li>
             <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
             <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
           </ul>
@@ -227,7 +228,7 @@ template = "landing"
     <div class="how-steps">
       <div class="how-step">
         <h3>설치</h3>
-        <p>Homebrew, Snap, Nix, cargo, 또는 사전 빌드된 바이너리로 Dalfox를 받으세요. 명령 하나면 되고, 관리할 런타임이 없습니다.</p>
+        <p>Homebrew, Snap, Chocolatey, Nix, cargo, 또는 사전 빌드된 바이너리로 Dalfox를 받으세요. 명령 하나면 되고, 관리할 런타임이 없습니다.</p>
         <code>brew install dalfox</code>
       </div>
       <div class="how-step">
