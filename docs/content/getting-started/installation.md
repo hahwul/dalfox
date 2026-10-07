@@ -164,7 +164,7 @@ You'll need Rust 1.93 or newer (2024 edition). Install with [rustup](https://rus
 dalfox --version
 ```
 
-You should see a single line such as `dalfox 3.2.3`.
+You should see a single line such as `dalfox 3.2.4`.
 
 ## Shell completions
 

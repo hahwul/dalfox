@@ -164,7 +164,7 @@ Rust 1.93 이상(2024 edition)이 필요합니다. 없다면 [rustup](https://ru
 dalfox --version
 ```
 
-`dalfox 3.2.3` 같은 한 줄이 출력되면 됩니다.
+`dalfox 3.2.4` 같은 한 줄이 출력되면 됩니다.
 
 ## 셸 자동완성
 

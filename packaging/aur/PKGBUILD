@@ -1,6 +1,6 @@
 # Maintainer: HAHWUL <hahwul@gmail.com>
 pkgname=dalfox
-pkgver=3.2.3
+pkgver=3.2.4
 pkgrel=1
 pkgdesc="Powerful open-source XSS scanner and utility focused on automation"
 arch=('x86_64' 'aarch64')
