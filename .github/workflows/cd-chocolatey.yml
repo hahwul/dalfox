@@ -1,0 +1,132 @@
+---
+name: Chocolatey Publish
+# Publishes the Windows release zip through Chocolatey once the Release
+# workflow has uploaded it. Dispatch supports backfills and a full
+# pack/install dry run without pushing.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 3.2.3)"
+        required: true
+        type: string
+      dry_run:
+        description: "Pack and smoke-test without pushing to Chocolatey"
+        required: false
+        default: false
+        type: boolean
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+permissions:
+  contents: read
+jobs:
+  publish-chocolatey:
+    name: Publish package to Chocolatey
+    # Match the AUR publisher: only a successful release build has the
+    # Windows zip this package downloads; workflow_dispatch can backfill.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'release')
+    runs-on: windows-latest
+    steps:
+      - name: Resolve version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        shell: pwsh
+        run: |
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $version = $env:DISPATCH_VERSION -replace '^v', ''
+          } else {
+            $version = $env:RUN_TAG -replace '^v', ''
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid release version: '$version'"
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+          Write-Host "Resolved version: $version"
+
+      - name: Checkout package templates
+        uses: actions/checkout@v7
+
+      # The Release workflow writes the checksum with certutil, so the
+      # .sha256 file is "SHA256 hash of ...", the hex digest, then a status
+      # line. The smoke-test install below re-verifies it against the zip.
+      - name: Read release checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $asset = "dalfox-v$env:VERSION-windows-x86_64.zip"
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          gh release download "v$env:VERSION" --repo hahwul/dalfox --pattern "$asset.sha256" --dir out
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release v$env:VERSION is missing $asset.sha256."
+          }
+          $sha256 = Get-Content "out/$asset.sha256" |
+            ForEach-Object { $_.Trim() -replace ' ', '' } |
+            Where-Object { $_ -match '^[0-9a-fA-F]{64}$' } |
+            Select-Object -First 1
+          if (-not $sha256) {
+            throw "No SHA256 digest found in $asset.sha256."
+          }
+          "SHA256=$($sha256.ToLowerInvariant())" >> $env:GITHUB_ENV
+
+      - name: Render package files
+        shell: pwsh
+        run: |
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          $nuspec = (Get-Content chocolatey/dalfox.nuspec.tmpl -Raw).Replace('__VERSION__', $env:VERSION)
+          $install = (Get-Content chocolatey/tools/chocolateyinstall.ps1.tmpl -Raw).Replace('__VERSION__', $env:VERSION).Replace('__SHA256__', $env:SHA256)
+          New-Item -ItemType Directory -Force -Path out/tools | Out-Null
+          [IO.File]::WriteAllText((Join-Path $PWD 'out/dalfox.nuspec'), $nuspec, $utf8)
+          [IO.File]::WriteAllText((Join-Path $PWD 'out/tools/chocolateyinstall.ps1'), $install, $utf8)
+          Get-Content out/dalfox.nuspec
+          Get-Content out/tools/chocolateyinstall.ps1
+
+      - name: Pack Chocolatey package
+        shell: pwsh
+        run: |
+          Push-Location out
+          try {
+            choco pack dalfox.nuspec --outputdirectory ..
+            if ($LASTEXITCODE -ne 0) { throw 'choco pack failed.' }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Smoke-test local package
+        shell: pwsh
+        run: |
+          choco install dalfox --source . -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Local Chocolatey install failed.' }
+          $text = (& dalfox --version 2>&1) -join "`n"
+          Write-Host $text
+          if ($LASTEXITCODE -ne 0 -or $text -notmatch [regex]::Escape($env:VERSION)) {
+            throw "dalfox --version did not print expected version $env:VERSION."
+          }
+
+      - name: Push package
+        if: ${{ github.event_name == 'workflow_run' || inputs.dry_run != true }}
+        env:
+          CHOCOLATEY_KEY: ${{ secrets.CHOCOLATEY_KEY }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CHOCOLATEY_KEY)) {
+            throw 'CHOCOLATEY_KEY is not configured.'
+          }
+          $out = choco push "dalfox.$env:VERSION.nupkg" --source https://push.chocolatey.org/ --api-key "$env:CHOCOLATEY_KEY" 2>&1
+          $code = $LASTEXITCODE
+          $text = $out -join "`n"
+          Write-Host $text
+          if ($code -ne 0) {
+            # A re-run of a release already pushed is not a failure: the feed refuses a version twice.
+            if ($text -match '409|already exists|Conflict') {
+              Write-Host "dalfox $env:VERSION is already on Chocolatey; nothing to push."
+            } else {
+              throw 'Chocolatey package push failed.'
+            }
+          }

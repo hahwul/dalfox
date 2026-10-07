@@ -45,6 +45,14 @@ cd dalfox
 makepkg -si
 ```
 
+## Chocolatey (Windows)
+
+```powershell
+choco install dalfox
+```
+
+사전 빌드된 `windows-x86_64` 릴리스 바이너리를 설치하고 `dalfox`를 `PATH`에 등록합니다.
+
 ## Nix & NixOS
 
 ```bash

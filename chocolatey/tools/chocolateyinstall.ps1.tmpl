@@ -1,0 +1,9 @@
+$ErrorActionPreference = 'Stop'
+$toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+
+# The release zip holds dalfox-v<ver>-windows-x86_64\dalfox.exe; Chocolatey
+# shims every .exe under tools\, so the nested folder needs no handling.
+Install-ChocolateyZipPackage -PackageName 'dalfox' `
+  -UnzipLocation $toolsDir `
+  -Url64bit 'https://github.com/hahwul/dalfox/releases/download/v__VERSION__/dalfox-v__VERSION__-windows-x86_64.zip' `
+  -Checksum64 '__SHA256__' -ChecksumType64 'sha256'

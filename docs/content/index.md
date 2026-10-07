@@ -89,6 +89,7 @@ template = "landing"
             <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
             <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
             <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
+            <li role="option" aria-selected="false" data-label="choco" data-cmd="choco install dalfox">Chocolatey</li>
             <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
             <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
           </ul>
@@ -227,7 +228,7 @@ template = "landing"
     <div class="how-steps">
       <div class="how-step">
         <h3>Install</h3>
-        <p>Grab Dalfox through Homebrew, Snap, Nix, cargo, or a prebuilt binary. One command, no runtime to manage.</p>
+        <p>Grab Dalfox through Homebrew, Snap, Chocolatey, Nix, cargo, or a prebuilt binary. One command, no runtime to manage.</p>
         <code>brew install dalfox</code>
       </div>
       <div class="how-step">

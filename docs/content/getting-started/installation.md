@@ -45,6 +45,14 @@ cd dalfox
 makepkg -si
 ```
 
+## Chocolatey (Windows)
+
+```powershell
+choco install dalfox
+```
+
+Installs the prebuilt `windows-x86_64` release binary and puts `dalfox` on your `PATH`.
+
 ## Nix & NixOS
 
 ```bash
