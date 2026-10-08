@@ -1810,6 +1810,7 @@ async fn sanitized_results_honor_min_confidence() {
             worker_panics: 0,
             session_lost: None,
             findings_capped: false,
+            warnings: Vec::new(),
             min_confidence: min.map(String::from),
         };
         let progress = JobProgress::default();
