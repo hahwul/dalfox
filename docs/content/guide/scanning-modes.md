@@ -116,11 +116,11 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 # INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan
 ```
 
-**Only completed targets are skipped.** Anything whose coverage is unknown is scanned again:
+**Only completed targets are skipped.** Anything whose coverage is unknown is scanned again. A target that produced findings is recorded `completed` only after the report is written (findings live in memory until then), so a kill, an OOM, or a failed `--output` write cannot leave a target skipped with its findings lost; it is simply scanned again. Targets with no findings are recorded as soon as they finish, and everything is recorded immediately under `--stream-findings`:
 
 | Recorded outcome | When | Next run |
 |------------------|------|----------|
-| `completed` | The target was scanned to the end with a live session | Skipped |
+| `completed` | The target was scanned to the end with a live session, and its findings (if any) were written to the report | Skipped |
 | `cancelled` | Ctrl-C, `--scan-timeout` expiry, a `--limit` stop, a session that died mid-scan, or severe transport loss (`meta.incomplete`) | Retried |
 | `error` | Dropped during preflight (unreachable, content-type mismatch, `--max-targets-per-host` cap), or a scan worker crashed | Retried |
 

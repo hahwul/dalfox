@@ -502,7 +502,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let scan_idx = Arc::new(AtomicUsize::new(0));
     let overall_done = Arc::new(AtomicUsize::new(0));
 
-    let overall_ticker =
+    let mut overall_ticker =
         logging::start_overall_ticker(args, total_targets, &findings_count, &overall_done);
 
     // Bundle the cross-task handles for the preflight/analysis loop, the
@@ -533,8 +533,6 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         streamed_findings: Arc::new(Mutex::new(std::collections::HashSet::new())),
     };
 
-    let oob_session = blind::arm_and_dispatch(args, &host_groups).await;
-
     // Targets entering preflight, so the ones it drops can be told apart from
     // the ones that go on to be scanned. Only materialized when `--state-file`
     // is on — on a 50k-URL list this is two strings per target.
@@ -546,6 +544,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             .collect(),
         None => Vec::new(),
     };
+
+    // Blind payloads are stored attack traffic: apply `--max-targets-per-host`
+    // first so capped-out targets (reported as skipped) never receive them.
+    analysis::apply_per_host_cap(args, &mut host_groups, &state.skipped_targets).await;
+    let oob_session = blind::arm_and_dispatch(args, &host_groups, &cancel_flag).await;
 
     // Preflight + parameter analysis for every target (bounded concurrency);
     // replaces each host group with the targets that survived preflight.
@@ -573,14 +576,21 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         }
     }
 
+    // The previews print their report right here; the ticker (which redraws
+    // without a trailing newline) must be gone first or the report is glued to
+    // its last frame and it keeps redrawing over the output.
+    if args.dry_run || args.only_discovery {
+        logging::stop_overall_ticker(overall_ticker.take()).await;
+    }
+
     // --dry-run: report what would be scanned without sending attack payloads.
     if args.dry_run {
-        return output::render_dry_run(args, &host_groups, &state).await;
+        return output::render_dry_run(args, &host_groups, &state, &all_target_urls).await;
     }
 
     // --only-discovery: print discovered params and exit early.
     if args.only_discovery {
-        return output::render_only_discovery(args, &host_groups, &state);
+        return output::render_only_discovery(args, &host_groups, &state, &all_target_urls).await;
     }
 
     // Computed once here so the scan loop and the end-of-scan renderer agree on
@@ -636,10 +646,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     }
 
     if args.format == "plain" && !args.silence && total_targets > 1 {
-        if let Some((tx, done_rx)) = overall_ticker {
-            let _ = tx.send(());
-            let _ = done_rx.await;
-        }
+        logging::stop_overall_ticker(overall_ticker).await;
         println!();
     }
 
@@ -673,6 +680,16 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         baseline.as_ref(),
     )
     .await;
+
+    // The report is out: targets held back as "findings not yet reported" can
+    // now be recorded `completed`. Left unrecorded when the write failed or the
+    // run is incomplete, so the next run scans them again.
+    if let Some(sf) = &state.state_file
+        && !output_write_failed
+        && !requests.is_incomplete()
+    {
+        sf.commit_deferred();
+    }
 
     // Request/Response are displayed inline under each POC in plain mode.
     if args.format == "plain" && !args.silence {

@@ -94,6 +94,37 @@ fn completed_targets_are_skipped_on_the_next_run() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// A target whose findings are still only in memory is not skippable until the
+/// report holding them is out: a process that dies between the two leaves it
+/// to be scanned again.
+#[test]
+fn a_deferred_completion_is_not_skippable_until_committed() {
+    let path = scratch("deferred");
+    let args = args_with(&path);
+
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.defer_completed(&test_target("https://a.test/?q=1", "GET"));
+        record(&sf, "https://b.test/?q=1", "GET", TargetOutcome::Completed);
+        // "Killed" here: dropped without commit_deferred.
+    }
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(!is_completed(&sf, "https://a.test/?q=1", "GET"));
+    assert!(is_completed(&sf, "https://b.test/?q=1", "GET"));
+    drop(sf);
+
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.defer_completed(&test_target("https://a.test/?q=1", "GET"));
+        sf.commit_deferred();
+        sf.commit_deferred(); // draining twice must not re-append
+    }
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(is_completed(&sf, "https://a.test/?q=1", "GET"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
 #[test]
 fn changed_raw_http_request_body_is_not_skipped_as_completed() {
     let path = scratch("raw-http-body");

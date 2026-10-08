@@ -13,10 +13,63 @@ use super::postprocess::dedupe_ast_results;
 use crate::scanning::result::{FindingType, Result};
 use crate::target_parser::Target;
 
+/// Every distinct input target was skipped (unreachable, content-type
+/// mismatch, per-host cap, ...): nothing was or would be scanned. Shared by the
+/// scan outcome and the `--dry-run` / `--only-discovery` previews so a dead host
+/// or typo'd URL cannot read as a clean pass in any mode.
+fn all_targets_skipped(
+    all_target_urls: &[String],
+    skipped: &std::collections::HashMap<String, &'static str>,
+) -> bool {
+    !all_target_urls.is_empty()
+        && !skipped.is_empty()
+        && all_target_urls.iter().all(|u| skipped.contains_key(u))
+}
+
+/// Skipped targets with their error codes, sorted by target for stable output.
+fn skipped_entries(
+    skipped: &std::collections::HashMap<String, &'static str>,
+) -> Vec<serde_json::Value> {
+    let mut entries: Vec<(&String, &&'static str)> = skipped.iter().collect();
+    entries.sort();
+    entries
+        .into_iter()
+        .map(|(target, code)| serde_json::json!({ "target": target, "error_code": code }))
+        .collect()
+}
+
+/// Requests a scan of `target` is expected to send, as quoted by `--dry-run`.
+///
+/// Mirrors the scan-time effective cap (built-in safety cap unless
+/// --deep-scan / explicit --max-payloads-per-param). The shared estimator is
+/// the one REST `/preflight` and the MCP preflight tool use, so all three
+/// quote the same number for the same target. It counts both capped halves
+/// (reflection + DOM verification) but is still a LOWER BOUND: the shared
+/// CSP/tech payloads appended after the cap and the WAF-bypass
+/// mutation/encoder expansion are excluded.
+pub(crate) fn estimate_target_requests(args: &ScanArgs, target: &Target) -> usize {
+    // Encoder factor comes from the encoder pipeline so it can't drift from
+    // the expansion the scan actually performs.
+    let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
+    let cap = crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
+    let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
+    target
+        .reflection_params
+        .iter()
+        // Fragment params are client-side only: no HTTP request is sent.
+        .filter(|p| crate::scanning::param_is_http_scannable(p))
+        .fold(0usize, |acc, p| {
+            acc.saturating_add(crate::scanning::estimate_param_requests(
+                p, args, enc_factor, &apply_cap,
+            ))
+        })
+}
+
 pub(crate) async fn render_dry_run(
     args: &ScanArgs,
     host_groups: &std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
+    all_target_urls: &[String],
 ) -> ScanOutcome {
     let skipped_targets = &state.skipped_targets;
     let mut dry_run_targets = Vec::new();
@@ -24,34 +77,7 @@ pub(crate) async fn render_dry_run(
     for group in host_groups.values() {
         for target in group {
             let param_count = target.reflection_params.len();
-            // Estimate request count per target using encoder expansion. The
-            // factor comes from the encoder pipeline so it can't drift from the
-            // expansion the scan actually performs.
-            let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
-            // Mirror the scan-time effective cap (built-in safety cap unless
-            // --deep-scan / explicit --max-payloads-per-param). This is a
-            // LOWER-BOUND estimate: it counts the capped base reflection set only,
-            // and excludes the shared CSP/tech payloads appended after the cap,
-            // the WAF-bypass mutation/encoder expansion, and the DOM-verification
-            // set — so a real scan can send more (the preflight estimate in
-            // analysis.rs carries the same caveat).
-            let cap =
-                crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
-            let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
-            let mut estimated_requests: usize = 0;
-            for p in &target.reflection_params {
-                let payload_count = if let Some(ctx) = &p.injection_context {
-                    crate::scanning::xss_common::get_dynamic_payloads(ctx, args)
-                        .unwrap_or_else(|_| vec![])
-                        .len()
-                } else {
-                    let html_len =
-                        crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
-                    let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
-                    html_len + js_len
-                };
-                estimated_requests = estimated_requests.saturating_add(apply_cap(payload_count));
-            }
+            let estimated_requests = estimate_target_requests(args, target);
 
             let params: Vec<serde_json::Value> = target
                 .reflection_params
@@ -134,6 +160,9 @@ pub(crate) async fn render_dry_run(
                 "targets_skipped_completed": state.resumed_skipped,
             });
         }
+        if !skipped.is_empty() {
+            meta["skipped"] = serde_json::json!(skipped_entries(&skipped));
+        }
         if !warnings.is_empty() {
             meta["warnings"] = serde_json::json!(warnings);
         }
@@ -154,6 +183,14 @@ pub(crate) async fn render_dry_run(
         let _ = writeln!(out, "  Targets (input):     {}", total_input_targets);
         let _ = writeln!(out, "  Targets (scannable): {}", dry_run_targets.len());
         let _ = writeln!(out, "  Targets (skipped):   {}", skipped.len());
+        for e in skipped_entries(&skipped) {
+            let _ = writeln!(
+                out,
+                "    - {} ({})",
+                e["target"].as_str().unwrap_or("?"),
+                e["error_code"].as_str().unwrap_or("?")
+            );
+        }
         if state.dedup.collapsed > 0 {
             let _ = writeln!(
                 out,
@@ -208,17 +245,19 @@ pub(crate) async fn render_dry_run(
         out
     };
 
-    if write_output_or_stdout(args, &report) {
+    if write_output_or_stdout(args, &report) || all_targets_skipped(all_target_urls, &skipped) {
         return ScanOutcome::Error;
     }
     ScanOutcome::Clean
 }
 
-pub(crate) fn render_only_discovery(
+pub(crate) async fn render_only_discovery(
     args: &ScanArgs,
     host_groups: &std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
+    all_target_urls: &[String],
 ) -> ScanOutcome {
+    let skipped = state.skipped_targets.lock().await;
     // Collect once so we can render both human-readable plain
     // output and the `{meta, params}` envelope shape that matches
     // every other JSON/JSONL output dalfox emits.
@@ -254,6 +293,10 @@ pub(crate) fn render_only_discovery(
             if let Some(r) = &resumed {
                 meta["resumed"] = r.clone();
             }
+            if !skipped.is_empty() {
+                meta["targets_skipped"] = serde_json::json!(skipped.len());
+                meta["skipped"] = serde_json::json!(skipped_entries(&skipped));
+            }
             let envelope = serde_json::json!({
                 "meta": meta,
                 "params": entries,
@@ -270,6 +313,10 @@ pub(crate) fn render_only_discovery(
             });
             if let Some(r) = &resumed {
                 inner["resumed"] = r.clone();
+            }
+            if !skipped.is_empty() {
+                inner["targets_skipped"] = serde_json::json!(skipped.len());
+                inner["skipped"] = serde_json::json!(skipped_entries(&skipped));
             }
             let meta = serde_json::json!({ "meta": inner });
             let mut out = serde_json::to_string(&meta).unwrap_or_default();
@@ -294,7 +341,7 @@ pub(crate) fn render_only_discovery(
         }
     };
 
-    if write_output_or_stdout(args, &report) {
+    if write_output_or_stdout(args, &report) || all_targets_skipped(all_target_urls, &skipped) {
         return ScanOutcome::Error;
     }
     ScanOutcome::Clean
@@ -943,10 +990,8 @@ pub(crate) async fn derive_outcome(
     // clean pass. Treat the all-skipped case as an error instead; if
     // even one target produced any scan activity (even with zero
     // findings) the outcome falls through to Clean as before.
-    let all_unreachable = !all_target_urls.is_empty() && {
-        let skipped = state.skipped_targets.lock().await;
-        !skipped.is_empty() && all_target_urls.iter().all(|u| skipped.contains_key(u))
-    };
+    let all_unreachable =
+        all_targets_skipped(all_target_urls, &*state.skipped_targets.lock().await);
     if all_unreachable {
         return ScanOutcome::Error;
     }

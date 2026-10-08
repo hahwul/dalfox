@@ -68,18 +68,18 @@ async fn record_session_baseline(
         .insert(target.url.to_string(), baseline);
 }
 
-pub(crate) async fn run_preflight_and_analysis(
+/// Limit targets per host. Targets above the cap aren't silently dropped —
+/// record them in skipped_targets so target_summary surfaces the skip with
+/// the TRUNCATED_PER_HOST_CAP error code instead of "clean". This is the
+/// only place `--max-targets-per-host` applies; the scan stage inherits the
+/// truncated groups. Idempotent: `run_scan` calls it before blind-XSS dispatch
+/// (so capped-out targets never receive stored payloads) and the analysis
+/// stage calls it again as a no-op.
+pub(crate) async fn apply_per_host_cap(
     args: &ScanArgs,
     host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
-    state: &ScanState,
+    skipped_targets: &Mutex<HashMap<String, &'static str>>,
 ) {
-    let skipped_targets = state.skipped_targets.clone();
-
-    // Limit targets per host. Targets above the cap aren't silently dropped —
-    // record them in skipped_targets so target_summary surfaces the skip with
-    // the TRUNCATED_PER_HOST_CAP error code instead of "clean". This is the
-    // only place `--max-targets-per-host` applies; the scan stage inherits the
-    // truncated groups.
     for group in host_groups.values_mut() {
         if group.len() > args.max_targets_per_host {
             let dropped: Vec<String> = group
@@ -104,6 +104,16 @@ pub(crate) async fn run_preflight_and_analysis(
             group.truncate(args.max_targets_per_host);
         }
     }
+}
+
+pub(crate) async fn run_preflight_and_analysis(
+    args: &ScanArgs,
+    host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
+    state: &ScanState,
+) {
+    let skipped_targets = state.skipped_targets.clone();
+
+    apply_per_host_cap(args, host_groups, &skipped_targets).await;
 
     // One bound for the whole stage, shared by every host group — the same
     // shape as the scan stage's `global_semaphore`. This used to be a fresh

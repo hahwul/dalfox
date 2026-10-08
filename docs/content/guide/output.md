@@ -389,7 +389,7 @@ Dalfox returns:
 |------|---------|
 | `0` | Completed successfully, no findings |
 | `1` | Completed successfully, at least one finding **of any tier** |
-| `2` | Input/config/runtime error, or the `-o` file could not be written. With no findings, also: every target was skipped (unreachable, wrong content type, …), a target's scan worker crashed (`INTERNAL_ERROR`), at least 10% of requests (and at least 3) never got a response, or a session was lost mid-scan under the default `--on-session-loss abort` (a run that did find something still exits `1`) |
+| `2` | Input/config/runtime error, or the `-o` file could not be written. With no findings, also: every target was skipped (unreachable, wrong content type, …; also under `--dry-run` and `--only-discovery`, whose JSON/JSONL carry the skipped targets and their `error_code`), a target's scan worker crashed (`INTERNAL_ERROR`), at least 10% of requests (and at least 3) never got a response, or a session was lost mid-scan under the default `--on-session-loss abort` (a run that did find something still exits `1`) |
 
 `1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity == "High"` with `jq` reaches nearly the same set today, because severity currently tracks the tier: `V` is `High`, `A` is `Medium`, `R` is `Info`. The exception is an `I` library finding, which carries its advisory's severity and can be `High`. See [Detection Model](../detection-model/).)
 

@@ -22,6 +22,14 @@
 //!   window where the file is invalid. Lines are flushed but not `fsync`ed:
 //!   that survives `kill -9` (the page cache outlives the process), not a
 //!   machine crash, which is the right trade for a progress log.
+//! - **A target with findings is `completed` only once they are reported.**
+//!   Findings live in memory until the end-of-scan render, so a target that
+//!   produced any is held back ([`StateFile::defer_completed`]) and recorded
+//!   after the report is written ([`StateFile::commit_deferred`]); a kill or a
+//!   failed `-o` write in between leaves it to be re-scanned rather than
+//!   skipped with its findings lost. Targets with no findings have nothing to
+//!   lose and are recorded immediately, as is everything under
+//!   `--stream-findings`, which prints them as they are found.
 //! - **Only `completed` is skipped.** `cancelled` (SIGINT / `--scan-timeout`,
 //!   dead session, or severe transport loss) and `error` (preflight skip)
 //!   targets are retried on the next run, because how much of them was actually
@@ -484,6 +492,12 @@ pub(crate) struct StateFile {
     /// than repeating per target).
     handle: Mutex<Option<std::fs::File>>,
     write_failed: AtomicBool,
+    /// Targets that finished with findings still only in memory. Their
+    /// `completed` record waits for [`StateFile::commit_deferred`], called once
+    /// the report is out: a kill, an OOM or a failed `-o` write before that
+    /// would otherwise leave a target the next run skips and a report that
+    /// never held its findings.
+    deferred: Mutex<Vec<TargetIdentity>>,
     silence: bool,
     /// Why the prior file was set aside, if it was. Surfaced by the caller.
     pub(crate) reset_reason: Option<String>,
@@ -528,6 +542,7 @@ impl StateFile {
             prior: Mutex::new(loaded.prior),
             handle: Mutex::new(None),
             write_failed: AtomicBool::new(false),
+            deferred: Mutex::new(Vec::new()),
             silence: args.silence,
             reset_reason: loaded.reset,
             corrupt_lines: loaded.corrupt_lines,
@@ -626,6 +641,31 @@ impl StateFile {
 
     pub(crate) fn record_identity(&self, identity: TargetIdentity, outcome: TargetOutcome) {
         self.append(identity, outcome, |_| true);
+    }
+
+    /// Hold back `target`'s `completed` record until [`commit_deferred`]. For
+    /// a target whose findings exist only in memory: recorded now, a hard kill
+    /// would make the next run skip it with those findings never reported.
+    ///
+    /// [`commit_deferred`]: StateFile::commit_deferred
+    pub(crate) fn defer_completed(&self, target: &Target) {
+        let identity = self.identity(target);
+        match self.deferred.lock() {
+            Ok(mut g) => g.push(identity),
+            Err(poisoned) => poisoned.into_inner().push(identity),
+        }
+    }
+
+    /// Write the held-back `completed` records. Call only after the report
+    /// that carries those targets' findings has been written.
+    pub(crate) fn commit_deferred(&self) {
+        let held = match self.deferred.lock() {
+            Ok(mut g) => std::mem::take(&mut *g),
+            Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
+        };
+        for identity in held {
+            self.record_identity(identity, TargetOutcome::Completed);
+        }
     }
 
     /// Downgrade a target to `cancelled` after a run-wide transport-loss check,
