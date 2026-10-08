@@ -112,11 +112,7 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
     let content = content.trim_start_matches('\u{feff}');
     let har: Har = serde_json::from_str(content).map_err(|e| format!("invalid HAR JSON: {}", e))?;
 
-    // Hard cap on produced targets so a large-but-valid HAR can't amplify into
-    // multi-GiB resident memory (each Target plus the downstream all_target_urls
-    // / host_groups / dedup copies) beyond the input byte budget. Set far above
-    // any realistic capture; truncation is surfaced as a warning.
-    const MAX_HAR_TARGETS: usize = 1_000_000;
+    const MAX_HAR_TARGETS: usize = super::MAX_IMPORT_TARGETS;
 
     let total_entries = har.log.entries.len();
     let mut targets = Vec::new();
@@ -140,54 +136,12 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
             }
         };
 
-        let mut headers: Vec<(String, String)> = Vec::new();
-        let mut cookies: Vec<(String, String)> = Vec::new();
-        let mut user_agent: Option<String> = None;
-
+        // Shared with the OpenAPI/Postman import paths: Cookie split into
+        // pairs, User-Agent lifted out, pseudo / hop-by-hop / unsendable
+        // headers dropped.
+        let mut imported = super::ImportedHeaders::default();
         for h in &req.headers {
-            let name = h.name.trim();
-            // HTTP/2 pseudo-headers (:method, :path, :scheme, :authority) are
-            // not valid on the wire for reqwest's HTTP/1.1 requests.
-            if name.is_empty() || name.starts_with(':') {
-                continue;
-            }
-            if name.eq_ignore_ascii_case("cookie") {
-                for kv in h.value.split(';') {
-                    if let Some((k, v)) = kv.trim().split_once('=') {
-                        let k = k.trim();
-                        // Skip empty-name pairs (e.g. a leading `=val` or `;=v;`
-                        // segment): an empty cookie name is invalid and would
-                        // re-serialize into a malformed `=val` Cookie segment.
-                        if k.is_empty() {
-                            continue;
-                        }
-                        cookies.push((k.to_string(), v.trim().to_string()));
-                    }
-                }
-                continue;
-            }
-            if name.eq_ignore_ascii_case("user-agent") {
-                user_agent = Some(h.value.clone());
-                continue;
-            }
-            if is_skippable_har_header(name) {
-                continue;
-            }
-            // Drop any header reqwest can't put on an HTTP/1.1 wire (a
-            // space-bearing name, a control byte in the value, …). Forwarded
-            // verbatim it would fail the reachability probe and every scan
-            // request, silently marking a live target unreachable. The
-            // `:`-pseudo-header and empty-name cases are already handled above;
-            // this closes the remaining name/value-validity gap and keeps the
-            // raw-HTTP and HAR import paths in step.
-            if !super::is_forwardable_header(name, &h.value) {
-                crate::dbg_log!(
-                    "dropping unsendable HAR header {:?} (name/value rejected by HTTP/1.1)",
-                    name
-                );
-                continue;
-            }
-            headers.push((name.to_string(), h.value.clone()));
+            imported.push(&h.name, &h.value);
         }
 
         // The structured `cookies` array is a fallback for captures that carry
@@ -198,17 +152,12 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
         // header's presence would then discard the real cookies and scan the
         // capture logged-out. When the header did yield cookies this stays
         // non-empty, so the fallback still can't double-count.
-        if cookies.is_empty() && !req.cookies.is_empty() {
-            cookies = req
-                .cookies
-                .iter()
-                // Trim the value too, matching the Cookie-header path above, so
-                // the same cookie parses identically whichever HAR field carries it.
-                .map(|c| (c.name.trim(), c.value.trim()))
-                // Drop empty-name cookies for parity with the Cookie-header path.
-                .filter(|(k, _)| !k.is_empty())
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
+        if imported.cookies.is_empty() {
+            // Same per-pair rules as the Cookie-header path, so the same
+            // cookie parses identically whichever HAR field carries it.
+            for c in &req.cookies {
+                imported.push_cookie(&c.name, &c.value);
+            }
         }
 
         let data = req.post_data.and_then(har_body);
@@ -225,9 +174,9 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
         targets.push(Target {
             method,
             data,
-            headers,
-            cookies,
-            user_agent,
+            headers: imported.headers,
+            cookies: imported.cookies,
+            user_agent: imported.user_agent,
             ..Target::for_url(url)
         });
     }
@@ -245,18 +194,6 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
     }
 
     Ok(targets)
-}
-
-/// Request headers that must not be forwarded verbatim from a HAR capture.
-/// `Host` is set by reqwest from the URL; `Content-Length` is recomputed (a
-/// stale value corrupts the body); `Accept-Encoding` is left to reqwest so its
-/// transparent decompression stays enabled (a manual value disables it and
-/// yields compressed gibberish); the rest are hop-by-hop headers tied to the
-/// original connection. `Cookie` and `User-Agent` are handled separately by the
-/// caller and are intentionally not listed here.
-fn is_skippable_har_header(name: &str) -> bool {
-    // Single source of truth shared with the raw-HTTP request parser.
-    super::is_skippable_request_header(name)
 }
 
 /// Extract a request body from `postData`, preferring the captured raw `text`

@@ -138,7 +138,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 - `findings_count`
 - `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 세션이 끊긴 경우 `error_code`(Ctrl-C / `--limit` / `--scan-timeout`으로 도중에 끊긴 대상은 `error_code` 없이 `incomplete`. 세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`도), 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/#거의-같은-url-묶기) 모드와 그것이 병합한 대상 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
-- `targets_unparsable` — 대상 목록의 줄을 파싱하지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/#file-모드) 참고
+- `targets_unparsable` — 대상 목록의 줄을 파싱하지 못했거나 OpenAPI / Postman 오퍼레이션을 만들지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/#file-모드), [OpenAPI / Postman 모드](../scanning-modes/#openapi-postman-모드) 참고
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
 - `resumed` — `--state-file`을 쓴 경우에만 포함됩니다. `state_file`(경로)과 `targets_skipped_completed`(이전 실행에서 끝나 건너뛴 대상 수)
 - `incomplete` — 실행이 **완전히 테스트되지 않았을 때** `true`입니다. 스캔 도중 대상의 인증 세션이 끊어졌거나([세션 모니터링](../scanning-modes/#세션-모니터링) 참고), 전체 요청의 10% 이상(최소 3건)이 응답을 받지 못했거나, Ctrl-C / `--limit` / `--scan-timeout`으로 모든 대상이 끝나기 전에 실행이 멈춘 경우입니다. `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보세요. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*

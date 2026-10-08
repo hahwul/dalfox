@@ -6,7 +6,122 @@ use std::time::Duration;
 use url::Url;
 
 mod har;
+mod openapi;
+mod postman;
 pub use har::{is_har_content, parse_har};
+pub use openapi::parse_openapi;
+pub use postman::parse_postman;
+
+/// Most targets one imported document (HAR, OpenAPI, Postman) may expand to.
+/// Set far above any realistic capture or spec; it only exists so a
+/// large-but-valid document can't amplify into multi-GiB resident memory
+/// (each Target plus the downstream dedup/host-group copies). Truncation is
+/// surfaced as a warning.
+pub(crate) const MAX_IMPORT_TARGETS: usize = 1_000_000;
+
+/// Most bytes (URL + headers + body) one spec operation / collection request
+/// may expand to. A `$ref` to a large `example`, or a `{{var}}` to a large
+/// value, can be repeated thousands of times inside a single request; past
+/// this the request is skipped instead of amplifying a small document into
+/// gigabytes. Far above any real API request.
+pub(crate) const MAX_IMPORT_REQUEST_BYTES: usize = 4 << 20;
+
+/// Skip reason for a request past [`MAX_IMPORT_REQUEST_BYTES`].
+pub(crate) fn too_large(noun: &str) -> String {
+    format!("{noun} expands past {} MiB", MAX_IMPORT_REQUEST_BYTES >> 20)
+}
+
+/// Methods a spec import does not scan. HEAD and OPTIONS responses carry no
+/// body to reflect into; DELETE with placeholder ids would have discovery,
+/// mining and every payload hit a destructive endpoint. Counted, not silent.
+pub(crate) fn is_unscanned_spec_method(method: &str) -> bool {
+    ["HEAD", "OPTIONS", "DELETE"]
+        .iter()
+        .any(|m| m.eq_ignore_ascii_case(method))
+}
+
+/// What a spec import (`-i openapi` / `-i postman`) produced: the targets plus
+/// one human-readable reason per operation or request that was skipped. A bad
+/// entry never aborts the import — the same per-entry leniency a target list
+/// gets — so the caller reports the skips and scans the rest.
+#[derive(Debug, Default)]
+pub struct SpecImport {
+    pub targets: Vec<Target>,
+    pub skipped: Vec<String>,
+    /// DELETE / HEAD / OPTIONS operations left out by policy (see
+    /// [`is_unscanned_spec_method`]) — not errors, reported separately.
+    pub unscanned_methods: usize,
+}
+
+/// Request headers imported from a document (HAR entry, OpenAPI header
+/// parameter, Postman header), split the way the request builders want them:
+/// `Cookie` into per-cookie pairs (so cookie injection and composition work
+/// and no duplicate `Cookie` header goes out), `User-Agent` lifted into its
+/// own field, HTTP/2 pseudo-headers, hop-by-hop/length/encoding headers and
+/// anything reqwest cannot put on an HTTP/1.1 wire dropped. One copy of these
+/// rules for every import path, so they cannot drift apart.
+#[derive(Debug, Default)]
+pub(crate) struct ImportedHeaders {
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) cookies: Vec<(String, String)>,
+    pub(crate) user_agent: Option<String>,
+}
+
+impl ImportedHeaders {
+    pub(crate) fn push(&mut self, name: &str, value: &str) {
+        let name = name.trim();
+        // HTTP/2 pseudo-headers (:method, :path, :scheme, :authority) are not
+        // valid on the wire for reqwest's HTTP/1.1 requests.
+        if name.is_empty() || name.starts_with(':') {
+            return;
+        }
+        if name.eq_ignore_ascii_case("cookie") {
+            for kv in value.split(';') {
+                if let Some((k, v)) = kv.trim().split_once('=') {
+                    self.push_cookie(k, v);
+                }
+            }
+            return;
+        }
+        if name.eq_ignore_ascii_case("user-agent") {
+            self.user_agent = Some(value.to_string());
+            return;
+        }
+        if is_skippable_request_header(name) {
+            return;
+        }
+        // Drop any header reqwest can't put on an HTTP/1.1 wire (a
+        // space-bearing name, a control byte such as CR/LF in the value, …).
+        // Forwarded verbatim it would fail the reachability probe and every
+        // scan request, silently marking a live target unreachable.
+        if !is_forwardable_header(name, value) {
+            crate::dbg_log!(
+                "dropping unsendable imported header {:?} (name/value rejected by HTTP/1.1)",
+                name
+            );
+            return;
+        }
+        self.headers.push((name.to_string(), value.to_string()));
+    }
+
+    /// Add one cookie pair. An empty name is invalid and would re-serialize as
+    /// a malformed `=val` segment; a `;` would split into extra cookies once
+    /// the pairs are composed back into one `Cookie` header; and a pair that
+    /// isn't a sendable header value (a control byte) would make
+    /// that composed header — and with it every request — fail at send. All
+    /// of those are dropped rather than forwarded.
+    pub(crate) fn push_cookie(&mut self, name: &str, value: &str) {
+        let (name, value) = (name.trim(), value.trim());
+        if name.is_empty()
+            || name.contains(['=', ',', ' ', ';'])
+            || value.contains(';')
+            || !is_forwardable_header("Cookie", &format!("{name}={value}"))
+        {
+            return;
+        }
+        self.cookies.push((name.to_string(), value.to_string()));
+    }
+}
 
 /// Cache key capturing the inputs that affect Client construction:
 /// timeout, optional proxy URL, follow-redirects policy, and whether TLS
@@ -68,6 +183,12 @@ pub struct Target {
     /// box (`--insecure`); set to `false` (`--insecure=false`) to enforce
     /// certificate validation.
     pub insecure: bool,
+    /// The request body is `multipart/form-data` (an imported OpenAPI /
+    /// Postman request declared it). `data` still holds the fields
+    /// form-urlencoded — the shape every multipart builder reads — and this
+    /// flag makes body mining test them as `MultipartBody` fields instead of
+    /// as an urlencoded body the endpoint would not parse.
+    pub multipart: bool,
 }
 
 impl Target {
@@ -115,6 +236,7 @@ impl Target {
             // Scanner default: trust self-signed / staging certs unless the
             // caller explicitly opts into validation (`--insecure=false`).
             insecure: true,
+            multipart: false,
         }
     }
 

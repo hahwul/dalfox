@@ -103,7 +103,7 @@ dalfox scan targets.txt --skip-mining --workers 10 --delay 150
 
 Combine with `--max-concurrent-targets` and `--max-targets-per-host` for safety.
 
-### E. Raw Captured Request (raw-http) / HAR export (har)
+### E. Raw Captured Request (raw-http) / HAR export (har) / API spec (openapi, postman)
 
 ```bash
 # One captured request:
@@ -114,6 +114,13 @@ dalfox scan -i har capture.har          # explicit
 ```
 
 Excellent when the interesting parameters live in cookies, custom headers, or a complex JSON body. `har` fans a multi-request capture out into one target per `log.entries[].request` (deduped by URL+method); `raw-http` is the single-request form. See `references/cli.md`.
+
+API spec instead of traffic? `-i openapi` (OpenAPI 3.x JSON/YAML, Swagger 2.0) and `-i postman` (Collection v2.1) expand every GET/POST/PUT/PATCH operation into a target with path/query/header/cookie params and a JSON / form / multipart / XML body built from the schema (DELETE/HEAD/OPTIONS are never scanned). Never auto-detected — pass `-i`. `--base-url https://host[/prefix]` supplies the origin for every request (the spec server's path is appended); it is required when the server is relative or a Postman host is an undefined `{{var}}`. Bad operations are skipped with a stderr warning, not fatal; only local `$ref`s are followed. `-H` / `--cookies` replace same-named imported values. CLI only.
+
+```bash
+dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com -H 'Authorization: Bearer …'
+dalfox scan -i postman api.postman_collection.json
+```
 
 ### F. Stored XSS (SXSS)
 
@@ -159,6 +166,7 @@ See `references/advanced.md` for the detailed recipes:
 - "WAF present" → `--force-waf`, `--waf-evasion`, `--waf-bypass off` (`force` acts like `auto`)
 - "Need custom payloads or markers" → `--custom-payload`, `--inject-marker`, `--custom-alert-*`
 - "Captured request testing" → `-i raw-http` (single request) or `-i har` (whole proxy/DevTools export)
+- "Scan what an API spec describes" → `-i openapi` / `-i postman` (+ `--base-url` for relative servers)
 - Concurrency / politeness caps
 
 ## 6. Configuration & Environment

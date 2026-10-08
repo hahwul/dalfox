@@ -32,6 +32,7 @@ See the auto-generated template for the full schema. Common useful keys under `[
 - `force_waf = "cloudflare"`
 - `deep_scan = true`
 - `skip_mining = true`
+- `input_type = "openapi"` + `base_url = "https://staging.example.com"` (spec inputs; `base_url` must be an absolute `http(s)` URL)
 
 ## Banner & Silence Interaction
 

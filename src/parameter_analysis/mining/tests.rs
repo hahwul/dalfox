@@ -1464,6 +1464,48 @@ async fn test_probe_multipart_params_noop_without_multipart_spec() {
 }
 
 #[tokio::test]
+async fn test_mine_parameters_declared_multipart_target_mines_every_field_as_multipart() {
+    // An OpenAPI / Postman import that declared `multipart/form-data` sets
+    // `Target::multipart`: every field is a multipart field without `-p`, and
+    // the urlencoded body probe stays out (it would duplicate each slot).
+    let addr = start_raw_body_reflect_server().await;
+    let mut target =
+        parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
+    target.method = "POST".to_string();
+    target.multipart = true;
+    let mut args = default_scan_args();
+    args.skip_mining = true;
+    args.method = "POST".to_string();
+    args.data = Some("note=a&title=b".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    mine_parameters(
+        &mut target,
+        &args,
+        reflection_params.clone(),
+        semaphore,
+        None,
+    )
+    .await;
+
+    let mut got: Vec<(String, Location)> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .map(|p| (p.name.clone(), p.location.clone()))
+        .collect();
+    got.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        got,
+        vec![
+            ("note".to_string(), Location::MultipartBody),
+            ("title".to_string(), Location::MultipartBody)
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_mine_parameters_multipart_survives_same_named_body_param() {
     // `-d file=a -p file:multipart`: `probe_body_params` seeds `file` as a Body
     // param from the same `-d`, but the multipart slot must still be seeded —

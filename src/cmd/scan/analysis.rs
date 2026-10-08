@@ -391,11 +391,13 @@ pub(crate) async fn preflight_and_analyze_target(
                     if let Some((k, v)) = pair.split_once('=')
                         && v.contains(marker.as_str())
                     {
-                        marker_params.push(Param::new(
-                            k.to_string(),
-                            v.to_string(),
-                            Location::Body,
-                        ));
+                        // An imported multipart body keeps its wire format.
+                        let location = if target.multipart {
+                            Location::MultipartBody
+                        } else {
+                            Location::Body
+                        };
+                        marker_params.push(Param::new(k.to_string(), v.to_string(), location));
                     }
                 }
             }
