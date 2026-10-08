@@ -50,7 +50,7 @@ pub async fn verify_dom_xss_light_with_client(
             .get("Content-Security-Policy")
             .and_then(|v| v.to_str().ok())
             .map(ToString::to_string);
-        if let Ok(text) = crate::utils::http::read_body(resp).await {
+        if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
             let marker_evidence =
                 crate::scanning::check_dom_verification::classify_dom_evidence_for_response(
                     payload, &text, &ct,

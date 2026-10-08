@@ -723,6 +723,55 @@ async fn test_read_body_capped_handles_utf8_split_at_cap() {
     assert_eq!(body, "a\u{FFFD}");
 }
 
+/// Reply with headers promising `Content-Length: 100000`, then close after a
+/// few bytes: the failure surfaces mid-body, not at `send()`.
+async fn serve_truncated_body() -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let mut scratch = [0u8; 1024];
+            let _ = sock.read(&mut scratch).await;
+            let _ = sock
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 100000\r\nConnection: close\r\n\r\n<html>partial",
+                )
+                .await;
+            let _ = sock.flush().await;
+        }
+    });
+    format!("http://{addr}/")
+}
+
+#[tokio::test]
+async fn read_body_counted_counts_a_mid_body_failure() {
+    crate::ensure_crypto_provider();
+    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let c = counter.clone();
+    crate::REQUEST_FAILURE_COUNT_JOB
+        .scope(counter, async move {
+            // The plain reader is shared with non-scan callers (OOB poll,
+            // session probe) and must not count.
+            let url = serve_truncated_body().await;
+            let resp = reqwest::Client::new().get(&url).send().await.unwrap();
+            assert!(read_body(resp).await.is_err());
+            assert_eq!(c.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+            let url = serve_truncated_body().await;
+            let resp = reqwest::Client::new().get(&url).send().await.unwrap();
+            assert!(read_body_counted(resp).await.is_err());
+            assert_eq!(
+                c.load(std::sync::atomic::Ordering::Relaxed),
+                1,
+                "a body that dies mid-read is a payload sent but never tested"
+            );
+        })
+        .await;
+}
+
 #[test]
 fn test_content_type_is_never_markup_covers_text_plain() {
     // `text/plain` stays out of the plain deny-list (that list is consulted
