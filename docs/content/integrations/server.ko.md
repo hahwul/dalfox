@@ -352,7 +352,11 @@ curl http://127.0.0.1:6664/health
     "force_waf": "cloudflare",
     "waf_evasion": false,
     "waf_min_confidence": 0.3,
-    "max_payloads_per_param": 0
+    "max_payloads_per_param": 0,
+    "blind_oob": true,
+    "blind_oob_wait": 30,
+    "session_check": "Sign out",
+    "session_check_url": "https://app/me"
   }
 }
 ```
@@ -409,6 +413,21 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 하며, 그 밖의 값은 `400`입니다. 이 값을 설정하면 *저장형* 블라인드 XSS 주입이 켜집니다.
 `<script src=...>` 페이로드가 모든 쿼리·바디·헤더·쿠키 파라미터에 기록되어 대상에
 그대로 남습니다.
+
+`blind_oob`는 CLI의 `--blind-oob`에 해당하는 관리형 OAST(interactsh) 채널입니다.
+공개 메시를 쓰려면 `true`, 서버를 지정하려면 호스트 목록(`["oast.fun","oast.me"]`)을
+넘기면 됩니다. Dalfox가 등록하고, 콜백을 유발한 페이로드와 상관(correlate)시키며,
+직접 폴링하므로 리스너를 직접 운영하지 않아도 콜백이 `detection_method: "oob"`인 `V`
+탐지 결과가 됩니다. 폴러는 잡에 묶여 있어 스캔이 시작되면 함께 시작하고, 끝나거나
+취소·삭제되면 함께 멈추며 잡 상한에 포함됩니다. `blind_oob_wait`(`0`–`600`, 기본값
+`30`)은 스캔의 마지막 요청 이후 폴링을 얼마나 더 지속할지로, `scan_timeout`에
+포함됩니다. `GET /scan`에서는 `?blind_oob=true` 또는 `?blind_oob=oast.fun,oast.me`로
+같은 것을 고릅니다. 자가 호스팅 인증 토큰(`--blind-oob-secret`)은 CLI/설정 전용입니다.
+
+`session_check`(인증된 응답에 계속 매칭되어야 하는 정규식)와 `session_check_url`(대상
+대신 조회할 저렴한 인증 엔드포인트)은 쿠키가 없어도 세션 손실 탐지를 켭니다 — 아래
+끊어진 세션 설명을 보세요. 컴파일되지 않는 정규식이나 `http(s)`가 아닌 조회 URL은
+`400`입니다.
 
 `scan_timeout`은 스캔 전체의 벽시계 시간 예산(초)입니다 (기본값 `0` = 무제한).
 요청당 `timeout`과는 구별됩니다. 예산에 도달하면 스캔이 중단되고, 그때까지 수집한
@@ -501,8 +520,15 @@ queued → cancelled
 잡아 두고 스캔이 끝날 때 다시 확인합니다. 그 사이에 세션이 만료됐다면 (이후 모든 요청이
 로그인 페이지를 받고 아무것도 반사되지 않는 상태) 탐지 결과 0건의 `done`이 아니라
 `SESSION_LOST:`로 시작하는 `error_message`와 함께 `error`로 종료됩니다. 부분 탐지
-결과는 그대로 유지됩니다. 자격증명이 없는 스캔에서는 모니터링이 꺼져 있으며 비용도
-들지 않습니다.
+결과는 그대로 유지됩니다. `session_check` / `session_check_url`을 명시하면 쿠키 없이도
+같은 모니터링을 켤 수 있습니다. 자격증명도 `session_check`도 없는 스캔에서는 모니터링이
+꺼져 있으며 비용도 들지 않습니다.
+
+스캔을 실패시키지는 않는 문제도 전달됩니다. `GET /scan/{id}`는 `blind_oob`가 어떤
+서버에도 등록하지 못한 경우, `session_check` 기준선을 잡지 못해 모니터링이 꺼진 경우,
+발견된 파라미터 상한에 걸린 경우 같은 조건을 `warnings` 목록(비어 있으면 생략)으로
+알려 줍니다. 탐지 결과가 0건인 `done`이라도 `warnings`가 있으면 대상이 깨끗하다는
+증거가 아닙니다.
 
 ## systemd에서 실행하기
 

@@ -59,6 +59,10 @@ Submit a scan. Returns immediately.
   "rate_limit": 0,
   "insecure": true,
   "blind_callback_url": "https://callback.example",
+  "blind_oob": true,
+  "blind_oob_wait": 30,
+  "session_check": "Sign out",
+  "session_check_url": "https://app/me",
   "deep_scan": false,
   "skip_ast_analysis": false,
   "analyze_external_js": false,
@@ -89,6 +93,22 @@ nothing. `remote_payloads` / `remote_wordlists` are likewise checked against
 the registered providers, because an unrecognized name would silently fetch
 nothing and let the scan report `done` with the payload coverage the caller
 asked for quietly missing.
+
+`blind_oob` is the managed OAST (interactsh) channel — the same thing the CLI's
+`--blind-oob` arms. Pass `true` for the public mesh or a list of interactsh
+hosts (`["oast.fun"]`); Dalfox registers, correlates each callback to the
+payload that caused it, and polls on its own, so a callback becomes a `V`
+finding with `detection_method: "oob"` without you running a listener. The
+poller is bound to the scan: started when it starts, stopped when it finishes,
+is cancelled, or is deleted. `blind_oob_wait` (`0`–`600`, default `30`) tunes
+how long polling continues after the scan's last request and counts against
+`scan_timeout`. The self-hosted auth token stays CLI/config-only.
+
+`session_check` (a regex that must keep matching an authenticated response) and
+`session_check_url` (a cheap authed endpoint to probe instead of the target)
+turn on session-loss detection even without cookies; an invalid regex or a
+non-`http(s)` probe URL is an `invalid_params` error. See the dead-session note
+under `get_results_dalfox`.
 
 `insecure` controls TLS certificate validation (default `true`, scanner-friendly):
 set it `false` to enforce certificate validation and reject self-signed or
@@ -357,12 +377,19 @@ must start with `http://` or `https://`.
 
 A scan whose **authenticated session dies mid-run** ends the same way. When the
 call carries credentials (`cookies`, or a `Cookie` / `Authorization` entry in
-`headers`), Dalfox fingerprints the authenticated response before scanning and
-re-checks it at the end; if the session expired in between, the scan settles
+`headers`) — or you set `session_check` / `session_check_url` explicitly —
+Dalfox fingerprints the authenticated response before scanning and re-checks it
+at the end; if the session expired in between, the scan settles
 `status: "error"` with an `error_message` beginning `SESSION_LOST:` instead of
 `done` with an empty `results`. Do not summarize such a scan as "no XSS found" —
-nothing was really tested. Monitoring costs nothing when no credentials are
-passed.
+nothing was really tested. Monitoring costs nothing when no credentials and no
+`session_check` are passed.
+
+Problems that don't fail the scan still reach you: the result adds a `warnings`
+list (absent when empty) for conditions such as `blind_oob` failing to register
+with any server, a `session_check` baseline that could not be captured
+(monitoring inactive), or the discovered-parameter cap. A `done` scan with zero
+findings and a non-empty `warnings` is not proof of a clean target.
 
 ### `list_scans_dalfox`
 

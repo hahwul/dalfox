@@ -26,6 +26,10 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
         cookies: opts.cookie.as_slice(),
         proxy: Some(&mut opts.proxy),
         blind: Some((&mut opts.blind, "blind")),
+        blind_oob: Some(&mut opts.blind_oob),
+        blind_oob_wait: opts.blind_oob_wait,
+        session_check: Some(&mut opts.session_check),
+        session_check_url: Some(&mut opts.session_check_url),
     }
     .validate()?;
     // `send_terminal_webhook` dials http(s) only and returns silently for

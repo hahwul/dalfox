@@ -146,6 +146,7 @@ pub(crate) async fn get_result_handler(
                 status: j.status.clone(),
                 results: j.results.as_deref().map(Vec::as_slice),
                 error_message: j.error_message.clone(),
+                warnings: &j.warnings,
                 progress: progress_data,
                 queued_at_ms: j.queued_at_ms,
                 started_at_ms: j.started_at_ms,
@@ -246,6 +247,25 @@ fn split_csv(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// `?blind_oob=` takes a boolean or a comma-separated server list, mirroring
+/// the JSON body's `true` / `[...]` forms. Empty and the false spellings mean
+/// off; the true spellings mean the public mesh.
+fn blind_oob_query(raw: &str) -> Option<crate::job::spec::BlindOobRequest> {
+    use crate::job::spec::BlindOobRequest;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" | "0" | "false" | "no" | "off" => None,
+        "1" | "true" | "yes" | "on" => Some(BlindOobRequest::Enabled(true)),
+        _ => {
+            // An all-blank list (`,`, ` , `) is off, not the public mesh — a
+            // template that rendered to nothing should not silently arm OOB.
+            // Non-host junk (`ture`) survives here and is rejected with a clear
+            // 400 by `normalize_blind_oob`'s single-label / host check.
+            let servers = split_csv(raw);
+            (!servers.is_empty()).then_some(BlindOobRequest::Servers(servers))
+        }
+    }
+}
+
 pub(crate) async fn get_scan_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -332,6 +352,12 @@ pub(crate) async fn get_scan_handler(
         }
     };
     let blind = params.get("blind").cloned();
+    let blind_oob_wait = match parse_num_query::<u64>(&params, "blind_oob_wait") {
+        Ok(v) => v,
+        Err(msg) => {
+            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
+        }
+    };
     let method = params
         .get("method")
         .cloned()
@@ -400,6 +426,10 @@ pub(crate) async fn get_scan_handler(
         rate_limit,
         scan_timeout,
         max_payloads_per_param,
+        blind_oob: params.get("blind_oob").and_then(|v| blind_oob_query(v)),
+        blind_oob_wait,
+        session_check: params.get("session_check").cloned(),
+        session_check_url: params.get("session_check_url").cloned(),
     };
 
     if let Err(msg) = validate_scan_options(&mut opts) {

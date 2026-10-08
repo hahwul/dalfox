@@ -71,6 +71,53 @@ pub(crate) struct ScanRequestSpec {
     pub(crate) remote_payloads: Vec<String>,
     pub(crate) remote_wordlists: Vec<String>,
     pub(crate) max_payloads_per_param: usize,
+    /// OOB/OAST (interactsh) blind XSS, already validated: `None` = off,
+    /// `Some([])` = the public mesh, else the named servers.
+    pub(crate) blind_oob: Option<Vec<String>>,
+    /// End-of-scan OOB drain window; `None` = the CLI default.
+    pub(crate) blind_oob_wait: Option<u64>,
+    /// `--session-check` regex, already known to compile.
+    pub(crate) session_check: Option<String>,
+    /// `--session-check-url`, already known to be an absolute http(s) URL.
+    pub(crate) session_check_url: Option<String>,
+}
+
+/// The `blind_oob` request field, shared by REST and MCP: `true` arms the
+/// public interactsh mesh, `false` leaves OOB off, a list names the servers to
+/// try in order (an empty list also means the mesh, like a bare `--blind-oob`),
+/// and a string is a comma-separated server list for parity with the
+/// `GET /scan` query form (a blank string means off).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub(crate) enum BlindOobRequest {
+    Enabled(bool),
+    Servers(Vec<String>),
+    /// Comma-separated form, so a JSON `"blind_oob": "oast.fun,oast.me"` is
+    /// accepted with a clear downstream error rather than serde's opaque
+    /// untagged-enum message. Canonicalized to `Servers` by validation.
+    Csv(String),
+}
+
+impl BlindOobRequest {
+    /// The `BlindOobArgs::blind_oob` value this request means: `None` = off,
+    /// `Some([])` = the public mesh, `Some(list)` = those servers.
+    pub(crate) fn servers(&self) -> Option<Vec<String>> {
+        match self {
+            Self::Enabled(false) => None,
+            Self::Enabled(true) => Some(Vec::new()),
+            Self::Servers(list) => Some(list.clone()),
+            Self::Csv(s) => {
+                let list: Vec<String> = s
+                    .split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect();
+                // A blank string ("", ",", " ") is "off", matching the
+                // `GET /scan` query where a blank value disables OOB.
+                if list.is_empty() { None } else { Some(list) }
+            }
+        }
+    }
 }
 
 impl Default for ScanRequestSpec {
@@ -117,6 +164,10 @@ impl Default for ScanRequestSpec {
             remote_payloads: Vec::new(),
             remote_wordlists: Vec::new(),
             max_payloads_per_param: 0,
+            blind_oob: None,
+            blind_oob_wait: None,
+            session_check: None,
+            session_check_url: None,
         }
     }
 }
@@ -192,10 +243,20 @@ impl ScanRequestSpec {
             remote_payloads: self.remote_payloads,
             remote_wordlists: self.remote_wordlists,
 
-            // Everything else stays at its CLI default. Notably `oob`: OOB/OAST
-            // blind XSS is CLI-only for now, because these surfaces run their
-            // own job loop and would need the poller lifecycle wired
-            // separately.
+            // The poller lifecycle is bound to the job in
+            // `job::runner::execute_scan`. No `blind_oob_secret`: a self-hosted
+            // server's auth token stays a CLI/config concern.
+            oob: crate::cmd::scan::BlindOobArgs {
+                blind_oob: self.blind_oob,
+                blind_oob_secret: None,
+                blind_oob_wait: self.blind_oob_wait,
+            },
+            session_check: self.session_check,
+            session_check_url: self.session_check_url,
+
+            // Everything else stays at its CLI default — including
+            // `on_session_loss`, whose `abort` only skips *other* targets of
+            // the same host, which a one-target job does not have.
             ..Default::default()
         }
     }
@@ -267,6 +328,10 @@ impl ScanRequestSpec {
             max_payloads_per_param: opts
                 .max_payloads_per_param
                 .unwrap_or(d.max_payloads_per_param),
+            blind_oob: opts.blind_oob.as_ref().and_then(BlindOobRequest::servers),
+            blind_oob_wait: opts.blind_oob_wait,
+            session_check: opts.session_check.clone(),
+            session_check_url: opts.session_check_url.clone(),
         }
     }
 }

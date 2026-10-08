@@ -28,6 +28,8 @@ struct MockState {
     /// Bare host[:port] the client embeds in callback hosts.
     host: String,
     deregistered: bool,
+    /// How many times the poller hit `/poll` — proves it ran.
+    poll_count: usize,
 }
 
 type Shared = Arc<StdMutex<MockState>>;
@@ -53,6 +55,7 @@ async fn deregister(State(s): State<Shared>, Json(_body): Json<Value>) -> Json<V
 async fn poll(State(s): State<Shared>, Query(_q): Query<HashMap<String, String>>) -> Json<Value> {
     let (pubkey, corr, nonce, host) = {
         let mut st = s.lock().unwrap();
+        st.poll_count += 1;
         (
             st.public_key_b64.clone(),
             st.correlation_id.clone(),
@@ -211,4 +214,141 @@ fn interaction_reads_null_and_missing_fields_as_empty() {
     assert_eq!(it.protocol, "dns");
     assert_eq!(it.full_id, "abc.oast.fun");
     assert!(it.remote_address.is_empty() && it.timestamp.is_empty());
+}
+
+/// A server/MCP job that enables `blind_oob` must start the OOB poller bound to
+/// the job and stop it when the scan ends — no process-global state, no leaked
+/// task. Drives the real `job::runner::execute_scan` against a mock target and
+/// a mock interactsh server, then asserts the session was polled (started) and
+/// deregistered (stopped) by the time the job returned.
+#[tokio::test]
+async fn execute_scan_starts_and_stops_the_job_oob_poller() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let app = Router::new()
+        .route("/register", post(register))
+        .route("/poll", get(poll))
+        .route("/deregister", post(deregister))
+        .with_state(state.clone());
+    let oob_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock interactsh");
+    let oob_addr = oob_listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(oob_listener, app).await;
+    });
+    state.lock().unwrap().host = oob_addr.to_string();
+
+    // Mock scan target.
+    let tgt_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock target");
+    let tgt_addr = tgt_listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            tgt_listener,
+            Router::new().route("/", get(|| async { "<html>ok</html>" })),
+        )
+        .await;
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    // `?q=1` gives the blind injector a query param to arm over OOB, so the
+    // correlation registry is non-empty and the drain actually polls (rather
+    // than short-circuiting its wait).
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{tgt_addr}/?q=1")).expect("target");
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        oob: crate::cmd::scan::BlindOobArgs {
+            blind_oob: Some(vec![format!("http://{oob_addr}")]),
+            blind_oob_secret: None,
+            // Short drain so the background poller runs at least once (proving
+            // it was started) without sleeping the default 30s.
+            blind_oob_wait: Some(1),
+        },
+        ..Default::default()
+    });
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(!run.reachability_failed, "mock target must be reachable");
+    assert!(
+        !run.was_cancelled,
+        "a completed scan must not read as cancelled"
+    );
+
+    let st = state.lock().unwrap();
+    // The background poll loop polls immediately on spawn, and `finish` does a
+    // final sweep — so a running-then-stopped poller shows at least two polls,
+    // which a final-sweep-only poller (never started) could not.
+    assert!(
+        st.poll_count >= 2,
+        "the background poller must have run (polls={})",
+        st.poll_count
+    );
+    assert!(
+        st.deregistered,
+        "the job must have stopped the poller and deregistered the session"
+    );
+}
+
+/// The drain must always deregister, even when the job is cancelled mid-flight
+/// — the timeout/cancel path for the OOB poller. `finish` under a tripped
+/// cancel flag returns promptly and still runs its final sweep + deregister, so
+/// a cancelled scan does not leave the session armed on the server.
+#[tokio::test]
+async fn poller_finish_under_cancel_still_deregisters() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let app = Router::new()
+        .route("/register", post(register))
+        .route("/poll", get(poll))
+        .route("/deregister", post(deregister))
+        .with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    state.lock().unwrap().host = addr.to_string();
+
+    let config = OobConfig {
+        servers: vec![format!("http://{addr}")],
+        secret: None,
+        wait_secs: 1,
+        timeout: 5,
+        proxy: None,
+        insecure: true,
+    };
+    let session = OobSession::start(&config).await.expect("register");
+
+    let results = Arc::new(TokioMutex::new(Vec::new()));
+    let findings_count = Arc::new(AtomicUsize::new(0));
+    // Cancel is already set — the budget/user cancel case.
+    let cancel = Arc::new(AtomicBool::new(true));
+    let poller = spawn_poller(
+        Arc::new(session),
+        results,
+        findings_count,
+        cancel,
+        /* silence */ true,
+    );
+    // A 30s grace would hang if cancel were ignored; cancel must cut it short.
+    let start = std::time::Instant::now();
+    poller.finish(Duration::from_secs(30)).await;
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "a tripped cancel must cut the grace window short"
+    );
+    assert!(
+        state.lock().unwrap().deregistered,
+        "a cancelled drain must still deregister the session"
+    );
 }

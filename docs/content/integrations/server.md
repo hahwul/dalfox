@@ -359,7 +359,11 @@ Returns `status: "ok"`, version, `auth_required`, and the list of supported endp
     "force_waf": "cloudflare",
     "waf_evasion": false,
     "waf_min_confidence": 0.3,
-    "max_payloads_per_param": 0
+    "max_payloads_per_param": 0,
+    "blind_oob": true,
+    "blind_oob_wait": 30,
+    "session_check": "Sign out",
+    "session_check_url": "https://app/me"
   }
 }
 ```
@@ -420,6 +424,24 @@ provider name is a `400`. `method` is uppercased for you (`"post"` → `"POST"`)
 `https://` URL; anything else is a `400`. Setting it arms *stored* blind-XSS
 injection: `<script src=...>` payloads are written into every query, body,
 header and cookie parameter and stay in the target.
+
+`blind_oob` is the managed OAST (interactsh) channel, the server/MCP equivalent
+of the CLI's `--blind-oob`: pass `true` for the public mesh or a list of server
+hosts (`["oast.fun","oast.me"]`), and Dalfox registers, correlates each
+callback to the payload that caused it, and polls — a callback becomes a `V`
+finding with `detection_method: "oob"`. The poller is bound to the job: it is
+started when the scan starts and stopped when it ends, is cancelled, or is
+deleted, and it counts against the job caps. `blind_oob_wait` (`0`–`600`,
+default `30`) is how long to keep polling after the scan's last request; it
+counts against `scan_timeout`. On `GET /scan`, `?blind_oob=true` or
+`?blind_oob=oast.fun,oast.me` select the same thing. The self-hosted auth token
+(`--blind-oob-secret`) stays CLI/config-only.
+
+`session_check` (a regex that must keep matching an authenticated response) and
+`session_check_url` (a cheap authed endpoint to probe instead of the target)
+turn on session-loss detection even without cookies (see the dead-session note
+further down). A regex that does not compile or a non-`http(s)` probe URL is a
+`400`.
 
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached
@@ -516,13 +538,20 @@ reachability without launching a scan. The `target` must start with `http://` or
 `https://`; any other scheme is rejected with `400` (same as `/preflight`).
 
 The same rule covers a **dead session**. When the scan request carries
-credentials (a `cookie`, or a `Cookie` / `Authorization` entry in `header`),
-Dalfox fingerprints the authenticated response before scanning and re-checks it
-when the scan ends. If the session expired in between (every later request
-answered by a login page, nothing reflecting), the scan ends as `error` with an
-`error_message` beginning `SESSION_LOST:` and the signal that fired, rather than
-`done` with zero findings. Partial results stay attached. For a scan with no
-credentials the monitoring is off and costs nothing.
+credentials (a `cookie`, or a `Cookie` / `Authorization` entry in `header`) — or
+you set `session_check` / `session_check_url` explicitly — Dalfox fingerprints
+the authenticated response before scanning and re-checks it when the scan ends.
+If the session expired in between (every later request answered by a login page,
+nothing reflecting), the scan ends as `error` with an `error_message` beginning
+`SESSION_LOST:` and the signal that fired, rather than `done` with zero
+findings. Partial results stay attached. For a scan with no credentials and no
+`session_check` the monitoring is off and costs nothing.
+
+Softer problems that don't fail the scan still reach you: `GET /scan/{id}` adds
+a `warnings` list (absent when empty) for conditions such as `blind_oob` failing
+to register with any server, a `session_check` baseline that could not be
+captured (monitoring inactive), or the discovered-parameter cap. A `done` scan
+with zero findings and a non-empty `warnings` is not proof of a clean target.
 
 ## Running under systemd
 

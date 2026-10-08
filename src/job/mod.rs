@@ -359,6 +359,135 @@ pub(crate) fn validate_remote_providers(
     )
 }
 
+/// Upper bound on `blind_oob_wait` (seconds) accepted via scan options. The
+/// drain holds the job's worker and capacity slot while it waits for late
+/// callbacks, so an unbounded value would pin both; ten minutes is far past
+/// any callback a stored payload realistically produces within one job.
+pub(crate) const MAX_BLIND_OOB_WAIT_SECS: u64 = 600;
+
+/// Upper bound on the `blind_oob` server list. Registration tries them in
+/// order, each bounded by the scan `timeout`, so the list length is what
+/// bounds a dead-server registration stall. The public mesh is six.
+pub(crate) const MAX_BLIND_OOB_SERVERS: usize = 8;
+
+/// Validate and normalize a `blind_oob` request: each named server is trimmed,
+/// blanks are dropped (so `[""]` means the public mesh, like `--blind-oob=`),
+/// and every remaining entry must parse as a host the interactsh client can
+/// dial. Parsed with `url::Url` rather than pattern-matched — a host allowlist
+/// built from spellings was defeated by `oast.pro:0443` once already.
+pub(crate) fn normalize_blind_oob(req: &mut Option<spec::BlindOobRequest>) -> Result<(), String> {
+    use spec::BlindOobRequest;
+    // Canonicalize every spelling (bool, list, CSV string) to its resolved
+    // server list first, so the host validation below has one shape to check
+    // and the stored value is exactly what the scan will dial.
+    match req.as_ref() {
+        None | Some(BlindOobRequest::Enabled(_)) => return Ok(()),
+        Some(other) => match other.servers() {
+            // `false` / blank CSV ⇒ off.
+            None => {
+                *req = Some(BlindOobRequest::Enabled(false));
+                return Ok(());
+            }
+            Some(list) => *req = Some(BlindOobRequest::Servers(list)),
+        },
+    }
+    let Some(spec::BlindOobRequest::Servers(list)) = req else {
+        return Ok(());
+    };
+    let cleaned: Vec<String> = list
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if cleaned.len() > MAX_BLIND_OOB_SERVERS {
+        return Err(format!(
+            "blind_oob names {} servers (max {})",
+            cleaned.len(),
+            MAX_BLIND_OOB_SERVERS
+        ));
+    }
+    for server in &cleaned {
+        // Validate through the exact parser the interactsh client dials with,
+        // so a server accepted here is one the client can use (one definition).
+        let host = match crate::oob::interactsh::parse_server_host(server) {
+            Some((_, host)) => host,
+            None => {
+                return Err(format!(
+                    "blind_oob server '{}' is not a valid interactsh host (expected e.g. \"oast.fun\" or \"https://oob.example.com\")",
+                    crate::utils::log::sanitize_log_message(server)
+                ));
+            }
+        };
+        // Reject a single-label host (`ture`, a `true`/`false` typo, a bare
+        // word): interactsh servers are FQDNs or host:port / IP, and a bare
+        // label would otherwise register against a doomed host. The host part
+        // before any `:port` must carry a dot (FQDN) or be an IP literal.
+        let bare = host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h);
+        let looks_like_host =
+            bare.contains('.') || bare.starts_with('[') || bare.parse::<std::net::IpAddr>().is_ok();
+        if !looks_like_host {
+            return Err(format!(
+                "blind_oob server '{}' is a single-label host; name a full interactsh domain (e.g. \"oast.fun\") or host:port",
+                crate::utils::log::sanitize_log_message(server)
+            ));
+        }
+    }
+    *list = cleaned;
+    Ok(())
+}
+
+/// Validate and normalize the session-check pair. Blank values mean "unset"
+/// (templated query strings send `?session_check=`); a regex that does not
+/// compile or a probe URL that is not absolute http(s) is refused up front,
+/// because both are only consulted when a probe fires — the CLI validates them
+/// at startup for the same reason (`cmd::scan::startup`).
+pub(crate) fn normalize_session_check(
+    pattern: &mut Option<String>,
+    probe_url: &mut Option<String>,
+) -> Result<(), String> {
+    // Only a truly empty string is "unset" (the templated `?session_check=`
+    // convention shared with `proxy` / `blind`). A whitespace-only value is a
+    // real pattern, compiled like the CLI compiles it rather than silently
+    // dropped — so the two surfaces treat the same input the same way.
+    if pattern.as_deref() == Some("") {
+        *pattern = None;
+    }
+    if let Some(p) = pattern.as_deref() {
+        regex::Regex::new(p).map_err(|e| {
+            // regex errors quote the pattern, which is caller-supplied.
+            crate::utils::log::sanitize_log_message(&format!(
+                "session_check is not a valid regex: {e}"
+            ))
+            .into_owned()
+        })?;
+    }
+    *probe_url = probe_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string);
+    if let Some(u) = probe_url.as_deref() {
+        crate::cmd::scan::validate_http_url(u, "session_check_url")?;
+    }
+    Ok(())
+}
+
+/// Cap on [`Job::warnings`] entries; past it further warnings are dropped (the
+/// server/MCP log still records them).
+pub(crate) const MAX_JOB_WARNINGS: usize = 32;
+
+/// Append a warning to a job's list: sanitized (messages quote target- and
+/// server-derived bytes), deduplicated, and capped at [`MAX_JOB_WARNINGS`].
+pub(crate) fn push_job_warning(warnings: &mut Vec<String>, msg: &str) {
+    if warnings.len() >= MAX_JOB_WARNINGS {
+        return;
+    }
+    let msg = crate::utils::log::sanitize_log_message(msg).into_owned();
+    if !warnings.contains(&msg) {
+        warnings.push(msg);
+    }
+}
+
 /// Scan options borrowed from a REST body or an MCP tool call, for
 /// [`ScanOptionChecks::validate`] — the one bounds/normalization pass every
 /// agent-facing surface runs before queuing work. `None` / empty means
@@ -395,6 +524,10 @@ pub(crate) struct ScanOptionChecks<'a, F = f32> {
     pub proxy: Option<&'a mut Option<String>>,
     /// REST spells it `blind`, MCP `blind_callback_url`.
     pub blind: Option<(&'a mut Option<String>, &'static str)>,
+    pub blind_oob: Option<&'a mut Option<spec::BlindOobRequest>>,
+    pub blind_oob_wait: Option<u64>,
+    pub session_check: Option<&'a mut Option<String>>,
+    pub session_check_url: Option<&'a mut Option<String>>,
 }
 
 impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
@@ -486,6 +619,21 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
                 .transpose()?
                 .flatten();
         }
+        if let Some(b) = self.blind_oob {
+            normalize_blind_oob(b)?;
+        }
+        if let Some(w) = self.blind_oob_wait
+            && w > MAX_BLIND_OOB_WAIT_SECS
+        {
+            return Err(format!(
+                "blind_oob_wait must be between 0 and {} seconds (got {})",
+                MAX_BLIND_OOB_WAIT_SECS, w
+            ));
+        }
+        normalize_session_check(
+            self.session_check.unwrap_or(&mut None),
+            self.session_check_url.unwrap_or(&mut None),
+        )?;
         Ok(())
     }
 }
@@ -598,6 +746,11 @@ pub(crate) struct Job {
     pub progress: JobProgress,
     pub cancelled: Arc<AtomicBool>,
     pub error_message: Option<String>,
+    /// Non-fatal conditions the caller must see to read the result honestly
+    /// (blind_oob never armed, session monitoring inactive, params capped…).
+    /// A `done` scan with zero findings is only "clean" if this is empty.
+    /// Bounded and deduplicated by [`push_job_warning`].
+    pub warnings: Vec<String>,
     /// The original target URL submitted for scanning.
     pub target_url: String,
     /// Optional webhook URL to POST results to. REST-server only.
@@ -651,6 +804,7 @@ impl Job {
             progress: JobProgress::default(),
             cancelled: Arc::new(AtomicBool::new(false)),
             error_message: None,
+            warnings: Vec::new(),
             target_url,
             callback_url: None,
             queued_at_ms: now_ms(),

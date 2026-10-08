@@ -640,6 +640,10 @@ fn rest_and_mcp_requests_agree_on_scan_args() {
         remote_payloads: mcp_params.remote_payloads,
         remote_wordlists: mcp_params.remote_wordlists,
         max_payloads_per_param: mcp_params.max_payloads_per_param,
+        blind_oob: mcp_params.blind_oob.as_ref().and_then(|b| b.servers()),
+        blind_oob_wait: mcp_params.blind_oob_wait,
+        session_check: mcp_params.session_check,
+        session_check_url: mcp_params.session_check_url,
     }
     .into_scan_args();
 
@@ -687,6 +691,12 @@ fn rest_non_default_options_reach_scan_args() {
         remote_payloads: Some(vec!["portswigger".to_string()]),
         remote_wordlists: Some(vec!["burp".to_string()]),
         max_payloads_per_param: Some(11),
+        blind_oob: Some(crate::job::spec::BlindOobRequest::Servers(vec![
+            "oast.fun".to_string(),
+        ])),
+        blind_oob_wait: Some(12),
+        session_check: Some("Sign out".to_string()),
+        session_check_url: Some("https://app/me".to_string()),
         ..Default::default()
     };
 
@@ -736,6 +746,162 @@ fn rest_non_default_options_reach_scan_args() {
     assert_eq!(args.max_payloads_per_param, 11);
     assert!(args.include_request);
     assert!(args.include_response);
+    assert_eq!(args.oob.blind_oob, Some(vec!["oast.fun".to_string()]));
+    assert!(args.blind_oob_enabled());
+    assert_eq!(args.oob.blind_oob_wait, Some(12));
+    assert_eq!(args.session_check.as_deref(), Some("Sign out"));
+    assert_eq!(args.session_check_url.as_deref(), Some("https://app/me"));
+}
+
+#[test]
+fn normalize_blind_oob_validates_and_cleans_servers() {
+    use crate::job::spec::BlindOobRequest;
+    // A bare bool is passed through untouched.
+    let mut enabled = Some(BlindOobRequest::Enabled(true));
+    normalize_blind_oob(&mut enabled).unwrap();
+    assert_eq!(enabled, Some(BlindOobRequest::Enabled(true)));
+
+    // Blanks are dropped, good hosts kept (bare + scheme forms both valid).
+    let mut servers = Some(BlindOobRequest::Servers(vec![
+        "  oast.fun ".to_string(),
+        "".to_string(),
+        "https://oob.example.com".to_string(),
+    ]));
+    normalize_blind_oob(&mut servers).unwrap();
+    assert_eq!(
+        servers,
+        Some(BlindOobRequest::Servers(vec![
+            "oast.fun".to_string(),
+            "https://oob.example.com".to_string(),
+        ]))
+    );
+
+    // A comma-separated string (parity with the GET query form) canonicalizes
+    // to a validated server list.
+    let mut csv = Some(BlindOobRequest::Csv(" oast.fun , oast.me ".to_string()));
+    normalize_blind_oob(&mut csv).unwrap();
+    assert_eq!(
+        csv,
+        Some(BlindOobRequest::Servers(vec![
+            "oast.fun".to_string(),
+            "oast.me".to_string(),
+        ]))
+    );
+    // A blank CSV string is "off", not the mesh.
+    let mut blank = Some(BlindOobRequest::Csv("  , ".to_string()));
+    normalize_blind_oob(&mut blank).unwrap();
+    assert_eq!(blank, Some(BlindOobRequest::Enabled(false)));
+
+    // A host-allowlist bypass (parsed, not pattern-matched), a junk value, and
+    // a single-label boolean typo (`ture`) are all refused, naming the field.
+    for bad in [
+        "oast.pro:0443:x",
+        "ht!tp://x",
+        "http://",
+        "not a host",
+        "ture",
+        "localhost",
+    ] {
+        let mut r = Some(BlindOobRequest::Servers(vec![bad.to_string()]));
+        let err = normalize_blind_oob(&mut r).expect_err(&format!("{bad} must be rejected"));
+        assert!(err.contains("blind_oob"), "field must be named: {err}");
+    }
+    // An IP literal and host:port are valid even without a dotted-name FQDN.
+    for ok in ["127.0.0.1:8080", "https://[::1]:9000"] {
+        let mut r = Some(BlindOobRequest::Servers(vec![ok.to_string()]));
+        normalize_blind_oob(&mut r).unwrap_or_else(|e| panic!("{ok} must pass: {e}"));
+    }
+
+    // Too many servers is a typo guard, not a feature.
+    let mut many = Some(BlindOobRequest::Servers(
+        (0..MAX_BLIND_OOB_SERVERS + 1)
+            .map(|i| format!("oob{i}.example.com"))
+            .collect(),
+    ));
+    assert!(normalize_blind_oob(&mut many).is_err());
+}
+
+#[test]
+fn normalize_session_check_blanks_are_unset_and_bad_inputs_rejected() {
+    // A templated `?session_check=` (empty string) is "unset".
+    let (mut p, mut u) = (Some("".to_string()), Some("".to_string()));
+    normalize_session_check(&mut p, &mut u).unwrap();
+    assert_eq!(p, None);
+    assert_eq!(u, None);
+    // Whitespace-only is a real regex, compiled like the CLI — kept, not dropped.
+    let (mut p, mut u) = (Some("  ".to_string()), None);
+    normalize_session_check(&mut p, &mut u).unwrap();
+    assert_eq!(p.as_deref(), Some("  "));
+
+    // A good pair survives, trimmed.
+    let (mut p, mut u) = (
+        Some("Sign out".to_string()),
+        Some(" https://app/me ".to_string()),
+    );
+    normalize_session_check(&mut p, &mut u).unwrap();
+    assert_eq!(p.as_deref(), Some("Sign out"));
+    assert_eq!(u.as_deref(), Some("https://app/me"));
+
+    // A bad regex fails up front (and its CRLF cannot forge a log line).
+    let (mut p, mut u) = (Some("(".to_string()), None);
+    let err = normalize_session_check(&mut p, &mut u).unwrap_err();
+    assert!(err.contains("session_check") && !err.contains('\n'));
+
+    // A non-http probe URL is refused.
+    let (mut p, mut u) = (None, Some("ftp://app/me".to_string()));
+    assert!(normalize_session_check(&mut p, &mut u).is_err());
+}
+
+/// The real MCP mapping of the new OOB/session fields, exercised from a
+/// deserialized `ScanWithDalfoxParams` with non-default values (not the
+/// all-`None` defaults the parity test uses): `blind_oob` as a JSON list,
+/// `session_check*` set, validated then mapped into `ScanArgs` exactly as the
+/// `scan_with_dalfox` handler does.
+#[test]
+fn mcp_oob_and_session_fields_reach_scan_args() {
+    use crate::job::spec::BlindOobRequest;
+    let mut p: crate::mcp::ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "target": "http://example.com/?q=1",
+        "blind_oob": ["oast.fun", "oast.me"],
+        "blind_oob_wait": 12,
+        "session_check": "Sign out",
+        "session_check_url": "https://app/me",
+    }))
+    .expect("MCP params with OOB/session fields deserialize");
+
+    // The shared validation canonicalizes/validates in place, as the handler runs it.
+    normalize_blind_oob(&mut p.blind_oob).expect("servers valid");
+    normalize_session_check(&mut p.session_check, &mut p.session_check_url).expect("session valid");
+
+    let args = ScanRequestSpec {
+        target: p.target.clone(),
+        blind_oob: p.blind_oob.as_ref().and_then(BlindOobRequest::servers),
+        blind_oob_wait: p.blind_oob_wait,
+        session_check: p.session_check.clone(),
+        session_check_url: p.session_check_url.clone(),
+        ..Default::default()
+    }
+    .into_scan_args();
+
+    assert!(args.blind_oob_enabled());
+    assert_eq!(
+        args.oob.blind_oob,
+        Some(vec!["oast.fun".to_string(), "oast.me".to_string()])
+    );
+    assert_eq!(args.oob.blind_oob_wait, Some(12));
+    assert_eq!(args.session_check.as_deref(), Some("Sign out"));
+    assert_eq!(args.session_check_url.as_deref(), Some("https://app/me"));
+
+    // A JSON boolean `true` maps to the public mesh (empty server list).
+    let b: crate::mcp::ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "target": "http://example.com/?q=1",
+        "blind_oob": true,
+    }))
+    .expect("bool blind_oob deserializes");
+    assert_eq!(
+        b.blind_oob.as_ref().and_then(BlindOobRequest::servers),
+        Some(Vec::new())
+    );
 }
 
 #[test]
@@ -1111,6 +1277,7 @@ fn async_jobs_cap_findings_and_say_so() {
         worker_panics: 0,
         session_lost: None,
         findings_capped: true,
+        warnings: Vec::new(),
     };
     let mut job = Job::new_queued("http://t/".into());
     assert_eq!(
@@ -1162,6 +1329,14 @@ fn preflight_accepts_a_documented_subset_of_the_scan_options() {
         // No payloads means no blind injection and no WAF interaction.
         "blind",
         "blind_callback_url",
+        // Blind OOB arms a payload channel and polls for callbacks — there is
+        // nothing to call back when preflight sends no payloads.
+        "blind_oob",
+        "blind_oob_wait",
+        // Session-loss detection watches a running scan's auth; preflight sends
+        // no scan traffic a session could expire during.
+        "session_check",
+        "session_check_url",
         "waf_bypass",
         "skip_waf_probe",
         "force_waf",
@@ -1295,6 +1470,180 @@ async fn execute_scan_derives_waf_csp_tech_and_outdated_libs_like_the_cli() {
     );
 }
 
+/// Session-loss parity with the CLI (#1273): a server/MCP job whose
+/// `--session-check` marker vanishes mid-scan must surface `SESSION_LOST`, not
+/// settle `done` with zero findings. The marker is present on the preflight
+/// baseline GET and absent on the post-scan probe, so `execute_scan` must
+/// report the loss and `settle` must stamp `Error` with a `SESSION_LOST:`
+/// error_message.
+#[tokio::test]
+async fn execute_scan_surfaces_session_loss_like_the_cli() {
+    use axum::{Router, routing::get};
+    use std::sync::atomic::AtomicUsize;
+
+    // First GET (preflight baseline) shows the logged-in marker; every GET
+    // after it (the post-scan session probe) shows a login page instead. HEAD
+    // (the reachability probe) never touches the GET counter.
+    let gets = Arc::new(AtomicUsize::new(0));
+    let gets_h = gets.clone();
+    let app = Router::new().route(
+        "/",
+        get(move || {
+            let gets = gets_h.clone();
+            async move {
+                if gets.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+                    "<html><body>Welcome LOGGED_IN</body></html>"
+                } else {
+                    "<html><body>Please sign in</body></html>"
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        session_check: Some("LOGGED_IN".to_string()),
+        silence: true,
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(
+        run.lost_session(),
+        "a disappearing session marker must be detected as a lost session"
+    );
+
+    let mut job = Job::new_queued(format!("http://{addr}/"));
+    job.status = JobStatus::Running;
+    let status = run.settle(&mut job, Arc::new(Vec::new()), 0, false);
+    assert_eq!(
+        status,
+        JobStatus::Error,
+        "a lost session is not a clean done"
+    );
+    assert!(
+        job.error_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with(crate::cmd::error_codes::SESSION_LOST)),
+        "the error_message must carry the SESSION_LOST code: {:?}",
+        job.error_message
+    );
+}
+
+/// The silent-clean guard for the two new soft failures: an OOB server that
+/// refuses registration and a `session_check_url` whose baseline cannot be
+/// captured must each leave a warning on the job record (not only in the
+/// operator log), and the REST result payload must expose them — while a job
+/// with no warnings carries no `warnings` key at all.
+#[tokio::test]
+async fn soft_failures_surface_as_job_warnings() {
+    use axum::{Router, routing::get};
+
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, Router::new().route("/", get(|| async { "ok" }))).await;
+    });
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        timeout: 2,
+        // Nothing listens on port 1: registration and the baseline probe fail.
+        session_check_url: Some("http://127.0.0.1:1/me".to_string()),
+        oob: crate::cmd::scan::BlindOobArgs {
+            blind_oob: Some(vec!["http://127.0.0.1:1".to_string()]),
+            blind_oob_secret: None,
+            blind_oob_wait: Some(0),
+        },
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+
+    let mut job = Job::new_queued(format!("http://{addr}/"));
+    job.status = JobStatus::Running;
+    run.settle(&mut job, Arc::new(Vec::new()), 0, false);
+    assert!(
+        job.warnings
+            .iter()
+            .any(|w| w.contains("blind_oob disabled")),
+        "OOB registration failure must be on the job: {:?}",
+        job.warnings
+    );
+    assert!(
+        job.warnings
+            .iter()
+            .any(|w| w.contains("session-loss monitoring is INACTIVE")),
+        "an unusable session baseline must be on the job: {:?}",
+        job.warnings
+    );
+
+    let payload = |j: &Job| {
+        serde_json::to_value(crate::server::types::ResultPayload {
+            target: j.target_url.clone(),
+            status: j.status.clone(),
+            results: None,
+            error_message: None,
+            warnings: &j.warnings,
+            progress: None,
+            queued_at_ms: 0,
+            started_at_ms: None,
+            finished_at_ms: None,
+            duration_ms: None,
+        })
+        .expect("serialize")
+    };
+    assert!(
+        payload(&job)["warnings"]
+            .as_array()
+            .is_some_and(|a| a.len() >= 2)
+    );
+    let clean = Job::new_queued("http://t/".into());
+    assert!(payload(&clean).get("warnings").is_none());
+}
+
+#[test]
+fn push_job_warning_dedups_caps_and_sanitizes() {
+    let mut w = Vec::new();
+    push_job_warning(&mut w, "same");
+    push_job_warning(&mut w, "same");
+    assert_eq!(w.len(), 1, "identical messages are deduplicated");
+    push_job_warning(&mut w, "x\r\n[ERR] forged");
+    assert!(
+        !w[1].contains('\n') && !w[1].contains('\r'),
+        "sanitized: {:?}",
+        w[1]
+    );
+    for i in 0..100 {
+        push_job_warning(&mut w, &format!("w{i}"));
+    }
+    assert_eq!(w.len(), MAX_JOB_WARNINGS, "bounded");
+}
+
 /// `force_waf` needs no fingerprint at all; `waf_bypass=off` keeps detection
 /// but must not arm the bypass state.
 #[tokio::test]
@@ -1406,6 +1755,7 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         worker_panics: 0,
         session_lost: None,
         findings_capped: false,
+        warnings: Vec::new(),
     };
     let note = "scan exceeded scan_timeout (5s); returning partial results";
     for (prior, append, want) in [
