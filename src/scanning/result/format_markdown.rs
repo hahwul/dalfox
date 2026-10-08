@@ -36,6 +36,11 @@ fn md_cell(value: &str) -> String {
 /// inline code spans.
 fn md_code_cell(value: &str) -> String {
     let body = crate::utils::term::sanitize_display(value).replace('|', "\\|");
+    // An empty span renders as a literal pair of backticks; page-level AST and
+    // uncorrelated OOB findings have no parameter.
+    if body.is_empty() {
+        return "-".to_string();
+    }
     let fence = "`".repeat(longest_backtick_run(&body) + 1);
     // A body edge that is a space or a backtick needs one space of padding:
     // a backtick there would merge with the fence into a longer run and leave
@@ -240,7 +245,19 @@ impl Result {
         out.push_str("## Summary\n\n");
         let _ = writeln!(out, "- **Total Findings**: {}", results.len());
         let _ = writeln!(out, "- **Vulnerabilities (V)**: {}", v_count);
-        let _ = write!(out, "- **Reflections (R)**: {}\n\n", r_count); // double newline intentional
+        let _ = writeln!(out, "- **Reflections (R)**: {}", r_count);
+        // A and I only when present, so Total is the sum of the listed counts
+        // without adding two always-zero lines to a typical report.
+        for (tier, label) in [
+            (FindingType::AstDetected, "AST-detected (A)"),
+            (FindingType::Informational, "Informational (I)"),
+        ] {
+            let n = results.iter().filter(|r| r.result_type == tier).count();
+            if n > 0 {
+                let _ = writeln!(out, "- **{label}**: {n}");
+            }
+        }
+        out.push('\n');
 
         // Add findings table
         if !results.is_empty() {
@@ -251,10 +268,11 @@ impl Result {
                     out,
                     "### {}. {} - {} ({})\n\n", // double newline intentional
                     idx + 1,
-                    if result.result_type == FindingType::Verified {
-                        "Vulnerability"
-                    } else {
-                        "Reflection"
+                    match result.result_type {
+                        FindingType::Verified => "Vulnerability",
+                        FindingType::AstDetected => "AST-detected",
+                        FindingType::Reflected => "Reflection",
+                        FindingType::Informational => "Informational",
                     },
                     md_code_cell(&result.param),
                     md_cell(&result.inject_type)

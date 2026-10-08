@@ -962,6 +962,40 @@ fn markdown_finding_includes_type_description() {
 }
 
 #[test]
+fn markdown_labels_ast_and_informational_findings_and_counts_them() {
+    let make = |tier: FindingType, param: &str| {
+        Result::builder(tier)
+            .inject_type("DOM-XSS")
+            .method("GET")
+            .data("https://example.com/")
+            .param(param)
+            .payload("")
+            .cwe("CWE-79")
+            .severity("Low")
+            .message_id(0)
+            .message_str("m")
+            .build()
+    };
+    let md = Result::results_to_markdown(
+        &[
+            make(FindingType::AstDetected, "location.hash"),
+            make(FindingType::Informational, ""),
+        ],
+        false,
+        false,
+    );
+    assert!(md.contains("### 1. AST-detected - `location.hash`"), "{md}");
+    assert!(md.contains("### 2. Informational - -"), "{md}");
+    assert!(
+        !md.contains("Reflection -"),
+        "A/I must not read as R:\n{md}"
+    );
+    assert!(md.contains("**AST-detected (A)**: 1"), "{md}");
+    assert!(md.contains("**Informational (I)**: 1"), "{md}");
+    assert!(!md.contains("``"), "no empty code span:\n{md}");
+}
+
+#[test]
 fn sarif_finding_includes_type_description() {
     let result = Result::builder(FindingType::Verified)
         .inject_type("inHTML")

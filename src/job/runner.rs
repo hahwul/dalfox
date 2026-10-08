@@ -111,12 +111,15 @@ impl ScanRun {
         include_request: bool,
         include_response: bool,
     ) -> Arc<Vec<SanitizedResult>> {
-        let locked = self.results.lock().await;
+        // The same AST fold the CLI report applies: one DOM sink is found by
+        // the preflight pass and again once per parameter, and without it the
+        // job lists (and counts, and caps) the same sink several times.
+        let deduped = crate::cmd::scan::dedupe_ast_results(self.results.lock().await.clone());
         progress
             .findings_so_far
-            .store(locked.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            .store(deduped.len() as u64, std::sync::atomic::Ordering::Relaxed);
         Arc::new(
-            locked
+            deduped
                 .iter()
                 .map(|r| r.to_sanitized(include_request, include_response))
                 .collect(),

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     Router,
@@ -321,6 +322,7 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
     // serve-error log, so the future can't take it by reference (it outlives
     // this point) or by move.
     let shutdown_state = state.clone();
+    let (signalled_tx, signalled_rx) = tokio::sync::oneshot::channel::<()>();
     let shutdown_signal = async move {
         #[cfg(unix)]
         {
@@ -341,16 +343,62 @@ pub async fn run_server(args: ServerArgs) -> Result<(), String> {
             "SERVER",
             "shutdown signal received — draining in-flight requests",
         );
+        let _ = signalled_tx.send(());
     };
-    if let Err(e) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal)
-        .await
+    let serve = std::future::IntoFuture::into_future(
+        axum::serve(listener, app).with_graceful_shutdown(shutdown_signal),
+    );
+    match serve_with_drain_deadline(
+        serve,
+        signalled_rx,
+        Duration::from_secs(SHUTDOWN_DRAIN_GRACE_SECS),
+    )
+    .await
     {
-        let msg = format!("server error: {}", e);
-        log(&state, "ERR", &msg);
-        return Err(msg);
+        Some(Err(e)) => {
+            let msg = format!("server error: {}", e);
+            log(&state, "ERR", &msg);
+            return Err(msg);
+        }
+        Some(Ok(())) => {}
+        None => log(
+            &state,
+            "SERVER",
+            "drain grace elapsed — exiting with requests still in flight",
+        ),
     }
     Ok(())
+}
+
+/// How long graceful shutdown waits for in-flight requests after the signal.
+/// axum's drain waits for every open request, and `/preflight` can hold one for
+/// minutes against a stalling target — without a deadline `run_server` never
+/// returns, `exit_daemon` is never reached, and the signal handlers (consumed
+/// by the first signal) swallow every later Ctrl-C.
+const SHUTDOWN_DRAIN_GRACE_SECS: u64 = 10;
+
+/// Drive `serve` to completion, but once `signalled` fires give it at most
+/// `grace` to finish draining. `None` means the grace ran out first.
+async fn serve_with_drain_deadline<F, T>(
+    serve: F,
+    signalled: tokio::sync::oneshot::Receiver<()>,
+    grace: Duration,
+) -> Option<T>
+where
+    F: std::future::Future<Output = T>,
+{
+    tokio::select! {
+        out = serve => Some(out),
+        _ = async {
+            // A dropped sender means the signal future was torn down without
+            // firing; never start the clock for that.
+            if signalled.await.is_ok() {
+                tokio::time::sleep(grace).await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        } => None,
+    }
 }
 
 #[cfg(test)]

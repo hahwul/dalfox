@@ -333,6 +333,7 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
                 None,
             ));
         }
+        crate::job::check_target_parses(&target).map_err(|e| ErrorData::invalid_params(e, None))?;
 
         // Same shared bounds/normalization pass the REST server runs.
         crate::job::ScanOptionChecks {

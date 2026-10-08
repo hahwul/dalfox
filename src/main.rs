@@ -325,10 +325,25 @@ async fn main() {
     // like an unclosed brace in `my-scan.toml` and leaves the operator
     // wondering why their `silence = true` / `format = "jsonl"` /
     // `encoders = […]` settings had no effect. Implicit default-path
-    // loading still stays quiet because most users never create that
-    // file and a missing-or-malformed default isn't actionable.
+    // loading is covered separately below, and only for a file that exists.
     if let (Some(cfg_path), Err(e)) = (&cli.config, &config_load) {
         eprintln!("Warning: failed to load --config {}: {}", cfg_path, e);
+    }
+    // The implicit default-path file gets the same visibility when it exists
+    // and is unreadable or malformed: one wrong-typed value drops the whole
+    // file, so `silence` / `format` / `proxy` / `headers` all silently revert
+    // and the run looks normal. A missing HOME or an uncreatable config dir
+    // (containers, CI) stays quiet — that is environment, not an edited file.
+    // The detail is value-free by construction (`config::parse_config`).
+    if cli.config.is_none()
+        && let Err(e) = &config_load
+        && let Some(fe) = e.downcast_ref::<config::ConfigFileError>()
+    {
+        eprintln!(
+            "Warning: failed to load config {}: {} — ran with built-in defaults",
+            fe.path.display(),
+            fe.detail
+        );
     }
 
     // A missing explicit `--config <path>` is scaffolded with a default template
