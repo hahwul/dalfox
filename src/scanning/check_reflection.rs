@@ -425,21 +425,30 @@ fn url_valued_attr_name_before_eq(bytes: &[u8], eq: usize) -> bool {
     })
 }
 
+/// Longest attribute name [`attr_name_before_eq`] reads; every name any rule
+/// here matches against is far shorter.
+const MAX_ATTR_NAME_LEN: usize = 64;
+
 /// The attribute name immediately left of the `=` at `eq` (whitespace skipped),
-/// or `None` when there is no name there. The single backwalk every
-/// attribute-name rule in this module reads through.
+/// or `None` when there is no name there (or it is over-long). The single
+/// backwalk every attribute-name rule in this module reads through.
 fn attr_name_before_eq(bytes: &[u8], eq: usize) -> Option<&[u8]> {
     // Skip whitespace between `=` and the attribute name.
     let mut name_end = eq;
     while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
         name_end -= 1;
     }
-    // Read the attribute name backwards.
+    // Read the attribute name backwards. Bounded: no real attribute name is
+    // this long, and a long non-space run before an `=` that many occurrences
+    // share would otherwise be re-walked once per occurrence.
     let mut name_start = name_end;
     while name_start > 0 {
         let b = bytes[name_start - 1];
         if b.is_ascii_whitespace() || b == b'<' || b == b'/' || b == b'"' || b == b'\'' {
             break;
+        }
+        if name_end - name_start >= MAX_ATTR_NAME_LEN {
+            return None;
         }
         name_start -= 1;
     }
@@ -679,7 +688,12 @@ fn occurrence_inside_url_attr_value(bytes: &[u8], at: usize) -> bool {
         return false;
     }
     let mut i = at;
-    while i > 0 {
+    // Same floor as the sibling backwalks: without it every occurrence inside
+    // one long quoted value walks back to the opening quote (occurrences x
+    // value length). Past the floor the answer is unknown, and `false` is the
+    // keep-the-finding polarity for the only caller (`escapes` = `!inside`).
+    let floor = at.saturating_sub(MAX_ATTR_BACKWALK);
+    while i > floor {
         i -= 1;
         match bytes[i] {
             b'"' | b'\'' => {
@@ -1196,6 +1210,38 @@ fn payload_is_fully_fullwidth_encoded(payload: &str) -> bool {
     payload
         .chars()
         .any(|c| (0xFF01..=0xFF5E).contains(&(c as u32)))
+}
+
+/// True for a payload that is the output of the opt-in `base64` / `zwsp`
+/// encoders and carries no raw structural HTML character: a bare base64 token
+/// (one that decodes to printable text with markup/call syntax in it), or text
+/// holding a U+200B. Echoed verbatim these are inert in every context — no
+/// parser base64-decodes a token or ignores a ZWSP inside a scheme — so, like
+/// the fullwidth case above, a verbatim echo must not surface as [R]. The
+/// shape check is deliberately narrow (the decode must look like an attack
+/// string) so ordinary alphanumeric probe markers are never caught.
+fn payload_is_inert_encoder_output(payload: &str) -> bool {
+    if payload.contains(['<', '>', '"', '\'']) {
+        return false;
+    }
+    if payload.contains('\u{200B}') {
+        return true;
+    }
+    use base64::Engine;
+    if payload.len() < 8
+        || !payload
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+    {
+        return false;
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .is_some_and(|text| {
+            text.chars().all(|c| !c.is_control()) && text.contains(['<', '>', '"', '\'', '(', ':'])
+        })
 }
 
 /// True when the payload carries no raw structural HTML characters
@@ -1827,6 +1873,11 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
         if payload_is_fully_fullwidth_encoded(payload) {
             return None;
         }
+        // `base64` / `zwsp` encoder output echoed verbatim: inert too, and the
+        // scheme-aware gates key on the plain payload, so they never fire.
+        if payload_is_inert_encoder_output(payload) {
+            return None;
+        }
         return Some(ReflectionKind::Raw);
     }
 
@@ -2443,7 +2494,7 @@ pub(crate) async fn capture_sxss_baseline(
         crate::record_outbound_request().await;
         match request.send().await {
             Ok(resp) => {
-                if let Ok(text) = crate::utils::http::read_body(resp).await {
+                if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
                     bodies.push(text);
                 }
             }
@@ -2518,7 +2569,7 @@ pub(crate) async fn sxss_store_probe(
         // inline fallback in the reflection path — otherwise a reflecting-but-
         // not-separately-stored sink would be judged non-storing and skipped.
         if let Ok(resp) = inject_resp
-            && let Ok(text) = crate::utils::http::read_body(resp).await
+            && let Ok(text) = crate::utils::http::read_body_counted(resp).await
             && classify_reflection(&text, marker).is_some()
             && sxss_injection_credited(&text, marker)
         {
@@ -2546,7 +2597,7 @@ pub(crate) async fn sxss_store_probe(
                     continue;
                 }
                 if let Ok(resp) = sent
-                    && let Ok(text) = crate::utils::http::read_body(resp).await
+                    && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                     && classify_reflection(&text, marker).is_some()
                     && sxss_injection_credited(&text, marker)
                 {
@@ -2653,7 +2704,7 @@ async fn fetch_injection_response(
                 .unwrap_or("")
                 .to_string();
             let is_js_content_type = crate::utils::is_javascript_content_type(&content_type);
-            let text = crate::utils::http::read_body(resp).await.ok()?;
+            let text = crate::utils::http::read_body_counted(resp).await.ok()?;
             if text.is_empty() || !response_body_supports_xss(&content_type, &text) {
                 return None;
             }
@@ -2847,7 +2898,7 @@ async fn fetch_injection_response(
                     xml_content_type: false,
                 };
             }
-            match crate::utils::http::read_body(resp).await {
+            match crate::utils::http::read_body_counted(resp).await {
                 Ok(body) => {
                     if !response_body_supports_xss(&content_type, &body) {
                         return FetchedInjection {
@@ -3016,7 +3067,7 @@ pub async fn check_reflection_with_hpp_url(
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        if let Ok(text) = crate::utils::http::read_body(resp).await {
+        if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
             if !hpp_response_has_executable_reflection(payload, &content_type, &text) {
                 return (None, None);
             }

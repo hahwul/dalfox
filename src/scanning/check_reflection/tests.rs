@@ -1589,6 +1589,44 @@ async fn test_path_reflection_suppressed_on_non_html_content_type() {
     );
 }
 
+/// A response whose body dies after the headers arrived is a payload that was
+/// sent but never tested; it must show up in `failed_requests` instead of
+/// reading as "no reflection" on a clean scan.
+#[tokio::test]
+async fn test_mid_body_failure_counts_as_failed_request() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let mut scratch = [0u8; 2048];
+            let _ = sock.read(&mut scratch).await;
+            let _ = sock
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 100000\r\nConnection: close\r\n\r\n<html><body>partial",
+                )
+                .await;
+            let _ = sock.flush().await;
+        }
+    });
+
+    let target = parse_target(&format!("http://{}/?q=a", addr)).expect("target");
+    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let c = counter.clone();
+    let (kind, body) = crate::REQUEST_FAILURE_COUNT_JOB
+        .scope(counter, async {
+            reflect(&target, &make_param(), "<xss>", &default_scan_args()).await
+        })
+        .await;
+    assert_eq!((kind, body), (None, None));
+    assert!(
+        c.load(std::sync::atomic::Ordering::Relaxed) >= 1,
+        "a body that fails mid-read must be counted as a failed request"
+    );
+}
+
 // ---- adaptive WAF cooldown policy (waf_block_cooldown_ms) ----
 
 #[test]
@@ -2190,6 +2228,84 @@ fn test_occurrence_inside_url_attr_value_handles_query_string() {
     let h3 = "<p>zzmarker</p>";
     let pos3 = h3.find("zzmarker").unwrap();
     assert!(!occurrence_inside_url_attr_value(h3.as_bytes(), pos3));
+}
+
+/// One long quoted URL value holding many echoes made every occurrence walk
+/// back to the opening quote (occurrences x value length). The walk is floored
+/// like its siblings; past the floor the finding is kept, never suppressed.
+#[test]
+fn test_url_value_backwalk_is_bounded_and_keeps_the_finding() {
+    let payload = "x onmouseover=alert(1) y";
+    let filler = "A".repeat(MAX_ATTR_BACKWALK + 1024);
+    let mut html = String::from("<a href=\"/");
+    for _ in 0..500 {
+        html.push_str(&filler);
+        html.push_str(payload);
+    }
+    html.push_str("\">x</a>");
+
+    let start = std::time::Instant::now();
+    assert!(
+        !is_in_safe_context_decoded(&html, payload),
+        "an echo the walk cannot place must keep the finding"
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(2),
+        "backwalk took {:?}",
+        start.elapsed()
+    );
+
+    // Within the floor the verdict is unchanged: trapped in the href value.
+    let short = format!("<a href=\"/{payload}\">x</a>");
+    let pos = short.find(payload).unwrap();
+    assert!(occurrence_inside_url_attr_value(short.as_bytes(), pos));
+}
+
+/// `-e base64` / `-e zwsp` output echoed verbatim by a page that escapes its
+/// output is inert; it must not surface as [R]. Probe markers and plain
+/// alphanumeric tokens still classify, and a ZWSP payload that carries a raw
+/// structural character is left to the existing gates.
+#[test]
+fn test_classify_reflection_demotes_inert_base64_and_zwsp_echo() {
+    use crate::encoding::{base64_encode, zero_width_encode};
+    let b64 = base64_encode("javascript:alert(1)");
+    let zw = zero_width_encode("data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==");
+    assert!(zw.contains('\u{200B}'));
+    for payload in [b64.as_str(), zw.as_str()] {
+        let html = format!("<input value=\"{payload}\">");
+        assert_eq!(classify_reflection(&html, payload), None, "{payload:?}");
+    }
+
+    for marker in [
+        NUMERIC_PROBE_MARKER,
+        crate::scanning::markers::bracketed_marker(),
+        "abcdefgh12345678",
+    ] {
+        let html = format!("<p>{marker}</p>");
+        assert_eq!(
+            classify_reflection(&html, marker),
+            Some(ReflectionKind::Raw),
+            "{marker}"
+        );
+    }
+
+    let structural = zero_width_encode("<svg/onload=alert(1)>");
+    let html = format!("<p>{structural}</p>");
+    assert_eq!(
+        classify_reflection(&html, &structural),
+        Some(ReflectionKind::Raw)
+    );
+}
+
+#[test]
+fn test_attr_name_before_eq_is_bounded() {
+    assert_eq!(
+        attr_name_before_eq(b"<a href=", 7),
+        Some(b"href".as_slice())
+    );
+    let mut long = vec![b'A'; MAX_ATTR_NAME_LEN + 10];
+    long.push(b'=');
+    assert_eq!(attr_name_before_eq(&long, long.len() - 1), None);
 }
 
 // ---------------------------------------------------------------------------

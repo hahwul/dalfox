@@ -1225,7 +1225,7 @@ async fn verify_sxss_dom(
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
-                if let Ok(text) = crate::utils::http::read_body(resp).await {
+                if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
                     saw_any_body = true;
                     if crate::scanning::check_reflection::classify_reflection(&text, payload)
                         .is_some()
@@ -1351,7 +1351,7 @@ async fn verify_normal_dom(
     // `reflected` is computed independently of the browser-parser check so an
     // inert echo (payload present, but not executable) can still feed the
     // DOM-phase early-exit signal.
-    if let Ok(text) = crate::utils::http::read_body(resp).await {
+    if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
         // The signal the DOM-phase inert-echo early exit budgets against.
         //
         // Byte-exact reflection is one half. The other half is the *escaped

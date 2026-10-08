@@ -590,3 +590,31 @@ fn test_analyze_csp_from_single_policy_unchanged() {
     assert!(r.report_only);
     assert!(!r.require_trusted_types_for);
 }
+
+/// A hostile page can carry a huge `<meta>` policy list; merging it must stay
+/// linear (distinct policies, capped) and still union the hosts, deduplicated.
+#[test]
+fn test_analyze_csp_from_many_policies_is_bounded() {
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "script-src a.example.com, script-src a.example.com, script-src b.example.com",
+    );
+    assert_eq!(
+        a.whitelisted_domains,
+        vec!["a.example.com".to_string(), "b.example.com".to_string()]
+    );
+
+    let list = (0..40_000)
+        .map(|i| format!("script-src h{i}.example.com 'nonce-n{i}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let start = std::time::Instant::now();
+    let a = analyze_csp_from("Content-Security-Policy", &list);
+    assert!(a.whitelisted_domains.len() <= MAX_CSP_POLICIES);
+    assert!(a.nonce_values.len() <= MAX_CSP_POLICIES);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "took {:?}",
+        start.elapsed()
+    );
+}

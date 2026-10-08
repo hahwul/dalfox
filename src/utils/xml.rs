@@ -74,13 +74,20 @@ impl RecoveredSourceIndex {
         while let Some(rel) = source[from..].find("</") {
             let name_start = from + rel + 2;
             let window_end = (name_start + Self::MAX_CLOSE_NAME + 1).min(bytes.len());
-            if let Some(gt) = bytes[name_start..window_end]
-                .iter()
-                .position(|&b| b == b'>')
-            {
-                index
-                    .closed
-                    .insert(source[name_start..name_start + gt].to_string());
+            // Record only a real `</name>` / `</name  >` closer: the name
+            // token, never the raw slice up to the next `>`. Storing the
+            // slice made memory ~ (`</` count x distance to `>`) on a
+            // `</</</…` body instead of O(body).
+            let mut tok_end = name_start;
+            while tok_end < window_end && is_name_char(bytes[tok_end]) {
+                tok_end += 1;
+            }
+            let mut end = tok_end;
+            while end < window_end && bytes[end].is_ascii_whitespace() {
+                end += 1;
+            }
+            if tok_end > name_start && end < window_end && bytes[end] == b'>' {
+                index.closed.insert(source[name_start..tok_end].to_string());
             }
             from = name_start;
         }
@@ -798,5 +805,19 @@ mod tests {
         assert!(!index.closed.contains("a"));
         assert!(index.declared_prefixes.contains("svg"));
         assert!(!index.declared_prefixes.contains("sv"));
+        assert!(RecoveredSourceIndex::build("</b >").closed.contains("b"));
+    }
+
+    #[test]
+    fn recovered_index_stores_name_tokens_not_raw_slices() {
+        let mut source = String::new();
+        for id in 0..200 {
+            source.push_str(&"</".repeat(400));
+            source.push_str(&format!("n{id}>"));
+        }
+        let index = RecoveredSourceIndex::build(&source);
+        assert!(index.closed.contains("n7"));
+        assert_eq!(index.closed.len(), 200);
+        assert!(index.closed.iter().all(|name| name.len() <= 8));
     }
 }
