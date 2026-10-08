@@ -145,7 +145,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 
 세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)에 `"error_code": "SESSION_LOST"`, 그리고 감지된 신호가 `"error_message"`에 담겨 보고됩니다. 절대 `"clean"`으로는 표시되지 않습니다. Ctrl-C, `--limit`, `--scan-timeout`으로 도중에 끊긴(또는 실행이 그 전에 멈춰 도달하지 못한) 대상도 탐지 결과가 없으면 `error_code` 없이 `"incomplete"`로 표시됩니다.
 
-**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복으로 실려, GitHub 코드 스캐닝을 비롯한 소비 도구가 컨텍스트를 잃지 않습니다. 각 결과의 `ruleId`는 `dalfox/cwe-<n>`(XSS는 `dalfox/cwe-79`, 오래된 라이브러리는 `dalfox/cwe-1104`)이고, `level`은 `severity`를 따르되(High → `error`, Medium → `warning`, Low / Info → `note`) `low` 등급 탐지 결과는 한 단계 낮아지며(`error` → `warning` → `note`), PoC URL은 location의 `uri`에 들어갑니다. `partialFingerprints["vulnIdentity/v1"]`은 코드 스캐닝이 실행 간에 같은 건을 맞춰 볼 수 있게 하는 안정적인 해시이며, `confidence`를 보지 않으므로 등급이 바뀌어도 식별자는 그대로입니다. 탐지 결과 필드(`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence` 등)는 결과의 `properties` 아래에 있고, `message.text`에는 `message_str`과 근거가 함께 담깁니다.
+**SARIF**에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 아래에 중복으로 실려, GitHub 코드 스캐닝을 비롯한 소비 도구가 컨텍스트를 잃지 않습니다. 각 결과의 `ruleId`는 `dalfox/cwe-<n>`(XSS는 `dalfox/cwe-79`, 오래된 라이브러리는 `dalfox/cwe-1104`)이고, `level`은 `severity`를 따르되(High → `error`, Medium → `warning`, Low / Info → `note`), PoC URL은 location의 `uri`에 들어갑니다. `partialFingerprints["vulnIdentity/v1"]`은 코드 스캐닝이 실행 간에 같은 건을 맞춰 볼 수 있게 하는 안정적인 해시입니다. 탐지 결과 필드(`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence` 등)는 결과의 `properties` 아래에 있고, `message.text`에는 `message_str`과 근거가 함께 담깁니다.
 
 **TOML**에서는 최상위 `[meta]` 테이블로 나타납니다(탐지 결과는 `[[results]]` 아래).
 
@@ -211,9 +211,11 @@ dalfox scan https://target.app --min-confidence high
 
 `--min-confidence high`는 티어가 아니라 `confidence` 등급으로 거르며, 가장 먼저
 적용됩니다. 모든 포맷의 출력, `--stream-findings`, `target_summary` 개수,
-`--baseline`, `--limit` 표시 개수, 종료 코드가 걸러진 집합을 봅니다. `I`는 등급이
-없으므로 유지됩니다. 기본값 `low`는 모두 유지합니다. `--limit`의 스캔 중 조기
-종료는 여전히 모든 탐지 결과를 셉니다.
+`--baseline`, `--limit`(스캔 중 조기 종료와 표시 개수 모두), 종료 코드가 걸러진
+집합을 봅니다. `I`는 등급이 없으므로 유지됩니다. 기본값 `low`는 모두 유지합니다.
+옵션을 주면 엔벨로프에 `meta.min_confidence: {"level": "high", "dropped": N}`이
+실리므로, 탐지 결과가 모두 걸러져 `clean`으로 보이는 대상을 아무것도 찾지 못한
+대상으로 오해하지 않습니다.
 
 결과 수를 제한합니다.
 

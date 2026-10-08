@@ -349,10 +349,17 @@ pub(crate) fn bound_evidence_body(body: String, payload: &str) -> String {
 }
 
 impl Result {
-    /// An XSS claim graded `low`. Ungraded findings (informational `I`) make
-    /// no XSS claim, so `--min-confidence high` keeps them.
-    pub(crate) fn is_low_confidence(&self) -> bool {
-        self.confidence == Some(Confidence::Low)
+    /// The one `--min-confidence` rule: `min` is the already-validated level
+    /// (`None` / `"low"` keep everything). Only `"high"` drops anything, and
+    /// only an XSS claim graded `low` — ungraded findings (informational `I`)
+    /// make no XSS claim, so they are always kept.
+    ///
+    /// Every consumer goes through this: the `--limit` / findings tally
+    /// (`count_matching_results`), the CLI report, the `--stream-findings`
+    /// printer, and the REST/MCP job results.
+    pub(crate) fn below_min_confidence(&self, min: Option<&str>) -> bool {
+        min == Some(crate::cmd::scan::MIN_CONFIDENCE_HIGH)
+            && self.confidence == Some(Confidence::Low)
     }
 
     /// Record where `param` travels on the wire: the `location` label and,
@@ -590,6 +597,12 @@ pub(crate) struct ScanMetadata {
     /// a resumed run from a scan that mostly found nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumed: Option<serde_json::Value>,
+    /// `--min-confidence` summary (`level` and how many findings it
+    /// `dropped`). Present only when the flag was set, so a target reading
+    /// `clean` because all of its findings were filtered is distinguishable
+    /// from one that found nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_confidence: Option<serde_json::Value>,
     /// At least one target was not fully tested: its authenticated session
     /// died mid-scan (see `error_codes::SESSION_LOST`), or a significant share
     /// of this run's requests never reached the target at all.
@@ -676,6 +689,11 @@ impl Result {
             && let serde_json::Value::Object(ref mut map) = value
         {
             map.insert("resumed".to_string(), resumed.clone());
+        }
+        if let Some(min_confidence) = &meta.min_confidence
+            && let serde_json::Value::Object(ref mut map) = value
+        {
+            map.insert("min_confidence".to_string(), min_confidence.clone());
         }
         value
     }

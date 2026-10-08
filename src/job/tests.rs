@@ -1281,7 +1281,7 @@ fn async_jobs_cap_findings_and_say_so() {
         session_lost: None,
         findings_capped: true,
         warnings: Vec::new(),
-        drop_low_confidence: false,
+        min_confidence: None,
     };
     let mut job = Job::new_queued("http://t/".into());
     assert_eq!(
@@ -1762,7 +1762,7 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         session_lost: None,
         findings_capped: false,
         warnings: Vec::new(),
-        drop_low_confidence: false,
+        min_confidence: None,
     };
     let note = "scan exceeded scan_timeout (5s); returning partial results";
     for (prior, append, want) in [
@@ -1796,9 +1796,10 @@ async fn sanitized_results_honor_min_confidence() {
         graded(FindingType::Reflected, Some(Confidence::Low), "low"),
         graded(FindingType::Informational, None, "info"),
     ];
-    for (drop_low, want) in [
-        (false, vec!["high", "low", "info"]),
-        (true, vec!["high", "info"]),
+    for (min, want) in [
+        (None, vec!["high", "low", "info"]),
+        (Some("low"), vec!["high", "low", "info"]),
+        (Some("high"), vec!["high", "info"]),
     ] {
         let run = runner::ScanRun {
             results: Arc::new(tokio::sync::Mutex::new(results.clone())),
@@ -1809,12 +1810,12 @@ async fn sanitized_results_honor_min_confidence() {
             worker_panics: 0,
             session_lost: None,
             findings_capped: false,
-            drop_low_confidence: drop_low,
+            min_confidence: min.map(String::from),
         };
         let progress = JobProgress::default();
         let kept = run.sanitized_results(&progress, false, false).await;
         let params: Vec<&str> = kept.iter().map(|r| r.param.as_str()).collect();
-        assert_eq!(params, want, "drop_low_confidence = {drop_low}");
+        assert_eq!(params, want, "min_confidence = {min:?}");
         assert_eq!(
             progress
                 .findings_so_far

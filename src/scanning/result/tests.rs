@@ -722,6 +722,7 @@ fn mk_meta() -> ScanMetadata {
         total_requests: 42,
         findings_count: 1,
         incomplete: false,
+        min_confidence: None,
         target_summary: vec![
             serde_json::json!({
                 "target": "https://example.com",
@@ -1178,18 +1179,18 @@ fn filter_fingerprint_reaches_every_machine_format() {
     assert!(r.to_json_value(false, false).get("filter").is_none());
 }
 
-/// A `low` grade drops the SARIF level one step so code scanning ranks it
-/// below a claim dalfox stands behind, while `partialFingerprints` stays put:
-/// re-grading a finding on a later run must not churn its identity.
+/// SARIF `level` follows severity only. The confidence grade rides in
+/// `properties`, and neither `level` nor `partialFingerprints` move with it, so
+/// existing code-scanning gates and finding identities are unaffected.
 #[test]
-fn test_results_to_sarif_low_confidence_lowers_level_not_fingerprint() {
-    let mk = |severity: &str, grade: Option<Confidence>| {
+fn test_results_to_sarif_level_and_fingerprint_ignore_confidence() {
+    let mk = |grade: Option<Confidence>| {
         let mut r = Result::builder(FindingType::Verified)
             .inject_type("DOM-XSS")
             .data("https://h/s?q=1")
             .param("q")
             .cwe("CWE-79")
-            .severity(severity)
+            .severity("High")
             .build();
         r.confidence = grade;
         r
@@ -1197,16 +1198,13 @@ fn test_results_to_sarif_low_confidence_lowers_level_not_fingerprint() {
     let sarif = |r: Result| -> serde_json::Value {
         serde_json::from_str(&Result::results_to_sarif(&[r], false, false)).unwrap()
     };
-    let level = |v: &serde_json::Value| v["runs"][0]["results"][0]["level"].clone();
-    let fp = |v: &serde_json::Value| v["runs"][0]["results"][0]["partialFingerprints"].clone();
-
-    let high = sarif(mk("High", Some(Confidence::High)));
-    let low = sarif(mk("High", Some(Confidence::Low)));
-    assert_eq!(level(&high), "error");
-    assert_eq!(level(&low), "warning");
-    assert_eq!(fp(&high), fp(&low));
-    assert_eq!(level(&sarif(mk("Medium", Some(Confidence::Low)))), "note");
-    assert_eq!(level(&sarif(mk("Info", Some(Confidence::Low)))), "note");
-    // Ungraded findings keep the severity mapping.
-    assert_eq!(level(&sarif(mk("High", None))), "error");
+    let first = |v: &serde_json::Value| v["runs"][0]["results"][0].clone();
+    let high = first(&sarif(mk(Some(Confidence::High))));
+    let low = first(&sarif(mk(Some(Confidence::Low))));
+    let none = first(&sarif(mk(None)));
+    for r in [&high, &low, &none] {
+        assert_eq!(r["level"], "error");
+    }
+    assert_eq!(high["partialFingerprints"], low["partialFingerprints"]);
+    assert_eq!(low["properties"]["confidence"], "low");
 }

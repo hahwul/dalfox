@@ -3895,12 +3895,30 @@ async fn min_confidence_filters_output_summary_and_exit_code() {
         render_with_min_confidence(None, all.clone(), "minconf_default").await;
     let (low_out, low_exit) =
         render_with_min_confidence(Some("low"), all.clone(), "minconf_low").await;
-    assert_eq!(default_out, low_out);
+    // The explicit `low` only adds its own meta block; everything else is
+    // byte-identical to the flagless report.
+    let mut low_v: serde_json::Value = serde_json::from_str(&low_out).expect("json");
+    assert_eq!(
+        low_v["meta"]["min_confidence"],
+        serde_json::json!({"level": "low", "dropped": 0})
+    );
+    low_v["meta"]
+        .as_object_mut()
+        .unwrap()
+        .remove("min_confidence");
+    assert_eq!(
+        serde_json::to_string_pretty(&low_v).unwrap() + "\n",
+        default_out
+    );
     assert_eq!(default_exit, ScanOutcome::Findings);
     assert_eq!(low_exit, ScanOutcome::Findings);
     let v: serde_json::Value = serde_json::from_str(&default_out).expect("json");
     assert_eq!(v["meta"]["findings_count"], 3);
     assert_eq!(v["meta"]["target_summary"][0]["findings_count"], 3);
+    assert!(
+        v["meta"].get("min_confidence").is_none(),
+        "absent by default"
+    );
 
     // `high`: the low-graded R is gone from findings and the summary; the
     // high-graded V and the ungraded I stay.
@@ -3916,6 +3934,10 @@ async fn min_confidence_filters_output_summary_and_exit_code() {
         .collect();
     assert_eq!(params, vec!["id", "lib"]);
     assert_eq!(high_exit, ScanOutcome::Findings);
+    assert_eq!(
+        v["meta"]["min_confidence"],
+        serde_json::json!({"level": "high", "dropped": 1})
+    );
 
     // Only low-graded findings: the flag turns exit 1 into a clean exit 0.
     let (_, exit) =
@@ -3953,4 +3975,41 @@ async fn min_confidence_filters_before_ast_dedup() {
     assert_eq!(v["meta"]["findings_count"], 1, "{out}");
     assert_eq!(v["findings"][0]["type"], "A");
     assert_eq!(v["findings"][0]["confidence"], "high");
+}
+
+/// The `--stream-findings` printer skips what `--min-confidence` drops (and
+/// does not record it, so it cannot shadow a later kept finding), and still
+/// folds a repeat of a printed finding.
+#[test]
+fn stream_printer_skips_findings_min_confidence_drops() {
+    use crate::scanning::result::Confidence;
+    let mut low = reflected_result("https://example.com", "q", "<x>");
+    low.message_id = 606;
+    low.confidence = Some(Confidence::Low);
+    let mut high = reflected_result("https://example.com", "id", "<y>");
+    high.message_id = 606;
+    high.result_type = FindingType::Verified;
+    high.confidence = Some(Confidence::High);
+
+    let mut seen = std::collections::HashSet::new();
+    assert!(!super::output::admit_streamed(
+        &low,
+        Some("high"),
+        &mut seen
+    ));
+    assert!(seen.is_empty(), "a dropped finding is not recorded");
+    assert!(super::output::admit_streamed(
+        &high,
+        Some("high"),
+        &mut seen
+    ));
+    assert!(!super::output::admit_streamed(
+        &high,
+        Some("high"),
+        &mut seen
+    ));
+
+    let mut seen = std::collections::HashSet::new();
+    assert!(super::output::admit_streamed(&low, None, &mut seen));
+    assert!(!super::output::admit_streamed(&low, Some("low"), &mut seen));
 }

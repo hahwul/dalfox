@@ -191,11 +191,12 @@ pub(crate) async fn accumulate_findings(
     findings_count: &std::sync::atomic::AtomicUsize,
     batch: Vec<crate::scanning::result::Result>,
     limit_result_type: &str,
+    min_confidence: Option<&str>,
 ) {
     if batch.is_empty() {
         return;
     }
-    let added = count_matching_results(&batch, limit_result_type);
+    let added = count_matching_results(&batch, limit_result_type, min_confidence);
     results.lock().await.extend(batch);
     findings_count.fetch_add(added, std::sync::atomic::Ordering::Relaxed);
 }

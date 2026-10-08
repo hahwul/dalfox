@@ -69,17 +69,16 @@ What reads `confidence`:
 
 - **`--min-confidence high`** (config `min_confidence`, REST/MCP
   `min_confidence`) drops every `low` finding — every `R`, plus AST flows dalfox
-  cannot stand behind — before output, `target_summary` counts, `--baseline`,
-  the `--limit` display cut, and the exit code, in every format and in
-  `--stream-findings`. `I` findings carry no grade and are kept. The default
-  (`low`) keeps everything. `--limit`'s scan-time early stop still counts every
-  finding, so `--limit N --min-confidence high` can stop on `low` findings.
-  A run whose only findings were `low` exits `0` under `high`.
+  cannot stand behind — from output in every format, `--stream-findings`,
+  `target_summary` counts, `--baseline`, `--limit` (both the early stop and the
+  display cut), and the exit code. `I` findings carry no grade and are kept.
+  The default (`low`) keeps everything. When set, `meta.min_confidence`
+  reports `{level, dropped}`, so a target reading `clean` because every finding
+  was filtered is distinguishable from one that found nothing. A run whose only
+  findings were `low` exits `0` under `high`.
 - **Dedup** ranks duplicate AST findings by type, then severity, then
   confidence (`high` before `low`).
-- **SARIF** drops a `low` finding's `level` one step (`error` → `warning` →
-  `note`); `partialFingerprints` ignore the grade, so re-grading never churns
-  code-scanning identity.
+- **SARIF** carries the grade in `properties`; `level` still follows severity.
 - **Plain** output shows a `Confidence:` line (grade only; the reason is in the
   machine formats).
 

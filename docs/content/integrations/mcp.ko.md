@@ -255,7 +255,7 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 `min_confidence`(`"low"` 또는 `"high"`, 생략하면 모두 유지)는 CLI의
 `--min-confidence`와 같습니다. `"high"`는 `low` 등급 탐지 결과를 작업 결과와
-완료 시점의 `findings_so_far`에서 제거합니다. `I`는 등급이 없으므로 유지됩니다.
+`findings_so_far`에서 제거합니다. `I`는 등급이 없으므로 유지됩니다.
 다른 값은 `invalid_params`로 거부됩니다.
 
 `remote_payloads`와 `remote_wordlists`는(둘 다 기본값 `[]`) 스캔을 시작하기 전에

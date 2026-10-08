@@ -263,7 +263,7 @@ it are dropped. Unknown values for `waf_bypass` or `force_waf`, and a
 
 `min_confidence` (`"low"` or `"high"`; omitted keeps every finding) is the CLI's
 `--min-confidence`: `"high"` drops every `low`-confidence finding from the
-job's results and its settled `findings_so_far`. `I` findings carry no grade
+job's results and from `findings_so_far`. `I` findings carry no grade
 and are kept. Any other value is rejected as `invalid_params`.
 
 `remote_payloads` and `remote_wordlists` (both default `[]`) fetch extra XSS

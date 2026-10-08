@@ -1086,11 +1086,10 @@ impl ScanArgs {
             .unwrap_or(BASELINE_MODE_FILTER)
     }
 
-    /// Whether `--min-confidence` drops `r`. The one filter predicate the CLI
-    /// report, the `--stream-findings` printer, and the REST/MCP job results
-    /// all share, so the three cannot disagree on what was found.
+    /// Whether `--min-confidence` drops `r`; see
+    /// [`crate::scanning::result::Result::below_min_confidence`].
     pub(crate) fn below_min_confidence(&self, r: &crate::scanning::result::Result) -> bool {
-        self.min_confidence.as_deref() == Some(MIN_CONFIDENCE_HIGH) && r.is_low_confidence()
+        r.below_min_confidence(self.min_confidence.as_deref())
     }
 
     /// Effective `--on-session-loss` policy: the operator's choice, else

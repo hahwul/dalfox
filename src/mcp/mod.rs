@@ -743,8 +743,8 @@ result sets; pagination describes {total, offset, limit, returned, has_more}. \
 When status is 'error', includes error_message explaining the failure reason. \
 When running/done/cancelled/error, includes progress: {params_total, params_tested, \
 requests_sent, requests_failed (requests that never reached the target: a large \
-share means 'not scanned', not 'nothing found'), findings_so_far (counts \
-every finding while running; the settled value honors min_confidence), \
+share means 'not scanned', not 'nothing found'), findings_so_far (honors \
+min_confidence), \
 estimated_completion_pct (0-100), \
 suggested_poll_interval_ms (recommended delay before next poll; 0 when terminal \
 and settled)}. The `settled` field is false while a terminal worker is still \

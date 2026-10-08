@@ -120,23 +120,23 @@ AST 패스는 응답에 담긴 JavaScript를 파싱해, 위험한 소스(`locati
 
 `confidence`는 `json`, `jsonl`, `toml`, `markdown`, `sarif`가
 `confidence_reason`과 함께 실어 나르고, `plain`은 등급만 `Confidence:` 줄로
-보여 줍니다. 등급에 반응하는 동작은 네 가지입니다.
+보여 줍니다. 등급에 반응하는 동작은 세 가지입니다.
 
 - **`--min-confidence high`** 는 `low` 탐지 결과(모든 `R`, 그리고 Dalfox가
   확신할 수 없는 AST 흐름)를 가장 먼저 걸러 냅니다. 모든 포맷의 출력,
   `--stream-findings`, `target_summary`의 대상별 개수, `--baseline`, `--limit`
-  표시 개수, 종료 코드가 모두 걸러진 뒤의 집합을 봅니다. 단, `--limit`의 스캔 중
-  조기 종료는 여전히 모든 탐지 결과를 셉니다. `I`는 XSS 주장이 아니라 등급이
-  없으므로 항상 남습니다. 기본값 `low`는 아무것도 거르지 않습니다. 설정 파일,
-  REST API, MCP에서는 `min_confidence`로 같은 옵션을 씁니다.
+  (스캔 중 조기 종료와 표시 개수 모두), 종료 코드가 모두 걸러진 뒤의 집합을
+  봅니다. `I`는 XSS 주장이 아니라 등급이 없으므로 항상 남습니다. 기본값 `low`는
+  아무것도 거르지 않습니다. 옵션을 주면 `meta.min_confidence`가
+  `{level, dropped}`를 보고하므로, 탐지 결과가 모두 걸러져 `clean`으로 보이는
+  대상과 실제로 아무것도 찾지 못한 대상을 구분할 수 있습니다. 설정 파일, REST
+  API, MCP에서는 `min_confidence`로 같은 옵션을 씁니다.
 - **AST 중복 제거**는 type과 severity가 같을 때 등급으로 순위를 가립니다(`high` 우선).
-- **SARIF**는 `low` 탐지 결과의 `level`을 한 단계 낮춥니다(`error` → `warning`
-  → `note`). `partialFingerprints`는 등급을 보지 않으므로, 이후 실행에서
-  등급이 바뀌어도 코드 스캐닝 식별자는 그대로입니다.
 - **종료 코드**도 위 필터를 따릅니다. `low` 탐지 결과만 있던 실행은
   `--min-confidence high`에서 `0`으로 끝납니다.
 
-`--only-poc`와 `--limit-result-type`은 여전히 `type`으로 선택합니다.
+`--only-poc`와 `--limit-result-type`은 여전히 `type`으로 선택하고, SARIF
+`level`도 여전히 severity를 따릅니다(등급은 `properties`에 있습니다).
 
 ## 전환
 

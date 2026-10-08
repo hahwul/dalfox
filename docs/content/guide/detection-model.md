@@ -121,23 +121,24 @@ Sanitizers are not a grading signal because they are already a *filter*: the ana
 
 `confidence` is carried by `json`, `jsonl`, `toml`, `markdown` and `sarif`
 (with `confidence_reason`). `plain` prints a `Confidence:` line with the grade
-only. Four things act on it:
+only. Three things act on it:
 
 - **`--min-confidence high`** drops every `low` finding (every `R`, plus AST
   flows Dalfox cannot stand behind) before anything else sees it: output in
   every format, `--stream-findings`, per-target counts in `target_summary`,
-  `--baseline`, the `--limit` display cut, and the exit code. `I` findings carry
-  no grade (they are not XSS claims) and are always kept. The default, `low`,
-  keeps everything. `--limit`'s scan-time early stop still counts every finding.
-  The same option is `min_confidence` in the config file, the REST API and MCP.
+  `--baseline`, `--limit` (the early stop and the display cut), and the exit
+  code. `I` findings carry no grade (they are not XSS claims) and are always
+  kept. The default, `low`, keeps everything. When it is set,
+  `meta.min_confidence` reports `{level, dropped}`, so a target that reads
+  `clean` because all of its findings were filtered can be told apart from one
+  that found nothing. The same option is `min_confidence` in the config file,
+  the REST API and MCP.
 - **AST deduplication** breaks a type + severity tie on the grade (`high` first).
-- **SARIF** lowers a `low` finding's `level` one step (`error` → `warning` →
-  `note`). `partialFingerprints` ignore the grade, so re-grading a finding on a
-  later run never changes its code-scanning identity.
 - **The exit code**, through the filter above: a run whose only findings were
   `low` exits `0` under `--min-confidence high`.
 
-`--only-poc` and `--limit-result-type` still select by `type`.
+`--only-poc` and `--limit-result-type` still select by `type`, and SARIF
+`level` still follows severity (the grade is under `properties`).
 
 ## Migration
 
