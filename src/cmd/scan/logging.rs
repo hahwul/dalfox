@@ -150,3 +150,42 @@ pub(crate) fn start_overall_ticker(
         None
     }
 }
+
+/// Stop the overall ticker and wait until it has cleared its line. Every exit
+/// that prints a report after the ticker started must call this first: the
+/// ticker redraws without a trailing newline, so a report printed while it is
+/// still alive is glued to its last frame.
+pub(crate) async fn stop_overall_ticker(
+    ticker: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+) {
+    if let Some((tx, done_rx)) = ticker {
+        let _ = tx.send(());
+        let _ = done_rx.await;
+    }
+}
+
+#[cfg(test)]
+mod ticker_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stop_overall_ticker_waits_for_the_clear_acknowledgement() {
+        let (tx, rx) = oneshot::channel::<()>();
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let cleared = Arc::new(AtomicUsize::new(0));
+        let c = cleared.clone();
+        tokio::spawn(async move {
+            let _ = rx.await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            c.store(1, Ordering::SeqCst);
+            let _ = done_tx.send(());
+        });
+        stop_overall_ticker(Some((tx, done_rx))).await;
+        assert_eq!(
+            cleared.load(Ordering::SeqCst),
+            1,
+            "returned before the clear"
+        );
+        stop_overall_ticker(None).await;
+    }
+}

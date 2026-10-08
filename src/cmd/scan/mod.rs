@@ -502,7 +502,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let scan_idx = Arc::new(AtomicUsize::new(0));
     let overall_done = Arc::new(AtomicUsize::new(0));
 
-    let overall_ticker =
+    let mut overall_ticker =
         logging::start_overall_ticker(args, total_targets, &findings_count, &overall_done);
 
     // Bundle the cross-task handles for the preflight/analysis loop, the
@@ -576,6 +576,13 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         }
     }
 
+    // The previews print their report right here; the ticker (which redraws
+    // without a trailing newline) must be gone first or the report is glued to
+    // its last frame and it keeps redrawing over the output.
+    if args.dry_run || args.only_discovery {
+        logging::stop_overall_ticker(overall_ticker.take()).await;
+    }
+
     // --dry-run: report what would be scanned without sending attack payloads.
     if args.dry_run {
         return output::render_dry_run(args, &host_groups, &state, &all_target_urls).await;
@@ -639,10 +646,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     }
 
     if args.format == "plain" && !args.silence && total_targets > 1 {
-        if let Some((tx, done_rx)) = overall_ticker {
-            let _ = tx.send(());
-            let _ = done_rx.await;
-        }
+        logging::stop_overall_ticker(overall_ticker).await;
         println!();
     }
 
