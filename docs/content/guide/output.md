@@ -52,6 +52,7 @@ Every finding includes:
 | `severity` | `"High"` | High / Medium / Low / Info |
 | `message_id` | `606` | Catalog message id |
 | `message_str` | `"Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>"` | Short message |
+| `filter` | `{"allowed": ["/"], "encoded": ["<", ">"], "blocked": ["(", ")"]}` | How the parameter treated each probed special character: reflected raw (`allowed`), only as an HTML entity or `%HH` (`encoded`), stripped (`blocked`), backslash-escaped (`escaped`). `encoded` / `escaped` are omitted when empty. Present on reflection and DOM-verification findings; omitted when the probe gave no verdict and on AST / HPP / stored / OOB findings. Plain and Markdown show it on `R` findings only |
 
 Three more fields appear only when asked for: `new` (under `--baseline-mode annotate`), `request` (with `--include-request`), and `response` (with `--include-response`).
 

@@ -195,6 +195,9 @@ impl fmt::Display for Confidence {
     }
 }
 
+/// Per-character filter verdict; defined next to the probe that measures it.
+pub use crate::parameter_analysis::FilterFingerprint;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Result {
     #[serde(rename = "type")]
@@ -284,6 +287,12 @@ pub struct Result {
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<String>,
+    /// How the finding's parameter treated each probed special character
+    /// (issue #1515). Set only by the reflection and DOM-verification
+    /// producers, whose payload travels the probed request; `None` for AST,
+    /// HPP, stored-XSS and OOB findings, and when the probe gave no verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterFingerprint>,
 }
 
 /// Stamp `origin_target` on findings that don't carry one yet.
@@ -389,6 +398,7 @@ impl Result {
                 origin_target: None,
                 request: None,
                 response: None,
+                filter: None,
             },
         }
     }
@@ -518,6 +528,9 @@ pub(crate) struct SanitizedResult {
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<String>,
+    /// Filter verdict for the parameter. See [`Result::filter`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterFingerprint>,
 }
 
 /// `skip_serializing_if` predicate: leave a zero count out of the envelope
@@ -615,6 +628,7 @@ impl Result {
             } else {
                 None
             },
+            filter: self.filter.clone(),
         }
     }
 

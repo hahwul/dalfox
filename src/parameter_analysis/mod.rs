@@ -212,6 +212,114 @@ pub struct Param {
     /// target-based inference for params created by older callers.
     #[serde(skip)]
     pub is_cookie: Option<bool>,
+    /// Operator-facing filter verdict from the active probe, surfaced on
+    /// findings (issue #1515). Separate from `valid_specials` /
+    /// `invalid_specials`, which are tuned for recall (an entity-encoded echo
+    /// counts as valid, a failed probe as all-invalid) and so misread as a
+    /// verdict. `None` when the probe produced no trustworthy reading.
+    #[serde(skip)]
+    pub filter: Option<FilterFingerprint>,
+}
+
+/// How a parameter treated each probed special character, read from the
+/// batched probe's reflected segment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FilterFingerprint {
+    /// Reflected raw.
+    pub allowed: Vec<char>,
+    /// Reflected only as an HTML entity or `%HH`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub encoded: Vec<char>,
+    /// Stripped, or forbidden by the transport.
+    pub blocked: Vec<char>,
+    /// Reflected only with a backslash in front.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub escaped: Vec<char>,
+}
+
+impl FilterFingerprint {
+    /// Classify every `probe_chars` entry against the reflected `segment`.
+    pub(crate) fn from_segment(segment: &str, probe_chars: &[char]) -> Self {
+        static ENCODED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"&#?[0-9A-Za-z]+;|%[0-9A-Fa-f]{2}").expect("static regex")
+        });
+        // Without the encoded sequences, so the `;` of `&lt;` is not a raw `;`.
+        let raw = ENCODED.replace_all(segment, "");
+        // Decode each sequence rather than match known spellings: servers emit
+        // `&#039;`, `&#x27;`, `%3c`, ... for the same char.
+        let encoded: Vec<char> = ENCODED
+            .find_iter(segment)
+            .filter_map(|m| match m.as_str().strip_prefix('%') {
+                Some(hex) => u8::from_str_radix(hex, 16).ok().map(char::from),
+                None => {
+                    let decoded =
+                        crate::scanning::check_reflection::decode_html_entities(m.as_str());
+                    let mut chars = decoded.chars();
+                    chars.next().filter(|_| chars.next().is_none())
+                }
+            })
+            .collect();
+        let mut out = Self {
+            allowed: Vec::new(),
+            encoded: Vec::new(),
+            blocked: Vec::new(),
+            escaped: Vec::new(),
+        };
+        for &c in probe_chars {
+            let bucket = if raw.contains(c) {
+                &mut out.allowed
+            } else if encoded.contains(&c) {
+                &mut out.encoded
+            } else {
+                &mut out.blocked
+            };
+            if !bucket.contains(&c) {
+                bucket.push(c);
+            }
+        }
+        out.allowed.sort_unstable();
+        out.encoded.sort_unstable();
+        out.blocked.sort_unstable();
+        out
+    }
+
+    /// Move `chars` out of `allowed` into `bucket` (escaped or blocked).
+    fn demote(&mut self, chars: &[char], to_escaped: bool) {
+        for &c in chars {
+            self.allowed.retain(|a| *a != c);
+            self.encoded.retain(|a| *a != c);
+            let bucket = if to_escaped {
+                &mut self.escaped
+            } else {
+                &mut self.blocked
+            };
+            if !bucket.contains(&c) {
+                bucket.push(c);
+                bucket.sort_unstable();
+            }
+        }
+    }
+
+    /// One-line form for human-readable reports:
+    /// `allowed <>  encoded "'  blocked ()  escaped \`.
+    pub fn summary(&self) -> String {
+        let field = |v: &[char]| {
+            if v.is_empty() {
+                "none".to_string()
+            } else {
+                v.iter().collect()
+            }
+        };
+        let mut out = format!("allowed {}", field(&self.allowed));
+        if !self.encoded.is_empty() {
+            out.push_str(&format!("  encoded {}", field(&self.encoded)));
+        }
+        out.push_str(&format!("  blocked {}", field(&self.blocked)));
+        if !self.escaped.is_empty() {
+            out.push_str(&format!("  escaped {}", field(&self.escaped)));
+        }
+        out
+    }
 }
 
 impl Param {
@@ -251,6 +359,7 @@ impl Param {
             reflected_markup: None,
             xml_namespace_candidate: None,
             is_cookie: None,
+            filter: None,
         }
     }
 
@@ -914,6 +1023,7 @@ pub async fn active_probe_param(
         .and_then(extract_reflected_segment)
     {
         Some(segment) => {
+            param.filter = Some(FilterFingerprint::from_segment(segment, &probe_chars));
             for &c in &probe_chars {
                 if char_reflected_in_segment(segment, c) {
                     valid.push(c);
@@ -1002,6 +1112,8 @@ pub async fn active_probe_param(
     }
 
     if need_per_char_fallback {
+        // The dense probe tripped something; its reading is not the filter.
+        param.filter = None;
         valid.clear();
         invalid.clear();
         let mut handles = Vec::new();
@@ -1056,11 +1168,15 @@ pub async fn active_probe_param(
     let iv = invalid.clone();
     // Fold in the characters the transport itself forbids, so payload
     // generation avoids them rather than learning it the hard way.
-    for c in transport_invalid_chars(target, &param) {
+    let transport_invalid = transport_invalid_chars(target, &param);
+    for &c in &transport_invalid {
         if !invalid.contains(&c) {
             invalid.push(c);
         }
         valid.retain(|v| *v != c);
+    }
+    if let Some(filter) = param.filter.as_mut() {
+        filter.demote(&transport_invalid, false);
     }
     param.valid_specials = Some(valid.clone());
     param.invalid_specials = Some(invalid);
@@ -1082,6 +1198,9 @@ pub async fn active_probe_param(
             detect_escaped_quotes_via_probe(&client, target, &param, &valid, &semaphore).await
         && !escaped.is_empty()
     {
+        if let Some(filter) = param.filter.as_mut() {
+            filter.demote(&escaped, true);
+        }
         param.escaped_specials = Some(escaped);
     }
 
@@ -1165,6 +1284,7 @@ pub async fn active_probe_param(
                 // are tried.
                 param.valid_specials = None;
                 param.invalid_specials = None;
+                param.filter = None;
                 break;
             }
         }
@@ -1308,6 +1428,11 @@ pub async fn analyze_parameters(
         for p in probed.iter_mut().filter(|p| !p.marker_echoed) {
             p.valid_specials = None;
             p.invalid_specials = None;
+        }
+        // The probe read the write response; findings come from the render
+        // page, so its verdict describes a different page.
+        for p in probed.iter_mut() {
+            p.filter = None;
         }
     }
     target.reflection_params = probed;

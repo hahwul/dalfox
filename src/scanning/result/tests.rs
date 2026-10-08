@@ -1099,3 +1099,81 @@ fn a_clean_run_carries_no_unparsable_field_at_all() {
     let serialized = serde_json::to_value(&meta).expect("meta serializes");
     assert!(serialized.get("targets_unparsable").is_none());
 }
+
+#[test]
+fn filter_fingerprint_separates_raw_encoded_and_stripped() {
+    let probe = ['<', '>', '"', '\'', ';', '(', ')', '-', '`'];
+    // htmlspecialchars + strip parens: `<>"'` come back as entities, whose
+    // own `;` must not read as a raw `;`.
+    let f = FilterFingerprint::from_segment("&lt;&gt;&quot;&#039;-`", &probe);
+    assert_eq!(f.allowed, vec!['-', '`']);
+    assert_eq!(f.encoded, vec!['"', '\'', '<', '>']);
+    assert_eq!(f.blocked, vec!['(', ')', ';']);
+    assert_eq!(f.summary(), "allowed -`  encoded \"'<>  blocked ();");
+
+    let f = FilterFingerprint::from_segment("%3C%3e;", &probe);
+    assert_eq!(f.allowed, vec![';']);
+    assert_eq!(f.encoded, vec!['<', '>']);
+
+    let f = FilterFingerprint::from_segment("", &['<']);
+    assert_eq!(f.summary(), "allowed none  blocked <");
+}
+
+#[test]
+fn markdown_code_cell_closes_around_edge_backticks() {
+    let mut r = Result::builder(FindingType::Reflected)
+        .param("q")
+        .payload("x")
+        .build();
+    r.filter = Some(FilterFingerprint {
+        allowed: vec!['<'],
+        encoded: vec![],
+        blocked: vec!['`'],
+        escaped: vec![],
+    });
+    let md = Result::results_to_markdown_with_meta(std::slice::from_ref(&r), false, false, None);
+    assert!(
+        md.contains("| **Filter** | `` allowed <  blocked ` `` |"),
+        "md: {md}"
+    );
+    r.result_type = FindingType::Verified;
+    let md = Result::results_to_markdown_with_meta(std::slice::from_ref(&r), false, false, None);
+    assert!(!md.contains("**Filter**"), "V rows skip the filter: {md}");
+}
+
+#[test]
+fn filter_fingerprint_reaches_every_machine_format() {
+    let mut r = Result::builder(FindingType::Reflected)
+        .param("q")
+        .payload("<x>")
+        .cwe("CWE-79")
+        .severity("Info")
+        .build();
+    r.filter = Some(FilterFingerprint {
+        allowed: vec!['<'],
+        encoded: vec![],
+        blocked: vec!['('],
+        escaped: vec![],
+    });
+
+    let json = r.to_json_value(false, false);
+    assert_eq!(json["filter"]["allowed"], serde_json::json!(["<"]));
+    assert_eq!(json["filter"]["blocked"], serde_json::json!(["("]));
+    assert!(
+        json["filter"].get("escaped").is_none(),
+        "empty escaped omitted"
+    );
+    assert!(
+        json["filter"].get("encoded").is_none(),
+        "empty encoded omitted"
+    );
+
+    let sanitized = serde_json::to_value(r.to_sanitized(false, false)).unwrap();
+    assert_eq!(sanitized["filter"], json["filter"]);
+
+    let toml = Result::results_to_toml_with_meta(std::slice::from_ref(&r), false, false, None);
+    assert!(toml.contains("[results.filter]"), "toml: {toml}");
+
+    r.filter = None;
+    assert!(r.to_json_value(false, false).get("filter").is_none());
+}

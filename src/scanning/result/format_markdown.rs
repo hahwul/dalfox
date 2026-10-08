@@ -37,8 +37,12 @@ fn md_cell(value: &str) -> String {
 fn md_code_cell(value: &str) -> String {
     let body = crate::utils::term::sanitize_display(value).replace('|', "\\|");
     let fence = "`".repeat(longest_backtick_run(&body) + 1);
+    // A body edge that is a space or a backtick needs one space of padding:
+    // a backtick there would merge with the fence into a longer run and leave
+    // the span unclosed. CommonMark strips one padding space from each side.
+    let edge = |c: char| c == ' ' || c == '`';
     let padding =
-        if !body.trim_matches(' ').is_empty() && (body.starts_with(' ') || body.ends_with(' ')) {
+        if !body.trim_matches(' ').is_empty() && (body.starts_with(edge) || body.ends_with(edge)) {
             " "
         } else {
             ""
@@ -302,6 +306,13 @@ impl Result {
 
                 if !result.evidence.is_empty() {
                     let _ = writeln!(out, "| **Evidence** | {} |", md_cell(&result.evidence));
+                }
+                // R only, like plain: why a reflection didn't verify is the
+                // manual follow-up. Machine formats carry it on every finding.
+                if result.result_type == FindingType::Reflected
+                    && let Some(filter) = &result.filter
+                {
+                    let _ = writeln!(out, "| **Filter** | {} |", md_code_cell(&filter.summary()));
                 }
 
                 out.push('\n');

@@ -97,6 +97,10 @@ impl Result {
                     }
                 }
 
+                if let Some(filter) = &r.filter {
+                    properties["filter"] = json!(filter);
+                }
+
                 if let Some(is_new) = r.new_since_baseline {
                     properties["new"] = json!(is_new);
                 }

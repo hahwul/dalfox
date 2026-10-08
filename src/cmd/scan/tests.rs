@@ -1083,6 +1083,37 @@ fn test_render_finding_block_reflected_plain() {
 }
 
 #[test]
+fn test_render_finding_block_filter_line_only_on_reflected() {
+    let mut r = reflected_result("https://example.com", "q", "<x>");
+    r.filter = Some(crate::scanning::result::FilterFingerprint {
+        allowed: vec!['<', '>'],
+        encoded: vec![],
+        blocked: vec!['('],
+        escaped: vec![],
+    });
+    let block = render_finding_block(&r, "plain", false, false);
+    assert!(
+        block.contains("Filter:") && block.contains("allowed <>  blocked ("),
+        "got: {}",
+        block
+    );
+    // Filter is the last section → closing bullet sits on it.
+    assert!(
+        block.contains("└──\x1b[0m \x1b[38;5;247mFilter:"),
+        "got: {}",
+        block
+    );
+
+    r.result_type = FindingType::Verified;
+    let block = render_finding_block(&r, "plain", false, false);
+    assert!(
+        !block.contains("Filter:"),
+        "V needs no filter line: {}",
+        block
+    );
+}
+
+#[test]
 fn test_render_finding_block_verified_with_context_and_response() {
     let mut r = reflected_result("https://example.com", "q", "PAYZ");
     r.result_type = FindingType::Verified;

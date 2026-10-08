@@ -1324,6 +1324,7 @@ impl ScanWorkerCtx {
                         .message_str(poc_msg)
                         .build();
                     result.set_injection_point(&self.target, param);
+                    result.filter = param.filter.clone();
                     result.wire_payload =
                         (poc_payload != reflection_payload).then_some(poc_payload);
                     result.request =
@@ -1509,6 +1510,7 @@ impl ScanWorkerCtx {
                                 ))
                                 .build();
                         result.set_injection_point(&self.target, param);
+                        result.filter = param.filter.clone();
                         result.wire_payload = (poc_payload != *dom_payload).then_some(poc_payload);
                         result.request = Some(build_request_text(&self.target, param, dom_payload));
                         result.response = response_text

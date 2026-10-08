@@ -54,6 +54,11 @@ impl Result {
                 );
             }
         }
+        if let Some(filter) = &self.filter
+            && let serde_json::Value::Object(ref mut map) = obj
+        {
+            map.insert("filter".to_string(), serde_json::json!(filter));
+        }
         if include_request
             && let Some(req) = &self.request
             && let serde_json::Value::Object(ref mut map) = obj

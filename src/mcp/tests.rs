@@ -1301,6 +1301,7 @@ fn dummy_finding(id: u32) -> SanitizedResult {
         new_since_baseline: None,
         request: None,
         response: None,
+        filter: None,
     }
 }
 
