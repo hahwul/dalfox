@@ -1087,6 +1087,7 @@ fn test_render_finding_block_filter_line_only_on_reflected() {
     let mut r = reflected_result("https://example.com", "q", "<x>");
     r.filter = Some(crate::scanning::result::FilterFingerprint {
         allowed: vec!['<', '>'],
+        encoded: vec![],
         blocked: vec!['('],
         escaped: vec![],
     });

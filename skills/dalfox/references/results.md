@@ -99,11 +99,13 @@ no `message` field. `confidence` / `confidence_reason` / `location` are omitted
 when unset.
 
 `filter` (when present) is the parameter's per-character filter verdict from the
-pre-scan probe: `allowed` (reflected raw), `blocked` (stripped/encoded),
-`escaped` (backslash-escaped; omitted when empty). Use it to explain an `R`
-finding — e.g. `<` / `>` allowed but `(` blocked means a paren-free handler or
-backtick call is the next manual try. Absent means no verdict, not "nothing
-allowed". `request` / `response` appear only under the opt-in flags below.
+pre-scan probe: `allowed` (reflected raw), `encoded` (only as an HTML entity or
+`%HH`), `blocked` (stripped), `escaped` (backslash-escaped). `encoded` /
+`escaped` are omitted when empty. Use it to explain an `R` finding — e.g. `<` /
+`>` allowed but `(` blocked means a paren-free handler or backtick call is the
+next manual try; `<` / `>` encoded means HTML injection is closed. It rides only
+on reflection / DOM-verification findings; absent means no verdict, not
+"nothing allowed". `request` / `response` appear only under the opt-in flags below.
 
 ### inject_type values (which check produced it, not parameter location)
 

@@ -1101,29 +1101,44 @@ fn a_clean_run_carries_no_unparsable_field_at_all() {
 }
 
 #[test]
-fn filter_fingerprint_from_param_splits_escaped_out_of_allowed() {
-    use crate::parameter_analysis::{Location, Param};
-    let mut p = Param::new("q".to_string(), String::new(), Location::Query);
-    assert_eq!(FilterFingerprint::from_param(&p), None, "no probe verdict");
+fn filter_fingerprint_separates_raw_encoded_and_stripped() {
+    let probe = ['<', '>', '"', '\'', ';', '(', ')', '-', '`'];
+    // htmlspecialchars + strip parens: `<>"'` come back as entities, whose
+    // own `;` must not read as a raw `;`.
+    let f = FilterFingerprint::from_segment("&lt;&gt;&quot;&#039;-`", &probe);
+    assert_eq!(f.allowed, vec!['-', '`']);
+    assert_eq!(f.encoded, vec!['"', '\'', '<', '>']);
+    assert_eq!(f.blocked, vec!['(', ')', ';']);
+    assert_eq!(f.summary(), "allowed -`  encoded \"'<>  blocked ();");
 
-    p.valid_specials = Some(vec!['>', '"', '<', '<']);
-    p.invalid_specials = Some(vec![')', '(']);
-    p.escaped_specials = Some(vec!['"']);
-    let f = FilterFingerprint::from_param(&p).expect("verdict");
-    assert_eq!(f.allowed, vec!['<', '>']);
-    assert_eq!(f.blocked, vec!['(', ')']);
-    assert_eq!(f.escaped, vec!['"']);
-    assert_eq!(f.summary(), "allowed <>  blocked ()  escaped \"");
+    let f = FilterFingerprint::from_segment("%3C%3e;", &probe);
+    assert_eq!(f.allowed, vec![';']);
+    assert_eq!(f.encoded, vec!['<', '>']);
 
-    p.escaped_specials = None;
-    p.invalid_specials = None;
-    let f = FilterFingerprint::from_param(&p).expect("verdict");
-    assert_eq!(f.summary(), "allowed \"<>  blocked -");
+    let f = FilterFingerprint::from_segment("", &['<']);
+    assert_eq!(f.summary(), "allowed none  blocked <");
+}
 
-    let target = crate::target_parser::parse_target("https://example.com/?q=1").unwrap();
-    let mut r = Result::builder(FindingType::Reflected).build();
-    r.set_injection_point(&target, &p);
-    assert_eq!(r.filter, FilterFingerprint::from_param(&p));
+#[test]
+fn markdown_code_cell_closes_around_edge_backticks() {
+    let mut r = Result::builder(FindingType::Reflected)
+        .param("q")
+        .payload("x")
+        .build();
+    r.filter = Some(FilterFingerprint {
+        allowed: vec!['<'],
+        encoded: vec![],
+        blocked: vec!['`'],
+        escaped: vec![],
+    });
+    let md = Result::results_to_markdown_with_meta(std::slice::from_ref(&r), false, false, None);
+    assert!(
+        md.contains("| **Filter** | `` allowed <  blocked ` `` |"),
+        "md: {md}"
+    );
+    r.result_type = FindingType::Verified;
+    let md = Result::results_to_markdown_with_meta(std::slice::from_ref(&r), false, false, None);
+    assert!(!md.contains("**Filter**"), "V rows skip the filter: {md}");
 }
 
 #[test]
@@ -1136,6 +1151,7 @@ fn filter_fingerprint_reaches_every_machine_format() {
         .build();
     r.filter = Some(FilterFingerprint {
         allowed: vec!['<'],
+        encoded: vec![],
         blocked: vec!['('],
         escaped: vec![],
     });
@@ -1144,6 +1160,7 @@ fn filter_fingerprint_reaches_every_machine_format() {
     assert_eq!(json["filter"]["allowed"], serde_json::json!(["<"]));
     assert_eq!(json["filter"]["blocked"], serde_json::json!(["("]));
     assert!(json["filter"].get("escaped").is_none(), "empty escaped omitted");
+    assert!(json["filter"].get("encoded").is_none(), "empty encoded omitted");
 
     let sanitized = serde_json::to_value(r.to_sanitized(false, false)).unwrap();
     assert_eq!(sanitized["filter"], json["filter"]);

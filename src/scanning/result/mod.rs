@@ -195,71 +195,8 @@ impl fmt::Display for Confidence {
     }
 }
 
-/// How the finding's parameter treated each probed special character, as
-/// measured by the active probe before scanning (issue #1515).
-///
-/// It answers why a `R` finding (or a clean param) did not verify: "`<` and
-/// `>` pass raw, `"` comes back backslash-escaped, `(` is stripped".
-/// `allowed` excludes the `escaped` chars — an escaped quote is present in
-/// the response but cannot break out raw.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct FilterFingerprint {
-    /// Reflected unchanged.
-    pub allowed: Vec<char>,
-    /// Stripped, encoded, or forbidden by the transport.
-    pub blocked: Vec<char>,
-    /// Reflected only with a backslash in front.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub escaped: Vec<char>,
-}
-
-impl FilterFingerprint {
-    /// `None` when the probe produced no verdict for `param` (it never ran, or
-    /// its verdict was discarded), so an absent field never reads as "nothing
-    /// allowed".
-    pub(crate) fn from_param(param: &crate::parameter_analysis::Param) -> Option<Self> {
-        let valid = param.valid_specials.as_ref()?;
-        let mut escaped = param.escaped_specials.clone().unwrap_or_default();
-        let mut allowed: Vec<char> = valid
-            .iter()
-            .copied()
-            .filter(|c| !escaped.contains(c))
-            .collect();
-        let mut blocked = param.invalid_specials.clone().unwrap_or_default();
-        // The per-char fallback probe fills these concurrently; sort so the
-        // same verdict always renders the same way.
-        for v in [&mut allowed, &mut blocked, &mut escaped] {
-            v.sort_unstable();
-            v.dedup();
-        }
-        Some(Self {
-            allowed,
-            blocked,
-            escaped,
-        })
-    }
-
-    /// One-line form for the plain report: `allowed <> blocked "( escaped '`.
-    pub(crate) fn summary(&self) -> String {
-        let field = |v: &[char]| {
-            if v.is_empty() {
-                "-".to_string()
-            } else {
-                v.iter().collect()
-            }
-        };
-        let mut out = format!(
-            "allowed {}  blocked {}",
-            field(&self.allowed),
-            field(&self.blocked)
-        );
-        if !self.escaped.is_empty() {
-            out.push_str("  escaped ");
-            out.push_str(&field(&self.escaped));
-        }
-        out
-    }
-}
+/// Per-character filter verdict; defined next to the probe that measures it.
+pub use crate::parameter_analysis::FilterFingerprint;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Result {
@@ -350,8 +287,10 @@ pub struct Result {
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<String>,
-    /// Per-character filter verdict for the finding's parameter. Last so the
-    /// TOML renderer emits it as a sub-table after every plain value.
+    /// How the finding's parameter treated each probed special character
+    /// (issue #1515). Set only by the reflection and DOM-verification
+    /// producers, whose payload travels the probed request; `None` for AST,
+    /// HPP, stored-XSS and OOB findings, and when the probe gave no verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterFingerprint>,
 }
@@ -419,7 +358,6 @@ impl Result {
     ) {
         self.location = format!("{:?}", param.location);
         self.cookie_param = crate::scanning::url_inject::param_is_cookie(target, param);
-        self.filter = FilterFingerprint::from_param(param);
     }
 
     /// Start building a finding. `result_type` is the only required field;

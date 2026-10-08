@@ -703,6 +703,9 @@ When done, results is an array of findings. Each finding includes: type \
 detection_method (reflection / dom-verification / ast / oob / library), \
 confidence (high / low, absent on I) with confidence_reason, inject_type, \
 method, param, payload, evidence, cwe, severity, location, and message_str. \
+Reflection / DOM-verification findings may also carry `filter` {allowed, encoded, \
+blocked, escaped}: the parameter's per-character filter verdict (raw, entity / %-encoded, \
+stripped, backslash-escaped); absent means no verdict, not \"nothing allowed\". \
 Select AST findings by detection_method == \"ast\", not type == \"A\": the \
 method field is stable, the A tier is being folded into the confidence axis. \
 Use the optional `offset` and `limit` parameters to page through large \

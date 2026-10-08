@@ -722,6 +722,8 @@ async fn test_active_probe_param_query_path_failure_paths() {
     )
     .await;
     assert!(query_res.valid_specials.as_ref().is_some());
+    // A probe that never got a response is not a filter verdict (#1515).
+    assert_eq!(query_res.filter, None);
     assert!(
         query_res
             .invalid_specials
@@ -2221,4 +2223,54 @@ fn with_query_param_replaces_every_match_or_appends() {
         with_query_param(&base, "c", "z").as_str(),
         "http://x/?a=1&b=2&a=3&c=z"
     );
+}
+
+/// #1515: the probe's verdict is what an operator would read off the echo —
+/// entity-encoded chars are `encoded`, not `allowed`, and stripped chars are
+/// `blocked` — even though `valid_specials` counts the encoded echo as valid.
+#[tokio::test]
+async fn test_active_probe_param_records_filter_verdict() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    async fn handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        // htmlspecialchars(ENT_QUOTES) + strip parens.
+        let q = params.get("q").cloned().unwrap_or_default();
+        let out: String = q
+            .chars()
+            .filter(|c| *c != '(' && *c != ')')
+            .map(|c| match c {
+                '<' => "&lt;".to_string(),
+                '>' => "&gt;".to_string(),
+                '"' => "&quot;".to_string(),
+                '\'' => "&#039;".to_string(),
+                c => c.to_string(),
+            })
+            .collect();
+        Html(format!("<div>{}</div>", out))
+    }
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr: SocketAddr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/", get(handler)))
+            .await
+            .expect("serve");
+    });
+
+    let target = parse_target(&format!("http://{}/?q=1", addr)).unwrap();
+    let param = active_probe_param(
+        &target,
+        probe_param("q", Location::Query),
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+    let filter = param.filter.expect("probe reflected, so a verdict exists");
+    assert_eq!(filter.encoded, vec!['"', '\'', '<', '>']);
+    assert!(filter.blocked.contains(&'(') && filter.blocked.contains(&')'));
+    assert!(!filter.allowed.contains(&'<') && filter.allowed.contains(&'/'));
+    // The recall-tuned set disagrees on purpose: the encoded `<` stays valid.
+    assert!(param.valid_specials.unwrap().contains(&'<'));
 }
