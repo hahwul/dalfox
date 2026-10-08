@@ -41,13 +41,12 @@ fn md_code_cell(value: &str) -> String {
     // a backtick there would merge with the fence into a longer run and leave
     // the span unclosed. CommonMark strips one padding space from each side.
     let edge = |c: char| c == ' ' || c == '`';
-    let padding = if !body.trim_matches(' ').is_empty()
-        && (body.starts_with(edge) || body.ends_with(edge))
-    {
-        " "
-    } else {
-        ""
-    };
+    let padding =
+        if !body.trim_matches(' ').is_empty() && (body.starts_with(edge) || body.ends_with(edge)) {
+            " "
+        } else {
+            ""
+        };
     format!("{fence}{padding}{body}{padding}{fence}")
 }
 

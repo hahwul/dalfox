@@ -1159,8 +1159,14 @@ fn filter_fingerprint_reaches_every_machine_format() {
     let json = r.to_json_value(false, false);
     assert_eq!(json["filter"]["allowed"], serde_json::json!(["<"]));
     assert_eq!(json["filter"]["blocked"], serde_json::json!(["("]));
-    assert!(json["filter"].get("escaped").is_none(), "empty escaped omitted");
-    assert!(json["filter"].get("encoded").is_none(), "empty encoded omitted");
+    assert!(
+        json["filter"].get("escaped").is_none(),
+        "empty escaped omitted"
+    );
+    assert!(
+        json["filter"].get("encoded").is_none(),
+        "empty encoded omitted"
+    );
 
     let sanitized = serde_json::to_value(r.to_sanitized(false, false)).unwrap();
     assert_eq!(sanitized["filter"], json["filter"]);

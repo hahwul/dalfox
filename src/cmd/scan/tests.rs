@@ -1098,11 +1098,19 @@ fn test_render_finding_block_filter_line_only_on_reflected() {
         block
     );
     // Filter is the last section → closing bullet sits on it.
-    assert!(block.contains("└──\x1b[0m \x1b[38;5;247mFilter:"), "got: {}", block);
+    assert!(
+        block.contains("└──\x1b[0m \x1b[38;5;247mFilter:"),
+        "got: {}",
+        block
+    );
 
     r.result_type = FindingType::Verified;
     let block = render_finding_block(&r, "plain", false, false);
-    assert!(!block.contains("Filter:"), "V needs no filter line: {}", block);
+    assert!(
+        !block.contains("Filter:"),
+        "V needs no filter line: {}",
+        block
+    );
 }
 
 #[test]

@@ -252,7 +252,8 @@ impl FilterFingerprint {
             .filter_map(|m| match m.as_str().strip_prefix('%') {
                 Some(hex) => u8::from_str_radix(hex, 16).ok().map(char::from),
                 None => {
-                    let decoded = crate::scanning::check_reflection::decode_html_entities(m.as_str());
+                    let decoded =
+                        crate::scanning::check_reflection::decode_html_entities(m.as_str());
                     let mut chars = decoded.chars();
                     chars.next().filter(|_| chars.next().is_none())
                 }
