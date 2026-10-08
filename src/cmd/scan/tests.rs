@@ -1253,8 +1253,8 @@ fn test_render_finding_block_curl_poc_type_has_no_ansi_on_poc_line() {
 // output.rs — render_only_discovery (sync; json / jsonl / plain)
 // ─────────────────────────────────────────────────────────────────────────
 
-#[test]
-fn test_render_only_discovery_plain() {
+#[tokio::test]
+async fn test_render_only_discovery_plain() {
     let target = target_with_params(
         "https://example.com",
         vec![
@@ -1264,37 +1264,116 @@ fn test_render_only_discovery_plain() {
     );
     let mut args = default_scan_args();
     args.format = "plain".to_string();
-    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
+    let outcome = render_only_discovery(
+        &args,
+        &host_group(vec![target]),
+        &make_scan_state(vec![]),
+        &[],
+    )
+    .await;
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
-#[test]
-fn test_render_only_discovery_json() {
+#[tokio::test]
+async fn test_render_only_discovery_json() {
     let target = target_with_params(
         "https://example.com",
         vec![make_param("q", Location::Query)],
     );
     let mut args = default_scan_args();
     args.format = "json".to_string();
-    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
+    let outcome = render_only_discovery(
+        &args,
+        &host_group(vec![target]),
+        &make_scan_state(vec![]),
+        &[],
+    )
+    .await;
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
-#[test]
-fn test_render_only_discovery_jsonl() {
+#[tokio::test]
+async fn test_render_only_discovery_jsonl() {
     let target = target_with_params(
         "https://example.com",
         vec![make_param("q", Location::Query)],
     );
     let mut args = default_scan_args();
     args.format = "jsonl".to_string();
-    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
+    let outcome = render_only_discovery(
+        &args,
+        &host_group(vec![target]),
+        &make_scan_state(vec![]),
+        &[],
+    )
+    .await;
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // output.rs — render_dry_run (async; needs ScanState)
 // ─────────────────────────────────────────────────────────────────────────
+
+/// A dead host or typo'd URL must not read as a clean pass in the preview
+/// modes either: every input target skipped => Error, and the skip codes are in
+/// the report. A partial skip stays Clean.
+#[tokio::test]
+async fn previews_exit_error_when_every_target_was_skipped() {
+    let all = vec![
+        "http://127.0.0.1:1/x".to_string(),
+        "http://127.0.0.1:1/y".to_string(),
+    ];
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.output = Some(temp_out_path("preview_all_skipped"));
+
+    let state = make_scan_state(vec![]);
+    {
+        let mut skipped = state.skipped_targets.lock().await;
+        skipped.insert(all[0].clone(), crate::cmd::error_codes::CONNECTION_FAILED);
+        skipped.insert(
+            all[1].clone(),
+            crate::cmd::error_codes::DNS_RESOLUTION_FAILED,
+        );
+    }
+    let none = host_group(vec![]);
+    let read_report = || {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(args.output.as_ref().unwrap()).unwrap())
+                .unwrap();
+        v
+    };
+
+    let outcome = render_only_discovery(&args, &none, &state, &all).await;
+    assert!(matches!(outcome, ScanOutcome::Error));
+    let report = read_report();
+    assert_eq!(report["meta"]["targets_skipped"], 2);
+    assert_eq!(report["meta"]["skipped"][0]["target"], all[0]);
+    assert_eq!(
+        report["meta"]["skipped"][0]["error_code"],
+        "CONNECTION_FAILED"
+    );
+
+    let outcome = render_dry_run(&args, &none, &state, &all).await;
+    assert!(matches!(outcome, ScanOutcome::Error));
+    let report = read_report();
+    assert_eq!(
+        report["meta"]["skipped"][1]["error_code"],
+        "DNS_RESOLUTION_FAILED"
+    );
+
+    // One survivor => not "everything skipped".
+    let mixed: Vec<String> = all
+        .iter()
+        .cloned()
+        .chain(["http://127.0.0.1:1/z".to_string()])
+        .collect();
+    let outcome = render_only_discovery(&args, &none, &state, &mixed).await;
+    assert!(matches!(outcome, ScanOutcome::Clean));
+    let outcome = render_dry_run(&args, &none, &state, &mixed).await;
+    assert!(matches!(outcome, ScanOutcome::Clean));
+    let _ = std::fs::remove_file(args.output.as_ref().unwrap());
+}
 
 /// `--dry-run` must quote the same number REST / MCP preflight do: both the
 /// reflection and the DOM-verification halves, nothing for fragment params.
@@ -1339,7 +1418,7 @@ async fn test_render_dry_run_plain() {
     args.format = "plain".to_string();
     args.targets = vec!["https://example.com".to_string()];
     let state = make_scan_state(vec![]);
-    let outcome = render_dry_run(&args, &host_group(vec![target]), &state).await;
+    let outcome = render_dry_run(&args, &host_group(vec![target]), &state, &[]).await;
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
@@ -1356,7 +1435,7 @@ async fn test_render_dry_run_json_with_encoders() {
     args.encoders = vec!["url".to_string(), "html".to_string()];
     args.max_payloads_per_param = 5;
     let state = make_scan_state(vec![]);
-    let outcome = render_dry_run(&args, &host_group(vec![target]), &state).await;
+    let outcome = render_dry_run(&args, &host_group(vec![target]), &state, &[]).await;
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
@@ -1370,7 +1449,7 @@ async fn test_render_dry_run_warns_on_unresolved_explicit_params() {
     args.targets = vec!["https://example.com".to_string()];
     args.param = vec!["seg:path".to_string()];
     let state = make_scan_state(vec![]);
-    let outcome = render_dry_run(&args, &host_group(vec![target]), &state).await;
+    let outcome = render_dry_run(&args, &host_group(vec![target]), &state, &[]).await;
     assert!(matches!(outcome, ScanOutcome::Clean));
     // Ensure the helper itself flags the unsynthesizable spec (source of warnings).
     let missing = crate::parameter_analysis::unresolved_explicit_param_specs(
@@ -3301,8 +3380,8 @@ fn test_finalize_scan_args_folds_globals_and_expands_include_all() {
 // ─────────────────────────────────────────────────────────────────────────
 
 #[cfg(unix)]
-#[test]
-fn test_output_report_file_is_created_private() {
+#[tokio::test]
+async fn test_output_report_file_is_created_private() {
     use std::os::unix::fs::PermissionsExt;
 
     let path = std::env::temp_dir().join(format!(
@@ -3328,7 +3407,9 @@ fn test_output_report_file_is_created_private() {
         &args,
         &host_group(vec![target.clone()]),
         &make_scan_state(vec![]),
-    );
+        &[],
+    )
+    .await;
     assert!(matches!(outcome, ScanOutcome::Clean));
 
     // A report carries the raw request under --include-request, headers and
@@ -3338,7 +3419,13 @@ fn test_output_report_file_is_created_private() {
 
     // Re-running still overwrites in place rather than appending.
     let first_len = std::fs::metadata(&path).unwrap().len();
-    let outcome = render_only_discovery(&args, &host_group(vec![target]), &make_scan_state(vec![]));
+    let outcome = render_only_discovery(
+        &args,
+        &host_group(vec![target]),
+        &make_scan_state(vec![]),
+        &[],
+    )
+    .await;
     assert!(matches!(outcome, ScanOutcome::Clean));
     assert_eq!(std::fs::metadata(&path).unwrap().len(), first_len);
 

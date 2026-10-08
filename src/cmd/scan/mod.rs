@@ -578,12 +578,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // --dry-run: report what would be scanned without sending attack payloads.
     if args.dry_run {
-        return output::render_dry_run(args, &host_groups, &state).await;
+        return output::render_dry_run(args, &host_groups, &state, &all_target_urls).await;
     }
 
     // --only-discovery: print discovered params and exit early.
     if args.only_discovery {
-        return output::render_only_discovery(args, &host_groups, &state);
+        return output::render_only_discovery(args, &host_groups, &state, &all_target_urls).await;
     }
 
     // Computed once here so the scan loop and the end-of-scan renderer agree on
