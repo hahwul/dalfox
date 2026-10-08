@@ -659,8 +659,9 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
         // `error_message` counts as target-derived: a scan whose authenticated
         // session died reports the URL the *origin* redirected it to, so the
         // banner has to ride along even on a body with no findings at all.
-        let carries_target_content =
-            results_slice.as_ref().is_some_and(|r| !r.is_empty()) || job.error_message.is_some();
+        let carries_target_content = results_slice.as_ref().is_some_and(|r| !r.is_empty())
+            || job.error_message.is_some()
+            || !job.warnings.is_empty();
         let mut out = serde_json::json!({
             "scan_id": scan_id,
             "target": job.target_url,
@@ -688,6 +689,11 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
         if let Some(ref err_msg) = job.error_message {
             out["error_message"] = serde_json::json!(err_msg);
         }
+        // Absent (not `[]`) when there is nothing to report, so a clean job's
+        // shape is unchanged.
+        if !job.warnings.is_empty() {
+            out["warnings"] = serde_json::json!(job.warnings);
+        }
         // Cancellation publishes a terminal status before the worker has
         // necessarily released its lease, so poll advice stays non-zero until
         // `settled` and a client can safely retry delete_scan_dalfox.
@@ -713,7 +719,9 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
             open_world_hint = false
         ),
         description = "Poll scan status and retrieve results by scan_id. \
-Returns {scan_id, target, status, settled, results, pagination, progress}. \
+Returns {scan_id, target, status, settled, results, pagination, progress}, plus \
+warnings when a non-fatal condition (blind_oob never armed, session monitoring \
+inactive, params capped) means a zero-finding done is not proof of a clean target. \
 Status is one of: queued, running, done, error, cancelled. \
 When done, results is an array of findings. Each finding includes: type \
 (V=Vulnerable, A=AST-detected, R=Reflected, I=Informational), type_description, \

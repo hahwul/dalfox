@@ -385,6 +385,12 @@ at the end; if the session expired in between, the scan settles
 nothing was really tested. Monitoring costs nothing when no credentials and no
 `session_check` are passed.
 
+Problems that don't fail the scan still reach you: the result adds a `warnings`
+list (absent when empty) for conditions such as `blind_oob` failing to register
+with any server, a `session_check` baseline that could not be captured
+(monitoring inactive), or the discovered-parameter cap. A `done` scan with zero
+findings and a non-empty `warnings` is not proof of a clean target.
+
 ### `list_scans_dalfox`
 
 List every tracked scan, newest first. All arguments are optional:

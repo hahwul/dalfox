@@ -146,6 +146,7 @@ pub(crate) async fn get_result_handler(
                 status: j.status.clone(),
                 results: j.results.as_deref().map(Vec::as_slice),
                 error_message: j.error_message.clone(),
+                warnings: &j.warnings,
                 progress: progress_data,
                 queued_at_ms: j.queued_at_ms,
                 started_at_ms: j.started_at_ms,

@@ -324,6 +324,10 @@ pub(crate) struct ResultPayload<'a> {
     pub(crate) results: Option<&'a [SanitizedResult]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error_message: Option<String>,
+    /// Non-fatal conditions the caller must weigh before calling the scan
+    /// clean (blind_oob never armed, session monitoring inactive, …).
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    pub(crate) warnings: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) progress: Option<ProgressPayload>,
     pub(crate) queued_at_ms: i64,

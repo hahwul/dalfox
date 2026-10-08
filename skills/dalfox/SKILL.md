@@ -86,7 +86,8 @@ The **server and MCP** surfaces monitor too, on the same trigger (a `cookie` /
 `Authorization` header on the scan request). They have no `meta` envelope, so a
 scan whose session died settles `status: "error"` with an `error_message`
 starting `SESSION_LOST:`. Same rule for you: on a scan that returns zero
-findings, check `status` before saying the target is clean.
+findings, check `status` — and any `warnings` (e.g. blind_oob never armed,
+session monitoring inactive) — before saying the target is clean.
 
 Two ways to catch blind XSS:
 - `--blind <url>` / MCP+server `blind_callback_url` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.

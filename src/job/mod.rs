@@ -472,6 +472,22 @@ pub(crate) fn normalize_session_check(
     Ok(())
 }
 
+/// Cap on [`Job::warnings`] entries; past it further warnings are dropped (the
+/// server/MCP log still records them).
+pub(crate) const MAX_JOB_WARNINGS: usize = 32;
+
+/// Append a warning to a job's list: sanitized (messages quote target- and
+/// server-derived bytes), deduplicated, and capped at [`MAX_JOB_WARNINGS`].
+pub(crate) fn push_job_warning(warnings: &mut Vec<String>, msg: &str) {
+    if warnings.len() >= MAX_JOB_WARNINGS {
+        return;
+    }
+    let msg = crate::utils::log::sanitize_log_message(msg).into_owned();
+    if !warnings.contains(&msg) {
+        warnings.push(msg);
+    }
+}
+
 /// Scan options borrowed from a REST body or an MCP tool call, for
 /// [`ScanOptionChecks::validate`] — the one bounds/normalization pass every
 /// agent-facing surface runs before queuing work. `None` / empty means
@@ -730,6 +746,11 @@ pub(crate) struct Job {
     pub progress: JobProgress,
     pub cancelled: Arc<AtomicBool>,
     pub error_message: Option<String>,
+    /// Non-fatal conditions the caller must see to read the result honestly
+    /// (blind_oob never armed, session monitoring inactive, params capped…).
+    /// A `done` scan with zero findings is only "clean" if this is empty.
+    /// Bounded and deduplicated by [`push_job_warning`].
+    pub warnings: Vec<String>,
     /// The original target URL submitted for scanning.
     pub target_url: String,
     /// Optional webhook URL to POST results to. REST-server only.
@@ -783,6 +804,7 @@ impl Job {
             progress: JobProgress::default(),
             cancelled: Arc::new(AtomicBool::new(false)),
             error_message: None,
+            warnings: Vec::new(),
             target_url,
             callback_url: None,
             queued_at_ms: now_ms(),

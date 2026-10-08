@@ -136,6 +136,8 @@ Terminal jobs auto-purge after 1 hour.
 - `session_check` must be a valid regex; `session_check_url` must be an absolute `http(s)://` URL
 - `remote_payloads` / `remote_wordlists` must name registered providers (`portswigger`, `payloadbox` / `burp`, `assetnote`)
 
+**`warnings`**: `get_results_dalfox` (and `wait=true`) adds a `warnings` string list when a non-fatal condition weakens the result — `blind_oob` failed to register, a `session_check` baseline could not be captured (monitoring inactive), params were capped. Absent when empty.
+
 **Encoder normalization**: If `"none"` is present anywhere, the list becomes `["none"]` only.
 
 **Unknown field names are refused, not ignored.** A key the tool does not recognise comes back as a JSON-RPC `invalid_params` error (`-32602`) naming it and listing every accepted one — there is no `scan_id`, so nothing ran. This is deliberate: a misspelled `cookies` used to be dropped silently, and the scan then ran unauthenticated and reported `status: "done"` with zero findings, which is indistinguishable from a real clean result.

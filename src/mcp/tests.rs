@@ -4548,3 +4548,36 @@ async fn cancelling_a_preflight_call_stops_the_analysis() {
         "a follow-up preflight must still run after a cancelled one freed its permit: {resp}"
     );
 }
+
+/// `get_results_dalfox` carries a job's `warnings` (so "OOB never armed" is not
+/// read as a clean scan), and a job without any has no `warnings` key at all.
+#[test]
+fn get_results_exposes_warnings_only_when_present() {
+    let mcp = DalfoxMcp::new();
+    let mut warned = test_job(JobStatus::Done, Some(Vec::new()));
+    warned.warnings = vec!["blind_oob disabled (could not register with any server)".into()];
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        jobs.insert("warned".into(), warned);
+        jobs.insert("clean".into(), test_job(JobStatus::Done, Some(Vec::new())));
+    }
+
+    let out = mcp.results_json_for_scan("warned", 0, 0).expect("known id");
+    assert_eq!(
+        out["warnings"][0],
+        "blind_oob disabled (could not register with any server)"
+    );
+    assert!(
+        out.get(UNTRUSTED_CONTENT_KEY).is_some(),
+        "warnings quote server-derived text, so the provenance banner rides along"
+    );
+    let clean = mcp.results_json_for_scan("clean", 0, 0).expect("known id");
+    assert!(
+        clean.get("warnings").is_none(),
+        "no warnings => no key: {clean}"
+    );
+    // The published outputSchema mirror must accept both shapes.
+    for body in [out, clean] {
+        serde_json::from_value::<outputs::ScanStatusOut>(body).expect("matches outputSchema");
+    }
+}

@@ -93,6 +93,8 @@ pub(crate) struct ScanRun {
     pub(crate) session_lost: Option<String>,
     /// The scan stopped at [`super::MAX_FINDINGS_PER_JOB`] (`deep_scan` only).
     pub(crate) findings_capped: bool,
+    /// Every warning the run raised, for [`super::Job::warnings`].
+    pub(crate) warnings: Vec<String>,
 }
 
 impl ScanRun {
@@ -141,6 +143,9 @@ impl ScanRun {
         append_note: bool,
     ) -> JobStatus {
         job.results = Some(results);
+        for w in &self.warnings {
+            super::push_job_warning(&mut job.warnings, w);
+        }
         if job.status != JobStatus::Cancelled {
             job.status = if self.was_cancelled {
                 JobStatus::Cancelled
@@ -269,6 +274,18 @@ pub(crate) async fn execute_scan(
 ) -> ScanRun {
     let args = args.clone();
     let cancel_flag = cancel_flag.clone();
+    // Every warning is also recorded for the job record (`Job::warnings`), not
+    // only logged: a server/MCP caller never sees the operator log, so "OOB
+    // never armed" or "session monitoring inactive" would otherwise read as a
+    // clean scan. Shadows the parameter so every call site below does both.
+    let job_warnings = std::sync::Mutex::new(Vec::<String>::new());
+    let warn = |msg: &str| {
+        warn(msg);
+        super::push_job_warning(
+            &mut job_warnings.lock().unwrap_or_else(|e| e.into_inner()),
+            msg,
+        );
+    };
     let results = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
     // Per-job WAF consecutive-block counter so one scan's WAF backoff doesn't
     // throttle an unrelated scan.
@@ -800,5 +817,6 @@ pub(crate) async fn execute_scan(
         panicked,
         session_lost,
         findings_capped: scan_report.limit_stopped,
+        warnings: std::mem::take(&mut *job_warnings.lock().unwrap_or_else(|e| e.into_inner())),
     }
 }

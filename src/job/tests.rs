@@ -1277,6 +1277,7 @@ fn async_jobs_cap_findings_and_say_so() {
         worker_panics: 0,
         session_lost: None,
         findings_capped: true,
+        warnings: Vec::new(),
     };
     let mut job = Job::new_queued("http://t/".into());
     assert_eq!(
@@ -1544,6 +1545,105 @@ async fn execute_scan_surfaces_session_loss_like_the_cli() {
     );
 }
 
+/// The silent-clean guard for the two new soft failures: an OOB server that
+/// refuses registration and a `session_check_url` whose baseline cannot be
+/// captured must each leave a warning on the job record (not only in the
+/// operator log), and the REST result payload must expose them — while a job
+/// with no warnings carries no `warnings` key at all.
+#[tokio::test]
+async fn soft_failures_surface_as_job_warnings() {
+    use axum::{Router, routing::get};
+
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, Router::new().route("/", get(|| async { "ok" }))).await;
+    });
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        timeout: 2,
+        // Nothing listens on port 1: registration and the baseline probe fail.
+        session_check_url: Some("http://127.0.0.1:1/me".to_string()),
+        oob: crate::cmd::scan::BlindOobArgs {
+            blind_oob: Some(vec!["http://127.0.0.1:1".to_string()]),
+            blind_oob_secret: None,
+            blind_oob_wait: Some(0),
+        },
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+
+    let mut job = Job::new_queued(format!("http://{addr}/"));
+    job.status = JobStatus::Running;
+    run.settle(&mut job, Arc::new(Vec::new()), 0, false);
+    assert!(
+        job.warnings
+            .iter()
+            .any(|w| w.contains("blind_oob disabled")),
+        "OOB registration failure must be on the job: {:?}",
+        job.warnings
+    );
+    assert!(
+        job.warnings
+            .iter()
+            .any(|w| w.contains("session-loss monitoring is INACTIVE")),
+        "an unusable session baseline must be on the job: {:?}",
+        job.warnings
+    );
+
+    let payload = |j: &Job| {
+        serde_json::to_value(crate::server::types::ResultPayload {
+            target: j.target_url.clone(),
+            status: j.status.clone(),
+            results: None,
+            error_message: None,
+            warnings: &j.warnings,
+            progress: None,
+            queued_at_ms: 0,
+            started_at_ms: None,
+            finished_at_ms: None,
+            duration_ms: None,
+        })
+        .expect("serialize")
+    };
+    assert!(
+        payload(&job)["warnings"]
+            .as_array()
+            .is_some_and(|a| a.len() >= 2)
+    );
+    let clean = Job::new_queued("http://t/".into());
+    assert!(payload(&clean).get("warnings").is_none());
+}
+
+#[test]
+fn push_job_warning_dedups_caps_and_sanitizes() {
+    let mut w = Vec::new();
+    push_job_warning(&mut w, "same");
+    push_job_warning(&mut w, "same");
+    assert_eq!(w.len(), 1, "identical messages are deduplicated");
+    push_job_warning(&mut w, "x\r\n[ERR] forged");
+    assert!(
+        !w[1].contains('\n') && !w[1].contains('\r'),
+        "sanitized: {:?}",
+        w[1]
+    );
+    for i in 0..100 {
+        push_job_warning(&mut w, &format!("w{i}"));
+    }
+    assert_eq!(w.len(), MAX_JOB_WARNINGS, "bounded");
+}
+
 /// `force_waf` needs no fingerprint at all; `waf_bypass=off` keeps detection
 /// but must not arm the bypass state.
 #[tokio::test]
@@ -1655,6 +1755,7 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         worker_panics: 0,
         session_lost: None,
         findings_capped: false,
+        warnings: Vec::new(),
     };
     let note = "scan exceeded scan_timeout (5s); returning partial results";
     for (prior, append, want) in [
