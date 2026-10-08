@@ -3399,6 +3399,50 @@ async fn a_worker_panic_fails_the_target_instead_of_reading_clean() {
     );
 }
 
+/// Blind payloads are stored attack traffic. A target the
+/// `--max-targets-per-host` cap reports as skipped must not receive them.
+#[tokio::test]
+async fn blind_dispatch_respects_per_host_cap() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let s = seen.clone();
+    let app = Router::new().fallback(any(move |uri: axum::http::Uri| {
+        let s = s.clone();
+        async move {
+            s.lock().unwrap().push(uri.path().to_string());
+            ([("content-type", "text/html")], "<html>ok</html>")
+        }
+    }));
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let args = ScanArgs {
+        targets: vec![
+            format!("http://{addr}/one?a=1"),
+            format!("http://{addr}/two?b=1"),
+            format!("http://{addr}/three?c=1"),
+        ],
+        max_targets_per_host: 1,
+        blind_callback_url: Some("https://cb.example/x".to_string()),
+        skip_mining: true,
+        skip_discovery: true,
+        skip_waf_probe: true,
+        ..default_scan_args()
+    };
+    let _ = super::run_scan(&args).await;
+    server.abort();
+
+    let seen = seen.lock().unwrap();
+    assert!(seen.iter().any(|p| p == "/one"), "kept target is scanned");
+    assert!(
+        !seen.iter().any(|p| p == "/two" || p == "/three"),
+        "capped-out targets must receive no requests, saw {seen:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_session_marker_beyond_the_preflight_range_does_not_fail_the_scan() {
     let _serial = RUN_SCAN_LOCK.lock().await;

@@ -44,7 +44,7 @@ fn host_group_slots(max_concurrent_targets: usize) -> usize {
 /// cheapest way to notice the flip. The poll only runs while a target's
 /// `--scan-timeout` is in effect and stops the moment that target's scan
 /// future completes (the `select!` drops this arm).
-async fn poll_cancel(flag: &AtomicBool) {
+pub(super) async fn poll_cancel(flag: &AtomicBool) {
     while !flag.load(Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

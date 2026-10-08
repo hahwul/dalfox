@@ -533,8 +533,6 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         streamed_findings: Arc::new(Mutex::new(std::collections::HashSet::new())),
     };
 
-    let oob_session = blind::arm_and_dispatch(args, &host_groups).await;
-
     // Targets entering preflight, so the ones it drops can be told apart from
     // the ones that go on to be scanned. Only materialized when `--state-file`
     // is on — on a 50k-URL list this is two strings per target.
@@ -546,6 +544,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             .collect(),
         None => Vec::new(),
     };
+
+    // Blind payloads are stored attack traffic: apply `--max-targets-per-host`
+    // first so capped-out targets (reported as skipped) never receive them.
+    analysis::apply_per_host_cap(args, &mut host_groups, &state.skipped_targets).await;
+    let oob_session = blind::arm_and_dispatch(args, &host_groups, &cancel_flag).await;
 
     // Preflight + parameter analysis for every target (bounded concurrency);
     // replaces each host group with the targets that survived preflight.

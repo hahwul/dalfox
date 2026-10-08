@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::args::ScanArgs;
 use super::logging::{log_info, log_warn};
@@ -18,6 +19,7 @@ use crate::target_parser::Target;
 pub(crate) async fn arm_and_dispatch(
     args: &ScanArgs,
     host_groups: &BTreeMap<String, Vec<Target>>,
+    cancel_flag: &AtomicBool,
 ) -> Option<Arc<crate::oob::OobSession>> {
     // Blind XSS: the static `-b/--blind` callback and/or OOB/OAST (interactsh)
     // callbacks. Skipped in preview-only modes — `--dry-run` (which advertises
@@ -74,8 +76,15 @@ pub(crate) async fn arm_and_dispatch(
             );
         }
         let custom = args.custom_blind_xss_payload.as_deref();
-        for group in host_groups.values() {
+        // Serial by design, but Ctrl-C must not wait out the whole phase: the
+        // flag is checked per target and also races the in-flight requests,
+        // so the first SIGINT drops the current target's request and moves on
+        // to the graceful drain.
+        'dispatch: for group in host_groups.values() {
             for target in group {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    break 'dispatch;
+                }
                 let source = match (&args.blind_callback_url, &oob_session) {
                     (Some(url), Some(session)) => crate::scanning::CallbackSource::Both {
                         url: url.as_str(),
@@ -86,11 +95,95 @@ pub(crate) async fn arm_and_dispatch(
                     // Guarded by the enclosing `if`: at least one is Some.
                     (None, None) => continue,
                 };
-                crate::scanning::blind_scanning_with(target, source, custom).await;
-                crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                tokio::select! {
+                    _ = async {
+                        crate::scanning::blind_scanning_with(target, source, custom).await;
+                        crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                    } => {}
+                    _ = super::scan_loop::poll_cancel(cancel_flag) => break 'dispatch,
+                }
             }
         }
     }
 
     oob_session
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::Router;
+    use axum::routing::any;
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
+
+    /// Server that counts requests and optionally stalls each one.
+    async fn spawn_counting_server(stall: Duration) -> (String, Arc<AtomicUsize>) {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let h = hits.clone();
+        let app = Router::new().fallback(any(move || {
+            let h = h.clone();
+            async move {
+                h.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(stall).await;
+                "ok"
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}/?q=1"), hits)
+    }
+
+    fn setup(url: &str) -> (ScanArgs, BTreeMap<String, Vec<Target>>) {
+        let args = ScanArgs {
+            blind_callback_url: Some("https://cb.example/x".to_string()),
+            silence: true,
+            insecure: Some(true),
+            ..Default::default()
+        };
+        let mut groups = BTreeMap::new();
+        groups.insert(
+            "h".to_string(),
+            vec![crate::target_parser::parse_target(url).unwrap()],
+        );
+        (args, groups)
+    }
+
+    #[tokio::test]
+    async fn cancelled_flag_stops_blind_dispatch() {
+        let _serial = crate::REQUEST_COUNTER_TEST_LOCK.lock().await;
+        let (url, hits) = spawn_counting_server(Duration::ZERO).await;
+        let (args, groups) = setup(&url);
+
+        arm_and_dispatch(&args, &groups, &AtomicBool::new(false)).await;
+        assert!(hits.load(Ordering::SeqCst) > 0, "control: dispatch sends");
+
+        hits.store(0, Ordering::SeqCst);
+        arm_and_dispatch(&args, &groups, &AtomicBool::new(true)).await;
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "cancelled before dispatch");
+    }
+
+    #[tokio::test]
+    async fn cancel_interrupts_an_in_flight_blind_request() {
+        let _serial = crate::REQUEST_COUNTER_TEST_LOCK.lock().await;
+        let (url, hits) = spawn_counting_server(Duration::from_secs(30)).await;
+        let (args, groups) = setup(&url);
+        let flag = Arc::new(AtomicBool::new(false));
+        let f = flag.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            f.store(true, Ordering::Relaxed);
+        });
+        let started = std::time::Instant::now();
+        arm_and_dispatch(&args, &groups, &flag).await;
+        assert!(hits.load(Ordering::SeqCst) >= 1);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "first Ctrl-C must not wait out the stalled request: {:?}",
+            started.elapsed()
+        );
+    }
 }
