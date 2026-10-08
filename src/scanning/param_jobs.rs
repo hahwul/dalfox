@@ -32,16 +32,10 @@ pub(crate) fn estimate_param_requests(
         let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
         html_len + js_len
     };
-    let dom_len = match &p.injection_context {
-        // A JS-context param gets no DOM-verification pass.
-        Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => 0,
-        Some(ctx) => crate::scanning::xss_common::generate_dynamic_payloads(ctx).len() * enc_factor,
-        None => {
-            (crate::payload::get_dynamic_xss_html_payloads().len()
-                + crate::payload::get_dynamic_xss_attribute_payloads().len())
-                * enc_factor
-        }
-    };
+    // The exact set `generate_param_jobs` builds (JS-context breakouts, adaptive
+    // variants, the JSONP verifiers every context gets), so the estimate cannot
+    // drift from it. Pure — safe to call from the estimator.
+    let dom_len = get_dom_payloads(p, scan_args).map_or(0, |v| v.len());
     apply_cap(refl_len).saturating_add(apply_cap(dom_len))
 }
 /// === Stage 4: Payload Generation — build per-parameter payload sets ===

@@ -406,9 +406,11 @@ pub(crate) fn build_hpp_url(
     };
     let fragment = base.fragment();
 
-    let safe_value = &param.value;
+    // The key the server reads. A nested-field param (`qs[a]`, JSON/base64 in
+    // `qs`) is addressed by its wire key, like `build_injected_url` does.
+    let key = param.effective_wire_name();
 
-    let mut result = String::with_capacity(base_str.len() + injected.len() + param.name.len() + 32);
+    let mut result = String::with_capacity(base_str.len() + injected.len() + key.len() + 32);
     result.push_str(prefix);
     result.push('?');
 
@@ -418,12 +420,12 @@ pub(crate) fn build_hpp_url(
         HppPosition::First => [true, false],
         HppPosition::Both => [true, true],
     };
-    let push_hpp_pairs = |result: &mut String| {
+    let push_hpp_pairs = |result: &mut String, safe_value: &str| {
         for (i, is_payload) in order.into_iter().enumerate() {
             if i > 0 {
                 result.push('&');
             }
-            encode_decoded_query_component_into(&param.name, result);
+            encode_decoded_query_component_into(key, result);
             result.push('=');
             if is_payload {
                 encode_query_component_preserving_pct_into(injected, result);
@@ -442,9 +444,16 @@ pub(crate) fn build_hpp_url(
             result.push('&');
         }
         first = false;
-        if k == param.name && !replaced {
+        if k == key && !replaced {
             replaced = true;
-            push_hpp_pairs(&mut result);
+            // A nested param's `param.value` is the leaf, not a value the server
+            // can decode from `key`; decoy with the pair's own original value.
+            let decoy: &str = if param.wire_name.is_some() {
+                &v
+            } else {
+                &param.value
+            };
+            push_hpp_pairs(&mut result, decoy);
         } else {
             encode_decoded_query_component_into(&k, &mut result);
             result.push('=');
@@ -457,7 +466,7 @@ pub(crate) fn build_hpp_url(
         if !first {
             result.push('&');
         }
-        push_hpp_pairs(&mut result);
+        push_hpp_pairs(&mut result, &param.value);
     }
 
     if let Some(frag) = fragment {
