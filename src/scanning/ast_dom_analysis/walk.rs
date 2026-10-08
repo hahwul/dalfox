@@ -432,7 +432,25 @@ impl<'a> DomXssVisitor<'a> {
         // escape handling below. Only the shadowed parameter names are lifted
         // out for the walk and put back afterwards.
         let mut shadowed_globals = Vec::new();
-        for name in &param_names {
+        // A body-level `var q`/`let q` owns `q` for the whole body (hoisting),
+        // so the outer `q`'s taint must not read through `var q = 'static'`.
+        // Only the body's own top level: a `let` in a nested block would
+        // wrongly hide the outer binding from code outside that block.
+        let mut own_names: HashSet<String> = param_names.iter().cloned().collect();
+        for stmt in statements {
+            match stmt {
+                Statement::VariableDeclaration(decl) => {
+                    for declarator in &decl.declarations {
+                        Self::collect_binding_pattern_strs(&declarator.id, &mut own_names);
+                    }
+                }
+                Statement::FunctionDeclaration(func) => {
+                    own_names.extend(func.id.iter().map(|id| id.name.to_string()));
+                }
+                _ => {}
+            }
+        }
+        for name in &own_names {
             self.tainted_vars.remove(name.as_str());
             self.var_aliases.remove(name.as_str());
             if self.global_taints.remove(name.as_str()) {
