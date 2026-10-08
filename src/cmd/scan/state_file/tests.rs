@@ -707,3 +707,22 @@ fn target_identity_ignores_only_run_wide_credential_values() {
         "captures differing only by Authorization are distinct requests"
     );
 }
+
+// `-H 'Cookie: …'` is lifted into `target.cookies` at target resolution, so a
+// rotated session in that header must still resume rather than reset.
+#[test]
+fn target_identity_ignores_rotated_cookie_header_values() {
+    let identity = |sid: &str| {
+        let args = ScanArgs {
+            headers: vec![format!("Cookie: sid={sid}; lang=en")],
+            ..Default::default()
+        };
+        let mut t = test_target("http://example.test/a?q=1", "GET");
+        t.cookies = vec![
+            ("sid".to_string(), sid.to_string()),
+            ("lang".to_string(), "en".to_string()),
+        ];
+        target_identity(&t, &CliCredentials::from_args(&args))
+    };
+    assert_eq!(identity("a"), identity("b"));
+}

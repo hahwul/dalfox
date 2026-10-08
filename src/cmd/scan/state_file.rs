@@ -139,6 +139,12 @@ impl CliCredentials {
                 creds
                     .headers
                     .insert((n.trim().to_ascii_lowercase(), v.trim().to_string()));
+                // Target resolution lifts `-H 'Cookie: …'` into `target.cookies`
+                // (`job::lift_cookie_headers`), where the pairs are hashed by
+                // value unless they are listed here too.
+                if n.trim().eq_ignore_ascii_case("cookie") {
+                    creds.cookies.extend(crate::job::split_cookie_pairs(v));
+                }
             }
         }
         for c in &args.cookies {
