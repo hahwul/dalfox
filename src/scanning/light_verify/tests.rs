@@ -124,8 +124,31 @@ async fn reflect_multipart(body: String) -> Html<String> {
     Html(format!("<html><body>{}</body></html>", body))
 }
 
+/// Reflects the base64-decoded `q`, like an app that decodes its input.
+async fn reflect_base64_decoded(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    use base64::Engine as _;
+    let raw = params.get("q").cloned().unwrap_or_default();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(raw)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .unwrap_or_default();
+    Html(format!("<html><body>{decoded}</body></html>"))
+}
+
+/// A WAF-style block page: 403 with the raw value echoed.
+async fn blocked_echo(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FORBIDDEN,
+        Html(format!("<html><body>{q}</body></html>")),
+    )
+}
+
 async fn start_mock_server(class_marker: &str) -> SocketAddr {
     let app = Router::new()
+        .route("/b64", get(reflect_base64_decoded))
+        .route("/blocked", get(blocked_echo))
         .route("/reflect", get(reflect_html))
         .route("/marker-only", get(marker_only_html))
         .route("/truncate", get(truncate_before_handler))
@@ -446,4 +469,55 @@ async fn test_verify_dom_xss_light_multipart_body_injects_absent_param() {
 
     assert!(verified, "absent multipart param must still be injected");
     assert!(response.expect("response").contains(&payload));
+}
+
+/// The re-request must carry the param's pre-encoding like every other
+/// injection path; the raw payload decoded to garbage server-side, so the
+/// light check could never confirm a base64 param.
+#[tokio::test]
+async fn test_verify_dom_xss_light_applies_param_pre_encoding() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    let target = make_target(addr, "/b64", None, None);
+    let mut param = make_param(Location::Query, "q");
+    param.pre_encoding = Some("base64".to_string());
+    let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
+    let client = test_client();
+
+    let (verified, response, _note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+
+    assert!(
+        verified,
+        "the server decodes the base64 value to the payload"
+    );
+    assert!(response.expect("response").contains(&payload));
+}
+
+/// `--ignore-return`: a status the operator excluded must not verify, even
+/// when its body echoes the payload.
+#[tokio::test]
+async fn test_verify_dom_xss_light_honors_ignore_return() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    let mut target = make_target(addr, "/blocked", None, None);
+    let param = make_param(Location::Query, "q");
+    let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
+    let client = test_client();
+
+    let (verified, ..) = verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+    assert!(
+        verified,
+        "control: without --ignore-return the 403 echo verifies"
+    );
+
+    target.ignore_return = vec![403];
+    let (verified, response, note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+    assert!(!verified);
+    assert!(response.is_none());
+    assert_eq!(
+        note,
+        Some("status ignored — DOM verify skipped".to_string())
+    );
 }

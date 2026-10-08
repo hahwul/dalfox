@@ -915,6 +915,7 @@ impl ScanWorkerCtx {
                     crate::scanning::markers::bracketed_marker(),
                     probe_response_is_xml,
                     &mut state.ast_seen,
+                    self.cancel.as_deref(),
                 )
                 .await;
                 for f in &ast_findings {
@@ -1142,6 +1143,7 @@ impl ScanWorkerCtx {
                         reflection_payload,
                         xml_content_type,
                         &mut state.ast_seen,
+                        self.cancel.as_deref(),
                     )
                     .await;
                     for f in &ast_findings {
@@ -1952,8 +1954,13 @@ pub async fn run_scanning(
             // Bump the live completion counter after this parameter is fully
             // processed (covers every `scan_param` exit path, including the
             // non-reflective early return), so async front-ends observe
-            // `params_tested` advancing as each worker finishes.
-            if let Some(done) = &ctx.params_done {
+            // `params_tested` advancing as each worker finishes. Not once the
+            // scan is cancelled: every queued worker returns early then, and
+            // counting them would read a cancelled scan as 100% tested (the
+            // runner deliberately skips pinning `params_tested` for that).
+            if !ctx.cancelled()
+                && let Some(done) = &ctx.params_done
+            {
                 done.fetch_add(1, Ordering::Relaxed);
             }
         }));

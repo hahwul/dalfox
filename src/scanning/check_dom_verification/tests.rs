@@ -199,6 +199,27 @@ async fn waf_block_echo_handler(
     )
 }
 
+/// A block page that echoes the payload RAW with a 403 (an error template that
+/// reflects the request). Parses to a marker element, so only `--ignore-return`
+/// keeps it from verifying.
+async fn waf_block_raw_echo_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FORBIDDEN,
+        Html(format!("<div>Request blocked: {}</div>", q)),
+    )
+}
+
+/// `--sxss` retrieval page that answers with the stored payload but a 403.
+async fn sxss_blocked_handler(State(state): State<TestState>) -> impl IntoResponse {
+    (
+        StatusCode::FORBIDDEN,
+        Html(format!("<div>{}</div>", state.stored_payload)),
+    )
+}
+
 /// A whitelisting sanitizer: it *removes* the markup instead of escaping it, so
 /// our bytes never come back whole. Counting this would let the DOM phase
 /// retire before a late whitelisted verifier is reached.
@@ -247,6 +268,8 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         .route("/dom/server-error", get(server_error_handler))
         .route("/dom/escaped", get(escaped_echo_handler))
         .route("/dom/waf-block", get(waf_block_echo_handler))
+        .route("/dom/waf-block-raw", get(waf_block_raw_echo_handler))
+        .route("/sxss/blocked", get(sxss_blocked_handler))
         .route("/dom/sanitized", get(sanitizing_handler))
         .route("/sxss/html", get(sxss_html_handler))
         .route("/sxss/json", get(sxss_json_handler))
@@ -500,6 +523,59 @@ async fn test_dom_outcome_4xx_block_echo_is_not_reflected() {
         "a 4xx block page that echoes the payload must not advance the inert-echo budget"
     );
     assert_eq!(outcome.status, 403, "the 4xx status must be threaded out");
+}
+
+#[tokio::test]
+async fn test_dom_verification_honors_ignore_return() {
+    // The reflection phase drops `--ignore-return` statuses; the DOM phase used
+    // to verify (High severity) straight from the excluded response's body.
+    let payload = format!(
+        "<svg onload=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/waf-block-raw");
+    let param = make_param();
+    let mut args = default_scan_args();
+
+    let (verified, _) = dom_verify(&target, &param, &payload, &args).await;
+    assert!(
+        verified,
+        "control: without --ignore-return the 403 echo verifies"
+    );
+
+    args.ignore_return = vec![403];
+    let client = target.build_client_or_default();
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
+    assert!(!outcome.verified, "an ignored status must not verify");
+    assert!(outcome.response_text.is_none());
+    assert_eq!(outcome.status, 403, "the status is still threaded out");
+}
+
+#[tokio::test]
+async fn test_dom_verification_sxss_honors_ignore_return() {
+    let payload = format!(
+        "<img src=x onerror=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server(&payload).await;
+    let target = make_target(addr, "/dom/no-payload");
+    let param = make_param();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{}:{}/sxss/blocked", addr.ip(), addr.port()));
+
+    let (verified, _) = dom_verify(&target, &param, &payload, &args).await;
+    assert!(
+        verified,
+        "control: the 403 retrieval page verifies by default"
+    );
+
+    args.ignore_return = vec![403];
+    let (verified, _) = dom_verify(&target, &param, &payload, &args).await;
+    assert!(!verified, "an ignored retrieval status must not verify");
 }
 
 #[tokio::test]

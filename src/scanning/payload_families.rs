@@ -488,8 +488,10 @@ pub(crate) fn get_dom_payloads_for_context(
             if param.invalid_specials.is_some() || param.valid_specials.is_some() {
                 let invalid = param.invalid_specials.as_deref().unwrap_or_default();
                 let valid = param.valid_specials.as_deref().unwrap_or_default();
-                let payloads =
-                    crate::scanning::xss_common::generate_adaptive_payloads(ctx, invalid, valid);
+                let raw_only = args.encoders.iter().any(|e| e == "none");
+                let payloads = crate::scanning::xss_common::generate_adaptive_payloads(
+                    ctx, invalid, valid, raw_only,
+                );
                 return Ok(payloads);
             }
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
