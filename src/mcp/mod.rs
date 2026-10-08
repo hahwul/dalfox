@@ -40,7 +40,7 @@ use crate::{
     job::{
         JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_CONCURRENT_PREFLIGHT,
         MAX_RETAINED_SCANS_MCP, has_http_scheme, purge_expired_jobs as purge_jobs_map,
-        spec::ScanRequestSpec, split_cookie_pairs, unreachable_error_message,
+        spec::{BlindOobRequest, ScanRequestSpec}, split_cookie_pairs, unreachable_error_message,
     },
     scanning::result::SanitizedResult,
     target_parser::parse_target,
@@ -266,6 +266,10 @@ agent smoke tests. Use max_payloads_per_param to bound request volume. \
 Scans for reflected, DOM-based, and stored XSS using parameter analysis, \
 payload mutation, and AST-based JavaScript verification. \
 Supports custom headers, cookies, POST data, and encoding strategies. \
+For blind/stored XSS set blind_oob (managed interactsh OAST, poller bound to \
+the job) or blind_callback_url (your own listener). For an authenticated scan \
+set session_check so a session that dies mid-scan ends the job as error with \
+error_message \"SESSION_LOST: …\" instead of a false clean. \
 Findings carry three separate axes: type (V=Vulnerable, R=Reflected, \
 A=AST-detected, I=Informational), detection_method (reflection / \
 dom-verification / ast / oob / library), and severity — plus CWE, payload, \
@@ -316,6 +320,10 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
             remote_payloads,
             remote_wordlists,
             max_payloads_per_param,
+            mut blind_oob,
+            blind_oob_wait,
+            mut session_check,
+            mut session_check_url,
             wait,
             wait_timeout_sec,
         } = params;
@@ -353,6 +361,10 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
             cookies: &cookies,
             proxy: Some(&mut proxy),
             blind: Some((&mut blind_callback_url, "blind_callback_url")),
+            blind_oob: Some(&mut blind_oob),
+            blind_oob_wait,
+            session_check: Some(&mut session_check),
+            session_check_url: Some(&mut session_check_url),
         }
         .validate()
         .map_err(|e| ErrorData::invalid_params(e, None))?;
@@ -462,6 +474,10 @@ target, proxy, blind_callback_url, or include_* settings of a later call."
                 remote_payloads,
                 remote_wordlists,
                 max_payloads_per_param,
+                blind_oob: blind_oob.as_ref().and_then(BlindOobRequest::servers),
+                blind_oob_wait,
+                session_check,
+                session_check_url,
             }
             .into_scan_args(),
         );

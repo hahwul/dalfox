@@ -97,7 +97,11 @@ Terminal jobs auto-purge after 1 hour.
   "skip_ast_analysis": false,
   "analyze_external_js": false,                    // fetch same-origin <script src> bundles, AST-analyze (16 files / 512 KiB)
   "detect_outdated_libs": false,                   // also emit [I] findings for known-vulnerable JS libs (CWE-1104, 0 extra reqs)
-  "blind_callback_url": "https://xyz.interact.sh", // OOB `--blind-oob` lifecycle is CLI-only; MCP uses this callback URL
+  "blind_callback_url": "https://xyz.interact.sh", // you run the listener and watch it yourself
+  "blind_oob": true,                               // OR managed interactsh (OAST): true = public mesh, or ["oast.fun"]; poller lives/dies with the job
+  "blind_oob_wait": 30,                            // sec to keep polling for callbacks after the scan (0–600; counts against scan_timeout)
+  "session_check": "Sign out",                     // regex that must keep matching an authed response; a lost session → status "error", error_message "SESSION_LOST: …"
+  "session_check_url": "https://app/me",           // probe this instead of the target when checking the session
   "workers": 50,                                   // 1-500 (hard validated)
   "waf_bypass": "auto",                            // "auto" (detect then bypass) or "off" (detect only); "force" is accepted but acts like auto
   "skip_waf_probe": false,                         // skip the active WAF fingerprinting probe entirely
@@ -128,6 +132,8 @@ Terminal jobs auto-purge after 1 hour.
 - `waf_min_confidence` ∈ [0.0, 1.0]
 - `force_waf` must name a known WAF profile (same set the CLI `--force-waf` accepts)
 - `blind_callback_url` must be empty (= no blind XSS) or start with `http://` / `https://`
+- `blind_oob` is `true`/`false` or a list of interactsh hosts (≤ 8, each a valid host); `blind_oob_wait` ∈ [0, 600]
+- `session_check` must be a valid regex; `session_check_url` must be an absolute `http(s)://` URL
 - `remote_payloads` / `remote_wordlists` must name registered providers (`portswigger`, `payloadbox` / `burp`, `assetnote`)
 
 **Encoder normalization**: If `"none"` is present anywhere, the list becomes `["none"]` only.

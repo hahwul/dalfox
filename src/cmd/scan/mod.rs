@@ -62,7 +62,7 @@ pub(crate) use preflight::finish_waf_detection;
 // Shared with `job::normalize_proxy` so REST/MCP refuse the same unroutable
 // proxy values the CLI startup gate does. The CLI wrapper that also rejects
 // empty lives in `validation::validate_proxy_url`.
-pub(crate) use validation::check_routable_proxy;
+pub(crate) use validation::{check_routable_proxy, validate_http_url};
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 

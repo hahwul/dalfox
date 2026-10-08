@@ -320,6 +320,33 @@ pub(crate) struct ScanWithDalfoxParams {
     #[serde(default)]
     pub max_payloads_per_param: usize,
 
+    /// Out-of-band blind XSS via interactsh: `true` registers with the public
+    /// oast.* mesh, a list names the servers to try (e.g. ["oast.fun"]),
+    /// `false`/omitted leaves it off. Injects stored `<script src=...>`
+    /// payloads whose callbacks become V findings with detection_method=oob.
+    /// The callback poller runs only for this scan and stops when it finishes
+    /// or is cancelled. Default: off
+    #[serde(default)]
+    pub blind_oob: Option<crate::job::spec::BlindOobRequest>,
+
+    /// Seconds to keep polling for OOB callbacks after the scan's last
+    /// request (0-600; counts against scan_timeout). Default: 30
+    #[serde(default)]
+    #[schemars(range(max = 600))]
+    pub blind_oob_wait: Option<u64>,
+
+    /// Regex that must keep matching an authenticated response (e.g.
+    /// "Sign out"). Turns session-loss detection on even without cookies or an
+    /// Authorization header; a lost session ends the scan as error with an
+    /// error_message starting "SESSION_LOST:". Default: none
+    #[serde(default)]
+    pub session_check: Option<String>,
+
+    /// Probe this absolute http(s) URL instead of the target when checking the
+    /// session (e.g. an authenticated /api/me). Default: none
+    #[serde(default)]
+    pub session_check_url: Option<String>,
+
     /// When true, block until the scan reaches a terminal status (done / error
     /// / cancelled) or `wait_timeout_sec` elapses, then return the same shape
     /// as `get_results_dalfox` (includes results when available). When false

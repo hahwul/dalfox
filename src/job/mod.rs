@@ -359,6 +359,97 @@ pub(crate) fn validate_remote_providers(
     )
 }
 
+/// Upper bound on `blind_oob_wait` (seconds) accepted via scan options. The
+/// drain holds the job's worker and capacity slot while it waits for late
+/// callbacks, so an unbounded value would pin both; ten minutes is far past
+/// any callback a stored payload realistically produces within one job.
+pub(crate) const MAX_BLIND_OOB_WAIT_SECS: u64 = 600;
+
+/// Upper bound on the `blind_oob` server list. Registration tries them in
+/// order, each bounded by the scan `timeout`, so the list length is what
+/// bounds a dead-server registration stall. The public mesh is six.
+pub(crate) const MAX_BLIND_OOB_SERVERS: usize = 8;
+
+/// Validate and normalize a `blind_oob` request: each named server is trimmed,
+/// blanks are dropped (so `[""]` means the public mesh, like `--blind-oob=`),
+/// and every remaining entry must parse as a host the interactsh client can
+/// dial. Parsed with `url::Url` rather than pattern-matched — a host allowlist
+/// built from spellings was defeated by `oast.pro:0443` once already.
+pub(crate) fn normalize_blind_oob(
+    req: &mut Option<spec::BlindOobRequest>,
+) -> Result<(), String> {
+    let Some(spec::BlindOobRequest::Servers(list)) = req else {
+        return Ok(());
+    };
+    let cleaned: Vec<String> = list
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if cleaned.len() > MAX_BLIND_OOB_SERVERS {
+        return Err(format!(
+            "blind_oob names {} servers (max {})",
+            cleaned.len(),
+            MAX_BLIND_OOB_SERVERS
+        ));
+    }
+    for server in &cleaned {
+        // Same shape `oob::interactsh::split_server` dials: a bare host gets
+        // `https://`, an explicit http(s) scheme is kept.
+        let lower = server.to_ascii_lowercase();
+        let with_scheme = if lower.contains("://") {
+            server.clone()
+        } else {
+            format!("https://{server}")
+        };
+        let ok = url::Url::parse(&with_scheme).is_ok_and(|u| {
+            matches!(u.scheme(), "http" | "https")
+                && u.host_str()
+                    .is_some_and(|h| !h.trim_end_matches('.').is_empty())
+        });
+        if !ok {
+            return Err(format!(
+                "blind_oob server '{}' is not a valid interactsh host (expected e.g. \"oast.fun\" or \"https://oob.example.com\")",
+                crate::utils::log::sanitize_log_message(server)
+            ));
+        }
+    }
+    *list = cleaned;
+    Ok(())
+}
+
+/// Validate and normalize the session-check pair. Blank values mean "unset"
+/// (templated query strings send `?session_check=`); a regex that does not
+/// compile or a probe URL that is not absolute http(s) is refused up front,
+/// because both are only consulted when a probe fires — the CLI validates them
+/// at startup for the same reason (`cmd::scan::startup`).
+pub(crate) fn normalize_session_check(
+    pattern: &mut Option<String>,
+    probe_url: &mut Option<String>,
+) -> Result<(), String> {
+    if pattern.as_deref().is_some_and(|p| p.trim().is_empty()) {
+        *pattern = None;
+    }
+    if let Some(p) = pattern.as_deref() {
+        regex::Regex::new(p).map_err(|e| {
+            // regex errors quote the pattern, which is caller-supplied.
+            crate::utils::log::sanitize_log_message(&format!(
+                "session_check is not a valid regex: {e}"
+            ))
+            .into_owned()
+        })?;
+    }
+    *probe_url = probe_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string);
+    if let Some(u) = probe_url.as_deref() {
+        crate::cmd::scan::validate_http_url(u, "session_check_url")?;
+    }
+    Ok(())
+}
+
 /// Scan options borrowed from a REST body or an MCP tool call, for
 /// [`ScanOptionChecks::validate`] — the one bounds/normalization pass every
 /// agent-facing surface runs before queuing work. `None` / empty means
@@ -395,6 +486,10 @@ pub(crate) struct ScanOptionChecks<'a, F = f32> {
     pub proxy: Option<&'a mut Option<String>>,
     /// REST spells it `blind`, MCP `blind_callback_url`.
     pub blind: Option<(&'a mut Option<String>, &'static str)>,
+    pub blind_oob: Option<&'a mut Option<spec::BlindOobRequest>>,
+    pub blind_oob_wait: Option<u64>,
+    pub session_check: Option<&'a mut Option<String>>,
+    pub session_check_url: Option<&'a mut Option<String>>,
 }
 
 impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
@@ -486,6 +581,21 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
                 .transpose()?
                 .flatten();
         }
+        if let Some(b) = self.blind_oob {
+            normalize_blind_oob(b)?;
+        }
+        if let Some(w) = self.blind_oob_wait
+            && w > MAX_BLIND_OOB_WAIT_SECS
+        {
+            return Err(format!(
+                "blind_oob_wait must be between 0 and {} seconds (got {})",
+                MAX_BLIND_OOB_WAIT_SECS, w
+            ));
+        }
+        normalize_session_check(
+            self.session_check.unwrap_or(&mut None),
+            self.session_check_url.unwrap_or(&mut None),
+        )?;
         Ok(())
     }
 }

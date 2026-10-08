@@ -59,6 +59,10 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         remote_payloads: vec![],
         remote_wordlists: vec![],
         max_payloads_per_param: 0,
+        blind_oob: None,
+        blind_oob_wait: None,
+        session_check: None,
+        session_check_url: None,
         wait: false,
         wait_timeout_sec: 300,
     }

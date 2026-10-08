@@ -88,12 +88,12 @@ scan whose session died settles `status: "error"` with an `error_message`
 starting `SESSION_LOST:`. Same rule for you: on a scan that returns zero
 findings, check `status` before saying the target is clean.
 
-Two ways to catch blind XSS (CLI):
-- `--blind <url>` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.
-- `--blind-oob[=servers]` — Dalfox manages an interactsh (OAST) session for you: it registers, correlates each callback to the originating payload, and polls automatically (`--blind-oob-secret` for self-hosted, `--blind-oob-wait` to tune end-of-scan polling). CLI-only for now.
+Two ways to catch blind XSS:
+- `--blind <url>` / MCP+server `blind_callback_url` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.
+- `--blind-oob[=servers]` / MCP+server `blind_oob` — Dalfox manages an interactsh (OAST) session for you: it registers, correlates each callback to the originating payload, and polls automatically (`--blind-oob-wait` / `blind_oob_wait` tunes end-of-scan polling). On MCP/server the poller lives and dies with the job; `--blind-oob-secret` (self-hosted auth) stays CLI/config-only.
 
 Common MCP pattern:
-- Supply `headers`, `cookies`, `proxy`, `blind_callback_url`, and explicit `param` with location hints. (MCP/server expose `--blind`-style callbacks; the managed `--blind-oob` lifecycle is CLI-only.)
+- Supply `headers`, `cookies`, `proxy`, `blind_callback_url` or `blind_oob`, and explicit `param` with location hints. For an authenticated scan add `session_check` so a dead session surfaces as `SESSION_LOST` instead of a false clean.
 
 ### D. File / Many Targets
 

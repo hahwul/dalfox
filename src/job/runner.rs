@@ -373,13 +373,51 @@ pub(crate) async fn execute_scan(
                         ));
                     }
 
-                    if let Some(callback_url) = &args.blind_callback_url {
-                        crate::scanning::blind_scanning_with(
-                            target,
-                            crate::scanning::CallbackSource::Static(callback_url),
-                            args.custom_blind_xss_payload.as_deref(),
-                        )
-                        .await;
+                    // Blind XSS: the static `-b` callback and/or the OOB/OAST
+                    // (interactsh) channel. Start the OOB session first — it
+                    // fails soft, so a registration outage warns and the scan
+                    // proceeds without it. The poller is bound to THIS job's
+                    // results/findings/cancel (nothing process-global), spawned
+                    // below just before the scan and drained right after, so it
+                    // can never outlive the job or leak across concurrent jobs.
+                    let oob_session: Option<Arc<crate::oob::OobSession>> =
+                        if args.blind_oob_enabled() {
+                            match crate::oob::OobSession::start(&args.oob_config()).await {
+                                Ok(session) => {
+                                    warn(&format!(
+                                        "OOB blind XSS armed via interactsh server: {}",
+                                        session.server_domain()
+                                    ));
+                                    Some(Arc::new(session))
+                                }
+                                Err(e) => {
+                                    warn(&format!(
+                                        "blind_oob disabled (could not register with any server): {e}"
+                                    ));
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                    let custom = args.custom_blind_xss_payload.as_deref();
+                    if args.blind_callback_url.is_some() || oob_session.is_some() {
+                        let source = match (&args.blind_callback_url, &oob_session) {
+                            (Some(url), Some(session)) => crate::scanning::CallbackSource::Both {
+                                url: url.as_str(),
+                                session: session.as_ref(),
+                            },
+                            (Some(url), None) => {
+                                crate::scanning::CallbackSource::Static(url.as_str())
+                            }
+                            (None, Some(session)) => {
+                                crate::scanning::CallbackSource::Oob(session.as_ref())
+                            }
+                            (None, None) => unreachable!("guarded by the enclosing if"),
+                        };
+                        crate::scanning::blind_scanning_with(target, source, custom).await;
+                        crate::scanning::blind_scan_forms_with(target, source, custom).await;
                     }
 
                     // Session-loss detection (issue #1273), the server half.
@@ -613,6 +651,21 @@ pub(crate) async fn execute_scan(
                         std::sync::atomic::Ordering::Relaxed,
                     );
 
+                    // Spawn the job's OOB poller now, so callbacks that fire
+                    // mid-scan land in `results` as they arrive. Silenced
+                    // (server/MCP never write the CLI's live stderr line), and
+                    // tied to this job's cancel flag — set by cancel/delete or
+                    // by `scan_timeout` — so it stops when the job does.
+                    let oob_poller = oob_session.as_ref().map(|session| {
+                        crate::oob::spawn_poller(
+                            session.clone(),
+                            results.clone(),
+                            findings_count.clone(),
+                            cancel_flag.clone(),
+                            true,
+                        )
+                    });
+
                     scan_report = crate::scanning::run_scanning(
                         target,
                         args.clone(),
@@ -627,6 +680,17 @@ pub(crate) async fn execute_scan(
                         .with_params_done(progress.params_tested.clone()),
                     )
                     .await;
+
+                    // Drain late OOB callbacks (seconds-to-minutes after the
+                    // payload lands), then deregister. Inside the budget scope
+                    // on purpose: the drain holds the job open, so it counts
+                    // against `scan_timeout`, and a tripped cancel flag cuts the
+                    // grace window short (see `PollerHandle::finish`).
+                    if let Some(poller) = oob_poller {
+                        poller
+                            .finish(std::time::Duration::from_secs(args.blind_oob_wait()))
+                            .await;
+                    }
 
                     // The probe that catches the reported failure: a session
                     // that survived the job's start and died during the

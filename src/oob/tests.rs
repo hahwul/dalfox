@@ -28,6 +28,8 @@ struct MockState {
     /// Bare host[:port] the client embeds in callback hosts.
     host: String,
     deregistered: bool,
+    /// How many times the poller hit `/poll` — proves it ran.
+    poll_count: usize,
 }
 
 type Shared = Arc<StdMutex<MockState>>;
@@ -53,6 +55,7 @@ async fn deregister(State(s): State<Shared>, Json(_body): Json<Value>) -> Json<V
 async fn poll(State(s): State<Shared>, Query(_q): Query<HashMap<String, String>>) -> Json<Value> {
     let (pubkey, corr, nonce, host) = {
         let mut st = s.lock().unwrap();
+        st.poll_count += 1;
         (
             st.public_key_b64.clone(),
             st.correlation_id.clone(),
@@ -211,4 +214,70 @@ fn interaction_reads_null_and_missing_fields_as_empty() {
     assert_eq!(it.protocol, "dns");
     assert_eq!(it.full_id, "abc.oast.fun");
     assert!(it.remote_address.is_empty() && it.timestamp.is_empty());
+}
+
+/// A server/MCP job that enables `blind_oob` must start the OOB poller bound to
+/// the job and stop it when the scan ends — no process-global state, no leaked
+/// task. Drives the real `job::runner::execute_scan` against a mock target and
+/// a mock interactsh server, then asserts the session was polled (started) and
+/// deregistered (stopped) by the time the job returned.
+#[tokio::test]
+async fn execute_scan_starts_and_stops_the_job_oob_poller() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let app = Router::new()
+        .route("/register", post(register))
+        .route("/poll", get(poll))
+        .route("/deregister", post(deregister))
+        .with_state(state.clone());
+    let oob_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock interactsh");
+    let oob_addr = oob_listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(oob_listener, app).await;
+    });
+    state.lock().unwrap().host = oob_addr.to_string();
+
+    // Mock scan target.
+    let tgt_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock target");
+    let tgt_addr = tgt_listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            tgt_listener,
+            Router::new().route("/", get(|| async { "<html>ok</html>" })),
+        )
+        .await;
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{tgt_addr}/")).expect("target");
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        oob: crate::cmd::scan::BlindOobArgs {
+            blind_oob: Some(vec![format!("http://{oob_addr}")]),
+            blind_oob_secret: None,
+            // 0 = no end-of-scan drain, so the test does not sleep the default 30s.
+            blind_oob_wait: Some(0),
+        },
+        ..Default::default()
+    });
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(!run.reachability_failed, "mock target must be reachable");
+
+    let st = state.lock().unwrap();
+    assert!(st.poll_count >= 1, "the job must have started the poller");
+    assert!(
+        st.deregistered,
+        "the job must have stopped the poller and deregistered the session"
+    );
 }

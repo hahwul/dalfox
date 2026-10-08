@@ -300,6 +300,17 @@ pub(crate) struct ScanOptions {
     /// was started with `--scan-timeout`, that value caps this one — a request
     /// may ask for a shorter budget but cannot exceed or disable the cap.
     pub(crate) scan_timeout: Option<u64>,
+    /// OOB/OAST blind XSS via interactsh: `true` (public mesh), `false`, or a
+    /// list of server domains. The poller lives and dies with the job.
+    pub(crate) blind_oob: Option<crate::job::spec::BlindOobRequest>,
+    /// Seconds to keep polling for OOB callbacks after the scan (default 30,
+    /// max 600). Counts against `scan_timeout`.
+    pub(crate) blind_oob_wait: Option<u64>,
+    /// Regex that must keep matching an authenticated response; turns session
+    /// monitoring on even without cookies/Authorization.
+    pub(crate) session_check: Option<String>,
+    /// Probe this URL instead of the target when checking the session.
+    pub(crate) session_check_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
