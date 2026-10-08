@@ -133,6 +133,22 @@ async fn test_scan_with_dalfox_rejects_non_http_target() {
 }
 
 #[tokio::test]
+async fn test_scan_with_dalfox_rejects_unparseable_http_target() {
+    // Passes the scheme prefix test, fails parse_target: must be refused up
+    // front like preflight_dalfox, not queued and failed inside the worker.
+    let mcp = DalfoxMcp::new();
+    for bad in ["http://", "http://exa mple.com/", "https://[::1/"] {
+        let err = mcp
+            .scan_with_dalfox(Parameters(default_scan_params(bad)))
+            .await
+            .expect_err("unparseable target must fail");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS, "{bad:?}");
+        assert!(err.message.contains("failed to parse target URL"));
+    }
+    assert!(mcp.jobs.lock().expect("jobs mutex poisoned").is_empty());
+}
+
+#[tokio::test]
 async fn test_get_results_rejects_empty_scan_id() {
     let mcp = DalfoxMcp::new();
     let params = get_params("");

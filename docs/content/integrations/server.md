@@ -150,10 +150,10 @@ repeats the HTTP status, `msg` says what went wrong, and `data` is absent. The
 handler-generated statuses you will see are `400` (invalid body or option),
 `401` (missing or wrong API key), `403` (cross-site or
 untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown scan
-id), `409` (purge of a scan that is still active), `500` (a preflight that
-failed inside the server) and `503` (at capacity). A body over
-`--max-body-bytes` is rejected by Axum before the handler runs with `413`, so it
-may not use the normal envelope. The other exceptions are a CORS
+id), `409` (purge of a scan that is still active or draining), `413` (body over
+`--max-body-bytes`), `415` (body without a JSON `Content-Type`), `500` (a
+preflight that failed inside the server), `503` (at capacity) and `504` (a
+preflight that outlived the `--scan-timeout` cap). The exceptions are a CORS
 preflight (`OPTIONS`), which answers `204` with no body (or a bare `403` when the
 browser gate refuses it), and a path or method not in the table, which gets a
 bare `404` / `405`.
@@ -289,9 +289,10 @@ cancelled scan stays listed with whatever partial results it gathered.
 
 To remove a terminal record, append `?purge=1`; the data is then
 `{scan_id, target, deleted: true, previous_status}`, and a scan that is still
-`queued` or `running` is refused with `409`. This is an explicit force-purge
-escape hatch: unlike MCP's safe delete, it may discard partial results or a
-terminal webhook if the cancelled worker is still draining.
+`queued` or `running` is refused with `409`. So is a cancelled scan whose worker
+is still draining: purging it would drop its concurrency slot while the worker
+runs. Retry once it settles; a worker wedged past the 5-minute drain grace
+becomes purgeable.
 
 ### Preflight (no attack)
 
@@ -450,11 +451,14 @@ a scan cancelled mid-run the POST goes out once the worker has drained, not at
 the moment of the `DELETE`:
 
 ```json
-{ "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [] }
+{ "scan_id": "9f2c…", "status": "done", "url": "https://target.app?q=test", "results": [], "error_message": null }
 ```
 
 `status` is `done`, `error` or `cancelled`, the same value `GET /scan/{id}`
-reports. The target is under `url` here, not `target`. The POST goes through the
+reports. `error_message` is that endpoint's `error_message` too: `null` for a
+clean finish or a plain cancel, otherwise the reason (target unreachable, a
+`scan_timeout` expiry, lost session, worker panic). The target is under `url`
+here, not `target`. The POST goes through the
 scan's own proxy and TLS settings, times out after 10 seconds, and is not
 retried.
 
@@ -462,7 +466,8 @@ retried.
 
 - `--rate-limit <rps>` — cap every scan's outbound request rate (protects targets).
 - `--scan-timeout <secs>` — hard wall-clock budget per scan; bounds long or
-  `deep_scan` jobs so one target can't pin a worker indefinitely.
+  `deep_scan` jobs so one target can't pin a worker indefinitely. Also bounds
+  `POST /preflight`, which answers `504` on expiry.
 - `--max-concurrent-scans <n>` — reject new submissions with `503` once `n`
   scans are queued/running (default `100`, `0` = unlimited). Bounds memory and
   the blocking pool against a flood of submissions. A cancelled scan keeps its

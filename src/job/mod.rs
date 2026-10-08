@@ -705,8 +705,9 @@ impl Job {
     /// retention may reclaim its map entry and capacity slot. Explicit MCP
     /// deletion must stay strict and use `is_settled`, otherwise a live worker
     /// can lose the record it still needs to write partial results into. REST
-    /// `DELETE ?purge=1` remains a separate, explicit force-purge escape hatch
-    /// for callers that accept dropping a draining record.
+    /// `DELETE ?purge=1` uses this same predicate: removing a draining entry
+    /// would also drop its `Weak` lease and lift the concurrency cap while the
+    /// worker still runs. A wedged worker is purgeable after the drain grace.
     pub(crate) fn is_evictable(&self) -> bool {
         self.is_settled() || (self.is_terminal() && self.drain_window_expired())
     }
@@ -1071,6 +1072,23 @@ pub(crate) fn has_http_scheme(url: &str) -> bool {
     let b = url.trim().as_bytes();
     let starts_with = |p: &[u8]| b.len() >= p.len() && b[..p.len()].eq_ignore_ascii_case(p);
     starts_with(b"http://") || starts_with(b"https://")
+}
+
+/// Reject a scan target `parse_target` would refuse, *before* a job exists.
+///
+/// `has_http_scheme` is a 7-byte prefix test, so `http://`, `http://exa mple/`
+/// or `https://[::1/` pass it; `hydrate_target` then fails inside the worker
+/// and the submission has already been admitted, logged as queued and answered
+/// `queued`/`200`. Run this right after the scheme check so REST `/scan` and
+/// MCP `scan_with_dalfox` refuse what `/preflight` and `preflight_dalfox`
+/// already refuse. The message is the one preflight returns.
+pub(crate) fn check_target_parses(url: &str) -> Result<(), String> {
+    crate::target_parser::parse_target(url.trim())
+        .map(|_| ())
+        .map_err(|_| {
+            "failed to parse target URL — must be a valid URL with scheme and host (example: \"https://example.com/path?q=test\")"
+                .to_string()
+        })
 }
 
 /// The `error_message` recorded when a scan target can't be connected to.

@@ -145,10 +145,23 @@ pub(crate) async fn mark_job_error(
     msg: String,
     client: Option<reqwest::Client>,
 ) {
+    let reason = msg.clone();
     let transitioned = (state.jobs.lock().await.get_mut(job_id))
         .and_then(|job| job.fail(msg).then(|| job.callback_url.clone()));
     if let Some(callback_url) = transitioned {
-        send_terminal_webhook(state, callback_url, job_id, url, "error", &[], client).await;
+        send_terminal_webhook(
+            state,
+            callback_url,
+            job_id,
+            url,
+            TerminalOutcome {
+                status_label: "error",
+                results: &[],
+                error_message: Some(&reason),
+            },
+            client,
+        )
+        .await;
     }
 }
 
@@ -228,8 +241,11 @@ pub(crate) async fn run_scan_job(
                 callback_url,
                 &job_id,
                 &url,
-                "cancelled",
-                &[],
+                TerminalOutcome {
+                    status_label: "cancelled",
+                    results: &[],
+                    error_message: None,
+                },
                 cb_client,
             )
             .await;
@@ -324,12 +340,17 @@ pub(crate) async fn run_scan_job(
     let final_results_arc = run
         .sanitized_results(&progress, include_request, include_response)
         .await;
-    let (callback_url, final_status) = match state.jobs.lock().await.get_mut(&job_id) {
-        Some(job) => (
-            job.callback_url.clone(),
-            Some(run.settle(job, final_results_arc.clone(), args.scan_timeout, false)),
-        ),
-        None => (None, None),
+    let (callback_url, final_status, error_message) = match state.jobs.lock().await.get_mut(&job_id)
+    {
+        Some(job) => {
+            let status = run.settle(job, final_results_arc.clone(), args.scan_timeout, false);
+            (
+                job.callback_url.clone(),
+                Some(status),
+                job.error_message.clone(),
+            )
+        }
+        None => (None, None, None),
     };
     // Derive the webhook/log label from the status actually stored, not from the
     // pre-lock `was_cancelled`/`panicked` snapshot: a DELETE cancel landing in
@@ -363,11 +384,21 @@ pub(crate) async fn run_scan_job(
         callback_url,
         &job_id,
         &url,
-        status_label,
-        &final_results_arc,
+        TerminalOutcome {
+            status_label,
+            results: &final_results_arc,
+            error_message: error_message.as_deref(),
+        },
         Some(cb_client),
     )
     .await;
+}
+
+/// What the terminal webhook reports about how the scan ended.
+pub(crate) struct TerminalOutcome<'a> {
+    pub(crate) status_label: &'a str,
+    pub(crate) results: &'a [SanitizedResult],
+    pub(crate) error_message: Option<&'a str>,
 }
 
 /// POST the scan-completion payload to the configured webhook, if any.
@@ -384,16 +415,23 @@ pub(crate) async fn run_scan_job(
 ///
 /// The status string is the same one we put in the response payload
 /// (`"done"` / `"cancelled"` / `"error"`) so downstream consumers can branch
-/// on it without re-deriving terminal state.
+/// on it without re-deriving terminal state. `error_message` is the job's
+/// stored reason (`null` when there is none): it is the only thing that tells a
+/// `scan_timeout` expiry from a user cancel, or an unreachable target from a
+/// worker panic, for a subscriber that never polls `GET /scan/{id}`.
 pub(crate) async fn send_terminal_webhook(
     state: &AppState,
     callback_url: Option<String>,
     job_id: &str,
     url: &str,
-    status_label: &str,
-    results: &[SanitizedResult],
+    outcome: TerminalOutcome<'_>,
     client: Option<reqwest::Client>,
 ) {
+    let TerminalOutcome {
+        status_label,
+        results,
+        error_message,
+    } = outcome;
     let Some(cb_url) = callback_url else { return };
     // Same scheme test `validate_scan_options` gates submission on, so a URL it
     // accepted can't be silently dropped here. Spelled with the shared helper
@@ -408,6 +446,7 @@ pub(crate) async fn send_terminal_webhook(
         "status": status_label,
         "url": url,
         "results": results,
+        "error_message": error_message,
     });
     // When the caller has no parsed target (e.g. pre-start cancellation),
     // fall back to a default client. Webhook delivery should not silently

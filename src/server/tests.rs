@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
-    routing::any,
+    routing::{any, post},
 };
 use std::collections::HashMap as Map;
 use std::net::Ipv4Addr;
@@ -2355,6 +2355,106 @@ async fn test_preflight_handler_unreachable_target() {
     assert_eq!(parsed["data"]["error_code"], "CONNECTION_FAILED");
 }
 
+#[tokio::test]
+async fn test_preflight_handler_504_when_target_outlives_scan_timeout() {
+    // A target that accepts connections and never answers: without the budget
+    // the request would run for the full per-request `timeout` (10s here).
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hold = tokio::spawn(async move {
+        let mut socks = Vec::new();
+        while let Ok((sock, _)) = listener.accept().await {
+            socks.push(sock);
+        }
+    });
+    let mut state = make_state(None, None, false, false, "cb");
+    state.scan_timeout = Some(1);
+    let started = std::time::Instant::now();
+    let resp = preflight_handler(
+        State(state),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            target: format!("http://{addr}/?q=1"),
+            options: Some(ScanOptions {
+                timeout: Some(10),
+                ..ScanOptions::default()
+            }),
+        })),
+    )
+    .await
+    .into_response();
+    hold.abort();
+    assert_eq!(resp.status(), StatusCode::GATEWAY_TIMEOUT);
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "budget must cut the preflight short, took {:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn test_serve_with_drain_deadline_gives_up_after_grace() {
+    // A drain that never finishes must not hold the process once the signal
+    // has fired and the grace has elapsed.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tx.send(()).unwrap();
+    let out = tokio::time::timeout(
+        Duration::from_secs(5),
+        serve_with_drain_deadline(std::future::pending::<()>(), rx, Duration::from_millis(50)),
+    )
+    .await
+    .expect("must return after the grace, not hang");
+    assert!(out.is_none());
+
+    // No signal yet: the server's own result passes straight through.
+    let (_tx, rx) = tokio::sync::oneshot::channel();
+    let out = serve_with_drain_deadline(async { 7 }, rx, Duration::from_millis(50)).await;
+    assert_eq!(out, Some(7));
+}
+
+#[tokio::test]
+async fn test_json_body_rejections_map_to_413_415_and_400() {
+    // Same layering as run_server: the cap sits on the router, the extractor
+    // inside the handler turns it into a JsonRejection.
+    let app = Router::new()
+        .route("/scan", post(start_scan_handler))
+        .route("/preflight", post(preflight_handler))
+        .layer(axum::extract::DefaultBodyLimit::max(200))
+        .with_state(make_state(None, None, false, false, "cb"));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await });
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    for path in ["scan", "preflight"] {
+        let url = format!("http://{addr}/{path}");
+        let big =
+            serde_json::json!({"target": "http://x/", "options": {"cookie": "a".repeat(500)}});
+        let r = client.post(&url).json(&big).send().await.unwrap();
+        assert_eq!(r.status(), 413, "{path}: oversized body");
+        let r = client.post(&url).body("{}").send().await.unwrap();
+        assert_eq!(r.status(), 415, "{path}: no JSON content-type");
+        let r = client
+            .post(&url)
+            .header("content-type", "application/json")
+            .body("{not json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 400, "{path}: malformed JSON stays 400");
+        let r = client
+            .post(&url)
+            .header("content-type", "application/json")
+            .body(r#"{"nope":1}"#)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 400, "{path}: schema error stays 400");
+    }
+    server.abort();
+}
+
 #[test]
 fn test_validate_scan_options_accepts_defaults() {
     assert!(validate_scan_options(&mut ScanOptions::default()).is_ok());
@@ -2633,6 +2733,35 @@ async fn test_start_scan_handler_rejects_non_http_url() {
         );
     }
     // No jobs should have been queued for any of the rejected targets.
+    assert!(state.jobs.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn test_scan_handlers_reject_unparseable_http_target_before_queueing() {
+    // `http://` and friends pass the 7-byte scheme prefix test but not
+    // `parse_target`; they used to be admitted, answered `queued`, and only
+    // fail later inside the worker. /preflight already refused them.
+    let state = make_state(None, None, false, false, "cb");
+    for bad in ["http://", "http://exa mple.com/", "https://[::1/"] {
+        let resp = start_scan_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Ok(Json(ScanRequest {
+                target: bad.to_string(),
+                options: None,
+            })),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "POST {bad:?}");
+        let mut params = Map::new();
+        params.insert("url".to_string(), bad.to_string());
+        let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "GET {bad:?}");
+    }
     assert!(state.jobs.lock().await.is_empty());
 }
 
@@ -3083,6 +3212,98 @@ async fn test_run_scan_job_pre_cancel_webhook_falls_back_when_url_unparseable() 
     assert_eq!(payload["scan_id"], serde_json::Value::String(id));
 }
 
+/// Webhook sink that records the last JSON body POSTed to `/hook`.
+async fn spawn_webhook_capture() -> (String, Arc<Mutex<Option<serde_json::Value>>>) {
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured_clone = captured.clone();
+    let app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            async move {
+                *captured.lock().await = serde_json::from_slice(&body).ok();
+                StatusCode::OK
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let addr = listener.local_addr().expect("webhook addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{addr}/hook"), captured)
+}
+
+#[tokio::test]
+async fn test_webhook_carries_the_error_message_for_error_and_timeout() {
+    crate::ensure_crypto_provider();
+    // Error path: the reason lives only in the job's error_message.
+    let (hook, captured) = spawn_webhook_capture().await;
+    let state = make_state(None, None, false, false, "cb");
+    let mut job = test_job(JobStatus::Running, None, "http://t/");
+    job.callback_url = Some(hook.clone());
+    state.jobs.lock().await.insert("err".to_string(), job);
+    mark_job_error(
+        &state,
+        "err",
+        "http://t/",
+        "boom: target down".to_string(),
+        None,
+    )
+    .await;
+    let payload = captured.lock().await.clone().expect("webhook fired");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error_message"], "boom: target down");
+
+    // Timeout path: a scan_timeout expiry settles as `cancelled`; without the
+    // message it is indistinguishable from a DELETE.
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hold = tokio::spawn(async move {
+        let mut socks = Vec::new();
+        while let Ok((sock, _)) = listener.accept().await {
+            socks.push(sock);
+        }
+    });
+    *captured.lock().await = None;
+    let target = format!("http://{addr}/?q=1");
+    let mut job = test_job(JobStatus::Queued, None, &target);
+    job.callback_url = Some(hook.clone());
+    state.jobs.lock().await.insert("slow".to_string(), job);
+    let opts = ScanOptions {
+        callback_url: Some(hook),
+        scan_timeout: Some(1),
+        timeout: Some(10),
+        ..ScanOptions::default()
+    };
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        run_scan_job(
+            state.clone(),
+            "slow".to_string(),
+            target,
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await
+    .expect("scan_timeout must bound the job");
+    hold.abort();
+    let payload = captured.lock().await.clone().expect("webhook fired");
+    assert_eq!(payload["status"], "cancelled");
+    assert!(
+        payload["error_message"]
+            .as_str()
+            .is_some_and(|m| m.contains("scan_timeout")),
+        "webhook must say the scan timed out: {payload}"
+    );
+}
+
 #[tokio::test]
 async fn test_send_terminal_webhook_skips_non_http_url() {
     // The webhook helper must refuse non-http(s) URLs so a malicious
@@ -3111,8 +3332,11 @@ async fn test_send_terminal_webhook_skips_non_http_url() {
             Some(url.to_string()),
             "id",
             "http://example.com",
-            "cancelled",
-            &[],
+            TerminalOutcome {
+                status_label: "cancelled",
+                results: &[],
+                error_message: None,
+            },
             None,
         )
         .await;
@@ -3126,7 +3350,19 @@ async fn test_send_terminal_webhook_skips_non_http_url() {
 
     // None-callback path: should be a fast no-op as well.
     let started = std::time::Instant::now();
-    send_terminal_webhook(&state, None, "id", "http://example.com", "done", &[], None).await;
+    send_terminal_webhook(
+        &state,
+        None,
+        "id",
+        "http://example.com",
+        TerminalOutcome {
+            status_label: "done",
+            results: &[],
+            error_message: None,
+        },
+        None,
+    )
+    .await;
     assert!(started.elapsed() < std::time::Duration::from_millis(500));
 }
 
@@ -3336,6 +3572,37 @@ async fn test_cancel_scan_handler_purge_deletes_terminal_job() {
 
     let jobs = state.jobs.lock().await;
     assert!(!jobs.contains_key("done-purge"));
+}
+
+#[tokio::test]
+async fn test_purge_refuses_cancelled_job_with_live_worker() {
+    // A cancelled job whose worker still holds the lease occupies a capacity
+    // slot; purging it would drop the Weak lease and lift --max-concurrent-scans.
+    let mut state = make_state(None, None, false, false, "cb");
+    state.max_concurrent_scans = 1;
+    let lease = {
+        let mut job = test_job(JobStatus::Cancelled, None, "");
+        let lease = job.issue_worker_lease();
+        state.jobs.lock().await.insert("draining".to_string(), job);
+        lease
+    };
+    let purge = |state: AppState| async move {
+        let mut params = Map::new();
+        params.insert("purge".to_string(), "1".to_string());
+        cancel_scan_handler(
+            State(state),
+            HeaderMap::new(),
+            Path("draining".to_string()),
+            Query(params),
+        )
+        .await
+        .into_response()
+    };
+    assert_eq!(purge(state.clone()).await.status(), StatusCode::CONFLICT);
+    assert!(state.jobs.lock().await.contains_key("draining"));
+    drop(lease);
+    assert_eq!(purge(state.clone()).await.status(), StatusCode::OK);
+    assert!(!state.jobs.lock().await.contains_key("draining"));
 }
 
 #[tokio::test]

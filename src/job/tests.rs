@@ -1421,3 +1421,57 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         assert!(job.finished_at_ms.is_some() && job.results.is_some());
     }
 }
+
+/// One DOM sink is found by the preflight pass and again per parameter. The
+/// CLI folds those (`dedupe_ast_results`); the stored job results and the
+/// `findings_so_far` tally must match, not list the sink once per stage.
+#[tokio::test]
+async fn sanitized_results_folds_duplicate_ast_findings() {
+    use crate::scanning::result::{FindingType, Result as ScanResult};
+    let ast = |param: &str| {
+        ScanResult::builder(FindingType::AstDetected)
+            .inject_type("DOM-XSS")
+            .method("GET")
+            .data("http://t/")
+            .param(param)
+            .payload("")
+            .evidence("http://t/:1:1 - (Source: location.hash, Sink: innerHTML)")
+            .severity("Medium")
+            .message_id(0)
+            .build()
+    };
+    let reflected = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("http://t/?a=1")
+        .param("a")
+        .payload("x")
+        .evidence("e")
+        .severity("Low")
+        .message_id(7)
+        .build();
+    let run = runner::ScanRun {
+        results: Arc::new(tokio::sync::Mutex::new(vec![
+            ast("-"),
+            ast("a"),
+            reflected,
+            ast("b"),
+        ])),
+        reachability_failed: false,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+        findings_capped: false,
+    };
+    let progress = JobProgress::default();
+    let out = run.sanitized_results(&progress, false, false).await;
+    assert_eq!(out.len(), 2, "three AST copies fold into one, R kept");
+    assert_eq!(
+        progress
+            .findings_so_far
+            .load(std::sync::atomic::Ordering::Relaxed),
+        2
+    );
+}
