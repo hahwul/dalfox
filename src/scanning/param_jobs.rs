@@ -11,8 +11,9 @@ use super::*;
 ///
 /// The DOM half used to be missing here, so `/preflight` quoted roughly half the
 /// requests the scan would send — on the one number the endpoint exists to
-/// produce. `cmd::scan::analysis` already estimated it this way for `--dry-run`;
-/// this brings the REST and MCP endpoints onto the same arithmetic.
+/// produce. The CLI `--dry-run` (`cmd::scan::output::estimate_target_requests`)
+/// and the debug estimate in `cmd::scan::analysis` route through this same
+/// function, so all surfaces quote one number.
 ///
 /// Still a lower bound: WAF mutation/encoder expansion and the shared CSP/tech
 /// payloads appended after the cap are not counted, matching the CLI's caveat.

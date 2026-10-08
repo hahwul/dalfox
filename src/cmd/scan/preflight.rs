@@ -154,9 +154,7 @@ fn classify_reqwest_error_code(err: &reqwest::Error) -> &'static str {
     match failure_layer(err) {
         FailureLayer::Dns => crate::cmd::error_codes::DNS_RESOLUTION_FAILED,
         FailureLayer::Tls => crate::cmd::error_codes::TLS_HANDSHAKE_FAILED,
-        FailureLayer::Refused | FailureLayer::Unknown => {
-            crate::cmd::error_codes::CONNECTION_FAILED
-        }
+        FailureLayer::Refused | FailureLayer::Unknown => crate::cmd::error_codes::CONNECTION_FAILED,
     }
 }
 
@@ -511,10 +509,9 @@ mod failure_tests {
     async fn refused_connection_is_not_classified_from_url_words() {
         let port = dead_port().await;
         for path in ["x", "dns/x", "ssl/x", "tls/handshake/certificate"] {
-            let target = crate::target_parser::parse_target(&format!(
-                "http://127.0.0.1:{port}/{path}?q=1"
-            ))
-            .unwrap();
+            let target =
+                crate::target_parser::parse_target(&format!("http://127.0.0.1:{port}/{path}?q=1"))
+                    .unwrap();
             match preflight_content_type(&target, &args()).await {
                 PreflightOutcome::Unreachable(code) => assert_eq!(
                     code,

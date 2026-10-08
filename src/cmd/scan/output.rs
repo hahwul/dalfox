@@ -13,6 +13,33 @@ use super::postprocess::dedupe_ast_results;
 use crate::scanning::result::{FindingType, Result};
 use crate::target_parser::Target;
 
+/// Requests a scan of `target` is expected to send, as quoted by `--dry-run`.
+///
+/// Mirrors the scan-time effective cap (built-in safety cap unless
+/// --deep-scan / explicit --max-payloads-per-param). The shared estimator is
+/// the one REST `/preflight` and the MCP preflight tool use, so all three
+/// quote the same number for the same target. It counts both capped halves
+/// (reflection + DOM verification) but is still a LOWER BOUND: the shared
+/// CSP/tech payloads appended after the cap and the WAF-bypass
+/// mutation/encoder expansion are excluded.
+pub(crate) fn estimate_target_requests(args: &ScanArgs, target: &Target) -> usize {
+    // Encoder factor comes from the encoder pipeline so it can't drift from
+    // the expansion the scan actually performs.
+    let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
+    let cap = crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
+    let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
+    target
+        .reflection_params
+        .iter()
+        // Fragment params are client-side only: no HTTP request is sent.
+        .filter(|p| crate::scanning::param_is_http_scannable(p))
+        .fold(0usize, |acc, p| {
+            acc.saturating_add(crate::scanning::estimate_param_requests(
+                p, args, enc_factor, &apply_cap,
+            ))
+        })
+}
+
 pub(crate) async fn render_dry_run(
     args: &ScanArgs,
     host_groups: &std::collections::BTreeMap<String, Vec<Target>>,
@@ -24,34 +51,7 @@ pub(crate) async fn render_dry_run(
     for group in host_groups.values() {
         for target in group {
             let param_count = target.reflection_params.len();
-            // Estimate request count per target using encoder expansion. The
-            // factor comes from the encoder pipeline so it can't drift from the
-            // expansion the scan actually performs.
-            let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
-            // Mirror the scan-time effective cap (built-in safety cap unless
-            // --deep-scan / explicit --max-payloads-per-param). This is a
-            // LOWER-BOUND estimate: it counts the capped base reflection set only,
-            // and excludes the shared CSP/tech payloads appended after the cap,
-            // the WAF-bypass mutation/encoder expansion, and the DOM-verification
-            // set — so a real scan can send more (the preflight estimate in
-            // analysis.rs carries the same caveat).
-            let cap =
-                crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
-            let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
-            let mut estimated_requests: usize = 0;
-            for p in &target.reflection_params {
-                let payload_count = if let Some(ctx) = &p.injection_context {
-                    crate::scanning::xss_common::get_dynamic_payloads(ctx, args)
-                        .unwrap_or_else(|_| vec![])
-                        .len()
-                } else {
-                    let html_len =
-                        crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
-                    let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
-                    html_len + js_len
-                };
-                estimated_requests = estimated_requests.saturating_add(apply_cap(payload_count));
-            }
+            let estimated_requests = estimate_target_requests(args, target);
 
             let params: Vec<serde_json::Value> = target
                 .reflection_params

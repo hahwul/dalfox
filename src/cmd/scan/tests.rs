@@ -1296,6 +1296,37 @@ fn test_render_only_discovery_jsonl() {
 // output.rs — render_dry_run (async; needs ScanState)
 // ─────────────────────────────────────────────────────────────────────────
 
+/// `--dry-run` must quote the same number REST / MCP preflight do: both the
+/// reflection and the DOM-verification halves, nothing for fragment params.
+#[test]
+fn dry_run_estimate_includes_dom_half_and_skips_fragment() {
+    use super::output::estimate_target_requests;
+    let args = default_scan_args();
+    let mut q = make_param("q", Location::Query);
+    q.injection_context = Some(InjectionContext::Html(None));
+    let frag = make_param("hash", Location::Fragment);
+    let target = target_with_params("https://example.com", vec![q.clone(), frag]);
+
+    let enc_factor = crate::encoding::encoder_expansion_factor(&args.encoders);
+    let cap = crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
+    let apply_cap = |n: usize| if cap == 0 { n } else { n.min(cap) };
+    let shared = crate::scanning::estimate_param_requests(&q, &args, enc_factor, &apply_cap);
+    let reflection_only = apply_cap(
+        crate::scanning::xss_common::get_dynamic_payloads(
+            q.injection_context.as_ref().unwrap(),
+            &args,
+        )
+        .unwrap()
+        .len(),
+    );
+
+    assert_eq!(estimate_target_requests(&args, &target), shared);
+    assert!(
+        shared > reflection_only,
+        "the DOM-verification half must be counted ({shared} vs {reflection_only})"
+    );
+}
+
 #[tokio::test]
 async fn test_render_dry_run_plain() {
     let mut p = make_param("q", Location::Query);
