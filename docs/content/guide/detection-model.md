@@ -117,17 +117,31 @@ Sanitizers are not a grading signal because they are already a *filter*: the ana
 
 `confidence_reason` never mixes the two directions. A `high` grade lists the supporting signals; a `low` grade lists **only** what blocked it, so the signals that did hold are not shown. One reason is informational only: `flow sits inside a conditional branch` records that the flow is guarded. It appears on `high` grades and never changes the grade on its own.
 
-### Where the grade is visible — and where it isn't
+### Where the grade is visible, and what reads it
 
-`confidence` is carried by `json`, `jsonl`, `toml`, `markdown` and `sarif`. The
-default `plain` output does **not** print it, so the triage advice below assumes
-a machine-readable format. Nothing else keys off it yet either: `--only-poc`,
-`--limit-result-type`, the deduplication ranking, and the exit code all still
-read `type`. The grade is a preview of the migration, not yet a control.
+`confidence` is carried by `json`, `jsonl`, `toml`, `markdown` and `sarif`
+(with `confidence_reason`). `plain` prints a `Confidence:` line with the grade
+only. Four things act on it:
+
+- **`--min-confidence high`** drops every `low` finding (every `R`, plus AST
+  flows Dalfox cannot stand behind) before anything else sees it: output in
+  every format, `--stream-findings`, per-target counts in `target_summary`,
+  `--baseline`, the `--limit` display cut, and the exit code. `I` findings carry
+  no grade (they are not XSS claims) and are always kept. The default, `low`,
+  keeps everything. `--limit`'s scan-time early stop still counts every finding.
+  The same option is `min_confidence` in the config file, the REST API and MCP.
+- **AST deduplication** breaks a type + severity tie on the grade (`high` first).
+- **SARIF** lowers a `low` finding's `level` one step (`error` → `warning` →
+  `note`). `partialFingerprints` ignore the grade, so re-grading a finding on a
+  later run never changes its code-scanning identity.
+- **The exit code**, through the filter above: a run whose only findings were
+  `low` exits `0` under `--min-confidence high`.
+
+`--only-poc` and `--limit-result-type` still select by `type`.
 
 ## Migration
 
-That the grade drives nothing yet is the point: you can see where each finding will land before anything moves.
+The tier itself does not move yet; `--min-confidence` is the opt-in way to act on the grade now. You can see where each finding will land before the tier follows.
 
 1. **Now** — `type` unchanged. `detection_method` and `confidence` are new. `type == "A"` is deprecated as a selector; use `detection_method == "ast"`.
 2. **Next** — `--tier-model confidence` as an opt-in.
@@ -165,8 +179,9 @@ are not the number of findings recorded during the scan:
   input twice at two different strengths. `V` and `A` are never dropped.
 - **AST deduplication** — the same source→sink flow can be found by the
   preflight, the probe, and the reflection loop. One survives per fingerprint:
-  the strongest by `type`, then `severity`. `confidence` does not participate,
-  so a `low`-confidence `V` still outranks a `high` `A`.
+  the strongest by `type`, then `severity`, then `confidence`. Type comes
+  first, so a `low`-confidence `V` still outranks a `high` `A`, unless
+  `--min-confidence high` removed the `V` before deduplication ran.
 
 `--stream-findings` prints each scan-loop finding the moment it is recorded,
 which is *before* the `R` collapse and before AST duplicates are narrowed to
@@ -191,13 +206,13 @@ add `--only-poc v`.
 ### Exit codes
 
 `0` means no findings and `1` means at least one finding **of any tier**,
-counted after `--only-poc`, a `--baseline` filter, and the collapse above. `2`
+counted after `--min-confidence`, `--only-poc`, a `--baseline` filter, and the collapse above. `2`
 is a hard error (bad input, every target unreachable, `--output` unwritable),
 and also covers a run with no findings that could not finish cleanly: a lost
 session under the default `--on-session-loss abort`, a crashed scan worker, or
 severe transport loss. A lone `R`, or a single `I` from `--detect-outdated-libs`, exits `1` exactly like a `V` does.
 For CI that should fail only on what Dalfox asserts is exploitable, run
-`--only-poc v`.
+`--only-poc v`; to fail only on claims graded `high`, run `--min-confidence high`.
 
 ## Choosing flags by intent
 
@@ -209,3 +224,4 @@ For CI that should fail only on what Dalfox asserts is exploitable, run
 | Test one parameter, still see every DOM sink | `-p q` (AST findings are not scoped by `-p`) |
 | Triage a large AST batch | `-f json`, sort on `confidence`, then read `confidence_reason` |
 | Fail CI only on asserted vulnerabilities | `--only-poc v` (otherwise any tier exits `1`) |
+| Drop findings Dalfox cannot stand behind | `--min-confidence high` (`I` is kept) |

@@ -21,6 +21,7 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
         waf_bypass: opts.waf_bypass.as_deref(),
         force_waf: opts.force_waf.as_mut(),
         waf_min_confidence: opts.waf_min_confidence,
+        min_confidence: opts.min_confidence.as_deref(),
         headers: opts.header.as_deref().unwrap_or_default(),
         user_agent: opts.user_agent.as_deref(),
         cookies: opts.cookie.as_slice(),

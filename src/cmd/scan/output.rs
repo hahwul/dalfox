@@ -475,11 +475,13 @@ pub(crate) fn render_plain_finding_blocks(
 /// pass with that parameter's name on it, and the final report folds those
 /// into a single finding. Keying them by `param` printed one block per
 /// parameter live and then the folded survivor a further time at the end. The
-/// type stays in the key so a stronger survivor (an `A` upgraded to `V`) is
-/// still shown at the end.
+/// type and the confidence grade stay in the key so a stronger survivor (an
+/// `A` upgraded to `V`, or a `low` duplicate beaten by a `high` one) is still
+/// shown at the end.
 pub(crate) fn stream_key(result: &Result) -> String {
     if let Some(ast_key) = super::postprocess::ast_dedup_key(result) {
-        return format!("{}|ast|{}", result.result_type.short(), ast_key);
+        let grade = result.confidence.map_or("", |c| c.as_str());
+        return format!("{}|ast|{}|{}", result.result_type.short(), grade, ast_key);
     }
     format!(
         "{}|{}|{}|{}",
@@ -503,7 +505,15 @@ pub(crate) async fn render_results(
     let skipped_targets = state.skipped_targets.clone();
     let target_meta = state.target_meta.clone();
     let target_mutation_stats = state.target_mutation_stats.clone();
-    let mut final_results = dedupe_ast_results(results.lock().await.clone());
+    // `--min-confidence` runs first — before AST dedup, so dedup picks the
+    // strongest *surviving* claim instead of picking a low-graded one that the
+    // filter then drops along with the high-graded duplicate it beat; and
+    // before `--baseline`, the per-target summary, and the returned vector, so
+    // a dropped finding cannot surface in counts or decide the exit code. The
+    // default (no flag) retains everything.
+    let mut final_results = results.lock().await.clone();
+    final_results.retain(|r| !args.below_min_confidence(r));
+    let mut final_results = dedupe_ast_results(final_results);
 
     // Apply --only-poc filter: keep only results whose type matches the specified filters
     if !args.only_poc.is_empty() {

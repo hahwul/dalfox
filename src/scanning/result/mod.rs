@@ -349,6 +349,12 @@ pub(crate) fn bound_evidence_body(body: String, payload: &str) -> String {
 }
 
 impl Result {
+    /// An XSS claim graded `low`. Ungraded findings (informational `I`) make
+    /// no XSS claim, so `--min-confidence high` keeps them.
+    pub(crate) fn is_low_confidence(&self) -> bool {
+        self.confidence == Some(Confidence::Low)
+    }
+
     /// Record where `param` travels on the wire: the `location` label and,
     /// for a header-located cookie param, the `cookie_param` POC hint.
     pub(crate) fn set_injection_point(

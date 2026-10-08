@@ -518,6 +518,7 @@ pub(crate) struct ScanOptionChecks<'a, F = f32> {
     /// Generic so the error echoes the value at the precision the surface
     /// parsed it (REST `f32`, MCP `f64`).
     pub waf_min_confidence: Option<F>,
+    pub min_confidence: Option<&'a str>,
     pub headers: &'a [String],
     pub user_agent: Option<&'a str>,
     pub cookies: &'a [String],
@@ -597,6 +598,15 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
             return Err(format!(
                 "waf_min_confidence must be between 0.0 and 1.0 (got {})",
                 c
+            ));
+        }
+        if let Some(level) = self.min_confidence
+            && !crate::cmd::scan::MIN_CONFIDENCE_VALUES.contains(&level)
+        {
+            return Err(format!(
+                "min_confidence must be one of {} (got '{}')",
+                crate::cmd::scan::MIN_CONFIDENCE_VALUES.join(", "),
+                crate::utils::log::sanitize_log_message(level)
             ));
         }
         // A malformed header — or a control byte in a User-Agent / cookie,

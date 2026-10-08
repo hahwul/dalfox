@@ -93,6 +93,11 @@ pub(crate) const BASELINE_MODE_FILTER: &str = "filter";
 /// `new: true|false`, for dashboards that want the whole set.
 pub(crate) const BASELINE_MODE_ANNOTATE: &str = "annotate";
 pub const BASELINE_MODE_VALUES: &[&str] = &[BASELINE_MODE_FILTER, BASELINE_MODE_ANNOTATE];
+/// `--min-confidence high`: drop every finding graded `low` (every `R`, plus
+/// AST flows dalfox cannot stand behind). `low` is the floor every graded
+/// finding already meets, so it filters nothing.
+pub(crate) const MIN_CONFIDENCE_HIGH: &str = "high";
+pub const MIN_CONFIDENCE_VALUES: &[&str] = &["low", MIN_CONFIDENCE_HIGH];
 pub const ENCODER_VALUES: &[&str] = &[
     "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
 ];
@@ -455,6 +460,16 @@ pub struct ScanArgs {
     // always wins. Read it through `ScanArgs::baseline_mode`.
     #[arg(long = "baseline-mode", value_name = "MODE", value_parser = clap::builder::PossibleValuesParser::new(BASELINE_MODE_VALUES.iter().copied()))]
     pub baseline_mode_arg: Option<String>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Drop findings graded below this confidence before output, per-target
+    /// counts, --baseline, and the exit code: low (default, keep everything)
+    /// or high (keep only findings dalfox can claim are exploitable;
+    /// informational findings carry no grade and are kept). Example: --min-confidence high
+    //
+    // `None` so an explicit `--min-confidence low` beats a config-file `high`.
+    #[arg(long, value_name = "LEVEL", value_parser = clap::builder::PossibleValuesParser::new(MIN_CONFIDENCE_VALUES.iter().copied()))]
+    pub min_confidence: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, multipart, cookie, header, graphql, xml.
@@ -922,6 +937,7 @@ impl Default for ScanArgs {
             state_file: None,
             baseline: None,
             baseline_mode_arg: None,
+            min_confidence: None,
             param: vec![],
             data: None,
             headers: vec![],
@@ -1068,6 +1084,13 @@ impl ScanArgs {
         self.baseline_mode_arg
             .as_deref()
             .unwrap_or(BASELINE_MODE_FILTER)
+    }
+
+    /// Whether `--min-confidence` drops `r`. The one filter predicate the CLI
+    /// report, the `--stream-findings` printer, and the REST/MCP job results
+    /// all share, so the three cannot disagree on what was found.
+    pub(crate) fn below_min_confidence(&self, r: &crate::scanning::result::Result) -> bool {
+        self.min_confidence.as_deref() == Some(MIN_CONFIDENCE_HIGH) && r.is_low_confidence()
     }
 
     /// Effective `--on-session-loss` policy: the operator's choice, else

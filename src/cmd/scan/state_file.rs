@@ -209,7 +209,7 @@ pub(crate) fn target_identity(target: &Target, cli: &CliCredentials) -> TargetId
 ///   the target list would reset the file on every iteration of that loop,
 ///   which is precisely the workflow resume exists for.
 /// - **Reporting** (`format`, `output`, `poc_type`, `include_*`, `no_color`,
-///   `silence`, `stream_findings`, `only_poc`, `baseline*`, `state_file`,
+///   `silence`, `stream_findings`, `only_poc`, `min_confidence`, `baseline*`, `state_file`,
 ///   `dry_run`, `only_discovery`) — presentation and post-processing of
 ///   findings already made. The two preview modes never write records at all.
 ///   `limit` and `limit_result_type` are deliberately *not* here: `--limit`
@@ -247,6 +247,7 @@ pub(crate) fn config_hash(args: &ScanArgs) -> String {
     a.silence = d.silence;
     a.stream_findings = d.stream_findings;
     a.only_poc = d.only_poc.clone();
+    a.min_confidence = d.min_confidence.clone();
     a.baseline = d.baseline.clone();
     a.baseline_mode_arg = d.baseline_mode_arg.clone();
     a.state_file = d.state_file.clone();

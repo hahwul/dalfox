@@ -95,6 +95,9 @@ pub(crate) struct ScanRun {
     pub(crate) findings_capped: bool,
     /// Every warning the run raised, for [`super::Job::warnings`].
     pub(crate) warnings: Vec<String>,
+    /// `min_confidence = "high"` was requested: low-graded findings are
+    /// dropped from the stored results and the final tally.
+    pub(crate) drop_low_confidence: bool,
 }
 
 impl ScanRun {
@@ -113,15 +116,15 @@ impl ScanRun {
         include_response: bool,
     ) -> Arc<Vec<SanitizedResult>> {
         let locked = self.results.lock().await;
+        let kept: Vec<SanitizedResult> = locked
+            .iter()
+            .filter(|r| !(self.drop_low_confidence && r.is_low_confidence()))
+            .map(|r| r.to_sanitized(include_request, include_response))
+            .collect();
         progress
             .findings_so_far
-            .store(locked.len() as u64, std::sync::atomic::Ordering::Relaxed);
-        Arc::new(
-            locked
-                .iter()
-                .map(|r| r.to_sanitized(include_request, include_response))
-                .collect(),
-        )
+            .store(kept.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        Arc::new(kept)
     }
 
     /// Record this run's results and final status on `job`, returning the
@@ -818,5 +821,7 @@ pub(crate) async fn execute_scan(
         session_lost,
         findings_capped: scan_report.limit_stopped,
         warnings: std::mem::take(&mut *job_warnings.lock().unwrap_or_else(|e| e.into_inner())),
+        drop_low_confidence: args.min_confidence.as_deref()
+            == Some(crate::cmd::scan::MIN_CONFIDENCE_HIGH),
     }
 }

@@ -2,7 +2,7 @@
 //! AST-finding deduplication. Split out of the monolithic `scan.rs` so the
 //! scan orchestrator only orchestrates.
 
-use crate::scanning::result::{FindingType, Result};
+use crate::scanning::result::{Confidence, FindingType, Result};
 use std::collections::HashMap;
 
 pub(crate) fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
@@ -22,7 +22,10 @@ pub(crate) fn extract_context(response: &str, payload: &str) -> Option<(usize, S
     None
 }
 
-fn result_priority(result: &Result) -> u8 {
+/// Dedup rank: type, then severity, then confidence (`high` > `low` >
+/// ungraded). Compared as a tuple so each axis only breaks ties in the one
+/// before it.
+fn result_priority(result: &Result) -> (u8, u8, u8) {
     let type_score = match result.result_type {
         FindingType::Verified => 3,
         FindingType::AstDetected => 2,
@@ -37,7 +40,12 @@ fn result_priority(result: &Result) -> u8 {
         "Low" => 1,
         _ => 0,
     };
-    type_score * 10 + severity_score
+    let confidence_score = match result.confidence {
+        Some(Confidence::High) => 2,
+        Some(Confidence::Low) => 1,
+        None => 0,
+    };
+    (type_score, severity_score, confidence_score)
 }
 
 /// Evidence-centric fingerprint [`dedupe_ast_results`] collapses AST findings

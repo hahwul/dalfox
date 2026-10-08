@@ -39,6 +39,22 @@ impl Result {
             }
         };
 
+        // A `low` confidence grade drops the level one step (error → warning
+        // → note), so code scanning ranks a claim dalfox cannot stand behind
+        // below one it can. `partialFingerprints` ignores the grade on
+        // purpose: a finding's code-scanning identity must not churn when a
+        // later run grades it differently.
+        let level_for = |r: &Result| -> &str {
+            let level = severity_to_level(&r.severity);
+            if !r.is_low_confidence() {
+                return level;
+            }
+            match level {
+                "error" => "warning",
+                _ => "note",
+            }
+        };
+
         // SARIF requires that a result's `ruleId` reference a rule defined in
         // `driver.rules`, and that a present `ruleIndex` point at THAT rule.
         // Findings carry different CWEs (XSS is CWE-79; outdated-library
@@ -129,7 +145,7 @@ impl Result {
                 json!({
                     "ruleId": rule_id,
                     "ruleIndex": rule_index,
-                    "level": severity_to_level(&r.severity),
+                    "level": level_for(r),
                     "message": {
                         "text": full_message
                     },

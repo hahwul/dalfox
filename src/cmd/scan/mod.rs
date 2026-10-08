@@ -52,11 +52,13 @@ pub use args::{
     DEFAULT_MINING_BUCKET_SIZE, DEFAULT_PAYLOAD_SAFETY_CAP, DEFAULT_RATE_LIMIT, DEFAULT_RETRIES,
     DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_BYPASS, DEFAULT_WAF_MIN_CONFIDENCE,
     DEFAULT_WORKERS, ENCODER_VALUES, ExplicitArgs, FORMAT_VALUES, LIMIT_RESULT_TYPE_VALUES,
-    MAX_MINING_BUCKET_SIZE, MAX_PER_PARAM_CONCURRENCY, MAX_SXSS_BACKOFF_MS, MINING_BISECT_WAYS,
-    ON_SESSION_LOSS_VALUES, ONLY_POC_VALUES, POC_TYPE_VALUES, PREFLIGHT_DEFAULT_WORKERS,
-    PreflightOptions, ScanArgs, WAF_BYPASS_VALUES, format_is_machine,
+    MAX_MINING_BUCKET_SIZE, MAX_PER_PARAM_CONCURRENCY, MAX_SXSS_BACKOFF_MS, MIN_CONFIDENCE_VALUES,
+    MINING_BISECT_WAYS, ON_SESSION_LOSS_VALUES, ONLY_POC_VALUES, POC_TYPE_VALUES,
+    PREFLIGHT_DEFAULT_WORKERS, PreflightOptions, ScanArgs, WAF_BYPASS_VALUES, format_is_machine,
 };
-pub(crate) use args::{parse_base_url_arg, parse_force_waf_arg, parse_http_method_arg};
+pub(crate) use args::{
+    MIN_CONFIDENCE_HIGH, parse_base_url_arg, parse_force_waf_arg, parse_http_method_arg,
+};
 pub(crate) use logging::log_info;
 pub(crate) use preflight::finish_waf_detection;
 // Shared with `job::normalize_proxy` so REST/MCP refuse the same unroutable

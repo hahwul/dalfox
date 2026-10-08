@@ -353,6 +353,7 @@ curl http://127.0.0.1:6664/health
     "waf_evasion": false,
     "waf_min_confidence": 0.3,
     "max_payloads_per_param": 0,
+    "min_confidence": "high",
     "blind_oob": true,
     "blind_oob_wait": 30,
     "session_check": "Sign out",
@@ -404,6 +405,10 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응되며 모두 선�
 `"off"`에서는 보고만 되고 우회는 적용되지 않습니다. `waf_evasion`은
 (기본값 `false`) 적응형 우회를 켭니다. `waf_min_confidence`는 `[0.0, 1.0]` 범위의
 탐지 신뢰도 하한입니다 (기본값 `0.3`). 이 값보다 낮은 핑거프린트는 버려집니다.
+`min_confidence`(`"low"` 또는 `"high"`, 생략하면 모두 유지)는 CLI의
+`--min-confidence`와 같습니다. `"high"`는 `low` 등급 탐지 결과를 작업 결과에서
+제거합니다. `I`는 등급이 없으므로 유지됩니다. `GET /scan`에서는 쿼리 파라미터로
+받습니다.
 
 `method`, `encoders`, `remote_payloads`, `remote_wordlists`는 CLI가 허용하는 것과
 같은 값으로 검사하며, 모르는 메서드·인코더·프로바이더 이름은 `400`입니다. `method`는

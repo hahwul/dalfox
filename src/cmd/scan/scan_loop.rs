@@ -158,8 +158,15 @@ pub(crate) async fn run_scan_loop(
         let include_request = args.include_request;
         let include_response = args.include_response;
         let streamed = state.streamed_findings.clone();
+        let filter_args = args.clone();
         let handle = tokio::spawn(async move {
             while let Some(result) = rx.recv().await {
+                // Same `--min-confidence` predicate the end-of-scan report
+                // applies, so the live output never shows a finding the
+                // summary and the exit code leave out.
+                if filter_args.below_min_confidence(&result) {
+                    continue;
+                }
                 // Deduplicate on (type, url, param, payload) so the same
                 // finding emitted along two code paths (e.g. JS-context V
                 // upgrade and DOM verification) only prints once. The set is

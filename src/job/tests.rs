@@ -644,6 +644,7 @@ fn rest_and_mcp_requests_agree_on_scan_args() {
         blind_oob_wait: mcp_params.blind_oob_wait,
         session_check: mcp_params.session_check,
         session_check_url: mcp_params.session_check_url,
+        min_confidence: mcp_params.min_confidence,
     }
     .into_scan_args();
 
@@ -697,6 +698,7 @@ fn rest_non_default_options_reach_scan_args() {
         blind_oob_wait: Some(12),
         session_check: Some("Sign out".to_string()),
         session_check_url: Some("https://app/me".to_string()),
+        min_confidence: Some("high".to_string()),
         ..Default::default()
     };
 
@@ -744,6 +746,7 @@ fn rest_non_default_options_reach_scan_args() {
     assert_eq!(args.remote_payloads, vec!["portswigger".to_string()]);
     assert_eq!(args.remote_wordlists, vec!["burp".to_string()]);
     assert_eq!(args.max_payloads_per_param, 11);
+    assert_eq!(args.min_confidence.as_deref(), Some("high"));
     assert!(args.include_request);
     assert!(args.include_response);
     assert_eq!(args.oob.blind_oob, Some(vec!["oast.fun".to_string()]));
@@ -1278,6 +1281,7 @@ fn async_jobs_cap_findings_and_say_so() {
         session_lost: None,
         findings_capped: true,
         warnings: Vec::new(),
+        drop_low_confidence: false,
     };
     let mut job = Job::new_queued("http://t/".into());
     assert_eq!(
@@ -1342,6 +1346,8 @@ fn preflight_accepts_a_documented_subset_of_the_scan_options() {
         "force_waf",
         "waf_evasion",
         "waf_min_confidence",
+        // No findings to grade.
+        "min_confidence",
         // Nothing is fetched to fuel an attack the caller has not run yet.
         "remote_payloads",
         "remote_wordlists",
@@ -1756,6 +1762,7 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         session_lost: None,
         findings_capped: false,
         warnings: Vec::new(),
+        drop_low_confidence: false,
     };
     let note = "scan exceeded scan_timeout (5s); returning partial results";
     for (prior, append, want) in [
@@ -1770,4 +1777,70 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         assert_eq!(job.error_message.as_deref(), Some(want.as_str()));
         assert!(job.finished_at_ms.is_some() && job.results.is_some());
     }
+}
+
+/// `min_confidence = "high"` on a REST/MCP job drops low-graded findings from
+/// the stored results and the settled tally — the same predicate the CLI
+/// applies at render — while ungraded informational findings stay. Without
+/// the flag every finding is kept.
+#[tokio::test]
+async fn sanitized_results_honor_min_confidence() {
+    use crate::scanning::result::{Confidence, FindingType, Result as ScanResult};
+    let graded = |t: FindingType, c: Option<Confidence>, param: &str| {
+        let mut r = ScanResult::builder(t).param(param).build();
+        r.confidence = c;
+        r
+    };
+    let results = vec![
+        graded(FindingType::Verified, Some(Confidence::High), "high"),
+        graded(FindingType::Reflected, Some(Confidence::Low), "low"),
+        graded(FindingType::Informational, None, "info"),
+    ];
+    for (drop_low, want) in [
+        (false, vec!["high", "low", "info"]),
+        (true, vec!["high", "info"]),
+    ] {
+        let run = runner::ScanRun {
+            results: Arc::new(tokio::sync::Mutex::new(results.clone())),
+            reachability_failed: false,
+            timed_out: false,
+            was_cancelled: false,
+            panicked: false,
+            worker_panics: 0,
+            session_lost: None,
+            findings_capped: false,
+            drop_low_confidence: drop_low,
+        };
+        let progress = JobProgress::default();
+        let kept = run.sanitized_results(&progress, false, false).await;
+        let params: Vec<&str> = kept.iter().map(|r| r.param.as_str()).collect();
+        assert_eq!(params, want, "drop_low_confidence = {drop_low}");
+        assert_eq!(
+            progress
+                .findings_so_far
+                .load(std::sync::atomic::Ordering::Relaxed),
+            want.len() as u64
+        );
+    }
+}
+
+#[test]
+fn scan_option_checks_reject_an_unknown_min_confidence() {
+    for ok in ["low", "high"] {
+        assert!(
+            ScanOptionChecks::<f32> {
+                min_confidence: Some(ok),
+                ..Default::default()
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+    let err = ScanOptionChecks::<f32> {
+        min_confidence: Some("medium"),
+        ..Default::default()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(err.contains("min_confidence"), "{err}");
 }

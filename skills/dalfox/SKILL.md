@@ -149,8 +149,10 @@ Key points for agents:
   Dalfox drives no browser by design; only `detection_method: "oob"` observes a
   real one. Never report `V` as "watched it fire".
 - Select AST findings with `detection_method == "ast"`, not `type == "A"`.
-- `confidence` (`high`/`low`) + `confidence_reason` grade the claim; sort a
-  large `A` batch on them. Machine formats only — plain output omits them.
+- `confidence` (`high`/`low`, absent on `I`) + `confidence_reason` grade the
+  claim; sort a large `A` batch on them. `--min-confidence high` (MCP/REST
+  `min_confidence`) drops every `low` finding before output and the exit code;
+  `I` findings carry no grade and are kept. Plain output shows the grade only.
 - `inject_type` names the check that produced the finding (`inHTML`,
   `sxss-inHTML`, `DOM-XSS`, `inHTML-HPP`, `blind-oob-…`, `OutdatedComponent`),
   not the reflection context — there is no `inJS` / `inATTR`.

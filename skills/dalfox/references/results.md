@@ -63,8 +63,25 @@ Every XSS finding carries `confidence` (`"high"` / `"low"`) plus a
 
 During the tier migration `type` and `confidence` can legitimately disagree
 (`type: "V"`, `confidence: "low"` from two legacy AST promotions). That is the
-preview signal, not a bug. `confidence` does not yet drive filtering, ordering,
-dedup, or exit codes — those still key off `type`.
+preview signal, not a bug.
+
+What reads `confidence`:
+
+- **`--min-confidence high`** (config `min_confidence`, REST/MCP
+  `min_confidence`) drops every `low` finding — every `R`, plus AST flows dalfox
+  cannot stand behind — before output, `target_summary` counts, `--baseline`,
+  the `--limit` display cut, and the exit code, in every format and in
+  `--stream-findings`. `I` findings carry no grade and are kept. The default
+  (`low`) keeps everything. `--limit`'s scan-time early stop still counts every
+  finding, so `--limit N --min-confidence high` can stop on `low` findings.
+  A run whose only findings were `low` exits `0` under `high`.
+- **Dedup** ranks duplicate AST findings by type, then severity, then
+  confidence (`high` before `low`).
+- **SARIF** drops a `low` finding's `level` one step (`error` → `warning` →
+  `note`); `partialFingerprints` ignore the grade, so re-grading never churns
+  code-scanning identity.
+- **Plain** output shows a `Confidence:` line (grade only; the reason is in the
+  machine formats).
 
 **Agent rule**: lead with V, then A, then R. Within a large `A` batch, sort on
 `confidence` and read `confidence_reason`. Group by parameter. Always surface

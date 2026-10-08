@@ -170,6 +170,7 @@ The block above is an excerpt. Every field the tool accepts, with its default â€
   "force_waf": null,
   "waf_evasion": false,
   "waf_min_confidence": 0.3,
+  "min_confidence": "high",
   "remote_payloads": [],
   "remote_wordlists": [],
   "max_payloads_per_param": 0,
@@ -259,6 +260,11 @@ applied. `waf_evasion`
 detection confidence floor in `[0.0, 1.0]` (default `0.3`); fingerprints below
 it are dropped. Unknown values for `waf_bypass` or `force_waf`, and a
 `waf_min_confidence` outside the range, are rejected as `invalid_params`.
+
+`min_confidence` (`"low"` or `"high"`; omitted keeps every finding) is the CLI's
+`--min-confidence`: `"high"` drops every `low`-confidence finding from the
+job's results and its settled `findings_so_far`. `I` findings carry no grade
+and are kept. Any other value is rejected as `invalid_params`.
 
 `remote_payloads` and `remote_wordlists` (both default `[]`) fetch extra XSS
 payloads (`"portswigger"`, `"payloadbox"`) and parameter wordlists (`"burp"`,

@@ -360,6 +360,7 @@ Returns `status: "ok"`, version, `auth_required`, and the list of supported endp
     "waf_evasion": false,
     "waf_min_confidence": 0.3,
     "max_payloads_per_param": 0,
+    "min_confidence": "high",
     "blind_oob": true,
     "blind_oob_wait": 30,
     "session_check": "Sign out",
@@ -415,6 +416,10 @@ preflight response still runs. `force_waf` pins a specific WAF profile (e.g.
 `"force"` alike; under `"off"` it is reported but no bypass is applied. `waf_evasion` (default `false`)
 enables adaptive evasion. `waf_min_confidence` is the detection confidence floor
 in `[0.0, 1.0]` (default `0.3`); fingerprints below it are discarded.
+`min_confidence` (`"low"` or `"high"`; omitted keeps every finding) is the CLI's
+`--min-confidence`: `"high"` drops every `low`-confidence finding from the job's
+results. `I` findings carry no grade and are kept. `GET /scan` takes it as a
+query parameter.
 
 `method`, `encoders`, `remote_payloads` and `remote_wordlists` are checked
 against the same values the CLI accepts, and an unknown verb, encoder or

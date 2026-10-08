@@ -287,6 +287,10 @@ pub(crate) struct ScanOptions {
     pub(crate) waf_evasion: Option<bool>,
     /// WAF detection confidence floor in [0.0, 1.0]. Absent keeps the default (0.3).
     pub(crate) waf_min_confidence: Option<f32>,
+    /// Finding confidence floor: "low" (default, keep everything) or "high"
+    /// (drop low-confidence findings from the job's results). Informational
+    /// findings carry no grade and are always kept.
+    pub(crate) min_confidence: Option<String>,
     /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped
     /// by the server's `--rate-limit` when set.
     pub(crate) rate_limit: Option<u32>,
