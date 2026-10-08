@@ -113,7 +113,7 @@ dalfox scan capture.har                 # auto-detected
 dalfox scan -i har capture.har          # explicit
 ```
 
-Excellent when the interesting parameters live in cookies, custom headers, or a complex JSON body. `har` fans a multi-request capture out into one target per `log.entries[].request` (deduped by URL+method); `raw-http` is the single-request form. See `references/cli.md`.
+Excellent when the interesting parameters live in cookies, custom headers, or a complex JSON body. `har` fans a multi-request capture out into one target per `log.entries[].request` (deduped by URL+method+body); `raw-http` is the single-request form. See `references/cli.md`.
 
 ### F. Stored XSS (SXSS)
 

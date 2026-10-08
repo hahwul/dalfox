@@ -9,7 +9,9 @@ use std::fs;
 
 use super::args::ScanArgs;
 use super::logging::log_warn;
-use super::validation::{validate_http_url, validate_numeric_args, validate_proxy_url};
+use super::validation::{
+    validate_http_url, validate_numeric_args, validate_proxy_url, validate_scope_regex,
+};
 use super::{ScanOutcome, emit_error, session};
 
 /// Everything that must hold — and be installed — before the first request
@@ -144,6 +146,22 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
         args.proxy.as_deref().map(validate_proxy_url),
     ] {
         if let Some(Err(msg)) = checked {
+            emit_error(&args.format, crate::cmd::error_codes::PARSE_ERROR, &msg);
+            return Err(ScanOutcome::Error);
+        }
+    }
+
+    // Scope regexes: an uncompilable one is dropped later, which turns
+    // `--exclude-url` into "exclude nothing" and attacks the excluded URLs.
+    for (flag, patterns) in [
+        ("--include-url", &args.include_url),
+        ("--exclude-url", &args.exclude_url),
+    ] {
+        if let Some(Err(msg)) = patterns
+            .iter()
+            .map(|p| validate_scope_regex(p, flag))
+            .find(Result::is_err)
+        {
             emit_error(&args.format, crate::cmd::error_codes::PARSE_ERROR, &msg);
             return Err(ScanOutcome::Error);
         }
