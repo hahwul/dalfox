@@ -19,6 +19,17 @@ use super::Target;
 use serde::Deserialize;
 use url::Url;
 
+/// `#[serde(default)]` only covers a *missing* key; exporters that marshal nil
+/// slices / empty strings as JSON `null` (Go-based proxies) would otherwise fail
+/// the whole file. Treat `null` as the default.
+fn null_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
 // HAR 1.2 schema, narrowed to the request fields we consume. Unknown fields
 // (response, timings, cache, pages, creator, …) are ignored by serde, so this
 // parses real-world exports from any tool without tracking the full spec.
@@ -30,7 +41,7 @@ struct Har {
 
 #[derive(Debug, Deserialize)]
 struct HarLog {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     entries: Vec<HarEntry>,
 }
 
@@ -41,12 +52,12 @@ struct HarEntry {
 
 #[derive(Debug, Deserialize)]
 struct HarRequest {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     method: String,
     url: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     headers: Vec<HarNameValue>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     cookies: Vec<HarNameValue>,
     #[serde(rename = "postData", default)]
     post_data: Option<HarPostData>,
@@ -54,9 +65,9 @@ struct HarRequest {
 
 #[derive(Debug, Deserialize)]
 struct HarNameValue {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     value: String,
 }
 
@@ -67,13 +78,13 @@ struct HarPostData {
     /// Some exporters omit `text` and only provide parsed `params` (e.g. for
     /// `application/x-www-form-urlencoded` or multipart bodies). We synthesize
     /// a urlencoded-shaped body from these when `text` is absent.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     params: Vec<HarPostParam>,
 }
 
 #[derive(Debug, Deserialize)]
 struct HarPostParam {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     name: String,
     #[serde(default)]
     value: Option<String>,

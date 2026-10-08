@@ -43,7 +43,15 @@ const MAX_CACHED_PROVIDER_SETS: usize = 64;
 struct ProviderCache(OnceLock<Mutex<CachedLists>>);
 
 /// Fetched lists indexed by the normalized provider set that produced them.
-type CachedLists = HashMap<Vec<String>, Arc<Vec<String>>>;
+type CachedLists = HashMap<Vec<String>, CachedList>;
+
+/// One cached list. `partial` marks a fetch where some provider URL failed: the
+/// surviving entries are served, but the set is fetched again next time rather
+/// than pinning the degraded list for the process lifetime.
+struct CachedList {
+    lines: Arc<Vec<String>>,
+    partial: bool,
+}
 
 impl ProviderCache {
     const fn new() -> Self {
@@ -56,19 +64,31 @@ impl ProviderCache {
 
     fn get(&self, key: &[String]) -> Option<Arc<Vec<String>>> {
         let m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
-        m.get(key).cloned()
+        m.get(key).map(|e| e.lines.clone())
+    }
+
+    /// Whether `key` holds a fully fetched list (present and not `partial`).
+    fn is_complete(&self, key: &[String]) -> bool {
+        let m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
+        m.get(key).is_some_and(|e| !e.partial)
     }
 
     /// Cache `lines` under `key`. Returns `false` when the cache is full and
     /// this is a new set — never evicting a live entry, which a job mid-scan
     /// may still be reading.
     #[must_use]
-    fn store(&self, key: Vec<String>, lines: Vec<String>) -> bool {
+    fn store(&self, key: Vec<String>, lines: Vec<String>, partial: bool) -> bool {
         let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
         if m.len() >= MAX_CACHED_PROVIDER_SETS && !m.contains_key(&key) {
             return false;
         }
-        m.insert(key, Arc::new(lines));
+        m.insert(
+            key,
+            CachedList {
+                lines: Arc::new(lines),
+                partial,
+            },
+        );
         true
     }
 
@@ -78,7 +98,7 @@ impl ProviderCache {
     fn sole_entry(&self) -> Option<Arc<Vec<String>>> {
         let m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
         if m.len() == 1 {
-            m.values().next().cloned()
+            m.values().next().map(|e| e.lines.clone())
         } else {
             None
         }
@@ -201,21 +221,28 @@ impl RemoteKind {
         opts: RemoteFetchOptions,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let key = provider_cache_key(providers);
-        if self.cache.get(&key).is_some() {
+        if self.cache.is_complete(&key) {
             return Ok(());
         }
 
         let urls = self.collect_urls(providers);
         if urls.is_empty() {
             // No recognized providers: cache an empty list for *this* set only.
-            let _ = self.cache.store(key, Vec::new());
+            let _ = self.cache.store(key, Vec::new(), false);
             return Ok(());
         }
 
         let client = build_remote_client(&opts)?;
 
-        let lines = fetch_multiple_text_lists(&client, &urls).await;
-        let sanitized = sanitize_lines(&lines);
+        let (lines, failed) = fetch_multiple_text_lists(&client, &urls).await;
+        let mut sanitized = sanitize_lines(&lines);
+        // A retry of a previously partial set that fails again must not lose
+        // what an earlier attempt already got: keep the union.
+        if failed > 0
+            && let Some(prior) = self.cache.get(&key)
+        {
+            sanitized.extend(prior.iter().cloned());
+        }
         let dedup_sorted = dedup_and_sort(sanitized);
 
         // Never cache "we got nothing" for a provider set that named real URLs: a
@@ -227,7 +254,9 @@ impl RemoteKind {
             return Err(format!("remote {} fetch returned no usable entries", self.noun).into());
         }
 
-        if !self.cache.store(key, dedup_sorted) {
+        // Some URLs failed: serve what survived, but leave the set marked
+        // partial so the next job fetches again.
+        if !self.cache.store(key, dedup_sorted, failed > 0) {
             return Err(cache_full_error(self.noun));
         }
         Ok(())
@@ -334,8 +363,9 @@ fn dedup_urls(mut urls: Vec<String>) -> Vec<String> {
 }
 
 /// Concurrently fetch multiple text endpoints and concatenate their contents.
-/// Any individual fetch failure will be logged to stderr and skipped.
-async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> String {
+/// Any individual fetch failure will be logged to stderr and skipped; the
+/// returned count is how many URLs failed.
+async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> (String, usize) {
     let mut set = JoinSet::new();
     for url in urls.iter() {
         let url = url.clone();
@@ -370,13 +400,16 @@ async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> String {
     }
 
     let mut out = String::new();
+    let mut failed = 0;
     while let Some(res) = set.join_next().await {
         if let Ok(Some(text)) = res {
             out.push('\n');
             out.push_str(&text);
+        } else {
+            failed += 1;
         }
     }
-    out
+    (out, failed)
 }
 
 /// Sanitize a blob of text into lines:

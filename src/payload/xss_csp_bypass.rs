@@ -182,8 +182,7 @@ pub(crate) fn analyze_csp(csp_value: &str) -> CspAnalysis {
     // them in after the loop, so `script-src 'nonce-x'; default-src
     // 'unsafe-inline'` is not misread as inline-allowed (which flipped a
     // nonce-hardened policy to "gadget-bypassable").
-    let mut default_src_unsafe_inline = false;
-    let mut default_src_unsafe_eval = false;
+    let mut default_src_values: Vec<&str> = Vec::new();
 
     for directive in &directives {
         let parts: Vec<&str> = directive.split_whitespace().collect();
@@ -197,53 +196,12 @@ pub(crate) fn analyze_csp(csp_value: &str) -> CspAnalysis {
             "script-src" | "script-src-elem" => {
                 has_script_src = true;
                 for v in &values {
-                    let lower = v.to_ascii_lowercase();
-                    if lower == "'unsafe-inline'" {
-                        analysis.has_unsafe_inline = true;
-                    }
-                    if lower == "'unsafe-eval'" {
-                        analysis.has_unsafe_eval = true;
-                    }
-                    if lower == "'strict-dynamic'" {
-                        analysis.has_strict_dynamic = true;
-                    }
-                    if lower == "data:" {
-                        analysis.allows_data_scheme = true;
-                    }
-                    if lower == "blob:" {
-                        analysis.allows_blob_scheme = true;
-                    }
-                    // `'nonce-<base64>'` — capture the base64 (case-sensitive,
-                    // so read from the original token, not the lowercased one).
-                    if let Some(nonce) = parse_nonce_token(v, &lower) {
-                        analysis.nonce_values.push(nonce);
-                    }
-                    // `'sha256-…'` / `'sha384-…'` / `'sha512-…'`.
-                    if let Some(hash) = parse_hash_token(v, &lower) {
-                        analysis.hash_values.push(hash);
-                    }
-                    // Collect whitelisted domains (not keywords). Nonce/hash
-                    // tokens start with `'` so they're excluded here too.
-                    if !lower.starts_with('\'')
-                        && lower != "data:"
-                        && lower != "blob:"
-                        && lower != "*"
-                    {
-                        analysis.whitelisted_domains.push(v.to_string());
-                    }
+                    apply_script_source(&mut analysis, v);
                 }
             }
             "default-src" => {
                 has_default_src = true;
-                for v in &values {
-                    let lower = v.to_ascii_lowercase();
-                    if lower == "'unsafe-inline'" {
-                        default_src_unsafe_inline = true;
-                    }
-                    if lower == "'unsafe-eval'" {
-                        default_src_unsafe_eval = true;
-                    }
-                }
+                default_src_values.extend(values.iter().copied());
             }
             "base-uri" => {
                 has_base_uri = true;
@@ -274,21 +232,61 @@ pub(crate) fn analyze_csp(csp_value: &str) -> CspAnalysis {
         }
     }
 
-    // Fold in default-src's script flags only when no script-src overrode it.
+    // Fold in default-src's script sources only when no script-src overrode
+    // it, through the same token handling as `script-src`, so `data:`,
+    // `blob:`, hosts, nonces, hashes and `'strict-dynamic'` all carry over.
     if !has_script_src {
-        if default_src_unsafe_inline {
-            analysis.has_unsafe_inline = true;
-        }
-        if default_src_unsafe_eval {
-            analysis.has_unsafe_eval = true;
+        for v in &default_src_values {
+            apply_script_source(&mut analysis, v);
         }
     }
 
     analysis.missing_script_src = !has_script_src && !has_default_src;
     analysis.missing_base_uri = !has_base_uri;
-    analysis.missing_object_src = !has_object_src;
+    // `object-src` falls back to `default-src`, so an object/embed `data:`
+    // payload only stays viable when that fallback itself permits `data:`.
+    analysis.missing_object_src = !has_object_src
+        && (!has_default_src
+            || default_src_values
+                .iter()
+                .any(|v| v.eq_ignore_ascii_case("data:")));
 
     analysis
+}
+
+/// Record one `script-src` (or script-governing `default-src`) source
+/// expression on `analysis`.
+fn apply_script_source(analysis: &mut CspAnalysis, v: &str) {
+    let lower = v.to_ascii_lowercase();
+    if lower == "'unsafe-inline'" {
+        analysis.has_unsafe_inline = true;
+    }
+    if lower == "'unsafe-eval'" {
+        analysis.has_unsafe_eval = true;
+    }
+    if lower == "'strict-dynamic'" {
+        analysis.has_strict_dynamic = true;
+    }
+    if lower == "data:" {
+        analysis.allows_data_scheme = true;
+    }
+    if lower == "blob:" {
+        analysis.allows_blob_scheme = true;
+    }
+    // `'nonce-<base64>'`: capture the base64 (case-sensitive, so read from the
+    // original token, not the lowercased one).
+    if let Some(nonce) = parse_nonce_token(v, &lower) {
+        analysis.nonce_values.push(nonce);
+    }
+    // `'sha256-…'` / `'sha384-…'` / `'sha512-…'`.
+    if let Some(hash) = parse_hash_token(v, &lower) {
+        analysis.hash_values.push(hash);
+    }
+    // Collect whitelisted domains (not keywords). Nonce/hash tokens start with
+    // `'` so they're excluded here too.
+    if !lower.starts_with('\'') && lower != "data:" && lower != "blob:" && lower != "*" {
+        analysis.whitelisted_domains.push(v.to_string());
+    }
 }
 
 /// Extract the base64 payload of a `'nonce-<base64>'` source expression. The
@@ -316,6 +314,10 @@ fn parse_hash_token(token: &str, lower: &str) -> Option<String> {
     }
     None
 }
+
+/// Most distinct `'nonce-…'` values that seed nonce-reuse payloads. Real
+/// policies carry one or two.
+const MAX_NONCE_PAYLOADS: usize = 4;
 
 /// Generate CSP bypass payloads based on CSP analysis.
 pub(crate) fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
@@ -362,7 +364,7 @@ pub(crate) fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
             class_marker
         ));
         payloads.push(format!(
-            "<img src=x onerror=new%20Function('alert(1)')() id={}>",
+            "<img src=x onerror=new(Function)('alert(1)')() id={}>",
             id_marker
         ));
     }
@@ -423,7 +425,19 @@ pub(crate) fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
         // The nonce value is quoted: base64 nonces routinely contain `=` (and
         // sometimes `+`/`/`), which are invalid in an unquoted HTML attribute
         // value and would truncate the nonce so it no longer matches the CSP.
-        for nonce in &analysis.nonce_values {
+        // Capped: the policy is attacker-controlled response data, and each
+        // nonce costs two payloads on every parameter (dedup cannot collapse
+        // them, the nonce is embedded).
+        let mut nonces: Vec<&String> = Vec::new();
+        for n in &analysis.nonce_values {
+            if nonces.len() == MAX_NONCE_PAYLOADS {
+                break;
+            }
+            if !nonces.contains(&n) {
+                nonces.push(n);
+            }
+        }
+        for nonce in nonces {
             payloads.push(format!(
                 "<script nonce=\"{}\" class={}>alert(1)</script>",
                 nonce, class_marker
