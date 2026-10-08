@@ -65,6 +65,45 @@ pub(crate) enum PreflightOutcome {
     Unreachable(&'static str),
 }
 
+/// Which layer a connect/request failure died at, read off the error chain.
+enum FailureLayer {
+    Dns,
+    Tls,
+    Refused,
+    Unknown,
+}
+
+/// Sniff the source chain for the failing layer. The walk starts at
+/// `err.source()`: the top-level reqwest error's Display embeds the request URL
+/// (`error sending request for url (...)`), so matching it would classify a
+/// plain refused connection to `/dns/x` or `tls.example.com` as DNS / TLS.
+/// Shared by the banner text and the error code so they cannot drift.
+fn failure_layer(err: &reqwest::Error) -> FailureLayer {
+    let mut cur = std::error::Error::source(err);
+    while let Some(e) = cur {
+        let s = e.to_string().to_lowercase();
+        if s.contains("connection refused") {
+            return FailureLayer::Refused;
+        }
+        if s.contains("dns")
+            || s.contains("name resolution")
+            || s.contains("nodename")
+            || s.contains("failed to lookup")
+        {
+            return FailureLayer::Dns;
+        }
+        if s.contains("certificate")
+            || s.contains("handshake")
+            || s.contains("tls")
+            || s.contains("ssl")
+        {
+            return FailureLayer::Tls;
+        }
+        cur = e.source();
+    }
+    FailureLayer::Unknown
+}
+
 /// Compact, user-facing summary of a reqwest network failure. Keeps the
 /// preflight banner single-line (e.g. "TLS timeout", "connection refused",
 /// "DNS error") instead of dumping the full reqwest::Error chain.
@@ -87,37 +126,17 @@ fn describe_reqwest_failure(err: &reqwest::Error) -> &'static str {
     if err.is_builder() {
         return "request build error";
     }
-    // For connect / request errors, walk the source chain so we can
-    // tell "DNS failed" from "TLS handshake failed" from "TCP refused"
-    // in the UNREACHABLE diagnostic instead of lumping every layer
-    // under "connection failed".
+    // For connect / request errors, tell "DNS failed" from "TLS handshake
+    // failed" from "TCP refused" in the UNREACHABLE diagnostic instead of
+    // lumping every layer under "connection failed".
     if err.is_connect() || err.is_request() {
-        let mut cur: Option<&dyn std::error::Error> = Some(err);
-        while let Some(e) = cur {
-            let s = e.to_string().to_lowercase();
-            if s.contains("dns")
-                || s.contains("name resolution")
-                || s.contains("nodename")
-                || s.contains("failed to lookup")
-            {
-                return "DNS resolution failed";
-            }
-            if s.contains("certificate")
-                || s.contains("handshake")
-                || s.contains("tls")
-                || s.contains("ssl")
-            {
-                return "TLS handshake failed";
-            }
-            if s.contains("connection refused") {
-                return "connection refused";
-            }
-            cur = e.source();
-        }
-        if err.is_connect() {
-            return "connection failed";
-        }
-        return "request error";
+        return match failure_layer(err) {
+            FailureLayer::Dns => "DNS resolution failed",
+            FailureLayer::Tls => "TLS handshake failed",
+            FailureLayer::Refused => "connection refused",
+            FailureLayer::Unknown if err.is_connect() => "connection failed",
+            FailureLayer::Unknown => "request error",
+        };
     }
     "network error"
 }
@@ -132,27 +151,35 @@ fn classify_reqwest_error_code(err: &reqwest::Error) -> &'static str {
     if err.is_timeout() {
         return crate::cmd::error_codes::REQUEST_TIMEOUT;
     }
-    // Walk the source chain looking for telltale substrings.
-    let mut cur: Option<&dyn std::error::Error> = Some(err);
-    while let Some(e) = cur {
-        let s = e.to_string().to_lowercase();
-        if s.contains("dns")
-            || s.contains("name resolution")
-            || s.contains("nodename")
-            || s.contains("failed to lookup")
-        {
-            return crate::cmd::error_codes::DNS_RESOLUTION_FAILED;
+    match failure_layer(err) {
+        FailureLayer::Dns => crate::cmd::error_codes::DNS_RESOLUTION_FAILED,
+        FailureLayer::Tls => crate::cmd::error_codes::TLS_HANDSHAKE_FAILED,
+        FailureLayer::Refused | FailureLayer::Unknown => {
+            crate::cmd::error_codes::CONNECTION_FAILED
         }
-        if s.contains("tls")
-            || s.contains("handshake")
-            || s.contains("certificate")
-            || s.contains("ssl")
-        {
-            return crate::cmd::error_codes::TLS_HANDSHAKE_FAILED;
-        }
-        cur = e.source();
     }
-    crate::cmd::error_codes::CONNECTION_FAILED
+}
+
+/// Print the single-line UNREACHABLE diagnostic for a hard reachability
+/// failure (TLS timeouts, connection refused, DNS, etc.) so users can tell a
+/// quiet scan from an unreachable target. Suppressed by `--silence`; the debug
+/// channel always carries it.
+fn unreachable_outcome(
+    target: &crate::target_parser::Target,
+    args: &ScanArgs,
+    e: &reqwest::Error,
+) -> PreflightOutcome {
+    let reason = describe_reqwest_failure(e);
+    crate::dbg_log!("preflight unreachable: {} ({})", target.url, reason);
+    if !args.silence {
+        crate::ceprintln!(
+            "{} {} ({})",
+            crate::utils::log::log_prefix("31", "UNREACHABLE"),
+            target.url,
+            reason
+        );
+    }
+    PreflightOutcome::Unreachable(classify_reqwest_error_code(e))
 }
 
 pub(crate) async fn preflight_content_type(
@@ -184,6 +211,10 @@ pub(crate) async fn preflight_content_type(
     const PREFLIGHT_MAX_ATTEMPTS: u32 = 2;
     const PREFLIGHT_RETRY_BACKOFF_MS: u64 = 200;
     let mut attempt = 0u32;
+    // A HEAD that dies *after* the connection was made (reset, hang) is not a
+    // reachability verdict: some origins and middleboxes drop HEAD and serve
+    // GET normally. Keep the error and let the GET below arbitrate.
+    let mut head_failure: Option<reqwest::Error> = None;
     let resp = loop {
         attempt += 1;
         let request_builder = crate::utils::build_preflight_request(
@@ -194,7 +225,7 @@ pub(crate) async fn preflight_content_type(
         );
         crate::record_outbound_request().await;
         match request_builder.send().await {
-            Ok(r) => break r,
+            Ok(r) => break Some(r),
             Err(e) => {
                 let transient = e.is_connect() || e.is_timeout();
                 if transient && attempt < PREFLIGHT_MAX_ATTEMPTS {
@@ -207,30 +238,24 @@ pub(crate) async fn preflight_content_type(
                     tokio::time::sleep(Duration::from_millis(PREFLIGHT_RETRY_BACKOFF_MS)).await;
                     continue;
                 }
-                // Surface a single-line diagnostic for hard reachability failures
-                // (TLS timeouts, connection refused, DNS, etc.) so users can
-                // distinguish a quiet scan from an unreachable target. Suppressed
-                // when --silence is on; the debug channel always carries it.
-                let reason = describe_reqwest_failure(&e);
-                crate::dbg_log!("preflight unreachable: {} ({})", target.url, reason);
-                if !args.silence {
-                    crate::ceprintln!(
-                        "{} {} ({})",
-                        crate::utils::log::log_prefix("31", "UNREACHABLE"),
-                        target.url,
-                        reason
+                if !e.is_connect() {
+                    crate::dbg_log!(
+                        "preflight HEAD failed ({}): {} — falling back to GET",
+                        describe_reqwest_failure(&e),
+                        target.url
                     );
+                    head_failure = Some(e);
+                    break None;
                 }
-                return PreflightOutcome::Unreachable(classify_reqwest_error_code(&e));
+                return unreachable_outcome(target, args, &e);
             }
         }
     };
-    let head_status = resp.status().as_u16();
-    let head_headers = resp.headers().clone();
-    let ct_opt = head_headers
-        .get(CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(ToString::to_string);
+    let head_status = resp.as_ref().map(|r| r.status().as_u16());
+    let mut head_headers = resp
+        .as_ref()
+        .map(|r| r.headers().clone())
+        .unwrap_or_default();
     // Technology detection accumulator
     let mut tech_result = crate::scanning::tech_detect::TechDetectionResult::default();
 
@@ -240,8 +265,10 @@ pub(crate) async fn preflight_content_type(
     // disables payload mutations, not fingerprinting. To suppress
     // detection too, use `--skip-waf-probe` (no provocation request)
     // or just don't read the `waf` field.
-    let mut waf_result = crate::waf::fingerprint_from_response(&head_headers, None, head_status);
-    let mut baseline_status = Some(head_status);
+    let mut waf_result = head_status
+        .map(|status| crate::waf::fingerprint_from_response(&head_headers, None, status))
+        .unwrap_or_default();
+    let mut baseline_status = head_status;
 
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
@@ -251,10 +278,19 @@ pub(crate) async fn preflight_content_type(
     let get_req =
         crate::utils::build_preflight_request(&client, target, false, Some(PREFLIGHT_BODY_BYTES));
     crate::record_outbound_request().await;
-    if let Ok(get_resp) = get_req.send().await {
+    let get_send = get_req.send().await;
+    // HEAD failed, so GET is the only reachability arbiter left.
+    if let (Err(e), Some(_)) = (&get_send, &head_failure) {
+        return unreachable_outcome(target, args, e);
+    }
+    if let Ok(get_resp) = get_send {
         let get_status = get_resp.status().as_u16();
         baseline_status = Some(get_status);
         let get_headers = get_resp.headers().clone();
+        if head_failure.is_some() {
+            // No HEAD to read the Content-Type / CSP header from.
+            head_headers = get_headers.clone();
+        }
         response_content_type = get_headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
@@ -325,6 +361,10 @@ pub(crate) async fn preflight_content_type(
     // merely gets the same blocking status back is not evidence of a WAF.
     let waf_result = finish_waf_detection(waf_result, baseline_status, target, &client, args).await;
 
+    let ct_opt = head_headers
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
     match ct_opt {
         Some(ct) => PreflightOutcome::WithContentType(PreflightResult {
             content_type: ct,
@@ -441,5 +481,90 @@ mod waf_type_tests {
             parse_waf_type("SomethingElse"),
             WafType::Unknown("somethingelse".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn args() -> ScanArgs {
+        ScanArgs {
+            insecure: Some(true),
+            silence: true,
+            skip_waf_probe: true,
+            ..Default::default()
+        }
+    }
+
+    /// A port nothing listens on: bind, note the port, drop the listener.
+    async fn dead_port() -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        l.local_addr().unwrap().port()
+    }
+
+    /// The error code must come from the failing layer, not from words that
+    /// merely appear in the request URL.
+    #[tokio::test]
+    async fn refused_connection_is_not_classified_from_url_words() {
+        let port = dead_port().await;
+        for path in ["x", "dns/x", "ssl/x", "tls/handshake/certificate"] {
+            let target = crate::target_parser::parse_target(&format!(
+                "http://127.0.0.1:{port}/{path}?q=1"
+            ))
+            .unwrap();
+            match preflight_content_type(&target, &args()).await {
+                PreflightOutcome::Unreachable(code) => assert_eq!(
+                    code,
+                    crate::cmd::error_codes::CONNECTION_FAILED,
+                    "path /{path}"
+                ),
+                _ => panic!("dead port must be unreachable (path /{path})"),
+            }
+        }
+    }
+
+    /// Serve HEAD by slamming the connection shut and GET with a 200.
+    async fn spawn_head_hostile_server() -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = l.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    if buf[..n].starts_with(b"HEAD") {
+                        return; // drop => connection closed with no response
+                    }
+                    let body = "<html>ok</html>";
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn head_reset_falls_back_to_get() {
+        let port = spawn_head_hostile_server().await;
+        let target =
+            crate::target_parser::parse_target(&format!("http://127.0.0.1:{port}/?q=1")).unwrap();
+        match preflight_content_type(&target, &args()).await {
+            PreflightOutcome::WithContentType(r) => {
+                assert!(r.content_type.contains("text/html"));
+                assert_eq!(r.response_body.as_deref(), Some("<html>ok</html>"));
+            }
+            PreflightOutcome::NoContentType { .. } => panic!("GET carried a Content-Type"),
+            PreflightOutcome::Unreachable(c) => panic!("HEAD-only failure must not skip: {c}"),
+        }
     }
 }
