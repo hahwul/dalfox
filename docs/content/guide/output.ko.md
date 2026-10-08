@@ -52,6 +52,7 @@ dalfox scan https://target.app -f jsonl -o findings.jsonl
 | `severity` | `"High"` | High / Medium / Low / Info |
 | `message_id` | `606` | 카탈로그 메시지 ID |
 | `message_str` | `"Triggered XSS Payload (DOM marker): q=<svg onload=alert(1) class=dlx1ec4110f>"` | 짧은 메시지 |
+| `filter` | `{"allowed": ["<", ">"], "blocked": ["(", ")"], "escaped": ["\""]}` | 파라미터가 탐침한 특수문자를 어떻게 처리했는지: 그대로 반사(`allowed`), 제거·인코딩(`blocked`), 백슬래시 이스케이프(`escaped`, 비어 있으면 생략). 탐침 판정이 없으면 생략. plain 출력에서는 `R` 결과에 `Filter:` 줄로 표시 |
 
 다음 세 필드는 요청했을 때만 나타납니다: `new`(`--baseline-mode annotate`), `request`(`--include-request`), `response`(`--include-response`).
 

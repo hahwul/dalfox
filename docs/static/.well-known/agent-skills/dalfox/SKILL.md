@@ -147,6 +147,8 @@ Key points for agents:
   `sxss-inHTML`, `DOM-XSS`, `inHTML-HPP`, `blind-oob-…`, `OutdatedComponent`),
   not the reflection context — there is no `inJS` / `inATTR`.
 - The parameter *location* (query/body/header/...) is in the `location` field.
+- `filter` (`allowed` / `blocked` / `escaped` chars) explains why an `R` didn't
+  verify; absent = no probe verdict, not "nothing allowed".
 - `include_request` / `include_response` are opt-in only — never enable them by default.
 
 ## 5. Performance & Scope Recipes

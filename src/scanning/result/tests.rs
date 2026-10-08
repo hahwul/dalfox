@@ -1099,3 +1099,58 @@ fn a_clean_run_carries_no_unparsable_field_at_all() {
     let serialized = serde_json::to_value(&meta).expect("meta serializes");
     assert!(serialized.get("targets_unparsable").is_none());
 }
+
+#[test]
+fn filter_fingerprint_from_param_splits_escaped_out_of_allowed() {
+    use crate::parameter_analysis::{Location, Param};
+    let mut p = Param::new("q".to_string(), String::new(), Location::Query);
+    assert_eq!(FilterFingerprint::from_param(&p), None, "no probe verdict");
+
+    p.valid_specials = Some(vec!['>', '"', '<', '<']);
+    p.invalid_specials = Some(vec![')', '(']);
+    p.escaped_specials = Some(vec!['"']);
+    let f = FilterFingerprint::from_param(&p).expect("verdict");
+    assert_eq!(f.allowed, vec!['<', '>']);
+    assert_eq!(f.blocked, vec!['(', ')']);
+    assert_eq!(f.escaped, vec!['"']);
+    assert_eq!(f.summary(), "allowed <>  blocked ()  escaped \"");
+
+    p.escaped_specials = None;
+    p.invalid_specials = None;
+    let f = FilterFingerprint::from_param(&p).expect("verdict");
+    assert_eq!(f.summary(), "allowed \"<>  blocked -");
+
+    let target = crate::target_parser::parse_target("https://example.com/?q=1").unwrap();
+    let mut r = Result::builder(FindingType::Reflected).build();
+    r.set_injection_point(&target, &p);
+    assert_eq!(r.filter, FilterFingerprint::from_param(&p));
+}
+
+#[test]
+fn filter_fingerprint_reaches_every_machine_format() {
+    let mut r = Result::builder(FindingType::Reflected)
+        .param("q")
+        .payload("<x>")
+        .cwe("CWE-79")
+        .severity("Info")
+        .build();
+    r.filter = Some(FilterFingerprint {
+        allowed: vec!['<'],
+        blocked: vec!['('],
+        escaped: vec![],
+    });
+
+    let json = r.to_json_value(false, false);
+    assert_eq!(json["filter"]["allowed"], serde_json::json!(["<"]));
+    assert_eq!(json["filter"]["blocked"], serde_json::json!(["("]));
+    assert!(json["filter"].get("escaped").is_none(), "empty escaped omitted");
+
+    let sanitized = serde_json::to_value(r.to_sanitized(false, false)).unwrap();
+    assert_eq!(sanitized["filter"], json["filter"]);
+
+    let toml = Result::results_to_toml_with_meta(std::slice::from_ref(&r), false, false, None);
+    assert!(toml.contains("[results.filter]"), "toml: {toml}");
+
+    r.filter = None;
+    assert!(r.to_json_value(false, false).get("filter").is_none());
+}

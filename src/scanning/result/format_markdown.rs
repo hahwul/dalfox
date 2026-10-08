@@ -303,6 +303,9 @@ impl Result {
                 if !result.evidence.is_empty() {
                     let _ = writeln!(out, "| **Evidence** | {} |", md_cell(&result.evidence));
                 }
+                if let Some(filter) = &result.filter {
+                    let _ = writeln!(out, "| **Filter** | {} |", md_code_cell(&filter.summary()));
+                }
 
                 out.push('\n');
 
