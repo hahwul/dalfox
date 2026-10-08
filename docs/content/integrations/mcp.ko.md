@@ -169,6 +169,7 @@ claude mcp add dalfox -- dalfox mcp
   "force_waf": null,
   "waf_evasion": false,
   "waf_min_confidence": 0.3,
+  "min_confidence": "high",
   "remote_payloads": [],
   "remote_wordlists": [],
   "max_payloads_per_param": 0,
@@ -251,6 +252,11 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 하한이며(기본값 `0.3`), 이보다 낮은 핑거프린트는 버려집니다. `waf_bypass`나
 `force_waf`에 알 수 없는 값을 주거나 `waf_min_confidence`가 범위를 벗어나면
 `invalid_params`로 거부됩니다.
+
+`min_confidence`(`"low"` 또는 `"high"`, 생략하면 모두 유지)는 CLI의
+`--min-confidence`와 같습니다. `"high"`는 `low` 등급 탐지 결과를 작업 결과와
+`findings_so_far`에서 제거합니다. `I`는 등급이 없으므로 유지됩니다.
+다른 값은 `invalid_params`로 거부됩니다.
 
 `remote_payloads`와 `remote_wordlists`는(둘 다 기본값 `[]`) 스캔을 시작하기 전에
 원격 제공자로부터 추가 XSS 페이로드(`"portswigger"`, `"payloadbox"`)와 파라미터

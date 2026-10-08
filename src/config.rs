@@ -126,6 +126,7 @@ pub struct ScanConfig {
     pub only_poc: Option<Vec<String>>,
     pub baseline: Option<String>,
     pub baseline_mode: Option<String>,
+    pub min_confidence: Option<String>,
     pub no_color: Option<bool>,
     // TARGETS
     pub param: Option<Vec<String>>,
@@ -321,6 +322,7 @@ impl Config {
             apply_cfg!(vec scan.only_poc => args.only_poc);
             apply_cfg!(opt_clone scan.baseline => args.baseline);
             apply_cfg!(opt_clone scan.baseline_mode => args.baseline_mode_arg);
+            apply_cfg!(opt_clone scan.min_confidence => args.min_confidence);
             apply_cfg!(flag scan.no_color => args.no_color);
             // Map debug conservatively: only set when CLI didn't enable it (global false)
             if let Some(v) = scan.debug
@@ -576,6 +578,12 @@ impl ScanConfig {
             &mut warnings,
         );
         reject_unless_allowed(
+            &mut self.min_confidence,
+            crate::cmd::scan::MIN_CONFIDENCE_VALUES,
+            "scan.min_confidence",
+            &mut warnings,
+        );
+        reject_unless_allowed(
             &mut self.custom_alert_type,
             crate::cmd::scan::CUSTOM_ALERT_TYPE_VALUES,
             "scan.custom_alert_type",
@@ -798,6 +806,7 @@ pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 # only_poc = ["v", "r"]      # show only these finding types: v (vulnerable), r (reflected), a (AST DOM XSS), i (informational)
 # baseline = "baseline.json"  # CLI only (not applied by `dalfox server` / MCP); prior JSON/JSONL report, report only findings new since it
 # baseline_mode = "filter"    # filter (drop known findings) or annotate (keep them, mark each `new`)
+# min_confidence = "low"      # low (keep every finding) or high (drop low-confidence findings before output and exit code)
 
 # TARGETS
 # param = ["id", "q:query", "auth:header"]

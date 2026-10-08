@@ -302,6 +302,13 @@ pub(crate) struct ScanWithDalfoxParams {
     #[serde(default = "default_waf_min_confidence")]
     pub waf_min_confidence: f64,
 
+    /// Finding confidence floor: "low" keeps every finding; "high" drops
+    /// findings graded low (every R, plus AST flows dalfox cannot stand
+    /// behind) from the results. Informational (I) findings carry no grade and
+    /// are always kept. Default: none (same as "low").
+    #[serde(default)]
+    pub min_confidence: Option<String>,
+
     /// Fetch remote XSS payloads from providers. Available: "portswigger",
     /// "payloadbox". An unregistered name is rejected, because it would fetch
     /// nothing and silently shrink the scan's payload coverage. Default: none.

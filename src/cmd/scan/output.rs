@@ -476,7 +476,26 @@ pub(crate) fn render_plain_finding_blocks(
 /// into a single finding. Keying them by `param` printed one block per
 /// parameter live and then the folded survivor a further time at the end. The
 /// type stays in the key so a stronger survivor (an `A` upgraded to `V`) is
-/// still shown at the end.
+/// still shown at the end. The confidence grade deliberately does not: a
+/// `high` duplicate of a streamed `low` block folds into it live, and the final
+/// report (whose dedup prefers `high`) is the authoritative record.
+/// Whether the `--stream-findings` printer emits `result` now, recording it
+/// in `streamed` when it does.
+///
+/// Skipped when `--min-confidence` drops it — the same predicate the
+/// end-of-scan report applies, so the live output never shows a finding the
+/// summary and the exit code leave out — or when its [`stream_key`] was
+/// already printed (the same finding emitted along two code paths, e.g. a
+/// JS-context `V` upgrade and DOM verification). The set is shared with
+/// end-of-scan rendering, which prints whatever never came through here.
+pub(crate) fn admit_streamed(
+    result: &Result,
+    min_confidence: Option<&str>,
+    streamed: &mut std::collections::HashSet<String>,
+) -> bool {
+    !result.below_min_confidence(min_confidence) && streamed.insert(stream_key(result))
+}
+
 pub(crate) fn stream_key(result: &Result) -> String {
     if let Some(ast_key) = super::postprocess::ast_dedup_key(result) {
         return format!("{}|ast|{}", result.result_type.short(), ast_key);
@@ -503,7 +522,23 @@ pub(crate) async fn render_results(
     let skipped_targets = state.skipped_targets.clone();
     let target_meta = state.target_meta.clone();
     let target_mutation_stats = state.target_mutation_stats.clone();
-    let mut final_results = dedupe_ast_results(results.lock().await.clone());
+    // `--min-confidence` runs first — before AST dedup, so dedup picks the
+    // strongest *surviving* claim instead of picking a low-graded one that the
+    // filter then drops along with the high-graded duplicate it beat; and
+    // before `--baseline`, the per-target summary, and the returned vector, so
+    // a dropped finding cannot surface in counts or decide the exit code. The
+    // default (no flag) retains everything.
+    let (kept, confidence_dropped) = {
+        let all = results.lock().await;
+        let kept: Vec<Result> = all
+            .iter()
+            .filter(|r| !args.below_min_confidence(r))
+            .cloned()
+            .collect();
+        let dropped = all.len() - kept.len();
+        (kept, dropped)
+    };
+    let mut final_results = dedupe_ast_results(kept);
 
     // Apply --only-poc filter: keep only results whose type matches the specified filters
     if !args.only_poc.is_empty() {
@@ -714,6 +749,12 @@ pub(crate) async fn render_results(
             })
         }),
         incomplete: scan_incomplete,
+        min_confidence: args.min_confidence.as_ref().map(|level| {
+            serde_json::json!({
+                "level": level,
+                "dropped": confidence_dropped,
+            })
+        }),
     };
 
     let output_content = if args.format == "json" {

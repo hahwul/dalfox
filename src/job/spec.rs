@@ -80,6 +80,8 @@ pub(crate) struct ScanRequestSpec {
     pub(crate) session_check: Option<String>,
     /// `--session-check-url`, already known to be an absolute http(s) URL.
     pub(crate) session_check_url: Option<String>,
+    /// `low` / `high`, already validated; `None` keeps every finding.
+    pub(crate) min_confidence: Option<String>,
 }
 
 /// The `blind_oob` request field, shared by REST and MCP: `true` arms the
@@ -168,6 +170,7 @@ impl Default for ScanRequestSpec {
             blind_oob_wait: None,
             session_check: None,
             session_check_url: None,
+            min_confidence: None,
         }
     }
 }
@@ -242,6 +245,9 @@ impl ScanRequestSpec {
 
             remote_payloads: self.remote_payloads,
             remote_wordlists: self.remote_wordlists,
+            // Applied to the job's results when it settles
+            // (`ScanRun::sanitized_results`), as the CLI applies it at render.
+            min_confidence: self.min_confidence,
 
             // The poller lifecycle is bound to the job in
             // `job::runner::execute_scan`. No `blind_oob_secret`: a self-hosted
@@ -332,6 +338,7 @@ impl ScanRequestSpec {
             blind_oob_wait: opts.blind_oob_wait,
             session_check: opts.session_check.clone(),
             session_check_url: opts.session_check_url.clone(),
+            min_confidence: opts.min_confidence.clone(),
         }
     }
 }

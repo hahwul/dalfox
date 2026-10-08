@@ -95,6 +95,9 @@ pub(crate) struct ScanRun {
     pub(crate) findings_capped: bool,
     /// Every warning the run raised, for [`super::Job::warnings`].
     pub(crate) warnings: Vec<String>,
+    /// The request's `min_confidence`; findings it drops never reach the
+    /// stored results or the settled tally.
+    pub(crate) min_confidence: Option<String>,
 }
 
 impl ScanRun {
@@ -113,15 +116,15 @@ impl ScanRun {
         include_response: bool,
     ) -> Arc<Vec<SanitizedResult>> {
         let locked = self.results.lock().await;
+        let kept: Vec<SanitizedResult> = locked
+            .iter()
+            .filter(|r| !r.below_min_confidence(self.min_confidence.as_deref()))
+            .map(|r| r.to_sanitized(include_request, include_response))
+            .collect();
         progress
             .findings_so_far
-            .store(locked.len() as u64, std::sync::atomic::Ordering::Relaxed);
-        Arc::new(
-            locked
-                .iter()
-                .map(|r| r.to_sanitized(include_request, include_response))
-                .collect(),
-        )
+            .store(kept.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        Arc::new(kept)
     }
 
     /// Record this run's results and final status on `job`, returning the
@@ -590,6 +593,7 @@ pub(crate) async fn execute_scan(
                                     let added = crate::scanning::count_matching_results(
                                         &ast_batch,
                                         &args.limit_result_type.to_uppercase(),
+                                        args.min_confidence.as_deref(),
                                     );
                                     let mut guard = results.lock().await;
                                     guard.extend(ast_batch);
@@ -613,6 +617,7 @@ pub(crate) async fn execute_scan(
                                         &findings_count,
                                         ext_batch,
                                         &args.limit_result_type.to_uppercase(),
+                                        args.min_confidence.as_deref(),
                                     )
                                     .await;
                                 }
@@ -783,6 +788,11 @@ pub(crate) async fn execute_scan(
         session.deregister().await;
     }
 
+    // Stop the live mirror and wait for it to finish, so a store already in
+    // flight cannot land after `sanitized_results` publishes the settled tally.
+    let mut findings_updater = findings_updater;
+    findings_updater.0.abort();
+    let _ = (&mut findings_updater.0).await;
     drop(findings_updater);
 
     let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
@@ -818,5 +828,6 @@ pub(crate) async fn execute_scan(
         session_lost,
         findings_capped: scan_report.limit_stopped,
         warnings: std::mem::take(&mut *job_warnings.lock().unwrap_or_else(|e| e.into_inner())),
+        min_confidence: args.min_confidence.clone(),
     }
 }

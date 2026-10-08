@@ -108,6 +108,7 @@ Terminal jobs auto-purge after 1 hour.
   "force_waf": "cloudflare",                       // pin a WAF profile in any waf_bypass mode; omit to auto-detect
   "waf_evasion": false,                            // adaptive evasion: request jitter + cooldown on clusters of blocks
   "waf_min_confidence": 0.3,                       // 0.0–1.0 floor; weaker fingerprints are discarded
+  "min_confidence": "high",                        // omit or "low" = keep all; "high" drops low-confidence findings (I kept)
   "remote_payloads": ["portswigger"],              // fetch remote XSS payload sets ("portswigger", "payloadbox")
   "remote_wordlists": ["burp"],                    // fetch remote param wordlists ("burp", "assetnote")
   "max_payloads_per_param": 0,                     // 0 = built-in cap (3000 per set unless deep_scan); use 10–50 for agent smoke
@@ -130,6 +131,7 @@ Terminal jobs auto-purge after 1 hour.
 - `wait_timeout_sec` ∈ [1, 86400] when `wait=true`
 - `waf_bypass` ∈ {`auto`, `force`, `off`}
 - `waf_min_confidence` ∈ [0.0, 1.0]
+- `min_confidence` ∈ {`low`, `high`}
 - `force_waf` must name a known WAF profile (same set the CLI `--force-waf` accepts)
 - `blind_callback_url` must be empty (= no blind XSS) or start with `http://` / `https://`
 - `blind_oob` is `true`/`false` or a list of interactsh hosts (≤ 8, each a valid host); `blind_oob_wait` ∈ [0, 600]

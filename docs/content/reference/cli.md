@@ -38,7 +38,7 @@ Exit codes:
 | Code | Meaning |
 |------|---------|
 | `0` | Success, no findings |
-| `1` | Success, findings reported (any tier — combine with `--only-poc v` to gate on `V` only) |
+| `1` | Success, findings reported (any tier — combine with `--only-poc v` to gate on `V` only, or `--min-confidence high` to gate on high-confidence findings) |
 | `2` | Input / config / runtime error |
 
 `2` also covers a run with no findings that could not finish cleanly (every target skipped, a lost session, a crashed scan worker, heavy request loss); see [Exit codes](../../guide/output/#exit-codes) for the full rule. `server` and `mcp` exit `2` when they fail to start (for example, the port is already in use). `payload` exits `2` for an unknown selector.
@@ -83,6 +83,7 @@ See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-inter
 | `--only-poc` | — | — | Comma-separated filter: `v` (vulnerable), `r` (reflected), `a` (AST), `i` (informational) |
 | `--baseline` | — | — | Diff against a previous Dalfox JSON/JSONL report and report only findings new since it. An ordinary `-f json -o` report is the baseline |
 | `--baseline-mode` | — | `filter` | `filter` drops known findings (counts and exit code describe only what is new), `annotate` keeps them and marks each `new` |
+| `--min-confidence` | — | `low` | `high` drops every `low`-confidence finding (every `R`, plus AST flows Dalfox cannot stand behind) before output, `target_summary` counts, `--baseline`, and the exit code. `I` findings carry no grade and are kept. `low` keeps everything |
 
 See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for the fingerprint rules and the CI recipe.
 

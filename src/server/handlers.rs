@@ -423,6 +423,7 @@ pub(crate) async fn get_scan_handler(
         force_waf,
         waf_evasion,
         waf_min_confidence,
+        min_confidence: params.get("min_confidence").cloned(),
         rate_limit,
         scan_timeout,
         max_payloads_per_param,

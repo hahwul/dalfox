@@ -148,7 +148,7 @@ fn test_count_matching_results_all() {
         make_result(FindingType::Reflected),
         make_result(FindingType::AstDetected),
     ];
-    assert_eq!(count_matching_results(&results, "ALL"), 3);
+    assert_eq!(count_matching_results(&results, "ALL", None), 3);
 }
 
 #[test]
@@ -159,16 +159,16 @@ fn test_count_matching_results_filtered() {
         make_result(FindingType::Reflected),
         make_result(FindingType::AstDetected),
     ];
-    assert_eq!(count_matching_results(&results, "V"), 1);
-    assert_eq!(count_matching_results(&results, "R"), 2);
-    assert_eq!(count_matching_results(&results, "A"), 1);
+    assert_eq!(count_matching_results(&results, "V", None), 1);
+    assert_eq!(count_matching_results(&results, "R", None), 2);
+    assert_eq!(count_matching_results(&results, "A", None), 1);
 }
 
 #[test]
 fn test_count_matching_results_empty() {
     let results: Vec<crate::scanning::result::Result> = vec![];
-    assert_eq!(count_matching_results(&results, "ALL"), 0);
-    assert_eq!(count_matching_results(&results, "V"), 0);
+    assert_eq!(count_matching_results(&results, "ALL", None), 0);
+    assert_eq!(count_matching_results(&results, "V", None), 0);
 }
 
 fn make_typed_param_result(
@@ -279,7 +279,7 @@ async fn test_collapse_target_results_no_underflow_when_filter_excludes_r() {
     let findings_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(1));
     let target = parse_target("https://example.com/?x=1").unwrap();
 
-    collapse_target_results(&results, &findings_count, "V", &target).await;
+    collapse_target_results(&results, &findings_count, "V", None, &target).await;
 
     // Two R duplicates dropped, but none matched "V" — counter must be untouched.
     assert_eq!(
@@ -302,7 +302,7 @@ async fn test_collapse_target_results_decrements_matching_r_under_all_filter() {
     let findings_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(3));
     let target = parse_target("https://example.com/?x=1").unwrap();
 
-    collapse_target_results(&results, &findings_count, "ALL", &target).await;
+    collapse_target_results(&results, &findings_count, "ALL", None, &target).await;
 
     // 3 -> 1 finding: decrement by 2.
     assert_eq!(
@@ -2314,7 +2314,7 @@ async fn test_accumulate_findings_empty_batch_is_noop() {
     let results: tokio::sync::Mutex<Vec<crate::scanning::result::Result>> =
         tokio::sync::Mutex::new(Vec::new());
     let counter = std::sync::atomic::AtomicUsize::new(0);
-    accumulate_findings(&results, &counter, vec![], "ALL").await;
+    accumulate_findings(&results, &counter, vec![], "ALL", None).await;
     assert_eq!(
         counter.load(std::sync::atomic::Ordering::Relaxed),
         0,
@@ -2339,7 +2339,7 @@ async fn test_accumulate_findings_counts_only_matching_result_type() {
         make_result(FindingType::Reflected),
         make_result(FindingType::Reflected),
     ];
-    accumulate_findings(&results, &counter, batch, "V").await;
+    accumulate_findings(&results, &counter, batch, "V", None).await;
     assert_eq!(
         counter.load(std::sync::atomic::Ordering::Relaxed),
         1,
@@ -5311,4 +5311,49 @@ async fn test_deep_scan_limit_bounds_findings_across_concurrent_params() {
         n <= LIMIT * 5,
         "deep_scan ran past --limit {LIMIT}: {n} findings"
     );
+}
+
+/// The findings tally behind `--limit`'s early stop, the deep-scan cap, the
+/// ticker and REST/MCP `findings_so_far` counts only findings
+/// `--min-confidence` keeps: `--limit 1 --min-confidence high` must not stop
+/// on an `R` it will then drop. Ungraded `I` findings still count.
+#[test]
+fn count_matching_results_skips_findings_min_confidence_drops() {
+    use crate::scanning::result::Confidence;
+    let graded = |t: FindingType, c: Option<Confidence>| {
+        let mut r = crate::scanning::result::Result::builder(t).build();
+        r.confidence = c;
+        r
+    };
+    let results = vec![
+        graded(FindingType::Reflected, Some(Confidence::Low)),
+        graded(FindingType::Verified, Some(Confidence::Low)),
+        graded(FindingType::Verified, Some(Confidence::High)),
+        graded(FindingType::Informational, None),
+    ];
+    assert_eq!(count_matching_results(&results, "ALL", None), 4);
+    assert_eq!(count_matching_results(&results, "ALL", Some("low")), 4);
+    assert_eq!(count_matching_results(&results, "ALL", Some("high")), 2);
+    assert_eq!(count_matching_results(&results, "V", Some("high")), 1);
+    assert_eq!(count_matching_results(&results, "R", Some("high")), 0);
+}
+
+/// Collapsing a dropped `R` under `--min-confidence high` must not decrement
+/// a tally that never counted it (the counter is unsigned).
+#[tokio::test]
+async fn collapse_under_min_confidence_does_not_underflow_the_tally() {
+    use crate::scanning::result::Confidence;
+    let mut v = make_typed_param_result(FindingType::Verified, "q", "inHTML");
+    v.confidence = Some(Confidence::High);
+    let mut r = make_typed_param_result(FindingType::Reflected, "q", "inHTML");
+    r.confidence = Some(Confidence::Low);
+    let batch = vec![v, r];
+    let counted = count_matching_results(&batch, "ALL", Some("high"));
+    assert_eq!(counted, 1);
+    let results = std::sync::Arc::new(tokio::sync::Mutex::new(batch));
+    let findings_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(counted));
+    let target = parse_target("https://example.com/?x=1").unwrap();
+    collapse_target_results(&results, &findings_count, "ALL", Some("high"), &target).await;
+    assert_eq!(results.lock().await.len(), 1, "the redundant R collapses");
+    assert_eq!(findings_count.load(std::sync::atomic::Ordering::Relaxed), 1);
 }
