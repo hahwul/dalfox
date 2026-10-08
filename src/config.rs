@@ -659,6 +659,24 @@ impl ScanConfig {
 /// input surface. Shared with the `--config` CLI path in `main`.
 pub const MAX_CONFIG_BYTES: u64 = 1 << 20; // 1 MiB
 
+/// An *existing* default-path config file that could not be read or parsed.
+/// Kept distinct from "no HOME" / "config dir not creatable" so the caller can
+/// warn about the former only: those are environment, not a file the operator
+/// edited. `detail` is already value-free (see [`parse_config`]).
+#[derive(Debug)]
+pub struct ConfigFileError {
+    pub path: PathBuf,
+    pub detail: String,
+}
+
+impl std::fmt::Display for ConfigFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.detail)
+    }
+}
+
+impl std::error::Error for ConfigFileError {}
+
 pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     let base_dir = resolve_config_dir()?;
     fs::create_dir_all(&base_dir)?;
@@ -666,11 +684,20 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     let toml_path = base_dir.join("config.toml");
     let json_path = base_dir.join("config.json");
     let read = |p: &Path| crate::utils::fs::read_bounded(p, MAX_CONFIG_BYTES, "config file");
+    let load_existing = |p: &Path, is_json: bool| {
+        read(p)
+            .map_err(|e| e.to_string())
+            .and_then(|text| parse_config(&text, is_json))
+            .map_err(|detail| ConfigFileError {
+                path: p.to_path_buf(),
+                detail,
+            })
+    };
 
     let ((config, unknown_keys), path, created) = if toml_path.exists() {
-        (parse_config(&read(&toml_path)?, false)?, toml_path, false)
+        (load_existing(&toml_path, false)?, toml_path, false)
     } else if json_path.exists() {
-        (parse_config(&read(&json_path)?, true)?, json_path, false)
+        (load_existing(&json_path, true)?, json_path, false)
     } else {
         // Neither exists: create TOML by default
         let mut f = fs::File::create(&toml_path)?;
