@@ -226,10 +226,11 @@ confidence = 0.9
 evidence_label = "Server: Barracuda"
 
 [[header]]
-header = "barra_counter_session"
+header = "set-cookie"
+value_contains = "barra_counter_session"
 waf_type = "Barracuda"
 confidence = 0.85
-evidence_label = "barra_counter_session cookie header"
+evidence_label = "barra_counter_session cookie"
 
 # FortiWeb
 [[header]]

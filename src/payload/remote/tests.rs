@@ -226,17 +226,77 @@ async fn fetch_multiple_text_lists_ignores_non_success_responses() {
     });
 
     let client = build_remote_client(&RemoteFetchOptions::default()).expect("client");
-    let text = fetch_multiple_text_lists(
+    let (text, failed) = fetch_multiple_text_lists(
         &client,
         &[format!("http://{addr}/ok"), format!("http://{addr}/gone")],
     )
     .await;
     server.abort();
 
+    assert_eq!(failed, 1);
     let lines = sanitize_lines(&text);
     assert!(lines.contains(&"alpha".to_string()));
     assert!(
         !lines.iter().any(|l| l.contains("404")),
         "an error page must not become list entries: {lines:?}"
     );
+}
+
+/// One provider URL failing must not pin the surviving half as the complete
+/// list: the next init for the same provider set fetches again and picks up the
+/// recovered URL.
+#[tokio::test]
+async fn partial_fetch_is_retried_not_pinned() {
+    use axum::{Router, http::StatusCode, routing::get};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let healthy = Arc::new(AtomicBool::new(false));
+    let flag = healthy.clone();
+    let app = Router::new()
+        .route("/a", get(|| async { "alpha\n" }))
+        .route(
+            "/b",
+            get(move || {
+                let ok = flag.load(Ordering::SeqCst);
+                async move {
+                    if ok {
+                        (StatusCode::OK, "beta\n")
+                    } else {
+                        (StatusCode::SERVICE_UNAVAILABLE, "down\n")
+                    }
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let name = "partial-retry-test-provider";
+    register_payload_provider(
+        name,
+        vec![format!("http://{addr}/a"), format!("http://{addr}/b")],
+    );
+    let providers = vec![name.to_string()];
+
+    init_remote_payloads_with(&providers, RemoteFetchOptions::default())
+        .await
+        .expect("partial fetch still serves the survivors");
+    let first = get_remote_payloads_for(&providers).expect("cached");
+    assert_eq!(*first, vec!["alpha".to_string()]);
+
+    healthy.store(true, Ordering::SeqCst);
+    init_remote_payloads_with(&providers, RemoteFetchOptions::default())
+        .await
+        .expect("retry succeeds");
+    let second = get_remote_payloads_for(&providers).expect("cached");
+    assert_eq!(*second, vec!["alpha".to_string(), "beta".to_string()]);
+
+    // Now complete: a further init is a no-op even though the server is gone.
+    server.abort();
+    init_remote_payloads_with(&providers, RemoteFetchOptions::default())
+        .await
+        .expect("complete entry is not refetched");
+    assert_eq!(get_remote_payloads_for(&providers).unwrap().len(), 2);
 }

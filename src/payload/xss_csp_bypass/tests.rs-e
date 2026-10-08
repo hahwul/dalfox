@@ -591,6 +591,7 @@ fn test_analyze_csp_from_single_policy_unchanged() {
     assert!(!r.require_trusted_types_for);
 }
 
+<<<<<<< HEAD
 /// A hostile page can carry a huge `<meta>` policy list; merging it must stay
 /// linear (distinct policies, capped) and still union the hosts, deduplicated.
 #[test]
@@ -617,8 +618,7 @@ fn test_analyze_csp_from_many_policies_is_bounded() {
         "took {:?}",
         start.elapsed()
     );
-}
-
+=======
 // --- hostile / fallback policy shapes ---------------------------------------
 
 /// The policy is attacker-controlled: a header with thousands of nonces must not
@@ -675,4 +675,5 @@ fn test_analyze_csp_object_src_falls_back_to_default_src() {
     assert!(analyze_csp("default-src 'self' data:").missing_object_src);
     assert!(analyze_csp("script-src 'self'").missing_object_src);
     assert!(!analyze_csp("default-src data:; object-src 'none'").missing_object_src);
+>>>>>>> fix/hunt-20261009-g7-r
 }

