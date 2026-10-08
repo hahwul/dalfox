@@ -42,6 +42,9 @@ pub(crate) async fn run_ast_dom_analysis(
     }
     reflected_markup.sent_value = Some(injected.to_string());
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
+    // Shared across blocks: a per-block clone is O(blocks x ids).
+    let (script_element_ids, reflected_markup) =
+        (Arc::new(script_element_ids), Arc::new(reflected_markup));
     for js_code in js_blocks {
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
@@ -230,7 +233,8 @@ pub(crate) async fn fetch_and_analyze_external_js(
     let script_urls =
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
 
-    let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(html);
+    let script_element_ids =
+        Arc::new(crate::scanning::ast_integration::extract_script_element_ids(html));
     // The posture comes from the *page's* CSP, not each script's response: the
     // policy that governs whether an injected handler runs is the document's.
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);

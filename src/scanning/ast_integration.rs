@@ -1,5 +1,6 @@
 use scraper::Html;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use super::selectors;
 
@@ -1263,7 +1264,7 @@ pub(crate) fn analyze_javascript_for_dom_xss(
 )> {
     analyze_javascript_for_dom_xss_with_html_context(
         js_code,
-        &HashSet::new(),
+        &Default::default(),
         &Default::default(),
         false,
     )
@@ -1280,8 +1281,8 @@ pub(crate) fn analyze_javascript_for_dom_xss(
 /// TrustedHTML-sink findings it neutralizes.
 pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     js_code: &str,
-    script_element_ids: &HashSet<String>,
-    reflected_markup: &crate::scanning::ast_dom_analysis::PageMarkup,
+    script_element_ids: &Arc<HashSet<String>>,
+    reflected_markup: &Arc<crate::scanning::ast_dom_analysis::PageMarkup>,
     trusted_types_enforced: bool,
 ) -> Vec<(
     crate::scanning::ast_dom_analysis::DomXssVulnerability,
@@ -1289,8 +1290,8 @@ pub(crate) fn analyze_javascript_for_dom_xss_with_html_context(
     String,
 )> {
     let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new()
-        .with_script_element_ids(script_element_ids.clone())
-        .with_reflected_markup(reflected_markup.clone())
+        .with_script_element_ids(Arc::clone(script_element_ids))
+        .with_reflected_markup(Arc::clone(reflected_markup))
         .with_trusted_types_enforced(trusted_types_enforced);
 
     match analyzer.analyze(js_code) {
@@ -1439,6 +1440,8 @@ pub(crate) fn run_initial_ast_dom_analysis_for_response(
             }
             extract_js_script_ids_and_reflected_markup(response_text)
         };
+    // Shared across blocks: a per-block clone is O(blocks x ids).
+    let (script_element_ids, page_markup) = (Arc::new(script_element_ids), Arc::new(page_markup));
     let mut out: Vec<crate::scanning::result::Result> = Vec::new();
     for js_code in js_blocks {
         let findings = analyze_javascript_for_dom_xss_with_html_context(
