@@ -9,10 +9,19 @@ pub(crate) fn extract_context(response: &str, payload: &str) -> Option<(usize, S
     for (line_num, line) in response.lines().enumerate() {
         if let Some(pos) = line.find(payload) {
             let context = if line.len() > 40 {
-                let start = pos.saturating_sub(20);
-                let end = (pos + payload.len() + 20).min(line.len());
-                // Use get to avoid panic on multibyte boundaries
-                line.get(start..end).unwrap_or(line).to_string()
+                let mut start = pos.saturating_sub(20);
+                let mut end = (pos + payload.len() + 20).min(line.len());
+                // `pos` and the payload end are boundaries; only the ±20
+                // padding can land inside a multibyte char. Snap outward
+                // (`len()` is always a boundary, so both loops terminate)
+                // rather than falling back to the whole — possibly 64 KiB — line.
+                while !line.is_char_boundary(start) {
+                    start -= 1;
+                }
+                while !line.is_char_boundary(end) {
+                    end += 1;
+                }
+                line[start..end].to_string()
             } else {
                 line.to_string()
             };

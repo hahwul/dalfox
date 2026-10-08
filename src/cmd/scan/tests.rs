@@ -272,6 +272,18 @@ fn test_extract_context_trims_long_line() {
 }
 
 #[test]
+fn test_extract_context_multibyte_padding_stays_bounded() {
+    // 'é' is 2 bytes, so the ±20 byte window lands mid-char on one side or
+    // the other; the context must still be a window, not the whole line.
+    // The lone ASCII 'a' on each side shifts the parity so that both window
+    // edges (pos-20, end+20) fall inside a character.
+    let line = format!("{}aX{}", "é".repeat(30), format!("a{}", "é".repeat(31)));
+    let (_, ctx) = extract_context(&line, "X").expect("should find payload");
+    assert!(ctx.contains('X'));
+    assert!(ctx.len() <= 1 + 2 * (20 + 1), "{} bytes", ctx.len());
+}
+
+#[test]
 fn test_extract_context_none() {
     assert!(extract_context("no match here", "PAY").is_none());
 }
