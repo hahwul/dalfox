@@ -126,6 +126,8 @@ jobs:
             # A re-run of a release already pushed is not a failure: the feed refuses a version twice.
             if ($text -match '409|already exists|Conflict') {
               Write-Host "dalfox $env:VERSION is already on Chocolatey; nothing to push."
+              # The pwsh wrapper exits with $LASTEXITCODE, still choco's non-zero code.
+              exit 0
             } else {
               throw 'Chocolatey package push failed.'
             }
