@@ -714,8 +714,8 @@ pub(crate) async fn resolve_targets(
 /// key.
 ///
 /// - `exact` — the historical key: the full URL string (query and values
-///   included) plus the method, plus the request body / headers / cookies a
-///   HAR or raw-http entry carries. Only byte-identical inputs collapse.
+///   included) plus the method, plus the request body a HAR or raw-http entry
+///   carries. Only byte-identical inputs collapse.
 /// - `signature` — method + scheme + host + port + path + the *sorted set of
 ///   parameter names* (query and body alike). Parameter values are excluded, so
 ///   `?id=1`, `?id=2`, … `?id=9999` from a `gau`/`katana` dump collapse to one
@@ -764,7 +764,7 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         let key = if mode == "signature" {
             target_signature_key(t)
         } else {
-            format!("{}|{}|{}", t.url, t.method, request_shape_digest(t))
+            format!("{}|{}|{}", t.url, t.method, request_body_digest(t))
         };
         match chosen.entry(key) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -798,16 +798,19 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
     }
 }
 
-/// Digest of the per-request content a HAR / raw-http import carries (body,
-/// headers, cookies, User-Agent), so `exact` dedup keeps two POSTs to one URL
-/// that differ only there. URL-list targets all share the run-wide values, so
-/// for them this is the same constant and the collapse is unchanged. Hashed
+/// Digest of the request body a HAR / raw-http import carries, so `exact` dedup
+/// keeps two POSTs to one URL that differ only there. Headers and cookies stay
+/// out of the key on purpose: a browser HAR repeats one URL with a drifting
+/// `Cookie` / `Referer` / `If-None-Match`, and keying on those would turn every
+/// such repeat into another full scan of the same injection points. URL-list
+/// targets share the run-wide body, so for them this is a constant. Hashed
 /// rather than inlined: a body can be MiBs.
-fn request_shape_digest(t: &Target) -> String {
+fn request_body_digest(t: &Target) -> String {
     use sha2::{Digest, Sha256};
-    let shape =
-        serde_json::to_vec(&(&t.data, &t.headers, &t.cookies, &t.user_agent)).unwrap_or_default();
-    hex::encode(Sha256::digest(shape))
+    t.data
+        .as_deref()
+        .map(|d| hex::encode(Sha256::digest(d.as_bytes())))
+        .unwrap_or_default()
 }
 
 /// Whether any query or form-body parameter of `t` is present but empty — the

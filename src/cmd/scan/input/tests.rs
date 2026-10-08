@@ -697,7 +697,7 @@ async fn dedup_urls_signature_flows_through_resolve_targets() {
 }
 
 #[test]
-fn exact_dedup_keeps_requests_that_differ_only_in_body_headers_or_cookies() {
+fn exact_dedup_keeps_requests_that_differ_only_in_body() {
     // HAR / raw-http entries to one URL: the second POST's body parameters
     // were dropped before discovery, so `b` was never scanned.
     let post = |body: &str| {
@@ -715,13 +715,15 @@ fn exact_dedup_keeps_requests_that_differ_only_in_body_headers_or_cookies() {
     );
     assert_eq!(stats.collapsed, 1);
 
+    // Drifting cookies / headers (a browser HAR repeating one URL) are not a
+    // different request: they must not defeat the collapse.
     let mut with_cookie = post("a=1");
     with_cookie.cookies.push(("s".into(), "x".into()));
     let mut with_header = post("a=1");
     with_header.headers.push(("X-T".into(), "y".into()));
     let mut targets = vec![post("a=1"), with_cookie, with_header];
     dedup_targets(&mut targets, "exact");
-    assert_eq!(targets.len(), 3);
+    assert_eq!(targets.len(), 1);
 }
 
 #[tokio::test]

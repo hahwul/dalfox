@@ -77,7 +77,7 @@ cat urls.txt | dalfox scan https://target.app/one
 
 ### 거의 같은 URL 묶기
 
-기본값(`--dedup-urls exact`)에서 Dalfox는 완전히 같은 대상만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드(HAR / raw HTTP 항목은 캡처된 본문, 헤더, 쿠키 포함)가 모두 일치해야 합니다. 그런데 `gau` / `katana` / `waybackurls` 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 `?id=1` … `?id=9999`가 주입 지점 하나를 9999번 풀스캔하게 됩니다.
+기본값(`--dedup-urls exact`)에서 Dalfox는 완전히 같은 대상만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드(HAR / raw HTTP 항목은 캡처된 본문 포함)가 모두 일치해야 합니다. 그런데 `gau` / `katana` / `waybackurls` 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 `?id=1` … `?id=9999`가 주입 지점 하나를 9999번 풀스캔하게 됩니다.
 
 `--dedup-urls signature`는 이것을 하나로 묶습니다. 키는 메서드, 스킴, 호스트, 포트, 경로, 그리고 *정렬된 파라미터 이름 집합*입니다. 쿼리는 물론 본문(form, JSON, multipart) 파라미터도 같은 자격으로 포함됩니다. 값은 키에서 제외되므로 값만 다른 URL 무리는 대상 하나로 묶입니다. 무엇을 버렸는지는 로그로 남고, 그 개수는 스캔 메타데이터(`dedup_mode`, `targets_deduplicated`)에도 실리므로 축소된 실행이 목록 전체를 커버한 것처럼 보이지 않습니다.
 
@@ -171,7 +171,7 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드 + 본문 + 헤더 + 쿠키로 판단하므로, 같은 URL에 본문만 다른 POST 두 개는 모두 남고 완전히 같은 항목만 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
+HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드 + 본문으로 판단하므로, 같은 URL에 본문만 다른 POST 두 개는 모두 남고 헤더나 쿠키만 다른 항목은 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
 CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`는 캡처에 있는 같은 이름(대소문자 무시)의 헤더를 대체하므로 새로 받은 `Authorization`이 오래된 값을 이깁니다. 같은 이름의 `-H`를 여러 번 주면 모두 전송됩니다. `--cookies`의 쿠키는 캡처된 같은 이름의 쿠키를 대체하고, 나머지 캡처 쿠키는 유지됩니다. `-H 'User-Agent: …'`는 `--user-agent`처럼 캡처된 User-Agent를 대체하고, `-H 'Cookie: …'`는 캡처된 쿠키(와 `--cookies`로 준 쿠키)를 통째로 대체합니다. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
 
