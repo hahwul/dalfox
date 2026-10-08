@@ -161,11 +161,16 @@ struct FoundParams {
 fn found_param_key(param: &Param) -> String {
     // `\u{1}` separator: not producible by a URL/header parameter name, so
     // concatenation cannot alias two different slots onto one key.
+    //
+    // A form field is sent to its form's action, so the same name posted to two
+    // different actions is two slots too (discovery keeps both, see
+    // `dedupe_reflection_params`); a finding at one must not skip the other.
     format!(
-        "{:?}\u{1}{}\u{1}{}",
+        "{:?}\u{1}{}\u{1}{}\u{1}{}",
         param.location,
         param.name,
-        param.effective_wire_name()
+        param.effective_wire_name(),
+        param.form_action_url.as_deref().unwrap_or("")
     )
 }
 

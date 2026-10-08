@@ -523,6 +523,42 @@ fn apply_request_cli_overrides_replace_same_name_header_and_cookie() {
 }
 
 #[test]
+fn apply_request_cli_cookie_header_replaces_captured_cookies_per_cookie() {
+    let mut target = crate::target_parser::parse_raw_http_request(
+        "GET /p HTTP/1.1\r\nHost: ov.example\r\nCookie: old=1\r\n\r\n",
+    )
+    .expect("raw request parses");
+    let args = args_from(&[
+        "-i",
+        "raw-http",
+        "-S",
+        "-H",
+        "Cookie: other=1; sid=abc",
+        "--cookies",
+        "dropped=1",
+        "ignored.example",
+    ]);
+
+    apply_request_cli_overrides(&mut target, &args);
+
+    // Replaces the captured cookies and `--cookies` outright (documented), but
+    // as per-cookie params, not a literal header.
+    assert_eq!(
+        target.cookies,
+        vec![
+            ("other".to_string(), "1".to_string()),
+            ("sid".to_string(), "abc".to_string())
+        ]
+    );
+    assert!(
+        !target
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+    );
+}
+
+#[test]
 fn apply_request_cli_overrides_keeps_request_method_without_flag() {
     let mut target = crate::target_parser::parse_raw_http_request(
         "DELETE /thing HTTP/1.1\r\nHost: keep.example\r\n\r\n",

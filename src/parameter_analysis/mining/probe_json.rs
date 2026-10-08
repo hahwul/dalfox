@@ -12,7 +12,6 @@ pub async fn probe_json_body_params(
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client_or_default();
-    let preexisting = snapshot_param_slots(&reflection_params).await;
 
     // Detect JSON body from args.data; only proceed if it's a JSON object
     let base_json: serde_json::Value = match &args.data {
@@ -69,13 +68,6 @@ pub async fn probe_json_body_params(
     let base_json = Arc::new(base_json);
 
     for param_name in keys {
-        {
-            // Early collapse stop
-            let st = stats.lock().await;
-            if st.collapsed {
-                break;
-            }
-        }
         if already_found.contains(&param_name) {
             continue;
         }
@@ -148,30 +140,22 @@ pub async fn probe_json_body_params(
                     st.record_attempt();
                     if crate::scanning::markers::probe_reflected(&text) {
                         st.record_reflection();
-                        if !st.collapsed {
-                            discovered = Some(
-                                Param::new(
-                                    param_name_cloned.clone(),
-                                    crate::scanning::markers::bracketed_marker().to_string(),
-                                    Location::JsonBody,
-                                )
-                                .with_reflection_analysis(&text),
+                        // No EWMA fold: these names are the user's own `-d`
+                        // keys (bounded by the body), not wordlist guesses, so
+                        // an echoing page must not replace them with `any`.
+                        discovered = Some(
+                            Param::new(
+                                param_name_cloned.clone(),
+                                crate::scanning::markers::bracketed_marker().to_string(),
+                                Location::JsonBody,
+                            )
+                            .with_reflection_analysis(&text),
+                        );
+                        if !silence {
+                            eprintln!(
+                                "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
+                                param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
                             );
-                            if !silence {
-                                eprintln!(
-                                    "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
-                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
-                                );
-                            }
-                            if st.should_collapse() {
-                                st.collapsed = true;
-                                if !silence {
-                                    eprintln!(
-                                        "[mining-collapse] JSON mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                        st.ewma_ratio, st.attempts, st.reflections
-                                    );
-                                }
-                            }
                         }
                     } else {
                         st.record_non_reflection();
@@ -193,11 +177,4 @@ pub async fn probe_json_body_params(
     }
 
     extend_with_joined(&reflection_params, handles).await;
-
-    // Collapse normalization to single 'any' JSON param if triggered. Only the
-    // JsonBody params this stage mined fold in; everything else is preserved.
-    let st_final = stats.lock().await;
-    if st_final.collapsed {
-        collapse_mined_params(&reflection_params, &preexisting, Location::JsonBody, None).await;
-    }
 }

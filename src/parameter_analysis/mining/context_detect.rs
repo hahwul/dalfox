@@ -104,6 +104,25 @@ pub(crate) fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option
     }
 }
 
+/// True when byte offset `mp` lies inside a closed `<!-- … -->` comment.
+/// Walks the comments in document order so a marker in the second or later
+/// comment is found, not only one in the first.
+fn marker_in_html_comment(text: &str, mp: usize) -> bool {
+    let mut pos = 0;
+    while let Some(off) = text.get(pos..mp).and_then(|s| s.find("<!--")) {
+        let cs = pos + off;
+        let Some(end) = text[cs + 4..].find("-->") else {
+            return false;
+        };
+        let ce = cs + 4 + end;
+        if mp < ce {
+            return true;
+        }
+        pos = ce + 3;
+    }
+    false
+}
+
 /// Like `detect_injection_context` but uses a caller-supplied marker string.
 /// Useful for probes that don't use the standard alphanumeric marker (e.g. numeric-only probes).
 pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> InjectionContext {
@@ -112,10 +131,8 @@ pub(crate) fn detect_injection_context_with_marker(text: &str, marker: &str) -> 
     }
 
     // Fast comment check using raw HTML when available
-    if let (Some(cs), Some(ce)) = (text.find("<!--"), text.find("-->"))
-        && let Some(mp) = text.find(marker)
-        && cs < mp
-        && mp < ce
+    if let Some(mp) = text.find(marker)
+        && marker_in_html_comment(text, mp)
     {
         return InjectionContext::Html(Some(DelimiterType::Comment));
     }

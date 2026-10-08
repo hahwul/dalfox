@@ -249,6 +249,28 @@ fn test_collapse_keeps_r_when_the_v_is_at_a_different_wire_location() {
     assert_eq!(after.len(), 1);
 }
 
+/// The same field name posted to two different form actions is two injection
+/// points: a finding at one must not mark the other as already found.
+#[test]
+fn found_param_key_separates_same_name_at_different_form_actions() {
+    let at = |action: Option<&str>| Param {
+        form_action_url: action.map(str::to_string),
+        ..Param::new("q".to_string(), String::new(), Location::Body)
+    };
+    assert_ne!(
+        found_param_key(&at(Some("https://x/a"))),
+        found_param_key(&at(Some("https://x/b")))
+    );
+    assert_ne!(
+        found_param_key(&at(None)),
+        found_param_key(&at(Some("https://x/a")))
+    );
+    assert_eq!(
+        found_param_key(&at(Some("https://x/a"))),
+        found_param_key(&at(Some("https://x/a")))
+    );
+}
+
 #[test]
 fn test_collapse_keeps_r_for_different_param_or_inject_type() {
     let results = vec![

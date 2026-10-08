@@ -566,6 +566,9 @@ pub(crate) async fn resolve_targets(
                         .iter()
                         .flat_map(|c| crate::job::split_cookie_pairs(c))
                         .collect();
+                    // `-H 'Cookie: …'` is a credential too: lift it into
+                    // `target.cookies` so each cookie is probed.
+                    crate::job::lift_cookie_headers(&mut target.headers, &mut target.cookies);
                     target.timeout = args.timeout;
                     target.delay = args.delay;
                     target.proxy = args.proxy.clone();
@@ -1159,6 +1162,15 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
         .cookies
         .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| k == n));
     target.cookies.extend(cli_cookies);
+    // A CLI `-H 'Cookie: …'` replaces the captured cookies (and `--cookies`)
+    // outright; lift it into `cookies` so each one is probed.
+    if args.headers.iter().any(|h| {
+        h.split_once(':')
+            .is_some_and(|(n, _)| n.trim().eq_ignore_ascii_case("cookie"))
+    }) {
+        target.cookies.clear();
+        crate::job::lift_cookie_headers(&mut target.headers, &mut target.cookies);
+    }
     target.timeout = args.timeout;
     target.delay = args.delay;
     target.proxy = args.proxy.clone();
