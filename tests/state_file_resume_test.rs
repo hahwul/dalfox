@@ -259,6 +259,60 @@ async fn a_second_run_reissues_no_request_for_completed_targets() {
     let _ = std::fs::remove_file(&out2);
 }
 
+// A target's findings live in memory until the report is written. If that write
+// fails, the target must not be recorded `completed`: the next run would skip
+// it and the findings would exist nowhere.
+#[tokio::test]
+async fn a_failed_report_write_does_not_complete_targets_with_findings() {
+    let _serial = serial().await;
+    let (base, hits, server) = spawn_app().await;
+    let state = unique_temp_path("resume-unreported", "jsonl");
+    let targets = vec![format!("{}/a?q=1", base)];
+
+    // A path whose parent does not exist: the report cannot be written.
+    let bad_out = unique_temp_path("resume-no-such-dir", "d").join("report.json");
+    let vulnerable = |out: &Path| ScanArgs {
+        // Discovery on, so the reflected `q` is actually tested.
+        skip_discovery: false,
+        ..lean_args(&targets, out, &state)
+    };
+    let outcome = run_scan(&vulnerable(&bad_out)).await;
+    assert_eq!(
+        outcome,
+        ScanOutcome::Error,
+        "the failed -o write is an error"
+    );
+    let recorded = outcomes(&state);
+    assert!(
+        recorded.iter().all(|(_, o)| o != "completed"),
+        "findings were never reported, so the target must be retried: {recorded:?}"
+    );
+    let after_first = hits.load(Ordering::Relaxed);
+
+    let out2 = unique_temp_path("resume-unreported2", "json");
+    run_scan(&vulnerable(&out2)).await;
+    server.abort();
+
+    assert!(
+        hits.load(Ordering::Relaxed) > after_first,
+        "the unreported target must be scanned again"
+    );
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out2).expect("report")).expect("json");
+    assert!(
+        report["findings"].as_array().is_some_and(|f| !f.is_empty()),
+        "the retry delivers the finding the first run lost: {report}"
+    );
+    let recorded = outcomes(&state);
+    assert!(
+        recorded.iter().any(|(_, o)| o == "completed"),
+        "once the report is out the target completes: {recorded:?}"
+    );
+
+    let _ = std::fs::remove_file(&state);
+    let _ = std::fs::remove_file(&out2);
+}
+
 // Only `completed` may be skipped. A target dropped in preflight was never
 // tested, so it is recorded `error` and re-requested on the next run.
 #[tokio::test]

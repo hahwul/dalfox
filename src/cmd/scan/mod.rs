@@ -681,6 +681,16 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     )
     .await;
 
+    // The report is out: targets held back as "findings not yet reported" can
+    // now be recorded `completed`. Left unrecorded when the write failed or the
+    // run is incomplete, so the next run scans them again.
+    if let Some(sf) = &state.state_file
+        && !output_write_failed
+        && !requests.is_incomplete()
+    {
+        sf.commit_deferred();
+    }
+
     // Request/Response are displayed inline under each POC in plain mode.
     if args.format == "plain" && !args.silence {
         let __dalfox_elapsed = __dalfox_scan_start.elapsed().as_secs_f64();

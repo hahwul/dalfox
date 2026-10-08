@@ -116,11 +116,11 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 # INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan
 ```
 
-**건너뛰는 것은 완료된 대상뿐입니다.** 어디까지 검사됐는지 알 수 없는 것은 전부 다시 스캔합니다:
+**건너뛰는 것은 완료된 대상뿐입니다.** 어디까지 검사됐는지 알 수 없는 것은 전부 다시 스캔합니다. 결과가 나온 대상은 리포트가 기록된 뒤에야 `completed`로 남습니다(그 전까지 결과는 메모리에만 있습니다). 따라서 강제 종료, OOM, `--output` 쓰기 실패가 생겨도 결과를 잃은 채 건너뛰는 일은 없고 그 대상은 다시 스캔됩니다. 결과가 없는 대상은 끝나는 즉시 기록되며, `--stream-findings` 사용 시에는 모두 즉시 기록됩니다:
 
 | 기록된 상태 | 언제 | 다음 실행 |
 |------------|------|----------|
-| `completed` | 세션이 살아 있는 상태로 끝까지 스캔됨 | 건너뜀 |
+| `completed` | 세션이 살아 있는 상태로 끝까지 스캔됐고, 결과(있다면)가 리포트에 기록됨 | 건너뜀 |
 | `cancelled` | Ctrl-C, `--scan-timeout` 만료, `--limit` 도달로 인한 중단, 스캔 도중 세션 끊김, 심각한 전송 손실(`meta.incomplete`) | 재시도 |
 | `error` | 프리플라이트에서 제외됨(도달 불가, content-type 불일치, `--max-targets-per-host` 상한), 또는 스캔 워커 크래시 | 재시도 |
 
