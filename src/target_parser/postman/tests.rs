@@ -215,6 +215,24 @@ fn non_http_and_bad_method_requests_are_skipped() {
 }
 
 #[test]
+fn scheme_is_only_read_before_the_path_and_delete_is_not_scanned() {
+    let c = r#"{"item":[
+        {"name":"cb","request":{"url":"api.example.com/cb?next=https://other.example/x"}},
+        {"name":"del","request":{"method":"DELETE","url":"https://h/a"}},
+        {"name":"big","request":{"method":"POST","url":"https://h/b",
+            "body":{"mode":"raw","raw":"BIG"}}}
+    ]}"#
+    .replace("BIG", &"x".repeat(5 << 20));
+    let out = parse_postman(&c, None).unwrap();
+    assert_eq!(out.targets.len(), 1);
+    assert_eq!(out.targets[0].url.host_str(), Some("api.example.com"));
+    assert_eq!(out.targets[0].url.scheme(), "http");
+    assert_eq!(out.unscanned_methods, 1);
+    // A raw body counts toward the per-request cap too.
+    assert!(out.skipped[0].starts_with("big:"), "{:?}", out.skipped);
+}
+
+#[test]
 fn non_collection_is_rejected() {
     assert!(parse_postman(r#"{"openapi":"3.0.0"}"#, None).is_err());
     assert!(parse_postman("openapi: 3.0.0", None).is_err());

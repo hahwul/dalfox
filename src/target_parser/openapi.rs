@@ -41,10 +41,17 @@ const MAX_REF_HOPS: usize = 16;
 const MAX_OP_PARAMS: usize = 1024;
 
 fn too_large() -> String {
-    format!(
-        "operation expands past {} MiB",
-        MAX_IMPORT_REQUEST_BYTES >> 20
-    )
+    super::too_large("operation")
+}
+
+/// The spec version field as text. YAML reads an unquoted `swagger: 2.0` or
+/// `openapi: 3.0` as a number.
+fn version(doc: &Value, key: &str) -> Option<String> {
+    match doc.get(key)? {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => n.as_f64().map(|f| format!("{f:.1}")),
+        _ => None,
+    }
 }
 
 /// Parse an OpenAPI 3.x (JSON or YAML) or Swagger 2.0 document.
@@ -58,9 +65,9 @@ pub fn parse_openapi(
     base_url: Option<&Url>,
 ) -> Result<SpecImport, Box<dyn std::error::Error>> {
     let doc = parse_document(content)?;
-    let swagger2 = match (doc.get("openapi"), doc.get("swagger")) {
-        (Some(Value::String(v)), _) if v.starts_with("3.") => false,
-        (_, Some(Value::String(v))) if v == "2.0" => true,
+    let swagger2 = match (version(&doc, "openapi"), version(&doc, "swagger")) {
+        (Some(v), _) if v.starts_with("3.") => false,
+        (_, Some(v)) if v == "2.0" => true,
         _ => {
             return Err(
                 "not an OpenAPI 3.x / Swagger 2.0 document (no `openapi: 3.x` or `swagger: \"2.0\"`)"
@@ -86,6 +93,10 @@ pub fn parse_openapi(
             let Some(op) = item.get(*method).filter(|o| o.is_object()) else {
                 continue;
             };
+            if super::is_unscanned_spec_method(method) {
+                out.unscanned_methods += 1;
+                continue;
+            }
             let label = format!("{} {}", method.to_ascii_uppercase(), path);
             if out.targets.len() >= super::MAX_IMPORT_TARGETS || budget == 0 {
                 out.skipped.push(format!(
@@ -124,8 +135,9 @@ pub fn parse_openapi(
             .map(|s| format!(" (e.g. {s})"))
             .unwrap_or_default();
         return Err(format!(
-            "spec yielded no scannable operation ({} skipped){why}",
-            out.skipped.len()
+            "spec yielded no scannable operation ({} skipped, {} DELETE/HEAD/OPTIONS not scanned){why}",
+            out.skipped.len(),
+            out.unscanned_methods
         )
         .into());
     }
@@ -143,8 +155,13 @@ pub(super) fn parse_document(content: &str) -> Result<Value, Box<dyn std::error:
     }
     let mut budget = serde_saphyr::Budget::default();
     budget.max_events = 50_000_000;
-    budget.max_nodes = 20_000_000;
+    budget.max_nodes = 8_000_000;
     budget.max_total_scalar_bytes = crate::utils::fs::MAX_FILE_READ_BYTES as usize;
+    // Specs legitimately reuse one anchor (`*defaultError`) hundreds of times,
+    // which the alias-to-anchor ratio heuristic rejects. Billion laughs is
+    // still stopped by the absolute caps: alias count, retained anchor
+    // events/bytes, and total nodes.
+    budget.enforce_alias_anchor_ratio = false;
     let mut options = serde_saphyr::Options::default();
     options.budget = Some(budget);
     serde_saphyr::from_str_with_options(content, options)
@@ -543,8 +560,13 @@ impl<'a> Op<'a> {
 
     /// The server URL in effect for this operation: operation `servers`, then
     /// path-item `servers`, then the root (OAS 3); `schemes`/`host`/`basePath`
-    /// (Swagger 2.0). `--base-url` replaces an absolute one and anchors a
-    /// relative one.
+    /// (Swagger 2.0).
+    ///
+    /// With `--base-url` one rule applies to every server shape: the base URL
+    /// supplies scheme, host and port and is a path *prefix*; only the
+    /// server's path (or `basePath`) is appended. A spec server can therefore
+    /// never move the scan off the host the operator named — not even a
+    /// scheme-relative `//prod.example.com/v1`.
     fn base_url(&self, base_override: Option<&Url>) -> Result<Url, String> {
         let declared = if self.swagger2 {
             swagger2_server(self.doc)
@@ -557,16 +579,38 @@ impl<'a> Op<'a> {
                 .map(oas3_server_url)
                 .transpose()?
         };
+        let unresolved = |s: &str| {
+            let open = s.find('{')?;
+            let close = s[open..].find('}').map_or(s.len(), |c| open + c + 1);
+            Some(format!(
+                "server variable {} has no default (pass --base-url to say where the API lives)",
+                &s[open..close]
+            ))
+        };
         let base = match (declared, base_override) {
-            (Some(d), Some(o)) => match Url::parse(&d) {
-                Ok(_) => o.clone(),
-                Err(_) => o.join(&d).map_err(|e| {
-                    format!("server URL '{d}' does not resolve against --base-url: {e}")
-                })?,
-            },
-            (Some(d), None) => Url::parse(&d).map_err(|_| {
-                format!("server URL '{d}' is relative; pass --base-url to say where the API lives")
-            })?,
+            (Some(d), Some(o)) => {
+                // The server's origin (and any variable in it) is discarded.
+                let (_, path) = split_server(&d);
+                if let Some(e) = unresolved(path) {
+                    return Err(e);
+                }
+                join_path(o, path)?
+            }
+            (Some(d), None) => {
+                if let Some(e) = unresolved(&d) {
+                    return Err(e);
+                }
+                match split_server(&d) {
+                    (Some(origin), _) if origin.contains("://") => {
+                        Url::parse(&d).map_err(|e| format!("invalid server URL '{d}': {e}"))?
+                    }
+                    _ => {
+                        return Err(format!(
+                            "server URL '{d}' is relative; pass --base-url to say where the API lives"
+                        ));
+                    }
+                }
+            }
             (None, Some(o)) => o.clone(),
             (None, None) => {
                 return Err(
@@ -643,8 +687,26 @@ fn param_is(p: &Value, location: &str) -> bool {
     p.get("in").and_then(Value::as_str) == Some(location)
 }
 
+/// Split a server URL into its origin (`scheme://authority`, or a
+/// scheme-relative `//authority`, backslashes included) and its path. A
+/// server with neither (`/api/v3`, `api`) has no origin.
+fn split_server(s: &str) -> (Option<&str>, &str) {
+    let s = s.trim();
+    let first_sep = s.find(['/', '\\', '?', '#']).unwrap_or(s.len());
+    let authority_start = match s.find("://") {
+        Some(i) if i <= first_sep => i + 3,
+        _ if s.starts_with("//") || s.starts_with("\\\\") || s.starts_with("/\\") => 2,
+        _ => return (None, s),
+    };
+    let end = s[authority_start..]
+        .find(['/', '\\', '?', '#'])
+        .map_or(s.len(), |e| authority_start + e);
+    (Some(&s[..end]), &s[end..])
+}
+
 /// `servers[0].url` with `{variables}` replaced by their `default` (or first
-/// `enum`). An undeclared variable is an error, not a literal `{x}` host.
+/// `enum`). A variable without one is left as `{name}` for the caller to
+/// reject — unless `--base-url` discards the part it sits in.
 fn oas3_server_url(server: &Value) -> Result<String, String> {
     let raw = server
         .get("url")
@@ -662,10 +724,12 @@ fn oas3_server_url(server: &Value) -> Result<String, String> {
         let value = var
             .and_then(|v| v.get("default"))
             .or_else(|| var.and_then(|v| v.get("enum")?.as_array()?.first()))
-            .and_then(Value::as_str)
-            .ok_or_else(|| format!("server variable {{{name}}} has no default"))?;
+            .and_then(Value::as_str);
         out.push_str(&rest[..open]);
-        out.push_str(value);
+        match value {
+            Some(v) => out.push_str(v),
+            None => out.push_str(&rest[open..open + close + 1]),
+        }
         rest = &rest[open + close + 1..];
     }
     out.push_str(rest);
@@ -700,8 +764,10 @@ pub(super) fn join_path(base: &Url, path: &str) -> Result<Url, String> {
     let mut b = base.clone();
     b.set_query(None);
     b.set_fragment(None);
-    let sep = if path.starts_with('/') { "" } else { "/" };
-    let joined = format!("{}{sep}{path}", b.as_str().trim_end_matches('/'));
+    // Leading slashes / backslashes collapse to one separator, so neither a
+    // `//host` nor a `\\host` path can read as a new authority.
+    let path = path.trim_start_matches(['/', '\\']);
+    let joined = format!("{}/{path}", b.as_str().trim_end_matches('/'));
     let url = Url::parse(&joined).map_err(|e| format!("invalid URL '{joined}': {e}"))?;
     if url.scheme() != b.scheme()
         || url.host_str() != b.host_str()

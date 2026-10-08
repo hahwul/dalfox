@@ -24,7 +24,7 @@ Dalfox는 설정 디렉터리를 하나만 고릅니다.
 [scan]
 # INPUT
 input_type = "auto"   # auto, url, file, pipe, raw-http, har, openapi, postman
-# base_url = "https://staging.example.com"  # openapi/postman: 명세의 서버 URL을 대체(상대 URL이면 기준이 됨)
+# base_url = "https://staging.example.com"  # openapi/postman: 모든 요청의 스킴+호스트(+포트), 경로 접두어. 명세 서버 경로는 뒤에 붙음
 dedup_urls = "exact"  # exact, signature (파라미터 값만 다른 URL 병합), off
 # state_file = "scan.state"  # 완료된 대상을 기록해 재실행 시 건너뜁니다. CLI 전용 — `dalfox server`/MCP는 무시
 
@@ -140,7 +140,7 @@ debug = false
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`, `postman` |
-| `base_url` | string | — | `openapi` / `postman` 입력 전용: 명세의 절대 서버 URL을 대체하고 상대 서버 URL의 기준이 됩니다. 절대 `http(s)` URL이어야 하며, 그 밖의 값은 경고와 함께 무시합니다([OpenAPI / Postman 모드](../../guide/scanning-modes/#openapi-postman-모드)) |
+| `base_url` | string | — | `openapi` / `postman` 입력 전용: 모든 요청의 스킴, 호스트, 포트를 정하고 경로 접두어가 됩니다. 명세 서버의 경로는 그 뒤에 붙습니다. 절대 `http(s)` URL이어야 하며, 그 밖의 값은 경고와 함께 무시합니다([OpenAPI / Postman 모드](../../guide/scanning-modes/#openapi-postman-모드)) |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature`(파라미터 값만 다른 URL을 하나로 병합), `off` |
 | `state_file` | string | — | 완료된 대상을 기록해 재실행 시 건너뜁니다([중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)). **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
 

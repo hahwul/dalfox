@@ -21,13 +21,22 @@ pub async fn probe_multipart_params(
     let Some(data) = &args.data else {
         return;
     };
+    /// Imported multipart fields probed per target. One task per field is
+    /// spawned up front, so an imported body with thousands of fields must
+    /// not turn into thousands of tasks; real forms are far smaller.
+    const MAX_IMPORTED_MULTIPART_FIELDS: usize = 256;
+
     let mut wanted =
         crate::parameter_analysis::discovery::explicit_param_names(&args.param, "multipart");
+    let mut seen: HashSet<String> = wanted.iter().cloned().collect();
     if target.multipart {
         // An imported spec/collection declared this body multipart: every
         // field of it is a multipart field, named or not.
         for (k, _) in form_urlencoded::parse(data.as_bytes()) {
-            if !wanted.iter().any(|w| *w == k) {
+            if seen.len() >= MAX_IMPORTED_MULTIPART_FIELDS {
+                break;
+            }
+            if seen.insert(k.to_string()) {
                 wanted.push(k.into_owned());
             }
         }
@@ -41,33 +50,38 @@ pub async fn probe_multipart_params(
         pb.set_message("Probing multipart fields");
     }
 
-    let pairs: Vec<(String, String)> = form_urlencoded::parse(data.as_bytes())
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    let pairs: Arc<Vec<(String, String)>> = Arc::new(
+        form_urlencoded::parse(data.as_bytes())
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+    );
     let client = target.build_client_or_default();
     let marker = crate::scanning::markers::bracketed_marker();
     let silence = args.silence;
     let delay = target.delay;
+    let shared_target = Arc::new(target.clone());
+    // Skip only names already registered *as a multipart field*. A
+    // same-named body/query param (e.g. `probe_body_params` seeding `file`
+    // from the same `-d`) must not block the multipart slot — `-p
+    // file:multipart` filters by location, so the body entry would be
+    // dropped and we'd be left with nothing.
+    let existing: HashSet<String> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .filter(|p| p.location == Location::MultipartBody)
+        .map(|p| p.name.clone())
+        .collect();
 
     let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
     for field in wanted {
-        // Skip only if this name is already registered *as a multipart field*.
-        // A same-named body/query param (e.g. `probe_body_params` seeding
-        // `file` from the same `-d`) must not block the multipart slot —
-        // `-p file:multipart` filters by location, so the body entry would be
-        // dropped and we'd be left with nothing.
-        let exists = reflection_params
-            .lock()
-            .await
-            .iter()
-            .any(|p| p.name == field && p.location == Location::MultipartBody);
-        if exists {
+        if existing.contains(&field) {
             continue;
         }
 
         let client_clone = client.clone();
         let url = target.url.clone();
-        let target_clone = Arc::new(target.clone());
+        let target_clone = shared_target.clone();
         let semaphore_clone = semaphore.clone();
         let pairs_clone = pairs.clone();
         let field_name = field.clone();
@@ -81,7 +95,7 @@ pub async fn probe_multipart_params(
                     .expect("acquire semaphore permit");
                 let mut form = reqwest::multipart::Form::new();
                 let mut placed = false;
-                for (k, v) in &pairs_clone {
+                for (k, v) in pairs_clone.iter() {
                     if *k == field_name {
                         form = form.text(k.clone(), marker.to_string());
                         placed = true;

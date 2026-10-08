@@ -58,7 +58,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi` (OpenAPI 3.x / Swagger 2.0, JSON or YAML), `postman` (Postman Collection v2.1) |
-| `--base-url` | — | — | For `openapi` / `postman`: replaces the spec's absolute server URL (and every Postman request's origin) and anchors a relative one (`/api/v3`). Must be an absolute `http(s)` URL |
+| `--base-url` | — | — | For `openapi` / `postman`: supplies scheme, host and port for every request and is a path prefix; the spec server's path (`/api/v3`, from a relative or absolute server) or each Postman request's path is appended. Must be an absolute `http(s)` URL |
 | `--dedup-urls` | — | `exact` | Target deduplication: `exact` (drop identical URL+method), `signature` (also collapse URLs differing only in parameter *values*), `off` (scan every input line) |
 | `--state-file` | — | — | Record completed targets to a file and skip them when the scan is re-run; raw HTTP/HAR request data is fingerprinted so changed captures are scanned again; run-wide credential values from `-H` / `--cookies` / `--cookie-from-raw` are excluded so a refreshed session resumes, while credentials inside a capture still count |
 

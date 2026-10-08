@@ -777,8 +777,8 @@ pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 [scan]
 # INPUT
 # input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal), har (HAR / proxy export), openapi (OpenAPI 3.x / Swagger 2.0 JSON or YAML), postman (Postman collection v2.1)
-# base_url = "https://staging.example.com"  # openapi/postman: replaces the spec's server URL (anchors a relative one)
-# dedup_urls = "exact"       # exact (drop identical URL+method), signature (also collapse URLs differing only in param values), off
+# base_url = "https://staging.example.com"  # openapi/postman: scheme+host(+port) for every request, path prefix; the spec server path is appended
+# dedup_urls = "exact"       # exact (drop identical URL+method+request content), signature (also collapse URLs differing only in param values), off
 # state_file = "scan.state"  # CLI only (not applied by `dalfox server` / MCP); record completed targets and skip them when the scan is re-run
 
 # OUTPUT

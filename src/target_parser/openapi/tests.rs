@@ -255,24 +255,107 @@ fn wide_deep_schema_is_bounded() {
 }
 
 #[test]
-fn base_url_overrides_absolute_and_anchors_relative_servers() {
-    let abs = r##"{"openapi":"3.0.0","servers":[{"url":"https://prod.example.com/api"}],
-                  "paths":{"/u":{"get":{}}}}"##;
-    let rel = r##"{"openapi":"3.0.0","servers":[{"url":"/api/v3"}],"paths":{"/u":{"get":{}}}}"##;
-    let none = r##"{"openapi":"3.0.0","paths":{"/u":{"get":{}}}}"##;
+fn base_url_is_origin_plus_path_prefix_for_every_server_shape() {
+    // One rule: --base-url gives scheme/host/port and a path prefix; the
+    // server's path (or Swagger basePath) is appended; its origin is dropped.
     let base = Url::parse("http://127.0.0.1:9000/x/").unwrap();
+    let url_for = |servers: &str| {
+        let spec = format!(r#"{{"openapi":"3.0.0",{servers}"paths":{{"/u":{{"get":{{}}}}}}}}"#);
+        parse_openapi(&spec, Some(&base)).unwrap().targets[0]
+            .url
+            .to_string()
+    };
+    let cases = [
+        // absolute: its path is kept under the prefix
+        (
+            r#""servers":[{"url":"https://prod.example.com/api"}],"#,
+            "http://127.0.0.1:9000/x/api/u",
+        ),
+        // relative
+        (
+            r#""servers":[{"url":"/api/v3"}],"#,
+            "http://127.0.0.1:9000/x/api/v3/u",
+        ),
+        (
+            r#""servers":[{"url":"api/v3"}],"#,
+            "http://127.0.0.1:9000/x/api/v3/u",
+        ),
+        // scheme-relative and backslash network paths can't change the host
+        (
+            r#""servers":[{"url":"//prod.example.com/v1"}],"#,
+            "http://127.0.0.1:9000/x/v1/u",
+        ),
+        (
+            r#""servers":[{"url":"\\\\prod.example.com\\v1"}],"#,
+            "http://127.0.0.1:9000/x/v1/u",
+        ),
+        // an undeclared variable in the discarded origin doesn't matter
+        (
+            r#""servers":[{"url":"https://{tenant}.example.com/v2"}],"#,
+            "http://127.0.0.1:9000/x/v2/u",
+        ),
+        // no servers at all
+        ("", "http://127.0.0.1:9000/x/u"),
+    ];
+    for (servers, want) in cases {
+        assert_eq!(url_for(servers), want, "{servers}");
+    }
 
-    let t = &parse_openapi(abs, Some(&base)).unwrap().targets[0];
-    assert_eq!(t.url.as_str(), "http://127.0.0.1:9000/x/u");
-    let t = &parse_openapi(rel, Some(&base)).unwrap().targets[0];
-    assert_eq!(t.url.as_str(), "http://127.0.0.1:9000/api/v3/u");
-    let t = &parse_openapi(none, Some(&base)).unwrap().targets[0];
-    assert_eq!(t.url.as_str(), "http://127.0.0.1:9000/x/u");
+    let swagger = r#"{"swagger":"2.0","host":"prod.example.com","basePath":"/v2",
+                      "paths":{"/u":{"get":{}}}}"#;
+    let t = &parse_openapi(swagger, Some(&base)).unwrap().targets[0];
+    assert_eq!(t.url.as_str(), "http://127.0.0.1:9000/x/v2/u");
 
-    // Without --base-url a relative / missing server can't be aimed anywhere.
-    let err = parse_openapi(rel, None).unwrap_err().to_string();
-    assert!(err.contains("--base-url"), "{err}");
-    assert!(parse_openapi(none, None).is_err());
+    // Without --base-url a relative / scheme-relative / missing server, or an
+    // undeclared variable, can't be aimed anywhere.
+    for servers in [
+        r#""servers":[{"url":"/api/v3"}],"#,
+        r#""servers":[{"url":"//prod.example.com/v1"}],"#,
+        r#""servers":[{"url":"https://{tenant}.example.com"}],"#,
+        "",
+    ] {
+        let spec = format!(r#"{{"openapi":"3.0.0",{servers}"paths":{{"/u":{{"get":{{}}}}}}}}"#);
+        let err = parse_openapi(&spec, None).unwrap_err().to_string();
+        assert!(err.contains("--base-url"), "{servers}: {err}");
+    }
+}
+
+#[test]
+fn numeric_versions_and_reused_anchors_parse() {
+    // Unquoted YAML versions are numbers.
+    let y = "swagger: 2.0\nhost: h\npaths:\n  /a:\n    get: {}\n";
+    assert_eq!(parse(y).targets.len(), 1);
+    let y = "openapi: 3.0\nservers: [{url: 'https://h'}]\npaths:\n  /a:\n    get: {}\n";
+    assert_eq!(parse(y).targets.len(), 1);
+
+    // One anchor reused 150 times (a shared error response) is legitimate.
+    let mut y = String::from(
+        "openapi: 3.0.0\nservers: [{url: 'https://h'}]\nx-err: &err {description: e}\npaths:\n",
+    );
+    for i in 0..150 {
+        y.push_str(&format!(
+            "  /p{i}:\n    get:\n      responses:\n        '500': *err\n"
+        ));
+    }
+    assert_eq!(parse(&y).targets.len(), 150);
+}
+
+#[test]
+fn delete_head_options_are_counted_not_scanned() {
+    let spec = r#"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{
+        "/a":{"get":{},"post":{},"put":{},"patch":{},"delete":{},"head":{},"options":{}}
+    }}"#;
+    let out = parse(spec);
+    let mut methods: Vec<&str> = out.targets.iter().map(|t| t.method.as_str()).collect();
+    methods.sort();
+    assert_eq!(methods, vec!["GET", "PATCH", "POST", "PUT"]);
+    assert_eq!(out.unscanned_methods, 3);
+    assert!(out.skipped.is_empty());
+
+    let only_delete = r#"{"openapi":"3.0.0","servers":[{"url":"https://h"}],
+        "paths":{"/a":{"delete":{}}}}"#;
+    let err = parse_openapi(only_delete, None).unwrap_err().to_string();
+    assert!(err.contains("1 DELETE/HEAD/OPTIONS"), "{err}");
 }
 
 #[test]

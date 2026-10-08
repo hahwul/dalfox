@@ -102,7 +102,7 @@ pub const WAF_BYPASS_VALUES: &[&str] = &["auto", "force", "off"];
 /// MCP tool schema cannot drift onto different defaults.
 pub const DEFAULT_WAF_BYPASS: &str = "auto";
 pub const DEDUP_URLS_VALUES: &[&str] = &["exact", "signature", "off"];
-/// Default for `--dedup-urls`: collapse only byte-identical `url|method`
+/// Default for `--dedup-urls`: collapse only byte-identical `url|method|request content`
 /// pairs, i.e. the historical behavior. `signature` additionally collapses
 /// URLs that differ solely in parameter *values*, which is not value-safe for
 /// every endpoint, so it stays opt-in.
@@ -336,16 +336,16 @@ pub struct ScanArgs {
     pub input_type: String,
 
     #[clap(help_heading = "INPUT")]
-    /// Where the API of an `-i openapi` / `-i postman` input lives. Replaces
-    /// the spec's absolute server URL (and every Postman request's origin);
-    /// anchors a relative one (`servers: [{url: /api/v3}]`). Example:
-    /// --base-url https://staging.example.com
+    /// Where the API of an `-i openapi` / `-i postman` input lives. Supplies
+    /// scheme, host and port for every request and is a path prefix; the
+    /// spec server's path (or each Postman request's path) is appended.
+    /// Example: --base-url https://staging.example.com
     #[arg(long, value_name = "URL", value_parser = parse_base_url_arg)]
     pub base_url: Option<String>,
 
     #[clap(help_heading = "INPUT")]
     /// Target deduplication [default: exact]: exact (drop byte-identical
-    /// URL+method), signature (also collapse URLs that differ only in
+    /// URL+method+request content), signature (also collapse URLs that differ only in
     /// parameter values — keys on method+host+path+parameter names), off (scan
     /// every input line).
     //

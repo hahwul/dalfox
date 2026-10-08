@@ -352,9 +352,10 @@ async fn openapi_spec_expands_through_the_full_input_pipeline() {
         v
     };
 
-    // --base-url anchors the relative root server and replaces the absolute
-    // operation-level one; `-H` rides on every operation; the operation with
-    // an undeclared server variable is skipped, not fatal.
+    // --base-url supplies the origin for every operation (the relative root
+    // server, the absolute operation-level one, and the one whose host has an
+    // undeclared variable — that host is discarded anyway); `-H` rides on
+    // every operation.
     let args = args_from(&[
         "-i",
         "openapi",
@@ -370,6 +371,7 @@ async fn openapi_spec_expands_through_the_full_input_pipeline() {
         show(&targets),
         vec![
             "GET http://127.0.0.1:9000/api/items/1?q=hi -",
+            "GET http://127.0.0.1:9000/broken -",
             "GET http://127.0.0.1:9000/other -",
             r#"POST http://127.0.0.1:9000/api/items/1 {"name":"test"}"#,
         ]
@@ -574,6 +576,63 @@ fn apply_request_cli_overrides_only_overrides_explicit_flags() {
     assert_eq!(target.user_agent.as_deref(), Some("Agent/9"));
     assert_eq!(target.effective_user_agent(), Some("Agent/9"));
     assert!(target.cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
+}
+
+#[test]
+fn apply_request_cli_overrides_replace_same_named_imported_headers_and_cookies() {
+    // A spec placeholder / stale captured value must not stay first on the
+    // wire next to the operator's credential.
+    let mut target = crate::target_parser::parse_raw_http_request(
+        "GET /p HTTP/1.1\r\nHost: h\r\nauthorization: Bearer placeholder\r\n\
+         X-Keep: 1\r\nCookie: sid=old; theme=dark\r\n\r\n",
+    )
+    .expect("raw request parses");
+    let args = args_from(&[
+        "-i",
+        "raw-http",
+        "-S",
+        "-H",
+        "Authorization: Bearer real",
+        "--cookies",
+        "sid=new",
+        "x",
+    ]);
+    apply_request_cli_overrides(&mut target, &args);
+    let auth: Vec<&str> = target
+        .headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert_eq!(auth, vec!["Bearer real"]);
+    assert!(target.headers.iter().any(|(k, _)| k == "X-Keep"));
+    let mut cookies = target.cookies.clone();
+    cookies.sort();
+    assert_eq!(
+        cookies,
+        vec![
+            ("sid".to_string(), "new".to_string()),
+            ("theme".to_string(), "dark".to_string())
+        ]
+    );
+}
+
+#[test]
+fn exact_dedup_keeps_same_url_requests_with_different_bodies() {
+    let mk = |body: &str| {
+        let mut t = target_at("https://h/graphql");
+        t.method = "POST".to_string();
+        t.data = Some(body.to_string());
+        t
+    };
+    let mut targets = vec![
+        mk("{\"query\":\"a\"}"),
+        mk("{\"query\":\"b\"}"),
+        mk("{\"query\":\"a\"}"),
+    ];
+    let stats = dedup_targets(&mut targets, "exact");
+    assert_eq!(targets.len(), 2);
+    assert_eq!(stats.collapsed, 1);
 }
 
 #[test]

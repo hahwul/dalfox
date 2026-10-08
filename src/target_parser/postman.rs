@@ -13,6 +13,7 @@
 use super::{ImportedHeaders, MAX_IMPORT_REQUEST_BYTES, SpecImport, Target};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::rc::Rc;
 use url::Url;
 
 /// Most bytes one `{{var}}` expansion may grow a string to; keeps a variable
@@ -59,16 +60,22 @@ pub fn parse_postman(
     let mut budget = crate::utils::fs::MAX_FILE_READ_BYTES as usize;
     // Explicit stack (reversed pushes keep document order): folder nesting is
     // bounded by serde_json's recursion limit, but no recursion is needed.
-    let mut stack: Vec<(&Value, String)> = items.iter().rev().map(|i| (i, String::new())).collect();
+    // Labels are shared (`Rc`) and each name is truncated, so a folder with a
+    // huge name and many children can't multiply into a copy per child.
+    let root: Rc<str> = Rc::from("");
+    let mut stack: Vec<(&Value, Rc<str>)> = items.iter().rev().map(|i| (i, root.clone())).collect();
     while let Some((item, parent)) = stack.pop() {
-        let name = item
+        let name: String = item
             .get("name")
             .and_then(Value::as_str)
-            .unwrap_or("(unnamed)");
-        let label = if parent.is_empty() {
-            name.to_string()
+            .unwrap_or("(unnamed)")
+            .chars()
+            .take(64)
+            .collect();
+        let label: Rc<str> = if parent.is_empty() {
+            Rc::from(name)
         } else {
-            format!("{parent}/{name}")
+            Rc::from(format!("{parent}/{name}"))
         };
         if let Some(children) = item.get("item").and_then(Value::as_array) {
             stack.extend(children.iter().rev().map(|c| (c, label.clone())));
@@ -84,6 +91,7 @@ pub fn parse_postman(
             break;
         }
         match build_request(req, &vars, base_url) {
+            Ok(t) if super::is_unscanned_spec_method(&t.method) => out.unscanned_methods += 1,
             Ok(t) => {
                 let size = t.url.as_str().len()
                     + t.data.as_ref().map_or(0, String::len)
@@ -105,8 +113,9 @@ pub fn parse_postman(
             .map(|s| format!(" (e.g. {s})"))
             .unwrap_or_default();
         return Err(format!(
-            "collection yielded no scannable request ({} skipped){why}",
-            out.skipped.len()
+            "collection yielded no scannable request ({} skipped, {} DELETE/HEAD/OPTIONS not scanned){why}",
+            out.skipped.len(),
+            out.unscanned_methods
         )
         .into());
     }
@@ -114,10 +123,7 @@ pub fn parse_postman(
 }
 
 fn too_large() -> String {
-    format!(
-        "request expands past {} MiB",
-        MAX_IMPORT_REQUEST_BYTES >> 20
-    )
+    super::too_large("request")
 }
 
 /// A Postman scalar as text (values may be strings, numbers or booleans).
@@ -155,8 +161,10 @@ fn substitute(s: &str, vars: &HashMap<String, String>, fill: bool) -> Result<Str
                 None if fill => out.push_str(PLACEHOLDER),
                 None => out.push_str(&rest[open..open + close + 4]),
             }
-            if out.len() > MAX_EXPANDED_BYTES {
-                return Err("variable expansion exceeds 1 MiB".to_string());
+            // Growth, not length: a large literal body with one variable in
+            // it is fine; a small one that variables blow up is not.
+            if out.len() > s.len() + MAX_EXPANDED_BYTES {
+                return Err("variable expansion grows a value by more than 1 MiB".to_string());
             }
             rest = &rest[open + close + 4..];
         }
@@ -219,9 +227,12 @@ fn build_request(
 
     // Split origin from the rest before filling placeholders: a variable
     // still unresolved in the origin is a host nobody named.
+    // A scheme only counts before the first `/`, `?` or `#`: in
+    // `host/cb?next=https://x` the `://` belongs to the query.
+    let first_sep = raw.find(['/', '?', '#']).unwrap_or(raw.len());
     let (scheme, after) = match raw.find("://") {
-        Some(i) => (&raw[..i], &raw[i + 3..]),
-        None => ("http", raw.as_str()),
+        Some(i) if i <= first_sep => (&raw[..i], &raw[i + 3..]),
+        _ => ("http", raw.as_str()),
     };
     let end = after.find(['/', '?', '#']).unwrap_or(after.len());
     let (authority, rest) = after.split_at(end);
@@ -365,6 +376,18 @@ fn build_request(
         && !crate::utils::http::has_header(&imported.headers, "Content-Type")
     {
         imported.push("Content-Type", ct);
+    }
+    // Every body kind (raw and graphql included) and the URL count toward
+    // the per-request cap, not just the key/value lists.
+    let size = target.url.as_str().len()
+        + target.data.as_ref().map_or(0, String::len)
+        + imported
+            .headers
+            .iter()
+            .map(|(k, v)| k.len() + v.len())
+            .sum::<usize>();
+    if size > MAX_IMPORT_REQUEST_BYTES {
+        return Err(too_large());
     }
     target.headers = imported.headers;
     target.cookies = imported.cookies;

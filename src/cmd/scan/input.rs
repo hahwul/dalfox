@@ -46,7 +46,8 @@ pub(crate) struct ResolvedTargets {
     pub(crate) targets: Vec<Target>,
     pub(crate) dedup: DedupStats,
     /// Lines from a target list (file, stdin pipe, `-i file`) that did not
-    /// parse as a target and were skipped. Reported for the same reason as
+    /// parse as a target and were skipped, plus OpenAPI / Postman operations
+    /// skipped as unusable. Reported for the same reason as
     /// [`DedupStats::collapsed`]: a run that discarded part of its input list
     /// must never read as full coverage of that list.
     pub(crate) unparsable_lines: usize,
@@ -481,6 +482,7 @@ pub(crate) async fn resolve_targets(
     // Spec operations / collection requests that could not become a target,
     // across every document; reported once below.
     let mut spec_skipped = 0usize;
+    let mut spec_unscanned_methods = 0usize;
     let mut spec_skip_sample: Vec<String> = Vec::new();
     for (s, origin) in target_strings {
         if input_type == "openapi" || input_type == "postman" {
@@ -508,6 +510,7 @@ pub(crate) async fn resolve_targets(
                         parsed_targets.push(target);
                     }
                     spec_skipped += import.skipped.len();
+                    spec_unscanned_methods += import.unscanned_methods;
                     for why in import.skipped {
                         if spec_skip_sample.len() >= UNPARSABLE_SAMPLE_LIMIT {
                             break;
@@ -672,12 +675,19 @@ pub(crate) async fn resolve_targets(
     if spec_skipped > 0 {
         // Same contract as the skipped-list-lines warning below: always on
         // stderr, so a run that left part of the spec untested never reads as
-        // full coverage of it.
+        // full coverage of it. The count also rides in the scan-meta envelope
+        // as `targets_unparsable` (added to the return value below).
         eprintln!(
             "[warn] skipped {} {} operation(s) — e.g. {}",
             spec_skipped,
             input_type,
             spec_skip_sample.join("; ")
+        );
+    }
+    if spec_unscanned_methods > 0 {
+        eprintln!(
+            "[warn] not scanning {} DELETE/HEAD/OPTIONS {} operation(s) (destructive or no body to reflect)",
+            spec_unscanned_methods, input_type
         );
     }
 
@@ -787,7 +797,9 @@ pub(crate) async fn resolve_targets(
     Ok(ResolvedTargets {
         targets: parsed_targets,
         dedup,
-        unparsable_lines,
+        // Input entries that could not become a target: list lines and spec
+        // operations alike (policy-skipped methods are not failures).
+        unparsable_lines: unparsable_lines + spec_skipped,
     })
 }
 
@@ -844,7 +856,16 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         let key = if mode == "signature" {
             target_signature_key(t)
         } else {
-            format!("{}|{}", t.url, t.method)
+            // URL + method + a hash of the request content (body, headers,
+            // cookies, UA) — the same identity `--state-file` uses. Thirty
+            // GraphQL queries to `POST /graphql` from a spec or HAR are thirty
+            // requests; a URL list's targets all share the CLI body/headers,
+            // so for it this is still URL + method.
+            let id = super::state_file::target_identity(
+                t,
+                &super::state_file::CliCredentials::default(),
+            );
+            format!("{}|{}|{}", id.target, id.method, id.request_hash)
         };
         match chosen.entry(key) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -1165,12 +1186,14 @@ fn method_override(args: &ScanArgs) -> Option<&str> {
 }
 
 /// Apply CLI overrides to a Target parsed from a request-bearing source
-/// (`raw-http` or `har`). Request-content fields (method, body, headers,
-/// cookies, User-Agent) are only touched when the user explicitly set the
-/// matching flag, so each captured request keeps its own shape by default;
-/// CLI headers and cookies are *appended* (not replaced) since the request
-/// already carries its own. Network/runtime fields are always taken from the
-/// args. This is the shared override path for both raw-HTTP and HAR inputs.
+/// (`raw-http`, `har`, `openapi`, `postman`). Request-content fields (method,
+/// body, headers, cookies, User-Agent) are only touched when the user
+/// explicitly set the matching flag, so each imported request keeps its own
+/// shape by default. A CLI header or cookie *replaces* every imported one of
+/// the same name (case-insensitive for headers) and is otherwise added:
+/// appending would leave the stale imported value (a captured session, a
+/// spec's placeholder `Authorization`) first on the wire, where servers read
+/// it. Network/runtime fields are always taken from the args.
 fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     if let Some(m) = method_override(args) {
         target.method = m.to_string();
@@ -1178,13 +1201,16 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     if let Some(d) = &args.data {
         target.data = Some(d.clone());
     }
-    for h in &args.headers {
-        if let Some((name, value)) = h.split_once(':') {
-            target
-                .headers
-                .push((name.trim().to_string(), value.trim().to_string()));
-        }
-    }
+    let cli_headers: Vec<(String, String)> = args
+        .headers
+        .iter()
+        .filter_map(|h| h.split_once(':'))
+        .map(|(n, v)| (n.trim().to_string(), v.trim().to_string()))
+        .collect();
+    target
+        .headers
+        .retain(|(k, _)| !cli_headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(k)));
+    target.headers.extend(cli_headers);
     // Empty `--user-agent ""` means "no override", not a literal empty header.
     if let Some(ua) = args.user_agent.as_ref().filter(|ua| !ua.is_empty()) {
         target.headers.push(("User-Agent".to_string(), ua.clone()));
@@ -1206,9 +1232,15 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     }
     // Shared splitter: a `--cookies "a=1; b=2"` value carries several cookies
     // and every one of them has to become its own probe-able parameter.
-    for c in &args.cookies {
-        target.cookies.extend(crate::job::split_cookie_pairs(c));
-    }
+    let cli_cookies: Vec<(String, String)> = args
+        .cookies
+        .iter()
+        .flat_map(|c| crate::job::split_cookie_pairs(c))
+        .collect();
+    target
+        .cookies
+        .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| n == k));
+    target.cookies.extend(cli_cookies);
     target.timeout = args.timeout;
     target.delay = args.delay;
     target.proxy = args.proxy.clone();

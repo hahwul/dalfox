@@ -26,6 +26,20 @@ pub(crate) const MAX_IMPORT_TARGETS: usize = 1_000_000;
 /// gigabytes. Far above any real API request.
 pub(crate) const MAX_IMPORT_REQUEST_BYTES: usize = 4 << 20;
 
+/// Skip reason for a request past [`MAX_IMPORT_REQUEST_BYTES`].
+pub(crate) fn too_large(noun: &str) -> String {
+    format!("{noun} expands past {} MiB", MAX_IMPORT_REQUEST_BYTES >> 20)
+}
+
+/// Methods a spec import does not scan. HEAD and OPTIONS responses carry no
+/// body to reflect into; DELETE with placeholder ids would have discovery,
+/// mining and every payload hit a destructive endpoint. Counted, not silent.
+pub(crate) fn is_unscanned_spec_method(method: &str) -> bool {
+    ["HEAD", "OPTIONS", "DELETE"]
+        .iter()
+        .any(|m| m.eq_ignore_ascii_case(method))
+}
+
 /// What a spec import (`-i openapi` / `-i postman`) produced: the targets plus
 /// one human-readable reason per operation or request that was skipped. A bad
 /// entry never aborts the import — the same per-entry leniency a target list
@@ -34,6 +48,9 @@ pub(crate) const MAX_IMPORT_REQUEST_BYTES: usize = 4 << 20;
 pub struct SpecImport {
     pub targets: Vec<Target>,
     pub skipped: Vec<String>,
+    /// DELETE / HEAD / OPTIONS operations left out by policy (see
+    /// [`is_unscanned_spec_method`]) — not errors, reported separately.
+    pub unscanned_methods: usize,
 }
 
 /// Request headers imported from a document (HAR entry, OpenAPI header

@@ -58,8 +58,8 @@ dalfox scan [TARGETS]... [FLAGS]
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
 | `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`(OpenAPI 3.x / Swagger 2.0, JSON 또는 YAML), `postman`(Postman Collection v2.1) |
-| `--base-url` | — | — | `openapi` / `postman` 전용: 명세의 절대 서버 URL(과 Postman 요청마다의 오리진)을 대체하고, 상대 서버 URL(`/api/v3`)의 기준이 됩니다. 절대 `http(s)` URL이어야 합니다 |
-| `--dedup-urls` | — | `exact` | 대상 중복 제거: `exact`(URL+메서드가 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
+| `--base-url` | — | — | `openapi` / `postman` 전용: 모든 요청의 스킴, 호스트, 포트를 정하고 경로 접두어가 됩니다. 명세 서버의 경로(상대든 절대든 `/api/v3` 부분)나 Postman 요청마다의 경로가 그 뒤에 붙습니다. 절대 `http(s)` URL이어야 합니다 |
+| `--dedup-urls` | — | `exact` | 대상 중복 제거: `exact`(URL+메서드+요청 내용이 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
 | `--state-file` | — | — | 끝난 대상을 파일에 기록해 두고 같은 스캔을 다시 돌릴 때 건너뜁니다. 중단된 대량 스캔을 처음부터가 아니라 이어서 진행합니다. raw HTTP/HAR 요청 데이터는 지문으로 기록되므로 바뀐 캡처는 다시 스캔합니다. `-H` / `--cookies` / `--cookie-from-raw`로 준 자격 증명 값은 식별자에서 제외되므로 세션을 갱신해도 이어서 진행합니다. 캡처 안의 자격 증명은 그대로 포함됩니다 |
 
 무엇을 건너뛰고 무엇을 다시 시도하는지는 [중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)를 참고하세요.

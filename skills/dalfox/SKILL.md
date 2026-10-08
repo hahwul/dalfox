@@ -115,7 +115,7 @@ dalfox scan -i har capture.har          # explicit
 
 Excellent when the interesting parameters live in cookies, custom headers, or a complex JSON body. `har` fans a multi-request capture out into one target per `log.entries[].request` (deduped by URL+method); `raw-http` is the single-request form. See `references/cli.md`.
 
-API spec instead of traffic? `-i openapi` (OpenAPI 3.x JSON/YAML, Swagger 2.0) and `-i postman` (Collection v2.1) expand every operation into a target with path/query/header/cookie params and a JSON / form / multipart / XML body built from the schema. Never auto-detected — pass `-i`. A relative server URL (or a Postman host left as an undefined `{{var}}`) needs `--base-url https://host`; bad operations are skipped with a stderr warning, not fatal; only local `$ref`s are followed. CLI only.
+API spec instead of traffic? `-i openapi` (OpenAPI 3.x JSON/YAML, Swagger 2.0) and `-i postman` (Collection v2.1) expand every GET/POST/PUT/PATCH operation into a target with path/query/header/cookie params and a JSON / form / multipart / XML body built from the schema (DELETE/HEAD/OPTIONS are never scanned). Never auto-detected — pass `-i`. `--base-url https://host[/prefix]` supplies the origin for every request (the spec server's path is appended); it is required when the server is relative or a Postman host is an undefined `{{var}}`. Bad operations are skipped with a stderr warning, not fatal; only local `$ref`s are followed. `-H` / `--cookies` replace same-named imported values. CLI only.
 
 ```bash
 dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com -H 'Authorization: Bearer …'
