@@ -8,7 +8,7 @@ use super::*;
 ///
 /// This is the *necessary prerequisite* for a `[V]` promotion, not the whole
 /// gate: the verifier additionally requires either a surviving on*/script sink
-/// on that element (`element_carries_surviving_sink`, issue #1118) or a
+/// on that element (`element_keeps_sent_sink`, issues #1118 + #1522) or a
 /// presence-only structural vector (base-href / object / iframe-`javascript:`).
 /// Both of those need the marker to first exist as a real attribute — exactly
 /// what the three bugs below break — so this is the property to lock in here.

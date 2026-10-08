@@ -525,25 +525,31 @@ async fn test_dom_outcome_blocked_threads_5xx_status() {
 // Server uppercases every reflected byte; the marker survives as a
 // case-folded class value. The standard CSS class selector is case-
 // sensitive so it misses the match, but the case-insensitive
-// attribute walk added to `has_marker_evidence_in_doc` recovers V.
+// attribute walk added to `has_marker_evidence_in_doc` recovers V —
+// provided the handler value itself survives the fold (#1522), which a
+// numeric-entity spelling does and a plain `alert(1)` does not.
 #[tokio::test]
 async fn test_check_dom_verification_marker_survives_case_fold() {
-    let payload = format!(
-        "<img src=x onerror=alert(1) class={}>",
-        crate::scanning::markers::class_marker()
-    );
+    let marker = crate::scanning::markers::class_marker();
     let addr = start_mock_server("stored").await;
     let target = make_target(addr, "/dom/html-upper");
     let param = make_param();
     let args = default_scan_args();
 
+    let folded = format!("<img src=x onerror=alert(1) class={marker}>");
+    let (found, _) = dom_verify(&target, &param, &folded, &args).await;
+    assert!(
+        !found,
+        "`ALERT(1)` is an undefined name under case-sensitive JS; not DOM evidence"
+    );
+
+    let payload = format!("<img src=x onerror=&#97;&#108;&#101;&#114;&#116;(1) class={marker}>");
     let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(
         found,
         "uppercased marker class should still satisfy DOM evidence via case-insensitive scan"
     );
     let body = body.unwrap_or_default();
-    let marker = crate::scanning::markers::class_marker();
     assert!(
         body.to_ascii_lowercase().contains(marker),
         "marker should appear in the body under ASCII case fold"
@@ -1171,8 +1177,7 @@ fn xml_script_body_from_payload_is_verified_as_executable() {
     assert_eq!(xml_node_text(script_node), "alert(1)");
     assert!(xml_node_has_payload_structural_sink(
         script_node,
-        payload,
-        payload
+        &payload_structural_sinks(payload)
     ));
     assert_eq!(
         classify_dom_evidence_for_response(payload, &svg, "image/svg+xml"),
@@ -1337,10 +1342,20 @@ fn test_has_marker_evidence_matrix() {
             false,
         ),
         // ── server uppercases every reflected byte (ASCII case-fold) ──
+        // Tag/attr names and the marker fold harmlessly, but JS is
+        // case-sensitive: `ALERT(1)` is an undefined name and throws (#1522).
         (
-            "casefold_handler_survives",
+            "casefold_handler_value_folded",
             format!("<img src=x onerror=alert(1) class={cm}>"),
             format!("<IMG SRC=X ONERROR=ALERT(1) CLASS=\"{up}\">"),
+            false,
+        ),
+        // A value spelled with numeric entities survives the fold intact
+        // (`&#97;` has no letters to fold) and decodes back to `alert(1)`.
+        (
+            "casefold_entity_spelled_value_survives",
+            format!("<img src=x onerror=&#97;&#108;&#101;&#114;&#116;(1) class={cm}>"),
+            format!("<IMG SRC=X ONERROR=&#97;&#108;&#101;&#114;&#116;(1) CLASS=\"{up}\">"),
             true,
         ),
         (
@@ -1363,11 +1378,118 @@ fn test_has_marker_evidence_matrix() {
             format!("<svg onload=\"alert(1)\" class=\"{cm}\"></svg>"),
             true,
         ),
-        // server emitted uppercase named entity in handler value; DOM decoder + value_carries must recover
+        // Server re-encodes the handler's parens: the parser decodes them back,
+        // so the value the JS engine sees is the one we sent.
         (
-            "entity_encoded_sink_upper_named_in_value",
+            "entity_reencoded_value_survives",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<img src=x onerror=\"alert&#40;1&#41;\" class=\"{cm}\">"),
+            true,
+        ),
+        // ...but an uppercased call is still a different (undefined) name.
+        (
+            "entity_encoded_value_upper_folded",
             format!("<img src=x onerror=alert(1) class={cm}>"),
             format!("<img src=x onerror=\"ALERT&#40;1&#41;\" class=\"{cm}\">"),
+            false,
+        ),
+        // ── #1522: handler survives, its value does not ──
+        (
+            "parens_stripped_from_handler",
+            format!("<svg onload=alert(1) class={cm}>"),
+            format!("<svg onload=alert1 class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "backticks_stripped_from_handler",
+            format!("<svg onload=alert`1` class={cm}>"),
+            format!("<svg onload=alert1 class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "call_truncated_to_reference",
+            format!("<svg onload=alert(1) class={cm}>"),
+            format!("<svg onload=alert class=\"{cm}\"></svg>"),
+            false,
+        ),
+        // Surrounding whitespace is not part of the call.
+        (
+            "handler_value_whitespace_padded",
+            format!("<svg onload=\"alert(1)\" class={cm}>"),
+            format!("<svg onload=\"  alert(1) \" class=\"{cm}\"></svg>"),
+            true,
+        ),
+        // A `//`-terminated value swallows what the page appends to it.
+        (
+            "line_comment_value_with_page_tail",
+            format!("'\"><svg/class={cm} onload=alert(1)//"),
+            format!("<div><svg class=\"{cm}\" onload=alert(1)//</div></div>"),
+            true,
+        ),
+        // ...but a page tail glued onto a value with no `//` breaks the call.
+        (
+            "unterminated_value_with_page_tail",
+            format!("'\"><svg/class={cm} onload=alert(1)"),
+            format!("<div><svg class=\"{cm}\" onload=alert(1)</div></div>"),
+            false,
+        ),
+        // Pre-encoded payloads reach the page percent-decoded; the sink must
+        // be read from that form, not skipped as "no sink" (presence-only).
+        (
+            "percent_encoded_payload_handler_mangled",
+            format!("%3Csvg%20onload%3Dalert%281%29%20class%3D{cm}%3E"),
+            format!("<svg onload=alert1 class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "percent_encoded_payload_handler_survives",
+            format!("%3Csvg%20onload%3Dalert%281%29%20class%3D{cm}%3E"),
+            format!("<svg onload=alert(1) class=\"{cm}\"></svg>"),
+            true,
+        ),
+        // An executable URL on the marker element is its exploit too.
+        (
+            "iframe_js_url_mangled",
+            format!("<iframe src=javascript:alert(1) class={cm}>"),
+            format!("<iframe src=\"javascript:alert1\" class=\"{cm}\"></iframe>"),
+            false,
+        ),
+        // The scheme is case-insensitive, the code after it is not.
+        (
+            "iframe_js_url_scheme_case_folded",
+            format!("<iFrAme/src=JaVAsCrIPt:alert(1) ClAss={cm}>"),
+            format!("<iframe src=\"javascript:alert(1)\" class=\"{cm}\"></iframe>"),
+            true,
+        ),
+        // A handler no sink-name list recognises is still the exploit.
+        (
+            "obfuscated_handler_mangled",
+            format!("<img src=x onerror=top[\"al\"+\"ert\"](1) class={cm}>"),
+            format!("<img src=x onerror='top[\"al\"+\"ert\"]1' class=\"{cm}\">"),
+            false,
+        ),
+        (
+            "obfuscated_handler_survives",
+            format!("<img src=x onerror=top[\"al\"+\"ert\"](1) class={cm}>"),
+            format!("<img src=x onerror='top[\"al\"+\"ert\"](1)' class=\"{cm}\">"),
+            true,
+        ),
+        // `<body …>` inside `<foreignObject>` merges onto the page body; the
+        // payload is read as a document so its sink is seen there too.
+        (
+            "foreignobject_body_handler_mangled",
+            format!("<svg><foreignObject><body onload=alert(1) class={cm}></foreignObject></svg>"),
+            format!(
+                "<html><body><div><svg><foreignObject><body onload=alert1 class={cm}></foreignObject></svg></div></body></html>"
+            ),
+            false,
+        ),
+        (
+            "foreignobject_body_handler_survives",
+            format!("<svg><foreignObject><body onload=alert(1) class={cm}></foreignObject></svg>"),
+            format!(
+                "<html><body><div><svg><foreignObject><body onload=alert(1) class={cm}></foreignObject></svg></div></body></html>"
+            ),
             true,
         ),
     ];
@@ -2178,14 +2300,29 @@ fn test_1183_marker_kept_when_on_both_hidden_and_visible() {
     let marker = crate::scanning::markers::class_marker();
     let payload = format!("<svg onload=alert(1) class={}>", marker);
     let body = format!(
-        "<html><body><div class=\"{}\">x</div>\
-         <input type=\"hidden\" onmouseover=alert(1) class=\"{}\"></body></html>",
+        "<html><body><svg onload=alert(1) class=\"{}\"></svg>\
+         <input type=\"hidden\" onload=alert(1) class=\"{}\"></body></html>",
         marker, marker
     );
     assert!(
         has_marker_evidence(&payload, &body),
         "a marker also present on a rendered element must stay evidence"
     );
+}
+
+/// ...but the surviving handler must sit on an element that can fire: a
+/// handler-less visible marker plus the handler on a hidden input executes
+/// nothing (the hidden input's copy never fires, #1183).
+#[test]
+fn test_1183_handler_only_on_hidden_input_not_evidence() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<svg onload=alert(1) class={}>", marker);
+    let body = format!(
+        "<html><body><div class=\"{}\">x</div>\
+         <input type=\"hidden\" onload=alert(1) class=\"{}\"></body></html>",
+        marker, marker
+    );
+    assert!(!has_marker_evidence(&payload, &body));
 }
 
 /// Path B (HtmlStructural): a no-marker payload that forms a hidden input with
@@ -2322,12 +2459,10 @@ fn test_tag_forming_payload_unaffected_by_bare_attr_gate() {
 /// not an event-handler attribute.
 #[test]
 fn test_payload_has_handler_sink_text_ignores_embedded_on() {
-    assert!(!payload_has_handler_sink_text("button=alert(1)"));
-    assert!(!payload_has_handler_sink_text("\" id=dlx x=\""));
-    assert!(payload_has_handler_sink_text(
-        "\" onmouseover=alert(1) x=\""
-    ));
-    assert!(payload_has_handler_sink_text("'/onfocus=\"alert(1)\"/x='"));
+    assert!(payload_handler_sinks_text("button=alert(1)").is_empty());
+    assert!(payload_handler_sinks_text("\" id=dlx x=\"").is_empty());
+    assert!(!payload_handler_sinks_text("\" onmouseover=alert(1) x=\"").is_empty());
+    assert!(!payload_handler_sinks_text("'/onfocus=\"alert(1)\"/x='").is_empty());
 }
 
 #[test]
@@ -2350,7 +2485,7 @@ fn deeply_nested_payload_does_not_stall_the_sink_check() {
         "</div>".repeat(depth)
     );
     let start = std::time::Instant::now();
-    let _ = payload_marker_element_carries_sink(&payload);
+    let _ = payload_sent_sinks(&payload, true);
     let elapsed = start.elapsed();
     assert!(
         elapsed.as_secs() < 3,
@@ -2363,15 +2498,42 @@ fn test_payload_has_handler_sink_text_is_linear_in_handler_count() {
     // Each `on*=` used to re-check the whole remaining suffix.
     let many = format!("\"{} onclick=alert(1) x=\"", " onx=a".repeat(40_000));
     let start = std::time::Instant::now();
-    assert!(payload_has_handler_sink_text(&many));
-    assert!(!payload_has_handler_sink_text(&" onx=a".repeat(40_000)));
+    assert!(!payload_handler_sinks_text(&many).is_empty());
+    assert_eq!(
+        payload_handler_sinks_text(&" onx=a".repeat(40_000)).len(),
+        40_000
+    );
     assert!(
         start.elapsed() < std::time::Duration::from_secs(2),
         "took {:?}",
         start.elapsed()
     );
     // A sink in a later handler is still found through the first suffix.
-    assert!(payload_has_handler_sink_text(
-        "\" onmouseover=x onfocus=alert(1) \""
+    assert!(!payload_handler_sinks_text("\" onmouseover=x onfocus=alert(1) \"").is_empty());
+}
+
+/// Issue #1522: the DOM phase reports `[R]` (not nothing) when the marker
+/// landed on a real element whose sink a filter broke — but not for an escaped
+/// echo (no element), a hidden input (#1183), or a sink-less structural marker.
+#[test]
+fn test_marker_injected_with_broken_sink() {
+    let cm = crate::scanning::markers::class_marker();
+    let im = crate::scanning::markers::id_marker();
+    let payload = format!("<svg onload=alert(1) class={cm}>");
+    assert!(marker_injected_with_broken_sink(
+        &payload,
+        &format!("<div><svg onload=alert1 class={cm}></svg></div>")
+    ));
+    assert!(!marker_injected_with_broken_sink(
+        &payload,
+        &format!("<div>&lt;svg onload=alert1 class={cm}&gt;</div>")
+    ));
+    assert!(!marker_injected_with_broken_sink(
+        &format!("\" onmouseover=alert(1) class={cm} x=\""),
+        &format!("<input type=hidden value=\"\" onmouseover=alert1 class={cm} x=\"\">")
+    ));
+    assert!(!marker_injected_with_broken_sink(
+        &format!("<base href=//evil/ id={im}>"),
+        &format!("<base href=//evil/ id={im}>")
     ));
 }

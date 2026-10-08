@@ -155,10 +155,10 @@ fn is_marker_element(node: scraper::ElementRef, flags: &MarkerFlags) -> bool {
 }
 
 /// Whether `value` (an `on*` handler value or `<script>` body) carries a
-/// JavaScript sink call, tolerating ASCII case-folding (servers that uppercase
-/// reflected input) and HTML-entity encoding (WAF-bypass payloads like
-/// `alert&#40;1&#41;`), mirroring the decode handling in
-/// [`has_html_structural_evidence_in_doc`].
+/// JavaScript sink call, tolerating ASCII case-folding and HTML-entity encoding
+/// (`alert&#40;1&#41;`). A loose *classifier* for the #1183 hidden-input
+/// suppression; it is not proof that the payload's sink survived the
+/// reflection — that is [`sink_survived`].
 fn value_carries_js_sink(value: &str) -> bool {
     use crate::scanning::js_context_verify::payload_carries_js_sink as sink;
     sink(value)
@@ -167,29 +167,114 @@ fn value_carries_js_sink(value: &str) -> bool {
         || sink(&decode_html_entities(&value.to_ascii_lowercase()))
 }
 
-/// Whether `node`'s own attributes/body carry a surviving JS sink: an `on*`
-/// event-handler attribute whose value is a sink call, or a `<script>` element
-/// whose text body is a sink call. This is the "active ingredient" a
-/// handler/script-body marker template attaches *directly to the marker
-/// element*; if it did not survive the server's reflection, the marker class
-/// alone is not proof of execution (issue #1118).
+fn is_handler_attr(name: &str) -> bool {
+    name.len() >= 3 && name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
+}
+
+/// Whether `node`'s own attributes/body carry *some* JS sink: an `on*` handler
+/// whose value is a sink call, or a `<script>` body that is one. Only the #1183
+/// hidden-input suppression uses this; DOM evidence requires the payload's own
+/// sink to have survived ([`element_keeps_sent_sink`]).
 fn element_carries_surviving_sink(node: scraper::ElementRef) -> bool {
     let v = node.value();
+    if v.attrs()
+        .any(|(name, val)| is_handler_attr(name) && value_carries_js_sink(val))
+    {
+        return true;
+    }
+    v.name().eq_ignore_ascii_case("script")
+        && value_carries_js_sink(&node.text().collect::<String>())
+}
+
+/// A JS sink the payload writes onto an element: an `on*` handler (`attr` is
+/// its lowercased name) or a `<script>` body (`attr` is `None`), holding the
+/// value the browser's HTML parser hands to the JS engine (entities decoded).
+#[derive(Debug)]
+struct SentSink {
+    attr: Option<String>,
+    value: String,
+}
+
+/// Whether `seen` — a handler value or script body parsed out of the response
+/// — is the sent sink `sent` surviving the round trip (issue #1522).
+///
+/// The handler merely being present is not proof: a filter that strips `(`/`)`
+/// turns `onload=alert(1)` into `onload=alert1`, an undefined identifier that
+/// throws and runs nothing. Both sides come out of an HTML parser, so they are
+/// already entity-decoded (a sent `alert&#40;1&#41;` equals an `alert(1)`
+/// echo). Only surrounding whitespace is ignored: JS is case-sensitive, so a
+/// case-folded `ALERT(1)` is a different, undefined name. A sent value's
+/// trailing `//` line comment is no part of the call: it exists to swallow
+/// whatever the page appends to an unterminated attribute (`alert(1)//</div`),
+/// so the echo may drop it, or keep it followed by anything short of a line
+/// terminator.
+fn sink_survived(sent: &str, seen: &str) -> bool {
+    let (sent, seen) = (sent.trim(), seen.trim());
+    // A URL scheme is case-insensitive; the code after it is not.
+    if let Some(n) = executable_scheme_len(sent) {
+        return seen
+            .get(..n)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case(&sent[..n]))
+            && sink_survived(&sent[n..], &seen[n..]);
+    }
+    let Some(code) = sent.strip_suffix("//") else {
+        return !sent.is_empty() && seen == sent;
+    };
+    let code = code.trim_end();
+    !code.is_empty()
+        && seen.strip_prefix(code).is_some_and(|rest| {
+            let rest = rest.trim_start();
+            rest.is_empty()
+                || (rest.starts_with("//") && !rest.contains(['\n', '\r', '\u{2028}', '\u{2029}']))
+        })
+}
+
+/// Collect the sinks `node` carries (see [`SentSink`]) into `out`. With
+/// `urls`, an executable URL in a navigating/embedding attribute
+/// (`<iframe src=javascript:alert(1)>`) counts as a sink too: on a marker
+/// element it is the exploit, and a filter can mangle it just the same.
+fn push_sent_sinks(node: scraper::ElementRef, urls: bool, out: &mut Vec<SentSink>) {
+    let v = node.value();
     for (name, val) in v.attrs() {
-        if name.len() >= 3
-            && name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
-            && value_carries_js_sink(val)
-        {
-            return true;
+        let is_url_sink = urls
+            && is_executable_url_attribute(v.name(), name)
+            && executable_scheme_len(val.trim()).is_some();
+        // Any non-empty handler counts, not only ones a sink-name list
+        // recognises: an obfuscated call (`top["al"+"ert"](1)`) is just as
+        // much the payload's exploit, and just as breakable by a filter.
+        if is_url_sink || (is_handler_attr(name) && !val.trim().is_empty()) {
+            out.push(SentSink {
+                attr: Some(name.to_ascii_lowercase()),
+                value: val.to_string(),
+            });
         }
     }
     if v.name().eq_ignore_ascii_case("script") {
         let text: String = node.text().collect();
-        if value_carries_js_sink(&text) {
-            return true;
+        if !text.trim().is_empty() {
+            out.push(SentSink {
+                attr: None,
+                value: text,
+            });
         }
     }
-    false
+}
+
+/// Whether `node` carries one of the payload's `sinks` with its value intact
+/// ([`sink_survived`]). The one survival check every handler/script-body DOM
+/// evidence path goes through: marker co-survival, HTML structural, and their
+/// XML twin [`xml_node_keeps_sent_sink`].
+fn element_keeps_sent_sink(node: scraper::ElementRef, sinks: &[SentSink]) -> bool {
+    let v = node.value();
+    sinks.iter().any(|s| match &s.attr {
+        Some(name) => v
+            .attr(name)
+            .is_some_and(|seen| sink_survived(&s.value, seen)),
+        None => {
+            v.name().eq_ignore_ascii_case("script")
+                && sink_survived(&s.value, &node.text().collect::<String>())
+        }
+    })
 }
 
 /// Whether `node` is a `<input type="hidden">` element. Such inputs have no
@@ -212,27 +297,26 @@ fn is_hidden_input(node: scraper::ElementRef) -> bool {
             .is_some_and(|t| t.trim().eq_ignore_ascii_case("hidden"))
 }
 
-/// Whether the payload attaches an on*-handler / `<script>`-body JS sink
-/// *directly to its marker element*. Parses the payload as an HTML fragment
-/// (appending a closing `>` so breakout payloads such as
-/// `'"><svg/class=… onload=…//` still yield the element) and also the
-/// entity-decoded form, then inspects the element carrying the class/id marker.
+/// The on*-handler / `<script>`-body sinks the payload writes, read the way the
+/// browser would: the payload — and, only when it differs, its entity-decoded
+/// form — parsed as an HTML fragment (with a closing `>` appended so breakout
+/// payloads such as `'"><svg/class=… onload=…//` still yield the element).
+/// `marker_only` keeps just the sinks on element(s) carrying a Dalfox marker.
 ///
-/// Returns `false` for structural markers — base-href injection, DOM-clobbering
+/// Empty for structural markers — base-href injection, DOM-clobbering
 /// containers (`<form id=…>`, `<object data=javascript:…>`) — where the marker
 /// element's mere presence is the exploit and there is no on*/script sink on it
 /// to verify, so those keep presence-only evidence.
-fn payload_marker_element_carries_sink(payload: &str) -> bool {
+fn payload_sent_sinks(payload: &str, marker_only: bool) -> Vec<SentSink> {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
-    // Inspect the raw payload and, only when it differs, its entity-decoded form
-    // (WAF-bypass payloads encode the sink chars). Skipping the no-op decoded
-    // pass avoids re-parsing an identical fragment.
+    // Skipping the no-op decoded pass avoids re-parsing an identical fragment.
     let decoded = decode_html_entities(payload);
     let mut candidates = vec![payload];
     if decoded != payload {
         candidates.push(decoded.as_str());
     }
+    let mut sinks = Vec::new();
     for candidate in candidates {
         let normalized = if candidate.trim_end().ends_with('>') {
             candidate.to_string()
@@ -242,21 +326,21 @@ fn payload_marker_element_carries_sink(payload: &str) -> bool {
         // Bounded: html5ever is O(depth^2) and this runs once per payload, so a
         // single pathological entry in a `--custom-payload` file or a fetched
         // `--remote-payloads` list would stall the scan. See
-        // `utils::html::parse_fragment_bounded`.
-        let frag = crate::utils::html::parse_fragment_bounded(&normalized);
-        let sel = super::selectors::universal();
-        let hit = frag.select(sel).any(|node| {
+        // `utils::html::parse_document_bounded`. A document parse, not a fragment
+        // one: it models the response, e.g. `<body onload=… class=…>` nested in
+        // `<svg><foreignObject>` merges onto the page `<body>`.
+        let frag = crate::utils::html::parse_document_bounded(&normalized);
+        for node in frag.select(super::selectors::universal()) {
             let is_marker = element_class_has(node, class_marker)
                 || element_class_has(node, "dalfox")
                 || element_id_is(node, id_marker)
                 || element_id_is(node, "dalfox");
-            is_marker && element_carries_surviving_sink(node)
-        });
-        if hit {
-            return true;
+            if is_marker || !marker_only {
+                push_sent_sinks(node, marker_only, &mut sinks);
+            }
         }
     }
-    false
+    sinks
 }
 
 /// Whether `payload` can open an HTML tag of its own — a `<` followed by a
@@ -277,77 +361,144 @@ fn payload_opens_tag(payload: &str) -> bool {
     opens(payload) || opens(&decode_html_entities(payload))
 }
 
-/// Whether `payload` contains an `on<event>=` attribute whose value carries a
-/// JavaScript sink call.
+/// The non-empty `on<event>=` attributes in `payload`, with each value read
+/// the way the tag tokenizer would (quoted up to the
+/// matching quote, unquoted up to whitespace or `>`) and entity-decoded.
 ///
 /// Deliberately textual: the shapes this exists for
 /// (`'/onmouseover="{JS}"/id="{ID}"/x='`, `" onmouseover={JS} class={CLASS} x="`)
 /// form no element on their own, so an HTML fragment parse yields nothing to
-/// inspect. Only the attribute *name* is matched structurally (`on` + letters,
-/// not preceded by an identifier character, followed by optional whitespace and
-/// `=`); the sink test then runs over the remainder of the payload, which is
-/// where the handler value lives.
-fn payload_has_handler_sink_text(payload: &str) -> bool {
+/// inspect. The attribute name is `on` + letters, not preceded by an identifier
+/// character, followed by optional whitespace and `=`. Scanning resumes after
+/// each value, so the cost stays linear in the payload however many `on*=` it
+/// repeats.
+fn payload_handler_sinks_text(payload: &str) -> Vec<SentSink> {
     let bytes = payload.as_bytes();
-    for i in 0..bytes.len() {
-        if !(bytes[i] | 0x20).eq(&b'o') || i + 2 >= bytes.len() {
-            continue;
-        }
-        if !(bytes[i + 1] | 0x20).eq(&b'n') {
-            continue;
-        }
+    let len = bytes.len();
+    let mut sinks = Vec::new();
+    let mut i = 0;
+    while i + 2 < len {
         // `on` must start an attribute name, not sit inside a longer word
         // (`button`, `session`, …).
-        if i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'-')) {
+        if (bytes[i] | 0x20) != b'o'
+            || (bytes[i + 1] | 0x20) != b'n'
+            || (i > 0
+                && (bytes[i - 1].is_ascii_alphanumeric() || matches!(bytes[i - 1], b'_' | b'-')))
+        {
+            i += 1;
             continue;
         }
         let mut end = i + 2;
-        while end < bytes.len() && bytes[end].is_ascii_alphabetic() {
+        while end < len && bytes[end].is_ascii_alphabetic() {
             end += 1;
         }
-        if end == i + 2 {
-            continue; // bare `on`, no event name
-        }
         let mut eq = end;
-        while eq < bytes.len() && bytes[eq].is_ascii_whitespace() {
+        while eq < len && bytes[eq].is_ascii_whitespace() {
             eq += 1;
         }
-        if eq >= bytes.len() || bytes[eq] != b'=' {
+        if end == i + 2 || eq >= len || bytes[eq] != b'=' {
+            i = end.max(i + 1);
             continue;
         }
-        // Only the first handler needs checking: every later handler's value
-        // suffix is a substring of this one, and the sink test is a
-        // conjunction of `contains` checks (also after lowercasing/entity
-        // decoding, which a cut right after `=` cannot split). Re-checking
-        // each later suffix cost O(payload²) on a payload of many `on*=`.
-        return value_carries_js_sink(&payload[eq + 1..]);
+        let mut start = eq + 1;
+        while start < len && bytes[start].is_ascii_whitespace() {
+            start += 1;
+        }
+        let (raw, next) = match bytes.get(start) {
+            Some(&quote @ (b'"' | b'\'')) => {
+                let close = payload[start + 1..]
+                    .find(quote as char)
+                    .map_or(len, |p| start + 1 + p);
+                (&payload[start + 1..close], close + 1)
+            }
+            _ => {
+                let stop = payload[start..]
+                    .find(|c: char| c.is_ascii_whitespace() || c == '>')
+                    .map_or(len, |p| start + p);
+                (&payload[start..stop], stop)
+            }
+        };
+        let value = decode_html_entities(raw);
+        if !value.trim().is_empty() {
+            sinks.push(SentSink {
+                attr: Some(payload[i..end].to_ascii_lowercase()),
+                value,
+            });
+        }
+        i = next.max(i + 1);
     }
-    false
+    sinks
 }
 
-/// Whether `payload` is a bare attribute-injection fragment that attaches an
-/// `on*` handler sink: it opens no tag of its own, yet carries a handler whose
-/// value is a JS sink.
-///
-/// These payloads slip past [`payload_marker_element_carries_sink`] because
-/// parsing them as an HTML fragment yields a text node and no element at all.
-/// Their marker and their handler are always emitted onto the *same* injected
-/// attribute run (see the `ATTR_*` templates in `payload::synthesis`), so if the
-/// response shows the marker on an element that carries no surviving handler,
-/// the handler was swallowed by the surrounding markup and nothing executes.
-fn payload_is_bare_attribute_handler_injection(payload: &str) -> bool {
-    !payload_opens_tag(payload) && payload_has_handler_sink_text(payload)
+/// The sinks the payload attaches to its marker element, which must survive on
+/// a marker element for the marker to count as DOM evidence (issues #1118,
+/// #1522). A tag-forming payload is read through [`payload_sent_sinks`]; a bare
+/// attribute-injection fragment (opens no tag of its own, so the fragment parse
+/// yields only text) through [`payload_handler_sinks_text`]. Such fragments
+/// always emit their marker and handler onto the *same* injected attribute run
+/// (see the `ATTR_*` templates in `payload::synthesis`), so a marker on an
+/// element without the handler means the handler was swallowed by the
+/// surrounding markup and nothing executes.
+fn payload_marker_sinks(payload: &str) -> Vec<SentSink> {
+    let mut sinks = Vec::new();
+    for form in payload_wire_forms(payload) {
+        let found = payload_sent_sinks(&form, true);
+        if found.is_empty() && !payload_opens_tag(&form) {
+            sinks.extend(payload_handler_sinks_text(&form));
+        } else {
+            sinks.extend(found);
+        }
+    }
+    sinks
+}
+
+/// The payload as sent and, when it differs, percent-decoded. A pre-encoded
+/// payload (`%3Csvg%20onload%3Dalert%281%29…`) reaches the page decoded, so its
+/// sinks only show up in the decoded form; reading just the raw text found no
+/// sink and let a bare marker stand in as presence-only evidence.
+fn payload_wire_forms(payload: &str) -> Vec<std::borrow::Cow<'_, str>> {
+    let mut forms = vec![std::borrow::Cow::Borrowed(payload)];
+    if payload.contains('%')
+        && let Ok(decoded) = urlencoding::decode(payload)
+        && decoded != payload
+    {
+        forms.push(std::borrow::Cow::Owned(decoded.into_owned()));
+    }
+    forms
+}
+
+/// Whether the payload attaches a sink to its marker and the marker landed on a
+/// real, rendered element of `text` — HTML injection confirmed — yet DOM
+/// evidence failed, so the sink did not survive (a filter mangled or dropped
+/// it, issues #1118/#1522). The DOM phase reports that as `[R]` rather than
+/// dropping it. Only meaningful once `classify_dom_evidence` returned `None`.
+fn marker_injected_with_broken_sink(payload: &str, text: &str) -> bool {
+    let flags = MarkerFlags::from_payload(payload);
+    if !flags.any() || payload_marker_sinks(payload).is_empty() {
+        return false;
+    }
+    let document = crate::utils::html::parse_document_bounded(text);
+    document
+        .select(super::selectors::universal())
+        .any(|node| is_marker_element(node, &flags) && !is_hidden_input(node))
 }
 
 /// Whether at least one element carrying one of the payload's markers also
-/// carries a surviving JS sink. Used to gate the marker-evidence path for
-/// payloads whose marker element's own attributes/body ARE the exploit.
-fn marker_element_carries_surviving_sink(payload: &str, document: &scraper::Html) -> bool {
+/// carries one of `sinks` with its value intact. A hidden input does not count:
+/// its handler never fires (#1183), so it cannot be the surviving sink for a
+/// marker that also rides on a handler-less rendered element.
+fn marker_element_keeps_sent_sink(
+    payload: &str,
+    document: &scraper::Html,
+    sinks: &[SentSink],
+) -> bool {
     let flags = MarkerFlags::from_payload(payload);
     let sel = super::selectors::universal();
-    document
-        .select(sel)
-        .any(|node| is_marker_element(node, &flags) && element_carries_surviving_sink(node))
+    document.select(sel).any(|node| {
+        is_marker_element(node, &flags)
+            && !is_hidden_input(node)
+            && element_keeps_sent_sink(node, sinks)
+    })
 }
 
 /// Whether the payload's marker rides *only* on `<input type="hidden">`
@@ -465,7 +616,7 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     // `<input type="hidden">`. The handler never fires (hidden inputs have no
     // rendered box), so this is reflected-but-inert, not DOM-verified. This
     // shape slips past the #1118 gate below because the bare payload forms no
-    // element on its own (`payload_marker_element_carries_sink` is false), so
+    // element on its own (`payload_sent_sinks` finds no marker element), so
     // it must be caught here, before the presence-only fall-through. Structural
     // markers (no surviving handler on the hidden input) are preserved.
     if marker_only_on_non_firing_hidden_inputs(payload, document) {
@@ -477,24 +628,18 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     // surviving is not enough — a server that reflects a *truncated* copy of the
     // payload (e.g. ASP.NET `ValidateRequest` error pages) can preserve the
     // marker class while dropping the handler, parsing into a real element that
-    // carries our marker but executes nothing. Require the sink to have survived
-    // on at least one marker-bearing element before treating this as DOM
-    // evidence. Structural markers (base-href, DOM-clobbering containers) carry
-    // no such sink on the marker element and keep presence-only evidence.
-    if payload_marker_element_carries_sink(payload) {
-        return marker_element_carries_surviving_sink(payload, document);
-    }
-
-    // Same requirement for the attribute-injection shapes that form no element
-    // of their own, so the parse above finds nothing to inspect. When such a
-    // payload lands inside a *quoted* attribute value the server already wrote
-    // (`style="… url('HERE')"`, `content="Looking for HERE"`), the injected
-    // `on*=` is swallowed by that value while a later `id=`/`class=` still
-    // tokenizes into a real attribute — leaving the marker on a live element
-    // that executes nothing. Require the handler to have survived alongside the
-    // marker before calling that DOM-verified.
-    if payload_is_bare_attribute_handler_injection(payload) {
-        return marker_element_carries_surviving_sink(payload, document);
+    // carries our marker but executes nothing. The same goes for bare
+    // attribute-injection shapes whose `on*=` is swallowed by a quoted value
+    // the server already wrote (`style="… url('HERE')"`) while a later
+    // `id=`/`class=` still tokenizes into a real attribute. And the handler
+    // being present is not enough either (issue #1522): a filter that strips
+    // `(`/`)` leaves `onload=alert1` on the marker element, which throws. So
+    // require the payload's own sink value to have survived on at least one
+    // marker-bearing element. Structural markers (base-href, DOM-clobbering
+    // containers) carry no such sink and keep presence-only evidence.
+    let sinks = payload_marker_sinks(payload);
+    if !sinks.is_empty() {
+        return marker_element_keeps_sent_sink(payload, document, &sinks);
     }
 
     true
@@ -517,10 +662,16 @@ fn starts_with_ascii_ci(s: &str, prefix: &str) -> bool {
 }
 
 fn payload_is_executable_url_protocol(payload: &str) -> bool {
-    let trimmed = payload.trim();
-    starts_with_ascii_ci(trimmed, "javascript:")
-        || starts_with_ascii_ci(trimmed, "data:text/html")
-        || starts_with_ascii_ci(trimmed, "vbscript:")
+    executable_scheme_len(payload.trim()).is_some()
+}
+
+/// Byte length of the executable URL scheme `value` starts with
+/// (`javascript:`, `data:text/html`, `vbscript:`; ASCII case-insensitive).
+fn executable_scheme_len(value: &str) -> Option<usize> {
+    ["javascript:", "data:text/html", "vbscript:"]
+        .into_iter()
+        .find(|scheme| starts_with_ascii_ci(value, scheme))
+        .map(str::len)
 }
 
 /// Decide whether an `(element, attribute)` pair is a real navigation /
@@ -606,12 +757,25 @@ fn has_executable_url_attribute_evidence_in_doc(payload: &str, document: &scrape
     })
 }
 
+/// Every sink the payload writes, on any element, for the marker-free
+/// structural paths. The classifier is case-sensitive here: a payload's own
+/// `ALERT(1)` is no sink, and without a marker there is no co-survival gate.
+fn payload_structural_sinks(payload: &str) -> Vec<SentSink> {
+    let mut sinks: Vec<SentSink> = payload_wire_forms(payload)
+        .iter()
+        .flat_map(|form| payload_sent_sinks(form, false))
+        .collect();
+    sinks.retain(|s| crate::scanning::js_context_verify::payload_carries_js_sink(&s.value));
+    sinks
+}
+
 /// True when the payload introduced (a) an HTML element with an event-handler
 /// attribute whose value contains a JavaScript sink call, OR (b) a `<script>`
-/// element whose body is the payload-carried sink call. The "introduced by the
-/// payload" check is enforced by requiring the parsed attribute value /
-/// script body to appear verbatim inside the original payload string —
-/// otherwise the matched element belonged to the original page.
+/// element whose body is the payload-carried sink call. "Introduced by the
+/// payload" means the response element carries one of the payload's own sinks
+/// — same handler name, value intact ([`element_keeps_sent_sink`]) — so a
+/// page's own handler, or the payload's handler mangled by a filter
+/// (`onload=alert1`, issue #1522), is not evidence.
 ///
 /// Catches realistic XSS payloads that don't embed a Dalfox marker, e.g.
 /// `<svg/onload=alert(1)>`, `<img src=x onerror=alert(1)>`,
@@ -623,56 +787,16 @@ fn has_html_structural_evidence_in_doc(payload: &str, document: &scraper::Html) 
     if !crate::scanning::js_context_verify::payload_carries_js_sink(payload) {
         return false;
     }
-
-    // The raw payload may entity-encode its sink chars for WAF bypass (e.g.
-    // `alert&#40;1&#41;`), but scraper decodes the parsed attribute/script text
-    // back to `alert(1)`. Compare against the entity-decoded payload too, else a
-    // genuine breakout gets downgraded to Reflected in WAF-bypass mode.
-    let decoded_payload = decode_html_entities(payload);
-
-    let selector = selectors::universal();
-    for node in document.select(selector) {
-        // Issue #1183: an `on*` handler injected onto a `<input type="hidden">`
-        // never fires (no rendered box), so it is not browser-executable DOM
-        // evidence. Skip the element entirely — a hidden input is a void element
-        // and is never a `<script>`, so the (b) script-body check never applies
-        // to it either.
-        if is_hidden_input(node) {
-            continue;
-        }
-        let value = node.value();
-        let tag = value.name();
-
-        // (a) Event-handler attribute introduced by the payload.
-        for (attr_name, attr_value) in value.attrs() {
-            if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
-                continue;
-            }
-            let trimmed = attr_value.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if !crate::scanning::js_context_verify::payload_carries_js_sink(trimmed) {
-                continue;
-            }
-            if payload.contains(trimmed) || decoded_payload.contains(trimmed) {
-                return true;
-            }
-        }
-
-        // (b) <script> element whose text body came from the payload.
-        if tag.eq_ignore_ascii_case("script") {
-            let text: String = node.text().collect();
-            let trimmed = text.trim();
-            if !trimmed.is_empty()
-                && crate::scanning::js_context_verify::payload_carries_js_sink(trimmed)
-                && (payload.contains(trimmed) || decoded_payload.contains(trimmed))
-            {
-                return true;
-            }
-        }
+    let sinks = payload_structural_sinks(payload);
+    if sinks.is_empty() {
+        return false;
     }
-    false
+    // Issue #1183: an `on*` handler injected onto a `<input type="hidden">`
+    // never fires (no rendered box), so it is not browser-executable DOM
+    // evidence. A hidden input is never a `<script>` either.
+    document
+        .select(selectors::universal())
+        .any(|node| !is_hidden_input(node) && element_keeps_sent_sink(node, &sinks))
 }
 
 /// Cheap response-body heuristic: returns false for bodies that look like
@@ -978,32 +1102,31 @@ fn xml_node_carries_sink(node: roxmltree::Node<'_, '_>) -> bool {
         && value_carries_js_sink(&xml_node_text(node))
 }
 
-fn xml_node_has_payload_structural_sink(
-    node: roxmltree::Node<'_, '_>,
-    payload: &str,
-    decoded_payload: &str,
-) -> bool {
-    if xml_node_is_hidden_input(node) {
-        return false;
-    }
-    if node.attributes().any(|attr| {
-        let name = attr.name();
-        name.starts_with("on")
-            && name.len() > 2
-            && name[2..].bytes().all(|b| b.is_ascii_alphabetic())
-            && value_carries_js_sink(attr.value().trim())
-            && (payload.contains(attr.value().trim())
-                || decoded_payload.contains(attr.value().trim()))
-    }) {
-        return true;
-    }
-    node.tag_name().name() == "script" && xml_script_type_is_javascript(node) && {
-        let script = xml_node_text(node);
-        let trimmed = script.trim();
-        !trimmed.is_empty()
-            && (payload.contains(trimmed) || decoded_payload.contains(trimmed))
-            && crate::scanning::js_context_verify::has_javascript_body_evidence(trimmed, trimmed)
-    }
+/// [`element_keeps_sent_sink`] for an XML (XHTML/SVG) node. XML attribute and
+/// element names are case-sensitive, so the names compare exactly.
+fn xml_node_keeps_sent_sink(node: roxmltree::Node<'_, '_>, sinks: &[SentSink]) -> bool {
+    sinks.iter().any(|s| match &s.attr {
+        Some(name) => node
+            .attribute(name.as_str())
+            .is_some_and(|seen| sink_survived(&s.value, seen)),
+        None => {
+            node.tag_name().name() == "script"
+                && xml_script_type_is_javascript(node)
+                && sink_survived(&s.value, &xml_node_text(node))
+        }
+    })
+}
+
+fn xml_node_has_payload_structural_sink(node: roxmltree::Node<'_, '_>, sinks: &[SentSink]) -> bool {
+    !xml_node_is_hidden_input(node)
+        && xml_node_keeps_sent_sink(node, sinks)
+        && (node.tag_name().name() != "script" || {
+            let script = xml_node_text(node);
+            crate::scanning::js_context_verify::has_javascript_body_evidence(
+                script.trim(),
+                script.trim(),
+            )
+        })
 }
 
 fn classify_dom_evidence_in_xml(
@@ -1033,13 +1156,14 @@ fn classify_dom_evidence_in_xml(
                 (flags.id && id == crate::scanning::markers::id_marker())
                     || (flags.legacy_id && id == "dalfox")
             });
-        let needs_sink = payload_marker_element_carries_sink(payload)
-            || payload_is_bare_attribute_handler_injection(payload);
-        let marker_has_sink = nodes.iter().any(|node| xml_node_carries_sink(*node));
+        let sinks = payload_marker_sinks(payload);
+        let marker_keeps_sink = nodes.iter().any(|node| {
+            !xml_node_is_hidden_input(*node) && xml_node_keeps_sent_sink(*node, &sinks)
+        });
         let hidden_only_with_sink = !nodes.is_empty()
             && nodes.iter().all(|node| xml_node_is_hidden_input(*node))
-            && marker_has_sink;
-        if class_ok && id_ok && !hidden_only_with_sink && (!needs_sink || marker_has_sink) {
+            && nodes.iter().any(|node| xml_node_carries_sink(*node));
+        if class_ok && id_ok && !hidden_only_with_sink && (sinks.is_empty() || marker_keeps_sink) {
             return Some(DomEvidenceKind::Marker);
         }
     }
@@ -1061,10 +1185,10 @@ fn classify_dom_evidence_in_xml(
 
     if payload.contains('<') && crate::scanning::js_context_verify::payload_carries_js_sink(payload)
     {
-        let decoded = decode_html_entities(payload);
+        let sinks = payload_structural_sinks(payload);
         if elements
             .clone()
-            .any(|node| xml_node_has_payload_structural_sink(node, payload, &decoded))
+            .any(|node| xml_node_has_payload_structural_sink(node, &sinks))
         {
             return Some(DomEvidenceKind::HtmlStructural);
         }
@@ -1302,6 +1426,9 @@ pub struct DomVerifyOutcome {
 pub(crate) struct DomVerifyEvidenceOutcome {
     pub(crate) outcome: DomVerifyOutcome,
     pub(crate) evidence_kind: Option<DomEvidenceKind>,
+    /// Not verified, but the payload's marker landed on a real element whose
+    /// sink a filter broke (issue #1522): HTML injection worth reporting as R.
+    pub(crate) markup_injected: bool,
 }
 
 /// Verify DOM evidence from a normal (non-stored) injection response.
@@ -1328,6 +1455,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyE
                 ..Default::default()
             },
             evidence_kind: None,
+            ..Default::default()
         };
     }
 
@@ -1396,8 +1524,12 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyE
                     status: status_code,
                 },
                 evidence_kind: Some(evidence_kind),
+                ..Default::default()
             };
         }
+        let markup_injected = reflected_for_evidence
+            && crate::utils::response_has_markup_document(content_type, &text)
+            && marker_injected_with_broken_sink(payload, &text);
         return DomVerifyEvidenceOutcome {
             outcome: DomVerifyOutcome {
                 verified: false,
@@ -1407,6 +1539,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyE
                 status: status_code,
             },
             evidence_kind: None,
+            markup_injected,
         };
     }
 
@@ -1416,6 +1549,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyE
             ..Default::default()
         },
         evidence_kind: None,
+        ..Default::default()
     }
 }
 
@@ -1472,6 +1606,7 @@ pub(crate) async fn check_dom_verification_with_evidence(
                 status: 0,
             },
             evidence_kind,
+            ..Default::default()
         }
     } else if let Ok(resp) = inject_resp {
         verify_normal_dom(resp, payload).await

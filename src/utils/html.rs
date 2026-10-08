@@ -540,7 +540,9 @@ pub(crate) fn parse_document_bounded(html: &str) -> scraper::Html {
 /// Payload text is not "trusted input" just because dalfox usually generates
 /// it: `--custom-payload` is a file, and `--remote-payloads` fetches a list
 /// from a third party. One pathological entry in either is enough, because the
-/// callers parse *per payload*.
+/// callers parse *per payload*. (The DOM verifier now parses payloads as a
+/// document; only tests still parse fragments.)
+#[cfg(test)]
 pub(crate) fn parse_fragment_bounded(html: &str) -> scraper::Html {
     scraper::Html::parse_fragment(&bound_html_nesting(html))
 }

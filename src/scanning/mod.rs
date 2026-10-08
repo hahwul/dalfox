@@ -570,6 +570,82 @@ impl ScanWorkerCtx {
         .await
     }
 
+    /// Build a DOM-phase finding for `dom_payload`: `[V]` when `verified`
+    /// (labelled by the evidence path that proved it), else the `[R]` reported
+    /// for a marker element whose sink a filter broke (issue #1522).
+    fn dom_phase_finding(
+        &self,
+        param: &Param,
+        dom_payload: &str,
+        verified: bool,
+        evidence_kind: Option<crate::scanning::check_dom_verification::DomEvidenceKind>,
+        response_text: Option<String>,
+    ) -> crate::scanning::result::Result {
+        // Use the form action URL when the param came from form discovery, and
+        // build the PoC from the as-sent payload (see the reflection path) so
+        // window-pad / base64 / multi-URL findings reproduce.
+        let base = crate::scanning::url_inject::effective_query_base(&self.target.url, param);
+        let poc_payload = crate::encoding::pre_encoding::apply_param_encoding(dom_payload, param);
+        let result_url =
+            crate::scanning::url_inject::build_injected_url(&base, param, &poc_payload);
+        let builder = if verified {
+            let label = evidence_kind.map_or("DOM evidence", |kind| kind.label());
+            crate::scanning::result::Result::builder(FindingType::Verified)
+                .confidence(
+                    crate::scanning::result::Confidence::High,
+                    format!("DOM verification confirmed an executable position ({label})"),
+                )
+                .evidence(format!(
+                    "DOM verification successful for param {} ({label})",
+                    param.name
+                ))
+                .severity("High")
+                .message_str(format!(
+                    "Triggered XSS Payload ({label}): {}={dom_payload}",
+                    param.name
+                ))
+        } else {
+            let note = "marker element injected, sink mangled";
+            crate::scanning::result::Result::builder(FindingType::Reflected)
+                .confidence(
+                    crate::scanning::result::Confidence::Low,
+                    "payload markup injected; its sink did not survive the response filter",
+                )
+                .evidence(format!(
+                    "Reflected XSS detected for param {} ({note})",
+                    param.name
+                ))
+                .severity("Info")
+                .message_str(format!(
+                    "[R] Triggered XSS Payload ({note}): {}={dom_payload}",
+                    param.name
+                ))
+        };
+        let mut result = builder
+            .inject_type(inject_type_for_payload_with_sink(
+                self.args.sxss,
+                dom_payload,
+                param.framework_sink.as_deref(),
+            ))
+            .method(crate::scanning::url_inject::effective_method(
+                &self.target.method,
+                param,
+            ))
+            .data(result_url)
+            .param(param.name.clone())
+            .payload(dom_payload.to_string())
+            .cwe("CWE-79")
+            .message_id(606)
+            .build();
+        result.set_injection_point(&self.target, param);
+        result.filter = param.filter.clone();
+        result.wire_payload = (poc_payload != dom_payload).then_some(poc_payload);
+        result.request = Some(build_request_text(&self.target, param, dom_payload));
+        result.response =
+            response_text.map(|t| crate::scanning::result::bound_evidence_body(t, dom_payload));
+        result
+    }
+
     /// Run one payload's DOM-verification request under the global per-request
     /// budget. Pure I/O; see [`Self::fetch_reflection`].
     async fn fetch_dom(
@@ -1429,6 +1505,7 @@ impl ScanWorkerCtx {
                 let crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome {
                     outcome,
                     evidence_kind,
+                    markup_injected,
                 } = outcome;
                 let crate::scanning::check_dom_verification::DomVerifyOutcome {
                     verified: dom_verified,
@@ -1453,68 +1530,13 @@ impl ScanWorkerCtx {
                     };
 
                     if should_add {
-                        // Create result (via helper). Use the form action URL
-                        // when the param came from form discovery.
-                        let base = crate::scanning::url_inject::effective_query_base(
-                            &self.target.url,
+                        let result = self.dom_phase_finding(
                             param,
+                            dom_payload,
+                            true,
+                            evidence_kind,
+                            response_text,
                         );
-                        // PoC URL from the as-sent payload (see reflection path
-                        // above) so window-pad / base64 / multi-URL findings
-                        // reproduce.
-                        let poc_payload =
-                            crate::encoding::pre_encoding::apply_param_encoding(dom_payload, param);
-                        let result_url = crate::scanning::url_inject::build_injected_url(
-                            &base,
-                            param,
-                            &poc_payload,
-                        );
-
-                        // Determine which evidence path proved exploitability
-                        // so the V finding's message reflects the route.
-                        let evidence_label =
-                            evidence_kind.map_or("DOM evidence", |kind| kind.label());
-
-                        // DOM-verified => Vulnerability
-                        let mut result =
-                            crate::scanning::result::Result::builder(FindingType::Verified)
-                                .confidence(
-                                    crate::scanning::result::Confidence::High,
-                                    format!(
-                                        "DOM verification confirmed an executable position ({})",
-                                        evidence_label
-                                    ),
-                                )
-                                .inject_type(inject_type_for_payload_with_sink(
-                                    self.args.sxss,
-                                    dom_payload,
-                                    param.framework_sink.as_deref(),
-                                ))
-                                .method(crate::scanning::url_inject::effective_method(
-                                    &self.target.method,
-                                    param,
-                                ))
-                                .data(result_url)
-                                .param(param.name.clone())
-                                .payload(dom_payload.to_string())
-                                .evidence(format!(
-                                    "DOM verification successful for param {} ({})",
-                                    param.name, evidence_label
-                                ))
-                                .cwe("CWE-79")
-                                .severity("High")
-                                .message_id(606)
-                                .message_str(format!(
-                                    "Triggered XSS Payload ({}): {}={}",
-                                    evidence_label, param.name, dom_payload
-                                ))
-                                .build();
-                        result.set_injection_point(&self.target, param);
-                        result.filter = param.filter.clone();
-                        result.wire_payload = (poc_payload != *dom_payload).then_some(poc_payload);
-                        result.request = Some(build_request_text(&self.target, param, dom_payload));
-                        result.response = response_text
-                            .map(|t| crate::scanning::result::bound_evidence_body(t, dom_payload));
 
                         self.stream_finding(&result);
                         // Defer pushing to shared results (batched)
@@ -1524,6 +1546,26 @@ impl ScanWorkerCtx {
                         // plus every un-launched chunk).
                         self.inc_progress((total - done) as u64);
                         break 'outer;
+                    }
+                }
+
+                // Issue #1522: the payload's marker landed on a real element but a
+                // filter broke the sink it carried (`onload=alert1`). Not V, yet
+                // real HTML injection the byte-exact reflection check misses, so
+                // claim the param's reflection slot and report it as R instead of
+                // dropping it. Keep looking: a later payload may still verify.
+                if markup_injected && !dom_verified {
+                    let should_add = self.args.deep_scan
+                        || self
+                            .found_params
+                            .write()
+                            .await
+                            .reflection
+                            .insert(found_param_key(param));
+                    if should_add {
+                        let result = self.dom_phase_finding(param, dom_payload, false, None, None);
+                        self.stream_finding(&result);
+                        state.local_results.push(result);
                     }
                 }
 

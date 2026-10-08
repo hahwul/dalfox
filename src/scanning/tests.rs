@@ -5312,3 +5312,89 @@ async fn test_deep_scan_limit_bounds_findings_across_concurrent_params() {
         "deep_scan ran past --limit {LIMIT}: {n} findings"
     );
 }
+
+/// Issue #1522, through the whole scan: a blacklist filter that strips `(`,
+/// `)` and `` ` `` turns `<svg onload=alert(1) class=dlx…>` into
+/// `<svg onload=alert1 …>`. The marker element and its handler survive, but
+/// `alert1` is an undefined name that throws, so no handler payload may be
+/// graded `[V]` by any path (static upgrade, DOM phase, light verify). The
+/// injection is real and must still surface as `[R]` rather than vanish. The
+/// filter also drops `form` and `<a ` so the presence-only DOM-clobbering
+/// markers (out of scope here) don't claim the param first. The unfiltered
+/// twin endpoint is the recall guard: the same scan must still verify.
+#[tokio::test]
+async fn test_run_scanning_mangled_handler_value_is_reflected_not_verified() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+
+    async fn stripped(Query(q): Query<HashMap<String, String>>) -> Html<String> {
+        let v = q
+            .get("q")
+            .cloned()
+            .unwrap_or_default()
+            .replace(['(', ')', '`'], "")
+            .replace("form", "")
+            .replace("<a ", "");
+        Html(format!("<html><body><div>{v}</div></body></html>"))
+    }
+    async fn raw(Query(q): Query<HashMap<String, String>>) -> Html<String> {
+        let v = q.get("q").cloned().unwrap_or_default();
+        Html(format!("<html><body><div>{v}</div></body></html>"))
+    }
+    async fn scan(addr: std::net::SocketAddr, path: &str) -> Vec<crate::scanning::result::Result> {
+        let mut target = parse_target(&format!("http://{addr}{path}?q=a")).expect("parse_target");
+        target.workers = 4;
+        target.reflection_params = vec![Param::new(
+            "q".to_string(),
+            "a".to_string(),
+            Location::Query,
+        )];
+        let results = Arc::new(Mutex::new(Vec::new()));
+        run_scanning(
+            &target,
+            Arc::new(integration_scan_args(false)),
+            ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+        )
+        .await;
+        results.lock().await.clone()
+    }
+
+    let addr = spawn_regression_app(
+        Router::new()
+            .route("/stripped", get(stripped))
+            .route("/raw", get(raw)),
+    )
+    .await;
+
+    let mangled = scan(addr, "/stripped").await;
+    let verified: Vec<&str> = mangled
+        .iter()
+        .filter(|r| r.result_type == FindingType::Verified)
+        .map(|r| r.payload.as_str())
+        .collect();
+    assert!(
+        verified.is_empty(),
+        "a paren/backtick-stripping filter leaves no executable handler; got [V] for {verified:?}"
+    );
+    let handler = regex::Regex::new(r"(?i)[\s/'\x22]on[a-z]+\s*=").expect("valid regex");
+    assert!(
+        mangled
+            .iter()
+            .any(|r| r.result_type == FindingType::Reflected
+                && r.param == "q"
+                && handler.is_match(&r.payload)),
+        "the mangled handler's injection is real and must still be reported as [R]; got {:?}",
+        mangled
+            .iter()
+            .map(|r| (&r.result_type, &r.payload))
+            .collect::<Vec<_>>()
+    );
+
+    let intact = scan(addr, "/raw").await;
+    assert!(
+        intact
+            .iter()
+            .any(|r| r.result_type == FindingType::Verified && r.param == "q"),
+        "an unfiltered echo must still verify"
+    );
+}
