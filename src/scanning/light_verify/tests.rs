@@ -521,3 +521,35 @@ async fn test_verify_dom_xss_light_honors_ignore_return() {
         Some("status ignored — DOM verify skipped".to_string())
     );
 }
+
+/// The verification re-request is tallied, and a transport failure is counted
+/// as one (it used to be swallowed, so `failed_requests` under-reported).
+#[tokio::test]
+async fn test_verify_dom_xss_light_counts_transport_failure() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Bind then drop: nothing listens on the port, so the connect is refused.
+    let addr = {
+        let l = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+        l.local_addr().expect("addr")
+    };
+    let target = make_target(addr, "/reflect", None, None);
+    let param = make_param(Location::Query, "q");
+    let client = test_client();
+    let sent = Arc::new(AtomicU64::new(0));
+    let failed = Arc::new(AtomicU64::new(0));
+
+    let (verified, response, _) = crate::REQUEST_COUNT_JOB
+        .scope(sent.clone(), async {
+            crate::REQUEST_FAILURE_COUNT_JOB
+                .scope(failed.clone(), async {
+                    verify_dom_xss_light_with_client(&client, &target, &param, "<b>x</b>").await
+                })
+                .await
+        })
+        .await;
+
+    assert!(!verified && response.is_none());
+    assert_eq!(sent.load(Ordering::Relaxed), 1, "request is tallied");
+    assert_eq!(failed.load(Ordering::Relaxed), 1, "failure is tallied");
+}

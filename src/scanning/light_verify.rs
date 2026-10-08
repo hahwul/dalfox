@@ -31,7 +31,13 @@ pub async fn verify_dom_xss_light_with_client(
     let mut note: Option<String> = None;
     // Honor --rate-limit and count this verification re-request.
     crate::record_outbound_request().await;
-    if let Ok(resp) = request.send().await {
+    let sent_resp = request.send().await;
+    // Counted as a transport failure like every other direct send, so a
+    // verification request that never answered is not read as a clean miss.
+    if sent_resp.is_err() {
+        crate::tick_request_failure();
+    }
+    if let Ok(resp) = sent_resp {
         // `--ignore-return`: a status the operator excluded never verifies.
         if target.ignore_return.contains(&resp.status().as_u16()) {
             return (
