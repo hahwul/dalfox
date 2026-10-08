@@ -17,6 +17,7 @@ fn full_scan_config() -> ScanConfig {
     ScanConfig {
         insecure: None,
         input_type: Some("file".to_string()),
+        base_url: Some("https://staging.example.com/api".to_string()),
         format: Some("jsonl".to_string()),
         output: Some("result.jsonl".to_string()),
         include_request: Some(true),
@@ -295,6 +296,10 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     cfg.apply_to_scan_args_if_default(&mut args);
 
     assert_eq!(args.input_type, "file");
+    assert_eq!(
+        args.base_url.as_deref(),
+        Some("https://staging.example.com/api")
+    );
     assert_eq!(args.format, "jsonl");
     assert_eq!(args.output.as_deref(), Some("result.jsonl"));
     assert!(args.include_request);
@@ -447,6 +452,26 @@ fn test_normalize_and_validate_leaves_only_custom_payload_alone() {
         Some(true),
         "the flag must survive to be merged with the CLI args"
     );
+}
+
+#[test]
+fn test_normalize_and_validate_rejects_non_http_base_url() {
+    // A config value skips `--base-url`'s clap parser; a relative or non-http
+    // value must be dropped with a warning, not reach the spec importers.
+    for bad in ["/api", "ftp://h", "not a url"] {
+        let mut cfg = Config {
+            scan: Some(ScanConfig {
+                base_url: Some(bad.to_string()),
+                ..Default::default()
+            }),
+        };
+        let warnings = cfg.normalize_and_validate();
+        assert!(
+            warnings.iter().any(|w| w.contains("scan.base_url")),
+            "{bad}: {warnings:?}"
+        );
+        assert!(cfg.scan.as_ref().unwrap().base_url.is_none());
+    }
 }
 
 #[test]

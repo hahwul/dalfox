@@ -21,8 +21,17 @@ pub async fn probe_multipart_params(
     let Some(data) = &args.data else {
         return;
     };
-    let wanted =
+    let mut wanted =
         crate::parameter_analysis::discovery::explicit_param_names(&args.param, "multipart");
+    if target.multipart {
+        // An imported spec/collection declared this body multipart: every
+        // field of it is a multipart field, named or not.
+        for (k, _) in form_urlencoded::parse(data.as_bytes()) {
+            if !wanted.iter().any(|w| *w == k) {
+                wanted.push(k.into_owned());
+            }
+        }
+    }
     if wanted.is_empty() {
         return;
     }

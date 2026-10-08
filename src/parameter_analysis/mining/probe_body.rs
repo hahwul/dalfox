@@ -14,7 +14,10 @@ pub async fn probe_body_params(
     let client = target.build_client_or_default();
     let preexisting = snapshot_param_slots(&reflection_params).await;
 
-    if let Some(data) = &args.data {
+    // A declared-multipart body is mined as multipart fields
+    // (`probe_multipart_params`); probing it urlencoded too would only add
+    // requests the endpoint can't parse and duplicate every field's slot.
+    if let Some(data) = args.data.as_ref().filter(|_| !target.multipart) {
         // Assume form data for now (application/x-www-form-urlencoded)
         let params: Vec<(String, String)> = form_urlencoded::parse(data.as_bytes())
             .map(|(k, v)| (k.to_string(), v.to_string()))

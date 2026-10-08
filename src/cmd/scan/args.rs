@@ -293,6 +293,19 @@ fn parse_limit_arg(s: &str) -> std::result::Result<usize, String> {
     Ok(n)
 }
 
+/// clap value-parser for `--base-url`: an absolute http(s) URL with a host.
+/// Shared with the config-file validator, which bypasses clap.
+pub(crate) fn parse_base_url_arg(s: &str) -> std::result::Result<String, String> {
+    match url::Url::parse(s.trim()) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host_str().is_some() => {
+            Ok(s.trim().to_string())
+        }
+        _ => Err(format!(
+            "invalid --base-url '{s}': must be an absolute http(s) URL (e.g. https://api.example.com)"
+        )),
+    }
+}
+
 /// clap value-parser for `--method` / `-X`. Normalises the input to
 /// uppercase so `--method get` and `--method GET` behave identically
 /// (case-sensitive comparisons downstream — e.g. `args.method !=
@@ -318,9 +331,17 @@ pub(crate) fn parse_http_method_arg(s: &str) -> std::result::Result<String, Stri
 #[derive(Clone, Debug, PartialEq, Args)]
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
-    /// Input type: auto, url, file, pipe, raw-http, har
+    /// Input type: auto, url, file, pipe, raw-http, har, openapi, postman
     #[arg(short = 'i', long, default_value = "auto")]
     pub input_type: String,
+
+    #[clap(help_heading = "INPUT")]
+    /// Where the API of an `-i openapi` / `-i postman` input lives. Replaces
+    /// the spec's absolute server URL (and every Postman request's origin);
+    /// anchors a relative one (`servers: [{url: /api/v3}]`). Example:
+    /// --base-url https://staging.example.com
+    #[arg(long, value_name = "URL", value_parser = parse_base_url_arg)]
+    pub base_url: Option<String>,
 
     #[clap(help_heading = "INPUT")]
     /// Target deduplication [default: exact]: exact (drop byte-identical
@@ -883,6 +904,7 @@ impl Default for ScanArgs {
     fn default() -> Self {
         Self {
             input_type: "auto".to_string(),
+            base_url: None,
             dedup_urls: None,
             format: "plain".to_string(),
             output: None,

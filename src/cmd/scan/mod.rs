@@ -56,7 +56,7 @@ pub use args::{
     ON_SESSION_LOSS_VALUES, ONLY_POC_VALUES, POC_TYPE_VALUES, PREFLIGHT_DEFAULT_WORKERS,
     PreflightOptions, ScanArgs, WAF_BYPASS_VALUES, format_is_machine,
 };
-pub(crate) use args::{parse_force_waf_arg, parse_http_method_arg};
+pub(crate) use args::{parse_base_url_arg, parse_force_waf_arg, parse_http_method_arg};
 pub(crate) use logging::log_info;
 pub(crate) use preflight::finish_waf_detection;
 // Shared with `job::normalize_proxy` so REST/MCP refuse the same unroutable

@@ -309,6 +309,124 @@ async fn har_invalid_document_is_an_error() {
     assert!(resolve(&args).await.is_err());
 }
 
+// ── resolve_targets: openapi + postman modes ────────────────────────
+
+const SPEC_YAML: &str = "openapi: 3.0.0
+servers: [{url: /api}]
+paths:
+  /items/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, schema: {type: integer}}
+        - {name: q, in: query, example: hi}
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {name: {type: string}}}
+  /other:
+    get:
+      servers: [{url: 'https://other.example.com'}]
+  /broken:
+    get:
+      servers: [{url: 'https://{tenant}.example.com'}]
+";
+
+#[tokio::test]
+async fn openapi_spec_expands_through_the_full_input_pipeline() {
+    let path = tmp_file("spec.yaml", SPEC_YAML);
+    let spec = path.to_str().unwrap();
+    let show = |targets: &[Target]| {
+        let mut v: Vec<String> = targets
+            .iter()
+            .map(|t| {
+                format!(
+                    "{} {} {}",
+                    t.method,
+                    t.url,
+                    t.data.as_deref().unwrap_or("-")
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+
+    // --base-url anchors the relative root server and replaces the absolute
+    // operation-level one; `-H` rides on every operation; the operation with
+    // an undeclared server variable is skipped, not fatal.
+    let args = args_from(&[
+        "-i",
+        "openapi",
+        "--base-url",
+        "http://127.0.0.1:9000",
+        "-H",
+        "Authorization: Bearer t",
+        "-S",
+        spec,
+    ]);
+    let targets = resolve(&args).await.expect("spec resolves");
+    assert_eq!(
+        show(&targets),
+        vec![
+            "GET http://127.0.0.1:9000/api/items/1?q=hi -",
+            "GET http://127.0.0.1:9000/other -",
+            r#"POST http://127.0.0.1:9000/api/items/1 {"name":"test"}"#,
+        ]
+    );
+    assert!(targets.iter().all(|t| {
+        t.headers
+            .iter()
+            .any(|(k, v)| k == "Authorization" && v == "Bearer t")
+    }));
+
+    // Without it, the relative-server operations can't be aimed anywhere and
+    // are skipped; the absolute operation-level server still resolves.
+    let args = args_from(&["-i", "openapi", "-S", spec]);
+    let targets = resolve(&args).await.expect("spec resolves");
+    assert_eq!(
+        show(&targets),
+        vec!["GET https://other.example.com/other -"]
+    );
+
+    // --out-of-scope applies to the expanded targets.
+    let args = args_from(&[
+        "-i",
+        "openapi",
+        "--out-of-scope",
+        "other.example.com",
+        "-S",
+        spec,
+    ]);
+    assert!(resolve(&args).await.is_err(), "every target excluded");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+async fn postman_collection_resolves_with_cli_overrides() {
+    let collection = r#"{"info":{"name":"c"},
+      "variable":[{"key":"base","value":"https://api.example.com"}],
+      "item":[{"name":"f","item":[
+        {"name":"a","request":{"method":"PUT","url":"{{base}}/a",
+          "body":{"mode":"raw","raw":"{\"x\":1}","options":{"raw":{"language":"json"}}}}},
+        {"name":"b","request":{"url":"{{unset}}/b"}}
+      ]}]}"#;
+    let path = tmp_file("c.postman_collection.json", collection);
+    let args = args_from(&["-i", "postman", "-X", "PATCH", "-S", path.to_str().unwrap()]);
+    let targets = resolve(&args).await.expect("collection resolves");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(targets.len(), 1, "unresolved-host request skipped");
+    assert_eq!(targets[0].url.as_str(), "https://api.example.com/a");
+    assert_eq!(targets[0].method, "PATCH", "explicit -X wins");
+    assert_eq!(targets[0].data.as_deref(), Some(r#"{"x":1}"#));
+}
+
+#[tokio::test]
+async fn openapi_missing_file_is_a_file_read_error() {
+    let args = args_from(&["-i", "openapi", "-S", "./no-such-spec.yaml"]);
+    assert!(resolve(&args).await.is_err());
+}
+
 // ── resolve_targets: cookie-from-raw ────────────────────────────────
 
 #[tokio::test]

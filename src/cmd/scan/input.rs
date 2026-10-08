@@ -57,6 +57,10 @@ pub(crate) struct ResolvedTargets {
 /// shape of what was dropped.
 const UNPARSABLE_SAMPLE_LIMIT: usize = 3;
 
+/// `parse_openapi` / `parse_postman`: document text + `--base-url` → targets.
+type SpecParser =
+    fn(&str, Option<&url::Url>) -> std::result::Result<SpecImport, Box<dyn std::error::Error>>;
+
 /// Where a target string came from, which decides what a parse failure means.
 ///
 /// A target typed on the command line is a direct instruction: if it does not
@@ -141,6 +145,9 @@ pub(crate) async fn resolve_targets(
     };
 
     let input_type = detect_input_type(args, stdin_is_piped, &mut buffered_stdin)?;
+    if args.base_url.is_some() && !matches!(input_type.as_str(), "openapi" | "postman") {
+        eprintln!("[warn] --base-url only applies to `-i openapi` / `-i postman`; ignoring it");
+    }
 
     // Each string is tagged with where it came from: a parse failure is fatal
     // for a command-line argument and skipped for a target-list line. See
@@ -400,9 +407,9 @@ pub(crate) async fn resolve_targets(
                     .map(|t| (t.clone(), TargetOrigin::Argument))
                     .collect()
             }
-            "har" => {
-                // Each string is a whole HAR document (a stdin buffer or a file
-                // path / literal), expanded to many Targets by parse_har later.
+            "har" | "openapi" | "postman" => {
+                // Each string is a whole document (a stdin buffer or a file
+                // path / literal), expanded to many Targets by its parser later.
                 if let Some(buf) = buffered_stdin.take() {
                     // Auto-detected HAR on stdin.
                     vec![(buf, TargetOrigin::Argument)]
@@ -427,10 +434,17 @@ pub(crate) async fn resolve_targets(
                         }
                     }
                 } else {
+                    let what = match input_type.as_str() {
+                        "openapi" => "an OpenAPI/Swagger spec path",
+                        "postman" => "a Postman collection path",
+                        _ => "a .har path",
+                    };
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::NO_FILE,
-                        "No HAR file specified for input-type=har (pass a .har path or pipe HAR on stdin)",
+                        &format!(
+                            "No file specified for input-type={input_type} (pass {what} or pipe it on stdin)"
+                        ),
                     );
                     return Err(ScanOutcome::Error);
                 }
@@ -441,7 +455,7 @@ pub(crate) async fn resolve_targets(
                     &args.format,
                     crate::cmd::error_codes::INVALID_INPUT_TYPE,
                     &format!(
-                        "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', or 'har'",
+                        "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', 'har', 'openapi', or 'postman'",
                         input_type
                     ),
                 );
@@ -464,8 +478,63 @@ pub(crate) async fn resolve_targets(
     // with the first few quoted in the warning. See [`TargetOrigin`].
     let mut unparsable_lines = 0usize;
     let mut unparsable_sample: Vec<String> = Vec::new();
+    // Spec operations / collection requests that could not become a target,
+    // across every document; reported once below.
+    let mut spec_skipped = 0usize;
+    let mut spec_skip_sample: Vec<String> = Vec::new();
     for (s, origin) in target_strings {
-        if input_type == "har" {
+        if input_type == "openapi" || input_type == "postman" {
+            let (label, parse): (&str, SpecParser) = if input_type == "openapi" {
+                ("OpenAPI spec", crate::target_parser::parse_openapi)
+            } else {
+                ("Postman collection", crate::target_parser::parse_postman)
+            };
+            // A spec named on the command line is a path; the stdin buffer
+            // (or a literal) is the document itself. JSON specs open with `{`,
+            // YAML ones span lines — `load_request_source` accepts both.
+            let content = load_request_source(&s, args, label, |c| {
+                c.trim_start_matches('\u{feff}')
+                    .trim_start()
+                    .starts_with('{')
+            })?;
+            let base = args
+                .base_url
+                .as_deref()
+                .and_then(|u| url::Url::parse(u).ok());
+            match parse(&content, base.as_ref()) {
+                Ok(import) => {
+                    for mut target in import.targets {
+                        apply_request_cli_overrides(&mut target, args);
+                        parsed_targets.push(target);
+                    }
+                    spec_skipped += import.skipped.len();
+                    for why in import.skipped {
+                        if spec_skip_sample.len() >= UNPARSABLE_SAMPLE_LIMIT {
+                            break;
+                        }
+                        spec_skip_sample
+                            .push(crate::utils::log::sanitize_log_message(&why).into_owned());
+                    }
+                }
+                Err(e) => {
+                    // `s` is the whole document when it came from stdin, and
+                    // the reason can quote spec text: name the source, not
+                    // its contents, and strip terminal escapes.
+                    let source = if s.contains(['\n', '\r']) || s.len() > 512 {
+                        "<inline document>"
+                    } else {
+                        s.as_str()
+                    };
+                    let msg = format!("Error parsing {label} '{source}': {e}");
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::PARSE_ERROR,
+                        &crate::utils::log::sanitize_log_message(&msg),
+                    );
+                    return Err(ScanOutcome::Error);
+                }
+            }
+        } else if input_type == "har" {
             // A single HAR document expands to many Targets. Load it from the
             // detection cache, a file on disk, or treat the string itself as
             // the document (the stdin buffer / a literal).
@@ -598,6 +667,18 @@ pub(crate) async fn resolve_targets(
                 }
             }
         }
+    }
+
+    if spec_skipped > 0 {
+        // Same contract as the skipped-list-lines warning below: always on
+        // stderr, so a run that left part of the spec untested never reads as
+        // full coverage of it.
+        eprintln!(
+            "[warn] skipped {} {} operation(s) — e.g. {}",
+            spec_skipped,
+            input_type,
+            spec_skip_sample.join("; ")
+        );
     }
 
     if unparsable_lines > 0 {

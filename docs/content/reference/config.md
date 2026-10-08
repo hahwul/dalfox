@@ -23,7 +23,8 @@ The config file only applies to CLI scans. `dalfox server` and `dalfox mcp` take
 ```toml
 [scan]
 # INPUT
-input_type = "auto"   # auto, url, file, pipe, raw-http, har
+input_type = "auto"   # auto, url, file, pipe, raw-http, har, openapi, postman
+# base_url = "https://staging.example.com"  # openapi/postman: replaces the spec's server URL (anchors a relative one)
 dedup_urls = "exact"  # exact, signature (collapse URLs differing only in param values), off
 # state_file = "scan.state"  # record completed targets and skip them on re-run. CLI only — ignored by `dalfox server` / MCP
 
@@ -138,7 +139,8 @@ debug = false
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`, `postman` |
+| `base_url` | string | — | For `openapi` / `postman` inputs: replaces the spec's absolute server URL and anchors a relative one. An absolute `http(s)` URL; anything else is ignored with a warning ([OpenAPI / Postman mode](../../guide/scanning-modes/#openapi-postman-mode)) |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature` (collapse URLs differing only in param values), `off` |
 | `state_file` | string | — | Record completed targets and skip them on re-run ([Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-interrupted-scan)). **CLI only** — ignored by `dalfox server` / MCP |
 
