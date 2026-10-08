@@ -223,6 +223,16 @@ pub(crate) fn validate_http_url(value: &str, flag: &str) -> Result<(), String> {
     }
 }
 
+/// Validate an `--include-url` / `--exclude-url` pattern. A pattern that does
+/// not compile is dropped by `apply_url_scope_filters`, so an all-invalid
+/// `--exclude-url` excludes nothing and the scan attacks the URLs the operator
+/// scoped out; refuse it up front instead. Config-file values reach here too.
+pub(crate) fn validate_scope_regex(pattern: &str, flag: &str) -> Result<(), String> {
+    regex::Regex::new(pattern).map(|_| ()).map_err(|e| {
+        format!("{flag} {pattern:?} is not a valid regex: {e} (hint: it takes a regex like '.*/api/.*', not a shell glob)")
+    })
+}
+
 /// Does this positional argument *look* like a URL or host rather than
 /// a file path? Used to break the "input is both a domain and a local
 /// file" tie in favour of the URL, instead of silently slurping the
@@ -388,6 +398,13 @@ mod input_shape_tests {
                 "{p} should be rejected as unroutable, got: {err}"
             );
         }
+    }
+
+    #[test]
+    fn scope_regex_rejects_a_glob_and_accepts_a_regex() {
+        assert!(validate_scope_regex(".*/admin.*", "--exclude-url").is_ok());
+        let err = validate_scope_regex("*/admin*", "--exclude-url").unwrap_err();
+        assert!(err.contains("--exclude-url") && err.contains("not a shell glob"));
     }
 
     #[test]

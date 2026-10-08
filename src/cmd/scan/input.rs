@@ -115,6 +115,12 @@ pub(crate) fn target_list_lines(content: &str) -> impl Iterator<Item = &str> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
 }
 
+fn is_test_harness_exe(exe: Option<&std::path::Path>) -> bool {
+    exe.and_then(|p| p.parent())
+        .and_then(|d| d.file_name())
+        .is_some_and(|n| n == "deps")
+}
+
 pub(crate) async fn resolve_targets(
     args: &ScanArgs,
 ) -> std::result::Result<ResolvedTargets, ScanOutcome> {
@@ -123,22 +129,12 @@ pub(crate) async fn resolve_targets(
     // it buffers the whole stream here so the parsing phase reuses the same
     // bytes instead of reading an already-drained stdin.
     let mut buffered_stdin: Option<String> = None;
-    let stdin_is_piped = {
-        let is_dalfox_bin = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .map(|name| {
-                let name_lower = name.to_lowercase();
-                name_lower == "dalfox" || name_lower == "dalfox.exe"
-            })
-            .unwrap_or(false);
-
-        if is_dalfox_bin {
-            !std::io::IsTerminal::is_terminal(&std::io::stdin())
-        } else {
-            false
-        }
-    };
+    // Skip stdin inside cargo's own test binaries: an idle inherited pipe
+    // would block `-i pipe` / the no-target path forever. Keyed on the binary's
+    // *location* (`target/<profile>/deps/`), not its name, so a renamed or
+    // symlinked `dalfox` still reads piped stdin.
+    let stdin_is_piped = !is_test_harness_exe(std::env::current_exe().ok().as_deref())
+        && !std::io::IsTerminal::is_terminal(&std::io::stdin());
 
     let input_type = detect_input_type(args, stdin_is_piped, &mut buffered_stdin)?;
 
@@ -214,15 +210,19 @@ pub(crate) async fn resolve_targets(
             // Detection only sniffed a prefix, so read the file in full now
             // (None when the arg isn't a file on disk — treated as a URL).
             let p = std::path::Path::new(target);
-            let file_read: Option<std::result::Result<String, std::io::Error>> = if p.exists() {
-                Some(crate::utils::fs::read_bounded(
-                    p,
-                    MAX_TARGET_LIST_BYTES,
-                    "target list",
-                ))
-            } else {
-                None
-            };
+            // A directory named like a host (`example.com/` from a recon dump or
+            // `wget -r`) is not a target list: keep it a host literal. A
+            // path-shaped one (`./out`, `/tmp`) still reports "not a regular file".
+            let file_read: Option<std::result::Result<String, std::io::Error>> =
+                if p.exists() && !(p.is_dir() && !names_a_missing_file(target)) {
+                    Some(crate::utils::fs::read_bounded(
+                        p,
+                        MAX_TARGET_LIST_BYTES,
+                        "target list",
+                    ))
+                } else {
+                    None
+                };
             match file_read {
                 Some(Ok(content)) => {
                     // Ambiguity: input is both a readable file *and*
@@ -714,7 +714,8 @@ pub(crate) async fn resolve_targets(
 /// key.
 ///
 /// - `exact` — the historical key: the full URL string (query and values
-///   included) plus the method. Only byte-identical inputs collapse.
+///   included) plus the method, plus the request body / headers / cookies a
+///   HAR or raw-http entry carries. Only byte-identical inputs collapse.
 /// - `signature` — method + scheme + host + port + path + the *sorted set of
 ///   parameter names* (query and body alike). Parameter values are excluded, so
 ///   `?id=1`, `?id=2`, … `?id=9999` from a `gau`/`katana` dump collapse to one
@@ -763,7 +764,7 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         let key = if mode == "signature" {
             target_signature_key(t)
         } else {
-            format!("{}|{}", t.url, t.method)
+            format!("{}|{}|{}", t.url, t.method, request_shape_digest(t))
         };
         match chosen.entry(key) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -795,6 +796,18 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         collapsed,
         sample,
     }
+}
+
+/// Digest of the per-request content a HAR / raw-http import carries (body,
+/// headers, cookies, User-Agent), so `exact` dedup keeps two POSTs to one URL
+/// that differ only there. URL-list targets all share the run-wide values, so
+/// for them this is the same constant and the collapse is unchanged. Hashed
+/// rather than inlined: a body can be MiBs.
+fn request_shape_digest(t: &Target) -> String {
+    use sha2::{Digest, Sha256};
+    let shape =
+        serde_json::to_vec(&(&t.data, &t.headers, &t.cookies, &t.user_agent)).unwrap_or_default();
+    hex::encode(Sha256::digest(shape))
 }
 
 /// Whether any query or form-body parameter of `t` is present but empty — the
@@ -1087,8 +1100,11 @@ fn method_override(args: &ScanArgs) -> Option<&str> {
 /// (`raw-http` or `har`). Request-content fields (method, body, headers,
 /// cookies, User-Agent) are only touched when the user explicitly set the
 /// matching flag, so each captured request keeps its own shape by default;
-/// CLI headers and cookies are *appended* (not replaced) since the request
-/// already carries its own. Network/runtime fields are always taken from the
+/// CLI headers and cookies are added to the request's own, but a CLI header
+/// (case-insensitive name) or cookie (exact name) *replaces* the captured one of
+/// the same name: reqwest's `.header()` appends and servers read the first
+/// value, so a kept stale `Authorization` / `sess=OLD` would beat the refreshed
+/// credential the operator passed. Network/runtime fields are always taken from the
 /// args. This is the shared override path for both raw-HTTP and HAR inputs.
 fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     if let Some(m) = method_override(args) {
@@ -1097,12 +1113,18 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     if let Some(d) = &args.data {
         target.data = Some(d.clone());
     }
-    for h in &args.headers {
-        if let Some((name, value)) = h.split_once(':') {
-            target
-                .headers
-                .push((name.trim().to_string(), value.trim().to_string()));
-        }
+    let cli_headers: Vec<(&str, &str)> = args
+        .headers
+        .iter()
+        .filter_map(|h| h.split_once(':'))
+        .map(|(n, v)| (n.trim(), v.trim()))
+        .collect();
+    // Drop captured same-name entries once, so repeated `-H X-Foo` all survive.
+    target
+        .headers
+        .retain(|(k, _)| !cli_headers.iter().any(|(n, _)| k.eq_ignore_ascii_case(n)));
+    for (name, value) in cli_headers {
+        target.headers.push((name.to_string(), value.to_string()));
     }
     // Empty `--user-agent ""` means "no override", not a literal empty header.
     if let Some(ua) = args.user_agent.as_ref().filter(|ua| !ua.is_empty()) {
@@ -1125,9 +1147,15 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     }
     // Shared splitter: a `--cookies "a=1; b=2"` value carries several cookies
     // and every one of them has to become its own probe-able parameter.
-    for c in &args.cookies {
-        target.cookies.extend(crate::job::split_cookie_pairs(c));
-    }
+    let cli_cookies: Vec<(String, String)> = args
+        .cookies
+        .iter()
+        .flat_map(|c| crate::job::split_cookie_pairs(c))
+        .collect();
+    target
+        .cookies
+        .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| k == n));
+    target.cookies.extend(cli_cookies);
     target.timeout = args.timeout;
     target.delay = args.delay;
     target.proxy = args.proxy.clone();

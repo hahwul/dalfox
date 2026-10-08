@@ -343,6 +343,9 @@ struct Loaded {
     /// normal case. Reported so a *systematically* unreadable file is visible
     /// rather than looking like an empty one.
     corrupt_lines: usize,
+    /// The file exists but holds no header (whitespace-only, e.g. `echo > f`).
+    /// Its length is non-zero, so the writer must be told to add one anyway.
+    blank: bool,
 }
 
 /// Read `path` and decide whether its completions can be reused under `hash`.
@@ -367,6 +370,7 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
             prior: std::collections::HashMap::new(),
             reset,
             corrupt_lines: 0,
+            blank: false,
         })
     };
 
@@ -389,7 +393,7 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
     };
 
     if raw.trim().is_empty() {
-        return fresh(None);
+        return fresh(None).map(|l| Loaded { blank: true, ..l });
     }
 
     let mut lines = raw.lines().filter(|l| !l.trim().is_empty());
@@ -445,7 +449,22 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
         prior,
         reset: None,
         corrupt_lines,
+        blank: false,
     })
+}
+
+/// Whether the (non-empty) file at `path` ends in '\n'. Unreadable counts as
+/// terminated: the append that follows reports the real error.
+fn ends_with_newline(path: &str) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut last = *b"\n";
+    std::fs::File::open(path)
+        .and_then(|mut f| {
+            f.seek(SeekFrom::End(-1))?;
+            f.read_exact(&mut last)
+        })
+        .map(|_| last[0] == b'\n')
+        .unwrap_or(true)
 }
 
 /// An open state file: the completions carried over from previous runs, plus
@@ -500,6 +519,7 @@ impl StateFile {
     fn open_inner(path: &str, args: &ScanArgs, read_only: bool) -> Result<Self, String> {
         let hash = config_hash(args);
         let loaded = load(path, &hash)?;
+        let loaded_blank = loaded.blank;
 
         let mut state = StateFile {
             path: path.to_string(),
@@ -546,10 +566,20 @@ impl StateFile {
             .open(path)
             .map_err(|e| format!("--state-file '{}' could not be opened: {}", path, e))?;
 
+        // A hard kill can leave the last line without its '\n'. Appending right
+        // after it would glue the next record onto the fragment and lose both,
+        // so terminate it first; the fragment then stays its own skipped line.
+        let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+        if len > 0 && !ends_with_newline(path) {
+            file.write_all(b"\n")
+                .map_err(|e| format!("--state-file '{}' could not be written: {}", path, e))?;
+        }
+
         // Header goes in when the file is new or was just moved aside. Judged
         // by length so a zero-byte file left behind by an earlier failure gets
-        // one too.
-        let needs_header = file.metadata().map(|m| m.len() == 0).unwrap_or(true);
+        // one too, and by `blank` so a whitespace-only file does (the loader
+        // skips blank lines, so the header may follow them).
+        let needs_header = len == 0 || loaded_blank;
         if needs_header {
             let header = Header {
                 dalfox_state: STATE_FORMAT_VERSION,

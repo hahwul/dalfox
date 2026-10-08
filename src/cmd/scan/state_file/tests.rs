@@ -259,6 +259,55 @@ fn a_torn_final_line_is_skipped_and_earlier_records_survive() {
     let _ = std::fs::remove_file(&path);
 }
 
+// The resumed run's first record must not be glued onto the torn fragment, or
+// that target is lost and the "unreadable line" warning never goes away.
+#[test]
+fn a_record_appended_after_a_torn_tail_stays_readable() {
+    let path = scratch("torn-append");
+    let args = args_with(&path);
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
+    }
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        write!(f, "{{\"target\":\"https://b.test/\",\"meth").unwrap();
+    }
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+        record(&sf, "https://c.test/", "GET", TargetOutcome::Completed);
+    }
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens again");
+    assert!(is_completed(&sf, "https://c.test/", "GET"));
+    assert!(is_completed(&sf, "https://a.test/", "GET"));
+    assert_eq!(sf.corrupt_lines, 1, "only the torn fragment is unreadable");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// `echo > scan.state` leaves one byte, so a length check alone skipped the
+// header and the next run refused the file dalfox itself had just written.
+#[test]
+fn a_whitespace_only_file_gets_a_header_and_stays_resumable() {
+    let path = scratch("blank");
+    let args = args_with(&path);
+    std::fs::write(&path, "\n").unwrap();
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
+    }
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("resumes");
+    assert!(is_completed(&sf, "https://a.test/", "GET"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
 // Changing a scan-affecting flag means the recorded targets were tested under
 // different settings, so they are not comparable: the file resets rather than
 // skipping targets the new configuration has never covered.
