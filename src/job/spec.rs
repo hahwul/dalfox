@@ -83,23 +83,39 @@ pub(crate) struct ScanRequestSpec {
 }
 
 /// The `blind_oob` request field, shared by REST and MCP: `true` arms the
-/// public interactsh mesh, `false` leaves OOB off, and a list names the
-/// servers to try in order (an empty list also means the mesh, like a bare
-/// `--blind-oob`).
+/// public interactsh mesh, `false` leaves OOB off, a list names the servers to
+/// try in order (an empty list also means the mesh, like a bare `--blind-oob`),
+/// and a string is a comma-separated server list for parity with the
+/// `GET /scan` query form (a blank string means off).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub(crate) enum BlindOobRequest {
     Enabled(bool),
     Servers(Vec<String>),
+    /// Comma-separated form, so a JSON `"blind_oob": "oast.fun,oast.me"` is
+    /// accepted with a clear downstream error rather than serde's opaque
+    /// untagged-enum message. Canonicalized to `Servers` by validation.
+    Csv(String),
 }
 
 impl BlindOobRequest {
-    /// The `BlindOobArgs::blind_oob` value this request means.
+    /// The `BlindOobArgs::blind_oob` value this request means: `None` = off,
+    /// `Some([])` = the public mesh, `Some(list)` = those servers.
     pub(crate) fn servers(&self) -> Option<Vec<String>> {
         match self {
             Self::Enabled(false) => None,
             Self::Enabled(true) => Some(Vec::new()),
             Self::Servers(list) => Some(list.clone()),
+            Self::Csv(s) => {
+                let list: Vec<String> = s
+                    .split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect();
+                // A blank string ("", ",", " ") is "off", matching the
+                // `GET /scan` query where a blank value disables OOB.
+                if list.is_empty() { None } else { Some(list) }
+            }
         }
     }
 }

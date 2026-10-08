@@ -254,7 +254,14 @@ fn blind_oob_query(raw: &str) -> Option<crate::job::spec::BlindOobRequest> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "" | "0" | "false" | "no" | "off" => None,
         "1" | "true" | "yes" | "on" => Some(BlindOobRequest::Enabled(true)),
-        _ => Some(BlindOobRequest::Servers(split_csv(raw))),
+        _ => {
+            // An all-blank list (`,`, ` , `) is off, not the public mesh — a
+            // template that rendered to nothing should not silently arm OOB.
+            // Non-host junk (`ture`) survives here and is rejected with a clear
+            // 400 by `normalize_blind_oob`'s single-label / host check.
+            let servers = split_csv(raw);
+            (!servers.is_empty()).then_some(BlindOobRequest::Servers(servers))
+        }
     }
 }
 

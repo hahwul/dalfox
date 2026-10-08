@@ -375,9 +375,22 @@ pub(crate) const MAX_BLIND_OOB_SERVERS: usize = 8;
 /// and every remaining entry must parse as a host the interactsh client can
 /// dial. Parsed with `url::Url` rather than pattern-matched — a host allowlist
 /// built from spellings was defeated by `oast.pro:0443` once already.
-pub(crate) fn normalize_blind_oob(
-    req: &mut Option<spec::BlindOobRequest>,
-) -> Result<(), String> {
+pub(crate) fn normalize_blind_oob(req: &mut Option<spec::BlindOobRequest>) -> Result<(), String> {
+    use spec::BlindOobRequest;
+    // Canonicalize every spelling (bool, list, CSV string) to its resolved
+    // server list first, so the host validation below has one shape to check
+    // and the stored value is exactly what the scan will dial.
+    match req.as_ref() {
+        None | Some(BlindOobRequest::Enabled(_)) => return Ok(()),
+        Some(other) => match other.servers() {
+            // `false` / blank CSV ⇒ off.
+            None => {
+                *req = Some(BlindOobRequest::Enabled(false));
+                return Ok(());
+            }
+            Some(list) => *req = Some(BlindOobRequest::Servers(list)),
+        },
+    }
     let Some(spec::BlindOobRequest::Servers(list)) = req else {
         return Ok(());
     };
@@ -394,22 +407,27 @@ pub(crate) fn normalize_blind_oob(
         ));
     }
     for server in &cleaned {
-        // Same shape `oob::interactsh::split_server` dials: a bare host gets
-        // `https://`, an explicit http(s) scheme is kept.
-        let lower = server.to_ascii_lowercase();
-        let with_scheme = if lower.contains("://") {
-            server.clone()
-        } else {
-            format!("https://{server}")
+        // Validate through the exact parser the interactsh client dials with,
+        // so a server accepted here is one the client can use (one definition).
+        let host = match crate::oob::interactsh::parse_server_host(server) {
+            Some((_, host)) => host,
+            None => {
+                return Err(format!(
+                    "blind_oob server '{}' is not a valid interactsh host (expected e.g. \"oast.fun\" or \"https://oob.example.com\")",
+                    crate::utils::log::sanitize_log_message(server)
+                ));
+            }
         };
-        let ok = url::Url::parse(&with_scheme).is_ok_and(|u| {
-            matches!(u.scheme(), "http" | "https")
-                && u.host_str()
-                    .is_some_and(|h| !h.trim_end_matches('.').is_empty())
-        });
-        if !ok {
+        // Reject a single-label host (`ture`, a `true`/`false` typo, a bare
+        // word): interactsh servers are FQDNs or host:port / IP, and a bare
+        // label would otherwise register against a doomed host. The host part
+        // before any `:port` must carry a dot (FQDN) or be an IP literal.
+        let bare = host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h);
+        let looks_like_host =
+            bare.contains('.') || bare.starts_with('[') || bare.parse::<std::net::IpAddr>().is_ok();
+        if !looks_like_host {
             return Err(format!(
-                "blind_oob server '{}' is not a valid interactsh host (expected e.g. \"oast.fun\" or \"https://oob.example.com\")",
+                "blind_oob server '{}' is a single-label host; name a full interactsh domain (e.g. \"oast.fun\") or host:port",
                 crate::utils::log::sanitize_log_message(server)
             ));
         }
@@ -427,7 +445,11 @@ pub(crate) fn normalize_session_check(
     pattern: &mut Option<String>,
     probe_url: &mut Option<String>,
 ) -> Result<(), String> {
-    if pattern.as_deref().is_some_and(|p| p.trim().is_empty()) {
+    // Only a truly empty string is "unset" (the templated `?session_check=`
+    // convention shared with `proxy` / `blind`). A whitespace-only value is a
+    // real pattern, compiled like the CLI compiles it rather than silently
+    // dropped — so the two surfaces treat the same input the same way.
+    if pattern.as_deref() == Some("") {
         *pattern = None;
     }
     if let Some(p) = pattern.as_deref() {

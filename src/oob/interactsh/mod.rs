@@ -356,7 +356,12 @@ fn is_tls_intercepting_proxy(proxy: &str) -> bool {
 /// An input `Url` cannot parse falls back to the old string split. That path
 /// only produces a host no mesh domain can spell, so it lands on the
 /// operator-named side, which is where an unparseable custom server belongs.
-fn split_server(server: &str) -> (String, String) {
+/// Parse `server` into `(base_url, host)` via `url::Url`, returning `None` when
+/// it does not name a dialable host. The single definition of "what spelling of
+/// an interactsh server is valid" — shared with `job::normalize_blind_oob`, so
+/// REST/MCP validate a server against exactly what the client will dial. A bare
+/// host gets `https://`; an explicit http(s) scheme (any case) is kept.
+pub(crate) fn parse_server_host(server: &str) -> Option<(String, String)> {
     let s = server.trim();
     // Schemes are case-insensitive (RFC 3986), and a case-sensitive test here
     // would treat `HTTPS://oast.pro` as a bare host and prepend a second
@@ -368,23 +373,32 @@ fn split_server(server: &str) -> (String, String) {
         format!("https://{s}")
     };
 
-    if let Ok(url) = url::Url::parse(&with_scheme)
-        && let Some(parsed_host) = url.host_str()
-    {
-        // A fully-qualified trailing dot names the same host; `Url` keeps it.
-        let bare = parsed_host.trim_end_matches('.').to_ascii_lowercase();
-        if !bare.is_empty() {
-            let scheme = url.scheme();
-            // `port()` is None when the port equals the scheme's default, so
-            // `:443` on https and `:80` on http normalize away here.
-            let host = match url.port() {
-                Some(p) => format!("{bare}:{p}"),
-                None => bare,
-            };
-            return (format!("{scheme}://{host}"), host);
-        }
+    let url = url::Url::parse(&with_scheme).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    let parsed_host = url.host_str()?;
+    // A fully-qualified trailing dot names the same host; `Url` keeps it.
+    let bare = parsed_host.trim_end_matches('.').to_ascii_lowercase();
+    if bare.is_empty() {
+        return None;
+    }
+    let scheme = url.scheme();
+    // `port()` is None when the port equals the scheme's default, so
+    // `:443` on https and `:80` on http normalize away here.
+    let host = match url.port() {
+        Some(p) => format!("{bare}:{p}"),
+        None => bare,
+    };
+    Some((format!("{scheme}://{host}"), host))
+}
+
+fn split_server(server: &str) -> (String, String) {
+    if let Some(parsed) = parse_server_host(server) {
+        return parsed;
     }
 
+    let lower = server.trim().to_ascii_lowercase();
     let (scheme, rest) = if let Some(r) = lower.strip_prefix("https://") {
         ("https", r)
     } else if let Some(r) = lower.strip_prefix("http://") {

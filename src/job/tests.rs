@@ -776,13 +776,40 @@ fn normalize_blind_oob_validates_and_cleans_servers() {
         ]))
     );
 
-    // A host-allowlist bypass (parsed, not pattern-matched) and a junk value
-    // are both refused, naming the field.
-    for bad in ["oast.pro:0443:x", "ht!tp://x", "http://", "not a host"] {
+    // A comma-separated string (parity with the GET query form) canonicalizes
+    // to a validated server list.
+    let mut csv = Some(BlindOobRequest::Csv(" oast.fun , oast.me ".to_string()));
+    normalize_blind_oob(&mut csv).unwrap();
+    assert_eq!(
+        csv,
+        Some(BlindOobRequest::Servers(vec![
+            "oast.fun".to_string(),
+            "oast.me".to_string(),
+        ]))
+    );
+    // A blank CSV string is "off", not the mesh.
+    let mut blank = Some(BlindOobRequest::Csv("  , ".to_string()));
+    normalize_blind_oob(&mut blank).unwrap();
+    assert_eq!(blank, Some(BlindOobRequest::Enabled(false)));
+
+    // A host-allowlist bypass (parsed, not pattern-matched), a junk value, and
+    // a single-label boolean typo (`ture`) are all refused, naming the field.
+    for bad in [
+        "oast.pro:0443:x",
+        "ht!tp://x",
+        "http://",
+        "not a host",
+        "ture",
+        "localhost",
+    ] {
         let mut r = Some(BlindOobRequest::Servers(vec![bad.to_string()]));
-        let err = normalize_blind_oob(&mut r)
-            .expect_err(&format!("{bad} must be rejected"));
+        let err = normalize_blind_oob(&mut r).expect_err(&format!("{bad} must be rejected"));
         assert!(err.contains("blind_oob"), "field must be named: {err}");
+    }
+    // An IP literal and host:port are valid even without a dotted-name FQDN.
+    for ok in ["127.0.0.1:8080", "https://[::1]:9000"] {
+        let mut r = Some(BlindOobRequest::Servers(vec![ok.to_string()]));
+        normalize_blind_oob(&mut r).unwrap_or_else(|e| panic!("{ok} must pass: {e}"));
     }
 
     // Too many servers is a typo guard, not a feature.
@@ -796,14 +823,21 @@ fn normalize_blind_oob_validates_and_cleans_servers() {
 
 #[test]
 fn normalize_session_check_blanks_are_unset_and_bad_inputs_rejected() {
-    // A templated `?session_check=` is "unset", not an always-failing empty regex.
-    let (mut p, mut u) = (Some("  ".to_string()), Some("".to_string()));
+    // A templated `?session_check=` (empty string) is "unset".
+    let (mut p, mut u) = (Some("".to_string()), Some("".to_string()));
     normalize_session_check(&mut p, &mut u).unwrap();
     assert_eq!(p, None);
     assert_eq!(u, None);
+    // Whitespace-only is a real regex, compiled like the CLI — kept, not dropped.
+    let (mut p, mut u) = (Some("  ".to_string()), None);
+    normalize_session_check(&mut p, &mut u).unwrap();
+    assert_eq!(p.as_deref(), Some("  "));
 
     // A good pair survives, trimmed.
-    let (mut p, mut u) = (Some("Sign out".to_string()), Some(" https://app/me ".to_string()));
+    let (mut p, mut u) = (
+        Some("Sign out".to_string()),
+        Some(" https://app/me ".to_string()),
+    );
     normalize_session_check(&mut p, &mut u).unwrap();
     assert_eq!(p.as_deref(), Some("Sign out"));
     assert_eq!(u.as_deref(), Some("https://app/me"));
@@ -816,6 +850,58 @@ fn normalize_session_check_blanks_are_unset_and_bad_inputs_rejected() {
     // A non-http probe URL is refused.
     let (mut p, mut u) = (None, Some("ftp://app/me".to_string()));
     assert!(normalize_session_check(&mut p, &mut u).is_err());
+}
+
+/// The real MCP mapping of the new OOB/session fields, exercised from a
+/// deserialized `ScanWithDalfoxParams` with non-default values (not the
+/// all-`None` defaults the parity test uses): `blind_oob` as a JSON list,
+/// `session_check*` set, validated then mapped into `ScanArgs` exactly as the
+/// `scan_with_dalfox` handler does.
+#[test]
+fn mcp_oob_and_session_fields_reach_scan_args() {
+    use crate::job::spec::BlindOobRequest;
+    let mut p: crate::mcp::ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "target": "http://example.com/?q=1",
+        "blind_oob": ["oast.fun", "oast.me"],
+        "blind_oob_wait": 12,
+        "session_check": "Sign out",
+        "session_check_url": "https://app/me",
+    }))
+    .expect("MCP params with OOB/session fields deserialize");
+
+    // The shared validation canonicalizes/validates in place, as the handler runs it.
+    normalize_blind_oob(&mut p.blind_oob).expect("servers valid");
+    normalize_session_check(&mut p.session_check, &mut p.session_check_url).expect("session valid");
+
+    let args = ScanRequestSpec {
+        target: p.target.clone(),
+        blind_oob: p.blind_oob.as_ref().and_then(BlindOobRequest::servers),
+        blind_oob_wait: p.blind_oob_wait,
+        session_check: p.session_check.clone(),
+        session_check_url: p.session_check_url.clone(),
+        ..Default::default()
+    }
+    .into_scan_args();
+
+    assert!(args.blind_oob_enabled());
+    assert_eq!(
+        args.oob.blind_oob,
+        Some(vec!["oast.fun".to_string(), "oast.me".to_string()])
+    );
+    assert_eq!(args.oob.blind_oob_wait, Some(12));
+    assert_eq!(args.session_check.as_deref(), Some("Sign out"));
+    assert_eq!(args.session_check_url.as_deref(), Some("https://app/me"));
+
+    // A JSON boolean `true` maps to the public mesh (empty server list).
+    let b: crate::mcp::ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "target": "http://example.com/?q=1",
+        "blind_oob": true,
+    }))
+    .expect("bool blind_oob deserializes");
+    assert_eq!(
+        b.blind_oob.as_ref().and_then(BlindOobRequest::servers),
+        Some(Vec::new())
+    );
 }
 
 #[test]
@@ -1444,7 +1530,11 @@ async fn execute_scan_surfaces_session_loss_like_the_cli() {
     let mut job = Job::new_queued(format!("http://{addr}/"));
     job.status = JobStatus::Running;
     let status = run.settle(&mut job, Arc::new(Vec::new()), 0, false);
-    assert_eq!(status, JobStatus::Error, "a lost session is not a clean done");
+    assert_eq!(
+        status,
+        JobStatus::Error,
+        "a lost session is not a clean done"
+    );
     assert!(
         job.error_message
             .as_deref()

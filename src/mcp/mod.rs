@@ -40,7 +40,8 @@ use crate::{
     job::{
         JOB_RETENTION_SECS, Job, JobStatus, MAX_ACTIVE_SCANS_MCP, MAX_CONCURRENT_PREFLIGHT,
         MAX_RETAINED_SCANS_MCP, has_http_scheme, purge_expired_jobs as purge_jobs_map,
-        spec::{BlindOobRequest, ScanRequestSpec}, split_cookie_pairs, unreachable_error_message,
+        spec::{BlindOobRequest, ScanRequestSpec},
+        split_cookie_pairs, unreachable_error_message,
     },
     scanning::result::SanitizedResult,
     target_parser::parse_target,

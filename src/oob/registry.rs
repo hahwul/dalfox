@@ -44,9 +44,9 @@ impl CorrelationRegistry {
             .cloned()
     }
 
-    /// Live entry count. Used by the registry tests, which assert the
-    /// correlation map is pruned as interactions are matched.
-    #[cfg(test)]
+    /// Live entry count. The OOB drain reads this to skip its wait window when
+    /// nothing was injected over OOB; the registry tests assert the map is
+    /// pruned as interactions are matched.
     pub(crate) fn len(&self) -> usize {
         self.inner
             .lock()
@@ -54,7 +54,6 @@ impl CorrelationRegistry {
             .len()
     }
 
-    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
