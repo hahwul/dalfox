@@ -211,6 +211,49 @@ fn split_cookie_pairs_splits_and_trims_multi_cookie_value() {
 }
 
 #[test]
+fn lift_cookie_headers_moves_pairs_and_keeps_unparseable_headers() {
+    let mut headers = vec![
+        ("X-A".to_string(), "1".to_string()),
+        ("COOKIE".to_string(), "a=1; sid=x".to_string()),
+        ("Cookie".to_string(), "junk".to_string()),
+    ];
+    let mut cookies = vec![("sid".to_string(), "keep".to_string())];
+    lift_cookie_headers(&mut headers, &mut cookies);
+    // Existing `--cookies` entry wins; the header with no pair is left alone.
+    assert_eq!(
+        cookies,
+        vec![
+            ("sid".to_string(), "keep".to_string()),
+            ("a".to_string(), "1".to_string())
+        ]
+    );
+    assert_eq!(
+        headers,
+        vec![
+            ("X-A".to_string(), "1".to_string()),
+            ("Cookie".to_string(), "junk".to_string())
+        ]
+    );
+}
+
+#[test]
+fn hydrate_target_lifts_cookie_header_for_server_and_mcp() {
+    let args = crate::cmd::scan::ScanArgs {
+        headers: vec!["Cookie: other=1; sid=abc".to_string()],
+        ..Default::default()
+    };
+    let t = runner::hydrate_target("http://127.0.0.1:1/", &args).expect("hydrate");
+    assert_eq!(
+        t.cookies,
+        vec![
+            ("other".to_string(), "1".to_string()),
+            ("sid".to_string(), "abc".to_string())
+        ]
+    );
+    assert!(t.headers.is_empty());
+}
+
+#[test]
 fn job_status_rejects_unknown_variant() {
     assert!(serde_json::from_str::<JobStatus>("\"finished\"").is_err());
 }

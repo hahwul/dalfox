@@ -2532,6 +2532,28 @@ async fn test_resolve_targets_splits_multi_cookie_values() {
 }
 
 #[tokio::test]
+async fn test_resolve_targets_lifts_cookie_header_into_cookies() {
+    // `-H 'Cookie: …'` used to stay a literal header: cookie discovery iterates
+    // `target.cookies` only, so no per-cookie param was probed and a reflecting
+    // cookie was reported clean.
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.headers = vec!["cookie: other=1; sid=abc".to_string(), "X-A: 1".to_string()];
+    args.cookies = vec!["sid=win".to_string()];
+    let targets = resolve(&args).await.expect("resolve ok");
+    let t = &targets[0];
+    assert_eq!(
+        t.cookies,
+        vec![
+            ("sid".to_string(), "win".to_string()),
+            ("other".to_string(), "1".to_string()),
+        ]
+    );
+    assert_eq!(t.headers, vec![("X-A".to_string(), "1".to_string())]);
+}
+
+#[tokio::test]
 async fn test_resolve_targets_drops_nameless_cookie_pairs() {
     let mut args = default_scan_args();
     args.input_type = "url".to_string();

@@ -6,7 +6,7 @@ use super::*;
 /// its declared `Content-Type` is an XML-family type, or the body opens with an
 /// `<?xml` prolog. Deliberately strict so JSON / form / HTML bodies are not
 /// mistaken for XML.
-fn request_is_xml(target: &Target, data: &str) -> bool {
+pub(super) fn request_is_xml(target: &Target, data: &str) -> bool {
     let ct_is_xml = target
         .headers
         .iter()

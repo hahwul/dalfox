@@ -480,6 +480,7 @@ pub(crate) fn hydrate_preflight_target(
         .as_ref()
         .map(|c| split_cookie_pairs(c))
         .unwrap_or_default();
+    crate::job::lift_cookie_headers(&mut t.headers, &mut t.cookies);
     t.data = opts.data.clone();
     Ok(t)
 }

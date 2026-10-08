@@ -968,6 +968,11 @@ pub async fn active_probe_param(
     mut param: Param,
     semaphore: Arc<Semaphore>,
 ) -> Param {
+    // A fragment never reaches the wire, so a probe could not reflect and would
+    // only burn ~2 requests per fragment key. The scan phase skips these too.
+    if !crate::scanning::param_is_http_scannable(&param) {
+        return param;
+    }
     let client = target.build_client_or_default();
 
     // Single batched probe — `OPEN + all special chars concatenated + CLOSE`.
@@ -1227,7 +1232,13 @@ pub async fn active_probe_param(
 
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let url = match param.location {
-                Location::Query => with_query_param(&target.url, &param.name, &encoded),
+                // Same base as the real injection: a GET-form field is probed at
+                // the form's action, not the page that hosts the `<form>`.
+                Location::Query => with_query_param(
+                    &crate::scanning::url_inject::effective_query_base(&target.url, &param),
+                    &param.name,
+                    &encoded,
+                ),
                 Location::Path => {
                     let mut url = target.url.clone();
                     if let Some(idx_str) = param.name.strip_prefix("path_segment_")
@@ -1363,7 +1374,7 @@ pub async fn analyze_parameters(
     // duplicates introduced by mining.)
     {
         let mut guard = reflection_params.lock().await;
-        crate::parameter_analysis::discovery::dedupe_reflection_params(&mut guard);
+        crate::parameter_analysis::discovery::dedupe_reflection_params(&mut guard, &target.url);
     }
     let mut params = reflection_params.lock().await.clone();
     if !args.ignore_param.is_empty() {

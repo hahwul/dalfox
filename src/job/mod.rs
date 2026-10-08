@@ -523,6 +523,36 @@ pub(crate) fn split_cookie_pairs(raw: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Move any `Cookie` header out of `headers` and into `cookies` (one entry per
+/// pair, skipping names `cookies` already holds, so `--cookies` wins).
+///
+/// Cookie discovery iterates `cookies` only. A session passed as
+/// `-H 'Cookie: a=1; sid=x'` otherwise stayed a literal header: no per-cookie
+/// params were probed, and the header sweep replaced the whole jar with the
+/// marker. The request still goes out with the same cookies, because
+/// `apply_headers_ua_cookies` rebuilds the one `Cookie` header from `cookies`.
+/// A header with no parseable pair is left alone rather than dropped.
+pub(crate) fn lift_cookie_headers(
+    headers: &mut Vec<(String, String)>,
+    cookies: &mut Vec<(String, String)>,
+) {
+    let mut lifted = Vec::new();
+    headers.retain(|(k, v)| {
+        if !k.eq_ignore_ascii_case("cookie") {
+            return true;
+        }
+        let pairs = split_cookie_pairs(v);
+        let keep = pairs.is_empty();
+        lifted.extend(pairs);
+        keep
+    });
+    for (name, value) in lifted {
+        if !cookies.iter().any(|(n, _)| *n == name) {
+            cookies.push((name, value));
+        }
+    }
+}
+
 /// Current unix time in milliseconds (UTC).
 pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()

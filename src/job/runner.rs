@@ -71,6 +71,7 @@ pub(crate) fn hydrate_target(url: &str, args: &ScanArgs) -> Result<Target, Strin
         .iter()
         .flat_map(|c| super::split_cookie_pairs(c))
         .collect();
+    super::lift_cookie_headers(&mut t.headers, &mut t.cookies);
     Ok(t)
 }
 
