@@ -102,7 +102,7 @@ pub async fn check_discovery(
     // to the scanner.
     {
         let mut guard = reflection_params.lock().await;
-        dedupe_reflection_params(&mut guard);
+        dedupe_reflection_params(&mut guard, &target.url);
     }
     target.reflection_params = reflection_params.lock().await.clone();
 }
@@ -118,9 +118,10 @@ pub async fn check_discovery(
 ///
 /// These fields are the smallest set that meaningfully distinguishes one
 /// injection point from another at scan time — same name in a query vs body
-/// slot, or in a header vs cookie, is two different sinks, but two pushes of
-/// `?query=` from the URL and from a `<form>` echo are not.
-pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
+/// slot, in a header vs cookie, or at two different form-action paths, is two
+/// different sinks, but two pushes of `?query=` from the URL and from a
+/// `<form>` echo posting back to the same path are not.
+pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>, target_url: &url::Url) {
     use std::collections::HashMap;
 
     if params.len() <= 1 {
@@ -133,13 +134,32 @@ pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
             .as_ref()
             .map(|p| format!("{:?}", p))
             .unwrap_or_default();
+        // Probed endpoint: a field found through a form is sent to the form's
+        // action, not the page. Same name at two endpoints is two sinks; a bare
+        // query param and a form that posts back to the same path are one.
+        // A form action's own query counts too (`/index.php?page=search` vs
+        // `?page=profile` route to different handlers). The page URL's query
+        // does not: there it is sibling params, not routing.
+        let endpoint = crate::scanning::url_inject::effective_query_base(target_url, p);
+        let mut route: Vec<(String, String)> = if p.form_action_url.is_some() {
+            endpoint
+                .query_pairs()
+                .filter(|(k, _)| *k != p.effective_wire_name())
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        route.sort();
         format!(
-            "{}|{:?}|{}|{}|{:?}",
+            "{}|{:?}|{}|{}|{:?}|{}|{:?}",
             p.name,
             p.location,
             p.effective_wire_name(),
             pipe,
-            p.is_cookie
+            p.is_cookie,
+            endpoint.path(),
+            route
         )
     };
 

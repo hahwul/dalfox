@@ -312,10 +312,14 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
 
 /// Generate adaptive payloads using per-parameter analysis data (valid/invalid specials).
 /// When a parameter has analysis data, this applies targeted encoding to bypass filters.
+///
+/// `raw_only` (`--encoders none`) drops every encoded variant and keeps only the
+/// raw payloads, like `apply_encoders_to_payloads` does on the other DOM arms.
 pub(crate) fn generate_adaptive_payloads(
     context: &InjectionContext,
     invalid_specials: &[char],
     valid_specials: &[char],
+    raw_only: bool,
 ) -> Vec<String> {
     let base_payloads = generate_dynamic_payloads(context);
 
@@ -454,6 +458,9 @@ pub(crate) fn generate_adaptive_payloads(
         // Original - insert reference to avoid clone when already seen
         if seen.insert(p.clone()) {
             out.push(p.clone());
+        }
+        if raw_only {
+            continue;
         }
         // Adaptive variants based on what's blocked, then the full-entity
         // variant and the url baseline.

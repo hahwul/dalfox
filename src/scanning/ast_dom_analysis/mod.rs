@@ -33,7 +33,7 @@ use oxc_span::{GetSpan, SourceType};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 pub use reflected_markup::PageMarkup;
 use scoped_state::{ScopedMap, ScopedSet};
@@ -427,9 +427,9 @@ struct DomXssVisitor<'a> {
     /// assignments execute as JS, even though the call is inline and
     /// never bound to a variable. Populated by the HTML pre-scan in
     /// `ast_integration::extract_script_element_ids`.
-    script_element_ids: HashSet<String>,
+    script_element_ids: Arc<HashSet<String>>,
     /// Page slots that carry this scan's marker (see [`PageMarkup`]).
-    reflected_markup: PageMarkup,
+    reflected_markup: Arc<PageMarkup>,
     /// Variables bound to an element in [`Self::reflected_markup`], by `id`.
     reflected_element_vars: HashMap<String, String>,
     /// Variables bound to a `<form>` element (see `expr_resolves_to_form`).
@@ -753,8 +753,8 @@ impl<'a> DomXssVisitor<'a> {
             idb_object_store_vars: Default::default(),
             idb_request_vars: Default::default(),
             script_element_vars: HashSet::new(),
-            script_element_ids: HashSet::new(),
-            reflected_markup: PageMarkup::default(),
+            script_element_ids: Arc::default(),
+            reflected_markup: Arc::default(),
             reflected_element_vars: HashMap::new(),
             form_element_vars: HashSet::new(),
             response_object_vars: Default::default(),
@@ -767,12 +767,12 @@ impl<'a> DomXssVisitor<'a> {
             default_tt_policy: None,
         }
     }
-    fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
-        self.script_element_ids = ids;
+    fn with_script_element_ids(mut self, ids: impl Into<Arc<HashSet<String>>>) -> Self {
+        self.script_element_ids = ids.into();
         self
     }
-    fn with_reflected_markup(mut self, markup: PageMarkup) -> Self {
-        self.reflected_markup = markup;
+    fn with_reflected_markup(mut self, markup: impl Into<Arc<PageMarkup>>) -> Self {
+        self.reflected_markup = markup.into();
         self
     }
     /// Mark that the page enforces `require-trusted-types-for 'script'`, so a
@@ -808,10 +808,13 @@ pub struct AstDomAnalyzer {
     /// IDs of `<script>` elements gathered from the surrounding HTML
     /// (see `ast_integration::extract_script_element_ids`). Empty when
     /// the caller has no HTML context.
-    script_element_ids: HashSet<String>,
+    ///
+    /// Shared (`Arc`): a page with N scripts builds one analyzer per block, and
+    /// cloning the page-wide set per block made that O(N²).
+    script_element_ids: Arc<HashSet<String>>,
     /// Slots of the analysed response that carry this scan's marker (see
     /// [`PageMarkup`]). Empty when the caller has no HTML context.
-    reflected_markup: PageMarkup,
+    reflected_markup: Arc<PageMarkup>,
     /// Whether the response CSP enforces `require-trusted-types-for 'script'`.
     /// Threaded into the visitor to gate strict-default-policy suppression.
     /// Off by default — preserving pre-Trusted-Types behaviour for callers
@@ -828,16 +831,16 @@ impl AstDomAnalyzer {
     /// Attach the set of `<script>` element IDs from the surrounding HTML
     /// so `document.getElementById('id').innerText = tainted` can be
     /// recognised as a JS-eval sink even when the lookup is inline.
-    pub(crate) fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
-        self.script_element_ids = ids;
+    pub(crate) fn with_script_element_ids(mut self, ids: impl Into<Arc<HashSet<String>>>) -> Self {
+        self.script_element_ids = ids.into();
         self
     }
 
     /// Attach the marker-carrying slots of the analysed response so reads of
     /// them (`el.dataset.x`, `getAttribute`, `textContent`, CSS custom
     /// properties) count as sources.
-    pub(crate) fn with_reflected_markup(mut self, markup: PageMarkup) -> Self {
-        self.reflected_markup = markup;
+    pub(crate) fn with_reflected_markup(mut self, markup: impl Into<Arc<PageMarkup>>) -> Self {
+        self.reflected_markup = markup.into();
         self
     }
 
@@ -880,8 +883,8 @@ impl AstDomAnalyzer {
             return Ok(Vec::new());
         }
 
-        let script_element_ids = self.script_element_ids.clone();
-        let reflected_markup = self.reflected_markup.clone();
+        let script_element_ids = Arc::clone(&self.script_element_ids);
+        let reflected_markup = Arc::clone(&self.reflected_markup);
         let trusted_types_enforced = self.trusted_types_enforced;
 
         // Fast path: a script this small can't nest a parser-recursion vector
@@ -933,14 +936,24 @@ impl AstDomAnalyzer {
     /// thread.
     fn analyze_on_stack(
         source_code: &str,
-        script_element_ids: HashSet<String>,
-        reflected_markup: PageMarkup,
+        script_element_ids: Arc<HashSet<String>>,
+        reflected_markup: Arc<PageMarkup>,
         trusted_types_enforced: bool,
     ) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();
-        let source_type = SourceType::default();
 
-        let ret = Parser::new(&allocator, source_code, source_type).parse();
+        // Module first, so `import`/`export`/top-level `await` bundles keep
+        // working. Inline `<script>` bodies are classic scripts though, and
+        // sloppy-only syntax (`<!--` comments, `await` as an identifier) is a
+        // module parse error that would silently drop the whole block, so
+        // retry as a script before giving up.
+        let mut ret = Parser::new(&allocator, source_code, SourceType::default()).parse();
+        if !ret.errors.is_empty() {
+            let script = Parser::new(&allocator, source_code, SourceType::script()).parse();
+            if script.errors.is_empty() {
+                ret = script;
+            }
+        }
 
         if !ret.errors.is_empty() {
             let error_messages: Vec<String> = ret.errors.iter().map(ToString::to_string).collect();

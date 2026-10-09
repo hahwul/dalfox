@@ -1681,55 +1681,6 @@ async fn active_probe_json_body_array_root_matches_the_real_injection() {
     }
 }
 
-/// Fragment params are DOM-side: the fragment never travels to the server, so
-/// the probe must still send a well-formed request whose path and query are
-/// untouched. A fragment builder that leaked into the query would silently
-/// change which endpoint gets probed.
-#[tokio::test]
-async fn active_probe_fragment_leaves_path_and_query_intact() {
-    use axum::{Router, extract::State, http::Uri, response::Html, routing::get};
-    use std::net::Ipv4Addr;
-    use tokio::time::{Duration, sleep};
-
-    async fn record(
-        State(seen): State<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
-        uri: Uri,
-    ) -> Html<String> {
-        seen.lock().expect("record uri").push(uri.to_string());
-        Html("<div>ok</div>".to_string())
-    }
-
-    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let app = Router::new()
-        .route("/p", get(record))
-        .with_state(seen.clone());
-    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-        .await
-        .expect("bind test listener");
-    let addr = listener.local_addr().expect("local addr");
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve test app");
-    });
-    sleep(Duration::from_millis(20)).await;
-
-    let target = parse_target(&format!("http://{addr}/p?a=1")).unwrap();
-    let _ = active_probe_param(
-        &target,
-        probe_param("f", Location::Fragment),
-        Arc::new(Semaphore::new(8)),
-    )
-    .await;
-
-    let uris = seen.lock().expect("uris").clone();
-    assert!(!uris.is_empty(), "the fragment probe must still be sent");
-    for uri in &uris {
-        assert_eq!(
-            uri, "/p?a=1",
-            "the fragment must not leak into the request line"
-        );
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Cookie params must not be probed with a character that ends the cookie.
 // ---------------------------------------------------------------------------
@@ -2273,4 +2224,90 @@ async fn test_active_probe_param_records_filter_verdict() {
     assert!(!filter.allowed.contains(&'<') && filter.allowed.contains(&'/'));
     // The recall-tuned set disagrees on purpose: the encoded `<` stays valid.
     assert!(param.valid_specials.unwrap().contains(&'<'));
+}
+
+/// The 2url/3url pre-encoding probe must go to the same URL the real injection
+/// does. For a GET-form field that is the form's action, not the page hosting
+/// the `<form>`: probing the host page never reflected, so the double-decode
+/// bypass was never detected for form fields.
+#[tokio::test]
+async fn active_probe_detects_double_decode_at_the_form_action() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    // Strips `<`/`>`, then URL-decodes the value a second time before echoing.
+    async fn search(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let q = p
+            .get("q")
+            .cloned()
+            .unwrap_or_default()
+            .replace(['<', '>'], "");
+        let q = urlencoding::decode(&q).map(|c| c.into_owned()).unwrap_or(q);
+        Html(format!("<html><body><div>{q}</div></body></html>"))
+    }
+
+    let app = Router::new()
+        .route(
+            "/",
+            get(|| async { Html("<html><body>form host</body></html>") }),
+        )
+        .route("/search", get(search));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/?q=1")).unwrap();
+    let mut param = probe_param("q", Location::Query);
+    param.form_action_url = Some(format!("http://{addr}/search"));
+    let res = active_probe_param(&target, param, Arc::new(Semaphore::new(8))).await;
+    assert_eq!(res.pre_encoding.as_deref(), Some("2url"));
+}
+
+/// A fragment is never sent to the server, so probing a `Location::Fragment`
+/// param could only waste requests (~2 per fragment key) and return a verdict
+/// that cannot be informative. It must come back untouched with zero requests.
+#[tokio::test]
+async fn active_probe_sends_nothing_for_a_fragment_param() {
+    use axum::{Router, routing::get};
+    use std::net::Ipv4Addr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let app = Router::new().route(
+        "/f",
+        get(move || {
+            let counter = counter.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                "static"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/f#p0=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("p0", Location::Fragment),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    assert_eq!(res.valid_specials, None);
 }

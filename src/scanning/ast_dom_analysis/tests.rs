@@ -3245,7 +3245,7 @@ const query = urlParams.get('query');
 document.getElementById('scriptTag').innerText = query;
 "#;
     let analyzer = AstDomAnalyzer::new()
-        .with_script_element_ids(std::iter::once("scriptTag".to_string()).collect());
+        .with_script_element_ids(std::iter::once("scriptTag".to_string()).collect::<HashSet<_>>());
     let r = analyzer.analyze(js).expect("parses");
     assert!(
         r.iter().any(|v| v.sink == "script.innerText"),
@@ -3286,7 +3286,7 @@ const query = urlParams.get('query');
 document.getElementById('output').innerText = query;
 "#;
     let analyzer = AstDomAnalyzer::new()
-        .with_script_element_ids(std::iter::once("scriptTag".to_string()).collect());
+        .with_script_element_ids(std::iter::once("scriptTag".to_string()).collect::<HashSet<_>>());
     let r = analyzer.analyze(js).expect("parses");
     assert!(
         !r.iter().any(|v| v.sink.starts_with("script.")),
@@ -5419,6 +5419,7 @@ open.onsuccess = function (e) {
     );
 }
 mod expression_regressions;
+mod hunt_regressions;
 mod scope_cost;
 
 #[test]

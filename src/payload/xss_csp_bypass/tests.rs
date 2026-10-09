@@ -590,3 +590,89 @@ fn test_analyze_csp_from_single_policy_unchanged() {
     assert!(r.report_only);
     assert!(!r.require_trusted_types_for);
 }
+
+/// A hostile page can carry a huge `<meta>` policy list; merging it must stay
+/// linear (distinct policies, capped) and still union the hosts, deduplicated.
+#[test]
+fn test_analyze_csp_from_many_policies_is_bounded() {
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "script-src a.example.com, script-src a.example.com, script-src b.example.com",
+    );
+    assert_eq!(
+        a.whitelisted_domains,
+        vec!["a.example.com".to_string(), "b.example.com".to_string()]
+    );
+
+    let list = (0..40_000)
+        .map(|i| format!("script-src h{i}.example.com 'nonce-n{i}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let start = std::time::Instant::now();
+    let a = analyze_csp_from("Content-Security-Policy", &list);
+    assert!(a.whitelisted_domains.len() <= MAX_CSP_POLICIES);
+    assert!(a.nonce_values.len() <= MAX_CSP_POLICIES);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "took {:?}",
+        start.elapsed()
+    );
+}
+
+// --- hostile / fallback policy shapes ---------------------------------------
+
+/// The policy is attacker-controlled: a header with thousands of nonces must not
+/// inflate every parameter's payload set (each nonce is embedded in its payload,
+/// so dedup cannot collapse them).
+#[test]
+fn test_strict_dynamic_nonce_payloads_are_capped() {
+    let nonces: String = (0..1500).map(|i| format!(" 'nonce-aB{i:05}='")).collect();
+    let analysis = analyze_csp(&format!("script-src 'strict-dynamic'{nonces}"));
+    assert_eq!(analysis.nonce_values.len(), 1500);
+    let with_many = get_csp_bypass_payloads(&analysis).len();
+    let one = get_csp_bypass_payloads(&analyze_csp("script-src 'strict-dynamic' 'nonce-aB00000='"));
+    assert!(with_many <= one.len() + 6);
+    // Repeats of one nonce still count once.
+    let dup = analyze_csp(
+        "script-src 'strict-dynamic' 'nonce-a' 'nonce-a' 'nonce-a' 'nonce-a' 'nonce-b'",
+    );
+    let dup_payloads = get_csp_bypass_payloads(&dup);
+    assert!(dup_payloads.iter().any(|p| p.contains("nonce=\"b\"")));
+}
+
+/// A payload dropped into an unquoted attribute value must not rely on `%20`
+/// (never decoded inside HTML) or a literal space (ends the value).
+#[test]
+fn test_unsafe_eval_payloads_have_no_percent_encoded_space() {
+    let payloads = get_csp_bypass_payloads(&analyze_csp("script-src 'unsafe-eval'"));
+    assert!(payloads.iter().any(|p| p.contains("new(Function)(")));
+    assert!(payloads.iter().all(|p| !p.contains("%20")));
+}
+
+/// `default-src` governs scripts when `script-src` is absent, so its `data:` and
+/// host sources must seed the same payloads `script-src` would.
+#[test]
+fn test_analyze_csp_default_src_sources_apply_without_script_src() {
+    let a = analyze_csp("default-src 'self' data: blob: https://ajax.googleapis.com");
+    assert!(a.allows_data_scheme);
+    assert!(a.allows_blob_scheme);
+    assert_eq!(a.whitelisted_domains, vec!["https://ajax.googleapis.com"]);
+    let n = analyze_csp("default-src 'strict-dynamic' 'nonce-abc'");
+    assert!(n.has_strict_dynamic);
+    assert_eq!(n.nonce_values, vec!["abc"]);
+    assert!(n.is_nonce_or_hash_based());
+    // ...but a present script-src still fully overrides it.
+    let s = analyze_csp("script-src 'self'; default-src data: https://cdn.example.com");
+    assert!(!s.allows_data_scheme);
+    assert!(s.whitelisted_domains.is_empty());
+}
+
+/// `object-src` falls back to `default-src`: only a fallback that permits `data:`
+/// leaves the object/embed data: payloads viable.
+#[test]
+fn test_analyze_csp_object_src_falls_back_to_default_src() {
+    assert!(!analyze_csp("default-src 'self'").missing_object_src);
+    assert!(analyze_csp("default-src 'self' data:").missing_object_src);
+    assert!(analyze_csp("script-src 'self'").missing_object_src);
+    assert!(!analyze_csp("default-src data:; object-src 'none'").missing_object_src);
+}

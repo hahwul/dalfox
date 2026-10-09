@@ -17,8 +17,66 @@ use crate::scanning::result::{FindingType, Result as ScanResult};
 /// How often the background task polls the OAST server.
 const POLL_INTERVAL_SECS: u64 = 5;
 
+/// Ceiling on findings from callbacks whose nonce is not in the registry.
+/// The correlation id is embedded in every injected URL, so anyone who can read
+/// a stored payload can mint `<corr-id><any 13 chars>.<server>` hosts at will;
+/// each distinct suffix is otherwise a new Verified/High finding plus a `seen`
+/// entry. Registered nonces are bounded by the payloads we injected and stay
+/// uncapped.
+pub(crate) const MAX_UNATTRIBUTED_FINDINGS: usize = 1000;
+
 type Results = Arc<TokioMutex<Vec<ScanResult>>>;
 type Seen = Arc<StdMutex<HashSet<String>>>;
+
+/// What the poll loop has observed, shared by the background task and the
+/// final sweep so a dead OAST server can be reported once instead of reading as
+/// a clean scan.
+#[derive(Default)]
+struct PollState {
+    ok: AtomicUsize,
+    failed: AtomicUsize,
+    consecutive_failed: AtomicUsize,
+    last_error: StdMutex<String>,
+    warned_poll: AtomicBool,
+    unattributed: AtomicUsize,
+    warned_cap: AtomicBool,
+}
+
+/// One WRN line on stderr (stdout stays clean for json/sarif), at most once per
+/// `flag`, and never under `--silence`.
+fn warn_once(silence: bool, flag: &AtomicBool, msg: &str) {
+    if !silence && !flag.swap(true, Ordering::Relaxed) {
+        crate::ceprintln!("{} {}", crate::utils::log::log_prefix("33", "WRN"), msg);
+    }
+}
+
+/// Short, secret-free cause for a poll failure. A `reqwest::Error` displays the
+/// request URL, which carries the session's `secret=` query value, so it is
+/// reduced to its kind; the remaining errors are our own messages.
+fn summarize_poll_error(e: &(dyn std::error::Error + Send + Sync + 'static)) -> String {
+    let s = match e.downcast_ref::<reqwest::Error>() {
+        Some(r) if r.is_timeout() => "request timed out".to_string(),
+        Some(r) if r.is_connect() => "connection failed".to_string(),
+        Some(_) => "request failed".to_string(),
+        None => e.to_string(),
+    };
+    crate::utils::term::sanitize_display(&s).to_string()
+}
+
+fn warn_poll_failure(silence: bool, state: &PollState) {
+    let last = state
+        .last_error
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    warn_once(
+        silence,
+        &state.warned_poll,
+        &format!(
+            "OOB polling is failing ({last}); blind callbacks are not being collected, so a clean result does not rule out blind XSS"
+        ),
+    );
+}
 
 /// Handle to a running poller. Hold it for the scan's lifetime, then call
 /// [`finish`](PollerHandle::finish) to drain the grace window and deregister.
@@ -33,6 +91,7 @@ pub(crate) struct PollerHandle {
     /// it, while [`Drop`] still aborts a handle dropped without `finish` (panic,
     /// early return) — the background poll loop must never outlive its job.
     task: Option<JoinHandle<()>>,
+    state: Arc<PollState>,
     silence: bool,
 }
 
@@ -57,8 +116,10 @@ pub(crate) fn spawn_poller(
 ) -> PollerHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let seen: Seen = Arc::new(StdMutex::new(HashSet::new()));
+    let state = Arc::new(PollState::default());
 
     let task = {
+        let state = state.clone();
         let session = session.clone();
         let results = results.clone();
         let findings_count = findings_count.clone();
@@ -67,7 +128,7 @@ pub(crate) fn spawn_poller(
         let seen = seen.clone();
         tokio::spawn(async move {
             while !stop.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
-                poll_once(&session, &results, &findings_count, &seen, silence).await;
+                poll_once(&session, &results, &findings_count, &seen, &state, silence).await;
                 // Sleep in 1s slices so a stop/cancel cuts the wait short.
                 for _ in 0..POLL_INTERVAL_SECS {
                     if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
@@ -87,11 +148,25 @@ pub(crate) fn spawn_poller(
         seen,
         stop,
         task: Some(task),
+        state,
         silence,
     }
 }
 
 impl PollerHandle {
+    /// `(poll-failure warning emitted, unattributed findings kept)`, readable
+    /// after `finish` has consumed the handle.
+    #[cfg(test)]
+    pub(crate) fn probe(&self) -> impl Fn() -> (bool, usize) + use<> {
+        let s = self.state.clone();
+        move || {
+            (
+                s.warned_poll.load(Ordering::Relaxed),
+                s.unattributed.load(Ordering::Relaxed),
+            )
+        }
+    }
+
     /// Keep the background poller draining for up to `grace`, then stop it, do a
     /// final poll for anything that landed in the last interval, and deregister.
     /// A pending cancel (Ctrl-C) cuts the grace window short.
@@ -110,9 +185,17 @@ impl PollerHandle {
             &self.results,
             &self.findings_count,
             &self.seen,
+            &self.state,
             self.silence,
         )
         .await;
+        // A short `--blind-oob-wait` may only ever see one poll, which is below
+        // the in-loop threshold; never having succeeded is enough to say so.
+        if self.state.ok.load(Ordering::Relaxed) == 0
+            && self.state.failed.load(Ordering::Relaxed) > 0
+        {
+            warn_poll_failure(self.silence, &self.state);
+        }
         self.session.deregister().await;
     }
 }
@@ -141,12 +224,26 @@ async fn poll_once(
     results: &Results,
     findings_count: &Arc<AtomicUsize>,
     seen: &Seen,
+    state: &PollState,
     silence: bool,
 ) {
     let interactions = match session.poll().await {
-        Ok(v) => v,
+        Ok(v) => {
+            state.ok.fetch_add(1, Ordering::Relaxed);
+            state.consecutive_failed.store(0, Ordering::Relaxed);
+            v
+        }
         Err(e) => {
             crate::dbg_log!("OOB poll failed: {e}");
+            *state
+                .last_error
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = summarize_poll_error(&*e);
+            state.failed.fetch_add(1, Ordering::Relaxed);
+            // Two in a row: a single dropped poll is noise, a dead server is not.
+            if state.consecutive_failed.fetch_add(1, Ordering::Relaxed) + 1 >= 2 {
+                warn_poll_failure(silence, state);
+            }
             return;
         }
     };
@@ -154,6 +251,20 @@ async fn poll_once(
     let mut batch: Vec<ScanResult> = Vec::new();
     for it in interactions {
         let nonce = session.extract_nonce(&it.full_id).unwrap_or_default();
+        let record = session.registry().lookup(&nonce);
+        if record.is_none() {
+            // Bound the forgeable path before it can grow `seen` or `results`.
+            if state.unattributed.load(Ordering::Relaxed) >= MAX_UNATTRIBUTED_FINDINGS {
+                warn_once(
+                    silence,
+                    &state.warned_cap,
+                    &format!(
+                        "OOB: more than {MAX_UNATTRIBUTED_FINDINGS} callbacks matched no injected payload; ignoring the rest (the correlation id is visible to the target)"
+                    ),
+                );
+                continue;
+            }
+        }
         let dedup_key = dedup_key(&nonce, &it);
         {
             let mut guard = seen.lock().unwrap_or_else(PoisonError::into_inner);
@@ -161,7 +272,9 @@ async fn poll_once(
                 continue;
             }
         }
-        let record = session.registry().lookup(&nonce);
+        if record.is_none() {
+            state.unattributed.fetch_add(1, Ordering::Relaxed);
+        }
         if !silence {
             crate::ceprintln!("{}", live_line(&it, record.as_ref()));
         }

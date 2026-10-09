@@ -228,18 +228,26 @@ impl<'a> DomXssVisitor<'a> {
                     self.var_aliases.remove(target_name);
                 }
 
-                if self.is_assignment_sink_property(target_name) && right_tainted {
-                    self.report_vulnerability_with_source(
-                        assign.span(),
-                        target_name,
-                        right_source.clone(),
-                    );
-                }
+                // No sink check here: a bare `href = tainted` assigns a plain
+                // (implicit-global) variable, not the `href` property of any
+                // element. The taint is recorded above, so a later real sink
+                // (`a.href = href`) still reports.
             }
             _ => {}
         }
         // Walk the right side
         self.walk_expression(&assign.right);
+    }
+    /// Attributes whose value is script or a script-bearing URL when set via
+    /// `setAttribute`/`setAttributeNS`/`Reflect.apply` (`name` is lowercased).
+    /// Mirrors the property sinks in `is_assignment_sink_property`; `action`
+    /// is deliberately absent (needs a form receiver) and so is `data`.
+    fn is_dangerous_attr_name(name: &str) -> bool {
+        name.starts_with("on")
+            || matches!(
+                name,
+                "href" | "xlink:href" | "srcdoc" | "src" | "formaction"
+            )
     }
     /// A call whose *member method* names a sink (`el.insertAdjacentHTML(...)`, `document['write'](...)`), including the computed-property spelling.
     pub(super) fn handle_member_method_sink(&mut self, call: &CallExpression<'a>) -> bool {
@@ -257,10 +265,13 @@ impl<'a> DomXssVisitor<'a> {
                     .and_then(|arg0| self.eval_static_string_arg(arg0))
                     .map(|name| name.to_ascii_lowercase());
                 if let Some(name) = attr_name_lc {
-                    let dangerous = name.starts_with("on")
-                        || name == "href"
-                        || name == "xlink:href"
-                        || name == "srcdoc";
+                    // `action` only counts on a real `<form>` receiver, never by
+                    // name alone (see `form.action` in the assignment path).
+                    let dangerous = Self::is_dangerous_attr_name(&name)
+                        || (name == "action"
+                            && self
+                                .get_callee_object_expr(&call.callee)
+                                .is_some_and(|recv| self.expr_resolves_to_form(recv)));
                     if dangerous && let Some(arg1) = call.arguments.get(1) {
                         let (tainted, source_hint) = self.argument_taint_and_source(arg1);
                         if tainted {
@@ -285,10 +296,7 @@ impl<'a> DomXssVisitor<'a> {
                     // Namespaced attribute names arrive as `xlink:href` or a
                     // bare local name depending on the call, so match both.
                     let local = name.rsplit(':').next().unwrap_or(&name);
-                    let dangerous = local.starts_with("on")
-                        || local == "href"
-                        || local == "srcdoc"
-                        || name == "xlink:href";
+                    let dangerous = Self::is_dangerous_attr_name(local);
                     if dangerous && let Some(arg2) = call.arguments.get(2) {
                         let (tainted, source_hint) = self.argument_taint_and_source(arg2);
                         if tainted {
@@ -786,10 +794,7 @@ impl<'a> DomXssVisitor<'a> {
                             .resolve_apply_static_string_at(arg_array, 0)
                             .map(|name| name.to_ascii_lowercase());
                         if let Some(name) = attr_name_lc {
-                            let dangerous = name.starts_with("on")
-                                || name == "href"
-                                || name == "xlink:href"
-                                || name == "srcdoc";
+                            let dangerous = Self::is_dangerous_attr_name(&name);
                             if dangerous {
                                 let (tainted, source_hint) =
                                     self.resolve_apply_argument_taint_at(arg_array, 1);

@@ -28,6 +28,10 @@ struct MockState {
     /// Bare host[:port] the client embeds in callback hosts.
     host: String,
     deregistered: bool,
+    /// Make `/poll` answer HTTP 500.
+    poll_fails: bool,
+    /// Make the next poll return this many callbacks with distinct, unregistered nonces.
+    flood: usize,
     /// How many times the poller hit `/poll` — proves it ran.
     poll_count: usize,
 }
@@ -52,10 +56,54 @@ async fn deregister(State(s): State<Shared>, Json(_body): Json<Value>) -> Json<V
     Json(json!({ "message": "deregistration successful" }))
 }
 
-async fn poll(State(s): State<Shared>, Query(_q): Query<HashMap<String, String>>) -> Json<Value> {
-    let (pubkey, corr, nonce, host) = {
+async fn poll(
+    State(s): State<Shared>,
+    Query(_q): Query<HashMap<String, String>>,
+) -> (axum::http::StatusCode, Json<Value>) {
+    let (fails, flood) = {
         let mut st = s.lock().unwrap();
         st.poll_count += 1;
+        (st.poll_fails, std::mem::take(&mut st.flood))
+    };
+    if fails {
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({})),
+        );
+    }
+    if flood > 0 {
+        let (pubkey, corr, host) = {
+            let st = s.lock().unwrap();
+            (
+                st.public_key_b64.clone().unwrap(),
+                st.correlation_id.clone().unwrap(),
+                st.host.clone(),
+            )
+        };
+        // One RSA wrap (the slow part in a debug build) for the whole batch;
+        // every entry shares the AES key it wraps.
+        let (_, aes_key_b64) = server_encrypt(&pubkey, b"");
+        let data: Vec<String> = (0..flood)
+            .map(|i| {
+                let interaction = json!({
+                    "protocol": "dns",
+                    "full-id": format!("{corr}forged{i:07}.{host}"),
+                    "remote-address": "198.51.100.1",
+                });
+                aes_blob(interaction.to_string().as_bytes())
+            })
+            .collect();
+        return (
+            axum::http::StatusCode::OK,
+            Json(json!({ "data": data, "aes_key": aes_key_b64 })),
+        );
+    }
+    (axum::http::StatusCode::OK, poll_one(s).await)
+}
+
+async fn poll_one(s: Shared) -> Json<Value> {
+    let (pubkey, corr, nonce, host) = {
+        let mut st = s.lock().unwrap();
         (
             st.public_key_b64.clone(),
             st.correlation_id.clone(),
@@ -78,6 +126,20 @@ async fn poll(State(s): State<Shared>, Query(_q): Query<HashMap<String, String>>
     });
     let (data_b64, aes_key_b64) = server_encrypt(&pubkey, interaction.to_string().as_bytes());
     Json(json!({ "data": [data_b64], "aes_key": aes_key_b64 }))
+}
+
+/// `base64(IV ‖ AES-256-CTR(plaintext))` under the fixed key `server_encrypt` wraps.
+fn aes_blob(plaintext: &[u8]) -> String {
+    use ctr::cipher::{KeyIvInit, StreamCipher};
+    type Aes256Ctr = ctr::Ctr128BE<aes::Aes256>;
+    let iv = [3u8; 16];
+    let mut buf = plaintext.to_vec();
+    Aes256Ctr::new_from_slices(&[0x11u8; 32], &iv)
+        .unwrap()
+        .apply_keystream(&mut buf);
+    let mut blob = iv.to_vec();
+    blob.extend_from_slice(&buf);
+    B64.encode(&blob)
 }
 
 /// Mirror the interactsh server: RSA-OAEP(SHA-256)-wrap a random AES key to the
@@ -214,6 +276,78 @@ fn interaction_reads_null_and_missing_fields_as_empty() {
     assert_eq!(it.protocol, "dns");
     assert_eq!(it.full_id, "abc.oast.fun");
     assert!(it.remote_address.is_empty() && it.timestamp.is_empty());
+}
+
+/// Start the mock and a session registered against it.
+async fn mock_session() -> (Shared, OobSession) {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let app = Router::new()
+        .route("/register", post(register))
+        .route("/poll", get(poll))
+        .route("/deregister", post(deregister))
+        .with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock interactsh");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    state.lock().unwrap().host = addr.to_string();
+    crate::ensure_crypto_provider();
+    let session = OobSession::start(&OobConfig {
+        servers: vec![format!("http://{addr}")],
+        secret: None,
+        wait_secs: 1,
+        timeout: 5,
+        proxy: None,
+        insecure: true,
+    })
+    .await
+    .expect("register with mock");
+    (state, session)
+}
+
+#[tokio::test]
+async fn oob_poll_failures_are_reported_not_swallowed() {
+    let (state, session) = mock_session().await;
+    state.lock().unwrap().poll_fails = true;
+    let poller = spawn_poller(
+        Arc::new(session),
+        Arc::new(TokioMutex::new(Vec::new())),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+        /* silence */ false,
+    );
+    let probe = poller.probe();
+    poller.finish(Duration::from_millis(300)).await;
+    assert!(
+        probe().0,
+        "a server that registers fine but fails every poll must produce a warning"
+    );
+}
+
+#[tokio::test]
+async fn oob_unregistered_nonce_findings_are_capped() {
+    let (state, session) = mock_session().await;
+    let extra = 50;
+    state.lock().unwrap().flood = super::poller::MAX_UNATTRIBUTED_FINDINGS + extra;
+    let results = Arc::new(TokioMutex::new(Vec::new()));
+    let poller = spawn_poller(
+        Arc::new(session),
+        results.clone(),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+        /* silence */ true,
+    );
+    let probe = poller.probe();
+    poller.finish(Duration::from_millis(400)).await;
+    assert_eq!(
+        results.lock().await.len(),
+        super::poller::MAX_UNATTRIBUTED_FINDINGS,
+        "forgeable unregistered-nonce hits must stop at the cap"
+    );
+    assert_eq!(probe().1, super::poller::MAX_UNATTRIBUTED_FINDINGS);
 }
 
 /// A server/MCP job that enables `blind_oob` must start the OOB poller bound to

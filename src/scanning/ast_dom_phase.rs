@@ -3,11 +3,20 @@
 //! Extracted from the scanning hub; see `mod.rs` for the pipeline overview.
 
 use super::*;
+use std::collections::HashMap;
 
 /// Maximum number of distinct same-origin external JS files fetched per target page fetch.
 pub(crate) const MAX_EXTERNAL_JS_FILES: usize = 16;
 /// Maximum bytes read from a single external JS file (matches analyzer limit).
 pub(crate) const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
+/// Ceiling on distinct light-verify GETs per `run_ast_dom_analysis` call (one
+/// call per parameter). The page chooses how many sinks it carries, so without
+/// a bound a 512 KiB script costs ~19k sequential requests per parameter.
+/// Findings past it are still reported, just unverified.
+const MAX_AST_LIGHT_VERIFY: usize = 32;
+/// Ceiling on findings per call that keep a response copy (<= 64 KiB each).
+const MAX_AST_EVIDENCE_BODIES: usize = 64;
+
 /// Run AST-based DOM XSS static analysis on the given response HTML.
 ///
 /// `injected` is the value `param` carried in the request that produced
@@ -17,6 +26,7 @@ pub(crate) const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
 /// Extracts JavaScript blocks, analyses each for DOM XSS flows, performs
 /// lightweight runtime verification, and returns any findings.  De-duplicates
 /// against `ast_seen` (shared across calls for the same parameter).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_ast_dom_analysis(
     client: &reqwest::Client,
     target: &Target,
@@ -25,8 +35,15 @@ pub(crate) async fn run_ast_dom_analysis(
     injected: &str,
     xml_response: bool,
     ast_seen: &mut HashSet<String>,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
+    // Light-verify outcome per distinct payload: the request depends only on
+    // (target, param, payload), so N sinks sharing a payload cost one GET.
+    // The cached body is already bounded.
+    type LightVerdict = (bool, Option<String>, Option<String>);
+    let mut verify_cache: HashMap<String, LightVerdict> = HashMap::new();
+    let mut evidence_left = MAX_AST_EVIDENCE_BODIES;
     // The response carries this request's marker in `param`, so the markup
     // slots holding it are proven reflections (see `PageMarkup`).
     let (js_blocks, script_element_ids, mut reflected_markup) = if xml_response {
@@ -42,6 +59,9 @@ pub(crate) async fn run_ast_dom_analysis(
     }
     reflected_markup.sent_value = Some(injected.to_string());
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
+    // Shared across blocks: a per-block clone is O(blocks x ids).
+    let (script_element_ids, reflected_markup) =
+        (Arc::new(script_element_ids), Arc::new(reflected_markup));
     for js_code in js_blocks {
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
@@ -72,6 +92,10 @@ pub(crate) async fn run_ast_dom_analysis(
                     &vuln.source,
                 );
             let source_uses_url_surface = ast_source_uses_browser_url_surface(&vuln.source);
+            // As-sent payload (pre-encoding applied) so the PoC URL reproduces
+            // the finding, like the reflection / DOM phases. Raw for URL-surface
+            // sources, which ride in the fragment / query / path of the page.
+            let wire_payload = crate::encoding::pre_encoding::apply_param_encoding(&payload, param);
             let result_url = if source_uses_url_surface {
                 crate::scanning::ast_integration::build_dom_xss_poc_url(
                     target.url.as_str(),
@@ -80,7 +104,7 @@ pub(crate) async fn run_ast_dom_analysis(
                 )
             } else {
                 let base = crate::scanning::url_inject::effective_query_base(&target.url, param);
-                crate::scanning::url_inject::build_injected_url(&base, param, &payload)
+                crate::scanning::url_inject::build_injected_url(&base, param, &wire_payload)
             };
             // Graded from the flow's own shape, so the light-check and
             // self-bootstrap upgrades below can leave `result_type` at
@@ -130,22 +154,42 @@ pub(crate) async fn run_ast_dom_analysis(
             ast_result.poc_url_complete = source_uses_url_surface;
             if !source_uses_url_surface {
                 ast_result.request = Some(build_request_text(target, param, &payload));
+                ast_result.wire_payload = (wire_payload != payload).then_some(wire_payload);
             }
-            ast_result.response = Some(crate::scanning::result::bound_evidence_body(
-                response_text.to_string(),
-                &payload,
-            ));
-            // Lightweight runtime verification (non-headless)
-            let (verified, rt_resp, note) =
-                crate::scanning::light_verify::verify_dom_xss_light_with_client(
-                    client, target, param, &payload,
-                )
-                .await;
-            if let Some(runtime_response) = rt_resp {
-                ast_result.response = Some(crate::scanning::result::bound_evidence_body(
-                    runtime_response,
-                    &payload,
-                ));
+            // Lightweight runtime verification (non-headless), once per
+            // distinct payload and only up to the per-call cap / until cancel.
+            if !verify_cache.contains_key(&payload) {
+                let entry = if verify_cache.len() >= MAX_AST_LIGHT_VERIFY
+                    || cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed))
+                {
+                    (
+                        false,
+                        None,
+                        Some("light check skipped: verification cap or scan cancelled".to_string()),
+                    )
+                } else {
+                    let (v, resp, n) =
+                        crate::scanning::light_verify::verify_dom_xss_light_with_client(
+                            client, target, param, &payload,
+                        )
+                        .await;
+                    let resp =
+                        resp.map(|r| crate::scanning::result::bound_evidence_body(r, &payload));
+                    (v, resp, n)
+                };
+                verify_cache.insert(payload.clone(), entry);
+            }
+            let (verified, rt_resp, note) = &verify_cache[&payload];
+            let verified = *verified;
+            if evidence_left > 0 {
+                evidence_left -= 1;
+                ast_result.response = Some(match rt_resp {
+                    Some(b) => b.clone(),
+                    None => crate::scanning::result::bound_evidence_body(
+                        response_text.to_string(),
+                        &payload,
+                    ),
+                });
             }
             if verified {
                 ast_result.result_type = FindingType::Verified;
@@ -231,7 +275,8 @@ pub(crate) async fn fetch_and_analyze_external_js(
     let script_urls =
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
 
-    let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(html);
+    let script_element_ids =
+        Arc::new(crate::scanning::ast_integration::extract_script_element_ids(html));
     // The posture comes from the *page's* CSP, not each script's response: the
     // policy that governs whether an injected handler runs is the document's.
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);

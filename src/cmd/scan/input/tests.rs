@@ -198,8 +198,10 @@ async fn exclude_url_drops_matching_targets() {
 
 #[tokio::test]
 async fn invalid_scope_regex_is_skipped_not_fatal() {
-    // An unparseable --include-url is warned about and dropped; with no other
-    // valid include pattern the filter is a no-op, so the target survives.
+    // The resolver itself stays lenient: an unparseable --include-url is warned
+    // about and dropped, and with no other valid pattern the target survives.
+    // `startup::prepare_and_validate` rejects it before this runs in `run_scan`
+    // (see `test_e2e_invalid_scope_regex_is_fatal`).
     let args = args_from(&[
         "-i",
         "url",
@@ -656,6 +658,84 @@ fn apply_request_cli_header_overrides_imported_user_agent() {
 }
 
 #[test]
+fn apply_request_cli_overrides_replace_same_name_header_and_cookie() {
+    // A kept stale `Authorization` / `sess=OLD` goes out first and wins on the
+    // server, so a refreshed credential on an old capture was silently ignored.
+    let mut target = crate::target_parser::parse_raw_http_request(
+        "GET /p HTTP/1.1\r\nHost: ov.example\r\nAuthorization: Bearer OLD\r\nX-Keep: k\r\nCookie: sess=OLD; keep=1\r\n\r\n",
+    )
+    .expect("raw request parses");
+    let args = args_from(&[
+        "-i",
+        "raw-http",
+        "-S",
+        "-H",
+        "authorization: Bearer NEW",
+        "-H",
+        "X-Multi: a",
+        "-H",
+        "X-Multi: b",
+        "--cookies",
+        "sess=NEW",
+        "ignored.example",
+    ]);
+
+    apply_request_cli_overrides(&mut target, &args);
+
+    let named = |n: &str| -> Vec<&str> {
+        target
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case(n))
+            .map(|(_, v)| v.as_str())
+            .collect()
+    };
+    assert_eq!(named("authorization"), ["Bearer NEW"]);
+    assert_eq!(named("x-keep"), ["k"]);
+    assert_eq!(named("x-multi"), ["a", "b"], "repeated CLI -H all survive");
+    let sess: Vec<_> = target.cookies.iter().filter(|(k, _)| k == "sess").collect();
+    assert_eq!(sess.len(), 1);
+    assert_eq!(sess[0].1, "NEW");
+    assert!(target.cookies.iter().any(|(k, v)| k == "keep" && v == "1"));
+}
+
+#[test]
+fn apply_request_cli_cookie_header_replaces_captured_cookies_per_cookie() {
+    let mut target = crate::target_parser::parse_raw_http_request(
+        "GET /p HTTP/1.1\r\nHost: ov.example\r\nCookie: old=1\r\n\r\n",
+    )
+    .expect("raw request parses");
+    let args = args_from(&[
+        "-i",
+        "raw-http",
+        "-S",
+        "-H",
+        "Cookie: other=1; sid=abc",
+        "--cookies",
+        "dropped=1",
+        "ignored.example",
+    ]);
+
+    apply_request_cli_overrides(&mut target, &args);
+
+    // Replaces the captured cookies and `--cookies` outright (documented), but
+    // as per-cookie params, not a literal header.
+    assert_eq!(
+        target.cookies,
+        vec![
+            ("other".to_string(), "1".to_string()),
+            ("sid".to_string(), "abc".to_string())
+        ]
+    );
+    assert!(
+        !target
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+    );
+}
+
+#[test]
 fn apply_request_cli_overrides_keeps_request_method_without_flag() {
     let mut target = crate::target_parser::parse_raw_http_request(
         "DELETE /thing HTTP/1.1\r\nHost: keep.example\r\n\r\n",
@@ -827,6 +907,36 @@ async fn dedup_urls_signature_flows_through_resolve_targets() {
     assert_eq!(resolved.targets.len(), 2);
     assert_eq!(resolved.dedup.mode, "signature");
     assert_eq!(resolved.dedup.collapsed, 1);
+}
+
+#[test]
+fn exact_dedup_keeps_requests_that_differ_only_in_body() {
+    // HAR / raw-http entries to one URL: the second POST's body parameters
+    // were dropped before discovery, so `b` was never scanned.
+    let post = |body: &str| {
+        let mut t = target_at("http://h.example/api");
+        t.method = "POST".to_string();
+        t.data = Some(body.to_string());
+        t
+    };
+    let mut targets = vec![post("a=1"), post("b=2"), post("a=1")];
+    let stats = dedup_targets(&mut targets, "exact");
+    assert_eq!(
+        targets.len(),
+        2,
+        "different bodies stay, identical collapse"
+    );
+    assert_eq!(stats.collapsed, 1);
+
+    // Drifting cookies / headers (a browser HAR repeating one URL) are not a
+    // different request: they must not defeat the collapse.
+    let mut with_cookie = post("a=1");
+    with_cookie.cookies.push(("s".into(), "x".into()));
+    let mut with_header = post("a=1");
+    with_header.headers.push(("X-T".into(), "y".into()));
+    let mut targets = vec![post("a=1"), with_cookie, with_header];
+    dedup_targets(&mut targets, "exact");
+    assert_eq!(targets.len(), 1);
 }
 
 #[tokio::test]
@@ -1183,6 +1293,45 @@ async fn auto_mode_bare_host_without_a_matching_file_stays_a_url() {
         assert_eq!(targets.len(), 1, "{arg}");
         assert!(targets[0].url.host_str().is_some(), "{arg}");
     }
+}
+
+#[tokio::test]
+async fn auto_mode_directory_named_like_a_host_stays_a_url() {
+    // `wget -r example.com` / recon dumps leave `./example.com/` behind; that
+    // directory is not a target list and must not turn the host into a fatal
+    // "is not a regular file". Relative to the cwd, like the real invocation.
+    let name = format!("dalfoxdirhost{}", std::process::id());
+    std::fs::create_dir(&name).expect("create host-named dir");
+    let args = args_from(&["-S", &name]);
+    let got = resolve(&args).await;
+    // A path-shaped directory argument keeps the explicit error.
+    let tmp = std::env::temp_dir();
+    let path_args = args_from(&["-S", tmp.to_str().unwrap()]);
+    let path_got = resolve(&path_args).await;
+    std::fs::remove_dir(&name).ok();
+    assert_eq!(got.expect("bare-name dir resolves as a host").len(), 1);
+    assert!(
+        path_got.is_err(),
+        "an absolute directory path stays an error"
+    );
+}
+
+#[test]
+fn stdin_is_only_skipped_for_binaries_under_a_deps_dir() {
+    use std::path::Path;
+    // cargo test binaries live in target/<profile>/deps/ and must not read the
+    // harness's stdin; a renamed or symlinked dalfox must.
+    assert!(is_test_harness_exe(Some(Path::new(
+        "/w/target/debug/deps/dalfox-1a2b3c"
+    ))));
+    for exe in [
+        "/usr/local/bin/dx",
+        "/w/target/debug/dalfox",
+        "/opt/dalfox-linux-amd64",
+    ] {
+        assert!(!is_test_harness_exe(Some(Path::new(exe))), "{exe}");
+    }
+    assert!(!is_test_harness_exe(None));
 }
 
 // ── --out-of-scope-file ─────────────────────────────────────────────

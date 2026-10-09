@@ -44,7 +44,7 @@ fn host_group_slots(max_concurrent_targets: usize) -> usize {
 /// cheapest way to notice the flip. The poll only runs while a target's
 /// `--scan-timeout` is in effect and stops the moment that target's scan
 /// future completes (the `select!` drops this arm).
-async fn poll_cancel(flag: &AtomicBool) {
+pub(super) async fn poll_cancel(flag: &AtomicBool) {
     while !flag.load(Ordering::Relaxed) {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -98,6 +98,30 @@ async fn run_target_capped<T>(
         }
     }
     (timed_out, out)
+}
+
+/// Record `outcome` for `--state-file`. A `completed` target whose findings
+/// are still only in `results` (and not already streamed to stdout) is held back
+/// until the report is written — see `StateFile::defer_completed`.
+async fn record_target_outcome(
+    sf: &super::state_file::StateFile,
+    target: &Target,
+    outcome: super::state_file::TargetOutcome,
+    results: &Mutex<Vec<crate::scanning::result::Result>>,
+    streamed_live: bool,
+) {
+    if outcome == super::state_file::TargetOutcome::Completed
+        && !streamed_live
+        && results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.origin_target.as_deref() == Some(target.url.as_str()))
+    {
+        sf.defer_completed(target);
+    } else {
+        sf.record(target, outcome);
+    }
 }
 
 pub(crate) async fn run_scan_loop(
@@ -513,6 +537,8 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
         let skipped_targets_target = skipped_targets_group.clone();
         let interrupted_targets_target = interrupted_targets_group.clone();
         let state_file_target = state_file_group.clone();
+        let results_for_state = results_clone.clone();
+        let streamed_live = finding_tx_group.is_some();
 
         let multi_pb_active = multi_pb_clone_inner.is_some();
         let panic_target_url = target.url.to_string();
@@ -688,7 +714,14 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                         } else {
                             super::state_file::TargetOutcome::Completed
                         };
-                        sf.record(&target, outcome);
+                        record_target_outcome(
+                            sf,
+                            &target,
+                            outcome,
+                            &results_for_state,
+                            streamed_live,
+                        )
+                        .await;
                     }
                 } else if let Some(sf) = &state_file_target {
                     // `--skip-xss-scanning`: the injection stage is off, but
@@ -698,7 +731,14 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     // of redoing every target while looking resumable. Safe
                     // because `skip_xss_scanning` is part of the config hash:
                     // a later run that does scan does not reuse these.
-                    sf.record(&target, super::state_file::TargetOutcome::Completed);
+                    record_target_outcome(
+                        sf,
+                        &target,
+                        super::state_file::TargetOutcome::Completed,
+                        &results_for_state,
+                        streamed_live,
+                    )
+                    .await;
                 }
                 drop(permit);
             });

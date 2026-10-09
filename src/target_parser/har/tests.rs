@@ -325,3 +325,26 @@ fn drops_headers_reqwest_cannot_send() {
     assert!(!t.headers.iter().any(|(k, _)| k == "X Foo"));
     assert!(!t.headers.iter().any(|(k, _)| k == "X-Ctl"));
 }
+
+/// Go-based exporters write nil slices / empty strings as `null`; `serde(default)`
+/// alone only covers a missing key, so the whole capture used to be rejected.
+#[test]
+fn parse_har_accepts_null_for_array_and_string_fields() {
+    let har = r#"{"log":{"entries":[{"request":{
+        "method": null,
+        "url": "https://example.com/p?q=1",
+        "headers": null,
+        "cookies": null,
+        "postData": {"params": null}
+    }},{"request":{
+        "method": "GET",
+        "url": "https://example.com/h",
+        "headers": [{"name": "X-A", "value": null}, {"name": null, "value": "v"}],
+        "cookies": []
+    }}]}}"#;
+    let targets = parse_har(har).expect("null-bearing HAR must parse");
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].url.as_str(), "https://example.com/p?q=1");
+    let none = parse_har(r#"{"log":{"entries":null}}"#);
+    assert!(none.is_err(), "no entries is still the zero-requests error");
+}

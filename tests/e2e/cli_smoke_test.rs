@@ -559,6 +559,30 @@ fn test_e2e_non_regular_file_rejected() {
     );
 }
 
+#[test]
+fn test_e2e_invalid_scope_regex_is_fatal() {
+    // A glob typed as a regex used to be dropped with a warning, so the
+    // excluded URL was scanned anyway.
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "scan",
+            "--dry-run",
+            "--format",
+            "json",
+            "--exclude-url",
+            "*/admin*",
+            "http://127.0.0.1:1/admin?q=1",
+        ])
+        .output()
+        .expect("failed to execute dalfox scan");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("PARSE_ERROR") && stderr.contains("--exclude-url"),
+        "stderr:\n{stderr}"
+    );
+}
+
 /// Every shell `dalfox completion` accepts (i.e. every `clap_complete::Shell`).
 const COMPLETION_SHELLS: [&str; 5] = ["bash", "zsh", "fish", "powershell", "elvish"];
 

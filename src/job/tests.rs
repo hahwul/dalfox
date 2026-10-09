@@ -211,6 +211,50 @@ fn split_cookie_pairs_splits_and_trims_multi_cookie_value() {
 }
 
 #[test]
+fn lift_cookie_headers_moves_pairs_and_keeps_unparseable_headers() {
+    let mut headers = vec![
+        ("X-A".to_string(), "1".to_string()),
+        ("COOKIE".to_string(), "a=1; sid=x".to_string()),
+        ("Cookie".to_string(), "junk".to_string()),
+    ];
+    let mut cookies = vec![("sid".to_string(), "dropped".to_string())];
+    lift_cookie_headers(&mut headers, &mut cookies);
+    // The header replaces `--cookies`, as it always did on the wire; the
+    // header with no pair is left alone.
+    assert_eq!(
+        cookies,
+        vec![
+            ("a".to_string(), "1".to_string()),
+            ("sid".to_string(), "x".to_string())
+        ]
+    );
+    assert_eq!(
+        headers,
+        vec![
+            ("X-A".to_string(), "1".to_string()),
+            ("Cookie".to_string(), "junk".to_string())
+        ]
+    );
+}
+
+#[test]
+fn hydrate_target_lifts_cookie_header_for_server_and_mcp() {
+    let args = crate::cmd::scan::ScanArgs {
+        headers: vec!["Cookie: other=1; sid=abc".to_string()],
+        ..Default::default()
+    };
+    let t = runner::hydrate_target("http://127.0.0.1:1/", &args).expect("hydrate");
+    assert_eq!(
+        t.cookies,
+        vec![
+            ("other".to_string(), "1".to_string()),
+            ("sid".to_string(), "abc".to_string())
+        ]
+    );
+    assert!(t.headers.is_empty());
+}
+
+#[test]
 fn job_status_rejects_unknown_variant() {
     assert!(serde_json::from_str::<JobStatus>("\"finished\"").is_err());
 }
@@ -1779,6 +1823,62 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
     }
 }
 
+/// One DOM sink is found by the preflight pass and again per parameter. The
+/// CLI folds those (`dedupe_ast_results`); the stored job results and the
+/// `findings_so_far` tally must match, not list the sink once per stage.
+#[tokio::test]
+async fn sanitized_results_folds_duplicate_ast_findings() {
+    use crate::scanning::result::{FindingType, Result as ScanResult};
+    let ast = |param: &str| {
+        ScanResult::builder(FindingType::AstDetected)
+            .inject_type("DOM-XSS")
+            .method("GET")
+            .data("http://t/")
+            .param(param)
+            .payload("")
+            .evidence("http://t/:1:1 - (Source: location.hash, Sink: innerHTML)")
+            .severity("Medium")
+            .message_id(0)
+            .build()
+    };
+    let reflected = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("http://t/?a=1")
+        .param("a")
+        .payload("x")
+        .evidence("e")
+        .severity("Low")
+        .message_id(7)
+        .build();
+    let run = runner::ScanRun {
+        results: Arc::new(tokio::sync::Mutex::new(vec![
+            ast("-"),
+            ast("a"),
+            reflected,
+            ast("b"),
+        ])),
+        reachability_failed: false,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+        findings_capped: false,
+        warnings: Vec::new(),
+        min_confidence: None,
+    };
+    let progress = JobProgress::default();
+    let out = run.sanitized_results(&progress, false, false).await;
+    assert_eq!(out.len(), 2, "three AST copies fold into one, R kept");
+    assert_eq!(
+        progress
+            .findings_so_far
+            .load(std::sync::atomic::Ordering::Relaxed),
+        2
+    );
+}
+
 /// `min_confidence = "high"` on a REST/MCP job drops low-graded findings from
 /// the stored results and the settled tally — the same predicate the CLI
 /// applies at render — while ungraded informational findings stay. Without
@@ -1787,7 +1887,9 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
 async fn sanitized_results_honor_min_confidence() {
     use crate::scanning::result::{Confidence, FindingType, Result as ScanResult};
     let graded = |t: FindingType, c: Option<Confidence>, param: &str| {
-        let mut r = ScanResult::builder(t).param(param).build();
+        // Non-zero `message_id`: 0 marks an AST finding, which the result
+        // fold collapses by evidence.
+        let mut r = ScanResult::builder(t).param(param).message_id(1).build();
         r.confidence = c;
         r
     };

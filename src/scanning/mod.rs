@@ -166,11 +166,16 @@ struct FoundParams {
 fn found_param_key(param: &Param) -> String {
     // `\u{1}` separator: not producible by a URL/header parameter name, so
     // concatenation cannot alias two different slots onto one key.
+    //
+    // A form field is sent to its form's action, so the same name posted to two
+    // different actions is two slots too (discovery keeps both, see
+    // `dedupe_reflection_params`); a finding at one must not skip the other.
     format!(
-        "{:?}\u{1}{}\u{1}{}",
+        "{:?}\u{1}{}\u{1}{}\u{1}{}",
         param.location,
         param.name,
-        param.effective_wire_name()
+        param.effective_wire_name(),
+        param.form_action_url.as_deref().unwrap_or("")
     )
 }
 
@@ -925,6 +930,7 @@ impl ScanWorkerCtx {
                     crate::scanning::markers::bracketed_marker(),
                     probe_response_is_xml,
                     &mut state.ast_seen,
+                    self.cancel.as_deref(),
                 )
                 .await;
                 for f in &ast_findings {
@@ -1152,6 +1158,7 @@ impl ScanWorkerCtx {
                         reflection_payload,
                         xml_content_type,
                         &mut state.ast_seen,
+                        self.cancel.as_deref(),
                     )
                     .await;
                     for f in &ast_findings {
@@ -1962,8 +1969,13 @@ pub async fn run_scanning(
             // Bump the live completion counter after this parameter is fully
             // processed (covers every `scan_param` exit path, including the
             // non-reflective early return), so async front-ends observe
-            // `params_tested` advancing as each worker finishes.
-            if let Some(done) = &ctx.params_done {
+            // `params_tested` advancing as each worker finishes. Not once the
+            // scan is cancelled: every queued worker returns early then, and
+            // counting them would read a cancelled scan as 100% tested (the
+            // runner deliberately skips pinning `params_tested` for that).
+            if !ctx.cancelled()
+                && let Some(done) = &ctx.params_done
+            {
                 done.fetch_add(1, Ordering::Relaxed);
             }
         }));

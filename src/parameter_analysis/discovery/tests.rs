@@ -68,6 +68,11 @@ async fn start_discovery_mock_server() -> SocketAddr {
     addr
 }
 
+/// The page every `dedupe_reflection_params` test treats as the scanned target.
+fn page_url() -> url::Url {
+    url::Url::parse("https://x/y?q=1").unwrap()
+}
+
 async fn reflect_last_query_value(uri: Uri) -> String {
     uri.query()
         .into_iter()
@@ -116,7 +121,7 @@ async fn same_named_header_and_cookie_keep_distinct_injection_locations() {
     check_cookie_discovery(&target, &args, reflection_params.clone(), semaphore).await;
     {
         let mut params = reflection_params.lock().await;
-        dedupe_reflection_params(&mut params);
+        dedupe_reflection_params(&mut params, &page_url());
     }
 
     let param = reflection_params
@@ -812,7 +817,7 @@ fn test_dedupe_collapses_same_name_location_pair() {
             ..Param::new("query".to_string(), String::new(), Location::Query)
         },
     ];
-    dedupe_reflection_params(&mut params);
+    dedupe_reflection_params(&mut params, &page_url());
     assert_eq!(params.len(), 1, "duplicates must collapse");
     // injection_context filled in from the second entry
     assert!(params[0].injection_context.is_some());
@@ -829,13 +834,65 @@ fn test_dedupe_collapses_same_name_location_pair() {
     assert!(!i.contains(&'\''));
 }
 
+/// The same field name probed at two endpoints is two sinks: a form that posts
+/// to another path must not be folded into the page's own query param (the
+/// merge used to graft the form's action onto it, so only the form's endpoint
+/// was ever scanned), and two forms with different actions must both survive.
+#[test]
+fn test_dedupe_keeps_same_name_at_different_form_actions_distinct() {
+    let form = |action: &str, location: Location| Param {
+        form_action_url: Some(action.to_string()),
+        ..Param::new("q".to_string(), String::new(), location)
+    };
+    // Page query `q` (no action) + a GET form to /search.
+    let mut params = vec![
+        Param::new("q".to_string(), "1".to_string(), Location::Query),
+        form("https://x/search", Location::Query),
+    ];
+    dedupe_reflection_params(&mut params, &page_url());
+    assert_eq!(params.len(), 2);
+    assert_eq!(params[0].form_action_url, None, "page param keeps its URL");
+
+    // Two forms, same field, different actions.
+    let mut params = vec![
+        form("https://x/a", Location::Body),
+        form("https://x/b", Location::Body),
+    ];
+    dedupe_reflection_params(&mut params, &page_url());
+    assert_eq!(params.len(), 2);
+
+    // A form that posts back to the page itself is still the same slot.
+    let mut params = vec![
+        Param::new("q".to_string(), "1".to_string(), Location::Query),
+        form("https://x/y", Location::Query),
+    ];
+    dedupe_reflection_params(&mut params, &page_url());
+    assert_eq!(params.len(), 1);
+
+    // Same path, different routing query: two handlers, two sinks.
+    let mut params = vec![
+        form("https://x/index.php?page=search", Location::Body),
+        form("https://x/index.php?page=profile", Location::Body),
+    ];
+    dedupe_reflection_params(&mut params, &page_url());
+    assert_eq!(params.len(), 2);
+
+    // Same route on both forms: one slot.
+    let mut params = vec![
+        form("https://x/index.php?page=search", Location::Body),
+        form("https://x/index.php?page=search", Location::Body),
+    ];
+    dedupe_reflection_params(&mut params, &page_url());
+    assert_eq!(params.len(), 1);
+}
+
 #[test]
 fn test_dedupe_keeps_different_locations_distinct() {
     let mut params = vec![
         Param::new("q".to_string(), String::new(), Location::Query),
         Param::new("q".to_string(), String::new(), Location::Body),
     ];
-    dedupe_reflection_params(&mut params);
+    dedupe_reflection_params(&mut params, &page_url());
     assert_eq!(params.len(), 2);
 }
 
@@ -846,7 +903,7 @@ fn test_dedupe_is_noop_for_unique_entries() {
         Param::new("b".to_string(), String::new(), Location::Query),
     ];
     let before = params.clone();
-    dedupe_reflection_params(&mut params);
+    dedupe_reflection_params(&mut params, &page_url());
     assert_eq!(params.len(), 2);
     assert_eq!(params[0].name, before[0].name);
     assert_eq!(params[1].name, before[1].name);
@@ -871,7 +928,7 @@ fn test_dedupe_fills_remaining_metadata_from_duplicate() {
             ..Param::new("p".to_string(), String::new(), Location::Query)
         },
     ];
-    dedupe_reflection_params(&mut params);
+    dedupe_reflection_params(&mut params, &page_url());
     assert_eq!(params.len(), 1, "same name+location must collapse");
     let merged = &params[0];
     assert_eq!(merged.js_breakout.as_deref(), Some("';alert(1)//"));
@@ -909,7 +966,7 @@ fn test_dedupe_keeps_canonical_metadata_over_duplicate() {
             ..Param::new("p".to_string(), String::new(), Location::Query)
         },
     ];
-    dedupe_reflection_params(&mut params);
+    dedupe_reflection_params(&mut params, &page_url());
     assert_eq!(params.len(), 1);
     let merged = &params[0];
     assert_eq!(merged.pre_encoding.as_deref(), Some("base-enc"));
@@ -1423,6 +1480,62 @@ async fn test_check_form_discovery_caps_get_form_fields() {
     );
 }
 
+/// An inline JSON object / `JSON.stringify` literal with many keys must not buy
+/// one full-object POST per key: probing is capped at `MAX_FORM_FIELDS` like
+/// the form branches (keys^2 bytes otherwise).
+#[tokio::test]
+async fn test_check_form_discovery_caps_inline_json_keys() {
+    const KEYS: usize = 260;
+    let obj = (0..KEYS)
+        .map(|i| format!("\"k{i}\":\"v\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    // The stringify literal is also an inline JSON object, so it is probed by
+    // both loops: 2 x MAX_FORM_FIELDS.
+    let pages = [
+        (format!("<html>{{{obj}}}</html>"), 200),
+        (
+            format!("<script>fetch(u,{{body:JSON.stringify({{{obj}}})}})</script>"),
+            400,
+        ),
+    ];
+    for (html, max) in pages {
+        let posts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = posts.clone();
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("local addr");
+        let app = Router::new().route(
+            "/",
+            any(move |method: axum::http::Method| {
+                let html = html.clone();
+                let counter = counter.clone();
+                async move {
+                    if method == axum::http::Method::POST {
+                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    html
+                }
+            }),
+        );
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        sleep(Duration::from_millis(20)).await;
+
+        let mut target = parse_target(&format!("http://{}/", addr)).unwrap();
+        target.delay = 0;
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        check_form_discovery(&target, reflection_params, Arc::new(Semaphore::new(4))).await;
+        let probed = posts.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            (1..=max).contains(&probed),
+            "a {KEYS}-key object must be probed at most MAX_FORM_FIELDS times per loop, got {probed}"
+        );
+    }
+}
+
 /// Under `--sxss`, form fields are kept even when the write response does not
 /// echo the probe (a stored sink answers "saved"), carrying the form URLs the
 /// stored-XSS stages resolve their check URLs from. Without `--sxss` the same
@@ -1543,7 +1656,7 @@ fn dedupe_reflection_params_is_linear_in_duplicates() {
     params
         .extend((0..20_000).map(|i| Param::new(format!("p{i}"), "w".to_string(), Location::Query)));
     let start = std::time::Instant::now();
-    dedupe_reflection_params(&mut params);
+    dedupe_reflection_params(&mut params, &page_url());
     assert_eq!(params.len(), 20_000);
     assert_eq!(params[0].value, "v", "first occurrence stays canonical");
     assert!(

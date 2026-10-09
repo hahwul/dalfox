@@ -2,6 +2,28 @@
 
 use super::*;
 
+/// Distinct `<input>` id/name values in document order. Order matters: the
+/// result is truncated by `cap_dom_params`, and a hash-order set made the kept
+/// subset differ from run to run. The `scraper::Html` (which is `!Send`) stays
+/// inside this function.
+pub(super) fn dom_candidate_names(text: &str) -> Vec<String> {
+    let document = crate::utils::html::parse_document_bounded(text);
+    let selector = selectors::input_with_id_or_name();
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for element in document.select(selector) {
+        for attr in [element.value().attr("id"), element.value().attr("name")]
+            .into_iter()
+            .flatten()
+        {
+            if seen.insert(attr) {
+                names.push(attr.to_string());
+            }
+        }
+    }
+    names
+}
+
 pub async fn probe_response_id_params(
     target: &Target,
     args: &ScanArgs,
@@ -40,25 +62,12 @@ pub async fn probe_response_id_params(
 
     // Scope the scraper::Html (which is !Send) strictly to this block so the
     // owned candidate list is all that crosses the subsequent async engine.
-    let params_to_check: std::collections::HashSet<String> = {
-        let document = crate::utils::html::parse_document_bounded(&text);
-        let selector = selectors::input_with_id_or_name();
-        let mut set = std::collections::HashSet::new();
-        for element in document.select(selector) {
-            if let Some(id) = element.value().attr("id") {
-                set.insert(id.to_string());
-            }
-            if let Some(name) = element.value().attr("name") {
-                set.insert(name.to_string());
-            }
-        }
-        set
-    };
+    let params_to_check = dom_candidate_names(&text);
 
     // Cap the DOM candidate set so a hostile/huge response body cannot fan
     // out into one task/request per attribute. Bucketing then bounds the live
     // task count again while retaining the full capped candidate surface.
-    let (params_to_check, capped_from) = cap_dom_params(params_to_check.into_iter().collect());
+    let (params_to_check, capped_from) = cap_dom_params(params_to_check);
     if let Some(original) = capped_from
         && !args.silence
     {

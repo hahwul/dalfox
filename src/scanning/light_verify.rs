@@ -21,13 +21,31 @@ pub async fn verify_dom_xss_light_with_client(
     // build its own request and omitted the urlencoded `Content-Type`, so a
     // form-parsing server never bound the param and light verification came
     // back negative on Body params.
-    let request = crate::scanning::url_inject::build_inject_request(client, target, param, payload);
+    //
+    // Send the as-sent value (pre-encoding applied, like every other injection
+    // path) but keep the raw `payload` for the body checks below: the server
+    // decodes it and reflects the raw content.
+    let sent = crate::encoding::pre_encoding::apply_param_encoding(payload, param);
+    let request = crate::scanning::url_inject::build_inject_request(client, target, param, &sent);
 
     let mut note: Option<String> = None;
-    // Honor --rate-limit on this verification re-request without changing the
-    // historical request tally (this path intentionally does not tick).
-    crate::rate_limit_acquire().await;
-    if let Ok(resp) = request.send().await {
+    // Honor --rate-limit and count this verification re-request.
+    crate::record_outbound_request().await;
+    let sent_resp = request.send().await;
+    // Counted as a transport failure like every other direct send, so a
+    // verification request that never answered is not read as a clean miss.
+    if sent_resp.is_err() {
+        crate::tick_request_failure();
+    }
+    if let Ok(resp) = sent_resp {
+        // `--ignore-return`: a status the operator excluded never verifies.
+        if target.ignore_return.contains(&resp.status().as_u16()) {
+            return (
+                false,
+                None,
+                Some("status ignored — DOM verify skipped".to_string()),
+            );
+        }
         // Browsers do not render the body of a 3xx response, so any apparent
         // reflection/marker evidence inside that body cannot be exploited.
         // Skip body-based verification entirely on redirects.
@@ -50,7 +68,7 @@ pub async fn verify_dom_xss_light_with_client(
             .get("Content-Security-Policy")
             .and_then(|v| v.to_str().ok())
             .map(ToString::to_string);
-        if let Ok(text) = crate::utils::http::read_body(resp).await {
+        if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
             let marker_evidence =
                 crate::scanning::check_dom_verification::classify_dom_evidence_for_response(
                     payload, &text, &ct,

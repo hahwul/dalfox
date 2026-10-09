@@ -12,12 +12,21 @@ pub async fn probe_body_params(
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client_or_default();
-    let preexisting = snapshot_param_slots(&reflection_params).await;
 
     // A declared-multipart body is mined as multipart fields
     // (`probe_multipart_params`); probing it urlencoded too would only add
     // requests the endpoint can't parse and duplicate every field's slot.
     if let Some(data) = args.data.as_ref().filter(|_| !target.multipart) {
+        // JSON (GraphQL included) / XML bodies have their own probes.
+        // Form-parsing one yields a single pair keyed by the whole body, which
+        // an echoing endpoint reflects, registering a junk Body param that then
+        // eats the full payload catalog.
+        if serde_json::from_str::<serde_json::Value>(data)
+            .is_ok_and(|v| v.is_object() || v.is_array())
+            || request_is_xml(target, data)
+        {
+            return;
+        }
         // Assume form data for now (application/x-www-form-urlencoded)
         let params: Vec<(String, String)> = form_urlencoded::parse(data.as_bytes())
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -49,13 +58,6 @@ pub async fn probe_body_params(
         let shared_data: Arc<str> = Arc::from(data.as_str());
 
         for (param_name, _) in params {
-            // Early stop if collapsed
-            {
-                let st = stats.lock().await;
-                if st.collapsed {
-                    break;
-                }
-            }
             // Skip already discovered params — but only at *this* wire slot.
             // Keying on the name alone meant an ordinary
             // `dalfox scan '…?q=x' -d 'q=y'` never mined the body `q` at all,
@@ -123,33 +125,22 @@ pub async fn probe_body_params(
                         st.record_attempt();
                         if crate::scanning::markers::probe_reflected(&text) {
                             st.record_reflection();
-                            if !st.collapsed {
-                                discovered = Some(
-                                    Param::new(
-                                        param_name_cloned.clone(),
-                                        crate::scanning::markers::bracketed_marker().to_string(),
-                                        Location::Body,
-                                    )
-                                    .with_reflection_analysis(&text),
+                            // No EWMA fold: these names are the user's own `-d`
+                            // keys (bounded by the body), not wordlist guesses,
+                            // so an echoing page must not replace them with `any`.
+                            discovered = Some(
+                                Param::new(
+                                    param_name_cloned.clone(),
+                                    crate::scanning::markers::bracketed_marker().to_string(),
+                                    Location::Body,
+                                )
+                                .with_reflection_analysis(&text),
+                            );
+                            if !silence {
+                                eprintln!(
+                                    "Discovered body param: {} (EWMA {:.2}, {}/{})",
+                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
                                 );
-                                if !silence {
-                                    eprintln!(
-                                        "Discovered body param: {} (EWMA {:.2}, {}/{})",
-                                        param_name_cloned,
-                                        st.ewma_ratio,
-                                        st.reflections,
-                                        st.attempts
-                                    );
-                                }
-                                if st.should_collapse() {
-                                    st.collapsed = true;
-                                    if !silence {
-                                        eprintln!(
-                                            "[mining-collapse] Body mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                            st.ewma_ratio, st.attempts, st.reflections
-                                        );
-                                    }
-                                }
                             }
                         } else {
                             st.record_non_reflection();
@@ -171,13 +162,5 @@ pub async fn probe_body_params(
         }
 
         extend_with_joined(&reflection_params, handles).await;
-
-        // If collapsed after attempts, normalize the Body params this stage
-        // mined to a single 'any' param. Params discovered via other channels
-        // — and the Body params that were already known — are preserved.
-        let st_final = stats.lock().await;
-        if st_final.collapsed {
-            collapse_mined_params(&reflection_params, &preexisting, Location::Body, None).await;
-        }
     }
 }

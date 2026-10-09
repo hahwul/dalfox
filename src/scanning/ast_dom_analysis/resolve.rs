@@ -92,6 +92,14 @@ impl<'a> DomXssVisitor<'a> {
         let lower = name.to_lowercase();
         let func = lower.split('.').next_back().unwrap_or(&lower);
 
+        // The inverse operations contain the verb (`unescapeHtml` has
+        // "escape"+"html") but re-introduce markup, so they must not clear taint.
+        if ["unescape", "unsanitiz", "unencode", "deescape", "desanitiz"]
+            .iter()
+            .any(|inverse| func.contains(inverse))
+        {
+            return false;
+        }
         // "sanitize" combined with "html" or "xss"
         if func.contains("sanitize") && (func.contains("html") || func.contains("xss")) {
             return true;

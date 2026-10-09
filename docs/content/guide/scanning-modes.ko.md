@@ -77,7 +77,7 @@ cat urls.txt | dalfox scan https://target.app/one
 
 ### 거의 같은 URL 묶기
 
-기본값(`--dedup-urls exact`)에서 Dalfox는 완전히 같은 대상만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드가 모두 일치해야 합니다. 그런데 `gau` / `katana` / `waybackurls` 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 `?id=1` … `?id=9999`가 주입 지점 하나를 9999번 풀스캔하게 됩니다.
+기본값(`--dedup-urls exact`)에서 Dalfox는 완전히 같은 대상만 버립니다. 쿼리 값까지 포함한 전체 URL과 메서드(HAR / raw HTTP 항목은 캡처된 본문 포함)가 모두 일치해야 합니다. 그런데 `gau` / `katana` / `waybackurls` 결과는 그런 모양이 아닙니다. 보통은 엔드포인트 몇 개에 값만 수천 개가 붙어 있고, 결국 `?id=1` … `?id=9999`가 주입 지점 하나를 9999번 풀스캔하게 됩니다.
 
 `--dedup-urls signature`는 이것을 하나로 묶습니다. 키는 메서드, 스킴, 호스트, 포트, 경로, 그리고 *정렬된 파라미터 이름 집합*입니다. 쿼리는 물론 본문(form, JSON, multipart) 파라미터도 같은 자격으로 포함됩니다. 값은 키에서 제외되므로 값만 다른 URL 무리는 대상 하나로 묶입니다. 무엇을 버렸는지는 로그로 남고, 그 개수는 스캔 메타데이터(`dedup_mode`, `targets_deduplicated`)에도 실리므로 축소된 실행이 목록 전체를 커버한 것처럼 보이지 않습니다.
 
@@ -116,11 +116,11 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 # INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan
 ```
 
-**건너뛰는 것은 완료된 대상뿐입니다.** 어디까지 검사됐는지 알 수 없는 것은 전부 다시 스캔합니다:
+**건너뛰는 것은 완료된 대상뿐입니다.** 어디까지 검사됐는지 알 수 없는 것은 전부 다시 스캔합니다. 결과가 나온 대상은 리포트가 기록된 뒤에야 `completed`로 남습니다(그 전까지 결과는 메모리에만 있습니다). 따라서 강제 종료, OOM, `--output` 쓰기 실패가 생겨도 결과를 잃은 채 건너뛰는 일은 없고 그 대상은 다시 스캔됩니다. 결과가 없는 대상은 끝나는 즉시 기록되며, `--stream-findings` 사용 시에는 모두 즉시 기록됩니다:
 
 | 기록된 상태 | 언제 | 다음 실행 |
 |------------|------|----------|
-| `completed` | 세션이 살아 있는 상태로 끝까지 스캔됨 | 건너뜀 |
+| `completed` | 세션이 살아 있는 상태로 끝까지 스캔됐고, 결과(있다면)가 리포트에 기록됨 | 건너뜀 |
 | `cancelled` | Ctrl-C, `--scan-timeout` 만료, `--limit` 도달로 인한 중단, 스캔 도중 세션 끊김, 심각한 전송 손실(`meta.incomplete`) | 재시도 |
 | `error` | 프리플라이트에서 제외됨(도달 불가, content-type 불일치, `--max-targets-per-host` 상한), 또는 스캔 워커 크래시 | 재시도 |
 
@@ -171,7 +171,7 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL, 메서드, 요청 내용(본문, 헤더, 쿠키)이 모두 같을 때만 제거하므로, 같은 URL에 본문만 다른 POST 두 개는 둘 다 스캔합니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
+HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드 + 본문으로 판단하므로, 같은 URL에 본문만 다른 POST 두 개는 둘 다 스캔하고, 헤더나 쿠키만 다른 항목(갱신된 세션, 바뀐 `Referer`)은 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
 CLI 요청 플래그는 HAR, raw HTTP, OpenAPI, Postman 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`로 준 헤더는 가져온 요청의 같은 이름 헤더(대소문자 무시)를 모두 대체하고, `--cookies`로 준 쿠키는 같은 이름의 가져온 쿠키를 대체합니다. 그래서 오래된 캡처 세션이나 명세의 자리표시자 값이 여러분의 값보다 앞서 전송되지 않습니다. 이름이 다른 것은 그대로 유지됩니다. `-H 'Cookie: …'`는 캡처된 쿠키(와 `--cookies`로 준 쿠키)를 통째로 대체합니다. 쿠키를 하나씩 더하거나 바꾸려면 `--cookies`를 쓰세요. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
 
@@ -204,7 +204,7 @@ dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com
 
 **관용성.** 잘못된 오퍼레이션이나 요청 하나(풀리지 않은 호스트, `http(s)`가 아닌 서버, 쓸 수 없는 본문)는 실행을 멈추지 않고 건너뜁니다. 건너뛴 개수와 몇 가지 예시가 stderr 경고로 출력됩니다. 문서가 명세가 아니거나 스캔할 수 있는 항목이 하나도 없을 때만 `PARSE_ERROR`로 실패합니다. 파일은 다른 입력과 같은 크기 상한으로 읽습니다(`INPUT_TOO_LARGE`).
 
-확장된 대상은 HAR 가져오기와 같은 파이프라인을 거칩니다. CLI 요청 플래그가 그 위에 적용되고(위 참고), 중복은 URL, 메서드, 요청 내용이 모두 같을 때만 합쳐지며, 건너뛴 오퍼레이션은 `meta.targets_unparsable`에 집계되고, `--include-url` / `--out-of-scope`가 집합을 좁히고, `--state-file`은 각 대상의 메서드, 본문, 헤더, 쿠키를 지문으로 기록합니다.
+확장된 대상은 HAR 가져오기와 같은 파이프라인을 거칩니다. CLI 요청 플래그가 그 위에 적용되고(위 참고), 중복은 URL + 메서드 + 본문이 같으면 합쳐지며, 건너뛴 오퍼레이션은 `meta.targets_unparsable`에 집계되고, `--include-url` / `--out-of-scope`가 집합을 좁히고, `--state-file`은 각 대상의 메서드, 본문, 헤더, 쿠키를 지문으로 기록합니다.
 
 ## 저장형 XSS 모드 (SXSS)
 

@@ -249,6 +249,28 @@ fn test_collapse_keeps_r_when_the_v_is_at_a_different_wire_location() {
     assert_eq!(after.len(), 1);
 }
 
+/// The same field name posted to two different form actions is two injection
+/// points: a finding at one must not mark the other as already found.
+#[test]
+fn found_param_key_separates_same_name_at_different_form_actions() {
+    let at = |action: Option<&str>| Param {
+        form_action_url: action.map(str::to_string),
+        ..Param::new("q".to_string(), String::new(), Location::Body)
+    };
+    assert_ne!(
+        found_param_key(&at(Some("https://x/a"))),
+        found_param_key(&at(Some("https://x/b")))
+    );
+    assert_ne!(
+        found_param_key(&at(None)),
+        found_param_key(&at(Some("https://x/a")))
+    );
+    assert_eq!(
+        found_param_key(&at(Some("https://x/a"))),
+        found_param_key(&at(Some("https://x/a")))
+    );
+}
+
 #[test]
 fn test_collapse_keeps_r_for_different_param_or_inject_type() {
     let results = vec![
@@ -2032,6 +2054,204 @@ async fn test_run_scanning_increments_params_done_counter() {
 }
 
 #[tokio::test]
+async fn test_run_scanning_cancelled_workers_are_not_counted_as_tested() {
+    // Every parameter worker is spawned up front and the ones queued behind the
+    // semaphore return early once the scan is cancelled. They must not bump
+    // `params_done`, or a cancelled scan reports params_tested == params_total
+    // (100%) after a handful of requests.
+    use axum::{Router, extract::State, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+    async fn cancel_handler(
+        State(flag): State<Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Html<String> {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        Html("<html><body>no reflection here</body></html>".to_string())
+    }
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let app = Router::new()
+        .route("/", get(cancel_handler))
+        .with_state(cancel.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?a=1&b=2&c=3", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.workers = 1;
+    target.reflection_params.clear();
+    for name in ["a", "b", "c"] {
+        target.reflection_params.push(Param {
+            injection_context: Some(InjectionContext::Html(None)),
+            ..Param::new(name.to_string(), "1".to_string(), Location::Query)
+        });
+    }
+
+    let params_done = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        ScanRunHandles::new(
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(AtomicUsize::new(0)),
+        )
+        .with_cancel(cancel)
+        .with_params_done(params_done.clone()),
+    )
+    .await;
+
+    assert_eq!(
+        params_done.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "workers that bailed on cancellation must not count as tested"
+    );
+}
+
+/// Serve `body` for every GET and count the hits.
+async fn spawn_counting_page(body: String) -> (std::net::SocketAddr, Arc<AtomicUsize>) {
+    use axum::{Router, extract::State, response::Html, routing::get};
+    use std::net::Ipv4Addr;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route(
+            "/",
+            get(
+                |State((hits, body)): State<(Arc<AtomicUsize>, String)>| async move {
+                    hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Html(body)
+                },
+            ),
+        )
+        .with_state((hits.clone(), body));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    (addr, hits)
+}
+
+fn ast_sink_page(script_line: &str, n: usize) -> String {
+    let mut s = String::from("<html><body><div id=\"out\"></div><script>\n");
+    for _ in 0..n {
+        s.push_str(script_line);
+        s.push('\n');
+    }
+    s.push_str("</script></body></html>");
+    s
+}
+
+#[tokio::test]
+async fn test_run_ast_dom_analysis_bounds_light_verify_requests_and_evidence() {
+    // A page chooses how many sinks it carries; each used to cost one uncounted,
+    // uncancellable GET plus a retained 64 KiB body. N sinks sharing a payload
+    // are one request, and only the first findings keep a response copy.
+    let n = 200;
+    let page = ast_sink_page(
+        "document.getElementById('out').innerHTML = location.hash;",
+        n,
+    );
+    let (addr, hits) = spawn_counting_page(page.clone()).await;
+    let target = parse_target(&format!("http://{addr}/?q=1")).expect("parse_target");
+    let param = Param::new("q".to_string(), "1".to_string(), Location::Query);
+    let client = target.build_client_or_default();
+    let mut seen = HashSet::new();
+
+    let results =
+        run_ast_dom_analysis(&client, &target, &param, &page, "m", false, &mut seen, None).await;
+
+    assert!(
+        results.len() >= n,
+        "every sink is still reported ({} findings)",
+        results.len()
+    );
+    let verify_gets = hits.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        verify_gets <= 4,
+        "one light-verify GET per distinct payload, not per sink: {verify_gets}"
+    );
+    let with_body = results.iter().filter(|r| r.response.is_some()).count();
+    assert!(
+        with_body <= 64,
+        "response copies are capped, got {with_body}"
+    );
+}
+
+#[tokio::test]
+async fn test_run_ast_dom_analysis_skips_light_verify_once_cancelled() {
+    let page = ast_sink_page(
+        "document.getElementById('out').innerHTML = location.hash;",
+        5,
+    );
+    let (addr, hits) = spawn_counting_page(page.clone()).await;
+    let target = parse_target(&format!("http://{addr}/?q=1")).expect("parse_target");
+    let param = Param::new("q".to_string(), "1".to_string(), Location::Query);
+    let client = target.build_client_or_default();
+    let mut seen = HashSet::new();
+    let cancel = std::sync::atomic::AtomicBool::new(true);
+
+    let results = run_ast_dom_analysis(
+        &client,
+        &target,
+        &param,
+        &page,
+        "m",
+        false,
+        &mut seen,
+        Some(&cancel),
+    )
+    .await;
+
+    assert!(!results.is_empty(), "static findings are still reported");
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "a cancelled scan must not fire verification requests"
+    );
+}
+
+#[tokio::test]
+async fn test_run_ast_dom_analysis_poc_url_uses_param_pre_encoding() {
+    // The reflection / DOM phases build the PoC from the as-sent payload; the
+    // AST path used the raw one, so `data` disagreed with `request` for a
+    // pre-encoded param and the PoC did not reproduce.
+    let page = ast_sink_page("document.getElementById('out').innerHTML = window.name;", 1);
+    let (addr, _hits) = spawn_counting_page(page.clone()).await;
+    let target = parse_target(&format!("http://{addr}/?q=c2FmZQ==")).expect("parse_target");
+    let mut param = Param::new("q".to_string(), "c2FmZQ==".to_string(), Location::Query);
+    param.pre_encoding = Some("base64".to_string());
+    let client = target.build_client_or_default();
+    let mut seen = HashSet::new();
+
+    let results =
+        run_ast_dom_analysis(&client, &target, &param, &page, "m", false, &mut seen, None).await;
+
+    let r = results
+        .iter()
+        .find(|r| !r.poc_url_complete)
+        .expect("a non-URL-surface source finding");
+    let wire = r.wire_payload.as_deref().expect("wire payload recorded");
+    assert_ne!(wire, r.payload);
+    assert_eq!(
+        wire,
+        crate::encoding::pre_encoding::apply_param_encoding(&r.payload, &param)
+    );
+    assert!(
+        r.data.contains(&urlencoding::encode(wire).into_owned()) || r.data.contains(wire),
+        "PoC URL carries the as-sent payload: {}",
+        r.data
+    );
+}
+
+#[tokio::test]
 async fn test_run_scanning_empty_params() {
     let target = parse_target("https://example.com").unwrap();
 
@@ -3709,8 +3929,8 @@ fn test_estimate_param_requests_counts_both_scan_phases() {
         );
     }
 
-    // A JS-context param gets no DOM-verification pass, so it is billed for the
-    // reflection set alone — the one branch where the two agree.
+    // A JS-context param runs the script-breakout DOM set too (plus the JSONP
+    // verifiers), so it is billed for both halves.
     let js = param_with_context(Some(InjectionContext::Javascript(None)));
     let js_refl = crate::scanning::xss_common::get_dynamic_payloads(
         js.injection_context.as_ref().expect("js context"),
@@ -3718,7 +3938,12 @@ fn test_estimate_param_requests_counts_both_scan_phases() {
     )
     .expect("reflection payloads")
     .len();
-    assert_eq!(estimate_param_requests(&js, &args, 1, &uncapped), js_refl);
+    let js_dom = get_dom_payloads(&js, &args).expect("dom payloads").len();
+    assert!(js_dom > 0, "a JS-context param has a DOM payload set");
+    assert_eq!(
+        estimate_param_requests(&js, &args, 1, &uncapped),
+        js_refl + js_dom
+    );
 }
 
 #[test]
@@ -3738,14 +3963,37 @@ fn test_estimate_param_requests_caps_each_phase_separately() {
         2 * cap
     );
 
-    // A JS-context param has no DOM phase, so it stops at one cap.
+    // A JS-context param runs both phases too, each capped.
     let js = param_with_context(Some(InjectionContext::Javascript(None)));
-    assert_eq!(estimate_param_requests(&js, &args, 1, &apply_cap), cap);
+    assert_eq!(estimate_param_requests(&js, &args, 1, &apply_cap), 2 * cap);
 
     // `cap == 0` is the --deep-scan spelling of "unlimited" and must not zero
     // the estimate.
     let unlimited = |n: usize| n;
     assert!(estimate_param_requests(&html, &args, 1, &unlimited) > 2 * cap);
+}
+
+#[test]
+fn test_dom_payloads_with_probe_data_honor_encoders_none() {
+    // A param with probe data takes the adaptive DOM arm, which always appended
+    // url / entity / adaptive-encoded variants and ignored `-e none`.
+    let mut p = param_with_context(Some(InjectionContext::Attribute(Some(
+        crate::parameter_analysis::DelimiterType::DoubleQuote,
+    ))));
+    p.invalid_specials = Some(vec!['<', '>', '"', '\'']);
+    p.valid_specials = Some(vec![]);
+    let mut args = default_scan_args();
+    args.encoders = vec!["none".to_string()];
+    let none = get_dom_payloads_for_context(&p, &args).expect("dom payloads");
+    assert!(!none.is_empty());
+    assert!(
+        none.iter()
+            .all(|x| !x.contains("%25") && !x.contains("&#x")),
+        "`-e none` must send raw payloads only"
+    );
+    args.encoders = vec!["url".to_string(), "html".to_string()];
+    let encoded = get_dom_payloads_for_context(&p, &args).expect("dom payloads");
+    assert!(encoded.len() > none.len());
 }
 
 // ---------------------------------------------------------------------------

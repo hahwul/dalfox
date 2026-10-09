@@ -120,6 +120,12 @@ pub(crate) fn target_list_lines(content: &str) -> impl Iterator<Item = &str> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
 }
 
+fn is_test_harness_exe(exe: Option<&std::path::Path>) -> bool {
+    exe.and_then(|p| p.parent())
+        .and_then(|d| d.file_name())
+        .is_some_and(|n| n == "deps")
+}
+
 pub(crate) async fn resolve_targets(
     args: &ScanArgs,
 ) -> std::result::Result<ResolvedTargets, ScanOutcome> {
@@ -128,22 +134,12 @@ pub(crate) async fn resolve_targets(
     // it buffers the whole stream here so the parsing phase reuses the same
     // bytes instead of reading an already-drained stdin.
     let mut buffered_stdin: Option<String> = None;
-    let stdin_is_piped = {
-        let is_dalfox_bin = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .map(|name| {
-                let name_lower = name.to_lowercase();
-                name_lower == "dalfox" || name_lower == "dalfox.exe"
-            })
-            .unwrap_or(false);
-
-        if is_dalfox_bin {
-            !std::io::IsTerminal::is_terminal(&std::io::stdin())
-        } else {
-            false
-        }
-    };
+    // Skip stdin inside cargo's own test binaries: an idle inherited pipe
+    // would block `-i pipe` / the no-target path forever. Keyed on the binary's
+    // *location* (`target/<profile>/deps/`), not its name, so a renamed or
+    // symlinked `dalfox` still reads piped stdin.
+    let stdin_is_piped = !is_test_harness_exe(std::env::current_exe().ok().as_deref())
+        && !std::io::IsTerminal::is_terminal(&std::io::stdin());
 
     let input_type = detect_input_type(args, stdin_is_piped, &mut buffered_stdin)?;
     if args.base_url.is_some() && !matches!(input_type.as_str(), "openapi" | "postman") {
@@ -222,15 +218,21 @@ pub(crate) async fn resolve_targets(
             // Detection only sniffed a prefix, so read the file in full now
             // (None when the arg isn't a file on disk — treated as a URL).
             let p = std::path::Path::new(target);
-            let file_read: Option<std::result::Result<String, std::io::Error>> = if p.exists() {
-                Some(crate::utils::fs::read_bounded(
-                    p,
-                    MAX_TARGET_LIST_BYTES,
-                    "target list",
-                ))
-            } else {
-                None
-            };
+            // A directory named like a host (`example.com/` from a recon dump or
+            // `wget -r`) is not a target list: keep it a host literal. A
+            // path-shaped one (`./out`, `/tmp`, `C:\out`) still reports "not a
+            // regular file".
+            let path_shaped = p.is_absolute() || names_a_missing_file(target);
+            let file_read: Option<std::result::Result<String, std::io::Error>> =
+                if p.exists() && !(p.is_dir() && !path_shaped) {
+                    Some(crate::utils::fs::read_bounded(
+                        p,
+                        MAX_TARGET_LIST_BYTES,
+                        "target list",
+                    ))
+                } else {
+                    None
+                };
             match file_read {
                 Some(Ok(content)) => {
                     // Ambiguity: input is both a readable file *and*
@@ -638,6 +640,9 @@ pub(crate) async fn resolve_targets(
                         .iter()
                         .flat_map(|c| crate::job::split_cookie_pairs(c))
                         .collect();
+                    // `-H 'Cookie: …'` is a credential too: lift it into
+                    // `target.cookies` so each cookie is probed.
+                    crate::job::lift_cookie_headers(&mut target.headers, &mut target.cookies);
                     target.timeout = args.timeout;
                     target.delay = args.delay;
                     target.proxy = args.proxy.clone();
@@ -807,7 +812,8 @@ pub(crate) async fn resolve_targets(
 /// key.
 ///
 /// - `exact` — the historical key: the full URL string (query and values
-///   included) plus the method. Only byte-identical inputs collapse.
+///   included) plus the method, plus the request body a HAR or raw-http entry
+///   carries. Only byte-identical inputs collapse.
 /// - `signature` — method + scheme + host + port + path + the *sorted set of
 ///   parameter names* (query and body alike). Parameter values are excluded, so
 ///   `?id=1`, `?id=2`, … `?id=9999` from a `gau`/`katana` dump collapse to one
@@ -856,16 +862,7 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         let key = if mode == "signature" {
             target_signature_key(t)
         } else {
-            // URL + method + a hash of the request content (body, headers,
-            // cookies, UA) — the same identity `--state-file` uses. Thirty
-            // GraphQL queries to `POST /graphql` from a spec or HAR are thirty
-            // requests; a URL list's targets all share the CLI body/headers,
-            // so for it this is still URL + method.
-            let id = super::state_file::target_identity(
-                t,
-                &super::state_file::CliCredentials::default(),
-            );
-            format!("{}|{}|{}", id.target, id.method, id.request_hash)
+            format!("{}|{}|{}", t.url, t.method, request_body_digest(t))
         };
         match chosen.entry(key) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -897,6 +894,21 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         collapsed,
         sample,
     }
+}
+
+/// Digest of the request body a HAR / raw-http import carries, so `exact` dedup
+/// keeps two POSTs to one URL that differ only there. Headers and cookies stay
+/// out of the key on purpose: a browser HAR repeats one URL with a drifting
+/// `Cookie` / `Referer` / `If-None-Match`, and keying on those would turn every
+/// such repeat into another full scan of the same injection points. URL-list
+/// targets share the run-wide body, so for them this is a constant. Hashed
+/// rather than inlined: a body can be MiBs.
+fn request_body_digest(t: &Target) -> String {
+    use sha2::{Digest, Sha256};
+    t.data
+        .as_deref()
+        .map(|d| hex::encode(Sha256::digest(d.as_bytes())))
+        .unwrap_or_default()
 }
 
 /// Whether any query or form-body parameter of `t` is present but empty — the
@@ -1239,8 +1251,12 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
         .collect();
     target
         .cookies
-        .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| n == k));
+        .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| k == n));
     target.cookies.extend(cli_cookies);
+    // A CLI `-H 'Cookie: …'` replaces the captured cookies and `--cookies`
+    // outright, as on every other input path; lift it into `cookies` so each
+    // one is probed.
+    crate::job::lift_cookie_headers(&mut target.headers, &mut target.cookies);
     target.timeout = args.timeout;
     target.delay = args.delay;
     target.proxy = args.proxy.clone();

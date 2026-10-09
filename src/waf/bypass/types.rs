@@ -35,7 +35,7 @@ pub enum MutationType {
     /// SVG animate/set element execution: `<svg><animate onbegin=alert(1) attributeName=x>`
     /// Bypasses CRS 941110 tag denylist which may not include SVG animation elements.
     SvgAnimateExec,
-    /// Exotic whitespace chars (vertical tab 0x0B, form feed 0x0C) between tag and attrs.
+    /// Exotic whitespace chars (form feed 0x0C; VT 0x0B is not HTML whitespace) between tag and attrs.
     /// Bypasses CRS 941320 tag handler regex that only checks \\s (space/tab/newline).
     ExoticWhitespace,
     // ── Attribute-decode-layer mutations ────────────────────────────

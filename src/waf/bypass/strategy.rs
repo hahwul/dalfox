@@ -80,7 +80,7 @@ pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
         // - Slash-separated tag attributes bypass 941160 regex
         // - SVG animate/set elements bypass 941110 tag denylist
         // - HTML entity-encoded parens bypass 941370 JS function detection
-        // - Exotic whitespace (0x0B, 0x0C) bypass 941320 tag handler
+        // - Exotic whitespace (0x0C) bypass 941320 tag handler
         // - Constructor chain and backtick bypass keyword-based rules
         WafType::OwaspCrs => BypassStrategy {
             extra_encoders: vec![

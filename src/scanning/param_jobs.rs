@@ -11,8 +11,9 @@ use super::*;
 ///
 /// The DOM half used to be missing here, so `/preflight` quoted roughly half the
 /// requests the scan would send — on the one number the endpoint exists to
-/// produce. `cmd::scan::analysis` already estimated it this way for `--dry-run`;
-/// this brings the REST and MCP endpoints onto the same arithmetic.
+/// produce. The CLI `--dry-run` (`cmd::scan::output::estimate_target_requests`)
+/// and the debug estimate in `cmd::scan::analysis` route through this same
+/// function, so all surfaces quote one number.
 ///
 /// Still a lower bound: WAF mutation/encoder expansion and the shared CSP/tech
 /// payloads appended after the cap are not counted, matching the CLI's caveat.
@@ -31,16 +32,10 @@ pub(crate) fn estimate_param_requests(
         let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
         html_len + js_len
     };
-    let dom_len = match &p.injection_context {
-        // A JS-context param gets no DOM-verification pass.
-        Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => 0,
-        Some(ctx) => crate::scanning::xss_common::generate_dynamic_payloads(ctx).len() * enc_factor,
-        None => {
-            (crate::payload::get_dynamic_xss_html_payloads().len()
-                + crate::payload::get_dynamic_xss_attribute_payloads().len())
-                * enc_factor
-        }
-    };
+    // The exact set `generate_param_jobs` builds (JS-context breakouts, adaptive
+    // variants, the JSONP verifiers every context gets), so the estimate cannot
+    // drift from it. Pure — safe to call from the estimator.
+    let dom_len = get_dom_payloads(p, scan_args).map_or(0, |v| v.len());
     apply_cap(refl_len).saturating_add(apply_cap(dom_len))
 }
 /// === Stage 4: Payload Generation — build per-parameter payload sets ===

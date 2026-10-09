@@ -59,7 +59,7 @@ fn test_slash_separator_covers_new_tags() {
 #[test]
 fn test_exotic_whitespace_covers_new_tags() {
     let r = exotic_whitespace("<button onclick=alert(1)>");
-    assert!(r.contains('\x0B') || r.contains('\x0C'));
+    assert!(r.contains('\x0C') && !r.contains('\x0B'));
     assert!(!r.contains("<button on"));
 }
 
@@ -439,14 +439,14 @@ fn test_svg_animate_exec_from_img() {
 #[test]
 fn test_exotic_whitespace() {
     let result = exotic_whitespace("<img src=x onerror=alert(1)>");
-    assert!(result.contains('\x0B') || result.contains('\x0C'));
+    assert!(result.contains('\x0C') && !result.contains('\x0B'));
     assert!(!result.contains("<img src"));
 }
 
 #[test]
 fn test_exotic_whitespace_svg() {
     let result = exotic_whitespace("<svg onload=alert(1)>");
-    assert!(result.contains('\x0B') || result.contains('\x0C'));
+    assert!(result.contains('\x0C') && !result.contains('\x0B'));
 }
 
 /// The literal `alert(1)` table is gone; backtick_parens now fires on any
@@ -1004,4 +1004,50 @@ fn mutation_type_display_is_variant_name() {
         "HtmlCommentSplit"
     );
     assert_eq!(MutationType::EntityScheme.to_string(), "EntityScheme");
+}
+
+/// The mutated tag must still parse as the same element with its attributes:
+/// vertical tab is not HTML whitespace, so a VT separator yields one bogus tag
+/// name carrying no real `src`/`onerror`.
+#[test]
+fn exotic_whitespace_output_parses_as_the_same_element() {
+    for payload in [
+        "<img src=x onerror=alert(1) class=M>",
+        "<svg onload=alert(1) class=M>",
+        "<svg/onload=alert(1) class=M>",
+        "<details open ontoggle=alert(1) class=M>",
+    ] {
+        let out = exotic_whitespace(payload);
+        assert!(!out.contains('\x0B'), "{out:?}");
+        let doc = scraper::Html::parse_fragment(&out);
+        let sel = scraper::Selector::parse("[class=M]").unwrap();
+        let el = doc.select(&sel).next().expect("marker element");
+        assert!(
+            ["img", "svg", "details"].contains(&el.value().name()),
+            "tag name must survive: {out:?} -> {}",
+            el.value().name()
+        );
+        assert!(el.value().attrs().any(|(k, _)| k.starts_with("on")));
+    }
+}
+
+/// Only the opening tag is rewritten: the breakout prefix and the trailing
+/// class/id marker must survive so the variant can break out and be verified.
+#[test]
+fn svg_animate_exec_keeps_prefix_and_marker() {
+    let out = svg_animate_exec("\"><IMG src=x onerror=alert(1) ClAss=dlxabc>");
+    assert_eq!(
+        out,
+        "\"><svg><animate onbegin=alert(1) attributeName=x dur=1s ClAss=dlxabc>"
+    );
+    let out = svg_animate_exec("<svg onload=alert(1) class=dlxabc>");
+    assert_eq!(
+        out,
+        "<svg><animate onbegin=alert(1) attributeName=x dur=1s class=dlxabc>"
+    );
+    let out = svg_animate_exec("\"><svg onload=alert(1) class=dlxabc>");
+    assert_eq!(
+        out,
+        "\"><svg><animate onbegin=alert(1) attributeName=x dur=1s class=dlxabc>"
+    );
 }

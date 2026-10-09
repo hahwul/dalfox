@@ -1745,6 +1745,7 @@ fn reflected_markup_flow_is_found_and_graded_reachable() {
     };
     let run = |html: &str| {
         let (js, ids, markup) = extract_js_script_ids_and_reflected_markup(html);
+        let (ids, markup) = (Arc::new(ids), Arc::new(markup));
         js.iter()
             .flat_map(|code| {
                 analyze_javascript_for_dom_xss_with_html_context(code, &ids, &markup, false)

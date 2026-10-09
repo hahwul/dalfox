@@ -71,6 +71,7 @@ pub(crate) fn hydrate_target(url: &str, args: &ScanArgs) -> Result<Target, Strin
         .iter()
         .flat_map(|c| super::split_cookie_pairs(c))
         .collect();
+    super::lift_cookie_headers(&mut t.headers, &mut t.cookies);
     Ok(t)
 }
 
@@ -115,8 +116,11 @@ impl ScanRun {
         include_request: bool,
         include_response: bool,
     ) -> Arc<Vec<SanitizedResult>> {
-        let locked = self.results.lock().await;
-        let kept: Vec<SanitizedResult> = locked
+        // The same AST fold the CLI report applies: one DOM sink is found by
+        // the preflight pass and again once per parameter, and without it the
+        // job lists (and counts, and caps) the same sink several times.
+        let deduped = crate::cmd::scan::dedupe_ast_results(self.results.lock().await.clone());
+        let kept: Vec<SanitizedResult> = deduped
             .iter()
             .filter(|r| !r.below_min_confidence(self.min_confidence.as_deref()))
             .map(|r| r.to_sanitized(include_request, include_response))

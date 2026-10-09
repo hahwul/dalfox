@@ -625,6 +625,28 @@ impl<'a> DomXssVisitor<'a> {
                 return true;
             }
         }
+        // `location.hash.length` is a number, which cannot carry markup. Gated
+        // on the receiver being a known *string* source: an object-typed taint
+        // (`JSON.parse(location.hash)`, `event.data`) can have an attacker
+        // string in its `length` field, so those stay tainted.
+        if member.property.name == "length"
+            && let Expression::StaticMemberExpression(inner) = &member.object
+            && self.get_member_string(inner).is_some_and(|path| {
+                matches!(
+                    path.trim_start_matches("window.")
+                        .trim_start_matches("self."),
+                    "location.hash"
+                        | "location.search"
+                        | "location.href"
+                        | "location.pathname"
+                        | "document.URL"
+                        | "document.referrer"
+                        | "document.cookie"
+                )
+            })
+        {
+            return false;
+        }
         // Also check if the base object is a tainted variable
         // e.g., if 'data' is tainted, then 'data.field' is also tainted
         self.is_tainted(&member.object)

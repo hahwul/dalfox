@@ -681,6 +681,42 @@ pub(crate) fn split_cookie_pairs(raw: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Move any `Cookie` header out of `headers` and into `cookies`, one entry per
+/// pair. A Cookie header *replaces* `cookies` (`--cookies` / imported ones):
+/// that is what the wire always did, since `apply_headers_ua_cookies` sends a
+/// literal `Cookie` header and skips `cookies` entirely when one is present.
+///
+/// Cookie discovery iterates `cookies` only. A session passed as
+/// `-H 'Cookie: a=1; sid=x'` otherwise stayed a literal header: no per-cookie
+/// params were probed, and the header sweep replaced the whole jar with the
+/// marker. The request still goes out with the same cookies, because
+/// `apply_headers_ua_cookies` rebuilds the one `Cookie` header from `cookies`.
+/// A header with no parseable pair is left alone rather than dropped.
+pub(crate) fn lift_cookie_headers(
+    headers: &mut Vec<(String, String)>,
+    cookies: &mut Vec<(String, String)>,
+) {
+    let mut lifted = Vec::new();
+    headers.retain(|(k, v)| {
+        if !k.eq_ignore_ascii_case("cookie") {
+            return true;
+        }
+        let pairs = split_cookie_pairs(v);
+        let keep = pairs.is_empty();
+        lifted.extend(pairs);
+        keep
+    });
+    if lifted.is_empty() {
+        return;
+    }
+    cookies.clear();
+    for (name, value) in lifted {
+        if !cookies.iter().any(|(n, _)| *n == name) {
+            cookies.push((name, value));
+        }
+    }
+}
+
 /// Current unix time in milliseconds (UTC).
 pub(crate) fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -869,8 +905,9 @@ impl Job {
     /// retention may reclaim its map entry and capacity slot. Explicit MCP
     /// deletion must stay strict and use `is_settled`, otherwise a live worker
     /// can lose the record it still needs to write partial results into. REST
-    /// `DELETE ?purge=1` remains a separate, explicit force-purge escape hatch
-    /// for callers that accept dropping a draining record.
+    /// `DELETE ?purge=1` uses this same predicate: removing a draining entry
+    /// would also drop its `Weak` lease and lift the concurrency cap while the
+    /// worker still runs. A wedged worker is purgeable after the drain grace.
     pub(crate) fn is_evictable(&self) -> bool {
         self.is_settled() || (self.is_terminal() && self.drain_window_expired())
     }
@@ -1235,6 +1272,23 @@ pub(crate) fn has_http_scheme(url: &str) -> bool {
     let b = url.trim().as_bytes();
     let starts_with = |p: &[u8]| b.len() >= p.len() && b[..p.len()].eq_ignore_ascii_case(p);
     starts_with(b"http://") || starts_with(b"https://")
+}
+
+/// Reject a scan target `parse_target` would refuse, *before* a job exists.
+///
+/// `has_http_scheme` is a 7-byte prefix test, so `http://`, `http://exa mple/`
+/// or `https://[::1/` pass it; `hydrate_target` then fails inside the worker
+/// and the submission has already been admitted, logged as queued and answered
+/// `queued`/`200`. Run this right after the scheme check so REST `/scan` and
+/// MCP `scan_with_dalfox` refuse what `/preflight` and `preflight_dalfox`
+/// already refuse. The message is the one preflight returns.
+pub(crate) fn check_target_parses(url: &str) -> Result<(), String> {
+    crate::target_parser::parse_target(url.trim())
+        .map(|_| ())
+        .map_err(|_| {
+            "failed to parse target URL — must be a valid URL with scheme and host (example: \"https://example.com/path?q=test\")"
+                .to_string()
+        })
 }
 
 /// The `error_message` recorded when a scan target can't be connected to.

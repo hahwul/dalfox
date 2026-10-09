@@ -85,6 +85,39 @@ fn test_detect_injection_context_comment_delimiter() {
     assert_eq!(ctx, InjectionContext::Html(Some(DelimiterType::Comment)));
 }
 
+/// Past the cap, the kept DOM candidates are the first ones in document order,
+/// the same on every run (a hash-ordered set kept a random subset).
+#[test]
+fn dom_candidate_names_are_document_ordered_under_the_cap() {
+    let n = MAX_DOM_MINING_PARAMS + 500;
+    let html: String = (0..n)
+        .map(|i| format!("<input id=i{i} name=n{i}>"))
+        .collect();
+    let names = dom_candidate_names(&html);
+    assert_eq!(names.len(), 2 * n);
+    let (kept, capped) = cap_dom_params(names);
+    assert_eq!(capped, Some(2 * n));
+    let expected: Vec<String> = (0..MAX_DOM_MINING_PARAMS / 2)
+        .flat_map(|i| [format!("i{i}"), format!("n{i}")])
+        .collect();
+    assert_eq!(kept, expected);
+}
+
+#[test]
+fn test_detect_injection_context_marker_in_later_comment() {
+    let marker = crate::scanning::markers::open_marker();
+    let comment = InjectionContext::Html(Some(DelimiterType::Comment));
+    // Marker in the second comment, after an earlier one has closed.
+    let body = format!("<!-- a --><p>hi</p><!-- debug {} -->", marker);
+    assert_eq!(detect_injection_context(&body), comment);
+    // Marker in plain text between two comments is not a comment context.
+    let body = format!("<!-- a -->{}<!-- b -->", marker);
+    assert_eq!(
+        detect_injection_context(&body),
+        InjectionContext::Html(None)
+    );
+}
+
 #[test]
 fn test_detect_injection_context_script_single_quote() {
     let marker = crate::scanning::markers::open_marker();
@@ -1209,6 +1242,94 @@ async fn test_probe_json_body_params_discovers_reflected_top_level_key() {
         "expected a JSON-body param discovered, got {:?}",
         params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
+}
+
+/// The user's own `-d` keys are never folded into a synthetic `any`, however
+/// many of them an echoing page reflects (the EWMA fires at 15 attempts).
+#[tokio::test]
+async fn test_probe_body_params_keeps_every_echoing_d_key() {
+    let addr = start_body_reflect_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/b", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.data = Some(
+        (0..20)
+            .map(|i| format!("f{i}=v{i}"))
+            .collect::<Vec<_>>()
+            .join("&"),
+    );
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let names: Vec<String> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .filter(|p| p.location == Location::Body)
+        .map(|p| p.name.clone())
+        .collect();
+    assert_eq!(
+        names.len(),
+        20,
+        "all 20 -d keys must survive, got {names:?}"
+    );
+    assert!(!names.iter().any(|n| n == "any"), "got {names:?}");
+}
+
+#[tokio::test]
+async fn test_probe_json_body_params_keeps_every_echoing_d_key() {
+    let addr = start_json_reflect_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/j", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    let obj: serde_json::Map<String, serde_json::Value> = (0..20)
+        .map(|i| (format!("f{i}"), serde_json::Value::String(format!("v{i}"))))
+        .collect();
+    args.data = Some(serde_json::Value::Object(obj).to_string());
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_json_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let names: Vec<String> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .filter(|p| p.location == Location::JsonBody)
+        .map(|p| p.name.clone())
+        .collect();
+    assert_eq!(
+        names.len(),
+        20,
+        "all 20 -d keys must survive, got {names:?}"
+    );
+    assert!(!names.iter().any(|n| n == "any"), "got {names:?}");
+}
+
+/// A JSON / XML / GraphQL `-d` body is not form data: form-parsing it keys one
+/// pair on the whole body text, which a body-echoing endpoint reflects.
+#[tokio::test]
+async fn test_probe_body_params_skips_non_form_bodies() {
+    let addr = start_raw_body_reflect_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
+    for data in [
+        r#"{"a":"b"}"#,
+        r#"[{"a":"b"}]"#,
+        r#"<?xml version="1.0"?><a>b</a>"#,
+        r#"{"query":"query($x:String){f(x:$x)}","variables":{"x":"1"}}"#,
+    ] {
+        let mut args = default_scan_args();
+        args.data = Some(data.to_string());
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        probe_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+        let params = reflection_params.lock().await.clone();
+        assert!(
+            params.is_empty(),
+            "{data}: no Body param for a non-form body, got {params:?}"
+        );
+    }
 }
 
 #[tokio::test]

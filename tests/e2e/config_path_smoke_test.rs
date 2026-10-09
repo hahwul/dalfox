@@ -322,6 +322,36 @@ fn test_default_load_or_init_prefers_toml_over_json() {
 }
 
 #[test]
+fn test_malformed_default_config_warns_without_echoing_values() {
+    // One wrong-typed value discards the whole implicit config file, so the
+    // run silently reverts every other setting. The warning must name the file
+    // and line, and must not quote the value (a mistyped `proxy` / `headers`
+    // would print its credential).
+    let xdg_home = unique_temp_dir("xdg-malformed");
+    let dalfox_dir = xdg_home.join("dalfox");
+    std::fs::create_dir_all(&dalfox_dir).expect("create dalfox config dir");
+    std::fs::write(
+        dalfox_dir.join("config.toml"),
+        "[scan]\nsilence = true\nworkers = \"hunter2-secret\"\n",
+    )
+    .expect("write malformed toml config");
+
+    let output = run_payload_with_xdg_config_home(&xdg_home);
+    assert!(output.status.success(), "a bad config stays non-fatal");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to load config")
+            && stderr.contains("config.toml")
+            && stderr.contains("line 3"),
+        "stderr must name the file and line, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("hunter2-secret"),
+        "the warning must not echo config values, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn test_uncreatable_config_path_warns_instead_of_claiming_creation() {
     // The scaffold write is best-effort (`let _ = std::fs::write(..)`), so the
     // notice has to describe what actually landed on disk. A `--config` path

@@ -313,6 +313,15 @@ fn test_aws_waf_header_detection() {
     assert!(result.primary().unwrap().confidence >= 0.9);
 }
 
+/// `barra_counter_session` is a cookie name, so it can only arrive in
+/// `Set-Cookie`; the rule used to name it as a header and never fired.
+#[test]
+fn test_barracuda_detected_by_session_cookie_alone() {
+    let headers = make_headers(&[("set-cookie", "barra_counter_session=abc; Path=/")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Barracuda));
+}
+
 #[test]
 fn test_modsecurity_body_detection() {
     let headers = make_headers(&[]);

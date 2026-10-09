@@ -1216,12 +1216,16 @@ async fn verify_sxss_dom(
                 crate::tick_request_failure();
             }
             if let Ok(resp) = sent {
+                // `--ignore-return`: same gate as the reflection retrieval loop.
+                if args.ignore_return.contains(&resp.status().as_u16()) {
+                    continue;
+                }
                 let headers = resp.headers().clone();
                 let ct = headers
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
-                if let Ok(text) = crate::utils::http::read_body(resp).await {
+                if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
                     saw_any_body = true;
                     if crate::scanning::check_reflection::classify_reflection(&text, payload)
                         .is_some()
@@ -1316,12 +1320,20 @@ pub(crate) struct DomVerifyEvidenceOutcome {
 /// `/redirect/level{1..4}`), and a payload reflected inside a `?next=…` target
 /// merely forwards the bytes; the reflection path still reports it as R. So a
 /// redirect never verifies.
-async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyEvidenceOutcome {
+///
+/// A status the operator excluded with `--ignore-return` is dropped the same
+/// way (the reflection phase does this in `injection_response_suppressed`):
+/// otherwise a WAF block page that echoes the payload verified here.
+async fn verify_normal_dom(
+    resp: reqwest::Response,
+    payload: &str,
+    ignore_return: &[u16],
+) -> DomVerifyEvidenceOutcome {
     let status = resp.status();
     let status_code = status.as_u16();
     let headers = resp.headers().clone();
 
-    if status.is_redirection() {
+    if status.is_redirection() || ignore_return.contains(&status_code) {
         return DomVerifyEvidenceOutcome {
             outcome: DomVerifyOutcome {
                 status: status_code,
@@ -1339,7 +1351,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyE
     // `reflected` is computed independently of the browser-parser check so an
     // inert echo (payload present, but not executable) can still feed the
     // DOM-phase early-exit signal.
-    if let Ok(text) = crate::utils::http::read_body(resp).await {
+    if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
         // The signal the DOM-phase inert-echo early exit budgets against.
         //
         // Byte-exact reflection is one half. The other half is the *escaped
@@ -1474,7 +1486,7 @@ pub(crate) async fn check_dom_verification_with_evidence(
             evidence_kind,
         }
     } else if let Ok(resp) = inject_resp {
-        verify_normal_dom(resp, payload).await
+        verify_normal_dom(resp, payload, &args.ignore_return).await
     } else {
         DomVerifyEvidenceOutcome::default()
     }

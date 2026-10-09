@@ -4,6 +4,17 @@
 
 use super::*;
 
+/// Status for a body the `Json` extractor refused. Only the two classes the
+/// docs promise keep axum's own status — a body over `--max-body-bytes` (413)
+/// and a missing/foreign `Content-Type` (415); malformed JSON and schema
+/// errors (axum would answer 422) stay the documented 400.
+fn json_rejection_status(rej: &JsonRejection) -> StatusCode {
+    match rej.status() {
+        s @ (StatusCode::PAYLOAD_TOO_LARGE | StatusCode::UNSUPPORTED_MEDIA_TYPE) => s,
+        _ => StatusCode::BAD_REQUEST,
+    }
+}
+
 pub(crate) async fn start_scan_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -35,7 +46,7 @@ pub(crate) async fn start_scan_handler(
                 &state,
                 &headers,
                 &params,
-                StatusCode::BAD_REQUEST,
+                json_rejection_status(&rej),
                 format!("invalid request body: {}", rej),
             );
         }
@@ -65,6 +76,9 @@ pub(crate) async fn start_scan_handler(
             StatusCode::BAD_REQUEST,
             "target must start with http:// or https://",
         );
+    }
+    if let Err(msg) = crate::job::check_target_parses(&url) {
+        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
     }
 
     // `&mut`: validation also normalizes (e.g. uppercases `method`), and the
@@ -319,6 +333,9 @@ pub(crate) async fn get_scan_handler(
             "target must start with http:// or https://",
         );
     }
+    if let Err(msg) = crate::job::check_target_parses(&url) {
+        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
+    }
 
     // Build ScanOptions from query parameters
     let headers_param = params.get("header").cloned().unwrap_or_default();
@@ -542,19 +559,29 @@ pub(crate) async fn cancel_scan_handler(
     purge_expired_jobs(&state).await;
 
     // When ?purge=1, delete the job from memory instead of (or in addition to)
-    // cancelling it. Only allowed when the job is already terminal — callers
-    // must first cancel a running scan and wait for it to settle.
+    // cancelling it. Only allowed once the job is evictable (terminal and its
+    // worker released the lease, or wedged past the drain grace) — callers
+    // must first cancel a running scan and wait for it to settle. Removing a
+    // still-draining entry would drop its Weak lease, so `admit_job` would
+    // stop counting a worker that is still running and the cap is bypassed.
     let purge_requested = parse_bool_query(&params, "purge");
 
     let mut jobs = state.jobs.lock().await;
     match jobs.get_mut(&id) {
         Some(job) => {
             if purge_requested {
-                if !job.is_terminal() {
-                    let msg = format!(
-                        "cannot purge scan in status '{}' — cancel it first and wait for it to settle",
-                        job.status
-                    );
+                if !job.is_evictable() {
+                    let msg = if job.is_terminal() {
+                        format!(
+                            "cannot purge scan in status '{}' while its worker is still draining — retry once it settles",
+                            job.status
+                        )
+                    } else {
+                        format!(
+                            "cannot purge scan in status '{}' — cancel it first and wait for it to settle",
+                            job.status
+                        )
+                    };
                     drop(jobs);
                     return api_error(&state, &headers, &params, StatusCode::CONFLICT, msg);
                 }
@@ -673,6 +700,8 @@ enum PreflightError {
     RuntimeUnavailable(String),
     /// The blocking task panicked — infrastructure issue.
     TaskPanicked,
+    /// The analysis outlived the effective scan budget (`--scan-timeout` cap).
+    TimedOut(u64),
 }
 
 // POST /preflight — parameter discovery without attack payloads
@@ -706,7 +735,7 @@ pub(crate) async fn preflight_handler(
                 &state,
                 &headers,
                 &params,
-                StatusCode::BAD_REQUEST,
+                json_rejection_status(&rej),
                 format!("invalid request body: {}", rej),
             );
         }
@@ -746,6 +775,11 @@ pub(crate) async fn preflight_handler(
     // the same `effective_rate_limit` ceiling the scan path uses so the
     // operator's cap wins over the request's value.
     let preflight_rate = effective_rate_limit(opts.rate_limit, state.rate_limit);
+    // Same wall-clock ceiling `/scan` jobs get: a target that answers the
+    // reachability HEAD and then stalls every probe would otherwise hold this
+    // request (and its permit and blocking thread) for minutes, and graceful
+    // shutdown waits on in-flight requests.
+    let preflight_budget = effective_scan_timeout(opts.scan_timeout, state.scan_timeout);
 
     // Bound concurrent preflights: each one pins a blocking-pool thread for the
     // full request timeout against an attacker-controlled target, so an
@@ -781,7 +815,7 @@ pub(crate) async fn preflight_handler(
             // `record_outbound_request` looks for. `with_job_rate_limiter` is a
             // plain await when the effective rate is 0 (unlimited), so the
             // default path pays nothing.
-            rt.block_on(crate::with_job_rate_limiter(preflight_rate, async {
+            let work = crate::with_job_rate_limiter(preflight_rate, async {
                 let mut target = hydrate_preflight_target(&target_url, &opts, timeout_secs)
                     .map_err(PreflightError::BadUrl)?;
 
@@ -816,7 +850,17 @@ pub(crate) async fn preflight_handler(
                     opts.deep_scan.unwrap_or(false),
                 )
                 .await)
-            }))
+            });
+            // Dropping `work` on expiry aborts the in-flight probes; the
+            // runtime (and any task they spawned) goes with it.
+            rt.block_on(async {
+                if preflight_budget == 0 {
+                    return work.await;
+                }
+                tokio::time::timeout(Duration::from_secs(preflight_budget), work)
+                    .await
+                    .unwrap_or(Err(PreflightError::TimedOut(preflight_budget)))
+            })
         })
         .await
         .unwrap_or(Err(PreflightError::TaskPanicked));
@@ -844,6 +888,13 @@ pub(crate) async fn preflight_handler(
                 "preflight runtime unavailable",
             )
         }
+        Err(PreflightError::TimedOut(secs)) => api_error(
+            &state,
+            &headers,
+            &params,
+            StatusCode::GATEWAY_TIMEOUT,
+            format!("preflight exceeded the {secs}s scan timeout"),
+        ),
         Err(PreflightError::TaskPanicked) => {
             log(&state, "ERR", "preflight task panicked");
             api_error(

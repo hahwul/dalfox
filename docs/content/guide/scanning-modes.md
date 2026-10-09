@@ -77,7 +77,7 @@ Two knobs adjust that. `DALFOX_STDIN_WAIT_MS` raises the wait, or disables the m
 
 ### Collapsing near-duplicate URLs
 
-By default Dalfox only drops targets that are byte-identical (`--dedup-urls exact`): the full URL, query values included, plus the method. A `gau` / `katana` / `waybackurls` dump rarely looks like that — it is usually the same handful of endpoints with thousands of harvested values, and `?id=1` … `?id=9999` are 9999 separate full scans of one injection point.
+By default Dalfox only drops targets that are byte-identical (`--dedup-urls exact`): the full URL, query values included, plus the method (and, for HAR / raw HTTP entries, the captured body). A `gau` / `katana` / `waybackurls` dump rarely looks like that — it is usually the same handful of endpoints with thousands of harvested values, and `?id=1` … `?id=9999` are 9999 separate full scans of one injection point.
 
 `--dedup-urls signature` collapses them. The key is the method, scheme, host, port, path, and the *sorted set of parameter names* — query and body (form, JSON, multipart) alike. Values are excluded, so a value-only family becomes one target. Dalfox logs what it dropped, and the count lands in the scan metadata (`dedup_mode`, `targets_deduplicated`) so a collapsed run is never read as full coverage of the list.
 
@@ -116,11 +116,11 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 # INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan
 ```
 
-**Only completed targets are skipped.** Anything whose coverage is unknown is scanned again:
+**Only completed targets are skipped.** Anything whose coverage is unknown is scanned again. A target that produced findings is recorded `completed` only after the report is written (findings live in memory until then), so a kill, an OOM, or a failed `--output` write cannot leave a target skipped with its findings lost; it is simply scanned again. Targets with no findings are recorded as soon as they finish, and everything is recorded immediately under `--stream-findings`:
 
 | Recorded outcome | When | Next run |
 |------------------|------|----------|
-| `completed` | The target was scanned to the end with a live session | Skipped |
+| `completed` | The target was scanned to the end with a live session, and its findings (if any) were written to the report | Skipped |
 | `cancelled` | Ctrl-C, `--scan-timeout` expiry, a `--limit` stop, a session that died mid-scan, or severe transport loss (`meta.incomplete`) | Retried |
 | `error` | Dropped during preflight (unreachable, content-type mismatch, `--max-targets-per-host` cap), or a scan worker crashed | Retried |
 
@@ -171,7 +171,7 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped only when URL, method and request content (body, headers, cookies) all match, so two POSTs to the same URL with different bodies are both scanned. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
+Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped by URL + method + body, so two POSTs to the same URL with different bodies are both scanned; entries that differ only in headers or cookies (a rotated session, a drifting `Referer`) collapse. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
 
 CLI request flags still apply on top, for HAR, raw HTTP, OpenAPI and Postman alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). A `-H` header replaces every imported header of the same name (case-insensitive), and a `--cookies` cookie replaces the imported cookie of the same name, so a stale captured session or a spec's placeholder value never goes out ahead of yours; differently named ones are kept. `-H 'Cookie: …'` replaces the captured cookies (and any `--cookies`) outright; use `--cookies` to add or replace individual cookies. Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
 
@@ -204,7 +204,7 @@ Both types are explicit: `auto` does not detect a spec, so pass `-i openapi` / `
 
 **Leniency.** One bad operation or request (an unresolved host, a non-`http(s)` server, an unusable body) is skipped, not fatal; a warning on stderr counts the skips and quotes a few. The run fails with `PARSE_ERROR` only when the document is not a spec or nothing in it is scannable. Files are read under the same size cap as other inputs (`INPUT_TOO_LARGE`).
 
-The expanded targets then go through the same pipeline as a HAR import: CLI request flags apply on top (see above), duplicates collapse only when URL, method and request content all match, skipped operations are counted in `meta.targets_unparsable`, `--include-url` / `--out-of-scope` narrow the set, and `--state-file` fingerprints each target's method, body, headers and cookies.
+The expanded targets then go through the same pipeline as a HAR import: CLI request flags apply on top (see above), duplicates collapse on URL + method + body, skipped operations are counted in `meta.targets_unparsable`, `--include-url` / `--out-of-scope` narrow the set, and `--state-file` fingerprints each target's method, body, headers and cookies.
 
 ## Stored XSS mode (SXSS)
 

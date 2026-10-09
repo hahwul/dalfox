@@ -1188,3 +1188,39 @@ fn form_action_consumers_follow_a_same_host_tls_upgrade() {
         downgrade_target.as_str()
     );
 }
+
+#[test]
+fn hpp_on_nested_field_param_pollutes_the_wire_key_with_the_wire_decoy() {
+    // `qs[move_url]` is a display name: the server reads `qs` (base64 JSON). HPP
+    // must duplicate `qs` itself, decoyed with the pair's own original value,
+    // not append `qs[move_url]=...` pairs the server never reads.
+    let base = make_url("https://example.com/p?a=1&qs=ORIG");
+    let mut param = Param::new("qs[move_url]", "x", Location::Query);
+    param.wire_name = Some("qs".to_string());
+
+    let pairs = |pos| -> Vec<(String, String)> {
+        let out = build_hpp_url(&base, &param, "PAY", pos).expect("query location");
+        assert!(
+            !out.contains("%5B"),
+            "display name leaked onto the wire: {out}"
+        );
+        Url::parse(&out)
+            .expect("parseable")
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect()
+    };
+    let kv = |k: &str, v: &str| (k.to_string(), v.to_string());
+    assert_eq!(
+        pairs(HppPosition::Last),
+        vec![kv("a", "1"), kv("qs", "ORIG"), kv("qs", "PAY")]
+    );
+    assert_eq!(
+        pairs(HppPosition::First),
+        vec![kv("a", "1"), kv("qs", "PAY"), kv("qs", "ORIG")]
+    );
+    assert_eq!(
+        pairs(HppPosition::Both),
+        vec![kv("a", "1"), kv("qs", "PAY"), kv("qs", "PAY")]
+    );
+}

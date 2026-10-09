@@ -22,6 +22,14 @@
 //!   window where the file is invalid. Lines are flushed but not `fsync`ed:
 //!   that survives `kill -9` (the page cache outlives the process), not a
 //!   machine crash, which is the right trade for a progress log.
+//! - **A target with findings is `completed` only once they are reported.**
+//!   Findings live in memory until the end-of-scan render, so a target that
+//!   produced any is held back ([`StateFile::defer_completed`]) and recorded
+//!   after the report is written ([`StateFile::commit_deferred`]); a kill or a
+//!   failed `-o` write in between leaves it to be re-scanned rather than
+//!   skipped with its findings lost. Targets with no findings have nothing to
+//!   lose and are recorded immediately, as is everything under
+//!   `--stream-findings`, which prints them as they are found.
 //! - **Only `completed` is skipped.** `cancelled` (SIGINT / `--scan-timeout`,
 //!   dead session, or severe transport loss) and `error` (preflight skip)
 //!   targets are retried on the next run, because how much of them was actually
@@ -139,6 +147,12 @@ impl CliCredentials {
                 creds
                     .headers
                     .insert((n.trim().to_ascii_lowercase(), v.trim().to_string()));
+                // Target resolution lifts `-H 'Cookie: …'` into `target.cookies`
+                // (`job::lift_cookie_headers`), where the pairs are hashed by
+                // value unless they are listed here too.
+                if n.trim().eq_ignore_ascii_case("cookie") {
+                    creds.cookies.extend(crate::job::split_cookie_pairs(v));
+                }
             }
         }
         for c in &args.cookies {
@@ -344,6 +358,9 @@ struct Loaded {
     /// normal case. Reported so a *systematically* unreadable file is visible
     /// rather than looking like an empty one.
     corrupt_lines: usize,
+    /// The file exists but holds no header (whitespace-only, e.g. `echo > f`).
+    /// Its length is non-zero, so the writer must be told to add one anyway.
+    blank: bool,
 }
 
 /// Read `path` and decide whether its completions can be reused under `hash`.
@@ -368,6 +385,7 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
             prior: std::collections::HashMap::new(),
             reset,
             corrupt_lines: 0,
+            blank: false,
         })
     };
 
@@ -390,7 +408,7 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
     };
 
     if raw.trim().is_empty() {
-        return fresh(None);
+        return fresh(None).map(|l| Loaded { blank: true, ..l });
     }
 
     let mut lines = raw.lines().filter(|l| !l.trim().is_empty());
@@ -446,7 +464,22 @@ fn load(path: &str, hash: &str) -> Result<Loaded, String> {
         prior,
         reset: None,
         corrupt_lines,
+        blank: false,
     })
+}
+
+/// Whether the (non-empty) file at `path` ends in '\n'. Unreadable counts as
+/// terminated: the append that follows reports the real error.
+fn ends_with_newline(path: &str) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut last = *b"\n";
+    std::fs::File::open(path)
+        .and_then(|mut f| {
+            f.seek(SeekFrom::End(-1))?;
+            f.read_exact(&mut last)
+        })
+        .map(|_| last[0] == b'\n')
+        .unwrap_or(true)
 }
 
 /// An open state file: the completions carried over from previous runs, plus
@@ -466,6 +499,12 @@ pub(crate) struct StateFile {
     /// than repeating per target).
     handle: Mutex<Option<std::fs::File>>,
     write_failed: AtomicBool,
+    /// Targets that finished with findings still only in memory. Their
+    /// `completed` record waits for [`StateFile::commit_deferred`], called once
+    /// the report is out: a kill, an OOM or a failed `-o` write before that
+    /// would otherwise leave a target the next run skips and a report that
+    /// never held its findings.
+    deferred: Mutex<Vec<TargetIdentity>>,
     silence: bool,
     /// Why the prior file was set aside, if it was. Surfaced by the caller.
     pub(crate) reset_reason: Option<String>,
@@ -501,6 +540,7 @@ impl StateFile {
     fn open_inner(path: &str, args: &ScanArgs, read_only: bool) -> Result<Self, String> {
         let hash = config_hash(args);
         let loaded = load(path, &hash)?;
+        let loaded_blank = loaded.blank;
 
         let mut state = StateFile {
             path: path.to_string(),
@@ -509,6 +549,7 @@ impl StateFile {
             prior: Mutex::new(loaded.prior),
             handle: Mutex::new(None),
             write_failed: AtomicBool::new(false),
+            deferred: Mutex::new(Vec::new()),
             silence: args.silence,
             reset_reason: loaded.reset,
             corrupt_lines: loaded.corrupt_lines,
@@ -547,10 +588,20 @@ impl StateFile {
             .open(path)
             .map_err(|e| format!("--state-file '{}' could not be opened: {}", path, e))?;
 
+        // A hard kill can leave the last line without its '\n'. Appending right
+        // after it would glue the next record onto the fragment and lose both,
+        // so terminate it first; the fragment then stays its own skipped line.
+        let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+        if len > 0 && !ends_with_newline(path) {
+            file.write_all(b"\n")
+                .map_err(|e| format!("--state-file '{}' could not be written: {}", path, e))?;
+        }
+
         // Header goes in when the file is new or was just moved aside. Judged
         // by length so a zero-byte file left behind by an earlier failure gets
-        // one too.
-        let needs_header = file.metadata().map(|m| m.len() == 0).unwrap_or(true);
+        // one too, and by `blank` so a whitespace-only file does (the loader
+        // skips blank lines, so the header may follow them).
+        let needs_header = len == 0 || loaded_blank;
         if needs_header {
             let header = Header {
                 dalfox_state: STATE_FORMAT_VERSION,
@@ -597,6 +648,31 @@ impl StateFile {
 
     pub(crate) fn record_identity(&self, identity: TargetIdentity, outcome: TargetOutcome) {
         self.append(identity, outcome, |_| true);
+    }
+
+    /// Hold back `target`'s `completed` record until [`commit_deferred`]. For
+    /// a target whose findings exist only in memory: recorded now, a hard kill
+    /// would make the next run skip it with those findings never reported.
+    ///
+    /// [`commit_deferred`]: StateFile::commit_deferred
+    pub(crate) fn defer_completed(&self, target: &Target) {
+        let identity = self.identity(target);
+        match self.deferred.lock() {
+            Ok(mut g) => g.push(identity),
+            Err(poisoned) => poisoned.into_inner().push(identity),
+        }
+    }
+
+    /// Write the held-back `completed` records. Call only after the report
+    /// that carries those targets' findings has been written.
+    pub(crate) fn commit_deferred(&self) {
+        let held = match self.deferred.lock() {
+            Ok(mut g) => std::mem::take(&mut *g),
+            Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
+        };
+        for identity in held {
+            self.record_identity(identity, TargetOutcome::Completed);
+        }
     }
 
     /// Downgrade a target to `cancelled` after a run-wide transport-loss check,

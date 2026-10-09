@@ -453,7 +453,9 @@ pub(crate) async fn check_form_discovery_with(
                     continue;
                 }
 
-                for key in &keys {
+                // Each probe re-sends the whole object, so cost is keys^2 bytes;
+                // probe only the first MAX_FORM_FIELDS keys (full body kept).
+                for key in keys.iter().take(MAX_FORM_FIELDS) {
                     let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                     let mut map = serde_json::Map::new();
                     for (k, v) in &obj {
@@ -532,7 +534,7 @@ pub(crate) async fn check_form_discovery_with(
                 }
 
                 // Try JSON body with each field replaced by test_value
-                for (field_name, field_value) in &json_fields {
+                for (field_name, field_value) in json_fields.iter().take(MAX_FORM_FIELDS) {
                     let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                     let mut map = serde_json::Map::new();
                     for (n, v) in &json_fields {

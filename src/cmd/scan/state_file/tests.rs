@@ -94,6 +94,37 @@ fn completed_targets_are_skipped_on_the_next_run() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// A target whose findings are still only in memory is not skippable until the
+/// report holding them is out: a process that dies between the two leaves it
+/// to be scanned again.
+#[test]
+fn a_deferred_completion_is_not_skippable_until_committed() {
+    let path = scratch("deferred");
+    let args = args_with(&path);
+
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.defer_completed(&test_target("https://a.test/?q=1", "GET"));
+        record(&sf, "https://b.test/?q=1", "GET", TargetOutcome::Completed);
+        // "Killed" here: dropped without commit_deferred.
+    }
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(!is_completed(&sf, "https://a.test/?q=1", "GET"));
+    assert!(is_completed(&sf, "https://b.test/?q=1", "GET"));
+    drop(sf);
+
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        sf.defer_completed(&test_target("https://a.test/?q=1", "GET"));
+        sf.commit_deferred();
+        sf.commit_deferred(); // draining twice must not re-append
+    }
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+    assert!(is_completed(&sf, "https://a.test/?q=1", "GET"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
 #[test]
 fn changed_raw_http_request_body_is_not_skipped_as_completed() {
     let path = scratch("raw-http-body");
@@ -255,6 +286,55 @@ fn a_torn_final_line_is_skipped_and_earlier_records_survive() {
     assert_eq!(sf.corrupt_lines, 1);
     assert!(is_completed(&sf, "https://a.test/", "GET"));
     assert!(sf.reset_reason.is_none(), "a torn tail is not a reset");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// The resumed run's first record must not be glued onto the torn fragment, or
+// that target is lost and the "unreadable line" warning never goes away.
+#[test]
+fn a_record_appended_after_a_torn_tail_stays_readable() {
+    let path = scratch("torn-append");
+    let args = args_with(&path);
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
+    }
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        write!(f, "{{\"target\":\"https://b.test/\",\"meth").unwrap();
+    }
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens");
+        record(&sf, "https://c.test/", "GET", TargetOutcome::Completed);
+    }
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("reopens again");
+    assert!(is_completed(&sf, "https://c.test/", "GET"));
+    assert!(is_completed(&sf, "https://a.test/", "GET"));
+    assert_eq!(sf.corrupt_lines, 1, "only the torn fragment is unreadable");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// `echo > scan.state` leaves one byte, so a length check alone skipped the
+// header and the next run refused the file dalfox itself had just written.
+#[test]
+fn a_whitespace_only_file_gets_a_header_and_stays_resumable() {
+    let path = scratch("blank");
+    let args = args_with(&path);
+    std::fs::write(&path, "\n").unwrap();
+    {
+        let sf = StateFile::open(path.to_str().unwrap(), &args).expect("opens");
+        record(&sf, "https://a.test/", "GET", TargetOutcome::Completed);
+    }
+
+    let sf = StateFile::open(path.to_str().unwrap(), &args).expect("resumes");
+    assert!(is_completed(&sf, "https://a.test/", "GET"));
 
     let _ = std::fs::remove_file(&path);
 }
@@ -706,4 +786,23 @@ fn target_identity_ignores_only_run_wide_credential_values() {
         target_identity(&t("a", "Bearer tenant-b", "acme"), &none),
         "captures differing only by Authorization are distinct requests"
     );
+}
+
+// `-H 'Cookie: …'` is lifted into `target.cookies` at target resolution, so a
+// rotated session in that header must still resume rather than reset.
+#[test]
+fn target_identity_ignores_rotated_cookie_header_values() {
+    let identity = |sid: &str| {
+        let args = ScanArgs {
+            headers: vec![format!("Cookie: sid={sid}; lang=en")],
+            ..Default::default()
+        };
+        let mut t = test_target("http://example.test/a?q=1", "GET");
+        t.cookies = vec![
+            ("sid".to_string(), sid.to_string()),
+            ("lang".to_string(), "en".to_string()),
+        ];
+        target_identity(&t, &CliCredentials::from_args(&args))
+    };
+    assert_eq!(identity("a"), identity("b"));
 }

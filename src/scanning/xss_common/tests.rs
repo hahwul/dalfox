@@ -329,6 +329,7 @@ fn test_generate_adaptive_payloads_filters_angle_brackets_in_attribute() {
         &InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
         &['<', '>'],
         &[],
+        false,
     );
     assert!(!payloads.is_empty());
     assert!(
@@ -339,9 +340,27 @@ fn test_generate_adaptive_payloads_filters_angle_brackets_in_attribute() {
 
 #[test]
 fn test_generate_adaptive_payloads_no_specials_keeps_base() {
-    let payloads = generate_adaptive_payloads(&InjectionContext::Html(None), &[], &[]);
+    let payloads = generate_adaptive_payloads(&InjectionContext::Html(None), &[], &[], false);
     assert!(!payloads.is_empty());
     assert!(payloads.iter().any(|p| p.contains("onerror=alert(1)")));
+}
+
+#[test]
+fn test_generate_adaptive_payloads_raw_only_drops_encoded_variants() {
+    // `--encoders none`: no url / entity / adaptive-encoded variants, only the
+    // raw payloads, while the default keeps them.
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
+    let blocked = ['<', '>', '"', '\''];
+    let raw = generate_adaptive_payloads(&ctx, &blocked, &[], true);
+    let full = generate_adaptive_payloads(&ctx, &blocked, &[], false);
+    assert!(!raw.is_empty());
+    assert!(
+        raw.iter().all(|p| !p.contains('%')),
+        "raw_only must emit no url-encoded variants: {:?}",
+        raw.iter().find(|p| p.contains('%'))
+    );
+    assert!(raw.len() < full.len());
+    assert!(full.iter().any(|p| p.contains('%')));
 }
 
 // --- load_custom_payloads ---
