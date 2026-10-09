@@ -45,13 +45,14 @@ struct ProviderCache(OnceLock<Mutex<CachedLists>>);
 /// Fetched lists indexed by the normalized provider set that produced them.
 type CachedLists = HashMap<Vec<String>, CachedList>;
 
-/// One cached list. `partial_at` marks a fetch where some provider URL failed:
-/// the surviving entries are served, and the set is fetched again once
-/// [`PARTIAL_RETRY_AFTER`] has passed rather than pinning the degraded list for
-/// the process lifetime (or re-fetching on every job when a URL is dead).
+/// One cached list. `retry_at` marks a fetch where some provider URL failed:
+/// the surviving entries are served, and the set is fetched again once that
+/// instant ([`PARTIAL_RETRY_AFTER`] later) has passed rather than pinning the
+/// degraded list for the process lifetime (or re-fetching on every job when a
+/// URL is dead).
 struct CachedList {
     lines: Arc<Vec<String>>,
-    partial_at: Option<std::time::Instant>,
+    retry_at: Option<std::time::Instant>,
 }
 
 /// Backoff before a partially fetched provider set is fetched again.
@@ -75,20 +76,20 @@ impl ProviderCache {
     /// recently enough.
     fn is_fresh(&self, key: &[String]) -> bool {
         let m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
-        m.get(key).is_some_and(|e| {
-            e.partial_at
-                .is_none_or(|at| at.elapsed() < PARTIAL_RETRY_AFTER)
-        })
+        m.get(key)
+            .is_some_and(|e| e.retry_at.is_none_or(|at| std::time::Instant::now() < at))
     }
 
-    /// Age a partial entry past the retry backoff.
+    /// Make a partial entry due for a retry now. (Not by subtracting the
+    /// backoff from an `Instant`: that underflows on a freshly booted Windows
+    /// host, whose monotonic clock starts near zero.)
     #[cfg(test)]
     fn expire_partial(&self, key: &[String]) {
         let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(e) = m.get_mut(key)
-            && let Some(at) = e.partial_at.as_mut()
+            && let Some(at) = e.retry_at.as_mut()
         {
-            *at -= PARTIAL_RETRY_AFTER;
+            *at = std::time::Instant::now();
         }
     }
 
@@ -105,7 +106,7 @@ impl ProviderCache {
             key,
             CachedList {
                 lines: Arc::new(lines),
-                partial_at: partial.then(std::time::Instant::now),
+                retry_at: partial.then(|| std::time::Instant::now() + PARTIAL_RETRY_AFTER),
             },
         );
         true
