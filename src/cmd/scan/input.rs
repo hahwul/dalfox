@@ -220,9 +220,11 @@ pub(crate) async fn resolve_targets(
             let p = std::path::Path::new(target);
             // A directory named like a host (`example.com/` from a recon dump or
             // `wget -r`) is not a target list: keep it a host literal. A
-            // path-shaped one (`./out`, `/tmp`) still reports "not a regular file".
+            // path-shaped one (`./out`, `/tmp`, `C:\out`) still reports "not a
+            // regular file".
+            let path_shaped = p.is_absolute() || names_a_missing_file(target);
             let file_read: Option<std::result::Result<String, std::io::Error>> =
-                if p.exists() && !(p.is_dir() && !names_a_missing_file(target)) {
+                if p.exists() && !(p.is_dir() && !path_shaped) {
                     Some(crate::utils::fs::read_bounded(
                         p,
                         MAX_TARGET_LIST_BYTES,
