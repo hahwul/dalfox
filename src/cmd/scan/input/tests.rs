@@ -535,17 +535,18 @@ fn apply_request_cli_cookie_header_replaces_captured_cookies_per_cookie() {
         "-H",
         "Cookie: other=1; sid=abc",
         "--cookies",
-        "dropped=1",
+        "kept=1",
         "ignored.example",
     ]);
 
     apply_request_cli_overrides(&mut target, &args);
 
-    // Replaces the captured cookies and `--cookies` outright (documented), but
-    // as per-cookie params, not a literal header.
+    // Replaces the captured cookies outright, as per-cookie params rather
+    // than a literal header; `--cookies` is kept, like the URL-list path.
     assert_eq!(
         target.cookies,
         vec![
+            ("kept".to_string(), "1".to_string()),
             ("other".to_string(), "1".to_string()),
             ("sid".to_string(), "abc".to_string())
         ]

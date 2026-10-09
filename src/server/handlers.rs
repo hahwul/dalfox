@@ -540,10 +540,17 @@ pub(crate) async fn cancel_scan_handler(
         Some(job) => {
             if purge_requested {
                 if !job.is_evictable() {
-                    let msg = format!(
-                        "cannot purge scan in status '{}' — cancel it first and wait for it to settle",
-                        job.status
-                    );
+                    let msg = if job.is_terminal() {
+                        format!(
+                            "cannot purge scan in status '{}' while its worker is still draining — retry once it settles",
+                            job.status
+                        )
+                    } else {
+                        format!(
+                            "cannot purge scan in status '{}' — cancel it first and wait for it to settle",
+                            job.status
+                        )
+                    };
                     drop(jobs);
                     return api_error(&state, &headers, &params, StatusCode::CONFLICT, msg);
                 }

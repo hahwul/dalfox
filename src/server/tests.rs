@@ -3598,7 +3598,11 @@ async fn test_purge_refuses_cancelled_job_with_live_worker() {
         .await
         .into_response()
     };
-    assert_eq!(purge(state.clone()).await.status(), StatusCode::CONFLICT);
+    let refused = purge(state.clone()).await;
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    // Already cancelled: telling the client to "cancel it first" loops it.
+    let msg = response_body_string(refused).await;
+    assert!(msg.contains("still draining"), "{msg}");
     assert!(state.jobs.lock().await.contains_key("draining"));
     drop(lease);
     assert_eq!(purge(state.clone()).await.status(), StatusCode::OK);

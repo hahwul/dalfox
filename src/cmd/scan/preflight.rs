@@ -201,7 +201,7 @@ pub(crate) async fn preflight_content_type(
     if target.delay > 0 {
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
-    // Retry once on transient connect/timeout errors. At high worker counts
+    // Retry once on transient connect errors. At high worker counts
     // ECONNREFUSED can spuriously fire even against healthy servers as the OS
     // throttles new connection establishment; a single short backoff usually
     // recovers without losing the target. Non-connect errors (status / body /
@@ -225,8 +225,10 @@ pub(crate) async fn preflight_content_type(
         match request_builder.send().await {
             Ok(r) => break Some(r),
             Err(e) => {
-                let transient = e.is_connect() || e.is_timeout();
-                if transient && attempt < PREFLIGHT_MAX_ATTEMPTS {
+                // A timed-out HEAD is not retried: the GET fallback below is
+                // its second attempt, so a tarpit host still costs two
+                // timeouts, not three.
+                if e.is_connect() && attempt < PREFLIGHT_MAX_ATTEMPTS {
                     crate::dbg_log!(
                         "preflight transient {} (attempt {}): {} — retrying",
                         describe_reqwest_failure(&e),
@@ -563,5 +565,48 @@ mod failure_tests {
             PreflightOutcome::NoContentType { .. } => panic!("GET carried a Content-Type"),
             PreflightOutcome::Unreachable(c) => panic!("HEAD-only failure must not skip: {c}"),
         }
+    }
+
+    /// A HEAD that hangs past the timeout goes straight to the GET fallback
+    /// instead of a second HEAD, so a tarpit costs two timeouts, not three.
+    #[tokio::test]
+    async fn head_timeout_is_not_retried_before_get() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let heads = Arc::new(AtomicUsize::new(0));
+        let counter = heads.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = l.accept().await else {
+                    return;
+                };
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    if buf[..n].starts_with(b"HEAD") {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        return;
+                    }
+                    let body = "<html>ok</html>";
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        let mut target =
+            crate::target_parser::parse_target(&format!("http://127.0.0.1:{port}/?q=1")).unwrap();
+        target.timeout = 1;
+        assert!(matches!(
+            preflight_content_type(&target, &args()).await,
+            PreflightOutcome::WithContentType(_)
+        ));
+        assert_eq!(heads.load(Ordering::SeqCst), 1, "timed-out HEAD retried");
     }
 }

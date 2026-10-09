@@ -14,14 +14,13 @@ pub async fn probe_body_params(
     let client = target.build_client_or_default();
 
     if let Some(data) = &args.data {
-        // JSON / XML / GraphQL bodies have their own probes. Form-parsing one
-        // yields a single pair keyed by the whole body, which an echoing
-        // endpoint reflects, registering a junk Body param that then eats the
-        // full payload catalog.
+        // JSON (GraphQL included) / XML bodies have their own probes.
+        // Form-parsing one yields a single pair keyed by the whole body, which
+        // an echoing endpoint reflects, registering a junk Body param that then
+        // eats the full payload catalog.
         if serde_json::from_str::<serde_json::Value>(data)
             .is_ok_and(|v| v.is_object() || v.is_array())
             || request_is_xml(target, data)
-            || !crate::encoding::pipeline::infer_graphql_variable_fields(data).is_empty()
         {
             return;
         }

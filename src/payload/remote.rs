@@ -45,13 +45,17 @@ struct ProviderCache(OnceLock<Mutex<CachedLists>>);
 /// Fetched lists indexed by the normalized provider set that produced them.
 type CachedLists = HashMap<Vec<String>, CachedList>;
 
-/// One cached list. `partial` marks a fetch where some provider URL failed: the
-/// surviving entries are served, but the set is fetched again next time rather
-/// than pinning the degraded list for the process lifetime.
+/// One cached list. `partial_at` marks a fetch where some provider URL failed:
+/// the surviving entries are served, and the set is fetched again once
+/// [`PARTIAL_RETRY_AFTER`] has passed rather than pinning the degraded list for
+/// the process lifetime (or re-fetching on every job when a URL is dead).
 struct CachedList {
     lines: Arc<Vec<String>>,
-    partial: bool,
+    partial_at: Option<std::time::Instant>,
 }
+
+/// Backoff before a partially fetched provider set is fetched again.
+const PARTIAL_RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl ProviderCache {
     const fn new() -> Self {
@@ -67,10 +71,25 @@ impl ProviderCache {
         m.get(key).map(|e| e.lines.clone())
     }
 
-    /// Whether `key` holds a fully fetched list (present and not `partial`).
-    fn is_complete(&self, key: &[String]) -> bool {
+    /// Whether `key` needs no fetch: fully fetched, or partial but retried
+    /// recently enough.
+    fn is_fresh(&self, key: &[String]) -> bool {
         let m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
-        m.get(key).is_some_and(|e| !e.partial)
+        m.get(key).is_some_and(|e| {
+            e.partial_at
+                .is_none_or(|at| at.elapsed() < PARTIAL_RETRY_AFTER)
+        })
+    }
+
+    /// Age a partial entry past the retry backoff.
+    #[cfg(test)]
+    fn expire_partial(&self, key: &[String]) {
+        let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(e) = m.get_mut(key)
+            && let Some(at) = e.partial_at.as_mut()
+        {
+            *at -= PARTIAL_RETRY_AFTER;
+        }
     }
 
     /// Cache `lines` under `key`. Returns `false` when the cache is full and
@@ -86,7 +105,7 @@ impl ProviderCache {
             key,
             CachedList {
                 lines: Arc::new(lines),
-                partial,
+                partial_at: partial.then(std::time::Instant::now),
             },
         );
         true
@@ -221,7 +240,7 @@ impl RemoteKind {
         opts: RemoteFetchOptions,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let key = provider_cache_key(providers);
-        if self.cache.is_complete(&key) {
+        if self.cache.is_fresh(&key) {
             return Ok(());
         }
 
@@ -255,7 +274,7 @@ impl RemoteKind {
         }
 
         // Some URLs failed: serve what survived, but leave the set marked
-        // partial so the next job fetches again.
+        // partial so a later job fetches again after the backoff.
         if !self.cache.store(key, dedup_sorted, failed > 0) {
             return Err(cache_full_error(self.noun));
         }

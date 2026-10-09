@@ -173,7 +173,7 @@ mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 
 HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드 + 본문으로 판단하므로, 같은 URL에 본문만 다른 POST 두 개는 모두 남고 헤더나 쿠키만 다른 항목은 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
-CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`는 캡처에 있는 같은 이름(대소문자 무시)의 헤더를 대체하므로 새로 받은 `Authorization`이 오래된 값을 이깁니다. 같은 이름의 `-H`를 여러 번 주면 모두 전송됩니다. `--cookies`의 쿠키는 캡처된 같은 이름의 쿠키를 대체하고, 나머지 캡처 쿠키는 유지됩니다. `-H 'User-Agent: …'`는 `--user-agent`처럼 캡처된 User-Agent를 대체하고, `-H 'Cookie: …'`는 캡처된 쿠키(와 `--cookies`로 준 쿠키)를 통째로 대체합니다. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
+CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`는 캡처에 있는 같은 이름(대소문자 무시)의 헤더를 대체하므로 새로 받은 `Authorization`이 오래된 값을 이깁니다. 같은 이름의 `-H`를 여러 번 주면 모두 전송됩니다. `--cookies`의 쿠키는 캡처된 같은 이름의 쿠키를 대체하고, 나머지 캡처 쿠키는 유지됩니다. `-H 'User-Agent: …'`는 `--user-agent`처럼 캡처된 User-Agent를 대체하고, `-H 'Cookie: …'`는 캡처된 쿠키를 통째로 대체합니다. 이름이 겹치면 `--cookies` 쪽이 이깁니다. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
 
 ## 저장형 XSS 모드 (SXSS)
 

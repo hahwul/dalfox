@@ -1045,4 +1045,9 @@ fn svg_animate_exec_keeps_prefix_and_marker() {
         out,
         "<svg><animate onbegin=alert(1) attributeName=x dur=1s class=dlxabc>"
     );
+    let out = svg_animate_exec("\"><svg onload=alert(1) class=dlxabc>");
+    assert_eq!(
+        out,
+        "\"><svg><animate onbegin=alert(1) attributeName=x dur=1s class=dlxabc>"
+    );
 }

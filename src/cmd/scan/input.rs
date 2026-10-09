@@ -1158,18 +1158,21 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
         .iter()
         .flat_map(|c| crate::job::split_cookie_pairs(c))
         .collect();
-    target
-        .cookies
-        .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| k == n));
-    target.cookies.extend(cli_cookies);
-    // A CLI `-H 'Cookie: …'` replaces the captured cookies (and `--cookies`)
-    // outright; lift it into `cookies` so each one is probed.
-    if args.headers.iter().any(|h| {
+    // A CLI `-H 'Cookie: …'` replaces the captured cookies outright; lift it
+    // into `cookies` so each one is probed. `--cookies` still wins on a name
+    // clash, same as the URL-list path and REST/MCP.
+    let cli_cookie_header = args.headers.iter().any(|h| {
         h.split_once(':')
             .is_some_and(|(n, _)| n.trim().eq_ignore_ascii_case("cookie"))
-    }) {
-        target.cookies.clear();
+    });
+    if cli_cookie_header {
+        target.cookies = cli_cookies;
         crate::job::lift_cookie_headers(&mut target.headers, &mut target.cookies);
+    } else {
+        target
+            .cookies
+            .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| k == n));
+        target.cookies.extend(cli_cookies);
     }
     target.timeout = args.timeout;
     target.delay = args.delay;

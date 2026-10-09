@@ -394,12 +394,14 @@ pub(super) fn svg_animate_exec(payload: &str) -> String {
     const HANDLER_END: [char; 4] = [' ', '>', '\t', '\n'];
     // Transform svg onload variants to svg animate onbegin
     for prefix in &["<svg onload=", "<SVG ONLOAD=", "<sVg onload="] {
-        if let Some(rest) = payload.strip_prefix(prefix)
-            && rest.contains('>')
+        if let Some(idx) = payload.find(prefix)
+            && payload[idx..].contains('>')
         {
+            let rest = &payload[idx + prefix.len()..];
             let end = rest.find(HANDLER_END).unwrap_or(rest.len());
             return format!(
-                "<svg><animate onbegin={} attributeName=x dur=1s{}",
+                "{}<svg><animate onbegin={} attributeName=x dur=1s{}",
+                &payload[..idx],
                 &rest[..end],
                 &rest[end..]
             );

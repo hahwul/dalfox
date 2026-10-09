@@ -868,6 +868,22 @@ fn test_dedupe_keeps_same_name_at_different_form_actions_distinct() {
     ];
     dedupe_reflection_params(&mut params, &page_url());
     assert_eq!(params.len(), 1);
+
+    // Same path, different routing query: two handlers, two sinks.
+    let mut params = vec![
+        form("https://x/index.php?page=search", Location::Body),
+        form("https://x/index.php?page=profile", Location::Body),
+    ];
+    dedupe_reflection_params(&mut params, &page_url());
+    assert_eq!(params.len(), 2);
+
+    // Same route on both forms: one slot.
+    let mut params = vec![
+        form("https://x/index.php?page=search", Location::Body),
+        form("https://x/index.php?page=search", Location::Body),
+    ];
+    dedupe_reflection_params(&mut params, &page_url());
+    assert_eq!(params.len(), 1);
 }
 
 #[test]

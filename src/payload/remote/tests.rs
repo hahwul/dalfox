@@ -243,8 +243,8 @@ async fn fetch_multiple_text_lists_ignores_non_success_responses() {
 }
 
 /// One provider URL failing must not pin the surviving half as the complete
-/// list: the next init for the same provider set fetches again and picks up the
-/// recovered URL.
+/// list: once the retry backoff passes, the next init for the same provider
+/// set fetches again and picks up the recovered URL.
 #[tokio::test]
 async fn partial_fetch_is_retried_not_pinned() {
     use axum::{Router, http::StatusCode, routing::get};
@@ -286,7 +286,16 @@ async fn partial_fetch_is_retried_not_pinned() {
     let first = get_remote_payloads_for(&providers).expect("cached");
     assert_eq!(*first, vec!["alpha".to_string()]);
 
+    // Within the backoff a dead URL is not re-fetched on every job.
     healthy.store(true, Ordering::SeqCst);
+    init_remote_payloads_with(&providers, RemoteFetchOptions::default())
+        .await
+        .expect("backoff serves the cached survivors");
+    assert_eq!(*get_remote_payloads_for(&providers).unwrap(), *first);
+
+    PAYLOADS
+        .cache
+        .expire_partial(&provider_cache_key(&providers));
     init_remote_payloads_with(&providers, RemoteFetchOptions::default())
         .await
         .expect("retry succeeds");
