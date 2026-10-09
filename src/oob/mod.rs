@@ -17,7 +17,7 @@ mod registry;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use poller::spawn_poller;
+pub(crate) use poller::{PollerHandle, spawn_poller};
 pub(crate) use registry::{CorrelationRegistry, InjectionRecord};
 
 use std::sync::Arc;

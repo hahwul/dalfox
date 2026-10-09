@@ -21,11 +21,16 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
         waf_bypass: opts.waf_bypass.as_deref(),
         force_waf: opts.force_waf.as_mut(),
         waf_min_confidence: opts.waf_min_confidence,
+        min_confidence: opts.min_confidence.as_deref(),
         headers: opts.header.as_deref().unwrap_or_default(),
         user_agent: opts.user_agent.as_deref(),
         cookies: opts.cookie.as_slice(),
         proxy: Some(&mut opts.proxy),
         blind: Some((&mut opts.blind, "blind")),
+        blind_oob: Some(&mut opts.blind_oob),
+        blind_oob_wait: opts.blind_oob_wait,
+        session_check: Some(&mut opts.session_check),
+        session_check_url: Some(&mut opts.session_check_url),
     }
     .validate()?;
     // `send_terminal_webhook` dials http(s) only and returns silently for

@@ -23,7 +23,8 @@ Dalfox는 설정 디렉터리를 하나만 고릅니다.
 ```toml
 [scan]
 # INPUT
-input_type = "auto"   # auto, url, file, pipe, raw-http, har
+input_type = "auto"   # auto, url, file, pipe, raw-http, har, openapi, postman
+# base_url = "https://staging.example.com"  # openapi/postman: 모든 요청의 스킴+호스트(+포트), 경로 접두어. 명세 서버 경로는 뒤에 붙음
 dedup_urls = "exact"  # exact, signature (파라미터 값만 다른 URL 병합), off
 # state_file = "scan.state"  # 완료된 대상을 기록해 재실행 시 건너뜁니다. CLI 전용 — `dalfox server`/MCP는 무시
 
@@ -42,6 +43,7 @@ limit_result_type = "all"
 only_poc = []
 # baseline = "baseline.json"
 baseline_mode = "filter"
+min_confidence = "low"
 no_color = false
 
 # TARGETS
@@ -138,7 +140,8 @@ debug = false
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`, `postman` |
+| `base_url` | string | — | `openapi` / `postman` 입력 전용: 모든 요청의 스킴, 호스트, 포트를 정하고 경로 접두어가 됩니다. 명세 서버의 경로는 그 뒤에 붙습니다. 절대 `http(s)` URL이어야 하며, 그 밖의 값은 경고와 함께 무시합니다([OpenAPI / Postman 모드](../../guide/scanning-modes/#openapi-postman-모드)) |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature`(파라미터 값만 다른 URL을 하나로 병합), `off` |
 | `state_file` | string | — | 완료된 대상을 기록해 재실행 시 건너뜁니다([중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)). **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
 
@@ -160,6 +163,7 @@ debug = false
 | `only_poc` | array | `[]` | 출력 필터: `["v","a"]` |
 | `baseline` | string | — | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다([베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)). **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
 | `baseline_mode` | string | `"filter"` | `filter`는 알려진 건을 제거, `annotate`는 유지한 채 `new` 표시 |
+| `min_confidence` | string | `"low"` | `high`는 `low` 등급 탐지 결과를 출력과 종료 코드보다 먼저 제거 (`I`는 유지) |
 | `no_color` | bool | `false` | ANSI 색상 비활성화 |
 
 ### 대상
@@ -289,7 +293,7 @@ CLI 플래그  >  설정 파일  >  내장 기본값
 
 설정 값은 CLI 인자 파서를 거치지 않으므로, Dalfox는 파일을 읽을 때 따로 검사합니다.
 
-- 선택지가 정해진 키(`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`)에 잘못된 값을 넣거나, 알 수 없는 `method` / `sxss_method` / `force_waf`, 올바른 정규식이 아닌 `session_check`, 절대 URL이 아닌 `session_check_url`, `limit = 0`을 쓰면 stderr에 `Warning:`이 출력됩니다. 해당 키는 내장 기본값으로 돌아가고 스캔은 계속됩니다. `method`, `sxss_method`, `force_waf`는 플래그와 똑같이 대소문자가 정규화됩니다.
+- 선택지가 정해진 키(`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `min_confidence`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`)에 잘못된 값을 넣거나, 알 수 없는 `method` / `sxss_method` / `force_waf`, 올바른 정규식이 아닌 `session_check`, 절대 URL이 아닌 `session_check_url`, `limit = 0`을 쓰면 stderr에 `Warning:`이 출력됩니다. 해당 키는 내장 기본값으로 돌아가고 스캔은 계속됩니다. `method`, `sxss_method`, `force_waf`는 플래그와 똑같이 대소문자가 정규화됩니다.
 - `proxy`, `sxss_url`, `session_check_url`은 플래그와 같은 시작 검사를 거칩니다. Dalfox가 라우팅할 수 없는 프록시 스킴이나 스킴이 `http`/`https`가 아닌 URL이면 `PARSE_ERROR`(종료 코드 `2`)로 스캔이 중단됩니다.
 - 숫자 키는 대응하는 플래그와 같은 범위 제한을 받습니다(`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). 범위를 벗어나면 `INVALID_INPUT_TYPE`(종료 코드 `2`)으로 스캔이 중단됩니다.
 - 알 수 없는 키와 `[scan]` 테이블 밖에 둔 키는 무시되며, stderr에 ``Warning: config <path>: unknown key `scan.header` ignored`` 경고가 출력되므로 철자나 위치가 틀린 키를 알아챌 수 있습니다.

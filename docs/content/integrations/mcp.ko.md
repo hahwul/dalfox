@@ -59,6 +59,10 @@ claude mcp add dalfox -- dalfox mcp
   "rate_limit": 0,
   "insecure": true,
   "blind_callback_url": "https://callback.example",
+  "blind_oob": true,
+  "blind_oob_wait": 30,
+  "session_check": "Sign out",
+  "session_check_url": "https://app/me",
   "deep_scan": false,
   "skip_ast_analysis": false,
   "analyze_external_js": false,
@@ -89,6 +93,20 @@ claude mcp add dalfox -- dalfox mcp
 `remote_wordlists`도 등록된 프로바이더인지 검사합니다. 인식되지 않는 이름은
 조용히 아무것도 받아오지 않은 채, 요청한 페이로드 커버리지가 빠진 스캔을
 `done`으로 보고하게 만들기 때문입니다.
+
+`blind_oob`는 CLI의 `--blind-oob`가 켜는 것과 같은 관리형 OAST(interactsh)
+채널입니다. 공개 메시를 쓰려면 `true`, 서버를 지정하려면 interactsh 호스트
+목록(`["oast.fun"]`)을 넘기면 됩니다. Dalfox가 등록하고, 콜백을 유발한 페이로드와
+상관시키며, 직접 폴링하므로 리스너를 운영하지 않아도 콜백이 `detection_method: "oob"`인
+`V` 탐지 결과가 됩니다. 폴러는 스캔에 묶여 있어 스캔이 시작되면 함께 시작하고,
+끝나거나 취소·삭제되면 멈춥니다. `blind_oob_wait`(`0`–`600`, 기본값 `30`)은 스캔의
+마지막 요청 이후 폴링을 얼마나 지속할지로 `scan_timeout`에 포함됩니다. 자가 호스팅
+인증 토큰은 CLI/설정 전용입니다.
+
+`session_check`(인증된 응답에 계속 매칭되어야 하는 정규식)와 `session_check_url`(대상
+대신 조회할 저렴한 인증 엔드포인트)은 쿠키가 없어도 세션 손실 탐지를 켭니다. 컴파일되지
+않는 정규식이나 `http(s)`가 아닌 조회 URL은 `invalid_params` 오류입니다.
+`get_results_dalfox` 아래의 끊어진 세션 설명을 보세요.
 
 `insecure`는 TLS 인증서 검증을 제어합니다(기본값 `true`, 스캐너 친화적).
 인증서 검증을 강제하고 자체 서명되었거나 만료된 인증서를 거부하려면 `false`로
@@ -151,6 +169,7 @@ claude mcp add dalfox -- dalfox mcp
   "force_waf": null,
   "waf_evasion": false,
   "waf_min_confidence": 0.3,
+  "min_confidence": "high",
   "remote_payloads": [],
   "remote_wordlists": [],
   "max_payloads_per_param": 0,
@@ -233,6 +252,11 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 하한이며(기본값 `0.3`), 이보다 낮은 핑거프린트는 버려집니다. `waf_bypass`나
 `force_waf`에 알 수 없는 값을 주거나 `waf_min_confidence`가 범위를 벗어나면
 `invalid_params`로 거부됩니다.
+
+`min_confidence`(`"low"` 또는 `"high"`, 생략하면 모두 유지)는 CLI의
+`--min-confidence`와 같습니다. `"high"`는 `low` 등급 탐지 결과를 작업 결과와
+`findings_so_far`에서 제거합니다. `I`는 등급이 없으므로 유지됩니다.
+다른 값은 `invalid_params`로 거부됩니다.
 
 `remote_payloads`와 `remote_wordlists`는(둘 다 기본값 `[]`) 스캔을 시작하기 전에
 원격 제공자로부터 추가 XSS 페이로드(`"portswigger"`, `"payloadbox"`)와 파라미터
@@ -351,12 +375,18 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 `http://` 또는 `https://`로 시작해야 합니다.
 
 **인증 세션이 스캔 도중 끊어진 경우**도 마찬가지입니다. 호출이 자격증명(`cookies`,
-또는 `headers`의 `Cookie` / `Authorization` 항목)을 담고 있으면, Dalfox는 스캔 전에
+또는 `headers`의 `Cookie` / `Authorization` 항목)을 담고 있거나 `session_check` /
+`session_check_url`을 명시하면, Dalfox는 스캔 전에
 인증된 응답의 지문을 잡아 두고 스캔이 끝날 때 다시 확인합니다. 그 사이에 세션이
 만료됐다면 빈 `results`와 함께 `done`으로 끝나는 대신 `SESSION_LOST:`로 시작하는
 `error_message`와 함께 `status: "error"`로 종료됩니다. 이런 스캔을 "XSS 없음"으로
-요약하지 마십시오 — 실제로 테스트된 것이 없습니다. 자격증명을 넘기지 않으면 모니터링은
-비용이 들지 않습니다.
+요약하지 마십시오 — 실제로 테스트된 것이 없습니다. 자격증명도 `session_check`도 넘기지
+않으면 모니터링은 비용이 들지 않습니다.
+
+스캔을 실패시키지는 않는 문제도 전달됩니다. 결과에는 `blind_oob`가 어떤 서버에도
+등록하지 못한 경우, `session_check` 기준선을 잡지 못해 모니터링이 꺼진 경우, 발견된
+파라미터 상한에 걸린 경우 같은 조건이 `warnings` 목록(비어 있으면 생략)으로 붙습니다.
+탐지 결과가 0건인 `done`이라도 `warnings`가 있으면 대상이 깨끗하다는 증거가 아닙니다.
 
 ### `list_scans_dalfox`
 

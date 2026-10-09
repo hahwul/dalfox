@@ -87,9 +87,23 @@ pub(crate) struct PollerHandle {
     cancel: Arc<AtomicBool>,
     seen: Seen,
     stop: Arc<AtomicBool>,
-    task: JoinHandle<()>,
+    /// `Option` so [`finish`](PollerHandle::finish) can take the handle to await
+    /// it, while [`Drop`] still aborts a handle dropped without `finish` (panic,
+    /// early return) — the background poll loop must never outlive its job.
+    task: Option<JoinHandle<()>>,
     state: Arc<PollState>,
     silence: bool,
+}
+
+impl Drop for PollerHandle {
+    fn drop(&mut self) {
+        // `finish` already took the handle and awaited it; only a handle
+        // dropped *without* `finish` still owns a live task to abort.
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
 }
 
 /// Spawn the background poll loop. It runs until `stop`/`cancel` is set.
@@ -133,7 +147,7 @@ pub(crate) fn spawn_poller(
         cancel,
         seen,
         stop,
-        task,
+        task: Some(task),
         state,
         silence,
     }
@@ -156,13 +170,15 @@ impl PollerHandle {
     /// Keep the background poller draining for up to `grace`, then stop it, do a
     /// final poll for anything that landed in the last interval, and deregister.
     /// A pending cancel (Ctrl-C) cuts the grace window short.
-    pub async fn finish(self, grace: Duration) {
+    pub async fn finish(mut self, grace: Duration) {
         let start = Instant::now();
         while start.elapsed() < grace && !self.cancel.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         self.stop.store(true, Ordering::Relaxed);
-        let _ = self.task.await;
+        if let Some(task) = self.task.take() {
+            let _ = task.await;
+        }
         // Final sweep to catch interactions queued during the last poll gap.
         poll_once(
             &self.session,

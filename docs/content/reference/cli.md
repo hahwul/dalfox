@@ -38,7 +38,7 @@ Exit codes:
 | Code | Meaning |
 |------|---------|
 | `0` | Success, no findings |
-| `1` | Success, findings reported (any tier — combine with `--only-poc v` to gate on `V` only) |
+| `1` | Success, findings reported (any tier — combine with `--only-poc v` to gate on `V` only, or `--min-confidence high` to gate on high-confidence findings) |
 | `2` | Input / config / runtime error |
 
 `2` also covers a run with no findings that could not finish cleanly (every target skipped, a lost session, a crashed scan worker, heavy request loss); see [Exit codes](../../guide/output/#exit-codes) for the full rule. `server` and `mcp` exit `2` when they fail to start (for example, the port is already in use). `payload` exits `2` for an unknown selector.
@@ -57,7 +57,8 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi` (OpenAPI 3.x / Swagger 2.0, JSON or YAML), `postman` (Postman Collection v2.1) |
+| `--base-url` | — | — | For `openapi` / `postman`: supplies scheme, host and port for every request and is a path prefix; the spec server's path (`/api/v3`, from a relative or absolute server) or each Postman request's path is appended. Must be an absolute `http(s)` URL |
 | `--dedup-urls` | — | `exact` | Target deduplication: `exact` (drop identical URL+method), `signature` (also collapse URLs differing only in parameter *values*), `off` (scan every input line) |
 | `--state-file` | — | — | Record completed targets to a file and skip them when the scan is re-run; raw HTTP/HAR request data is fingerprinted so changed captures are scanned again; run-wide credential values from `-H` / `--cookies` / `--cookie-from-raw` are excluded so a refreshed session resumes, while credentials inside a capture still count |
 
@@ -82,6 +83,7 @@ See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-inter
 | `--only-poc` | — | — | Comma-separated filter: `v` (vulnerable), `r` (reflected), `a` (AST), `i` (informational) |
 | `--baseline` | — | — | Diff against a previous Dalfox JSON/JSONL report and report only findings new since it. An ordinary `-f json -o` report is the baseline |
 | `--baseline-mode` | — | `filter` | `filter` drops known findings (counts and exit code describe only what is new), `annotate` keeps them and marks each `new` |
+| `--min-confidence` | — | `low` | `high` drops every `low`-confidence finding (every `R`, plus AST flows Dalfox cannot stand behind) before output, `target_summary` counts, `--baseline`, and the exit code. `I` findings carry no grade and are kept. `low` keeps everything |
 
 See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for the fingerprint rules and the CI recipe.
 

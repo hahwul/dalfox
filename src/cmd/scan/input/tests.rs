@@ -311,6 +311,126 @@ async fn har_invalid_document_is_an_error() {
     assert!(resolve(&args).await.is_err());
 }
 
+// ── resolve_targets: openapi + postman modes ────────────────────────
+
+const SPEC_YAML: &str = "openapi: 3.0.0
+servers: [{url: /api}]
+paths:
+  /items/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, schema: {type: integer}}
+        - {name: q, in: query, example: hi}
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {name: {type: string}}}
+  /other:
+    get:
+      servers: [{url: 'https://other.example.com'}]
+  /broken:
+    get:
+      servers: [{url: 'https://{tenant}.example.com'}]
+";
+
+#[tokio::test]
+async fn openapi_spec_expands_through_the_full_input_pipeline() {
+    let path = tmp_file("spec.yaml", SPEC_YAML);
+    let spec = path.to_str().unwrap();
+    let show = |targets: &[Target]| {
+        let mut v: Vec<String> = targets
+            .iter()
+            .map(|t| {
+                format!(
+                    "{} {} {}",
+                    t.method,
+                    t.url,
+                    t.data.as_deref().unwrap_or("-")
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+
+    // --base-url supplies the origin for every operation (the relative root
+    // server, the absolute operation-level one, and the one whose host has an
+    // undeclared variable — that host is discarded anyway); `-H` rides on
+    // every operation.
+    let args = args_from(&[
+        "-i",
+        "openapi",
+        "--base-url",
+        "http://127.0.0.1:9000",
+        "-H",
+        "Authorization: Bearer t",
+        "-S",
+        spec,
+    ]);
+    let targets = resolve(&args).await.expect("spec resolves");
+    assert_eq!(
+        show(&targets),
+        vec![
+            "GET http://127.0.0.1:9000/api/items/1?q=hi -",
+            "GET http://127.0.0.1:9000/broken -",
+            "GET http://127.0.0.1:9000/other -",
+            r#"POST http://127.0.0.1:9000/api/items/1 {"name":"test"}"#,
+        ]
+    );
+    assert!(targets.iter().all(|t| {
+        t.headers
+            .iter()
+            .any(|(k, v)| k == "Authorization" && v == "Bearer t")
+    }));
+
+    // Without it, the relative-server operations can't be aimed anywhere and
+    // are skipped; the absolute operation-level server still resolves.
+    let args = args_from(&["-i", "openapi", "-S", spec]);
+    let targets = resolve(&args).await.expect("spec resolves");
+    assert_eq!(
+        show(&targets),
+        vec!["GET https://other.example.com/other -"]
+    );
+
+    // --out-of-scope applies to the expanded targets.
+    let args = args_from(&[
+        "-i",
+        "openapi",
+        "--out-of-scope",
+        "other.example.com",
+        "-S",
+        spec,
+    ]);
+    assert!(resolve(&args).await.is_err(), "every target excluded");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+async fn postman_collection_resolves_with_cli_overrides() {
+    let collection = r#"{"info":{"name":"c"},
+      "variable":[{"key":"base","value":"https://api.example.com"}],
+      "item":[{"name":"f","item":[
+        {"name":"a","request":{"method":"PUT","url":"{{base}}/a",
+          "body":{"mode":"raw","raw":"{\"x\":1}","options":{"raw":{"language":"json"}}}}},
+        {"name":"b","request":{"url":"{{unset}}/b"}}
+      ]}]}"#;
+    let path = tmp_file("c.postman_collection.json", collection);
+    let args = args_from(&["-i", "postman", "-X", "PATCH", "-S", path.to_str().unwrap()]);
+    let targets = resolve(&args).await.expect("collection resolves");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(targets.len(), 1, "unresolved-host request skipped");
+    assert_eq!(targets[0].url.as_str(), "https://api.example.com/a");
+    assert_eq!(targets[0].method, "PATCH", "explicit -X wins");
+    assert_eq!(targets[0].data.as_deref(), Some(r#"{"x":1}"#));
+}
+
+#[tokio::test]
+async fn openapi_missing_file_is_a_file_read_error() {
+    let args = args_from(&["-i", "openapi", "-S", "./no-such-spec.yaml"]);
+    assert!(resolve(&args).await.is_err());
+}
+
 // ── resolve_targets: cookie-from-raw ────────────────────────────────
 
 #[tokio::test]
@@ -461,6 +581,63 @@ fn apply_request_cli_overrides_only_overrides_explicit_flags() {
 }
 
 #[test]
+fn apply_request_cli_overrides_replace_same_named_imported_headers_and_cookies() {
+    // A spec placeholder / stale captured value must not stay first on the
+    // wire next to the operator's credential.
+    let mut target = crate::target_parser::parse_raw_http_request(
+        "GET /p HTTP/1.1\r\nHost: h\r\nauthorization: Bearer placeholder\r\n\
+         X-Keep: 1\r\nCookie: sid=old; theme=dark\r\n\r\n",
+    )
+    .expect("raw request parses");
+    let args = args_from(&[
+        "-i",
+        "raw-http",
+        "-S",
+        "-H",
+        "Authorization: Bearer real",
+        "--cookies",
+        "sid=new",
+        "x",
+    ]);
+    apply_request_cli_overrides(&mut target, &args);
+    let auth: Vec<&str> = target
+        .headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+        .map(|(_, v)| v.as_str())
+        .collect();
+    assert_eq!(auth, vec!["Bearer real"]);
+    assert!(target.headers.iter().any(|(k, _)| k == "X-Keep"));
+    let mut cookies = target.cookies.clone();
+    cookies.sort();
+    assert_eq!(
+        cookies,
+        vec![
+            ("sid".to_string(), "new".to_string()),
+            ("theme".to_string(), "dark".to_string())
+        ]
+    );
+}
+
+#[test]
+fn exact_dedup_keeps_same_url_requests_with_different_bodies() {
+    let mk = |body: &str| {
+        let mut t = target_at("https://h/graphql");
+        t.method = "POST".to_string();
+        t.data = Some(body.to_string());
+        t
+    };
+    let mut targets = vec![
+        mk("{\"query\":\"a\"}"),
+        mk("{\"query\":\"b\"}"),
+        mk("{\"query\":\"a\"}"),
+    ];
+    let stats = dedup_targets(&mut targets, "exact");
+    assert_eq!(targets.len(), 2);
+    assert_eq!(stats.collapsed, 1);
+}
+
+#[test]
 fn apply_request_cli_header_overrides_imported_user_agent() {
     let mut target = crate::target_parser::parse_raw_http_request(
         "GET /p HTTP/1.1\r\nHost: ov.example\r\nUser-Agent: captured-agent\r\n\r\n",
@@ -535,18 +712,17 @@ fn apply_request_cli_cookie_header_replaces_captured_cookies_per_cookie() {
         "-H",
         "Cookie: other=1; sid=abc",
         "--cookies",
-        "kept=1",
+        "dropped=1",
         "ignored.example",
     ]);
 
     apply_request_cli_overrides(&mut target, &args);
 
-    // Replaces the captured cookies outright, as per-cookie params rather
-    // than a literal header; `--cookies` is kept, like the URL-list path.
+    // Replaces the captured cookies and `--cookies` outright (documented), but
+    // as per-cookie params, not a literal header.
     assert_eq!(
         target.cookies,
         vec![
-            ("kept".to_string(), "1".to_string()),
             ("other".to_string(), "1".to_string()),
             ("sid".to_string(), "abc".to_string())
         ]

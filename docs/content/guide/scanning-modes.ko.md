@@ -1,15 +1,15 @@
 +++
 title = "스캔 모드"
-description = "URL, 파일, 파이프라인, raw HTTP, HAR, 저장형·블라인드 XSS, REST, MCP 중 Dalfox 스캔 모드를 선택합니다."
+description = "URL, 파일, 파이프라인, raw HTTP, HAR, OpenAPI·Postman 명세, 저장형·블라인드 XSS, REST, MCP 중 Dalfox 스캔 모드를 선택합니다."
 weight = 1
 toc = true
 +++
 
 Dalfox는 여러 형태의 대상을 받아들입니다. 모든 모드는 동일한 탐색, 페이로드, 검증 엔진을 공유하며, URL을 입력하는 방식과 결과가 어디로 가는지만 다릅니다.
 
-내부적으로는 실제 작업을 하는 네 개의 서브커맨드가 있습니다: `scan`(스캐너), `server`(장시간 유지되는 REST API), `payload`(페이로드 유틸리티), `mcp`(Model Context Protocol stdio 서버). 여기에 셸 자동완성 스크립트를 출력하는 `completion`이 더해집니다. 아래에서 "URL / File / Pipe / Raw HTTP / HAR / SXSS"로 표시된 것은 모두 `scan` 서브커맨드가 `--input-type`으로 처리하는 *입력 형태*이지, 독립적인 서브커맨드가 아닙니다.
+내부적으로는 실제 작업을 하는 네 개의 서브커맨드가 있습니다: `scan`(스캐너), `server`(장시간 유지되는 REST API), `payload`(페이로드 유틸리티), `mcp`(Model Context Protocol stdio 서버). 여기에 셸 자동완성 스크립트를 출력하는 `completion`이 더해집니다. 아래에서 "URL / File / Pipe / Raw HTTP / HAR / OpenAPI / Postman / SXSS"로 표시된 것은 모두 `scan` 서브커맨드가 `--input-type`으로 처리하는 *입력 형태*이지, 독립적인 서브커맨드가 아닙니다.
 
-> 팬아웃 입력 형태(`file`, `pipe`, `raw-http`, `har`)는 `scan` 전용입니다. 각각 하나의 입력을 여러 대상으로 확장합니다. `server`와 `mcp` 인터페이스는 호출당 단일 대상을 다룹니다. 하나의 URL에 명시적인 메서드/헤더/쿠키/본문(HAR 항목 하나가 담는 것과 동일한 충실도)을 더해서 받으므로, 캡처한 세션을 재생하려면 요청마다 한 번씩 호출하면 됩니다.
+> 팬아웃 입력 형태(`file`, `pipe`, `raw-http`, `har`, `openapi`, `postman`)는 `scan` 전용입니다. 각각 하나의 입력을 여러 대상으로 확장합니다. `server`와 `mcp` 인터페이스는 호출당 단일 대상을 다룹니다. 하나의 URL에 명시적인 메서드/헤더/쿠키/본문(HAR 항목 하나가 담는 것과 동일한 충실도)을 더해서 받으므로, 캡처한 세션을 재생하려면 요청마다 한 번씩 호출하면 됩니다.
 
 ## Auto (기본값)
 
@@ -171,9 +171,40 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드 + 본문으로 판단하므로, 같은 URL에 본문만 다른 POST 두 개는 모두 남고 헤더나 쿠키만 다른 항목은 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
+HAR을 단순 URL 목록으로 평탄화하는 것(메서드, 헤더, 쿠키, 본문을 버리는 방식)과 달리, HAR 모드는 캡처된 각 요청의 전체 형태를 유지하므로 JSON 본문을 가진 POST나 인증된 세션도 충실하게 재생됩니다. 각 `log.entries[].request`는 하나의 대상이 되며, 다른 모든 모드와 동일한 스코프 필터를 거칩니다. 중복은 URL + 메서드 + 본문으로 판단하므로, 같은 URL에 본문만 다른 POST 두 개는 둘 다 스캔하고, 헤더나 쿠키만 다른 항목(갱신된 세션, 바뀐 `Referer`)은 합쳐집니다. 모든 항목을 남기려면 `--dedup-urls off`를 쓰세요. `http(s)`가 아닌 항목(`data:`, `blob:`, WebSocket, 브라우저 확장 URL)은 자동으로 건너뜁니다.
 
-CLI 요청 플래그는 HAR과 raw HTTP 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`는 캡처에 있는 같은 이름(대소문자 무시)의 헤더를 대체하므로 새로 받은 `Authorization`이 오래된 값을 이깁니다. 같은 이름의 `-H`를 여러 번 주면 모두 전송됩니다. `--cookies`의 쿠키는 캡처된 같은 이름의 쿠키를 대체하고, 나머지 캡처 쿠키는 유지됩니다. `-H 'User-Agent: …'`는 `--user-agent`처럼 캡처된 User-Agent를 대체하고, `-H 'Cookie: …'`는 캡처된 쿠키를 통째로 대체합니다. 이름이 겹치면 `--cookies` 쪽이 이깁니다. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
+CLI 요청 플래그는 HAR, raw HTTP, OpenAPI, Postman 모두에서 그 위에 그대로 적용됩니다. `-X`, `-d`, `--user-agent`는 캡처된 각 요청의 메서드, 본문, User-Agent를 대체하고, `-H`와 `--cookies`는 요청에 추가됩니다(예: `-H "Authorization: Bearer …"`는 모든 항목에 붙습니다). `-H`로 준 헤더는 가져온 요청의 같은 이름 헤더(대소문자 무시)를 모두 대체하고, `--cookies`로 준 쿠키는 같은 이름의 가져온 쿠키를 대체합니다. 그래서 오래된 캡처 세션이나 명세의 자리표시자 값이 여러분의 값보다 앞서 전송되지 않습니다. 이름이 다른 것은 그대로 유지됩니다. `-H 'Cookie: …'`는 캡처된 쿠키(와 `--cookies`로 준 쿠키)를 통째로 대체합니다. 쿠키를 하나씩 더하거나 바꾸려면 `--cookies`를 쓰세요. 이 플래그들이 없으면 각 요청은 캡처된 형태를 그대로 유지합니다. `--include-url` / `--out-of-scope`는 대상 집합을 좁힙니다.
+
+## OpenAPI / Postman 모드
+
+API 중심 애플리케이션은 보통 모든 엔드포인트, 메서드, 파라미터, 본문을 이미 나열한 명세를 함께 제공합니다. 트래픽을 먼저 녹화하지 말고 그 명세를 Dalfox에 바로 넘기세요:
+
+```bash
+# OpenAPI 3.x(JSON 또는 YAML), 또는 Swagger 2.0
+dalfox scan -i openapi openapi.yaml
+# Postman Collection v2.1 익스포트
+dalfox scan -i postman api.postman_collection.json
+# 명세를 다른 배포 환경으로 향하게 하기
+dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com
+```
+
+두 타입 모두 명시해야 합니다. `auto`는 명세를 감지하지 않으므로 `-i openapi` / `-i postman`을 넘기세요. 명세를 파이프로 넘길 수도 있습니다(`cat openapi.json | dalfox scan -i openapi`).
+
+**OpenAPI.** `get`, `post`, `put`, `patch`, `query` 오퍼레이션이 각각 대상 하나가 됩니다. `delete`, `head`, `options` 오퍼레이션은 스캔하지 않습니다. 자리표시자 ID로 DELETE에 탐색, 마이닝, 페이로드를 보내면 데이터가 지워질 수 있고, HEAD / OPTIONS 응답에는 반사될 본문이 없기 때문입니다. 건너뛴 개수는 stderr 경고로 알려 주며, Postman 요청에도 같은 규칙이 적용됩니다. 각 대상은 다음과 같이 만들어집니다:
+
+- **URL**: 서버 URL(`servers[0]`, 오퍼레이션과 path item의 `servers`가 루트보다 우선)의 `{variables}`를 각 `default`로 바꾼 뒤 경로를 붙입니다. 경로 파라미터는 `example`, `examples`, 스키마의 `default` / `enum` / `example` 순서로 채우고, 없으면 타입별 자리표시자(숫자는 `1`, 문자열은 `test`, UUID / 날짜 형식은 고정값)를 씁니다. 값은 퍼센트 인코딩하며, 서버 오리진을 벗어나는 경로는 건너뜁니다.
+- **쿼리, 헤더, 쿠키 파라미터**: 같은 값 규칙으로 요청에 붙입니다. 이름이 `Accept`, `Content-Type`, `Authorization`인 헤더 파라미터는 OpenAPI 명세대로 무시하므로, 자격 증명은 `-H` / `--cookies`로 넘기세요.
+- **본문**: 오퍼레이션이 받는 형식 중 JSON, 폼(`application/x-www-form-urlencoded`), 멀티파트(`multipart/form-data`), XML 순서로 첫 번째를 고르고, 미디어 타입의 `example`을 쓰거나 스키마에서 샘플을 만듭니다(`allOf`는 병합, `oneOf` / `anyOf`는 첫 분기, `readOnly` 속성은 제외). 그다음 탐색이 `-d`일 때와 똑같이 주입 지점을 찾습니다. JSON 키, 폼 필드, XML 요소 텍스트, GraphQL 변수가 대상입니다. 멀티파트 필드는 멀티파트 필드로 마이닝하고 테스트합니다.
+- **`$ref`**: 로컬 참조(`#/components/...`)만 따라갑니다. 원격 `$ref`는 절대 가져오지 않고 자리표시자로 바꿉니다. 참조 순환과 지나치게 깊거나 넓은 스키마는 잘라 내므로, 악의적인 명세로 메모리를 고갈시킬 수 없습니다.
+- **Swagger 2.0**: `schemes` / `host` / `basePath`로 서버를, `in: body` 파라미터로 JSON 본문을, `in: formData` 파라미터로 폼 본문을 만듭니다(오퍼레이션의 `consumes`가 멀티파트이거나 `file` 필드가 있으면 멀티파트).
+
+`--base-url`은 서버 형태와 관계없이 한 가지 규칙을 따릅니다. 스킴, 호스트, 포트는 `--base-url`에서 가져오고, 그 경로는 접두어가 됩니다. 명세 서버의 경로(또는 Swagger `basePath`)는 그 뒤에 붙고, 서버 자체의 스킴과 호스트는 버립니다. 따라서 `--base-url https://staging.example.com`을 주면 `servers: [{url: /api/v3}]`와 `servers: [{url: https://prod.example.com/api/v3}]` 모두 `https://staging.example.com/api/v3/...`를 스캔합니다. 스킴 상대 서버(`//prod.example.com/v1`)도 지정한 호스트를 벗어나게 할 수 없고, 버려지는 호스트에 있는 서버 변수에는 기본값이 없어도 됩니다. `--base-url` 없이 서버가 상대 경로나 스킴 상대 경로이거나, 선언되지 않은 서버 변수가 있거나, `servers`가 아예 없으면 해당 오퍼레이션은 `--base-url`을 넘기라는 안내와 함께 건너뜁니다.
+
+**Postman.** 폴더를 포함해 컬렉션의 모든 요청이 각각 대상 하나가 됩니다. `{{variables}}`는 컬렉션의 `variable` 목록에서 가져오며 중첩 참조도 풀립니다. 환경(environment) 파일은 읽지 않습니다. 호스트가 아직 풀리지 않은 `{{variable}}`인 요청은 경고와 함께 건너뛰므로, `--base-url`로 오리진을 지정하세요(모든 요청의 오리진을 대체하고 각 요청의 경로는 유지합니다). 그 밖의 위치(경로, 쿼리, 헤더, 본문)에 남은 미해결 변수는 자리표시자 값이 됩니다. 어차피 스캔이 주입하는 자리이기 때문입니다. `:name` 경로 변수는 요청의 `url.variable`에서 채웁니다. 본문 모드는 `raw`(그대로 전송하며, 요청에 `Content-Type`이 없으면 raw 언어에서 정함), `urlencoded`(폼), `formdata`(멀티파트, 파일 파트의 로컬 경로는 읽지 않음), `graphql`(JSON `{query, variables}` 본문)로 대응합니다. 컬렉션 수준 `auth`는 적용하지 않으니 `-H`로 넘기세요.
+
+**관용성.** 잘못된 오퍼레이션이나 요청 하나(풀리지 않은 호스트, `http(s)`가 아닌 서버, 쓸 수 없는 본문)는 실행을 멈추지 않고 건너뜁니다. 건너뛴 개수와 몇 가지 예시가 stderr 경고로 출력됩니다. 문서가 명세가 아니거나 스캔할 수 있는 항목이 하나도 없을 때만 `PARSE_ERROR`로 실패합니다. 파일은 다른 입력과 같은 크기 상한으로 읽습니다(`INPUT_TOO_LARGE`).
+
+확장된 대상은 HAR 가져오기와 같은 파이프라인을 거칩니다. CLI 요청 플래그가 그 위에 적용되고(위 참고), 중복은 URL + 메서드 + 본문이 같으면 합쳐지며, 건너뛴 오퍼레이션은 `meta.targets_unparsable`에 집계되고, `--include-url` / `--out-of-scope`가 집합을 좁히고, `--state-file`은 각 대상의 메서드, 본문, 헤더, 쿠키를 지문으로 기록합니다.
 
 ## 저장형 XSS 모드 (SXSS)
 
@@ -296,6 +327,7 @@ dalfox payload uri-scheme        # javascript:/data: 페이로드 출력
 | 크롤러가 만든 목록 스캔 | File이나 Pipe |
 | 특정 요청 재생 | Raw HTTP |
 | 캡처한 세션 전체 재생(프록시/DevTools 익스포트) | HAR |
+| API 명세가 설명하는 모든 엔드포인트 스캔 | OpenAPI / Postman |
 | 다른 페이지에 기록하는 폼 테스트 | SXSS |
 | 나중에 보이지 않는 곳에서 실행되는 페이로드 잡기 | Blind (`-b` / `--blind-oob`) |
 | 대시보드나 CI에서 여러 스캔 실행 | Server |

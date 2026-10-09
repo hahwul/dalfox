@@ -121,19 +121,24 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 /// payloads (checked in Stage 5), and its DOM payloads (verified in Stage 6).
 pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 
-/// Count how many results in `results` match the `--limit-result-type` filter.
-/// Returns `results.len()` when filter is `"all"` (default).
+/// Count how many results in `results` match the `--limit-result-type` filter
+/// and survive `--min-confidence` (`min_confidence`, the raw option value).
 /// `filter` must already be uppercased (normalised once at scan start).
+///
+/// This is the findings tally behind `--limit`'s early stop, the deep-scan
+/// findings cap, the multi-target ticker, and the REST/MCP live
+/// `findings_so_far`. A finding `--min-confidence` will drop must not count
+/// here, or `--limit 1 --min-confidence high` stops on an `R` and then
+/// reports nothing.
 pub(crate) fn count_matching_results(
     results: &[crate::scanning::result::Result],
     filter: &str,
+    min_confidence: Option<&str>,
 ) -> usize {
-    if filter == "ALL" {
-        return results.len();
-    }
     results
         .iter()
-        .filter(|r| r.result_type.short() == filter)
+        .filter(|r| !r.below_min_confidence(min_confidence))
+        .filter(|r| filter == "ALL" || r.result_type.short() == filter)
         .count()
 }
 
@@ -184,6 +189,7 @@ async fn collapse_target_results(
     results: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     findings_count: &Arc<AtomicUsize>,
     limit_result_type: &str,
+    min_confidence: Option<&str>,
     target: &Target,
 ) {
     let mut guard = results.lock().await;
@@ -197,9 +203,9 @@ async fn collapse_target_results(
     // so subtracting them underflows the unsigned counter to ~usize::MAX and
     // poisons `limit_reached()` for the rest of a multi-target run (a silent,
     // hard-to-diagnose scan truncation).
-    let before_matching = count_matching_results(&original, limit_result_type);
+    let before_matching = count_matching_results(&original, limit_result_type, min_confidence);
     let collapsed = collapse_redundant_reflected(original, &target_url_str);
-    let after_matching = count_matching_results(&collapsed, limit_result_type);
+    let after_matching = count_matching_results(&collapsed, limit_result_type, min_confidence);
     *guard = collapsed;
     if after_matching < before_matching {
         findings_count.fetch_sub(before_matching - after_matching, Ordering::Relaxed);
@@ -631,7 +637,11 @@ impl ScanWorkerCtx {
         }
         let mut batch = std::mem::take(local_results);
         crate::scanning::result::stamp_origin(&mut batch, self.target.url.as_str());
-        let added = count_matching_results(&batch, &self.limit_result_type);
+        let added = count_matching_results(
+            &batch,
+            &self.limit_result_type,
+            self.args.min_confidence.as_deref(),
+        );
         let mut guard = self.results.lock().await;
         guard.extend(batch);
         self.findings_count.fetch_add(added, Ordering::Relaxed);
@@ -2004,7 +2014,14 @@ pub async fn run_scanning(
     // Collapse this target's R findings that are already proven by one of
     // its own V findings on the same (param, location, inject_type), scoped
     // to the current target so other targets' findings are never affected.
-    collapse_target_results(&results, &findings_count, &limit_result_type, target).await;
+    collapse_target_results(
+        &results,
+        &findings_count,
+        &limit_result_type,
+        args.min_confidence.as_deref(),
+        target,
+    )
+    .await;
 
     if let Some(pb) = pb {
         finish_scan_bar(

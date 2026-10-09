@@ -315,6 +315,37 @@ fn test_dedupe_ast_results_prefers_verified_variant() {
     assert_eq!(deduped[0].severity, "High");
 }
 
+/// Dedup tiebreak after type and severity: the `high`-graded duplicate wins,
+/// whichever order the stages produced them in.
+#[test]
+fn test_dedupe_ast_results_breaks_ties_on_confidence() {
+    use crate::scanning::result::Confidence;
+    let mut low = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .data("https://example.com")
+        .param("q")
+        .evidence("https://example.com:1:1 - desc (Source: location.search, Sink: innerHTML)")
+        .severity("Medium")
+        .build();
+    low.confidence = Some(Confidence::Low);
+    let mut high = low.clone();
+    high.confidence = Some(Confidence::High);
+
+    for input in [
+        vec![low.clone(), high.clone()],
+        vec![high.clone(), low.clone()],
+    ] {
+        let deduped = dedupe_ast_results(input);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].confidence, Some(Confidence::High));
+    }
+    // Type still outranks confidence.
+    let mut v_low = low.clone();
+    v_low.result_type = FindingType::Verified;
+    let deduped = dedupe_ast_results(vec![high.clone(), v_low]);
+    assert_eq!(deduped[0].result_type, FindingType::Verified);
+}
+
 #[test]
 fn test_dedupe_ast_results_collapses_cross_stage_duplicates() {
     let evidence =
@@ -1092,6 +1123,32 @@ fn test_render_finding_block_reflected_plain() {
     assert!(block.contains("<x>"), "missing payload text: {}", block);
     // Payload is the last section here → closing bullet.
     assert!(block.contains("└──"), "missing closing bullet: {}", block);
+}
+
+#[test]
+fn test_render_finding_block_shows_confidence_grade() {
+    use crate::scanning::result::Confidence;
+    let mut r = reflected_result("https://example.com", "q", "<x>");
+    r.confidence = Some(Confidence::Low);
+    r.confidence_reason = "payload echoed".to_string();
+    let block = render_finding_block(&r, "plain", false, false);
+    // Last section here → it carries the closing bullet, and Payload no longer does.
+    assert!(
+        block.contains("└──\x1b[0m \x1b[38;5;247mConfidence:\x1b[0m \x1b[38;5;247mlow"),
+        "got: {}",
+        block
+    );
+    assert!(
+        block.contains("├──\x1b[0m \x1b[38;5;247mPayload:"),
+        "got: {}",
+        block
+    );
+    assert_eq!(block.matches("└──").count(), 1, "got: {}", block);
+
+    // Ungraded findings keep their historical shape.
+    r.confidence = None;
+    let block = render_finding_block(&r, "plain", false, false);
+    assert!(!block.contains("Confidence:"), "got: {}", block);
 }
 
 #[test]
@@ -2662,14 +2719,15 @@ async fn test_resolve_targets_lifts_cookie_header_into_cookies() {
     args.input_type = "url".to_string();
     args.targets = vec!["https://example.com/".to_string()];
     args.headers = vec!["cookie: other=1; sid=abc".to_string(), "X-A: 1".to_string()];
-    args.cookies = vec!["sid=win".to_string()];
+    args.cookies = vec!["sid=lost".to_string()];
     let targets = resolve(&args).await.expect("resolve ok");
     let t = &targets[0];
+    // The header replaces `--cookies`, as it always did on the wire.
     assert_eq!(
         t.cookies,
         vec![
-            ("sid".to_string(), "win".to_string()),
             ("other".to_string(), "1".to_string()),
+            ("sid".to_string(), "abc".to_string()),
         ]
     );
     assert_eq!(t.headers, vec![("X-A".to_string(), "1".to_string())]);
@@ -3970,4 +4028,185 @@ async fn preflight_does_not_infer_a_waf_from_a_status_the_page_always_returns() 
             preflight.waf_result.detected
         );
     }
+}
+
+/// Render a JSON report and derive the exit code for `findings` under
+/// `--min-confidence min` — the same two steps `run_scan` ends with.
+async fn render_with_min_confidence(
+    min: Option<&str>,
+    findings: Vec<ScanResult>,
+    tag: &str,
+) -> (String, ScanOutcome) {
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.min_confidence = min.map(String::from);
+    let path = temp_out_path(tag);
+    args.output = Some(path.clone());
+    let urls = vec!["https://example.com".to_string()];
+    let state = make_scan_state(findings);
+    let requests = crate::cmd::scan::output::RequestTally {
+        sent: 42,
+        failed: 0,
+    };
+    let (results, write_failed) = render_results(
+        &args,
+        &state,
+        &urls,
+        std::time::Duration::from_millis(7),
+        requests,
+        false,
+        None,
+    )
+    .await;
+    let outcome =
+        super::output::derive_outcome(&args, &urls, &state, &results, requests, write_failed).await;
+    let content = std::fs::read_to_string(&path).expect("report written");
+    let _ = std::fs::remove_file(&path);
+    (content, outcome)
+}
+
+/// `--min-confidence high` end to end through the render + exit-code path: a
+/// low-graded finding disappears from the findings, the per-target summary
+/// and the exit code; an ungraded informational one stays; and with no flag
+/// (or the explicit `low`) the report is byte-identical to the unfiltered one.
+#[tokio::test]
+async fn min_confidence_filters_output_summary_and_exit_code() {
+    use crate::scanning::result::Confidence;
+    let url = "https://example.com";
+    let mut low = reflected_result(url, "q", "<x>");
+    low.confidence = Some(Confidence::Low);
+    let mut high = reflected_result(url, "id", "<y>");
+    high.result_type = FindingType::Verified;
+    high.confidence = Some(Confidence::High);
+    let mut info = reflected_result(url, "lib", "");
+    info.result_type = FindingType::Informational;
+    for r in [&mut low, &mut high, &mut info] {
+        r.origin_target = Some(url.to_string());
+        // Non-zero so AST dedup (keyed on `message_id == 0`) leaves them apart.
+        r.message_id = 606;
+    }
+    let all = vec![low.clone(), high.clone(), info.clone()];
+
+    // Default vs explicit `low`: byte-identical report, nothing dropped.
+    let (default_out, default_exit) =
+        render_with_min_confidence(None, all.clone(), "minconf_default").await;
+    let (low_out, low_exit) =
+        render_with_min_confidence(Some("low"), all.clone(), "minconf_low").await;
+    // The explicit `low` only adds its own meta block; everything else is
+    // byte-identical to the flagless report.
+    let mut low_v: serde_json::Value = serde_json::from_str(&low_out).expect("json");
+    assert_eq!(
+        low_v["meta"]["min_confidence"],
+        serde_json::json!({"level": "low", "dropped": 0})
+    );
+    low_v["meta"]
+        .as_object_mut()
+        .unwrap()
+        .remove("min_confidence");
+    assert_eq!(
+        serde_json::to_string_pretty(&low_v).unwrap() + "\n",
+        default_out
+    );
+    assert_eq!(default_exit, ScanOutcome::Findings);
+    assert_eq!(low_exit, ScanOutcome::Findings);
+    let v: serde_json::Value = serde_json::from_str(&default_out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 3);
+    assert_eq!(v["meta"]["target_summary"][0]["findings_count"], 3);
+    assert!(
+        v["meta"].get("min_confidence").is_none(),
+        "absent by default"
+    );
+
+    // `high`: the low-graded R is gone from findings and the summary; the
+    // high-graded V and the ungraded I stay.
+    let (high_out, high_exit) = render_with_min_confidence(Some("high"), all, "minconf_high").await;
+    let v: serde_json::Value = serde_json::from_str(&high_out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 2);
+    assert_eq!(v["meta"]["target_summary"][0]["findings_count"], 2);
+    let params: Vec<&str> = v["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .map(|f| f["param"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(params, vec!["id", "lib"]);
+    assert_eq!(high_exit, ScanOutcome::Findings);
+    assert_eq!(
+        v["meta"]["min_confidence"],
+        serde_json::json!({"level": "high", "dropped": 1})
+    );
+
+    // Only low-graded findings: the flag turns exit 1 into a clean exit 0.
+    let (_, exit) =
+        render_with_min_confidence(None, vec![low.clone()], "minconf_lowonly_default").await;
+    assert_eq!(exit, ScanOutcome::Findings);
+    let (out, exit) =
+        render_with_min_confidence(Some("high"), vec![low], "minconf_lowonly_high").await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 0);
+    assert_eq!(v["meta"]["target_summary"][0]["status"], "clean");
+    assert_eq!(exit, ScanOutcome::Clean);
+}
+
+/// The confidence filter runs before AST dedup: a `V`/low duplicate must not
+/// beat — and then take down with it — the `A`/high flow it duplicates.
+#[tokio::test]
+async fn min_confidence_filters_before_ast_dedup() {
+    use crate::scanning::result::Confidence;
+    let mut a_high = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .data("https://example.com")
+        .param("q")
+        .evidence("https://example.com:1:1 - d (Source: location.hash, Sink: innerHTML)")
+        .severity("Medium")
+        .build();
+    a_high.confidence = Some(Confidence::High);
+    let mut v_low = a_high.clone();
+    v_low.result_type = FindingType::Verified;
+    v_low.severity = "High".to_string();
+    v_low.confidence = Some(Confidence::Low);
+
+    let (out, _) =
+        render_with_min_confidence(Some("high"), vec![a_high, v_low], "minconf_dedup_order").await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 1, "{out}");
+    assert_eq!(v["findings"][0]["type"], "A");
+    assert_eq!(v["findings"][0]["confidence"], "high");
+}
+
+/// The `--stream-findings` printer skips what `--min-confidence` drops (and
+/// does not record it, so it cannot shadow a later kept finding), and still
+/// folds a repeat of a printed finding.
+#[test]
+fn stream_printer_skips_findings_min_confidence_drops() {
+    use crate::scanning::result::Confidence;
+    let mut low = reflected_result("https://example.com", "q", "<x>");
+    low.message_id = 606;
+    low.confidence = Some(Confidence::Low);
+    let mut high = reflected_result("https://example.com", "id", "<y>");
+    high.message_id = 606;
+    high.result_type = FindingType::Verified;
+    high.confidence = Some(Confidence::High);
+
+    let mut seen = std::collections::HashSet::new();
+    assert!(!super::output::admit_streamed(
+        &low,
+        Some("high"),
+        &mut seen
+    ));
+    assert!(seen.is_empty(), "a dropped finding is not recorded");
+    assert!(super::output::admit_streamed(
+        &high,
+        Some("high"),
+        &mut seen
+    ));
+    assert!(!super::output::admit_streamed(
+        &high,
+        Some("high"),
+        &mut seen
+    ));
+
+    let mut seen = std::collections::HashSet::new();
+    assert!(super::output::admit_streamed(&low, None, &mut seen));
+    assert!(!super::output::admit_streamed(&low, Some("low"), &mut seen));
 }

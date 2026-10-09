@@ -182,18 +182,14 @@ pub(crate) async fn run_scan_loop(
         let include_request = args.include_request;
         let include_response = args.include_response;
         let streamed = state.streamed_findings.clone();
+        let min_confidence = args.min_confidence.clone();
         let handle = tokio::spawn(async move {
             while let Some(result) = rx.recv().await {
-                // Deduplicate on (type, url, param, payload) so the same
-                // finding emitted along two code paths (e.g. JS-context V
-                // upgrade and DOM verification) only prints once. The set is
-                // shared with end-of-scan rendering, which prints whatever
-                // never came through here.
-                if !streamed
-                    .lock()
-                    .await
-                    .insert(super::output::stream_key(&result))
-                {
+                if !super::output::admit_streamed(
+                    &result,
+                    min_confidence.as_deref(),
+                    &mut *streamed.lock().await,
+                ) {
                     continue;
                 }
                 // Emit the same POC + tree block the end-of-scan path

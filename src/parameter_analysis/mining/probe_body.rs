@@ -13,7 +13,10 @@ pub async fn probe_body_params(
     let silence = args.silence;
     let client = target.build_client_or_default();
 
-    if let Some(data) = &args.data {
+    // A declared-multipart body is mined as multipart fields
+    // (`probe_multipart_params`); probing it urlencoded too would only add
+    // requests the endpoint can't parse and duplicate every field's slot.
+    if let Some(data) = args.data.as_ref().filter(|_| !target.multipart) {
         // JSON (GraphQL included) / XML bodies have their own probes.
         // Form-parsing one yields a single pair keyed by the whole body, which
         // an echoing endpoint reflects, registering a junk Body param that then

@@ -23,7 +23,8 @@ The config file only applies to CLI scans. `dalfox server` and `dalfox mcp` take
 ```toml
 [scan]
 # INPUT
-input_type = "auto"   # auto, url, file, pipe, raw-http, har
+input_type = "auto"   # auto, url, file, pipe, raw-http, har, openapi, postman
+# base_url = "https://staging.example.com"  # openapi/postman: scheme+host(+port) for every request, path prefix; the spec server path is appended
 dedup_urls = "exact"  # exact, signature (collapse URLs differing only in param values), off
 # state_file = "scan.state"  # record completed targets and skip them on re-run. CLI only — ignored by `dalfox server` / MCP
 
@@ -42,6 +43,7 @@ limit_result_type = "all"
 only_poc = []
 # baseline = "baseline.json"
 baseline_mode = "filter"
+min_confidence = "low"
 no_color = false
 
 # TARGETS
@@ -138,7 +140,8 @@ debug = false
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`, `postman` |
+| `base_url` | string | — | For `openapi` / `postman` inputs: supplies scheme, host and port for every request and is a path prefix; the spec server's path is appended. An absolute `http(s)` URL; anything else is ignored with a warning ([OpenAPI / Postman mode](../../guide/scanning-modes/#openapi-postman-mode)) |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature` (collapse URLs differing only in param values), `off` |
 | `state_file` | string | — | Record completed targets and skip them on re-run ([Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-interrupted-scan)). **CLI only** — ignored by `dalfox server` / MCP |
 
@@ -160,6 +163,7 @@ debug = false
 | `only_poc` | array | `[]` | Filter output: `["v","a"]` |
 | `baseline` | string | — | Previous JSON/JSONL report to diff against; only findings new since it are reported ([Baselines](../../guide/output/#baselines-reporting-only-what-is-new)). **CLI only** — ignored by `dalfox server` / MCP |
 | `baseline_mode` | string | `"filter"` | `filter` drops known findings, `annotate` keeps them and marks each `new` |
+| `min_confidence` | string | `"low"` | `high` drops low-confidence findings before output and the exit code (`I` kept) |
 | `no_color` | bool | `false` | Disable ANSI colour |
 
 ### Targets
@@ -289,7 +293,7 @@ CLI flag  >  Config file  >  Built-in default
 
 Config values skip the CLI's argument parser, so Dalfox checks them when it loads the file:
 
-- An invalid value for a fixed-choice key (`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`), an unknown `method` / `sxss_method` / `force_waf`, a `session_check` that is not a valid regex, a `session_check_url` that is not an absolute URL, or `limit = 0` prints a `Warning:` on stderr. That key then falls back to its built-in default and the scan continues. `method`, `sxss_method` and `force_waf` are case-normalised the same way the flags are.
+- An invalid value for a fixed-choice key (`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `min_confidence`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`), an unknown `method` / `sxss_method` / `force_waf`, a `session_check` that is not a valid regex, a `session_check_url` that is not an absolute URL, or `limit = 0` prints a `Warning:` on stderr. That key then falls back to its built-in default and the scan continues. `method`, `sxss_method` and `force_waf` are case-normalised the same way the flags are.
 - `proxy`, `sxss_url` and `session_check_url` go through the same startup checks as their flags. A proxy scheme Dalfox cannot route, or a URL whose scheme is not `http`/`https`, stops the scan with `PARSE_ERROR` (exit `2`).
 - Numeric keys have the same limits as their flags (`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). An out-of-range value stops the scan with `INVALID_INPUT_TYPE` (exit `2`).
 - Unknown keys, and keys placed outside the `[scan]` table, are ignored with a ``Warning: config <path>: unknown key `scan.header` ignored`` on stderr, so a misspelled or misplaced key is visible.

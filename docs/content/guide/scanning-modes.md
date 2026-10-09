@@ -1,15 +1,15 @@
 +++
 title = "Scanning Modes"
-description = "Choose a Dalfox scan mode for URLs, files, pipelines, raw HTTP, HAR, stored XSS, blind XSS, REST, or MCP."
+description = "Choose a Dalfox scan mode for URLs, files, pipelines, raw HTTP, HAR, OpenAPI / Postman specs, stored XSS, blind XSS, REST, or MCP."
 weight = 1
 toc = true
 +++
 
 Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.
 
-Under the hood there are four working subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server), plus `completion`, which prints shell completion scripts. Everything below labelled "URL / File / Pipe / Raw HTTP / HAR / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
+Under the hood there are four working subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server), plus `completion`, which prints shell completion scripts. Everything below labelled "URL / File / Pipe / Raw HTTP / HAR / OpenAPI / Postman / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
 
-> The fan-out input shapes (`file`, `pipe`, `raw-http`, `har`) are `scan`-only: each expands one input into many targets. The `server` and `mcp` interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.
+> The fan-out input shapes (`file`, `pipe`, `raw-http`, `har`, `openapi`, `postman`) are `scan`-only: each expands one input into many targets. The `server` and `mcp` interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.
 
 ## Auto (default)
 
@@ -171,9 +171,40 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped by URL + method + body, so two POSTs to the same URL with different bodies are both kept; entries that differ only in headers or cookies collapse. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
+Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped by URL + method + body, so two POSTs to the same URL with different bodies are both scanned; entries that differ only in headers or cookies (a rotated session, a drifting `Referer`) collapse. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
 
-CLI request flags still apply on top, for HAR and raw HTTP alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). A `-H` replaces any captured header of the same name (case-insensitive), so a refreshed `Authorization` wins over the stale one; repeated `-H` flags of one name are all sent. A `--cookies` pair replaces the captured cookie of the same name and any other captured cookie is kept. `-H 'User-Agent: …'` replaces the captured User-Agent like `--user-agent` does, and `-H 'Cookie: …'` replaces the captured cookies outright; a `--cookies` pair still wins on a name clash. Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
+CLI request flags still apply on top, for HAR, raw HTTP, OpenAPI and Postman alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). A `-H` header replaces every imported header of the same name (case-insensitive), and a `--cookies` cookie replaces the imported cookie of the same name, so a stale captured session or a spec's placeholder value never goes out ahead of yours; differently named ones are kept. `-H 'Cookie: …'` replaces the captured cookies (and any `--cookies`) outright; use `--cookies` to add or replace individual cookies. Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
+
+## OpenAPI / Postman mode
+
+API-first applications usually ship a spec that already lists every endpoint, method, parameter, and body. Hand it to Dalfox instead of recording traffic first:
+
+```bash
+# OpenAPI 3.x (JSON or YAML), or Swagger 2.0
+dalfox scan -i openapi openapi.yaml
+# Postman Collection v2.1 export
+dalfox scan -i postman api.postman_collection.json
+# Point the spec at a different deployment
+dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com
+```
+
+Both types are explicit: `auto` does not detect a spec, so pass `-i openapi` / `-i postman`. A spec can also be piped (`cat openapi.json | dalfox scan -i openapi`).
+
+**OpenAPI.** Each `get`, `post`, `put`, `patch` and `query` operation becomes one target. `delete`, `head` and `options` operations are not scanned: discovery, mining and payloads against a DELETE with placeholder ids could destroy data, and HEAD / OPTIONS responses have no body to reflect into. They are counted in a stderr warning (the same applies to Postman requests). Each target is built like this:
+
+- **URL**: the server URL (`servers[0]`, operation and path-item `servers` win over the root) with `{variables}` replaced by their `default`, plus the path. Path parameters are filled from `example`, then `examples`, then the schema's `default` / `enum` / `example`, then a typed placeholder (`1` for numbers, `test` for strings, a fixed UUID / date for those formats). Values are percent-encoded, and a path that would leave the server's origin is skipped.
+- **Query, header, cookie parameters**: placed on the request with the same value rules. Header parameters named `Accept`, `Content-Type`, or `Authorization` are ignored, as the OpenAPI spec says; pass credentials with `-H` / `--cookies`.
+- **Body**: the first of JSON, form (`application/x-www-form-urlencoded`), multipart (`multipart/form-data`), and XML that the operation accepts, built from the media type's `example` or sampled from its schema (`allOf` merged, `oneOf` / `anyOf` take the first branch, `readOnly` properties dropped). Discovery then finds the injection points the same way it does for `-d`: JSON keys, form fields, XML element text, and GraphQL variables. Multipart fields are mined and tested as multipart fields.
+- **`$ref`**: only local references (`#/components/...`) are followed. A remote `$ref` is never fetched; it becomes a placeholder. Reference cycles and very deep or very wide schemas are cut off, so a hostile spec can't run the import out of memory.
+- **Swagger 2.0**: `schemes` / `host` / `basePath` give the server, `in: body` parameters the JSON body, and `in: formData` parameters a form body (multipart when the operation `consumes` multipart or has a `file` field).
+
+`--base-url` follows one rule for every server shape: it supplies the scheme, host and port, and its path is a prefix; the spec server's path (or Swagger `basePath`) is appended after it, and the server's own scheme and host are dropped. So with `--base-url https://staging.example.com`, both `servers: [{url: /api/v3}]` and `servers: [{url: https://prod.example.com/api/v3}]` scan `https://staging.example.com/api/v3/...`. A scheme-relative server (`//prod.example.com/v1`) can't move the scan off the host you named either, and server variables in the dropped host don't need defaults. Without `--base-url`, a spec whose server is relative or scheme-relative, has an undeclared server variable, or has no `servers` is skipped with a hint to pass it.
+
+**Postman.** Every request in the collection becomes one target, folders included. `{{variables}}` come from the collection's `variable` list (nested references resolve too). Environment files are not read: a request whose host is still an unresolved `{{variable}}` is skipped with a warning, so pass `--base-url` to supply the origin (it replaces the origin of every request and keeps each request's path). An unresolved variable anywhere else (path, query, header, body) becomes a placeholder value, since those are the slots the scan injects into anyway. `:name` path variables are filled from the request's `url.variable`. Body modes map as `raw` (sent as-is, with `Content-Type` from the raw language when the request has none), `urlencoded` (form), `formdata` (multipart; a file part's local path is never read), and `graphql` (a JSON `{query, variables}` body). Collection-level `auth` is not applied; pass it with `-H`.
+
+**Leniency.** One bad operation or request (an unresolved host, a non-`http(s)` server, an unusable body) is skipped, not fatal; a warning on stderr counts the skips and quotes a few. The run fails with `PARSE_ERROR` only when the document is not a spec or nothing in it is scannable. Files are read under the same size cap as other inputs (`INPUT_TOO_LARGE`).
+
+The expanded targets then go through the same pipeline as a HAR import: CLI request flags apply on top (see above), duplicates collapse on URL + method + body, skipped operations are counted in `meta.targets_unparsable`, `--include-url` / `--out-of-scope` narrow the set, and `--state-file` fingerprints each target's method, body, headers and cookies.
 
 ## Stored XSS mode (SXSS)
 
@@ -349,6 +380,7 @@ dalfox payload uri-scheme        # print javascript:/data: payloads
 | Scan a list from your crawler | File or Pipe |
 | Replay a specific request | Raw HTTP |
 | Replay a whole captured session (proxy/DevTools export) | HAR |
+| Scan every endpoint an API spec describes | OpenAPI / Postman |
 | Test a form that writes to another page | SXSS |
 | Catch a payload that fires later, out of sight | Blind (`-b` / `--blind-oob`) |
 | Run many scans from a dashboard or CI | Server |

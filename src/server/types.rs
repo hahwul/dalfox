@@ -287,6 +287,10 @@ pub(crate) struct ScanOptions {
     pub(crate) waf_evasion: Option<bool>,
     /// WAF detection confidence floor in [0.0, 1.0]. Absent keeps the default (0.3).
     pub(crate) waf_min_confidence: Option<f32>,
+    /// Finding confidence floor: "low" (default, keep everything) or "high"
+    /// (drop low-confidence findings from the job's results). Informational
+    /// findings carry no grade and are always kept.
+    pub(crate) min_confidence: Option<String>,
     /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped
     /// by the server's `--rate-limit` when set.
     pub(crate) rate_limit: Option<u32>,
@@ -300,6 +304,17 @@ pub(crate) struct ScanOptions {
     /// was started with `--scan-timeout`, that value caps this one — a request
     /// may ask for a shorter budget but cannot exceed or disable the cap.
     pub(crate) scan_timeout: Option<u64>,
+    /// OOB/OAST blind XSS via interactsh: `true` (public mesh), `false`, or a
+    /// list of server domains. The poller lives and dies with the job.
+    pub(crate) blind_oob: Option<crate::job::spec::BlindOobRequest>,
+    /// Seconds to keep polling for OOB callbacks after the scan (default 30,
+    /// max 600). Counts against `scan_timeout`.
+    pub(crate) blind_oob_wait: Option<u64>,
+    /// Regex that must keep matching an authenticated response; turns session
+    /// monitoring on even without cookies/Authorization.
+    pub(crate) session_check: Option<String>,
+    /// Probe this URL instead of the target when checking the session.
+    pub(crate) session_check_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -313,6 +328,10 @@ pub(crate) struct ResultPayload<'a> {
     pub(crate) results: Option<&'a [SanitizedResult]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error_message: Option<String>,
+    /// Non-fatal conditions the caller must weigh before calling the scan
+    /// clean (blind_oob never armed, session monitoring inactive, …).
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    pub(crate) warnings: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) progress: Option<ProgressPayload>,
     pub(crate) queued_at_ms: i64,

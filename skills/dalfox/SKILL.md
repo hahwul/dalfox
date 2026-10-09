@@ -86,14 +86,15 @@ The **server and MCP** surfaces monitor too, on the same trigger (a `cookie` /
 `Authorization` header on the scan request). They have no `meta` envelope, so a
 scan whose session died settles `status: "error"` with an `error_message`
 starting `SESSION_LOST:`. Same rule for you: on a scan that returns zero
-findings, check `status` before saying the target is clean.
+findings, check `status` — and any `warnings` (e.g. blind_oob never armed,
+session monitoring inactive) — before saying the target is clean.
 
-Two ways to catch blind XSS (CLI):
-- `--blind <url>` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.
-- `--blind-oob[=servers]` — Dalfox manages an interactsh (OAST) session for you: it registers, correlates each callback to the originating payload, and polls automatically (`--blind-oob-secret` for self-hosted, `--blind-oob-wait` to tune end-of-scan polling). CLI-only for now.
+Two ways to catch blind XSS:
+- `--blind <url>` / MCP+server `blind_callback_url` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.
+- `--blind-oob[=servers]` / MCP+server `blind_oob` — Dalfox manages an interactsh (OAST) session for you: it registers, correlates each callback to the originating payload, and polls automatically (`--blind-oob-wait` / `blind_oob_wait` tunes end-of-scan polling). On MCP/server the poller lives and dies with the job; `--blind-oob-secret` (self-hosted auth) stays CLI/config-only.
 
 Common MCP pattern:
-- Supply `headers`, `cookies`, `proxy`, `blind_callback_url`, and explicit `param` with location hints. (MCP/server expose `--blind`-style callbacks; the managed `--blind-oob` lifecycle is CLI-only.)
+- Supply `headers`, `cookies`, `proxy`, `blind_callback_url` or `blind_oob`, and explicit `param` with location hints. For an authenticated scan add `session_check` so a dead session surfaces as `SESSION_LOST` instead of a false clean.
 
 ### D. File / Many Targets
 
@@ -103,7 +104,7 @@ dalfox scan targets.txt --skip-mining --workers 10 --delay 150
 
 Combine with `--max-concurrent-targets` and `--max-targets-per-host` for safety.
 
-### E. Raw Captured Request (raw-http) / HAR export (har)
+### E. Raw Captured Request (raw-http) / HAR export (har) / API spec (openapi, postman)
 
 ```bash
 # One captured request:
@@ -114,6 +115,13 @@ dalfox scan -i har capture.har          # explicit
 ```
 
 Excellent when the interesting parameters live in cookies, custom headers, or a complex JSON body. `har` fans a multi-request capture out into one target per `log.entries[].request` (deduped by URL+method+body); `raw-http` is the single-request form. See `references/cli.md`.
+
+API spec instead of traffic? `-i openapi` (OpenAPI 3.x JSON/YAML, Swagger 2.0) and `-i postman` (Collection v2.1) expand every GET/POST/PUT/PATCH operation into a target with path/query/header/cookie params and a JSON / form / multipart / XML body built from the schema (DELETE/HEAD/OPTIONS are never scanned). Never auto-detected — pass `-i`. `--base-url https://host[/prefix]` supplies the origin for every request (the spec server's path is appended); it is required when the server is relative or a Postman host is an undefined `{{var}}`. Bad operations are skipped with a stderr warning, not fatal; only local `$ref`s are followed. `-H` / `--cookies` replace same-named imported values. CLI only.
+
+```bash
+dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com -H 'Authorization: Bearer …'
+dalfox scan -i postman api.postman_collection.json
+```
 
 ### F. Stored XSS (SXSS)
 
@@ -141,8 +149,10 @@ Key points for agents:
   Dalfox drives no browser by design; only `detection_method: "oob"` observes a
   real one. Never report `V` as "watched it fire".
 - Select AST findings with `detection_method == "ast"`, not `type == "A"`.
-- `confidence` (`high`/`low`) + `confidence_reason` grade the claim; sort a
-  large `A` batch on them. Machine formats only — plain output omits them.
+- `confidence` (`high`/`low`, absent on `I`) + `confidence_reason` grade the
+  claim; sort a large `A` batch on them. `--min-confidence high` (MCP/REST
+  `min_confidence`) drops every `low` finding before output and the exit code;
+  `I` findings carry no grade and are kept. Plain output shows the grade only.
 - `inject_type` names the check that produced the finding (`inHTML`,
   `sxss-inHTML`, `DOM-XSS`, `inHTML-HPP`, `blind-oob-…`, `OutdatedComponent`),
   not the reflection context — there is no `inJS` / `inATTR`.
@@ -159,6 +169,7 @@ See `references/advanced.md` for the detailed recipes:
 - "WAF present" → `--force-waf`, `--waf-evasion`, `--waf-bypass off` (`force` acts like `auto`)
 - "Need custom payloads or markers" → `--custom-payload`, `--inject-marker`, `--custom-alert-*`
 - "Captured request testing" → `-i raw-http` (single request) or `-i har` (whole proxy/DevTools export)
+- "Scan what an API spec describes" → `-i openapi` / `-i postman` (+ `--base-url` for relative servers)
 - Concurrency / politeness caps
 
 ## 6. Configuration & Environment

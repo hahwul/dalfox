@@ -38,7 +38,7 @@ dalfox [SUBCOMMAND] [TARGET] [FLAGS]
 | 코드 | 의미 |
 |------|---------|
 | `0` | 성공, 탐지 결과 없음 |
-| `1` | 성공, 탐지 결과 보고됨 (티어 무관 — `V`만 게이트하려면 `--only-poc v`와 함께) |
+| `1` | 성공, 탐지 결과 보고됨 (티어 무관 — `V`만 게이트하려면 `--only-poc v`, `high` 등급만 게이트하려면 `--min-confidence high`와 함께) |
 | `2` | 입력 / 설정 / 런타임 오류 |
 
 탐지 결과 없이 깨끗하게 끝나지 못한 실행(모든 대상이 건너뛰어짐, 세션 유실, 스캔 워커 크래시, 대량의 요청 유실)도 `2`입니다. 전체 규칙은 [종료 코드](../../guide/output/#종료-코드)를 참고하세요. `server`와 `mcp`는 시작하지 못하면(예: 포트가 이미 사용 중) `2`로 종료합니다. `payload`는 알 수 없는 선택자를 받으면 `2`로 종료합니다.
@@ -57,8 +57,9 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 약칭 | 기본값 | 설명 |
 |------|-------|---------|-------------|
-| `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
-| `--dedup-urls` | — | `exact` | 대상 중복 제거: `exact`(URL+메서드가 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
+| `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`(OpenAPI 3.x / Swagger 2.0, JSON 또는 YAML), `postman`(Postman Collection v2.1) |
+| `--base-url` | — | — | `openapi` / `postman` 전용: 모든 요청의 스킴, 호스트, 포트를 정하고 경로 접두어가 됩니다. 명세 서버의 경로(상대든 절대든 `/api/v3` 부분)나 Postman 요청마다의 경로가 그 뒤에 붙습니다. 절대 `http(s)` URL이어야 합니다 |
+| `--dedup-urls` | — | `exact` | 대상 중복 제거: `exact`(URL+메서드+요청 내용이 완전히 같은 것만 제거), `signature`(파라미터 *값*만 다른 URL도 하나로 병합), `off`(입력의 모든 줄을 그대로 스캔) |
 | `--state-file` | — | — | 끝난 대상을 파일에 기록해 두고 같은 스캔을 다시 돌릴 때 건너뜁니다. 중단된 대량 스캔을 처음부터가 아니라 이어서 진행합니다. raw HTTP/HAR 요청 데이터는 지문으로 기록되므로 바뀐 캡처는 다시 스캔합니다. `-H` / `--cookies` / `--cookie-from-raw`로 준 자격 증명 값은 식별자에서 제외되므로 세션을 갱신해도 이어서 진행합니다. 캡처 안의 자격 증명은 그대로 포함됩니다 |
 
 무엇을 건너뛰고 무엇을 다시 시도하는지는 [중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)를 참고하세요.
@@ -82,6 +83,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--only-poc` | — | — | 쉼표로 구분된 필터: `v`(취약), `r`(반사됨), `a`(AST), `i`(정보성) |
 | `--baseline` | — | — | 이전 Dalfox JSON/JSONL 리포트와 비교해 그 이후 새로 생긴 건만 보고합니다. 평범한 `-f json -o` 리포트가 그대로 베이스라인입니다 |
 | `--baseline-mode` | — | `filter` | `filter`는 알려진 건을 제거하고(카운트와 종료 코드가 신규 기준), `annotate`는 유지한 채 각각에 `new`를 표시합니다 |
+| `--min-confidence` | — | `low` | `high`는 `low` 등급 탐지 결과(모든 `R`, 그리고 Dalfox가 확신할 수 없는 AST 흐름)를 출력, `target_summary` 개수, `--baseline`, 종료 코드보다 먼저 제거합니다. `I`는 등급이 없으므로 유지됩니다. `low`는 모두 유지합니다 |
 
 지문 규칙과 CI 레시피는 [베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)을 참고하세요.
 

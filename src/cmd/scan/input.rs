@@ -46,7 +46,8 @@ pub(crate) struct ResolvedTargets {
     pub(crate) targets: Vec<Target>,
     pub(crate) dedup: DedupStats,
     /// Lines from a target list (file, stdin pipe, `-i file`) that did not
-    /// parse as a target and were skipped. Reported for the same reason as
+    /// parse as a target and were skipped, plus OpenAPI / Postman operations
+    /// skipped as unusable. Reported for the same reason as
     /// [`DedupStats::collapsed`]: a run that discarded part of its input list
     /// must never read as full coverage of that list.
     pub(crate) unparsable_lines: usize,
@@ -56,6 +57,10 @@ pub(crate) struct ResolvedTargets {
 /// count. A recon dump can contain thousands; three is enough to recognise the
 /// shape of what was dropped.
 const UNPARSABLE_SAMPLE_LIMIT: usize = 3;
+
+/// `parse_openapi` / `parse_postman`: document text + `--base-url` → targets.
+type SpecParser =
+    fn(&str, Option<&url::Url>) -> std::result::Result<SpecImport, Box<dyn std::error::Error>>;
 
 /// Where a target string came from, which decides what a parse failure means.
 ///
@@ -137,6 +142,9 @@ pub(crate) async fn resolve_targets(
         && !std::io::IsTerminal::is_terminal(&std::io::stdin());
 
     let input_type = detect_input_type(args, stdin_is_piped, &mut buffered_stdin)?;
+    if args.base_url.is_some() && !matches!(input_type.as_str(), "openapi" | "postman") {
+        eprintln!("[warn] --base-url only applies to `-i openapi` / `-i postman`; ignoring it");
+    }
 
     // Each string is tagged with where it came from: a parse failure is fatal
     // for a command-line argument and skipped for a target-list line. See
@@ -400,9 +408,9 @@ pub(crate) async fn resolve_targets(
                     .map(|t| (t.clone(), TargetOrigin::Argument))
                     .collect()
             }
-            "har" => {
-                // Each string is a whole HAR document (a stdin buffer or a file
-                // path / literal), expanded to many Targets by parse_har later.
+            "har" | "openapi" | "postman" => {
+                // Each string is a whole document (a stdin buffer or a file
+                // path / literal), expanded to many Targets by its parser later.
                 if let Some(buf) = buffered_stdin.take() {
                     // Auto-detected HAR on stdin.
                     vec![(buf, TargetOrigin::Argument)]
@@ -427,10 +435,17 @@ pub(crate) async fn resolve_targets(
                         }
                     }
                 } else {
+                    let what = match input_type.as_str() {
+                        "openapi" => "an OpenAPI/Swagger spec path",
+                        "postman" => "a Postman collection path",
+                        _ => "a .har path",
+                    };
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::NO_FILE,
-                        "No HAR file specified for input-type=har (pass a .har path or pipe HAR on stdin)",
+                        &format!(
+                            "No file specified for input-type={input_type} (pass {what} or pipe it on stdin)"
+                        ),
                     );
                     return Err(ScanOutcome::Error);
                 }
@@ -441,7 +456,7 @@ pub(crate) async fn resolve_targets(
                     &args.format,
                     crate::cmd::error_codes::INVALID_INPUT_TYPE,
                     &format!(
-                        "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', or 'har'",
+                        "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', 'har', 'openapi', or 'postman'",
                         input_type
                     ),
                 );
@@ -464,8 +479,65 @@ pub(crate) async fn resolve_targets(
     // with the first few quoted in the warning. See [`TargetOrigin`].
     let mut unparsable_lines = 0usize;
     let mut unparsable_sample: Vec<String> = Vec::new();
+    // Spec operations / collection requests that could not become a target,
+    // across every document; reported once below.
+    let mut spec_skipped = 0usize;
+    let mut spec_unscanned_methods = 0usize;
+    let mut spec_skip_sample: Vec<String> = Vec::new();
     for (s, origin) in target_strings {
-        if input_type == "har" {
+        if input_type == "openapi" || input_type == "postman" {
+            let (label, parse): (&str, SpecParser) = if input_type == "openapi" {
+                ("OpenAPI spec", crate::target_parser::parse_openapi)
+            } else {
+                ("Postman collection", crate::target_parser::parse_postman)
+            };
+            // A spec named on the command line is a path; the stdin buffer
+            // (or a literal) is the document itself. JSON specs open with `{`,
+            // YAML ones span lines — `load_request_source` accepts both.
+            let content = load_request_source(&s, args, label, |c| {
+                c.trim_start_matches('\u{feff}')
+                    .trim_start()
+                    .starts_with('{')
+            })?;
+            let base = args
+                .base_url
+                .as_deref()
+                .and_then(|u| url::Url::parse(u).ok());
+            match parse(&content, base.as_ref()) {
+                Ok(import) => {
+                    for mut target in import.targets {
+                        apply_request_cli_overrides(&mut target, args);
+                        parsed_targets.push(target);
+                    }
+                    spec_skipped += import.skipped.len();
+                    spec_unscanned_methods += import.unscanned_methods;
+                    for why in import.skipped {
+                        if spec_skip_sample.len() >= UNPARSABLE_SAMPLE_LIMIT {
+                            break;
+                        }
+                        spec_skip_sample
+                            .push(crate::utils::log::sanitize_log_message(&why).into_owned());
+                    }
+                }
+                Err(e) => {
+                    // `s` is the whole document when it came from stdin, and
+                    // the reason can quote spec text: name the source, not
+                    // its contents, and strip terminal escapes.
+                    let source = if s.contains(['\n', '\r']) || s.len() > 512 {
+                        "<inline document>"
+                    } else {
+                        s.as_str()
+                    };
+                    let msg = format!("Error parsing {label} '{source}': {e}");
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::PARSE_ERROR,
+                        &crate::utils::log::sanitize_log_message(&msg),
+                    );
+                    return Err(ScanOutcome::Error);
+                }
+            }
+        } else if input_type == "har" {
             // A single HAR document expands to many Targets. Load it from the
             // detection cache, a file on disk, or treat the string itself as
             // the document (the stdin buffer / a literal).
@@ -603,6 +675,25 @@ pub(crate) async fn resolve_targets(
         }
     }
 
+    if spec_skipped > 0 {
+        // Same contract as the skipped-list-lines warning below: always on
+        // stderr, so a run that left part of the spec untested never reads as
+        // full coverage of it. The count also rides in the scan-meta envelope
+        // as `targets_unparsable` (added to the return value below).
+        eprintln!(
+            "[warn] skipped {} {} operation(s) — e.g. {}",
+            spec_skipped,
+            input_type,
+            spec_skip_sample.join("; ")
+        );
+    }
+    if spec_unscanned_methods > 0 {
+        eprintln!(
+            "[warn] not scanning {} DELETE/HEAD/OPTIONS {} operation(s) (destructive or no body to reflect)",
+            spec_unscanned_methods, input_type
+        );
+    }
+
     if unparsable_lines > 0 {
         // Always on stderr, for every format: a list whose lines were dropped
         // is not full coverage of that list, and a `--silence`d JSON consumer
@@ -709,7 +800,9 @@ pub(crate) async fn resolve_targets(
     Ok(ResolvedTargets {
         targets: parsed_targets,
         dedup,
-        unparsable_lines,
+        // Input entries that could not become a target: list lines and spec
+        // operations alike (policy-skipped methods are not failures).
+        unparsable_lines: unparsable_lines + spec_skipped,
     })
 }
 
@@ -1103,15 +1196,14 @@ fn method_override(args: &ScanArgs) -> Option<&str> {
 }
 
 /// Apply CLI overrides to a Target parsed from a request-bearing source
-/// (`raw-http` or `har`). Request-content fields (method, body, headers,
-/// cookies, User-Agent) are only touched when the user explicitly set the
-/// matching flag, so each captured request keeps its own shape by default;
-/// CLI headers and cookies are added to the request's own, but a CLI header
-/// (case-insensitive name) or cookie (exact name) *replaces* the captured one of
-/// the same name: reqwest's `.header()` appends and servers read the first
-/// value, so a kept stale `Authorization` / `sess=OLD` would beat the refreshed
-/// credential the operator passed. Network/runtime fields are always taken from the
-/// args. This is the shared override path for both raw-HTTP and HAR inputs.
+/// (`raw-http`, `har`, `openapi`, `postman`). Request-content fields (method,
+/// body, headers, cookies, User-Agent) are only touched when the user
+/// explicitly set the matching flag, so each imported request keeps its own
+/// shape by default. A CLI header or cookie *replaces* every imported one of
+/// the same name (case-insensitive for headers) and is otherwise added:
+/// appending would leave the stale imported value (a captured session, a
+/// spec's placeholder `Authorization`) first on the wire, where servers read
+/// it. Network/runtime fields are always taken from the args.
 fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     if let Some(m) = method_override(args) {
         target.method = m.to_string();
@@ -1119,19 +1211,16 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     if let Some(d) = &args.data {
         target.data = Some(d.clone());
     }
-    let cli_headers: Vec<(&str, &str)> = args
+    let cli_headers: Vec<(String, String)> = args
         .headers
         .iter()
         .filter_map(|h| h.split_once(':'))
-        .map(|(n, v)| (n.trim(), v.trim()))
+        .map(|(n, v)| (n.trim().to_string(), v.trim().to_string()))
         .collect();
-    // Drop captured same-name entries once, so repeated `-H X-Foo` all survive.
     target
         .headers
-        .retain(|(k, _)| !cli_headers.iter().any(|(n, _)| k.eq_ignore_ascii_case(n)));
-    for (name, value) in cli_headers {
-        target.headers.push((name.to_string(), value.to_string()));
-    }
+        .retain(|(k, _)| !cli_headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(k)));
+    target.headers.extend(cli_headers);
     // Empty `--user-agent ""` means "no override", not a literal empty header.
     if let Some(ua) = args.user_agent.as_ref().filter(|ua| !ua.is_empty()) {
         target.headers.push(("User-Agent".to_string(), ua.clone()));
@@ -1158,22 +1247,14 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
         .iter()
         .flat_map(|c| crate::job::split_cookie_pairs(c))
         .collect();
-    // A CLI `-H 'Cookie: …'` replaces the captured cookies outright; lift it
-    // into `cookies` so each one is probed. `--cookies` still wins on a name
-    // clash, same as the URL-list path and REST/MCP.
-    let cli_cookie_header = args.headers.iter().any(|h| {
-        h.split_once(':')
-            .is_some_and(|(n, _)| n.trim().eq_ignore_ascii_case("cookie"))
-    });
-    if cli_cookie_header {
-        target.cookies = cli_cookies;
-        crate::job::lift_cookie_headers(&mut target.headers, &mut target.cookies);
-    } else {
-        target
-            .cookies
-            .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| k == n));
-        target.cookies.extend(cli_cookies);
-    }
+    target
+        .cookies
+        .retain(|(k, _)| !cli_cookies.iter().any(|(n, _)| k == n));
+    target.cookies.extend(cli_cookies);
+    // A CLI `-H 'Cookie: …'` replaces the captured cookies and `--cookies`
+    // outright, as on every other input path; lift it into `cookies` so each
+    // one is probed.
+    crate::job::lift_cookie_headers(&mut target.headers, &mut target.cookies);
     target.timeout = args.timeout;
     target.delay = args.delay;
     target.proxy = args.proxy.clone();

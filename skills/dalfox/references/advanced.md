@@ -106,7 +106,7 @@ Only when you have evidence that the first finding on a parameter is not the onl
 
 Most scan flags have direct equivalents in `scan_with_dalfox` (including `max_payloads_per_param`, `wait` / `wait_timeout_sec`, remote payloads/wordlists, WAF options). Notable absences / differences:
 - `--cookie-from-raw` — intentionally absent on MCP (host file-read class; supply `cookies` directly)
-- Managed `--blind-oob` lifecycle — CLI-only; MCP uses `blind_callback_url`
+- Managed `--blind-oob` lifecycle and `--session-check` are now on MCP/server too (`blind_oob` / `blind_oob_wait`, `session_check` / `session_check_url`); the poller is bound to the job. Only `--blind-oob-secret` (self-hosted auth) stays CLI/config-only.
 - Multi-target / HAR / raw-http fan-out — CLI-only (call MCP once per URL)
 - `preflight_dalfox.param` is accepted but **not applied** (full discovery impact estimate); pass `param` on `scan_with_dalfox`
 - Some of the more exotic mining/scope filters (they exist in the engine but are not yet exposed on the MCP surface)

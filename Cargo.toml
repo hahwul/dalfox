@@ -48,6 +48,12 @@ urlencoding = "2.1"
 base64 = "0.23"
 chrono = "0.4"
 toml = "1"
+# YAML for `-i openapi` specs. serde_yaml is deprecated (and serde_yml is an
+# unmaintained shim); serde-saphyr is pure Rust (keeps the static binary),
+# panic-free, and enforces a parse budget (alias/anchor expansion, depth, node
+# and scalar-byte caps), so a hostile billion-laughs spec fails fast instead
+# of exhausting memory. Only the deserializer is needed.
+serde-saphyr = { version = "1.3", default-features = false, features = ["deserialize"] }
 axum = "0.8"
 sha2 = "0.11"
 hex = "0.4"

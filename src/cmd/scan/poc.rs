@@ -514,6 +514,10 @@ pub(crate) fn render_finding_block(
     if context_info.is_some() {
         sections.push("Line");
     }
+    // Absent on ungraded findings, so those keep their historical shape.
+    if result.confidence.is_some() {
+        sections.push("Confidence");
+    }
     // Only for `R`: why the reflection didn't verify is what the operator has
     // to work out by hand. A `V` finding already broke through.
     let filter = result
@@ -582,6 +586,15 @@ pub(crate) fn render_finding_block(
             bullet_for(idx),
             line_num,
             sanitize_display(&context)
+        ));
+        idx += 1;
+    }
+
+    if let Some(grade) = result.confidence {
+        output.push_str(&format!(
+            "  \x1b[90m{}\x1b[0m \x1b[38;5;247mConfidence:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
+            bullet_for(idx),
+            grade
         ));
         idx += 1;
     }

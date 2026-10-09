@@ -722,6 +722,7 @@ fn mk_meta() -> ScanMetadata {
         total_requests: 42,
         findings_count: 1,
         incomplete: false,
+        min_confidence: None,
         target_summary: vec![
             serde_json::json!({
                 "target": "https://example.com",
@@ -1210,4 +1211,34 @@ fn filter_fingerprint_reaches_every_machine_format() {
 
     r.filter = None;
     assert!(r.to_json_value(false, false).get("filter").is_none());
+}
+
+/// SARIF `level` follows severity only. The confidence grade rides in
+/// `properties`, and neither `level` nor `partialFingerprints` move with it, so
+/// existing code-scanning gates and finding identities are unaffected.
+#[test]
+fn test_results_to_sarif_level_and_fingerprint_ignore_confidence() {
+    let mk = |grade: Option<Confidence>| {
+        let mut r = Result::builder(FindingType::Verified)
+            .inject_type("DOM-XSS")
+            .data("https://h/s?q=1")
+            .param("q")
+            .cwe("CWE-79")
+            .severity("High")
+            .build();
+        r.confidence = grade;
+        r
+    };
+    let sarif = |r: Result| -> serde_json::Value {
+        serde_json::from_str(&Result::results_to_sarif(&[r], false, false)).unwrap()
+    };
+    let first = |v: &serde_json::Value| v["runs"][0]["results"][0].clone();
+    let high = first(&sarif(mk(Some(Confidence::High))));
+    let low = first(&sarif(mk(Some(Confidence::Low))));
+    let none = first(&sarif(mk(None)));
+    for r in [&high, &low, &none] {
+        assert_eq!(r["level"], "error");
+    }
+    assert_eq!(high["partialFingerprints"], low["partialFingerprints"]);
+    assert_eq!(low["properties"]["confidence"], "low");
 }

@@ -93,6 +93,11 @@ pub(crate) const BASELINE_MODE_FILTER: &str = "filter";
 /// `new: true|false`, for dashboards that want the whole set.
 pub(crate) const BASELINE_MODE_ANNOTATE: &str = "annotate";
 pub const BASELINE_MODE_VALUES: &[&str] = &[BASELINE_MODE_FILTER, BASELINE_MODE_ANNOTATE];
+/// `--min-confidence high`: drop every finding graded `low` (every `R`, plus
+/// AST flows dalfox cannot stand behind). `low` is the floor every graded
+/// finding already meets, so it filters nothing.
+pub(crate) const MIN_CONFIDENCE_HIGH: &str = "high";
+pub const MIN_CONFIDENCE_VALUES: &[&str] = &["low", MIN_CONFIDENCE_HIGH];
 pub const ENCODER_VALUES: &[&str] = &[
     "none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp",
 ];
@@ -102,7 +107,7 @@ pub const WAF_BYPASS_VALUES: &[&str] = &["auto", "force", "off"];
 /// MCP tool schema cannot drift onto different defaults.
 pub const DEFAULT_WAF_BYPASS: &str = "auto";
 pub const DEDUP_URLS_VALUES: &[&str] = &["exact", "signature", "off"];
-/// Default for `--dedup-urls`: collapse only byte-identical `url|method`
+/// Default for `--dedup-urls`: collapse only byte-identical `url|method|request content`
 /// pairs, i.e. the historical behavior. `signature` additionally collapses
 /// URLs that differ solely in parameter *values*, which is not value-safe for
 /// every endpoint, so it stays opt-in.
@@ -293,6 +298,19 @@ fn parse_limit_arg(s: &str) -> std::result::Result<usize, String> {
     Ok(n)
 }
 
+/// clap value-parser for `--base-url`: an absolute http(s) URL with a host.
+/// Shared with the config-file validator, which bypasses clap.
+pub(crate) fn parse_base_url_arg(s: &str) -> std::result::Result<String, String> {
+    match url::Url::parse(s.trim()) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") && u.host_str().is_some() => {
+            Ok(s.trim().to_string())
+        }
+        _ => Err(format!(
+            "invalid --base-url '{s}': must be an absolute http(s) URL (e.g. https://api.example.com)"
+        )),
+    }
+}
+
 /// clap value-parser for `--method` / `-X`. Normalises the input to
 /// uppercase so `--method get` and `--method GET` behave identically
 /// (case-sensitive comparisons downstream — e.g. `args.method !=
@@ -318,13 +336,21 @@ pub(crate) fn parse_http_method_arg(s: &str) -> std::result::Result<String, Stri
 #[derive(Clone, Debug, PartialEq, Args)]
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
-    /// Input type: auto, url, file, pipe, raw-http, har
+    /// Input type: auto, url, file, pipe, raw-http, har, openapi, postman
     #[arg(short = 'i', long, default_value = "auto")]
     pub input_type: String,
 
     #[clap(help_heading = "INPUT")]
+    /// Where the API of an `-i openapi` / `-i postman` input lives. Supplies
+    /// scheme, host and port for every request and is a path prefix; the
+    /// spec server's path (or each Postman request's path) is appended.
+    /// Example: --base-url https://staging.example.com
+    #[arg(long, value_name = "URL", value_parser = parse_base_url_arg)]
+    pub base_url: Option<String>,
+
+    #[clap(help_heading = "INPUT")]
     /// Target deduplication [default: exact]: exact (drop byte-identical
-    /// URL+method), signature (also collapse URLs that differ only in
+    /// URL+method+request content), signature (also collapse URLs that differ only in
     /// parameter values — keys on method+host+path+parameter names), off (scan
     /// every input line).
     //
@@ -434,6 +460,16 @@ pub struct ScanArgs {
     // always wins. Read it through `ScanArgs::baseline_mode`.
     #[arg(long = "baseline-mode", value_name = "MODE", value_parser = clap::builder::PossibleValuesParser::new(BASELINE_MODE_VALUES.iter().copied()))]
     pub baseline_mode_arg: Option<String>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Drop findings graded below this confidence before output, per-target
+    /// counts, --baseline, and the exit code: low (default, keep everything)
+    /// or high (keep only findings dalfox can claim are exploitable;
+    /// informational findings carry no grade and are kept). Example: --min-confidence high
+    //
+    // `None` so an explicit `--min-confidence low` beats a config-file `high`.
+    #[arg(long, value_name = "LEVEL", value_parser = clap::builder::PossibleValuesParser::new(MIN_CONFIDENCE_VALUES.iter().copied()))]
+    pub min_confidence: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, multipart, cookie, header, graphql, xml.
@@ -883,6 +919,7 @@ impl Default for ScanArgs {
     fn default() -> Self {
         Self {
             input_type: "auto".to_string(),
+            base_url: None,
             dedup_urls: None,
             format: "plain".to_string(),
             output: None,
@@ -900,6 +937,7 @@ impl Default for ScanArgs {
             state_file: None,
             baseline: None,
             baseline_mode_arg: None,
+            min_confidence: None,
             param: vec![],
             data: None,
             headers: vec![],
@@ -1046,6 +1084,12 @@ impl ScanArgs {
         self.baseline_mode_arg
             .as_deref()
             .unwrap_or(BASELINE_MODE_FILTER)
+    }
+
+    /// Whether `--min-confidence` drops `r`; see
+    /// [`crate::scanning::result::Result::below_min_confidence`].
+    pub(crate) fn below_min_confidence(&self, r: &crate::scanning::result::Result) -> bool {
+        r.below_min_confidence(self.min_confidence.as_deref())
     }
 
     /// Effective `--on-session-loss` policy: the operator's choice, else

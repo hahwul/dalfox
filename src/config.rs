@@ -104,6 +104,8 @@ pub struct Config {
 pub struct ScanConfig {
     // INPUT
     pub input_type: Option<String>,
+    /// `--base-url`: where an `openapi` / `postman` input's API lives.
+    pub base_url: Option<String>,
     pub dedup_urls: Option<String>,
     /// `--state-file`: path of the resume state file. CLI only — the server /
     /// MCP job model has its own per-job lifecycle and never resumes a
@@ -124,6 +126,7 @@ pub struct ScanConfig {
     pub only_poc: Option<Vec<String>>,
     pub baseline: Option<String>,
     pub baseline_mode: Option<String>,
+    pub min_confidence: Option<String>,
     pub no_color: Option<bool>,
     // TARGETS
     pub param: Option<Vec<String>>,
@@ -300,6 +303,7 @@ impl Config {
         if let Some(scan) = &self.scan {
             // INPUT
             apply_cfg!(explicit_clone scan.input_type => args.input_type);
+            apply_cfg!(opt_clone scan.base_url => args.base_url);
             apply_cfg!(opt_clone scan.state_file => args.state_file);
             apply_cfg!(opt_clone scan.dedup_urls => args.dedup_urls);
 
@@ -318,6 +322,7 @@ impl Config {
             apply_cfg!(vec scan.only_poc => args.only_poc);
             apply_cfg!(opt_clone scan.baseline => args.baseline);
             apply_cfg!(opt_clone scan.baseline_mode => args.baseline_mode_arg);
+            apply_cfg!(opt_clone scan.min_confidence => args.min_confidence);
             apply_cfg!(flag scan.no_color => args.no_color);
             // Map debug conservatively: only set when CLI didn't enable it (global false)
             if let Some(v) = scan.debug
@@ -496,6 +501,17 @@ impl ScanConfig {
     pub fn normalize_and_validate(&mut self) -> Vec<String> {
         let mut warnings = Vec::new();
 
+        // `base_url` — same check as `--base-url`'s clap parser.
+        if let Some(u) = &self.base_url {
+            match crate::cmd::scan::parse_base_url_arg(u) {
+                Ok(v) => self.base_url = Some(v),
+                Err(e) => {
+                    warnings.push(format!("config scan.base_url: {e}; ignoring"));
+                    self.base_url = None;
+                }
+            }
+        }
+
         // `method` — uppercase + validate, mirroring `--method`'s parser so a
         // config `method = "post"` becomes "POST" instead of silently breaking
         // the case-sensitive method comparisons downstream.
@@ -559,6 +575,12 @@ impl ScanConfig {
             &mut self.baseline_mode,
             crate::cmd::scan::BASELINE_MODE_VALUES,
             "scan.baseline_mode",
+            &mut warnings,
+        );
+        reject_unless_allowed(
+            &mut self.min_confidence,
+            crate::cmd::scan::MIN_CONFIDENCE_VALUES,
+            "scan.min_confidence",
             &mut warnings,
         );
         reject_unless_allowed(
@@ -789,8 +811,9 @@ pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 
 [scan]
 # INPUT
-# input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal), har (HAR / proxy export)
-# dedup_urls = "exact"       # exact (drop identical URL+method), signature (also collapse URLs differing only in param values), off
+# input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal), har (HAR / proxy export), openapi (OpenAPI 3.x / Swagger 2.0 JSON or YAML), postman (Postman collection v2.1)
+# base_url = "https://staging.example.com"  # openapi/postman: scheme+host(+port) for every request, path prefix; the spec server path is appended
+# dedup_urls = "exact"       # exact (drop identical URL+method+request content), signature (also collapse URLs differing only in param values), off
 # state_file = "scan.state"  # CLI only (not applied by `dalfox server` / MCP); record completed targets and skip them when the scan is re-run
 
 # OUTPUT
@@ -810,6 +833,7 @@ pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 # only_poc = ["v", "r"]      # show only these finding types: v (vulnerable), r (reflected), a (AST DOM XSS), i (informational)
 # baseline = "baseline.json"  # CLI only (not applied by `dalfox server` / MCP); prior JSON/JSONL report, report only findings new since it
 # baseline_mode = "filter"    # filter (drop known findings) or annotate (keep them, mark each `new`)
+# min_confidence = "low"      # low (keep every finding) or high (drop low-confidence findings before output and exit code)
 
 # TARGETS
 # param = ["id", "q:query", "auth:header"]

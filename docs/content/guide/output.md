@@ -139,14 +139,14 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `findings_count`
 - `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or its session was lost — a target that Ctrl-C / `--limit` / `--scan-timeout` cut short is `incomplete` with none (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/#collapsing-near-duplicate-urls) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
-- `targets_unparsable` — only when a target-list line could not be parsed and was skipped; see [File mode](../scanning-modes/#file-mode)
+- `targets_unparsable` — only when a target-list line could not be parsed, or an OpenAPI / Postman operation could not be built, and was skipped; see [File mode](../scanning-modes/#file-mode) and [OpenAPI / Postman mode](../scanning-modes/#openapi-postman-mode)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
 - `resumed` — only when `--state-file` was used: `state_file` (the path) and `targets_skipped_completed` (targets skipped because an earlier run finished them)
 - `incomplete` — `true` when the run was **not fully tested**: a target's authenticated session died mid-scan (see [Session monitoring](../scanning-modes/#session-monitoring)), at least 10% of the run's requests (and at least 3) never got a response, or Ctrl-C / `--limit` / `--scan-timeout` stopped the run before every target finished. Read this one field instead of scanning every `target_summary` entry: `"findings_count": 0` plus `"incomplete": true` is *not* a clean bill of health
 
 A target whose session died is reported as `"status": "incomplete"` (or `"skipped"` if it never ran) with `"error_code": "SESSION_LOST"` and the signal that fired in `"error_message"` — never as `"clean"`. A target that Ctrl-C, `--limit`, or `--scan-timeout` cut short (or that the run stopped before reaching) and that found nothing is likewise `"incomplete"`, with no `error_code`.
 
-In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context. Each result's `ruleId` is `dalfox/cwe-<n>` (`dalfox/cwe-79` for XSS, `dalfox/cwe-1104` for outdated libraries), its `level` follows `severity` (High → `error`, Medium → `warning`, Low / Info → `note`), the PoC URL is the location `uri`, and `partialFingerprints["vulnIdentity/v1"]` is a stable hash that lets code scanning match a finding across runs. The finding fields (`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence`, …) are under the result's `properties`, and `message.text` carries `message_str` plus the evidence.
+In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context. Each result's `ruleId` is `dalfox/cwe-<n>` (`dalfox/cwe-79` for XSS, `dalfox/cwe-1104` for outdated libraries), its `level` follows `severity` (High → `error`, Medium → `warning`, Low / Info → `note`) the PoC URL is the location `uri`, and `partialFingerprints["vulnIdentity/v1"]` is a stable hash that lets code scanning match a finding across runs. The finding fields (`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence`, …) are under the result's `properties`, and `message.text` carries `message_str` plus the evidence.
 
 In **TOML** it appears as a top-level `[meta]` table (findings under `[[results]]`).
 
@@ -206,6 +206,21 @@ Show only certain result types:
 dalfox scan https://target.app --only-poc v     # only V (Vulnerable)
 dalfox scan https://target.app --only-poc v,a   # V + AST
 ```
+
+Drop findings Dalfox cannot stand behind (every `R`, plus `low`-graded AST flows):
+
+```bash
+dalfox scan https://target.app --min-confidence high
+```
+
+`--min-confidence high` filters by the `confidence` grade, not the tier, and
+runs first: output in every format, `--stream-findings`, `target_summary`
+counts, `--baseline`, `--limit` (the early stop and the display cut), and the
+exit code all see the filtered set. `I` findings carry no grade and are kept.
+The default `low` keeps everything. When the flag is set, the envelope carries
+`meta.min_confidence: {"level": "high", "dropped": N}`, so a target reading
+`clean` because all of its findings were filtered is never mistaken for one
+that found nothing.
 
 Cap the number of results:
 
@@ -391,7 +406,7 @@ Dalfox returns:
 | `1` | Completed successfully, at least one finding **of any tier** |
 | `2` | Input/config/runtime error, or the `-o` file could not be written. With no findings, also: every target was skipped (unreachable, wrong content type, …; also under `--dry-run` and `--only-discovery`, whose JSON/JSONL carry the skipped targets and their `error_code`), a target's scan worker crashed (`INTERNAL_ERROR`), at least 10% of requests (and at least 3) never got a response, or a session was lost mid-scan under the default `--on-session-loss abort` (a run that did find something still exits `1`) |
 
-`1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. (Gating on `severity == "High"` with `jq` reaches nearly the same set today, because severity currently tracks the tier: `V` is `High`, `A` is `Medium`, `R` is `Info`. The exception is an `I` library finding, which carries its advisory's severity and can be `High`. See [Detection Model](../detection-model/).)
+`1` covers every tier — a lone `R`, or a single `I` from `--detect-outdated-libs`, fails the build exactly like a `V` does. To gate on what Dalfox asserts is exploitable, run `--only-poc v` and keep using the exit code; it filters before the code is decided. `--min-confidence high` does the same on the confidence grade: a run whose only findings were `low` exits `0`. (Gating on `severity == "High"` with `jq` reaches nearly the same set today, because severity currently tracks the tier: `V` is `High`, `A` is `Medium`, `R` is `Info`. The exception is an `I` library finding, which carries its advisory's severity and can be `High`. See [Detection Model](../detection-model/).)
 
 `--baseline` narrows the same code to *novelty*: under the default `filter` mode, suppressed findings never reach the exit-code decision, so a run whose entire backlog is already in the baseline exits `0`. See [Baselines](#baselines-reporting-only-what-is-new).
 

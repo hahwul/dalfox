@@ -401,11 +401,13 @@ pub(crate) async fn preflight_and_analyze_target(
                     if let Some((k, v)) = pair.split_once('=')
                         && v.contains(marker.as_str())
                     {
-                        marker_params.push(Param::new(
-                            k.to_string(),
-                            v.to_string(),
-                            Location::Body,
-                        ));
+                        // An imported multipart body keeps its wire format.
+                        let location = if target.multipart {
+                            Location::MultipartBody
+                        } else {
+                            Location::Body
+                        };
+                        marker_params.push(Param::new(k.to_string(), v.to_string(), location));
                     }
                 }
             }
@@ -824,6 +826,7 @@ pub(crate) async fn detect_outdated_libs(
             let added = crate::scanning::count_matching_results(
                 &lib_findings,
                 &args_clone.limit_result_type.to_uppercase(),
+                args_clone.min_confidence.as_deref(),
             );
             crate::scanning::result::stamp_origin(&mut lib_findings, target.url.as_str());
             let mut guard = results_clone.lock().await;
@@ -868,6 +871,7 @@ async fn run_initial_ast_pass(
             let added = crate::scanning::count_matching_results(
                 &ast_batch,
                 &args_clone.limit_result_type.to_uppercase(),
+                args_clone.min_confidence.as_deref(),
             );
             crate::scanning::result::stamp_origin(&mut ast_batch, target.url.as_str());
             let mut guard = results_clone.lock().await;
@@ -891,6 +895,7 @@ async fn run_initial_ast_pass(
                 findings_count_clone,
                 ext_batch,
                 &args_clone.limit_result_type.to_uppercase(),
+                args_clone.min_confidence.as_deref(),
             )
             .await;
         }

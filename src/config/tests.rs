@@ -17,6 +17,7 @@ fn full_scan_config() -> ScanConfig {
     ScanConfig {
         insecure: None,
         input_type: Some("file".to_string()),
+        base_url: Some("https://staging.example.com/api".to_string()),
         format: Some("jsonl".to_string()),
         output: Some("result.jsonl".to_string()),
         include_request: Some(true),
@@ -31,6 +32,7 @@ fn full_scan_config() -> ScanConfig {
         only_poc: Some(vec!["v".to_string()]),
         baseline: Some("baseline.json".to_string()),
         baseline_mode: Some("annotate".to_string()),
+        min_confidence: Some("high".to_string()),
         no_color: Some(false),
         param: Some(vec!["q".to_string(), "id:query".to_string()]),
         data: Some("name=test".to_string()),
@@ -295,6 +297,10 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     cfg.apply_to_scan_args_if_default(&mut args);
 
     assert_eq!(args.input_type, "file");
+    assert_eq!(
+        args.base_url.as_deref(),
+        Some("https://staging.example.com/api")
+    );
     assert_eq!(args.format, "jsonl");
     assert_eq!(args.output.as_deref(), Some("result.jsonl"));
     assert!(args.include_request);
@@ -450,6 +456,26 @@ fn test_normalize_and_validate_leaves_only_custom_payload_alone() {
 }
 
 #[test]
+fn test_normalize_and_validate_rejects_non_http_base_url() {
+    // A config value skips `--base-url`'s clap parser; a relative or non-http
+    // value must be dropped with a warning, not reach the spec importers.
+    for bad in ["/api", "ftp://h", "not a url"] {
+        let mut cfg = Config {
+            scan: Some(ScanConfig {
+                base_url: Some(bad.to_string()),
+                ..Default::default()
+            }),
+        };
+        let warnings = cfg.normalize_and_validate();
+        assert!(
+            warnings.iter().any(|w| w.contains("scan.base_url")),
+            "{bad}: {warnings:?}"
+        );
+        assert!(cfg.scan.as_ref().unwrap().base_url.is_none());
+    }
+}
+
+#[test]
 fn test_normalize_and_validate_uppercases_sxss_method() {
     // Same class as `method`: a config value skips clap's parser, so `"post"`
     // reached `reqwest::Method::from_str` as the literal extension verb.
@@ -520,12 +546,13 @@ fn test_normalize_and_validate_rejects_invalid_enums() {
         custom_alert_type: Some("bogus".to_string()),
         waf_bypass: Some("always".to_string()),
         dedup_urls: Some("fuzzy".to_string()),
+        min_confidence: Some("medium".to_string()),
         ..Default::default()
     };
     let warnings = scan.normalize_and_validate();
     assert_eq!(
         warnings.len(),
-        6,
+        7,
         "one warning per invalid field: {warnings:?}"
     );
     assert_eq!(scan.format, None);
@@ -533,6 +560,7 @@ fn test_normalize_and_validate_rejects_invalid_enums() {
     assert_eq!(scan.limit_result_type, None);
     assert_eq!(scan.custom_alert_type, None);
     assert_eq!(scan.waf_bypass, None);
+    assert_eq!(scan.min_confidence, None);
     assert_eq!(
         scan.dedup_urls, None,
         "an invalid dedup mode must fall back to `exact`, not reach ScanArgs"
@@ -580,6 +608,7 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
         scan: Some(ScanConfig {
             on_session_loss: Some("continue".to_string()),
             baseline_mode: Some("annotate".to_string()),
+            min_confidence: Some("high".to_string()),
             ..Default::default()
         }),
     };
@@ -589,14 +618,17 @@ fn test_config_cannot_override_an_explicit_default_valued_cli_choice() {
     cfg.apply_to_scan_args_if_default(&mut args);
     assert_eq!(args.on_session_loss_mode(), "continue");
     assert_eq!(args.baseline_mode(), "annotate");
+    assert_eq!(args.min_confidence.as_deref(), Some("high"));
 
     // CLI explicitly re-asserts the built-in defaults: config must not win.
     let mut args = default_scan_args();
     args.on_session_loss_arg = Some("abort".to_string());
     args.baseline_mode_arg = Some("filter".to_string());
+    args.min_confidence = Some("low".to_string());
     cfg.apply_to_scan_args_if_default(&mut args);
     assert_eq!(args.on_session_loss_mode(), "abort");
     assert_eq!(args.baseline_mode(), "filter");
+    assert_eq!(args.min_confidence.as_deref(), Some("low"));
 }
 
 /// The generalization of the test above: `--baseline-mode` and
