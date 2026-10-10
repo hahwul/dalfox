@@ -57,6 +57,7 @@ impl<'a> DomXssVisitor<'a> {
                 if right_tainted
                     && prop_name == "action"
                     && self.expr_resolves_to_form(&member.object)
+                    && !self.url_scheme_is_pinned(&assign.right)
                 {
                     self.report_vulnerability_with_source(
                         assign.span(),
@@ -94,11 +95,15 @@ impl<'a> DomXssVisitor<'a> {
                         prop_name.to_string()
                     };
 
-                    self.report_vulnerability_with_source(
-                        assign.span(),
-                        &sink_name,
-                        right_source.clone(),
-                    );
+                    if !(Self::is_navigation_sink(&sink_name)
+                        && self.url_scheme_is_pinned(&assign.right))
+                    {
+                        self.report_vulnerability_with_source(
+                            assign.span(),
+                            &sink_name,
+                            right_source.clone(),
+                        );
+                    }
                 }
 
                 // Track field-level taint for property assignments like:
@@ -274,7 +279,11 @@ impl<'a> DomXssVisitor<'a> {
                                 .is_some_and(|recv| self.expr_resolves_to_form(recv)));
                     if dangerous && let Some(arg1) = call.arguments.get(1) {
                         let (tainted, source_hint) = self.argument_taint_and_source(arg1);
-                        if tainted {
+                        let pinned = Self::is_navigation_sink(&name)
+                            && arg1
+                                .as_expression()
+                                .is_some_and(|e| self.url_scheme_is_pinned(e));
+                        if tainted && !pinned {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 &format!("setAttribute:{}", name),
@@ -524,8 +533,12 @@ impl<'a> DomXssVisitor<'a> {
                     continue;
                 }
                 let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                let pinned = Self::is_navigation_sink(&func_name)
+                    && arg
+                        .as_expression()
+                        .is_some_and(|e| self.url_scheme_is_pinned(e));
 
-                if is_arg_tainted {
+                if is_arg_tainted && !pinned {
                     self.report_vulnerability_with_source(call.span(), &func_name, source_hint);
                     break;
                 }

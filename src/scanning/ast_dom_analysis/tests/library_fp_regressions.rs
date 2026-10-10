@@ -63,3 +63,47 @@ fn destructured_binding_keeps_real_flows() {
         assert!(!found(js).is_empty(), "{js}");
     }
 }
+
+/// A navigation sink only runs script when the tainted text supplies the
+/// scheme. Reloads, path rewrites and share links lead with the page's own
+/// URL or a literal that already fixes the scheme.
+#[test]
+fn navigation_with_pinned_scheme_is_not_a_finding() {
+    for js in [
+        "window.location.href = window.location.href;",
+        "window.location.href = window.location.origin + window.location.pathname;",
+        "location.href = location.pathname + '?page=2';",
+        "location.replace(location.href.split('#')[0]);",
+        "document.getElementById('a').href = location.pathname + '#top';",
+        "var a = document.createElement('a'); a.href = location.protocol + '//' + location.host + location.pathname;",
+        "document.getElementById('x').setAttribute('href', '/search' + location.search);",
+        "window.open('https://www.facebook.com/sharer.php?u=' + location.href, '_blank');",
+        "location.assign(`/login?next=${location.pathname}`);",
+        "location.href = ' \\t/x?' + location.hash;",
+    ] {
+        assert!(found(js).is_empty(), "{js}: {:?}", found(js));
+    }
+}
+
+#[test]
+fn navigation_with_tainted_scheme_still_reports() {
+    for js in [
+        "location.href = location.hash.slice(1);",
+        "location.href = decodeURIComponent(location.hash.substring(1));",
+        "location.href = new URLSearchParams(location.search).get('next');",
+        "location.href = location.pathname.substring(1);",
+        "location.href = 'java' + location.hash.slice(1);",
+        "location.href = 'javascript:' + location.hash.slice(1);",
+        "location.href = 'JavaScript:' + location.hash;",
+        "location.href = 'java\\tscript:' + location.hash;",
+        "location.href = 'data:text/html,' + location.hash;",
+        "location.href = '' + location.hash.slice(1);",
+        "location.href = `${location.hash.slice(1)}/x`;",
+        "document.getElementById('x').setAttribute('href', location.hash.slice(1));",
+        "window.open(location.hash.slice(1));",
+        // `src` is not pinned by a scheme: the host still matters.
+        "var s = document.createElement('script'); s.src = '/' + location.hash.slice(1);",
+    ] {
+        assert!(!found(js).is_empty(), "{js}");
+    }
+}
