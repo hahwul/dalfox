@@ -85,8 +85,7 @@ pub fn parse_openapi(
     // `x-…` keys are specification extensions, not paths.
     'paths: for (path, item) in paths.iter().filter(|(p, _)| !p.starts_with("x-")) {
         let Some(item) = resolve(&doc, item) else {
-            out.skipped
-                .push(format!("{path}: unresolvable path item $ref"));
+            out.skip(format!("{path}: unresolvable path item $ref"));
             continue;
         };
         for method in METHODS {
@@ -99,7 +98,7 @@ pub fn parse_openapi(
             }
             let label = format!("{} {}", method.to_ascii_uppercase(), path);
             if out.targets.len() >= super::MAX_IMPORT_TARGETS || budget == 0 {
-                out.skipped.push(format!(
+                out.skip(format!(
                     "{label}: stopped — spec expands past the import size cap"
                 ));
                 break 'paths;
@@ -123,7 +122,19 @@ pub fn parse_openapi(
                     budget = budget.saturating_sub(size);
                     out.targets.push(t);
                 }
-                Err(e) => out.skipped.push(format!("{label}: {e}")),
+                Err(e) => {
+                    // A skip costs its message, and a too-large one the
+                    // expansion it took to find out: path items shared by
+                    // `$ref` must not amplify through skipped operations.
+                    let skip = format!("{label}: {e}");
+                    let cost = if e == too_large() {
+                        MAX_IMPORT_REQUEST_BYTES
+                    } else {
+                        skip.len()
+                    };
+                    budget = budget.saturating_sub(cost);
+                    out.skip(skip);
+                }
             }
         }
     }
@@ -136,7 +147,7 @@ pub fn parse_openapi(
             .unwrap_or_default();
         return Err(format!(
             "spec yielded no scannable operation ({} skipped, {} DELETE/HEAD/OPTIONS not scanned){why}",
-            out.skipped.len(),
+            out.skipped_total,
             out.unscanned_methods
         )
         .into());
@@ -371,23 +382,34 @@ impl<'a> Op<'a> {
 
         // Path-item parameters, then operation parameters overriding by
         // (name, in) — the OAS merge rule.
-        let mut params: Vec<&Value> = Vec::new();
-        for list in [self.item.get("parameters"), self.op.get("parameters")] {
-            for p in list.and_then(Value::as_array).into_iter().flatten() {
-                let Some(p) = resolve(self.doc, p) else {
-                    continue; // remote $ref: not fetched
-                };
-                let key = |v: &'a Value| (v.get("name"), v.get("in"));
-                params.retain(|q| key(q) != key(p));
-                params.push(p);
-                // The override scan above is quadratic; no real operation
-                // comes near this.
-                if params.len() > MAX_OP_PARAMS {
-                    return Err(format!("more than {MAX_OP_PARAMS} parameters"));
-                }
-            }
+        let all: Vec<&Value> = [self.item.get("parameters"), self.op.get("parameters")]
+            .into_iter()
+            .flat_map(|list| list.and_then(Value::as_array).into_iter().flatten())
+            .take(MAX_OP_PARAMS + 1)
+            .collect();
+        if all.len() > MAX_OP_PARAMS {
+            return Err(format!("more than {MAX_OP_PARAMS} parameters"));
         }
+        // The last declaration of each (name, in) wins, in its position.
+        // A remote `$ref` is not fetched and drops out.
+        let mut seen = std::collections::HashSet::new();
+        let mut params: Vec<&Value> = all
+            .into_iter()
+            .rev()
+            .filter_map(|p| resolve(self.doc, p))
+            .filter(|p| {
+                let key = |k| p.get(k).and_then(Value::as_str);
+                seen.insert((key("name"), key("in")))
+            })
+            .collect();
+        params.reverse();
 
+        // Indexed once: a template can repeat `{x}` millions of times.
+        let path_params: std::collections::HashMap<&str, &Value> = params
+            .iter()
+            .filter(|p| param_is(p, "path"))
+            .filter_map(|p| Some((p.get("name")?.as_str()?, *p)))
+            .collect();
         let mut path = String::with_capacity(self.path.len());
         let mut rest = self.path;
         while let Some(open) = rest.find('{') {
@@ -396,12 +418,12 @@ impl<'a> Op<'a> {
             };
             path.push_str(&rest[..open]);
             let name = &rest[open + 1..open + close];
-            let value = params
-                .iter()
-                .find(|p| {
-                    param_is(p, "path") && p.get("name").and_then(Value::as_str) == Some(name)
-                })
+            let value = path_params
+                .get(name)
                 .map(|p| self.param_value(p))
+                // A dot-segment value survives encoding and would fold the
+                // segment away (`/u/{id}/x` → `/x`), scanning another path.
+                .filter(|v| v != "." && v != "..")
                 .unwrap_or_else(|| "1".to_string());
             path.push_str(&urlencoding::encode(&value));
             if path.len() > MAX_IMPORT_REQUEST_BYTES {
@@ -651,6 +673,12 @@ impl<'a> Op<'a> {
         });
         let schema = media.get("schema");
         let value = match example {
+            // A form example is often given already encoded: `a=1&b=2`.
+            Some(Value::String(s)) if kind == BodyKind::Form => Value::Object(
+                url::form_urlencoded::parse(s.as_bytes())
+                    .map(|(k, v)| (k.into_owned(), Value::String(v.into_owned())))
+                    .collect(),
+            ),
             Some(v) => v,
             None => Sampler::new(self.doc).sample(schema?, 0),
         };
@@ -724,10 +752,12 @@ fn oas3_server_url(server: &Value) -> Result<String, String> {
         let value = var
             .and_then(|v| v.get("default"))
             .or_else(|| var.and_then(|v| v.get("enum")?.as_array()?.first()))
-            .and_then(Value::as_str);
+            // YAML reads an unquoted `default: 8443` as a number.
+            .filter(|v| v.is_string() || v.is_number())
+            .map(wire_string);
         out.push_str(&rest[..open]);
         match value {
-            Some(v) => out.push_str(v),
+            Some(v) => out.push_str(&v),
             None => out.push_str(&rest[open..open + close + 1]),
         }
         rest = &rest[open + close + 1..];
@@ -740,19 +770,29 @@ fn oas3_server_url(server: &Value) -> Result<String, String> {
 /// relative (`basePath`), which `--base-url` must anchor.
 fn swagger2_server(doc: &Value) -> Option<String> {
     let base_path = doc.get("basePath").and_then(Value::as_str).unwrap_or("/");
-    let host = doc.get("host").and_then(Value::as_str);
-    let schemes: Vec<&str> = doc
+    let mut host = doc.get("host").and_then(Value::as_str);
+    let mut schemes: Vec<&str> = doc
         .get("schemes")
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
+    // `host` is a bare authority, but `https://api.example.com/` is a common
+    // mistake that would scan the host `https`: split the scheme off, and use
+    // it when `schemes` names none.
+    if let Some((scheme, h)) = host.and_then(|h| h.split_once("://")) {
+        host = Some(h.trim_end_matches('/'));
+        if schemes.is_empty() {
+            schemes.push(scheme);
+        }
+    }
     let scheme = if schemes.is_empty() || schemes.contains(&"https") {
         "https"
     } else {
         schemes[0]
     };
     Some(match host {
-        Some(h) => format!("{scheme}://{h}{base_path}"),
+        // A `basePath` missing its leading `/` must not run into the host.
+        Some(h) => format!("{scheme}://{h}/{}", base_path.trim_start_matches('/')),
         None => base_path.to_string(),
     })
 }
@@ -797,7 +837,8 @@ fn xml_root(doc: &Value, schema: &Value) -> Option<String> {
 
 /// Minimal XML for a sampled value: objects become child elements, arrays
 /// repeat their element, scalars become escaped text. Names that are not
-/// XML-safe fall back to `item`.
+/// XML-safe fall back to `item`. A document has one root element, so a root
+/// array is wrapped in it with `item` children.
 fn render_xml(name: &str, v: &Value, out: &mut String, depth: usize) {
     let safe = !name.is_empty()
         && name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
@@ -805,7 +846,9 @@ fn render_xml(name: &str, v: &Value, out: &mut String, depth: usize) {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
     let name = if safe { name } else { "item" };
-    if let Value::Array(items) = v {
+    if let Value::Array(items) = v
+        && depth > 0
+    {
         for i in items {
             render_xml(name, i, out, depth + 1);
         }
@@ -821,6 +864,7 @@ fn render_xml(name: &str, v: &Value, out: &mut String, depth: usize) {
             }
         }
         Value::Object(_) => {}
+        Value::Array(_) => render_xml("item", v, out, depth + 1),
         other => {
             for c in wire_string(other).chars() {
                 match c {

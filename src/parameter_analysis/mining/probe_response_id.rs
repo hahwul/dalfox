@@ -56,7 +56,7 @@ pub async fn probe_response_id_params(
         .get("location")
         .and_then(|value| value.to_str().ok())
         .map(ToString::to_string);
-    let Ok(text) = crate::utils::http::read_body(response).await else {
+    let Ok(text) = crate::utils::http::read_body_counted(response).await else {
         return;
     };
 

@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn detects_breakout_in_classic_script_with_sloppy_only_syntax() {
+    // Inline `<script>` is a classic script. `<!--` comments and `with` are
+    // module parse errors, so a module-only parse read the block as inert.
+    let payload = "\"-alert(1)-\"";
+    for body in [
+        format!("<!--\nvar c = \"{payload}\";\n//-->"),
+        format!("with (document) {{ var c = \"{payload}\"; }}"),
+    ] {
+        let html = format!("<html><body><script>{body}</script></body></html>");
+        assert!(has_js_context_evidence(payload, &html), "{html}");
+    }
+}
+
+#[test]
 fn detects_alert_breakout_in_double_quoted_js_string() {
     // Mirrors brutelogic c2 case: var c2 = "<INJECT>"
     let payload = "\"-alert(1)-\"";
@@ -714,5 +728,47 @@ fn many_in_string_echoes_stay_linear() {
         start.elapsed() < std::time::Duration::from_secs(2),
         "took {:?}",
         start.elapsed()
+    );
+}
+
+/// The positional block scan yields exactly what the capturing regex did.
+#[test]
+fn script_blocks_match_the_regex_form() {
+    for html in [
+        "<script>a()</script>",
+        "<SCRIPT type=\"text/javascript\">a()</SCRIPT >b<script>c</script\n>",
+        "<script data-x=\"a>b\">x</script>",
+        "<scripts>no</scripts><script-x>no</script-x><script>yes</script>",
+        "<script>a</scripty>b</script>",
+        "<script>never closed",
+        "<script a=b",
+        "<script>one</script><script>two",
+        "<p><script\n>multi\nline</script\t></p>",
+    ] {
+        let regex: Vec<(&str, &str)> = script_block_re()
+            .captures_iter(html)
+            .map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str()))
+            .collect();
+        let positional: Vec<(&str, &str)> = script_blocks(html).collect();
+        assert_eq!(positional, regex, "{html}");
+    }
+}
+
+/// A page inlining a multi-MiB bundle (or SSR hydration data) paid a
+/// capturing lazy-regex pass over the whole script on every payload response —
+/// ~30 ms each on a 3.5 MiB page in release, tens of seconds per scan.
+#[test]
+fn large_inline_script_scan_stays_cheap() {
+    let bundle = "var a=function(b){return b+1};".repeat(140_000); // ~4 MiB
+    let html =
+        format!("<html><head><script>{bundle}</script></head><body><p>alert(1)</p></body></html>");
+    let start = std::time::Instant::now();
+    for _ in 0..10 {
+        assert!(!has_inline_script_context_evidence("alert(1)", &html));
+    }
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "took {elapsed:?}"
     );
 }

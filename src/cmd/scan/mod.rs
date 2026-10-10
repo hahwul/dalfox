@@ -60,7 +60,7 @@ pub(crate) use args::{
     MIN_CONFIDENCE_HIGH, parse_base_url_arg, parse_force_waf_arg, parse_http_method_arg,
 };
 pub(crate) use logging::log_info;
-pub(crate) use postprocess::dedupe_ast_results;
+pub(crate) use postprocess::{ast_dedup_parts, dedupe_ast_results};
 pub(crate) use preflight::finish_waf_detection;
 // Shared with `job::normalize_proxy` so REST/MCP refuse the same unroutable
 // proxy values the CLI startup gate does. The CLI wrapper that also rejects
@@ -548,14 +548,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         None => Vec::new(),
     };
 
-    // Blind payloads are stored attack traffic: apply `--max-targets-per-host`
-    // first so capped-out targets (reported as skipped) never receive them.
-    analysis::apply_per_host_cap(args, &mut host_groups, &state.skipped_targets).await;
-    let oob_session = blind::arm_and_dispatch(args, &host_groups, &cancel_flag).await;
-
     // Preflight + parameter analysis for every target (bounded concurrency);
     // replaces each host group with the targets that survived preflight.
-    analysis::run_preflight_and_analysis(args, &mut host_groups, &state).await;
+    analysis::run_preflight_and_analysis(args, &mut host_groups, &state, &cancel_flag).await;
+
+    // Blind payloads are stored attack traffic: only the survivors get them,
+    // not targets capped out by `--max-targets-per-host` or dropped by
+    // preflight (unreachable, content-type mismatch) — none of which is scanned.
+    let oob_session = blind::arm_and_dispatch(args, &host_groups, &cancel_flag).await;
 
     // Record the targets preflight dropped (unreachable, content-type
     // mismatch, per-host cap) as `error`. They are retried on the next run —
@@ -618,6 +618,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             session.clone(),
             state.results.clone(),
             state.findings_count.clone(),
+            &args.limit_count_filter(),
             cancel_flag.clone(),
             args.silence,
         )

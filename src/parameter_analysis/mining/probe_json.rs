@@ -134,7 +134,7 @@ pub async fn probe_json_body_params(
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
-                    && let Ok(text) = crate::utils::http::read_body(r).await
+                    && let Ok(text) = crate::utils::http::read_body_counted(r).await
                 {
                     let mut st = stats_clone.lock().await;
                     st.record_attempt();

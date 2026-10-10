@@ -618,6 +618,20 @@ pub(crate) struct ProbeResponse {
     markup_document: bool,
 }
 
+/// Send one active-probe request (counted + rate-limited), then sleep
+/// `--delay` as every discovery and mining probe does.
+async fn send_paced_probe(
+    target: &Target,
+    request_builder: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, reqwest::Error> {
+    crate::record_outbound_request().await;
+    let sent = crate::utils::http::send_counted(request_builder).await;
+    if target.delay > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(target.delay)).await;
+    }
+    sent
+}
+
 async fn send_probe_request_detailed(
     client: &reqwest::Client,
     target: &Target,
@@ -641,7 +655,6 @@ async fn send_probe_request_detailed(
     let request_builder =
         crate::scanning::url_inject::build_inject_request(client, target, param, payload);
 
-    crate::record_outbound_request().await;
     let unusable = ProbeResponse {
         text: None,
         actionable: false,
@@ -649,7 +662,7 @@ async fn send_probe_request_detailed(
         content_type: String::new(),
         markup_document: false,
     };
-    let Ok(resp) = crate::utils::http::send_counted(request_builder).await else {
+    let Ok(resp) = send_paced_probe(target, request_builder).await else {
         return unusable;
     };
     if !ignore_return.is_empty() && ignore_return.contains(&resp.status().as_u16()) {
@@ -670,7 +683,7 @@ async fn send_probe_request_detailed(
     } else {
         None
     };
-    let body_text = match crate::utils::http::read_body(resp).await {
+    let body_text = match crate::utils::http::read_body_counted(resp).await {
         Ok(body) => Some(body),
         Err(e) => {
             crate::dbg_log!("discovery response body read failed: {}", e);
@@ -1284,9 +1297,8 @@ pub async fn active_probe_param(
                 url,
                 target.data.clone(),
             );
-            crate::record_outbound_request().await;
-            if let Ok(resp) = crate::utils::http::send_counted(request_builder).await
-                && let Ok(text) = crate::utils::http::read_body(resp).await
+            if let Ok(resp) = send_paced_probe(target, request_builder).await
+                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                 && text.contains(&raw_marker)
             {
                 param.pre_encoding = Some(enc_name.to_string());

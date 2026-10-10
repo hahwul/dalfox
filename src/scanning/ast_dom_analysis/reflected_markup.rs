@@ -212,6 +212,24 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    /// Whether `expr` resolves to an image element: `new Image(…)`,
+    /// `document.createElement('img')`, or a variable bound to one.
+    pub(super) fn expr_resolves_to_image(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::Identifier(id) => self.image_element_vars.contains(id.name.as_str()),
+            Expression::ParenthesizedExpression(p) => self.expr_resolves_to_image(&p.expression),
+            Expression::NewExpression(new_expr) => {
+                matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "Image")
+            }
+            Expression::CallExpression(call) => {
+                self.get_callee_property_name(&call.callee).as_deref() == Some("createElement")
+                    && Self::extract_static_string_argument(call, 0)
+                        .is_some_and(|tag| tag.eq_ignore_ascii_case("img"))
+            }
+            _ => false,
+        }
+    }
+
     /// Source label when `call` percent-decodes a string literal that is the
     /// server's copy of the parameter: `decodeURIComponent('…')` where the
     /// server wrote it, percent-encoded, into the script. The encoding leaves

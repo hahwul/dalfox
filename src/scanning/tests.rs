@@ -165,6 +165,32 @@ fn test_count_matching_results_filtered() {
 }
 
 #[test]
+fn test_limit_count_filter_narrows_to_only_poc() {
+    let filter = |limit: &str, only: &[&str]| {
+        crate::cmd::scan::ScanArgs {
+            limit_result_type: limit.to_string(),
+            only_poc: only.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+        .limit_count_filter()
+    };
+    let results = vec![
+        make_result(FindingType::Verified),
+        make_result(FindingType::Reflected),
+    ];
+    let counted = |f: String| count_matching_results(&results, &f, None);
+    assert_eq!(counted(filter("all", &[])), 2);
+    assert_eq!(counted(filter("all", &["v"])), 1);
+    assert_eq!(counted(filter("all", &["v", "r"])), 2);
+    assert_eq!(counted(filter("r", &["v", "r"])), 1);
+    assert_eq!(
+        counted(filter("r", &["v"])),
+        0,
+        "the two exclude each other"
+    );
+}
+
+#[test]
 fn test_count_matching_results_empty() {
     let results: Vec<crate::scanning::result::Result> = vec![];
     assert_eq!(count_matching_results(&results, "ALL", None), 0);
@@ -2569,6 +2595,26 @@ async fn test_accumulate_findings_counts_only_matching_result_type() {
         results.lock().await.len(),
         3,
         "all findings are still stored regardless of the limit filter"
+    );
+}
+
+/// An AST finding (`message_id == 0`) counts toward `--limit` only when no
+/// counted finding already shares its `ast_dedup_key`.
+#[test]
+fn count_new_matching_results_folds_ast_duplicates() {
+    let ast = |evidence: &str| {
+        let mut r = make_result(FindingType::AstDetected);
+        r.message_id = 0;
+        r.evidence = evidence.to_string();
+        r
+    };
+    let mut reflected = make_result(FindingType::Reflected);
+    reflected.message_id = 1;
+    let existing = vec![reflected, ast("sink-a")];
+    let batch = vec![ast("sink-a"), ast("sink-b"), ast("sink-b")];
+    assert_eq!(
+        count_new_matching_results(&existing, &batch, "ALL", None),
+        1
     );
 }
 
@@ -5604,4 +5650,105 @@ async fn collapse_under_min_confidence_does_not_underflow_the_tally() {
     collapse_target_results(&results, &findings_count, "ALL", Some("high"), &target).await;
     assert_eq!(results.lock().await.len(), 1, "the redundant R collapses");
     assert_eq!(findings_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
+/// Every parameter's Stage-0 probe re-runs the AST pass over the same page, so
+/// one page-level sink is recorded once per parameter — and the report folds
+/// those into a single finding (`dedupe_ast_results`). The tally `--limit`
+/// stops on must count the sink once too: it counted it per parameter, so
+/// `--limit 2` on a page with one sink and three parameters stopped the scan
+/// (target `incomplete`, `--state-file` retry) with one finding reported.
+#[tokio::test]
+async fn test_run_scanning_tally_counts_a_page_sink_once_across_params() {
+    use axum::{Router, response::Html, routing::get};
+
+    let page = "<html><body><div id=o></div><script>\
+                document.getElementById('o').innerHTML = location.hash.slice(1);\
+                </script></body></html>";
+    let addr =
+        spawn_regression_app(Router::new().route("/", get(move || async move { Html(page) })))
+            .await;
+
+    let mut target = parse_target(&format!("http://{addr}/?a=1&b=2&c=3")).expect("parse_target");
+    target.reflection_params = ["a", "b", "c"]
+        .iter()
+        .map(|n| Param::new(n.to_string(), "1".to_string(), Location::Query))
+        .collect();
+
+    let mut raw_args = integration_scan_args(false);
+    raw_args.skip_ast_analysis = false;
+    raw_args.limit = Some(2);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let findings_count = Arc::new(AtomicUsize::new(0));
+    let report = run_scanning(
+        &target,
+        Arc::new(raw_args),
+        ScanRunHandles::new(results.clone(), findings_count.clone()),
+    )
+    .await;
+
+    let reported = crate::cmd::scan::dedupe_ast_results(results.lock().await.clone()).len();
+    assert_eq!(reported, 1, "fixture: one page-level sink");
+    assert_eq!(
+        findings_count.load(Ordering::Relaxed),
+        reported,
+        "the tally must count what the report keeps"
+    );
+    assert!(
+        !report.limit_stopped,
+        "one distinct finding cannot reach --limit 2"
+    );
+}
+
+/// `--limit` caps what the report displays, and `--only-poc` decides what it
+/// displays — so a finding `--only-poc` hides must not count toward the stop.
+/// `--only-poc v --limit 1` used to stop on the first `R`, then report nothing
+/// and exit 0 with the catalog untested.
+#[tokio::test]
+async fn test_run_scanning_limit_ignores_findings_only_poc_hides() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+
+    let handler = |Query(q): Query<HashMap<String, String>>| async move {
+        let v = q.get("victim").cloned().unwrap_or_default();
+        let escaped = v
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        Html(format!("<html><body><div>{escaped}</div></body></html>"))
+    };
+    let addr = spawn_regression_app(Router::new().route("/", get(handler))).await;
+
+    let mut target = parse_target(&format!("http://{addr}/?victim=a")).expect("parse_target");
+    target.reflection_params = vec![Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        ..Param::new("victim".to_string(), "a".to_string(), Location::Query)
+    }];
+
+    let mut raw_args = integration_scan_args(false);
+    raw_args.limit = Some(1);
+    raw_args.only_poc = vec!["v".to_string()];
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let findings_count = Arc::new(AtomicUsize::new(0));
+    let report = run_scanning(
+        &target,
+        Arc::new(raw_args),
+        ScanRunHandles::new(results.clone(), findings_count.clone()),
+    )
+    .await;
+
+    assert!(
+        results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.result_type == FindingType::Reflected),
+        "fixture: the escaped echo records an R"
+    );
+    assert_eq!(findings_count.load(Ordering::Relaxed), 0);
+    assert!(
+        !report.limit_stopped,
+        "an R that --only-poc v hides must not stop the scan"
+    );
 }

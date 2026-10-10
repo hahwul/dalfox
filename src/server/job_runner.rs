@@ -158,6 +158,7 @@ pub(crate) async fn mark_job_error(
                 status_label: "error",
                 results: &[],
                 error_message: Some(&reason),
+                warnings: &[],
             },
             client,
         )
@@ -245,6 +246,7 @@ pub(crate) async fn run_scan_job(
                     status_label: "cancelled",
                     results: &[],
                     error_message: None,
+                    warnings: &[],
                 },
                 cb_client,
             )
@@ -340,18 +342,19 @@ pub(crate) async fn run_scan_job(
     let final_results_arc = run
         .sanitized_results(&progress, include_request, include_response)
         .await;
-    let (callback_url, final_status, error_message) = match state.jobs.lock().await.get_mut(&job_id)
-    {
-        Some(job) => {
-            let status = run.settle(job, final_results_arc.clone(), args.scan_timeout, false);
-            (
-                job.callback_url.clone(),
-                Some(status),
-                job.error_message.clone(),
-            )
-        }
-        None => (None, None, None),
-    };
+    let (callback_url, final_status, error_message, warnings) =
+        match state.jobs.lock().await.get_mut(&job_id) {
+            Some(job) => {
+                let status = run.settle(job, final_results_arc.clone(), args.scan_timeout, false);
+                (
+                    job.callback_url.clone(),
+                    Some(status),
+                    job.error_message.clone(),
+                    job.warnings.clone(),
+                )
+            }
+            None => (None, None, None, Vec::new()),
+        };
     // Derive the webhook/log label from the status actually stored, not from the
     // pre-lock `was_cancelled`/`panicked` snapshot: a DELETE cancel landing in
     // the window between those reads and this lock flips the job to `cancelled`,
@@ -388,6 +391,7 @@ pub(crate) async fn run_scan_job(
             status_label,
             results: &final_results_arc,
             error_message: error_message.as_deref(),
+            warnings: &warnings,
         },
         Some(cb_client),
     )
@@ -399,6 +403,8 @@ pub(crate) struct TerminalOutcome<'a> {
     pub(crate) status_label: &'a str,
     pub(crate) results: &'a [SanitizedResult],
     pub(crate) error_message: Option<&'a str>,
+    /// The job's `warnings`, as `GET /scan/{id}` reports them.
+    pub(crate) warnings: &'a [String],
 }
 
 /// POST the scan-completion payload to the configured webhook, if any.
@@ -431,6 +437,7 @@ pub(crate) async fn send_terminal_webhook(
         status_label,
         results,
         error_message,
+        warnings,
     } = outcome;
     let Some(cb_url) = callback_url else { return };
     // Same scheme test `validate_scan_options` gates submission on, so a URL it
@@ -441,13 +448,18 @@ pub(crate) async fn send_terminal_webhook(
     if !has_http_scheme(&cb_url) {
         return;
     }
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "scan_id": job_id,
         "status": status_label,
         "url": url,
         "results": results,
         "error_message": error_message,
     });
+    // Absent when empty, like `GET /scan/{id}`: a non-polling subscriber must
+    // not read a `done` the job itself flags as not-clean as clean.
+    if !warnings.is_empty() {
+        payload["warnings"] = serde_json::json!(warnings);
+    }
     // When the caller has no parsed target (e.g. pre-start cancellation),
     // fall back to a default client. Webhook delivery should not silently
     // drop just because the scan never got far enough to build a target.

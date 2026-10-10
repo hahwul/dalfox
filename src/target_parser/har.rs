@@ -184,6 +184,7 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
 
         targets.push(Target {
             method,
+            multipart: data.as_deref().is_some_and(super::is_raw_multipart),
             data,
             headers: imported.headers,
             cookies: imported.cookies,

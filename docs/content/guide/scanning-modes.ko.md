@@ -134,7 +134,7 @@ Warning: scan configuration changed since 'scan.state' was written (recorded a5f
 
 덮어쓰지 않고 옮겨 두는 이유는, 그 파일이 실제로 수행한 작업의 기록이기 때문입니다. 초기화 때문에 완료 기록 4만 건이 사라지는 쪽이 중복 스캔보다 훨씬 나쁩니다. 어떤 경우에도 기존 파일을 그 자리에서 덮어쓰거나 지우지 않습니다 — 해당 경로에 있는 파일이 Dalfox state 파일이 **아니면**(예: 대상 목록 파일을 오타로 지정한 경우) 아예 거부하고 멈춥니다.
 
-출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response` / `--include-all`, `--silence`, `--no-color`, `--stream-findings`, `--only-poc`, `--baseline` / `--baseline-mode`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록과 `--input-type` 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`, `--headers` / `--cookies`의 헤더·쿠키 *이름*(과 자격증명이 아닌 헤더 값) 등이 여기에 해당합니다. 실행 전체에 적용되는 자격증명 값과 `--cookie-from-raw` 경로는 위에서 설명한 대로 해시에 들어가지 않습니다.
+출력·속도 관련 플래그는 의도적으로 이 해시에서 빠져 있습니다 — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response` / `--include-all`, `--silence`, `--no-color`, `--stream-findings`, `--baseline` / `--baseline-mode`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, 그리고 대상 목록과 `--input-type` 자체입니다. 중단된 스캔을 이어가면서 타임아웃을 늘리거나 속도를 낮추는 것은 자연스러운 대응이고, 이미 완료된 대상이 무엇으로 검사됐는지는 그것들로 바뀌지 않기 때문입니다. 반대로 페이로드·탐색·커버리지·인증을 바꾸는 것은 파일을 무효화합니다 — `--deep-scan`, `--encoders`, `--custom-payload`, 마이닝/탐색 토글, WAF 옵션, `--limit`(그리고 어떤 발견이 거기에 집계되는지 정하는 `--only-poc`, `--min-confidence`), `--headers` / `--cookies`의 헤더·쿠키 *이름*(과 자격증명이 아닌 헤더 값) 등이 여기에 해당합니다. 실행 전체에 적용되는 자격증명 값과 `--cookie-from-raw` 경로는 위에서 설명한 대로 해시에 들어가지 않습니다.
 
 해시에는 Dalfox의 메이저 버전과 그 밖의 모든 스캔 옵션도 들어갑니다. 따라서 스캔 플래그가 추가된 버전으로 업그레이드하면 모든 state 파일이 한 번 처음부터 시작합니다. 조용히 건너뛰는 쪽이 아니라 중복 스캔 쪽으로 기우는 설계입니다.
 
@@ -188,7 +188,7 @@ dalfox scan -i postman api.postman_collection.json
 dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com
 ```
 
-두 타입 모두 명시해야 합니다. `auto`는 명세를 감지하지 않으므로 `-i openapi` / `-i postman`을 넘기세요. 명세를 파이프로 넘길 수도 있습니다(`cat openapi.json | dalfox scan -i openapi`).
+두 타입 모두 명시해야 합니다. `auto`는 명세를 감지하지 않으므로 `-i openapi` / `-i postman`을 넘기세요. `-i` 없이 명세를 대상 목록으로 읽으면 써야 할 플래그를 알려 주는 경고가 나옵니다. 명세를 파이프로 넘길 수도 있습니다(`cat openapi.json | dalfox scan -i openapi`).
 
 **OpenAPI.** `get`, `post`, `put`, `patch`, `query` 오퍼레이션이 각각 대상 하나가 됩니다. `delete`, `head`, `options` 오퍼레이션은 스캔하지 않습니다. 자리표시자 ID로 DELETE에 탐색, 마이닝, 페이로드를 보내면 데이터가 지워질 수 있고, HEAD / OPTIONS 응답에는 반사될 본문이 없기 때문입니다. 건너뛴 개수는 stderr 경고로 알려 주며, Postman 요청에도 같은 규칙이 적용됩니다. 각 대상은 다음과 같이 만들어집니다:
 
@@ -200,7 +200,7 @@ dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com
 
 `--base-url`은 서버 형태와 관계없이 한 가지 규칙을 따릅니다. 스킴, 호스트, 포트는 `--base-url`에서 가져오고, 그 경로는 접두어가 됩니다. 명세 서버의 경로(또는 Swagger `basePath`)는 그 뒤에 붙고, 서버 자체의 스킴과 호스트는 버립니다. 따라서 `--base-url https://staging.example.com`을 주면 `servers: [{url: /api/v3}]`와 `servers: [{url: https://prod.example.com/api/v3}]` 모두 `https://staging.example.com/api/v3/...`를 스캔합니다. 스킴 상대 서버(`//prod.example.com/v1`)도 지정한 호스트를 벗어나게 할 수 없고, 버려지는 호스트에 있는 서버 변수에는 기본값이 없어도 됩니다. `--base-url` 없이 서버가 상대 경로나 스킴 상대 경로이거나, 선언되지 않은 서버 변수가 있거나, `servers`가 아예 없으면 해당 오퍼레이션은 `--base-url`을 넘기라는 안내와 함께 건너뜁니다.
 
-**Postman.** 폴더를 포함해 컬렉션의 모든 요청이 각각 대상 하나가 됩니다. `{{variables}}`는 컬렉션의 `variable` 목록에서 가져오며 중첩 참조도 풀립니다. 환경(environment) 파일은 읽지 않습니다. 호스트가 아직 풀리지 않은 `{{variable}}`인 요청은 경고와 함께 건너뛰므로, `--base-url`로 오리진을 지정하세요(모든 요청의 오리진을 대체하고 각 요청의 경로는 유지합니다). 그 밖의 위치(경로, 쿼리, 헤더, 본문)에 남은 미해결 변수는 자리표시자 값이 됩니다. 어차피 스캔이 주입하는 자리이기 때문입니다. `:name` 경로 변수는 요청의 `url.variable`에서 채웁니다. 본문 모드는 `raw`(그대로 전송하며, 요청에 `Content-Type`이 없으면 raw 언어에서 정함), `urlencoded`(폼), `formdata`(멀티파트, 파일 파트의 로컬 경로는 읽지 않음), `graphql`(JSON `{query, variables}` 본문)로 대응합니다. 컬렉션 수준 `auth`는 적용하지 않으니 `-H`로 넘기세요.
+**Postman.** 폴더를 포함해 컬렉션의 모든 요청이 각각 대상 하나가 됩니다. `{{variables}}`는 컬렉션의 `variable` 목록에서 가져오며 중첩 참조도 풀립니다. 환경(environment) 파일은 읽지 않습니다. 호스트가 아직 풀리지 않은 `{{variable}}`이거나 빈 값으로 익스포트된 변수인 요청은 경고와 함께 건너뛰므로, `--base-url`로 오리진을 지정하세요(모든 요청의 오리진을 대체하고 각 요청의 경로는 유지합니다). 그 밖의 위치(경로, 쿼리, 헤더, 본문)에 남은 미해결 변수는 자리표시자 값이 됩니다. 어차피 스캔이 주입하는 자리이기 때문입니다. `:name` 경로 변수는 요청의 `url.variable`에서 채웁니다. `raw`가 없는 `url` 객체는 `protocol` / `host` / `port` / `path` / `query` 항목으로 URL을 다시 만듭니다(비활성화된 쿼리 항목은 제외). 본문 모드는 `raw`(그대로 전송하며, 요청에 `Content-Type`이 없으면 raw 언어에서 정함), `urlencoded`(폼), `formdata`(멀티파트, 파일 파트의 로컬 경로는 읽지 않음), `graphql`(JSON `{query, variables}` 본문)로 대응합니다. 컬렉션 수준 `auth`는 적용하지 않으니 `-H`로 넘기세요.
 
 **관용성.** 잘못된 오퍼레이션이나 요청 하나(풀리지 않은 호스트, `http(s)`가 아닌 서버, 쓸 수 없는 본문)는 실행을 멈추지 않고 건너뜁니다. 건너뛴 개수와 몇 가지 예시가 stderr 경고로 출력됩니다. 문서가 명세가 아니거나 스캔할 수 있는 항목이 하나도 없을 때만 `PARSE_ERROR`로 실패합니다. 파일은 다른 입력과 같은 크기 상한으로 읽습니다(`INPUT_TOO_LARGE`).
 
@@ -230,7 +230,7 @@ dalfox scan 'https://target.app/?q=1' -b https://your-callback.example
 dalfox scan 'https://target.app/?q=1' --blind-oob
 ```
 
-`--blind-oob`는 interactsh 서버(공개 메시, 또는 `--blind-oob=oast.fun`처럼 지정한 서버)에 등록하고, 페이로드마다 콜백 호스트를 새로 발급하며, 스캔이 끝난 뒤에도 `--blind-oob-wait`초(기본값 `30`) 동안 폴링을 계속합니다. 도착한 콜백은 `detection_method: oob`인 `V` 탐지 결과가 됩니다. Blind 페이로드는 저장되는 공격 트래픽이므로 `--dry-run`, `--only-discovery`, `--skip-xss-scanning`에서는 보내지 않습니다. 템플릿과 커스텀 페이로드는 [페이로드와 인코딩](../payloads/#blind-xss)에서 다룹니다.
+`--blind-oob`는 interactsh 서버(공개 메시, 또는 `--blind-oob=oast.fun`처럼 지정한 서버)에 등록하고, 페이로드마다 콜백 호스트를 새로 발급하며, 스캔이 끝난 뒤에도 `--blind-oob-wait`초(기본값 `30`) 동안 폴링을 계속합니다. 도착한 콜백은 `detection_method: oob`인 `V` 탐지 결과가 됩니다. Blind 페이로드는 저장되는 공격 트래픽이므로 `--dry-run`, `--only-discovery`, `--skip-xss-scanning`에서는 보내지 않으며, 스캔하지 않는 대상(연결 불가, content-type 불일치, `--max-targets-per-host` 초과)에도 보내지 않습니다. 템플릿과 커스텀 페이로드는 [페이로드와 인코딩](../payloads/#blind-xss)에서 다룹니다.
 
 ## 세션 모니터링
 

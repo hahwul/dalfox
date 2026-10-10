@@ -34,11 +34,16 @@ struct MockState {
     flood: usize,
     /// How many times the poller hit `/poll` — proves it ran.
     poll_count: usize,
+    /// Make `/register` hang (an unresponsive / blackholed OAST server).
+    register_hangs: bool,
 }
 
 type Shared = Arc<StdMutex<MockState>>;
 
 async fn register(State(s): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
+    if s.lock().unwrap().register_hangs {
+        tokio::time::sleep(Duration::from_secs(120)).await;
+    }
     let mut st = s.lock().unwrap();
     st.public_key_b64 = body
         .get("public-key")
@@ -212,6 +217,7 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
         nonce.clone(),
         InjectionRecord {
             target_url: "https://victim/?q=1".to_string(),
+            origin_target: String::new(),
             param: "q".to_string(),
             location: "Query".to_string(),
             payload: format!("\"'><script src={url}></script>"),
@@ -228,6 +234,7 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
         Arc::new(session),
         results.clone(),
         findings_count.clone(),
+        "ALL",
         cancel,
         /* silence */ true,
     );
@@ -251,6 +258,125 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
         state.lock().unwrap().deregistered,
         "session must deregister on finish"
     );
+}
+
+/// The poller feeds the same `findings_count` that `--limit` stops on, so it
+/// must count only findings of the `--limit-result-type`, like every other
+/// producer. A blind `V` used to count under `--limit-result-type r`, so
+/// `--limit 1` stopped the scan on a finding of a type it was told to ignore.
+#[tokio::test]
+async fn oob_findings_count_honors_limit_result_type() {
+    let (state, session) = mock_session().await;
+    let (url, nonce) = session.mint_url();
+    session.registry().record(
+        nonce.clone(),
+        InjectionRecord {
+            target_url: "https://victim/?q=1".to_string(),
+            origin_target: String::new(),
+            param: "q".to_string(),
+            location: "Query".to_string(),
+            payload: format!("<script src={url}></script>"),
+            method: "GET".to_string(),
+        },
+    );
+    state.lock().unwrap().pending_nonce = Some(nonce);
+    let results = Arc::new(TokioMutex::new(Vec::new()));
+    let findings_count = Arc::new(AtomicUsize::new(0));
+    let poller = spawn_poller(
+        Arc::new(session),
+        results.clone(),
+        findings_count.clone(),
+        "R",
+        Arc::new(AtomicBool::new(false)),
+        /* silence */ true,
+    );
+    poller.finish(Duration::from_millis(400)).await;
+    assert_eq!(results.lock().await.len(), 1, "the V finding is still kept");
+    assert_eq!(
+        findings_count.load(Ordering::Relaxed),
+        0,
+        "a V must not count toward --limit under --limit-result-type r"
+    );
+}
+
+/// A blind payload posted to a form records the form's *action* URL, so the
+/// callback's finding points there — and `target_summary` attributed it by URL
+/// heuristic, which cannot connect `/page?x=1` to `/submit`. The target read
+/// `clean` while the findings array held its `V`. The finding must carry the
+/// scanned target as its origin, like every in-band finding does.
+#[tokio::test]
+async fn oob_form_callback_is_attributed_to_the_scanned_target() {
+    use axum::extract::State as AxState;
+    let (state, session) = mock_session().await;
+
+    let posted: Arc<StdMutex<String>> = Arc::default();
+    let page = Router::new()
+        .route(
+            "/page",
+            get(|| async {
+                axum::response::Html("<form method=post action=/submit><input name=comment></form>")
+            }),
+        )
+        .route(
+            "/submit",
+            post(
+                |AxState(p): AxState<Arc<StdMutex<String>>>, body: String| async move {
+                    *p.lock().unwrap() = body;
+                    "ok"
+                },
+            ),
+        )
+        .with_state(posted.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind target");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, page).await;
+    });
+
+    let page_url = format!("http://{addr}/page?x=1");
+    let target = crate::target_parser::parse_target(&page_url).expect("target");
+    crate::scanning::blind_scan_forms_with(
+        &target,
+        crate::scanning::CallbackSource::Oob(&session),
+        &crate::cmd::scan::ScanArgs::default(),
+    )
+    .await;
+
+    // Fire the callback for the nonce the form payload carried.
+    let body = url::form_urlencoded::parse(posted.lock().unwrap().as_bytes())
+        .map(|(_, v)| v.into_owned())
+        .collect::<String>();
+    let corr = state.lock().unwrap().correlation_id.clone().unwrap();
+    let nonce: String = body
+        .split_once(&corr)
+        .expect("form payload carries the callback host")
+        .1
+        .chars()
+        .take(13)
+        .collect();
+    state.lock().unwrap().pending_nonce = Some(nonce);
+
+    let results = Arc::new(TokioMutex::new(Vec::new()));
+    let poller = spawn_poller(
+        Arc::new(session),
+        results.clone(),
+        Arc::new(AtomicUsize::new(0)),
+        "ALL",
+        Arc::new(AtomicBool::new(false)),
+        /* silence */ true,
+    );
+    poller.finish(Duration::from_millis(400)).await;
+
+    let found = results.lock().await;
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0].data.ends_with("/submit"),
+        "data: {}",
+        found[0].data
+    );
+    assert_eq!(found[0].origin_target.as_deref(), Some(page_url.as_str()));
 }
 
 #[tokio::test]
@@ -316,6 +442,7 @@ async fn oob_poll_failures_are_reported_not_swallowed() {
         Arc::new(session),
         Arc::new(TokioMutex::new(Vec::new())),
         Arc::new(AtomicUsize::new(0)),
+        "ALL",
         Arc::new(AtomicBool::new(false)),
         /* silence */ false,
     );
@@ -337,6 +464,7 @@ async fn oob_unregistered_nonce_findings_are_capped() {
         Arc::new(session),
         results.clone(),
         Arc::new(AtomicUsize::new(0)),
+        "ALL",
         Arc::new(AtomicBool::new(false)),
         /* silence */ true,
     );
@@ -471,6 +599,7 @@ async fn poller_finish_under_cancel_still_deregisters() {
         Arc::new(session),
         results,
         findings_count,
+        "ALL",
         cancel,
         /* silence */ true,
     );
@@ -484,5 +613,142 @@ async fn poller_finish_under_cancel_still_deregisters() {
     assert!(
         state.lock().unwrap().deregistered,
         "a cancelled drain must still deregister the session"
+    );
+}
+
+/// Serve the mock interactsh API on an ephemeral port.
+async fn serve_mock_oob(state: Shared) -> std::net::SocketAddr {
+    let app = Router::new()
+        .route("/register", post(register))
+        .route("/poll", get(poll))
+        .route("/deregister", post(deregister))
+        .with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock interactsh");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    state.lock().unwrap().host = addr.to_string();
+    addr
+}
+
+/// A reachable scan target plus job args that arm OOB against `oob_addr`.
+async fn oob_job(
+    oob_addr: std::net::SocketAddr,
+    wait: u64,
+    scan_timeout: u64,
+) -> (
+    crate::target_parser::Target,
+    Arc<crate::cmd::scan::ScanArgs>,
+) {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock target");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            Router::new().route("/", get(|| async { "<html>ok</html>" })),
+        )
+        .await;
+    });
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/?q=1")).expect("target");
+    target.timeout = 30;
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        timeout: 30,
+        scan_timeout,
+        oob: crate::cmd::scan::BlindOobArgs {
+            blind_oob: Some(vec![format!("http://{oob_addr}")]),
+            blind_oob_secret: None,
+            blind_oob_wait: Some(wait),
+        },
+        ..Default::default()
+    });
+    (target, args)
+}
+
+/// A server/MCP job runs its poller silenced, so an OAST server that registers
+/// but fails every poll must still reach the job's warnings — otherwise the
+/// job settles a clean `done` although no callback could ever be collected.
+#[tokio::test]
+async fn execute_scan_surfaces_oob_poll_failure_as_job_warning() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let oob_addr = serve_mock_oob(state.clone()).await;
+    state.lock().unwrap().poll_fails = true;
+    let (mut target, args) = oob_job(oob_addr, 0, 0).await;
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(
+        state.lock().unwrap().poll_count > 0,
+        "the poller must have run"
+    );
+    assert!(
+        run.warnings
+            .iter()
+            .any(|w| w.contains("OOB polling is failing")),
+        "poll failure must reach the job warnings: {:?}",
+        run.warnings
+    );
+}
+
+/// `blind_oob_wait` counts against `scan_timeout` (the documented contract, and
+/// what keeps a request from outliving the server-wide `--scan-timeout` cap):
+/// the drain window is clipped to what is left of the budget.
+#[tokio::test]
+async fn execute_scan_oob_drain_is_bounded_by_scan_timeout() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let oob_addr = serve_mock_oob(state.clone()).await;
+    let (mut target, args) = oob_job(oob_addr, 600, 10).await;
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+    // Not asserting `!timed_out`: a debug-build RSA keygen under parallel test
+    // load can eat the budget, which ends the drain early too.
+    tokio::time::timeout(
+        Duration::from_secs(40),
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}),
+    )
+    .await
+    .expect("a 600s drain must not outlive a 10s scan_timeout");
+    // Under load the same keygen can outlast the budget before `/register`,
+    // leaving nothing to deregister.
+    let s = state.lock().unwrap();
+    assert!(
+        s.public_key_b64.is_none() || s.deregistered,
+        "drain must still deregister"
+    );
+}
+
+/// A cancel that lands while OOB registration is stalled on an unresponsive
+/// server must not wait out `servers × timeout` before the job winds down.
+#[tokio::test]
+async fn execute_scan_cancel_interrupts_oob_registration() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let oob_addr = serve_mock_oob(state.clone()).await;
+    state.lock().unwrap().register_hangs = true;
+    let (mut target, args) = oob_job(oob_addr, 0, 0).await;
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let trip = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        trip.store(true, Ordering::Relaxed);
+    });
+    let start = std::time::Instant::now();
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(run.was_cancelled);
+    assert!(
+        start.elapsed() < Duration::from_secs(10),
+        "cancel must interrupt OOB registration (took {:?})",
+        start.elapsed()
     );
 }

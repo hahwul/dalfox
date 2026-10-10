@@ -147,6 +147,18 @@ fn form_body_via_request_body_ref_is_encoded() {
 }
 
 #[test]
+fn form_body_example_given_encoded_keeps_its_fields() {
+    let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{"/f":{"post":{
+      "requestBody":{"content":{"application/x-www-form-urlencoded":{"example":"user=a+b&q=%3Cx"}}}}}}}"##;
+    let t = &parse(spec).targets[0];
+    assert_eq!(t.data.as_deref(), Some("q=%3Cx&user=a+b"));
+    assert_eq!(
+        header(t, "Content-Type"),
+        Some("application/x-www-form-urlencoded")
+    );
+}
+
+#[test]
 fn xml_body_is_rooted_at_the_component_name() {
     let out = parse(PETSTORE_YAML);
     let xml = find(&out.targets, "POST", "/v1/xml");
@@ -194,6 +206,27 @@ fn path_param_fill_order_and_encoding() {
         "/a/e1/d1/00000000-0000-4000-8000-000000000000/1/..%2F..%2Fadmin%3Fx%3D1%23f"
     );
     assert!(t.url.query().is_none());
+}
+
+#[test]
+fn repeated_path_placeholders_expand_in_linear_time() {
+    // 200k `{a}` placeholders next to 1000 declared parameters used to scan
+    // every parameter per placeholder (~20 s here in a debug build).
+    let params: Vec<Value> = (0..1000)
+        .map(|i| serde_json::json!({"name": format!("p{i}"), "in": "query", "example": "1"}))
+        .chain([serde_json::json!({"name": "a", "in": "path", "example": "z"})])
+        .collect();
+    let mut paths = serde_json::Map::new();
+    paths.insert(
+        format!("/{}", "{a}".repeat(200_000)),
+        serde_json::json!({"parameters": params, "get": {}}),
+    );
+    let spec =
+        serde_json::json!({"openapi": "3.0.0", "servers": [{"url": "https://h"}], "paths": paths});
+    let start = std::time::Instant::now();
+    let t = &parse(&spec.to_string()).targets[0];
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    assert_eq!(t.url.path(), format!("/{}", "z".repeat(200_000)));
 }
 
 #[test]
@@ -341,6 +374,13 @@ fn numeric_versions_and_reused_anchors_parse() {
 }
 
 #[test]
+fn numeric_server_variable_default_is_substituted() {
+    // An unquoted YAML `default: 8443` is a number, not a string.
+    let y = "openapi: 3.0.0\nservers:\n  - url: 'https://h:{port}/v{major}'\n    variables:\n      port: {default: 8443}\n      major: {enum: [2, 1]}\npaths:\n  /a:\n    get: {}\n";
+    assert_eq!(parse(y).targets[0].url.as_str(), "https://h:8443/v2/a");
+}
+
+#[test]
 fn delete_head_options_are_counted_not_scanned() {
     let spec = r#"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{
         "/a":{"get":{},"post":{},"put":{},"patch":{},"delete":{},"head":{},"options":{}}
@@ -433,6 +473,68 @@ fn large_example_referenced_many_times_does_not_amplify() {
 }
 
 #[test]
+fn shared_path_item_with_many_params_expands_in_linear_time() {
+    // One path item with 1000 parameters, `$ref`'d by 100 paths: the
+    // (name, in) override merge used to be quadratic per operation (~18 s
+    // here in a debug build).
+    let params: Vec<Value> = (0..1000)
+        .map(|i| serde_json::json!({"name": format!("p{i}"), "in": "query", "example": "1"}))
+        .collect();
+    let paths: serde_json::Map<String, Value> = (0..100)
+        .map(|i| (format!("/a{i}"), serde_json::json!({"$ref": "#/x-item"})))
+        .collect();
+    let spec = serde_json::json!({
+        "openapi": "3.0.0", "servers": [{"url": "https://h"}],
+        "x-item": {"get": {}, "parameters": params},
+        "paths": paths,
+    });
+    let start = std::time::Instant::now();
+    let out = parse(&spec.to_string());
+    assert_eq!(out.targets.len(), 100);
+    assert!(start.elapsed() < std::time::Duration::from_secs(6));
+}
+
+#[test]
+fn operation_params_override_path_item_params_by_name_and_location() {
+    let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{"/x":{
+      "parameters":[
+        {"name":"a","in":"query","example":"path-level"},
+        {"name":"a","in":"header","example":"kept"},
+        {"name":"b","in":"query","example":"b"}
+      ],
+      "get":{"parameters":[{"name":"a","in":"query","example":"op-level"}]}}}}"##;
+    let t = &parse(spec).targets[0];
+    assert_eq!(t.url.query(), Some("b=b&a=op-level"));
+    assert_eq!(header(t, "a"), Some("kept"));
+}
+
+#[test]
+fn too_large_skips_charge_the_import_budget() {
+    // A path item whose one operation expands past the request cap, shared by
+    // `$ref` across 100 paths: every copy used to be rebuilt to 4 MiB and
+    // skipped for free.
+    let params: Vec<Value> = (0..100)
+        .map(|i| {
+            serde_json::json!({"name": format!("p{i}"), "in": "query",
+            "schema": {"$ref": "#/components/schemas/Big"}})
+        })
+        .collect();
+    let mut paths: serde_json::Map<String, Value> = (0..100)
+        .map(|i| (format!("/a{i}"), serde_json::json!({"$ref": "#/x-item"})))
+        .collect();
+    paths.insert("/0ok".to_string(), serde_json::json!({"get": {}}));
+    let spec = serde_json::json!({
+        "openapi": "3.0.0", "servers": [{"url": "https://h"}],
+        "x-item": {"get": {"parameters": params}},
+        "paths": paths,
+        "components": {"schemas": {"Big": {"type": "string", "example": "x".repeat(64 * 1024)}}}
+    });
+    let out = parse(&spec.to_string());
+    // Fewer than the 100 shared operations: the budget stopped the import.
+    assert!(out.skipped_total <= 70, "{} skipped", out.skipped_total);
+}
+
+#[test]
 fn hostile_paths_stay_on_the_server_origin() {
     let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://api.example.com"}],"paths":{
         "//evil.example/x":{"get":{}},
@@ -498,6 +600,19 @@ fn swagger2_body_and_form_data() {
 }
 
 #[test]
+fn swagger2_base_path_without_leading_slash_stays_off_the_host() {
+    let spec = r#"{"swagger":"2.0","host":"api.example.com","basePath":"v1",
+                   "paths":{"/a":{"get":{}}}}"#;
+    assert_eq!(
+        parse(spec).targets[0].url.as_str(),
+        "https://api.example.com/v1/a"
+    );
+    let base = Url::parse("http://127.0.0.1:9000").unwrap();
+    let t = &parse_openapi(spec, Some(&base)).unwrap().targets[0];
+    assert_eq!(t.url.as_str(), "http://127.0.0.1:9000/v1/a");
+}
+
+#[test]
 fn billion_laughs_yaml_fails_fast() {
     let mut y = String::from("a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n");
     for i in 1..12 {
@@ -516,4 +631,57 @@ fn non_spec_documents_are_rejected() {
     assert!(parse_openapi(r##"{"log":{"entries":[]}}"##, None).is_err());
     assert!(parse_openapi("not: [valid", None).is_err());
     assert!(parse_openapi(r##"{"openapi":"3.0.0"}"##, None).is_err());
+}
+
+#[test]
+fn skip_reasons_are_capped_but_counted() {
+    let mut paths = serde_json::Map::new();
+    for i in 0..1000 {
+        paths.insert(format!("/bad{i}"), serde_json::json!({"$ref": "#/nope"}));
+    }
+    paths.insert("/ok".into(), serde_json::json!({"get": {}}));
+    let spec =
+        serde_json::json!({"openapi": "3.0.0", "servers": [{"url": "https://h"}], "paths": paths});
+    let out = parse(&spec.to_string());
+    assert_eq!(out.skipped_total, 1000);
+    assert!(!out.skipped.is_empty() && out.skipped.len() <= super::super::MAX_SKIP_REASONS);
+}
+
+#[test]
+fn xml_array_body_has_one_root_element() {
+    // An array example rendered one root element per item: not XML.
+    let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{"/x":{"post":
+      {"requestBody":{"content":{"application/xml":{"schema":{"type":"array",
+        "xml":{"name":"pets"},"items":{"type":"string"}},"example":["a","b"]}}}}}}}"##;
+    let out = parse(spec);
+    let data = out.targets[0].data.as_deref().unwrap();
+    roxmltree::Document::parse(data).unwrap_or_else(|e| panic!("{data}: {e}"));
+    assert_eq!(data, "<pets><item>a</item><item>b</item></pets>");
+}
+
+#[test]
+fn dot_segment_path_examples_do_not_collapse_the_path() {
+    // `..` / `.` are unreserved, so they survived encoding and URL parsing
+    // folded them away: `/u/{id}/x` scanned `/x`.
+    for dots in ["..", "."] {
+        let spec = format!(
+            r##"{{"openapi":"3.0.0","servers":[{{"url":"https://h/v1"}}],"paths":{{"/u/{{id}}/x":{{"get":
+              {{"parameters":[{{"name":"id","in":"path","example":"{dots}"}}]}}}}}}}}"##
+        );
+        let out = parse(&spec);
+        assert_eq!(out.targets[0].url.path(), "/v1/u/1/x", "example {dots:?}");
+    }
+}
+
+#[test]
+fn swagger2_host_with_a_scheme_keeps_the_real_host() {
+    // `host` is a bare authority per spec, but a scheme there is a common
+    // mistake: it was read as host `https`.
+    let spec = r##"{"swagger":"2.0","host":"http://api.example.com:8080/","basePath":"/v1",
+      "paths":{"/a":{"get":{}}}}"##;
+    let out = parse(spec);
+    assert_eq!(
+        out.targets[0].url.as_str(),
+        "http://api.example.com:8080/v1/a"
+    );
 }

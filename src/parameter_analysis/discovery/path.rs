@@ -110,7 +110,7 @@ pub async fn check_path_discovery(
                     //                                       `<td>{uri}</td>`).
                     let status = resp.status().as_u16();
                     if !(300..400).contains(&status)
-                        && let Ok(text) = crate::utils::http::read_body(resp).await
+                        && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                         && crate::scanning::markers::probe_reflected(&text)
                     {
                         let exploitable_context = (200..300).contains(&status)
@@ -147,7 +147,7 @@ pub async fn check_path_discovery(
                                 );
                                 crate::record_outbound_request().await;
                                 match crate::utils::http::send_counted(probe).await {
-                                    Ok(r) => match crate::utils::http::read_body(r).await {
+                                    Ok(r) => match crate::utils::http::read_body_counted(r).await {
                                         Ok(t) => t.contains(&needle),
                                         Err(_) => false,
                                     },

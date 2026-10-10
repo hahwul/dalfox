@@ -426,6 +426,17 @@ async fn postman_collection_resolves_with_cli_overrides() {
 }
 
 #[tokio::test]
+async fn spec_skip_count_survives_the_capped_reason_sample() {
+    let bad = vec![r#"{"request":1}"#; 40].join(",");
+    let collection = format!(r#"{{"item":[{bad},{{"name":"ok","request":"https://h/ok"}}]}}"#);
+    let path = tmp_file("skips.postman_collection.json", &collection);
+    let args = args_from(&["-i", "postman", "-S", path.to_str().unwrap()]);
+    let resolved = resolve_targets(&args).await.expect("collection resolves");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(resolved.unparsable_lines, 40);
+}
+
+#[tokio::test]
 async fn openapi_missing_file_is_a_file_read_error() {
     let args = args_from(&["-i", "openapi", "-S", "./no-such-spec.yaml"]);
     assert!(resolve(&args).await.is_err());
@@ -453,6 +464,35 @@ async fn cookie_from_raw_appends_cookies_to_targets() {
     let cookies = &targets[0].cookies;
     assert!(cookies.iter().any(|(k, v)| k == "a" && v == "1"));
     assert!(cookies.iter().any(|(k, v)| k == "b" && v == "2"));
+}
+
+/// Appending a name the target already carries put two values on the wire
+/// (`sid=old; sid=new`), and first-value servers kept the stale one.
+#[tokio::test]
+async fn cookie_from_raw_replaces_same_name_cookies() {
+    let p = tmp_file(
+        "cookies-replace",
+        "GET / HTTP/1.1\r\nHost: x\r\nCookie: sid=new\r\n\r\n",
+    );
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--cookies",
+        "sid=old; keep=1",
+        "--cookie-from-raw",
+        p.to_str().unwrap(),
+        "https://example.com/",
+    ]);
+    let targets = resolve(&args).await.expect("resolves");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(
+        targets[0].cookies,
+        vec![
+            ("keep".to_string(), "1".to_string()),
+            ("sid".to_string(), "new".to_string())
+        ]
+    );
 }
 
 /// A `--cookie-from-raw` the operator supplied but that cannot be read must
@@ -747,6 +787,27 @@ fn apply_request_cli_overrides_keeps_request_method_without_flag() {
     let args = args_from(&["-i", "raw-http", "-S", "keep.example"]);
     apply_request_cli_overrides(&mut target, &args);
     assert_eq!(target.method, "DELETE");
+}
+
+#[test]
+fn apply_request_cli_overrides_data_replaces_an_imported_multipart_body() {
+    // `-d` is the operator's own body: the imported multipart flag described
+    // the body it replaced, and kept on it the new body was mined and sent
+    // as multipart fields.
+    let mut target = crate::target_parser::parse_target_with_method("https://h/up").unwrap();
+    target.data = Some("file=test&note=hi".to_string());
+    target.multipart = true;
+
+    let args = args_from(&["-S", "-d", r#"{"q":"x"}"#, "h"]);
+    apply_request_cli_overrides(&mut target, &args);
+    assert_eq!(target.data.as_deref(), Some(r#"{"q":"x"}"#));
+    assert!(!target.multipart);
+
+    // Without `-d` the imported multipart body stays as it was.
+    let mut target = crate::target_parser::parse_target_with_method("https://h/up").unwrap();
+    target.multipart = true;
+    apply_request_cli_overrides(&mut target, &args_from(&["-S", "h"]));
+    assert!(target.multipart);
 }
 
 // ── dedup_targets: --dedup-urls exact / signature / off ─────────────
@@ -1081,7 +1142,7 @@ async fn explicit_dedup_urls_flag_beats_an_unset_default() {
 fn target_list_lines_skips_blanks_and_comments() {
     let content = "https://a.example/\n\n   \n# a comment\n  https://b.example/  \n";
     assert_eq!(
-        target_list_lines(content).collect::<Vec<_>>(),
+        target_list_lines(content, false).collect::<Vec<_>>(),
         vec!["https://a.example/", "https://b.example/"]
     );
 }
@@ -1093,9 +1154,35 @@ fn target_list_lines_strips_a_leading_utf8_bom() {
     // `\u{feff}https://…` — a string with no parseable scheme.
     let content = "\u{feff}https://a.example/\nhttps://b.example/\n";
     assert_eq!(
-        target_list_lines(content).collect::<Vec<_>>(),
+        target_list_lines(content, false).collect::<Vec<_>>(),
         vec!["https://a.example/", "https://b.example/"]
     );
+}
+
+#[test]
+fn spec_document_hint_respects_silence() {
+    let openapi = "{\"openapi\": \"3.0.0\", \"paths\": {}}";
+    assert!(spec_document_hint(openapi, false).is_some_and(|h| h.contains("-i openapi")));
+    assert_eq!(spec_document_hint(openapi, true), None);
+}
+
+#[test]
+fn spec_document_kind_names_a_spec_read_as_a_target_list() {
+    let openapi = "\u{feff}{\n  \"openapi\": \"3.0.0\",\n  \"paths\": {}\n}";
+    assert_eq!(spec_document_kind(openapi), Some("openapi"));
+    assert_eq!(spec_document_kind("{\"swagger\":\"2.0\"}"), Some("openapi"));
+    assert_eq!(
+        spec_document_kind("# api\nopenapi: 3.1.0\npaths: {}\n"),
+        Some("openapi")
+    );
+    let postman = r#"{"info":{"_postman_id":"x","name":"c"},"item":[]}"#;
+    assert_eq!(spec_document_kind(postman), Some("postman"));
+    // A URL list (even one naming an `openapi` path) and other JSON are not.
+    assert_eq!(
+        spec_document_kind("https://a.example/openapi.json\nhttps://b.example/\n"),
+        None
+    );
+    assert_eq!(spec_document_kind(r#"{"log":{"entries":[]}}"#), None);
 }
 
 #[tokio::test]
@@ -1424,4 +1511,17 @@ fn only_a_real_cap_hit_reports_input_too_large() {
     )
     .expect_err("missing file");
     assert_eq!(file_read_error_code(&missing), error_codes::FILE_READ_ERROR);
+}
+
+#[test]
+fn parse_errors_name_an_inline_document_instead_of_echoing_it() {
+    // A piped HAR (or a raw-http literal) is the document itself: quoting it
+    // back put the whole capture, credentials and terminal escapes included,
+    // into the error.
+    assert_eq!(
+        source_name("{\"log\":{\"entries\":[]}}\n"),
+        "<inline document>"
+    );
+    assert_eq!(source_name(&"x".repeat(600)), "<inline document>");
+    assert_eq!(source_name("capture.har"), "capture.har");
 }

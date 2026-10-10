@@ -75,7 +75,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--include-all` | — | false | 두 include 플래그의 축약형 |
 | `--no-color` | — | false | ANSI 색상을 비활성화합니다 |
 | `--silence` | `-S` | false | STDOUT에 탐지 결과만 출력합니다 |
-| `--dry-run` | — | false | 페이로드를 보내지 않고 탐색 및 계획만 수행합니다 |
+| `--dry-run` | — | false | 페이로드를 보내지 않고 탐색 및 계획만 수행합니다 (`-f sarif`, `toml`은 `INVALID_INPUT_TYPE`으로 `2`를 반환하며, `markdown`은 plain 보고서를 출력합니다) |
 | `--stream-findings` | — | false | 스캔 종료 요약 이후가 아니라 각 탐지 결과가 검증되는 즉시 출력합니다 (plain 형식만; `--output`, `--limit`, `--only-poc`, `--baseline` 사용 시 자동 비활성화) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | 표시되는 전체 결과 수를 제한합니다 (`1` 이상이어야 하며, 제한하지 않으려면 생략) |
@@ -97,7 +97,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--cookies` | — | — | 쿠키 (반복 지정 가능) |
 | `--method` | `-X` | `GET` | HTTP 메서드 재정의 (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` / RFC 10008) |
 | `--user-agent` | — | — | 사용자 지정 User-Agent |
-| `--cookie-from-raw` | — | — | raw HTTP 요청 파일에서 쿠키를 불러옵니다. 파일을 읽을 수 없거나 `Cookie:` 헤더가 없으면 종료 코드 `2`로 중단합니다 — 그대로 진행하면 로그아웃 상태로 스캔해 `0 XSS`를 보고하기 때문입니다 |
+| `--cookie-from-raw` | — | — | raw HTTP 요청 파일에서 쿠키를 불러옵니다. `--cookies`나 가져온 요청에 같은 이름의 쿠키가 있으면 이 값으로 대체합니다. 파일을 읽을 수 없거나 `Cookie:` 헤더가 없으면 종료 코드 `2`로 중단합니다 — 그대로 진행하면 로그아웃 상태로 스캔해 `0 XSS`를 보고하기 때문입니다 |
 
 ### 세션
 
@@ -118,8 +118,8 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
-| `--include-url` | — | 이 정규식에 매칭되는 URL만 스캔합니다(부분 매칭). 패턴을 더 주려면 플래그를 반복하며, URL은 그중 하나 이상에 매칭되어야 합니다. 잘못된 정규식은 시작 시 오류입니다 |
-| `--exclude-url` | — | 이 정규식에 매칭되는 URL을 건너뜁니다(부분 매칭). 패턴을 더 주려면 플래그를 반복합니다. 잘못된 정규식은 시작 시 오류입니다 |
+| `--include-url` | — | 이 정규식에 매칭되는 URL만 스캔합니다(부분 매칭). 패턴을 더 주려면 플래그를 반복하며, URL은 그중 하나 이상에 매칭되어야 합니다. 페이지에서 찾은 폼 action(디스커버리와 블라인드 XSS 폼 주입)과 `--analyze-external-js` 스크립트에도 적용됩니다. 잘못된 정규식은 시작 시 오류입니다 |
+| `--exclude-url` | — | 이 정규식에 매칭되는 URL을 건너뜁니다(부분 매칭). 패턴을 더 주려면 플래그를 반복합니다. 페이지에서 찾은 폼 action(디스커버리와 블라인드 XSS 폼 주입)과 `--analyze-external-js` 스크립트에도 적용되므로, `--exclude-url /logout`이면 로그아웃 폼을 건드리지 않습니다. 잘못된 정규식은 시작 시 오류입니다 |
 | `--ignore-param` | — | 건너뛸 파라미터 이름(정확히 일치). 이름을 더 주려면 플래그를 반복합니다 |
 | `--out-of-scope` | — | 호스트가 이 패턴에 맞는 대상을 건너뜁니다. `*.example.com`은 `example.com`과 모든 하위 도메인에 맞고, 그 밖의 위치에 있는 `*`는 임의의 문자열에 맞으며(`127.0.0.*`, `*.example.*`), `*`가 없는 값은 호스트와 정확히 같아야 합니다(대소문자 무관). 패턴을 더 주려면 플래그를 반복합니다: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. 쉼표는 구분자가 아닙니다 |
 | `--out-of-scope-file` | — | 스코프 외 패턴을 한 줄에 하나씩 적은 파일(빈 줄과 `#` 줄은 무시). 매칭 방식은 `--out-of-scope`와 같습니다. 읽을 수 없는 경로는 치명적 오류(`FILE_READ_ERROR`)입니다 — 제외 목록 없이 계속 진행하면 그 목록에 적힌 호스트를 전부 공격하게 됩니다 |
@@ -128,7 +128,7 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
-| `--only-discovery` | false | 탐색 후 중지하고 XSS 페이로드를 보내지 않습니다 |
+| `--only-discovery` | false | 탐색 후 중지하고 XSS 페이로드를 보내지 않습니다 (`--dry-run`과 같이 `-f sarif`, `toml`은 지원하지 않음) |
 | `--skip-discovery` | false | 모든 탐색을 건너뜁니다 |
 | `--skip-reflection-header` | false | 헤더 기반 반사 검사를 건너뜁니다 |
 | `--skip-reflection-cookie` | false | 쿠키 기반 반사 검사를 건너뜁니다 |

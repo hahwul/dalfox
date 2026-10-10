@@ -237,3 +237,76 @@ fn non_collection_is_rejected() {
     assert!(parse_postman(r#"{"openapi":"3.0.0"}"#, None).is_err());
     assert!(parse_postman("openapi: 3.0.0", None).is_err());
 }
+
+#[test]
+fn deep_folder_labels_stay_bounded_in_skip_reasons() {
+    // 60 nested folders with 64-char names: the full path label is ~4 KiB,
+    // and copying it into every skipped child's reason turned a small
+    // collection into hundreds of MiB of skip strings.
+    let mut c = String::new();
+    for _ in 0..60 {
+        c.push_str(&format!(r#"{{"name":"{}","item":["#, "f".repeat(64)));
+    }
+    c.push_str(&vec![r#"{"request":1}"#; 100].join(","));
+    c.push_str(&"]}".repeat(60));
+    let doc = format!(r#"{{"item":[{c},{{"name":"ok","request":"https://h/ok"}}]}}"#);
+    let out = parse_postman(&doc, None).expect("parses");
+    assert_eq!(out.skipped_total, 100);
+    assert!(
+        out.skipped.iter().all(|s| s.len() <= 512),
+        "skip reason of {} bytes",
+        out.skipped[0].len()
+    );
+}
+
+#[test]
+fn empty_host_variable_is_skipped_not_read_from_the_path() {
+    // A collection variable exported with an empty value (the environment
+    // was meant to fill it) must not turn the first path segment into the
+    // host: `http:///users/list` parses as host `users`.
+    let c = r#"{"variable":[{"key":"baseUrl","value":""}],"item":[
+        {"name":"e","request":{"url":{"raw":"{{baseUrl}}/users/list"}}},
+        {"name":"ok","request":"https://h/ok"}
+    ]}"#;
+    let out = parse_postman(c, None).unwrap();
+    assert_eq!(out.targets.len(), 1, "{:?}", out.targets);
+    assert!(out.skipped[0].contains("--base-url"), "{:?}", out.skipped);
+    // --base-url still rescues it.
+    let base = Url::parse("https://staging.example").unwrap();
+    let out = parse_postman(c, Some(&base)).unwrap();
+    assert!(
+        out.targets
+            .iter()
+            .any(|t| t.url.as_str() == "https://staging.example/users/list")
+    );
+}
+
+#[test]
+fn url_object_without_raw_is_built_from_its_parts() {
+    // `raw` is optional in the v2.1 schema; Postman's runtime builds the
+    // URL from the parts, leaving disabled query entries off.
+    let c = r#"{"variable":[{"key":"h","value":"api"}],"item":[{"name":"p","request":{"url":{
+        "protocol":"https","host":["{{h}}","example","com"],"port":"8443",
+        "path":["v1",{"type":"string","value":"users"},":id"],
+        "variable":[{"key":"id","value":"7"}],
+        "query":[{"key":"q","value":"a b"},{"key":"off","value":"1","disabled":true},{"key":"flag","value":null}]
+    }}}]}"#;
+    let out = parse_postman(c, None).unwrap();
+    assert_eq!(
+        out.targets[0].url.as_str(),
+        "https://api.example.com:8443/v1/users/7?q=a%20b&flag"
+    );
+}
+
+#[test]
+fn skip_reasons_are_capped_but_counted() {
+    // A junk-heavy collection stored one reason per skipped request without
+    // bound; consumers only show the count and a short sample.
+    let doc = format!(
+        r#"{{"item":[{},{{"name":"ok","request":"https://h/ok"}}]}}"#,
+        vec![r#"{"request":1}"#; 1000].join(",")
+    );
+    let out = parse_postman(&doc, None).expect("parses");
+    assert_eq!(out.skipped_total, 1000);
+    assert!(!out.skipped.is_empty() && out.skipped.len() <= super::super::MAX_SKIP_REASONS);
+}

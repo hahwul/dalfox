@@ -57,6 +57,7 @@ impl<'a> DomXssVisitor<'a> {
                 if right_tainted
                     && prop_name == "action"
                     && self.expr_resolves_to_form(&member.object)
+                    && !self.url_scheme_is_pinned(&assign.right)
                 {
                     self.report_vulnerability_with_source(
                         assign.span(),
@@ -77,7 +78,9 @@ impl<'a> DomXssVisitor<'a> {
                 // would surface twice, once as `script.innerHTML` and once
                 // as the generic `innerHTML`. The script-element form is
                 // the correct one for PoC payload selection.
-                let is_sink = !script_text_sink && self.is_assignment_sink_property(prop_name);
+                let is_sink = !script_text_sink
+                    && self.is_assignment_sink_property(prop_name)
+                    && !(prop_name == "src" && self.expr_resolves_to_image(&member.object));
 
                 // Also check if the full member path is a sink (e.g., location.href)
                 let full_path_is_sink = if let Some(full_path) = self.get_member_string(member) {
@@ -94,11 +97,15 @@ impl<'a> DomXssVisitor<'a> {
                         prop_name.to_string()
                     };
 
-                    self.report_vulnerability_with_source(
-                        assign.span(),
-                        &sink_name,
-                        right_source.clone(),
-                    );
+                    if !(Self::is_navigation_sink(&sink_name)
+                        && self.url_scheme_is_pinned(&assign.right))
+                    {
+                        self.report_vulnerability_with_source(
+                            assign.span(),
+                            &sink_name,
+                            right_source.clone(),
+                        );
+                    }
                 }
 
                 // Track field-level taint for property assignments like:
@@ -165,6 +172,11 @@ impl<'a> DomXssVisitor<'a> {
             }
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
+                if self.expr_resolves_to_image(&assign.right) {
+                    self.image_element_vars.insert(target_name.to_string());
+                } else {
+                    self.image_element_vars.remove(target_name);
+                }
                 let mut assigned_instance_class = false;
                 self.clear_instance_field_taints(target_name);
                 if let Expression::NewExpression(new_expr) = &assign.right
@@ -267,14 +279,19 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(name) = attr_name_lc {
                     // `action` only counts on a real `<form>` receiver, never by
                     // name alone (see `form.action` in the assignment path).
-                    let dangerous = Self::is_dangerous_attr_name(&name)
+                    let receiver = self.get_callee_object_expr(&call.callee);
+                    let dangerous = (Self::is_dangerous_attr_name(&name)
+                        && !(name == "src"
+                            && receiver.is_some_and(|recv| self.expr_resolves_to_image(recv))))
                         || (name == "action"
-                            && self
-                                .get_callee_object_expr(&call.callee)
-                                .is_some_and(|recv| self.expr_resolves_to_form(recv)));
+                            && receiver.is_some_and(|recv| self.expr_resolves_to_form(recv)));
                     if dangerous && let Some(arg1) = call.arguments.get(1) {
                         let (tainted, source_hint) = self.argument_taint_and_source(arg1);
-                        if tainted {
+                        let pinned = Self::is_navigation_sink(&name)
+                            && arg1
+                                .as_expression()
+                                .is_some_and(|e| self.url_scheme_is_pinned(e));
+                        if tainted && !pinned {
                             self.report_vulnerability_with_source(
                                 call.span(),
                                 &format!("setAttribute:{}", name),
@@ -421,8 +438,8 @@ impl<'a> DomXssVisitor<'a> {
                 .or(summary_key);
         }
         let alias_owned = self.get_alias_for_callee_identifier(call).cloned();
-        if let Some(callee_key) = summary_key
-            && let Some(param_sinks) = self.function_summaries.get(&callee_key).map(|summary| {
+        if let Some(callee_key) = summary_key.as_ref()
+            && let Some(param_sinks) = self.function_summaries.get(callee_key).map(|summary| {
                 summary
                     .tainted_param_sinks
                     .iter()
@@ -436,6 +453,27 @@ impl<'a> DomXssVisitor<'a> {
                 if tainted {
                     self.report_vulnerability_with_source(call.span(), &sink_name, source_hint);
                     break;
+                }
+            }
+        }
+        if let Some(writes) = summary_key
+            .as_ref()
+            .and_then(|key| self.function_summaries.get(key))
+            .map(|summary| summary.tainted_param_writes.clone())
+        {
+            for (idx, (fields, globals)) in writes {
+                let (tainted, source) =
+                    self.resolve_param_argument_taint(call, alias_owned.as_ref(), idx);
+                if !tainted {
+                    continue;
+                }
+                let source = source.unwrap_or_else(|| "unknown".to_string());
+                for path in fields {
+                    self.field_taints.insert(path, source.clone());
+                }
+                for name in globals {
+                    self.var_aliases.insert(name.clone(), source.clone());
+                    self.global_taints.insert(name);
                 }
             }
         }
@@ -503,8 +541,12 @@ impl<'a> DomXssVisitor<'a> {
                     continue;
                 }
                 let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                let pinned = Self::is_navigation_sink(&func_name)
+                    && arg
+                        .as_expression()
+                        .is_some_and(|e| self.url_scheme_is_pinned(e));
 
-                if is_arg_tainted {
+                if is_arg_tainted && !pinned {
                     self.report_vulnerability_with_source(call.span(), &func_name, source_hint);
                     break;
                 }

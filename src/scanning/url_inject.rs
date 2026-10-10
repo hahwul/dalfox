@@ -632,7 +632,17 @@ pub(crate) fn json_body(data: Option<&str>, name: &str, param_value: &str, value
 fn multipart_fields(data: Option<&str>, name: &str, value: &str) -> Vec<(String, String)> {
     let mut fields = Vec::new();
     let mut found = false;
-    if let Some(data) = data {
+    // A captured multipart body (raw HTTP / HAR / `-d`) keeps its own framing.
+    if let Some(raw) = data.and_then(crate::target_parser::raw_multipart_fields) {
+        for (k, v) in raw {
+            if k == name {
+                fields.push((k, value.to_string()));
+                found = true;
+            } else {
+                fields.push((k, v));
+            }
+        }
+    } else if let Some(data) = data {
         for pair in data.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
                 let k = urlencoding::decode(k)
@@ -741,16 +751,7 @@ pub(crate) fn xml_request_content_type(target: &Target) -> String {
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
         .map(|(_, v)| v.trim())
-        .filter(|v| {
-            let primary = crate::utils::content_type_primary(v);
-            matches!(
-                primary.as_deref(),
-                Some("text/xml")
-                    | Some("application/xml")
-                    | Some("application/soap+xml")
-                    | Some("application/xhtml+xml")
-            )
-        })
+        .filter(|v| crate::utils::is_xml_content_type(v))
         .map(str::to_string)
         .unwrap_or_else(|| "application/xml".to_string())
 }

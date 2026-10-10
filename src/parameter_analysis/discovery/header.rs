@@ -51,7 +51,7 @@ async fn detect_blanket_header_echo(target: &Target) -> bool {
     let request = crate::utils::apply_header_overrides(base, &overrides);
     crate::record_outbound_request().await;
     match crate::utils::http::send_counted(request).await {
-        Ok(resp) => match crate::utils::http::read_body(resp).await {
+        Ok(resp) => match crate::utils::http::read_body_counted(resp).await {
             Ok(text) => crate::scanning::markers::probe_reflected(&text),
             Err(_) => false,
         },
@@ -144,7 +144,7 @@ pub async fn check_header_discovery(
                 crate::record_outbound_request().await;
                 let mut discovered: Option<Param> = None;
                 if let Ok(resp) = crate::utils::http::send_counted(request).await
-                    && let Ok(text) = crate::utils::http::read_body(resp).await
+                    && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                     && crate::scanning::markers::probe_reflected(&text)
                 {
                     discovered = Some(

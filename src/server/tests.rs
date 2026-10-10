@@ -1807,6 +1807,78 @@ async fn test_run_scan_job_webhook_reports_done_status() {
     );
 }
 
+/// The webhook is the only report a non-polling subscriber gets, so the job's
+/// `warnings` (here: blind_oob never armed) must ride along — otherwise a
+/// `done` with zero findings reads as clean there while GET /scan says not.
+#[tokio::test]
+async fn test_run_scan_job_webhook_carries_job_warnings() {
+    let target_addr = start_target_server().await;
+
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured_clone = captured.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            async move {
+                *captured.lock().await = serde_json::from_slice(&body).ok();
+                StatusCode::OK
+            }
+        }),
+    );
+    let webhook_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let webhook_addr = webhook_listener.local_addr().expect("webhook local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(webhook_listener, webhook_app).await;
+    });
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "warnings-webhook-test".to_string();
+    let mut job = test_job(JobStatus::Queued, None, "");
+    job.callback_url = Some(format!("http://{}/hook", webhook_addr));
+    state.jobs.lock().await.insert(id.clone(), job);
+
+    let opts = ScanOptions {
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(2),
+        timeout: Some(2),
+        // Nothing listens on port 1: OOB registration fails soft with a warning.
+        blind_oob: Some(crate::job::spec::BlindOobRequest::Servers(vec![
+            "http://127.0.0.1:1".to_string(),
+        ])),
+        callback_url: Some(format!("http://{}/hook", webhook_addr)),
+        ..ScanOptions::default()
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/", target_addr),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await
+    .expect("run_scan_job should complete in time");
+
+    let payload = captured
+        .lock()
+        .await
+        .clone()
+        .expect("webhook should have been invoked");
+    assert!(
+        payload["warnings"].as_array().is_some_and(|w| w
+            .iter()
+            .any(|m| m.as_str().is_some_and(|s| s.contains("blind_oob disabled")))),
+        "webhook must carry the job warnings (got payload: {})",
+        payload
+    );
+}
+
 #[tokio::test]
 async fn test_run_scan_job_unreachable_target_fires_error_webhook() {
     // Regression for F1: an unreachable (but parseable) target must still fire a
@@ -3336,6 +3408,7 @@ async fn test_send_terminal_webhook_skips_non_http_url() {
                 status_label: "cancelled",
                 results: &[],
                 error_message: None,
+                warnings: &[],
             },
             None,
         )
@@ -3359,6 +3432,7 @@ async fn test_send_terminal_webhook_skips_non_http_url() {
             status_label: "done",
             results: &[],
             error_message: None,
+            warnings: &[],
         },
         None,
     )

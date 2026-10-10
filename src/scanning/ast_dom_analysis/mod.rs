@@ -31,7 +31,7 @@ use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -261,8 +261,11 @@ pub struct DomXssVulnerability {
 /// Lightweight summary for a function declaration.
 /// Maps parameter index to a sink reached when that parameter is tainted.
 struct FunctionSummary {
-    tainted_param_sinks: HashMap<usize, String>,
-    tainted_param_returns: HashMap<usize, String>,
+    tainted_param_sinks: BTreeMap<usize, String>,
+    tainted_param_returns: BTreeMap<usize, String>,
+    /// Outer field paths (`cfg.html`) and globals the body writes a tainted
+    /// parameter into, applied at a call site that passes a tainted argument.
+    tainted_param_writes: BTreeMap<usize, (Vec<String>, Vec<String>)>,
     return_without_tainted_params: Option<String>,
 }
 
@@ -381,7 +384,7 @@ struct DomXssVisitor<'a> {
     /// Field-level taint tracking: "obj.field" -> source
     field_taints: ScopedMap<String, String>,
     /// Top-level global variable taint tracking
-    global_taints: HashSet<String>,
+    global_taints: ScopedSet<String>,
     /// Track `urlVar -> base source` for `new URL(tainted)` instances.
     url_object_sources: HashMap<String, String>,
     /// Track `paramsVar -> base source` for `url.searchParams` aliases.
@@ -434,6 +437,9 @@ struct DomXssVisitor<'a> {
     reflected_element_vars: HashMap<String, String>,
     /// Variables bound to a `<form>` element (see `expr_resolves_to_form`).
     form_element_vars: HashSet<String>,
+    /// Variables bound to an image (`new Image()`, `createElement('img')`),
+    /// whose `src` loads a picture and never runs script.
+    image_element_vars: ScopedSet<String>,
     /// Callback parameters currently bound to a `fetch()` `Response`
     /// object — the first `.then(resp => …)` of a fetch chain. While such
     /// a parameter is in scope, `resp.text()` / `resp.json()` read the
@@ -744,7 +750,7 @@ impl<'a> DomXssVisitor<'a> {
             source_code,
             line_starts,
             field_taints: Default::default(),
-            global_taints: HashSet::new(),
+            global_taints: Default::default(),
             url_object_sources: HashMap::new(),
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
@@ -757,6 +763,7 @@ impl<'a> DomXssVisitor<'a> {
             reflected_markup: Arc::default(),
             reflected_element_vars: HashMap::new(),
             form_element_vars: HashSet::new(),
+            image_element_vars: Default::default(),
             response_object_vars: Default::default(),
             branch_depth: 0,
             recursion_depth: Rc::new(Cell::new(0)),

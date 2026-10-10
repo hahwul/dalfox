@@ -43,9 +43,10 @@ struct PollState {
 }
 
 /// One WRN line on stderr (stdout stays clean for json/sarif), at most once per
-/// `flag`, and never under `--silence`.
+/// `flag`, and never under `--silence`. The flag is set either way, so
+/// [`PollerHandle::finish`] can hand the condition to a silenced server/MCP job.
 fn warn_once(silence: bool, flag: &AtomicBool, msg: &str) {
-    if !silence && !flag.swap(true, Ordering::Relaxed) {
+    if !flag.swap(true, Ordering::Relaxed) && !silence {
         crate::ceprintln!("{} {}", crate::utils::log::log_prefix("33", "WRN"), msg);
     }
 }
@@ -63,19 +64,25 @@ fn summarize_poll_error(e: &(dyn std::error::Error + Send + Sync + 'static)) -> 
     crate::utils::term::sanitize_display(&s).to_string()
 }
 
-fn warn_poll_failure(silence: bool, state: &PollState) {
+fn poll_failure_message(state: &PollState) -> String {
     let last = state
         .last_error
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    warn_once(
-        silence,
-        &state.warned_poll,
-        &format!(
-            "OOB polling is failing ({last}); blind callbacks are not being collected, so a clean result does not rule out blind XSS"
-        ),
-    );
+    format!(
+        "OOB polling is failing ({last}); blind callbacks are not being collected, so a clean result does not rule out blind XSS"
+    )
+}
+
+fn warn_poll_failure(silence: bool, state: &PollState) {
+    warn_once(silence, &state.warned_poll, &poll_failure_message(state));
+}
+
+fn unattributed_cap_message() -> String {
+    format!(
+        "OOB: more than {MAX_UNATTRIBUTED_FINDINGS} callbacks matched no injected payload; ignoring the rest (the correlation id is visible to the target)"
+    )
 }
 
 /// Handle to a running poller. Hold it for the scan's lifetime, then call
@@ -84,6 +91,7 @@ pub(crate) struct PollerHandle {
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
+    limit_result_type: Arc<str>,
     cancel: Arc<AtomicBool>,
     seen: Seen,
     stop: Arc<AtomicBool>,
@@ -107,13 +115,18 @@ impl Drop for PollerHandle {
 }
 
 /// Spawn the background poll loop. It runs until `stop`/`cancel` is set.
+/// `limit_result_type` is the uppercased `--limit-result-type`: like every
+/// other producer, the poller bumps `findings_count` only for findings of that
+/// type, so a blind `V` cannot trip `--limit` on a run limiting on `R`.
 pub(crate) fn spawn_poller(
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
+    limit_result_type: &str,
     cancel: Arc<AtomicBool>,
     silence: bool,
 ) -> PollerHandle {
+    let limit_result_type: Arc<str> = Arc::from(limit_result_type);
     let stop = Arc::new(AtomicBool::new(false));
     let seen: Seen = Arc::new(StdMutex::new(HashSet::new()));
     let state = Arc::new(PollState::default());
@@ -123,12 +136,22 @@ pub(crate) fn spawn_poller(
         let session = session.clone();
         let results = results.clone();
         let findings_count = findings_count.clone();
+        let limit_result_type = limit_result_type.clone();
         let cancel = cancel.clone();
         let stop = stop.clone();
         let seen = seen.clone();
         tokio::spawn(async move {
             while !stop.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
-                poll_once(&session, &results, &findings_count, &seen, &state, silence).await;
+                poll_once(
+                    &session,
+                    &results,
+                    &findings_count,
+                    &limit_result_type,
+                    &seen,
+                    &state,
+                    silence,
+                )
+                .await;
                 // Sleep in 1s slices so a stop/cancel cuts the wait short.
                 for _ in 0..POLL_INTERVAL_SECS {
                     if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
@@ -144,6 +167,7 @@ pub(crate) fn spawn_poller(
         session,
         results,
         findings_count,
+        limit_result_type,
         cancel,
         seen,
         stop,
@@ -170,7 +194,10 @@ impl PollerHandle {
     /// Keep the background poller draining for up to `grace`, then stop it, do a
     /// final poll for anything that landed in the last interval, and deregister.
     /// A pending cancel (Ctrl-C) cuts the grace window short.
-    pub async fn finish(mut self, grace: Duration) {
+    ///
+    /// Returns the warnings the session raised (poll failures, the unattributed
+    /// cap), for a silenced server/MCP job that has no stderr to read them on.
+    pub async fn finish(mut self, grace: Duration) -> Vec<String> {
         let start = Instant::now();
         while start.elapsed() < grace && !self.cancel.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -184,6 +211,7 @@ impl PollerHandle {
             &self.session,
             &self.results,
             &self.findings_count,
+            &self.limit_result_type,
             &self.seen,
             &self.state,
             self.silence,
@@ -197,6 +225,14 @@ impl PollerHandle {
             warn_poll_failure(self.silence, &self.state);
         }
         self.session.deregister().await;
+        let mut warnings = Vec::new();
+        if self.state.warned_poll.load(Ordering::Relaxed) {
+            warnings.push(poll_failure_message(&self.state));
+        }
+        if self.state.warned_cap.load(Ordering::Relaxed) {
+            warnings.push(unattributed_cap_message());
+        }
+        warnings
     }
 }
 
@@ -223,6 +259,7 @@ async fn poll_once(
     session: &OobSession,
     results: &Results,
     findings_count: &Arc<AtomicUsize>,
+    limit_result_type: &str,
     seen: &Seen,
     state: &PollState,
     silence: bool,
@@ -255,13 +292,7 @@ async fn poll_once(
         if record.is_none() {
             // Bound the forgeable path before it can grow `seen` or `results`.
             if state.unattributed.load(Ordering::Relaxed) >= MAX_UNATTRIBUTED_FINDINGS {
-                warn_once(
-                    silence,
-                    &state.warned_cap,
-                    &format!(
-                        "OOB: more than {MAX_UNATTRIBUTED_FINDINGS} callbacks matched no injected payload; ignoring the rest (the correlation id is visible to the target)"
-                    ),
-                );
+                warn_once(silence, &state.warned_cap, &unattributed_cap_message());
                 continue;
             }
         }
@@ -281,11 +312,9 @@ async fn poll_once(
         batch.push(build_finding(&it, record.as_ref(), session.server_domain()));
     }
 
-    if !batch.is_empty() {
-        let added = batch.len();
-        results.lock().await.extend(batch);
-        findings_count.fetch_add(added, Ordering::Relaxed);
-    }
+    // OOB findings are always `High`, so `--min-confidence` never drops one.
+    crate::scanning::accumulate_findings(results, findings_count, batch, limit_result_type, None)
+        .await;
 }
 
 /// One-line stderr notice when a callback lands (kept off stdout so JSON/SARIF
@@ -400,6 +429,9 @@ fn build_finding(
         .message_str("Triggered Blind XSS via out-of-band (interactsh) callback")
         .build();
     result.location = location;
+    result.origin_target = record
+        .map(|r| r.origin_target.clone())
+        .filter(|o| !o.is_empty());
     result
 }
 
@@ -417,6 +449,7 @@ mod tests {
         };
         let rec = InjectionRecord {
             target_url: "https://t/\u{9d}".to_string(),
+            origin_target: String::new(),
             param: "q\x1b]8;;https://evil/\x07".to_string(),
             location: "Query".to_string(),
             payload: "<x>\r".to_string(),
@@ -442,6 +475,7 @@ mod tests {
         };
         let rec = InjectionRecord {
             target_url: "https://t/?q=1".to_string(),
+            origin_target: String::new(),
             param: "q".to_string(),
             location: "Query".to_string(),
             payload: "\"'><script src=//x></script>".to_string(),

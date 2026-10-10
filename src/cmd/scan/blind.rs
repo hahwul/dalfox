@@ -40,6 +40,11 @@ pub(crate) async fn arm_and_dispatch(
     // operator had explicitly asked not to attack. This also skips OOB session
     // registration, which is correct: there is nothing left to call back.
     let blind_active = !args.dry_run && !args.only_discovery && !args.skip_xss_scanning;
+    // Ctrl-C before this phase: registering with interactsh is an outbound
+    // side effect the drain would only tear down again.
+    if cancel_flag.load(Ordering::Relaxed) {
+        return None;
+    }
     let oob_session: Option<Arc<crate::oob::OobSession>> =
         if blind_active && args.blind_oob_enabled() {
             match crate::oob::OobSession::start(&args.oob_config()).await {
@@ -75,7 +80,6 @@ pub(crate) async fn arm_and_dispatch(
                 ),
             );
         }
-        let custom = args.custom_blind_xss_payload.as_deref();
         // Serial by design, but Ctrl-C must not wait out the whole phase: the
         // flag is checked per target and also races the in-flight requests,
         // so the first SIGINT drops the current target's request and moves on
@@ -97,8 +101,8 @@ pub(crate) async fn arm_and_dispatch(
                 };
                 tokio::select! {
                     _ = async {
-                        crate::scanning::blind_scanning_with(target, source, custom).await;
-                        crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                        crate::scanning::blind_scanning_with(target, source, args).await;
+                        crate::scanning::blind_scan_forms_with(target, source, args).await;
                     } => {}
                     _ = super::scan_loop::poll_cancel(cancel_flag) => break 'dispatch,
                 }
@@ -164,6 +168,18 @@ mod tests {
         hits.store(0, Ordering::SeqCst);
         arm_and_dispatch(&args, &groups, &AtomicBool::new(true)).await;
         assert_eq!(hits.load(Ordering::SeqCst), 0, "cancelled before dispatch");
+    }
+
+    #[tokio::test]
+    async fn cancelled_flag_skips_oob_registration() {
+        let (url, hits) = spawn_counting_server(Duration::ZERO).await;
+        let base = url.trim_end_matches("/?q=1").to_string();
+        let (mut args, groups) = setup(&url);
+        args.blind_callback_url = None;
+        args.oob.blind_oob = Some(vec![base]);
+        let session = arm_and_dispatch(&args, &groups, &AtomicBool::new(true)).await;
+        assert!(session.is_none());
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "no interactsh register");
     }
 
     #[tokio::test]

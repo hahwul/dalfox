@@ -112,12 +112,50 @@ const SNIFF_PREFIX_BYTES: u64 = 8 * 1024;
 /// bogus host, a DNS failure recorded as `skipped`, and — as long as any later
 /// line resolved — exit code 0. The one target the operator put first was
 /// silently never scanned.
-pub(crate) fn target_list_lines(content: &str) -> impl Iterator<Item = &str> {
+///
+/// A list that is really an API spec gets a `-i openapi` / `-i postman` hint
+/// on stderr (unless `silence`): `auto` never detects one, and its `{` /
+/// `"paths": {}` lines otherwise fail as bogus hosts with no clue why.
+pub(crate) fn target_list_lines(content: &str, silence: bool) -> impl Iterator<Item = &str> {
+    if let Some(hint) = spec_document_hint(content, silence) {
+        eprintln!("{hint}");
+    }
     content
         .trim_start_matches('\u{feff}')
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
+/// The [`target_list_lines`] warning for a list that is really an API spec;
+/// `None` under `--silence`.
+fn spec_document_hint(content: &str, silence: bool) -> Option<String> {
+    if silence {
+        return None;
+    }
+    let kind = spec_document_kind(content)?;
+    Some(format!(
+        "[warn] the target list looks like {}, not URLs; pass `-i {kind}` to scan it",
+        if kind == "postman" {
+            "a Postman collection"
+        } else {
+            "an OpenAPI/Swagger spec"
+        }
+    ))
+}
+
+/// `Some("openapi" | "postman")` when `content` is that kind of document.
+fn spec_document_kind(content: &str) -> Option<&'static str> {
+    let t = content.trim_start_matches('\u{feff}').trim_start();
+    if t.starts_with('{') {
+        if t.contains("\"_postman_id\"") || t.contains("schema.getpostman.com") {
+            return Some("postman");
+        }
+        return (t.contains("\"openapi\"") || t.contains("\"swagger\"")).then_some("openapi");
+    }
+    t.lines()
+        .any(|l| l.starts_with("openapi:") || l.starts_with("swagger:"))
+        .then_some("openapi")
 }
 
 fn is_test_harness_exe(exe: Option<&std::path::Path>) -> bool {
@@ -173,7 +211,7 @@ pub(crate) async fn resolve_targets(
             ) {
                 Ok(crate::utils::fs::StdinRead::Data(buffer)) => {
                     let mut stdin_count = 0;
-                    for line in target_list_lines(&buffer) {
+                    for line in target_list_lines(&buffer, args.silence) {
                         target_strings.push((line.to_string(), TargetOrigin::List));
                         stdin_count += 1;
                     }
@@ -261,7 +299,8 @@ pub(crate) async fn resolve_targets(
                     // `#` comments skipped, leading BOM dropped) — see
                     // `target_list_lines`.
                     target_strings.extend(
-                        target_list_lines(&content).map(|l| (l.to_string(), TargetOrigin::List)),
+                        target_list_lines(&content, args.silence)
+                            .map(|l| (l.to_string(), TargetOrigin::List)),
                     );
                 }
                 Some(Err(e)) => {
@@ -332,7 +371,7 @@ pub(crate) async fn resolve_targets(
                         "target list",
                     ) {
                         Ok(content) => collected.extend(
-                            target_list_lines(&content)
+                            target_list_lines(&content, args.silence)
                                 .map(|l| (l.to_string(), TargetOrigin::List)),
                         ),
                         Err(e) => {
@@ -386,7 +425,8 @@ pub(crate) async fn resolve_targets(
                 // so `cat targets.txt | dalfox` and `dalfox scan targets.txt`
                 // behave identically.
                 piped_targets.extend(
-                    target_list_lines(&buffer).map(|l| (l.to_string(), TargetOrigin::List)),
+                    target_list_lines(&buffer, args.silence)
+                        .map(|l| (l.to_string(), TargetOrigin::List)),
                 );
                 if !args.targets.is_empty() {
                     let before_merge = piped_targets.len();
@@ -511,7 +551,7 @@ pub(crate) async fn resolve_targets(
                         apply_request_cli_overrides(&mut target, args);
                         parsed_targets.push(target);
                     }
-                    spec_skipped += import.skipped.len();
+                    spec_skipped += import.skipped_total;
                     spec_unscanned_methods += import.unscanned_methods;
                     for why in import.skipped {
                         if spec_skip_sample.len() >= UNPARSABLE_SAMPLE_LIMIT {
@@ -522,15 +562,7 @@ pub(crate) async fn resolve_targets(
                     }
                 }
                 Err(e) => {
-                    // `s` is the whole document when it came from stdin, and
-                    // the reason can quote spec text: name the source, not
-                    // its contents, and strip terminal escapes.
-                    let source = if s.contains(['\n', '\r']) || s.len() > 512 {
-                        "<inline document>"
-                    } else {
-                        s.as_str()
-                    };
-                    let msg = format!("Error parsing {label} '{source}': {e}");
+                    let msg = format!("Error parsing {label} '{}': {e}", source_name(&s));
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::PARSE_ERROR,
@@ -563,7 +595,10 @@ pub(crate) async fn resolve_targets(
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::PARSE_ERROR,
-                        &format!("Error parsing HAR '{}': {}", s, e),
+                        &crate::utils::log::sanitize_log_message(&format!(
+                            "Error parsing HAR '{}': {e}",
+                            source_name(&s)
+                        )),
                     );
                     return Err(ScanOutcome::Error);
                 }
@@ -588,7 +623,10 @@ pub(crate) async fn resolve_targets(
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::PARSE_ERROR,
-                        &format!("Error parsing raw HTTP request '{}': {}", s, e),
+                        &crate::utils::log::sanitize_log_message(&format!(
+                            "Error parsing raw HTTP request '{}': {e}",
+                            source_name(&s)
+                        )),
                     );
                     return Err(ScanOutcome::Error);
                 }
@@ -599,6 +637,7 @@ pub(crate) async fn resolve_targets(
                     // Only override data if explicitly provided via CLI
                     if let Some(d) = &args.data {
                         target.data = Some(d.clone());
+                        target.multipart = crate::target_parser::is_raw_multipart(d);
                     }
                     target.headers = args
                         .headers
@@ -1006,34 +1045,11 @@ fn looks_like_form_urlencoded(data: &str) -> bool {
 }
 
 /// Field names from a raw `multipart/form-data` body: the `name` attribute of
-/// each `Content-Disposition: form-data` part. Attributes are split on `;`
-/// before matching so a `filename="…"` — which contains `name="` as a
-/// substring — can't be mistaken for the field name.
+/// each `Content-Disposition: form-data` part.
 fn multipart_field_names(data: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for line in data.lines() {
-        let line = line.trim();
-        if !line
-            .to_ascii_lowercase()
-            .starts_with("content-disposition:")
-        {
-            continue;
-        }
-        for attr in line.split(';').skip(1) {
-            let attr = attr.trim();
-            let Some(value) = attr.strip_prefix("name=") else {
-                continue;
-            };
-            let value = value.trim();
-            let name = value
-                .strip_prefix('"')
-                .and_then(|v| v.split_once('"').map(|(n, _)| n))
-                .unwrap_or(value);
-            names.push(name.to_string());
-            break; // one field name per part
-        }
-    }
-    names
+    data.lines()
+        .filter_map(crate::target_parser::content_disposition_name)
+        .collect()
 }
 
 /// Default grace window for the `auto` stdin merge, in milliseconds.
@@ -1126,6 +1142,18 @@ fn names_a_missing_file(s: &str) -> bool {
     !is_ambiguous_tld && looks_like_target_list_filename(s)
 }
 
+/// How a parse error names a request-bearing source (raw-http, HAR, spec):
+/// its path, or a stand-in when `s` is the document itself (the stdin buffer
+/// or a literal), whose text can be huge and carry credentials or terminal
+/// escapes. Callers still sanitize the message: the reason can quote it.
+fn source_name(s: &str) -> &str {
+    if s.contains(['\n', '\r']) || s.len() > 512 {
+        "<inline document>"
+    } else {
+        s
+    }
+}
+
 /// Load the source text for a request-bearing input (`raw-http` or `har`):
 /// read the file at `s` (bounded), else treat `s` itself as the document (a
 /// stdin buffer or a CLI literal). Detection only sniffs a prefix, so the full
@@ -1212,6 +1240,9 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     }
     if let Some(d) = &args.data {
         target.data = Some(d.clone());
+        // The imported multipart flag described the body `-d` replaced; the
+        // new body is multipart only when it carries its own wire framing.
+        target.multipart = crate::target_parser::is_raw_multipart(d);
     }
     let cli_headers: Vec<(String, String)> = args
         .headers
@@ -1467,7 +1498,12 @@ fn load_cookies_from_raw_http(
         return Err(ScanOutcome::Error);
     }
 
+    // Replace same-name cookies, like `--cookies` over a capture: appending
+    // sent `sid=old; sid=new` and first-value servers kept the stale one.
     for target in parsed_targets.iter_mut() {
+        target
+            .cookies
+            .retain(|(k, _)| !cookies_from_raw.iter().any(|(n, _)| k == n));
         target.cookies.extend(cookies_from_raw.iter().cloned());
     }
     Ok(())

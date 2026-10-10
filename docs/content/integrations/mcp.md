@@ -393,7 +393,7 @@ nothing was really tested. Monitoring costs nothing when no credentials and no
 
 Problems that don't fail the scan still reach you: the result adds a `warnings`
 list (absent when empty) for conditions such as `blind_oob` failing to register
-with any server, a `session_check` baseline that could not be captured
+with any server or failing to poll it, a `session_check` baseline that could not be captured
 (monitoring inactive), or the discovered-parameter cap. A `done` scan with zero
 findings and a non-empty `warnings` is not proof of a clean target.
 

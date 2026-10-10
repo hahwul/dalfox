@@ -40,17 +40,34 @@ pub(crate) fn is_unscanned_spec_method(method: &str) -> bool {
         .any(|m| m.eq_ignore_ascii_case(method))
 }
 
+/// Most skip reasons a [`SpecImport`] stores. Consumers show the count and a
+/// short sample; a junk-heavy 256 MiB document would otherwise keep a reason
+/// string per entry, gigabytes in all.
+pub(crate) const MAX_SKIP_REASONS: usize = 16;
+
 /// What a spec import (`-i openapi` / `-i postman`) produced: the targets plus
-/// one human-readable reason per operation or request that was skipped. A bad
-/// entry never aborts the import — the same per-entry leniency a target list
-/// gets — so the caller reports the skips and scans the rest.
+/// a human-readable reason for the first operations or requests that were
+/// skipped. A bad entry never aborts the import — the same per-entry leniency
+/// a target list gets — so the caller reports the skips and scans the rest.
 #[derive(Debug, Default)]
 pub struct SpecImport {
     pub targets: Vec<Target>,
+    /// Reasons for the first [`MAX_SKIP_REASONS`] skips.
     pub skipped: Vec<String>,
+    /// Every skip, including those past the stored reasons.
+    pub skipped_total: usize,
     /// DELETE / HEAD / OPTIONS operations left out by policy (see
     /// [`is_unscanned_spec_method`]) — not errors, reported separately.
     pub unscanned_methods: usize,
+}
+
+impl SpecImport {
+    pub(crate) fn skip(&mut self, reason: String) {
+        self.skipped_total += 1;
+        if self.skipped.len() < MAX_SKIP_REASONS {
+            self.skipped.push(reason);
+        }
+    }
 }
 
 /// Request headers imported from a document (HAR entry, OpenAPI header
@@ -83,22 +100,23 @@ impl ImportedHeaders {
             }
             return;
         }
-        if name.eq_ignore_ascii_case("user-agent") {
-            self.user_agent = Some(value.to_string());
-            return;
-        }
         if is_skippable_request_header(name) {
             return;
         }
         // Drop any header reqwest can't put on an HTTP/1.1 wire (a
         // space-bearing name, a control byte such as CR/LF in the value, …).
         // Forwarded verbatim it would fail the reachability probe and every
-        // scan request, silently marking a live target unreachable.
+        // scan request, silently marking a live target unreachable. The
+        // User-Agent rides on every request too, so it is gated the same.
         if !is_forwardable_header(name, value) {
             crate::dbg_log!(
                 "dropping unsendable imported header {:?} (name/value rejected by HTTP/1.1)",
                 name
             );
+            return;
+        }
+        if name.eq_ignore_ascii_case("user-agent") {
+            self.user_agent = Some(value.to_string());
             return;
         }
         self.headers.push((name.to_string(), value.to_string()));
@@ -748,7 +766,9 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
                         cookies_vec.push((k.to_string(), v.trim().to_string()));
                     }
                 }
-            } else if name_trim.eq_ignore_ascii_case("user-agent") {
+            } else if name_trim.eq_ignore_ascii_case("user-agent")
+                && is_forwardable_header(&name_trim, &value_trim)
+            {
                 user_agent = Some(value_trim.clone());
                 headers_vec.push((name_trim, value_trim));
             } else if !is_skippable_request_header(&name_trim) {
@@ -841,11 +861,81 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
 
     Ok(Target {
         method,
+        multipart: data.as_deref().is_some_and(is_raw_multipart),
         data,
         headers: headers_vec,
         cookies: cookies_vec,
         user_agent,
         ..Target::for_url(url)
+    })
+}
+
+/// Whether `data` is a captured `multipart/form-data` body (see
+/// [`raw_multipart_fields`]).
+pub(crate) fn is_raw_multipart(data: &str) -> bool {
+    raw_multipart_fields(data).is_some()
+}
+
+/// The fields of a `multipart/form-data` body kept as captured on the wire
+/// (raw HTTP, HAR, `-d`): each part's `name` with its content, in order. The
+/// boundary is read off the body's own first line, so no `Content-Type` is
+/// needed. `None` when `data` is not such a body, which callers read as
+/// urlencoded.
+pub(crate) fn raw_multipart_fields(data: &str) -> Option<Vec<(String, String)>> {
+    let boundary = data
+        .lines()
+        .next()?
+        .trim_end_matches('\r')
+        .strip_prefix("--")
+        .filter(|b| !b.is_empty() && !b.contains(char::is_whitespace))?;
+    let delimiter = format!("--{boundary}");
+    let mut fields = Vec::new();
+    for part in data.split(delimiter.as_str()).skip(1) {
+        if part.starts_with("--") {
+            break; // close delimiter
+        }
+        let part = part
+            .strip_prefix("\r\n")
+            .or_else(|| part.strip_prefix('\n'))
+            .unwrap_or(part);
+        let Some((head, body)) = part
+            .split_once("\r\n\r\n")
+            .or_else(|| part.split_once("\n\n"))
+        else {
+            continue;
+        };
+        let Some(name) = head.lines().find_map(content_disposition_name) else {
+            continue;
+        };
+        let value = body
+            .strip_suffix("\r\n")
+            .or_else(|| body.strip_suffix('\n'))
+            .unwrap_or(body);
+        fields.push((name, value.to_string()));
+    }
+    (!fields.is_empty()).then_some(fields)
+}
+
+/// The field `name` of a `Content-Disposition: form-data` header line.
+/// Attributes are split on `;` before matching so a `filename="…"` — which
+/// contains `name="` as a substring — can't be mistaken for the field name.
+pub(crate) fn content_disposition_name(line: &str) -> Option<String> {
+    let line = line.trim();
+    if !line
+        .get(..20)
+        .is_some_and(|p| p.eq_ignore_ascii_case("content-disposition:"))
+    {
+        return None;
+    }
+    line.split(';').skip(1).find_map(|attr| {
+        let value = attr.trim().strip_prefix("name=")?.trim();
+        Some(
+            value
+                .strip_prefix('"')
+                .and_then(|v| v.split_once('"').map(|(n, _)| n))
+                .unwrap_or(value)
+                .to_string(),
+        )
     })
 }
 

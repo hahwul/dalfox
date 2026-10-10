@@ -90,6 +90,27 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
         return Err(ScanOutcome::Error);
     }
 
+    // The dry-run / only-discovery reports exist only as plain text and JSON
+    // (`output::render_dry_run` / `render_only_discovery`). `markdown` keeps
+    // printing the plain text, which a human reader takes as is; SARIF/TOML
+    // consumers cannot parse it, so those two are refused.
+    if (args.dry_run || args.only_discovery) && matches!(args.format.as_str(), "sarif" | "toml") {
+        let mode = if args.dry_run {
+            "--dry-run"
+        } else {
+            "--only-discovery"
+        };
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            &format!(
+                "{mode} does not support --format {}; use plain, markdown, json or jsonl",
+                args.format
+            ),
+        );
+        return Err(ScanOutcome::Error);
+    }
+
     // Install the process-wide request rate limiter (`--rate-limit`, req/sec;
     // 0 = unlimited). Shared across every worker and target so the aggregate
     // outbound rate stays bounded regardless of fan-out. Done before any
@@ -288,10 +309,10 @@ pub(crate) async fn init_remote_providers(args: &ScanArgs) {
     }
 
     // Initialize remote payloads/wordlists if requested (honor timeout/proxy)
-    if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
+    if (!args.remote_payloads.is_empty() || !args.remote_wordlists_in_use().is_empty())
         && let Err(e) = crate::utils::init_remote_resources_with_options(
             &args.remote_payloads,
-            &args.remote_wordlists,
+            args.remote_wordlists_in_use(),
             Some(args.timeout),
             args.proxy.clone(),
         )

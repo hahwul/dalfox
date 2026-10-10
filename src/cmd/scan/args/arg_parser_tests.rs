@@ -476,3 +476,18 @@ fn for_preflight_clamps_out_of_range_timeout_to_default() {
     });
     assert_eq!(huge.timeout, DEFAULT_TIMEOUT_SECS);
 }
+
+#[test]
+fn url_in_scope_reuses_the_compiled_patterns() {
+    let args = ScanArgs {
+        include_url: vec!["/api/".to_string(), "(".to_string()],
+        exclude_url: vec!["/api/admin".to_string()],
+        ..Default::default()
+    };
+    assert!(args.url_in_scope("https://a.test/api/x"));
+    assert!(!args.url_in_scope("https://a.test/api/admin"));
+    assert!(!args.url_in_scope("https://a.test/other"));
+    let first = compiled_url_scope(&args.include_url, &args.exclude_url);
+    let again = compiled_url_scope(&args.include_url, &args.exclude_url);
+    assert!(std::sync::Arc::ptr_eq(&first, &again));
+}

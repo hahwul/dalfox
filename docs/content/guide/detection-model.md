@@ -202,7 +202,8 @@ Both select by tier, and they do different things. `--only-poc` takes a comma li
 
 `--limit 2 --limit-result-type v` means "keep scanning until two `V` findings
 accrue, then show everything found along the way". To actually hide the rest,
-add `--only-poc v`.
+add `--only-poc v`. With `--only-poc`, `--limit` counts only the tiers it
+shows: a finding the report hides never stops the scan.
 
 ### Exit codes
 

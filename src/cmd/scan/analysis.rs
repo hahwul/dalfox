@@ -110,6 +110,7 @@ pub(crate) async fn run_preflight_and_analysis(
     args: &ScanArgs,
     host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
+    cancel: &std::sync::atomic::AtomicBool,
 ) {
     let skipped_targets = state.skipped_targets.clone();
 
@@ -156,13 +157,23 @@ pub(crate) async fn run_preflight_and_analysis(
     let processed: Vec<Vec<Target>> = local
         .run_until(async move {
             let mut handles = Vec::with_capacity(drained.len());
+            // Targets never dispatched because Ctrl-C arrived. Handed to the
+            // scan loop untouched, which reports them `incomplete`.
+            let mut undispatched: Vec<(usize, Target)> = Vec::new();
 
-            for (gi, target) in drained {
+            let mut drained = drained.into_iter();
+            while let Some((gi, target)) = drained.next() {
                 // Acquire before spawning, so at most `max_concurrent_targets`
                 // tasks are ever live — not one parked task per input target.
                 // The permit moves into the task and is released when it ends
-                // (unwinding included).
-                let Ok(permit) = sem.clone().acquire_owned().await else {
+                // (unwinding included). Ctrl-C stops dispatch, also while
+                // waiting for a permit.
+                let permit = tokio::select! {
+                    p = sem.clone().acquire_owned() => p.ok(),
+                    _ = super::scan_loop::poll_cancel(cancel) => None,
+                };
+                let Some(permit) = permit.filter(|_| !cancel.load(Ordering::Relaxed)) else {
+                    undispatched.extend(std::iter::once((gi, target)).chain(drained));
                     break;
                 };
                 // Kept outside the task so a panicking task can still be reported
@@ -213,6 +224,9 @@ pub(crate) async fn run_preflight_and_analysis(
                             .insert(target_url, crate::cmd::error_codes::INTERNAL_ERROR);
                     }
                 }
+            }
+            for (gi, target) in undispatched {
+                processed[gi].push(target);
             }
             processed
         })
@@ -370,68 +384,7 @@ pub(crate) async fn preflight_and_analyze_target(
     if let Some(ref marker) = args_clone.inject_marker {
         // Custom injection marker mode: skip normal discovery/mining
         // and create params from marker positions in URL/headers/body
-        use crate::parameter_analysis::{Location, Param};
-        let mut marker_params = Vec::new();
-
-        // Check URL query params
-        for (k, v) in target.url.query_pairs() {
-            if v.contains(marker.as_str()) {
-                marker_params.push(Param::new(k.to_string(), v.to_string(), Location::Query));
-            }
-        }
-
-        // Check body params
-        if let Some(ref data) = target.data {
-            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
-                if let Some(obj) = json_val.as_object() {
-                    for (k, v) in obj {
-                        if let Some(s) = v.as_str()
-                            && s.contains(marker.as_str())
-                        {
-                            marker_params.push(Param::new(
-                                k.clone(),
-                                s.to_string(),
-                                Location::JsonBody,
-                            ));
-                        }
-                    }
-                }
-            } else {
-                for pair in data.split('&') {
-                    if let Some((k, v)) = pair.split_once('=')
-                        && v.contains(marker.as_str())
-                    {
-                        // An imported multipart body keeps its wire format.
-                        let location = if target.multipart {
-                            Location::MultipartBody
-                        } else {
-                            Location::Body
-                        };
-                        marker_params.push(Param::new(k.to_string(), v.to_string(), location));
-                    }
-                }
-            }
-        }
-
-        // Check headers
-        for (k, v) in &target.headers {
-            if v.contains(marker.as_str()) {
-                marker_params.push(
-                    Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(false),
-                );
-            }
-        }
-
-        // Check cookies
-        for (k, v) in &target.cookies {
-            if v.contains(marker.as_str()) {
-                marker_params.push(
-                    Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(true),
-                );
-            }
-        }
-
-        target.reflection_params = marker_params;
+        target.reflection_params = inject_marker_params(&target, marker);
     } else {
         analyze_parameters(&mut target, &__analysis_args, multi_pb_clone).await;
     }
@@ -523,6 +476,80 @@ pub(crate) async fn preflight_and_analyze_target(
     }
 
     Some(target)
+}
+
+/// The params `--inject-marker` names: every query, body, header and cookie
+/// value carrying `marker`.
+fn inject_marker_params(target: &Target, marker: &str) -> Vec<crate::parameter_analysis::Param> {
+    use crate::parameter_analysis::{Location, Param};
+    let mut marker_params = Vec::new();
+
+    // Check URL query params
+    for (k, v) in target.url.query_pairs() {
+        if v.contains(marker) {
+            marker_params.push(Param::new(k.to_string(), v.to_string(), Location::Query));
+        }
+    }
+
+    // Check body params
+    if let Some(ref data) = target.data {
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(obj) = json_val.as_object() {
+                for (k, v) in obj {
+                    if let Some(s) = v.as_str()
+                        && s.contains(marker)
+                    {
+                        marker_params.push(Param::new(
+                            k.clone(),
+                            s.to_string(),
+                            Location::JsonBody,
+                        ));
+                    }
+                }
+            }
+        } else {
+            // An imported multipart body keeps its wire format, so its fields
+            // are the parts, not `&`/`=` pairs of the framing.
+            let (pairs, location) = if target.multipart {
+                (
+                    crate::target_parser::raw_multipart_fields(data).unwrap_or_default(),
+                    Location::MultipartBody,
+                )
+            } else {
+                (
+                    data.split('&')
+                        .filter_map(|p| p.split_once('='))
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect(),
+                    Location::Body,
+                )
+            };
+            for (k, v) in pairs {
+                if v.contains(marker) {
+                    marker_params.push(Param::new(k, v, location.clone()));
+                }
+            }
+        }
+    }
+
+    // Check headers
+    for (k, v) in &target.headers {
+        if v.contains(marker) {
+            marker_params.push(
+                Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(false),
+            );
+        }
+    }
+
+    // Check cookies
+    for (k, v) in &target.cookies {
+        if v.contains(marker) {
+            marker_params.push(
+                Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(true),
+            );
+        }
+    }
+    marker_params
 }
 
 /// What the preflight probe captured for one target, beyond the enrichment it
@@ -820,18 +847,15 @@ pub(crate) async fn detect_outdated_libs(
             &target.method,
         );
         if !lib_findings.is_empty() {
-            // Count only findings matching --limit-result-type so a
-            // CWE-1104 (informational) batch can't trip --limit when
-            // the user is limiting on a different result type.
-            let added = crate::scanning::count_matching_results(
-                &lib_findings,
-                &args_clone.limit_result_type.to_uppercase(),
-                args_clone.min_confidence.as_deref(),
-            );
             crate::scanning::result::stamp_origin(&mut lib_findings, target.url.as_str());
-            let mut guard = results_clone.lock().await;
-            guard.extend(lib_findings);
-            findings_count_clone.fetch_add(added, Ordering::Relaxed);
+            crate::scanning::accumulate_findings(
+                results_clone,
+                findings_count_clone,
+                lib_findings,
+                &args_clone.limit_count_filter(),
+                args_clone.min_confidence.as_deref(),
+            )
+            .await;
         }
     }
 }
@@ -867,17 +891,15 @@ async fn run_initial_ast_pass(
                 &target.method,
                 crate::scanning::ast_integration::PageSecurityPosture::from_target(target),
             );
-        if !ast_batch.is_empty() {
-            let added = crate::scanning::count_matching_results(
-                &ast_batch,
-                &args_clone.limit_result_type.to_uppercase(),
-                args_clone.min_confidence.as_deref(),
-            );
-            crate::scanning::result::stamp_origin(&mut ast_batch, target.url.as_str());
-            let mut guard = results_clone.lock().await;
-            guard.extend(ast_batch);
-            findings_count_clone.fetch_add(added, Ordering::Relaxed);
-        }
+        crate::scanning::result::stamp_origin(&mut ast_batch, target.url.as_str());
+        crate::scanning::accumulate_findings(
+            results_clone,
+            findings_count_clone,
+            ast_batch,
+            &args_clone.limit_count_filter(),
+            args_clone.min_confidence.as_deref(),
+        )
+        .await;
         if args_clone.analyze_external_js
             && crate::utils::response_has_markup_document(response_content_type, response_text)
         {
@@ -894,10 +916,29 @@ async fn run_initial_ast_pass(
                 results_clone,
                 findings_count_clone,
                 ext_batch,
-                &args_clone.limit_result_type.to_uppercase(),
+                &args_clone.limit_count_filter(),
                 args_clone.min_confidence.as_deref(),
             )
             .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inject_marker_names_the_multipart_part() {
+        let mut target = crate::target_parser::parse_target("http://127.0.0.1:1/").unwrap();
+        target.data = Some(
+            "--X\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\nFUZZ\r\n--X--\r\n"
+                .to_string(),
+        );
+        target.multipart = true;
+        let params = inject_marker_params(&target, "FUZZ");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "q");
+        assert_eq!(params[0].value, "FUZZ");
     }
 }

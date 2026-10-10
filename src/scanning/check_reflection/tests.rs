@@ -157,6 +157,30 @@ async fn redirect_json_ct_handler(
     )
 }
 
+/// 302 to a fixed page whose (never-rendered) HTML body echoes `q`.
+async fn redirect_body_echo_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FOUND,
+        [("location", "/elsewhere"), ("content-type", "text/html")],
+        format!("<html><body>{q}</body></html>"),
+    )
+}
+
+/// The same body echo on a 302 without `Location`: browsers render it.
+async fn redirect_body_echo_no_location_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FOUND,
+        [("content-type", "text/html")],
+        format!("<html><body>{q}</body></html>"),
+    )
+}
+
 /// Echo the raw request body back inside an HTML shell so a reflection check
 /// can see whatever multipart fields the request actually carried.
 async fn multipart_echo_handler(body: String) -> Html<String> {
@@ -176,6 +200,11 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         .route("/sxss/stored", get(sxss_handler))
         .route("/redirect/decoded", get(redirect_decoded_handler))
         .route("/redirect/json-ct", get(redirect_json_ct_handler))
+        .route("/redirect/body-echo", get(redirect_body_echo_handler))
+        .route(
+            "/redirect/body-echo-no-location",
+            get(redirect_body_echo_no_location_handler),
+        )
         .route(
             "/reflect/multipart-echo",
             axum::routing::post(multipart_echo_handler),
@@ -1037,6 +1066,68 @@ async fn test_redirect_location_body_is_not_renderable_and_carries_no_markup() {
         "stand-in must still contain the payload so R classification works: {}",
         body.text
     );
+}
+
+#[tokio::test]
+async fn test_redirect_body_echo_is_not_renderable_while_location_is_set() {
+    // A 3xx whose `Location` does NOT carry the payload fell through to the
+    // body read and came back `renderable`, so a payload echoed into the
+    // redirect's body minted a Verified/High finding. A browser follows the
+    // `Location` and never renders that body; only without one does it show.
+    let payload = "<svg onload=alert(1) class=dlxmarker>";
+    let addr = start_mock_server("stored").await;
+    let param = make_param();
+    let args = default_scan_args();
+    let streak = std::sync::atomic::AtomicU32::new(0);
+    for (path, renders) in [
+        ("/redirect/body-echo", false),
+        ("/redirect/body-echo-no-location", true),
+    ] {
+        let target = make_target(addr, path);
+        let (kind, body, ..) = check_reflection_with_response(
+            &target.build_client_or_default(),
+            &target,
+            &param,
+            payload,
+            &args,
+            &streak,
+        )
+        .await;
+        assert!(
+            kind.is_some(),
+            "{path}: the body echo is still a reflection"
+        );
+        let body = body.expect("reflection body");
+        assert_eq!(body.renderable, renders, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn test_sxss_redirect_body_echo_is_not_renderable() {
+    // The `--sxss` retrieval path read a followed redirect's body as
+    // renderable, unlike the normal path above.
+    let payload = "<svg onload=alert(1) class=dlxmarker>";
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/reflect/none");
+    let param = make_param();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_retries = 1;
+    let mut url = reqwest::Url::parse(&format!("http://{addr}/redirect/body-echo")).unwrap();
+    url.query_pairs_mut().append_pair("q", payload);
+    args.sxss_url = Some(url.to_string());
+    let streak = std::sync::atomic::AtomicU32::new(0);
+    let (kind, body, ..) = check_reflection_with_response(
+        &target.build_client_or_default(),
+        &target,
+        &param,
+        payload,
+        &args,
+        &streak,
+    )
+    .await;
+    assert!(kind.is_some(), "the stored body echo is still a reflection");
+    assert!(!body.expect("reflection body").renderable);
 }
 
 #[tokio::test]

@@ -603,6 +603,15 @@ fn scan_affecting_flags_change_the_hash() {
             limit: Some(10),
             ..Default::default()
         },
+        // Both decide which findings count toward `--limit`'s early stop.
+        ScanArgs {
+            only_poc: vec!["v".to_string()],
+            ..Default::default()
+        },
+        ScanArgs {
+            min_confidence: Some("high".to_string()),
+            ..Default::default()
+        },
         ScanArgs {
             max_targets_per_host: 5,
             ..Default::default()

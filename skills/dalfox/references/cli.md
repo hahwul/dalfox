@@ -22,11 +22,11 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 
 **`openapi` / `postman`** expand an API spec into one target per operation / request (`src/target_parser/openapi.rs`, `postman.rs`). Explicit only (never auto-detected); file or stdin, same size cap as other inputs.
 - OpenAPI 3.x (JSON/YAML; YAML via serde-saphyr with its parse budget) and Swagger 2.0. Server from operation → path-item → root `servers[0]` with `{vars}` → `default`; path params from `example` / `examples` / schema `default`·`enum`·`example` / typed placeholder (percent-encoded; a path that leaves the server origin is skipped). Query/header/cookie params placed (header `Accept`/`Content-Type`/`Authorization` ignored per spec). Body: first of JSON > form > multipart > XML, from the media `example` or a bounded schema sample (`allOf` merged, `oneOf`/`anyOf` first, `readOnly` dropped). Local `$ref` only — remote refs are never fetched; cycles/depth/width are cut.
-- Postman v2.1/v2.0: folders walked, `{{var}}` from the collection `variable` list (nested OK; environment files not read). Unresolved var in the *host* → that request is skipped (use `--base-url`); elsewhere → placeholder `1`. `:name` path vars from `url.variable`. Body modes: `raw` (CT from language), `urlencoded`, `formdata` (multipart; file parts get a placeholder, never read), `graphql` (JSON). Collection `auth` not applied — pass `-H`.
+- Postman v2.1/v2.0: folders walked, `{{var}}` from the collection `variable` list (nested OK; environment files not read). Unresolved (or empty-valued) var in the *host* → that request is skipped (use `--base-url`); elsewhere → placeholder `1`. `:name` path vars from `url.variable`; a `url` object without `raw` is rebuilt from its parts (disabled query entries dropped). Body modes: `raw` (CT from language), `urlencoded`, `formdata` (multipart; file parts get a placeholder, never read), `graphql` (JSON). Collection `auth` not applied — pass `-H`.
 - Multipart bodies set `Target::multipart`: fields are mined as `MultipartBody` without `-p name:multipart`.
 - DELETE / HEAD / OPTIONS operations and requests are never scanned (destructive with placeholder ids / nothing to reflect); they are counted in a separate stderr warning.
 - Per-entry leniency: a bad operation is skipped, counted in one stderr `[warn] skipped N … operation(s)` line and in `meta.targets_unparsable`; `PARSE_ERROR` only when the document isn't a spec or nothing is scannable. CLI overrides, dedup, scope / `--out-of-scope`, and `--state-file` identity behave exactly as for HAR. CLI only (server/MCP stay one-request-per-call).
-- For every imported input (raw-http, har, openapi, postman): `-H` / `--cookies` **replace** same-named imported headers/cookies (no stale value ahead of yours; `-H 'Cookie: …'` replaces every cookie), and `--dedup-urls exact` keys on URL + method + body (a rotated session or drifting header still collapses), so 30 GraphQL queries to one `POST /graphql` stay 30 targets.
+- For every imported input (raw-http, har, openapi, postman): `-H` / `--cookies` **replace** same-named imported headers/cookies (no stale value ahead of yours; `-H 'Cookie: …'` replaces every cookie; `--cookie-from-raw` replaces same-named cookies too), and `--dedup-urls exact` keys on URL + method + body (a rotated session or drifting header still collapses), so 30 GraphQL queries to one `POST /graphql` stay 30 targets.
 
 ## Output & POC
 
@@ -40,7 +40,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--include-all` | — | Sets both of the above |
 | `--stream-findings` | false | Emit each finding immediately (plain only; see the caveat in `results.md`) |
 | `--limit N` | unlimited | Cap displayed findings |
-| `--limit-result-type` | `all` | Which type counts toward `--limit`: `all`, `v`, `r`, `a`, `i` (case-insensitive). **Not an output filter** |
+| `--limit-result-type` | `all` | Which type counts toward `--limit`: `all`, `v`, `r`, `a`, `i` (case-insensitive). **Not an output filter**. Narrowed to the `--only-poc` tiers when both are set |
 | `--only-poc "v,r"` | all types | Output filter: `v`, `r`, `a`, `i`. This is the one that hides findings |
 | `--min-confidence` | `low` | `high` drops every `low`-confidence finding (all `R`, plus weak AST flows) before output, counts, `--baseline`, and the exit code; `I` is kept |
 | `--baseline PATH` | — | Diff against a previous dalfox JSON/JSONL report; only findings new since it are reported. An ordinary `-f json -o` report is the baseline |
@@ -58,8 +58,8 @@ Every format except `plain` auto-silences the banner.
 | `-d, --data` | Request body (form or JSON) |
 | `--user-agent` | Set a custom `User-Agent` header (e.g. `--user-agent 'Mozilla/5.0'`); unset uses the built-in default |
 | `-p, --param` | Restrict to specific params. Prefer `name:location` (`query`, `body`, `json`, `multipart`, `header`, `cookie`, `graphql`, `xml`; `path` / `fragment` only filter discovered params — they cannot be synthesized). Bare `-p name` still works: if discovery did not seed it, dalfox synthesizes it (infers location from the request, defaults to `query`) so `--skip-discovery -p q` is not a silent no-op |
-| `--include-url` | Regex whitelist (multiple) |
-| `--exclude-url` | Regex blacklist (multiple) |
+| `--include-url` | Regex whitelist (multiple); also gates discovered form actions and external scripts |
+| `--exclude-url` | Regex blacklist (multiple); also gates discovered form actions and external scripts |
 | `--ignore-param` | Skip these parameter names entirely |
 | `--out-of-scope` | Domain pattern to exclude (e.g. `*.dev.example.com`). Repeat the flag per pattern — a comma is not a separator. `*` matches any run of characters (`127.0.0.*`, `*.example.*`); a leading `*.` also matches the apex (`*.example.com` covers `example.com`) |
 | `--out-of-scope-file` | File containing one pattern per line. Unreadable path = fatal `FILE_READ_ERROR` (never a warning: continuing would scan the excluded hosts) |
@@ -68,7 +68,7 @@ Every format except `plain` auto-silences the banner.
 
 | Flag | Effect |
 |------|--------|
-| `--only-discovery` | Stop after parameter discovery (no XSS payloads) |
+| `--only-discovery` | Stop after parameter discovery (no XSS payloads; not with `-f sarif`/`toml`) |
 | `--skip-discovery` | Skip all discovery checks (query/header/cookie/path reflection, forms, fragment) |
 | `--skip-reflection-header` | Skip the blanket sweep of common request headers. Headers named explicitly with `-p name:header` are still probed |
 | `--skip-reflection-cookie` | Skip the blanket sweep over supplied cookies. Cookies named explicitly with `-p name:cookie` are still probed |
@@ -169,7 +169,7 @@ See `references/advanced.md` for recommended WAF combinations.
 ## Other Useful / Diagnostic
 
 - `--cookie-from-raw request.txt` — lift cookies from a captured raw request file (CLI only)
-- `--dry-run` — preflight summary only (parameter discovery + request estimate; no attack payloads). JSON/JSONL include `meta.warnings` when `-p` specs could not be seeded (e.g. `path` / `fragment` only), and `meta.skipped` (`target` + `error_code`) for skipped targets; exits `2` if every target was skipped, like a normal scan (`--only-discovery` behaves the same). MCP equivalent: `preflight_dalfox` (note: preflight intentionally ignores `param` filters for impact estimation)
+- `--dry-run` — preflight summary only (parameter discovery + request estimate; no attack payloads). JSON/JSONL include `meta.warnings` when `-p` specs could not be seeded (e.g. `path` / `fragment` only), and `meta.skipped` (`target` + `error_code`) for skipped targets; exits `2` if every target was skipped, like a normal scan (`--only-discovery` behaves the same). Both refuse `-f sarif` and `toml` (exit `2` with `INVALID_INPUT_TYPE` before sending a request); `-f markdown` prints the plain report. MCP equivalent: `preflight_dalfox` (note: preflight intentionally ignores `param` filters for impact estimation)
 - `--debug` — show DBG lines
 - Global root flags: `--config`, `--debug`, `--no-color`, `--silence`
 

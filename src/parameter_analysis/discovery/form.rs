@@ -10,13 +10,13 @@ pub async fn check_form_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
-    check_form_discovery_with(target, reflection_params, semaphore, false).await;
+    check_form_discovery_with(target, &ScanArgs::default(), reflection_params, semaphore).await;
 }
 
-/// [`check_form_discovery`], optionally keeping form fields whose submission
-/// did not echo the probe marker.
+/// [`check_form_discovery`] under the scan's `args`, which can keep form fields
+/// whose submission did not echo the probe marker.
 ///
-/// `keep_unreflected` is set under `--sxss`. Every probe here keeps a field only
+/// That happens under `--sxss`. Every probe here keeps a field only
 /// when the marker comes back in the *immediate* response, which a stored sink
 /// by definition fails: a comment form's write endpoint answers "saved" and
 /// the value surfaces later, on the page that lists comments. Dropping those
@@ -27,10 +27,11 @@ pub async fn check_form_discovery(
 /// Stage-0 probe still drops any field whose value is never stored.
 pub(crate) async fn check_form_discovery_with(
     target: &Target,
+    args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
-    keep_unreflected: bool,
 ) {
+    let keep_unreflected = args.sxss;
     // Only discover forms when the target doesn't already have POST data
     if target.data.is_some() || target.method.eq_ignore_ascii_case("POST") {
         return;
@@ -44,7 +45,7 @@ pub(crate) async fn check_form_discovery_with(
     let request = crate::utils::build_request(&client, target, method, target.url.clone(), None);
     crate::record_outbound_request().await;
     let html = match crate::utils::http::send_counted(request).await {
-        Ok(resp) => match crate::utils::http::read_body(resp).await {
+        Ok(resp) => match crate::utils::http::read_body_counted(resp).await {
             Ok(text) => text,
             Err(_) => return,
         },
@@ -104,6 +105,7 @@ pub(crate) async fn check_form_discovery_with(
             let action = form.value().attr("action").unwrap_or("");
             let Some(form_url) =
                 crate::utils::http::resolve_probeable_form_action(&target.url, action)
+                    .filter(|u| args.url_in_scope(u.as_str()))
             else {
                 continue;
             };
@@ -389,7 +391,7 @@ pub(crate) async fn check_form_discovery_with(
             );
             crate::record_outbound_request().await;
             if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                && let Ok(text) = crate::utils::http::read_body(resp).await
+                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                 && crate::scanning::markers::probe_reflected(&text)
             {
                 let analysis = ReflectionAnalysis::of(&text);
@@ -483,7 +485,7 @@ pub(crate) async fn check_form_discovery_with(
                     );
                     crate::record_outbound_request().await;
                     if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                        && let Ok(text) = crate::utils::http::read_body(resp).await
+                        && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                         && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
@@ -562,7 +564,7 @@ pub(crate) async fn check_form_discovery_with(
                     );
                     crate::record_outbound_request().await;
                     if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                        && let Ok(text) = crate::utils::http::read_body(resp).await
+                        && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                         && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
@@ -602,7 +604,9 @@ async fn form_field_param(
     keep_unreflected: bool,
     param: Param,
 ) -> Option<Param> {
-    let text = crate::utils::http::read_body(sent.ok()?).await.ok()?;
+    let text = crate::utils::http::read_body_counted(sent.ok()?)
+        .await
+        .ok()?;
     if crate::scanning::markers::probe_reflected(&text) {
         Some(param.with_reflection_analysis(&text))
     } else {

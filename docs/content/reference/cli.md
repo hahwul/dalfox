@@ -75,7 +75,7 @@ See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-inter
 | `--include-all` | — | false | Shorthand for both include flags |
 | `--no-color` | — | false | Disable ANSI colour |
 | `--silence` | `-S` | false | Emit only findings to STDOUT |
-| `--dry-run` | — | false | Discover and plan without sending payloads |
+| `--dry-run` | — | false | Discover and plan without sending payloads (`-f sarif` and `toml` exit `2` with `INVALID_INPUT_TYPE`; `markdown` prints the plain report) |
 | `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`, `--baseline`) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | Cap total results shown (must be at least `1`; omit for no cap) |
@@ -97,7 +97,7 @@ See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for th
 | `--cookies` | — | — | Cookie (repeatable) |
 | `--method` | `-X` | `GET` | HTTP method override (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` / RFC 10008) |
 | `--user-agent` | — | — | Custom User-Agent |
-| `--cookie-from-raw` | — | — | Load cookies from a raw HTTP request file. Fatal (exit `2`) if the file cannot be read or carries no `Cookie:` header — continuing would scan logged out and report `0 XSS` |
+| `--cookie-from-raw` | — | — | Load cookies from a raw HTTP request file; they replace same-named cookies from `--cookies` or an imported request. Fatal (exit `2`) if the file cannot be read or carries no `Cookie:` header — continuing would scan logged out and report `0 XSS` |
 
 ### Session
 
@@ -119,8 +119,8 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--include-url` | — | Scan only URLs matching this regex (unanchored). Repeat the flag for more patterns; a URL must match at least one. An invalid regex is a startup error |
-| `--exclude-url` | — | Skip URLs matching this regex (unanchored). Repeat the flag for more patterns. An invalid regex is a startup error |
+| `--include-url` | — | Scan only URLs matching this regex (unanchored). Repeat the flag for more patterns; a URL must match at least one. Also applies to form actions found on a page (discovery and blind-XSS form injection) and to `--analyze-external-js` scripts. An invalid regex is a startup error |
+| `--exclude-url` | — | Skip URLs matching this regex (unanchored). Repeat the flag for more patterns. Also applies to form actions found on a page (discovery and blind-XSS form injection) and to `--analyze-external-js` scripts, so `--exclude-url /logout` keeps a logout form from being probed. An invalid regex is a startup error |
 | `--ignore-param` | — | Parameter name to skip (exact match). Repeat the flag for more names |
 | `--out-of-scope` | — | Skip targets whose host matches this pattern. `*.example.com` matches `example.com` and every subdomain; any other `*` matches any run of characters (`127.0.0.*`, `*.example.*`); a value without `*` must equal the host. Case-insensitive. Repeat the flag for more patterns: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. A comma is not a separator |
 | `--out-of-scope-file` | — | File of out-of-scope patterns, one per line (blank and `#` lines skipped), same matching as `--out-of-scope`. A path that cannot be read is a fatal `FILE_READ_ERROR` — scanning on without the exclusion list would attack every host it named |
@@ -129,7 +129,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--only-discovery` | false | Stop after discovery, no XSS payloads |
+| `--only-discovery` | false | Stop after discovery, no XSS payloads (no `-f sarif` or `toml`, like `--dry-run`) |
 | `--skip-discovery` | false | Skip all discovery |
 | `--skip-reflection-header` | false | Skip header-based reflection checks |
 | `--skip-reflection-cookie` | false | Skip cookie-based reflection checks |

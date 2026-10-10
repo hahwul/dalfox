@@ -1067,6 +1067,16 @@ pub struct BlindOobArgs {
 pub(crate) const DEFAULT_BLIND_OOB_WAIT_SECS: u64 = 30;
 
 impl ScanArgs {
+    /// `--remote-wordlists` worth fetching up front: dictionary mining is their
+    /// only reader, so with it skipped they would be a wasted request each.
+    pub(crate) fn remote_wordlists_in_use(&self) -> &[String] {
+        if self.skip_mining || self.skip_mining_dict {
+            &[]
+        } else {
+            &self.remote_wordlists
+        }
+    }
+
     /// Effective `--dedup-urls` mode: the operator's choice, else the built-in
     /// [`DEFAULT_DEDUP_URLS`]. The field is an `Option` so config precedence can
     /// tell "unset" from an explicit `exact`; every reader should go through
@@ -1086,10 +1096,47 @@ impl ScanArgs {
             .unwrap_or(BASELINE_MODE_FILTER)
     }
 
+    /// The finding types the `--limit` tally counts, as the filter string
+    /// [`crate::scanning::count_matching_results`] takes (`ALL`, or the type
+    /// letters): `--limit-result-type` narrowed to the `--only-poc` types.
+    /// `--limit` caps what the report displays, so a finding `--only-poc`
+    /// hides must not stop the scan. Empty when the two exclude each other.
+    pub(crate) fn limit_count_filter(&self) -> String {
+        let limit = self.limit_result_type.to_uppercase();
+        if self.only_poc.is_empty() {
+            return limit;
+        }
+        let shown: String = self
+            .only_poc
+            .iter()
+            .map(|s| s.trim().to_uppercase())
+            .collect();
+        if limit == "ALL" {
+            shown
+        } else if shown.contains(&limit) {
+            limit
+        } else {
+            String::new()
+        }
+    }
+
     /// Whether `--min-confidence` drops `r`; see
     /// [`crate::scanning::result::Result::below_min_confidence`].
     pub(crate) fn below_min_confidence(&self, r: &crate::scanning::result::Result) -> bool {
         r.below_min_confidence(self.min_confidence.as_deref())
+    }
+
+    /// Whether `url` passes `--include-url` / `--exclude-url`, for URLs the
+    /// scan finds on its own (form actions, external scripts) rather than the
+    /// target list. Invalid patterns are skipped; startup already rejects them.
+    pub(crate) fn url_in_scope(&self, url: &str) -> bool {
+        if self.include_url.is_empty() && self.exclude_url.is_empty() {
+            return true;
+        }
+        let scope = compiled_url_scope(&self.include_url, &self.exclude_url);
+        let (include, exclude) = &scope.2;
+        (include.is_empty() || include.iter().any(|r| r.is_match(url)))
+            && !exclude.iter().any(|r| r.is_match(url))
     }
 
     /// Effective `--on-session-loss` policy: the operator's choice, else
@@ -1206,6 +1253,39 @@ impl ScanArgs {
             ..Default::default()
         }
     }
+}
+
+/// `--include-url` / `--exclude-url` compiled once and reused by
+/// [`ScanArgs::url_in_scope`], which runs per form action and external script.
+type UrlScope = (
+    Vec<String>,
+    Vec<String>,
+    (Vec<regex::Regex>, Vec<regex::Regex>),
+);
+
+// ponytail: single-entry cache; concurrent server/MCP jobs with different
+// scopes recompile on each switch (still correct). Key by job if that shows up.
+fn compiled_url_scope(include: &[String], exclude: &[String]) -> std::sync::Arc<UrlScope> {
+    use std::sync::{Arc, Mutex};
+    static CACHE: Mutex<Option<Arc<UrlScope>>> = Mutex::new(None);
+    let mut slot = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(hit) = slot.as_ref().filter(|c| c.0 == include && c.1 == exclude) {
+        return Arc::clone(hit);
+    }
+    // Invalid patterns are skipped; startup already rejects them.
+    let compile = |patterns: &[String]| -> Vec<regex::Regex> {
+        patterns
+            .iter()
+            .filter_map(|p| regex::Regex::new(p).ok())
+            .collect()
+    };
+    let scope = Arc::new((
+        include.to_vec(),
+        exclude.to_vec(),
+        (compile(include), compile(exclude)),
+    ));
+    *slot = Some(Arc::clone(&scope));
+    scope
 }
 
 #[cfg(test)]

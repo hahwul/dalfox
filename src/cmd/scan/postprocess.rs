@@ -63,12 +63,13 @@ fn result_priority(result: &Result) -> (u8, u8, u8) {
 /// merged. Shared with the `--stream-findings` printer so the live output folds
 /// the same duplicates the final report does.
 pub(crate) fn ast_dedup_key(result: &Result) -> Option<String> {
-    (result.message_id == 0).then(|| {
-        format!(
-            "{}|{}|{}",
-            result.inject_type, result.method, result.evidence
-        )
-    })
+    ast_dedup_parts(result).map(|(t, m, e)| format!("{t}|{m}|{e}"))
+}
+
+/// [`ast_dedup_key`]'s fields, borrowed, for hot paths that must not allocate
+/// per result.
+pub(crate) fn ast_dedup_parts(result: &Result) -> Option<(&str, &str, &str)> {
+    (result.message_id == 0).then_some((&result.inject_type, &result.method, &result.evidence))
 }
 
 // AST findings can be produced in multiple scan stages (preflight/probe/reflection loop).

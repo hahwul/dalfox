@@ -189,7 +189,6 @@ impl<'a> DomXssVisitor<'a> {
                     if let BindingPattern::BindingIdentifier(id) = &prop.value {
                         let name = id.name.to_string();
                         self.tainted_vars.insert(name.clone());
-                        self.global_taints.insert(name.clone());
                         if let Some(ref src) = source {
                             self.var_aliases.insert(name, src.clone());
                         }
@@ -200,7 +199,6 @@ impl<'a> DomXssVisitor<'a> {
                 {
                     let name = id.name.to_string();
                     self.tainted_vars.insert(name.clone());
-                    self.global_taints.insert(name.clone());
                     if let Some(ref src) = source {
                         self.var_aliases.insert(name, src.clone());
                     }
@@ -216,7 +214,6 @@ impl<'a> DomXssVisitor<'a> {
                     if let BindingPattern::BindingIdentifier(id) = &elem {
                         let name = id.name.to_string();
                         self.tainted_vars.insert(name.clone());
-                        self.global_taints.insert(name.clone());
                         if let Some(ref src) = source {
                             self.var_aliases.insert(name, src.clone());
                         }
@@ -427,6 +424,7 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let response_vars_checkpoint = self.response_object_vars.checkpoint();
+        let image_vars_checkpoint = self.image_element_vars.checkpoint();
         let param_names = self.function_param_bindings(params);
         // `global_taints` is deliberately *not* saved wholesale — see the
         // escape handling below. Only the shadowed parameter names are lifted
@@ -451,6 +449,7 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
         for name in &own_names {
+            self.image_element_vars.remove(name.as_str());
             self.tainted_vars.remove(name.as_str());
             self.var_aliases.remove(name.as_str());
             if self.global_taints.remove(name.as_str()) {
@@ -484,7 +483,10 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
-        self.global_taints.extend(shadowed_globals);
+        self.image_element_vars.rollback(image_vars_checkpoint);
+        for name in shadowed_globals {
+            self.global_taints.insert(name);
+        }
         for (name, source) in escaped {
             if let Some(source) = source {
                 self.var_aliases.insert(name.clone(), source);
@@ -501,7 +503,7 @@ impl<'a> DomXssVisitor<'a> {
     /// same path. A statement form missed here just means a local escapes as
     /// if it were a global — the behaviour function literals had before this
     /// scoping existed at all.
-    fn collect_declared_names(statements: &[Statement<'a>], out: &mut HashSet<String>) {
+    pub(super) fn collect_declared_names(statements: &[Statement<'a>], out: &mut HashSet<String>) {
         for stmt in statements {
             match stmt {
                 Statement::VariableDeclaration(decl) => {

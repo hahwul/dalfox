@@ -255,6 +255,24 @@ fn hydrate_target_lifts_cookie_header_for_server_and_mcp() {
 }
 
 #[test]
+fn hydrate_target_marks_a_raw_multipart_body_like_the_cli() {
+    let args = crate::cmd::scan::ScanArgs {
+        data: Some(
+            "--X\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\nv\r\n--X--\r\n".to_string(),
+        ),
+        ..Default::default()
+    };
+    let t = runner::hydrate_target("http://127.0.0.1:1/", &args).expect("hydrate");
+    assert!(t.multipart);
+    let args = crate::cmd::scan::ScanArgs {
+        data: Some("q=v".to_string()),
+        ..Default::default()
+    };
+    let t = runner::hydrate_target("http://127.0.0.1:1/", &args).expect("hydrate");
+    assert!(!t.multipart);
+}
+
+#[test]
 fn job_status_rejects_unknown_variant() {
     assert!(serde_json::from_str::<JobStatus>("\"finished\"").is_err());
 }
@@ -1928,6 +1946,43 @@ async fn sanitized_results_honor_min_confidence() {
     }
 }
 
+/// The job filters before it folds AST duplicates, as the CLI render does
+/// (`min_confidence_filters_before_ast_dedup`): a `V`/low duplicate must not
+/// win the fold and then take the `A`/high flow down with it.
+#[tokio::test]
+async fn sanitized_results_filter_min_confidence_before_ast_dedup() {
+    use crate::scanning::result::{Confidence, FindingType, Result as ScanResult};
+    let mut a_high = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .data("http://t/")
+        .param("q")
+        .evidence("http://t/:1:1 - d (Source: location.hash, Sink: innerHTML)")
+        .severity("Medium")
+        .build();
+    a_high.confidence = Some(Confidence::High);
+    let mut v_low = a_high.clone();
+    v_low.result_type = FindingType::Verified;
+    v_low.severity = "High".to_string();
+    v_low.confidence = Some(Confidence::Low);
+    let run = runner::ScanRun {
+        results: Arc::new(tokio::sync::Mutex::new(vec![a_high, v_low])),
+        reachability_failed: false,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+        findings_capped: false,
+        warnings: Vec::new(),
+        min_confidence: Some("high".to_string()),
+    };
+    let progress = JobProgress::default();
+    let kept = run.sanitized_results(&progress, false, false).await;
+    assert_eq!(kept.len(), 1, "the high-graded A flow survives");
+    assert_eq!(kept[0].result_type, FindingType::AstDetected);
+    assert_eq!(kept[0].confidence, Some(Confidence::High));
+}
+
 #[test]
 fn scan_option_checks_reject_an_unknown_min_confidence() {
     for ok in ["low", "high"] {
@@ -1947,4 +2002,104 @@ fn scan_option_checks_reject_an_unknown_min_confidence() {
     .validate()
     .unwrap_err();
     assert!(err.contains("min_confidence"), "{err}");
+}
+
+/// The CLI's `SESSION?` advisory (a baseline that redirects to an auth-shaped
+/// URL — maybe an expired SSO session, maybe not) must reach a silenced job's
+/// warnings too, or the caller reads `done` as "session was fine".
+#[tokio::test]
+async fn ambiguous_session_baseline_surfaces_as_job_warning() {
+    use axum::{Router, http::StatusCode, http::header::LOCATION, routing::get};
+
+    let app = Router::new().route(
+        "/",
+        get(|| async { (StatusCode::FOUND, [(LOCATION, "/oauth2/authorize")], "") }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+    target.cookies = vec![("sid".to_string(), "x".to_string())];
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        silence: true,
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(!run.lost_session(), "ambiguous is not a verdict");
+    assert!(
+        run.warnings.iter().any(|w| w.contains("auth-shaped URL")),
+        "the session advisory must reach the job: {:?}",
+        run.warnings
+    );
+}
+
+/// Blind injection writes stored payloads into the target (params × templates
+/// × channels, each paced by `delay`); a cancel landing mid-pass must stop it
+/// rather than keep firing at a target nobody is waiting on.
+#[tokio::test]
+async fn cancel_stops_blind_injection_mid_pass() {
+    use axum::{Router, routing::any};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_h = hits.clone();
+    let app = Router::new().fallback(any(move || {
+        let hits = hits_h.clone();
+        async move {
+            hits.fetch_add(1, Ordering::Relaxed);
+            "ok"
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    // 8 query params × 3 blind templates = 24 requests, 200ms apart (~5s).
+    let mut target = crate::target_parser::parse_target(&format!(
+        "http://{addr}/?a=1&b=1&c=1&d=1&e=1&f=1&g=1&h=1"
+    ))
+    .expect("valid target");
+    target.delay = 200;
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        blind_callback_url: Some("https://cb.example/x".to_string()),
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let trip = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        trip.store(true, Ordering::Relaxed);
+    });
+    let start = std::time::Instant::now();
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(run.was_cancelled);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(3),
+        "cancel must stop blind injection (took {:?}, {} requests)",
+        start.elapsed(),
+        hits.load(Ordering::Relaxed)
+    );
 }

@@ -177,6 +177,32 @@ fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
 }
 
 #[test]
+fn test_pipe_input_lists_its_targets_in_meta() {
+    // `meta.targets` echoed only the positional args, so a piped list — the
+    // whole input — reported `"targets": []`. It names the source (`-`, stdin),
+    // like a list file is named by its path, not by its expanded URLs.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["pipe", "--format", "json", "-S"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute dalfox pipe");
+    child
+        .stdin
+        .take()
+        .expect("child stdin should be piped")
+        .write_all(b"http://127.0.0.1:1/?q=1\n")
+        .expect("failed to write pipe input");
+    let output = child
+        .wait_with_output()
+        .expect("failed waiting for dalfox pipe");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is one JSON document");
+    assert_eq!(json["meta"]["targets"], serde_json::json!(["-"]));
+}
+
+#[test]
 fn test_e2e_file_shadowing_ambiguity_warning() {
     let mut shadow_file = std::env::temp_dir();
     shadow_file.push(format!("dalfox-e2e-shadow-{}.com", std::process::id()));
@@ -581,6 +607,35 @@ fn test_e2e_invalid_scope_regex_is_fatal() {
         stderr.contains("PARSE_ERROR") && stderr.contains("--exclude-url"),
         "stderr:\n{stderr}"
     );
+}
+
+#[test]
+fn test_e2e_preview_modes_refuse_formats_they_cannot_render() {
+    // The dry-run / only-discovery reports exist only as plain text and JSON;
+    // `-f sarif|toml` used to print the plain summary on stdout, which no
+    // SARIF/TOML consumer can parse.
+    for mode in ["--dry-run", "--only-discovery"] {
+        for fmt in ["sarif", "toml"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+                .args(["scan", mode, "-f", fmt, "http://127.0.0.1:1/?q=1"])
+                .output()
+                .expect("failed to execute dalfox scan");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(2), "{mode} {fmt}:\n{stderr}");
+            assert!(output.stdout.is_empty(), "{mode} {fmt} wrote stdout");
+            assert!(stderr.contains(mode), "{mode} {fmt}:\n{stderr}");
+        }
+        // Markdown is for a human reader: it keeps the plain report.
+        let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+            .args(["scan", mode, "-f", "markdown", "http://127.0.0.1:1/?q=1"])
+            .output()
+            .expect("failed to execute dalfox scan");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("does not support --format"),
+            "{mode} markdown:\n{stderr}"
+        );
+    }
 }
 
 /// Every shell `dalfox completion` accepts (i.e. every `clap_complete::Shell`).

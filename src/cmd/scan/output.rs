@@ -582,7 +582,18 @@ pub(crate) async fn render_results(
             .filter(|r| !args.below_min_confidence(r))
             .cloned()
             .collect();
-        let dropped = all.len() - kept.len();
+        // Counted the way the report counts: AST copies of one sink fold into
+        // one finding, so a dropped key counts once, and not at all when a
+        // kept copy still reports it.
+        let mut ast_keys: std::collections::HashSet<String> = kept
+            .iter()
+            .filter_map(super::postprocess::ast_dedup_key)
+            .collect();
+        let dropped = all
+            .iter()
+            .filter(|r| args.below_min_confidence(r))
+            .filter(|r| super::postprocess::ast_dedup_key(r).is_none_or(|k| ast_keys.insert(k)))
+            .count();
         (kept, dropped)
     };
     let mut final_results = dedupe_ast_results(kept);
@@ -648,7 +659,7 @@ pub(crate) async fn render_results(
     //
     // The heuristic's limitation — targets sharing a path-without-query or a
     // parent directory both match one finding — applies only to findings
-    // without an `origin_target` (OOB callbacks, deserialized results).
+    // without an `origin_target` (uncorrelated OOB callbacks, deserialized results).
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let meta = target_meta.lock().await;
@@ -777,7 +788,14 @@ pub(crate) async fn render_results(
     // in five places — and reached only the formats whose copy was remembered.
     let scan_meta = crate::scanning::result::ScanMetadata {
         dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
-        targets: args.targets.clone(),
+        // The targets as named (URLs, or the list/spec file path). A piped
+        // list names nothing on the command line; name its source, `-`, the
+        // way a list file is named by its path rather than its expanded URLs.
+        targets: if args.targets.is_empty() {
+            vec!["-".to_string()]
+        } else {
+            args.targets.clone()
+        },
         scan_duration_ms: scan_elapsed.as_millis() as u64,
         total_requests: requests.sent,
         failed_requests: requests.failed,

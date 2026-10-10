@@ -51,6 +51,12 @@ pub(crate) fn hydrate_target(url: &str, args: &ScanArgs) -> Result<Target, Strin
     t.ignore_return = args.ignore_return.clone();
     t.workers = args.workers;
     t.data = args.data.clone();
+    // Same rule as the CLI's `-d`: a body is multipart only when it carries
+    // its own wire framing.
+    t.multipart = args
+        .data
+        .as_deref()
+        .is_some_and(crate::target_parser::is_raw_multipart);
     t.headers = args
         .headers
         .iter()
@@ -118,11 +124,20 @@ impl ScanRun {
     ) -> Arc<Vec<SanitizedResult>> {
         // The same AST fold the CLI report applies: one DOM sink is found by
         // the preflight pass and again once per parameter, and without it the
-        // job lists (and counts, and caps) the same sink several times.
-        let deduped = crate::cmd::scan::dedupe_ast_results(self.results.lock().await.clone());
-        let kept: Vec<SanitizedResult> = deduped
+        // job lists (and counts, and caps) the same sink several times. The
+        // confidence filter runs first, as in the CLI, so the fold picks the
+        // strongest *surviving* claim rather than a low-graded winner the
+        // filter then drops along with the duplicate it beat.
+        let kept: Vec<ScanResult> = self
+            .results
+            .lock()
+            .await
             .iter()
             .filter(|r| !r.below_min_confidence(self.min_confidence.as_deref()))
+            .cloned()
+            .collect();
+        let kept: Vec<SanitizedResult> = crate::cmd::scan::dedupe_ast_results(kept)
+            .iter()
             .map(|r| r.to_sanitized(include_request, include_response))
             .collect();
         progress
@@ -267,6 +282,45 @@ pub(crate) async fn preflight(
     })
 }
 
+/// The OOB drain window: `blind_oob_wait`, clipped to what is left of a
+/// `scan_timeout` budget (0 = unbounded). The wait counts against the budget —
+/// the documented contract, and what keeps a request inside the server-wide
+/// `--scan-timeout` cap. Only the wait is clipped; the final sweep and the
+/// deregister still run.
+fn oob_drain_wait(
+    wait_secs: u64,
+    scan_timeout: u64,
+    elapsed: std::time::Duration,
+) -> std::time::Duration {
+    let wait = std::time::Duration::from_secs(wait_secs);
+    match scan_timeout {
+        0 => wait,
+        budget => wait.min(std::time::Duration::from_secs(budget).saturating_sub(elapsed)),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn oob_drain_wait_counts_against_scan_timeout() {
+    use std::time::Duration;
+    assert_eq!(
+        oob_drain_wait(600, 0, Duration::from_secs(5)),
+        Duration::from_secs(600)
+    );
+    assert_eq!(
+        oob_drain_wait(600, 10, Duration::from_secs(4)),
+        Duration::from_secs(6)
+    );
+    assert_eq!(
+        oob_drain_wait(3, 10, Duration::from_secs(4)),
+        Duration::from_secs(3)
+    );
+    assert_eq!(
+        oob_drain_wait(30, 10, Duration::from_secs(12)),
+        Duration::ZERO
+    );
+}
+
 /// Run one job's scan to completion and report what it left behind.
 ///
 /// `warn` receives operator-facing warnings so each interface can route them
@@ -390,10 +444,10 @@ pub(crate) async fn execute_scan(
                     // list the caller explicitly asked for and still settles
                     // `done`, which reads as "scanned, found nothing" — so it
                     // goes through `warn` rather than being swallowed.
-                    if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
+                    if (!args.remote_payloads.is_empty() || !args.remote_wordlists_in_use().is_empty())
                         && let Err(e) = crate::utils::init_remote_resources_with_options(
                             &args.remote_payloads,
-                            &args.remote_wordlists,
+                            args.remote_wordlists_in_use(),
                             Some(args.timeout),
                             args.proxy.clone(),
                         )
@@ -412,7 +466,16 @@ pub(crate) async fn execute_scan(
                     // below just before the scan and drained right after, so it
                     // can never outlive the job or leak across concurrent jobs.
                     if args.blind_oob_enabled() {
-                        match crate::oob::OobSession::start(&args.oob_config()).await {
+                        // Registration walks up to N servers × `timeout`; a
+                        // cancel must not wait that out (it would also outlive
+                        // the drain grace and free the job's capacity slot
+                        // while this worker still runs).
+                        let oob_config = args.oob_config();
+                        let started = tokio::select! {
+                            r = crate::oob::OobSession::start(&oob_config) => r,
+                            _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => return,
+                        };
+                        match started {
                             Ok(session) => {
                                 // Successful arming is diagnostic, not a
                                 // warning; the OOB finding is the real signal.
@@ -436,7 +499,6 @@ pub(crate) async fn execute_scan(
                     // source, matching the CLI's `-b`/`--blind-oob` behavior
                     // (`cmd::scan::blind::arm_and_dispatch` injects forms for a
                     // callback-only run too).
-                    let custom = args.custom_blind_xss_payload.as_deref();
                     let source = match (&args.blind_callback_url, &oob_session) {
                         (Some(url), Some(session)) => Some(crate::scanning::CallbackSource::Both {
                             url: url.as_str(),
@@ -455,8 +517,16 @@ pub(crate) async fn execute_scan(
                     if let Some(source) = source
                         && !cancel_flag.load(std::sync::atomic::Ordering::Relaxed)
                     {
-                        crate::scanning::blind_scanning_with(target, source, custom).await;
-                        crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                        // Params × templates × channels, each paced by
+                        // `delay`: a cancel mid-pass stops the stored writes.
+                        let inject = async {
+                            crate::scanning::blind_scanning_with(target, source, args.as_ref()).await;
+                            crate::scanning::blind_scan_forms_with(target, source, args.as_ref()).await;
+                        };
+                        tokio::select! {
+                            _ = inject => {}
+                            _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => return,
+                        }
                         oob_injected = oob_session.is_some();
                     }
 
@@ -593,17 +663,14 @@ pub(crate) async fn execute_scan(
                                         &target.method,
                                         posture,
                                     );
-                                if !ast_batch.is_empty() {
-                                    let added = crate::scanning::count_matching_results(
-                                        &ast_batch,
-                                        &args.limit_result_type.to_uppercase(),
-                                        args.min_confidence.as_deref(),
-                                    );
-                                    let mut guard = results.lock().await;
-                                    guard.extend(ast_batch);
-                                    findings_count
-                                        .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
-                                }
+                                crate::scanning::accumulate_findings(
+                                    &results,
+                                    &findings_count,
+                                    ast_batch,
+                                    &args.limit_count_filter(),
+                                    args.min_confidence.as_deref(),
+                                )
+                                .await;
                                 if crate::utils::response_has_markup_document(
                                     response_content_type,
                                     &body,
@@ -620,7 +687,7 @@ pub(crate) async fn execute_scan(
                                         &results,
                                         &findings_count,
                                         ext_batch,
-                                        &args.limit_result_type.to_uppercase(),
+                                        &args.limit_count_filter(),
                                         args.min_confidence.as_deref(),
                                     )
                                     .await;
@@ -680,6 +747,14 @@ pub(crate) async fn execute_scan(
                     session_lost = session_baseline
                         .as_ref()
                         .and_then(crate::cmd::scan::session::baseline_warning);
+                    // The CLI's print-only `SESSION?` heads-up; a silenced job
+                    // has no stderr, so it goes on the warning channel.
+                    if let Some(note) = session_baseline
+                        .as_ref()
+                        .and_then(crate::cmd::scan::session::baseline_advisory)
+                    {
+                        warn(&note);
+                    }
 
                     // `args.silence` is already `true` (set at construction), and
                     // `analyze_parameters` takes `&ScanArgs`, so pass the shared
@@ -720,6 +795,7 @@ pub(crate) async fn execute_scan(
                             session.clone(),
                             results.clone(),
                             findings_count.clone(),
+                            &args.limit_count_filter(),
                             cancel_flag.clone(),
                             true,
                         ));
@@ -765,6 +841,7 @@ pub(crate) async fn execute_scan(
     // tripped so any in-flight workers wind down at their next checkpoint, and
     // the job settles as `cancelled` with whatever partial results it gathered
     // (plus an explanatory error_message) — the same shape as a user cancel.
+    let scan_started = std::time::Instant::now();
     let timed_out = run_within_scan_budget(args.scan_timeout, &cancel_flag, scan_fut).await;
 
     // Drain late OOB callbacks and deregister — OUTSIDE the budget, so a
@@ -783,9 +860,17 @@ pub(crate) async fn execute_scan(
         {
             std::time::Duration::ZERO
         } else {
-            std::time::Duration::from_secs(args.blind_oob_wait())
+            oob_drain_wait(
+                args.blind_oob_wait(),
+                args.scan_timeout,
+                scan_started.elapsed(),
+            )
         };
-        poller.finish(grace).await;
+        // The poller is silenced here, so what it would have printed goes on
+        // the job's warning channel: a dead OAST poll path is not a clean scan.
+        for w in poller.finish(grace).await {
+            warn(&w);
+        }
     } else if let Some(session) = &oob_session {
         // Registered but never polled (e.g. cancelled during registration):
         // still release the session so it is not left armed on the server.

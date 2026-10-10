@@ -23,7 +23,7 @@ use axum::response::Response;
 use axum::routing::{any, get};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -3241,7 +3241,7 @@ async fn test_run_preflight_and_analysis_analyze_external_js_produces_finding() 
     let mut host_groups = std::collections::BTreeMap::new();
     host_groups.insert(host, vec![target]);
 
-    run_preflight_and_analysis(&args, &mut host_groups, &state).await;
+    run_preflight_and_analysis(&args, &mut host_groups, &state, &AtomicBool::new(false)).await;
 
     let results = state.results.lock().await;
     assert!(
@@ -3313,7 +3313,13 @@ async fn analysis_runs_host_groups_concurrently() {
         );
     }
     let t = std::time::Instant::now();
-    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![])).await;
+    run_preflight_and_analysis(
+        &args,
+        &mut groups,
+        &make_scan_state(vec![]),
+        &AtomicBool::new(false),
+    )
+    .await;
     let elapsed = t.elapsed();
     assert!(
         elapsed < std::time::Duration::from_millis(1500),
@@ -3321,6 +3327,34 @@ async fn analysis_runs_host_groups_concurrently() {
     );
     assert!(peak.load(std::sync::atomic::Ordering::SeqCst) > 1);
     assert!(groups.values().all(|g| g.len() == 1));
+}
+
+// Ctrl-C during preflight/analysis was ignored: the stage took no cancel flag,
+// so every remaining target was still preflighted, discovered and mined (hours
+// on a mass list) before the scan loop noticed and marked them all
+// interrupted. Once the flag is set no new target may be dispatched, and the
+// undispatched ones must still reach the scan loop so they are reported
+// `incomplete` instead of vanishing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn analysis_dispatches_nothing_after_ctrl_c() {
+    use super::analysis::run_preflight_and_analysis;
+    let (addr, peak) = spawn_slow_counting_server(20).await;
+    let args = analysis_only_args(2);
+    let mut groups = std::collections::BTreeMap::new();
+    groups.insert(
+        "h".to_string(),
+        (0..5)
+            .map(|i| parse_target(&format!("http://{addr}/?q={i}")).unwrap())
+            .collect::<Vec<_>>(),
+    );
+    let cancel = AtomicBool::new(true);
+    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![]), &cancel).await;
+    assert_eq!(
+        peak.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no target may be preflighted after Ctrl-C"
+    );
+    assert_eq!(groups["h"].len(), 5, "undispatched targets must be kept");
 }
 
 // The shared bound is still a bound: with `--max-concurrent-targets 1`, targets
@@ -3341,7 +3375,13 @@ async fn analysis_bound_applies_across_host_groups() {
         );
     }
     let t = std::time::Instant::now();
-    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![])).await;
+    run_preflight_and_analysis(
+        &args,
+        &mut groups,
+        &make_scan_state(vec![]),
+        &AtomicBool::new(false),
+    )
+    .await;
     assert_eq!(peak.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(t.elapsed() >= std::time::Duration::from_millis(800));
     assert!(groups.values().all(|g| g.len() == 2));
@@ -3380,7 +3420,7 @@ async fn analysis_restores_survivors_per_group_in_order() {
         ],
     );
     let state = make_scan_state(vec![]);
-    run_preflight_and_analysis(&args, &mut groups, &state).await;
+    run_preflight_and_analysis(&args, &mut groups, &state, &AtomicBool::new(false)).await;
 
     let urls = |k: &str| -> Vec<String> {
         groups[k]
@@ -3638,6 +3678,45 @@ async fn blind_dispatch_respects_per_host_cap() {
     assert!(
         !seen.iter().any(|p| p == "/two" || p == "/three"),
         "capped-out targets must receive no requests, saw {seen:?}"
+    );
+}
+
+/// A target preflight drops (here: content-type mismatch) is never scanned,
+/// so it must not receive stored blind payloads either.
+#[tokio::test]
+async fn blind_dispatch_skips_targets_preflight_dropped() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let s = seen.clone();
+    let app = Router::new().fallback(any(move |uri: axum::http::Uri| {
+        let s = s.clone();
+        async move {
+            s.lock().unwrap().push(uri.to_string());
+            ([("content-type", "image/png")], "png")
+        }
+    }));
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let args = ScanArgs {
+        targets: vec![format!("http://{addr}/img?a=1")],
+        blind_callback_url: Some("https://cb.example/x".to_string()),
+        skip_mining: true,
+        skip_discovery: true,
+        skip_waf_probe: true,
+        ..default_scan_args()
+    };
+    let _ = super::run_scan(&args).await;
+    server.abort();
+
+    let seen = seen.lock().unwrap();
+    assert!(!seen.is_empty(), "preflight ran");
+    assert!(
+        !seen.iter().any(|u| u.contains("cb.example")),
+        "a content-type-mismatched target got blind payloads: {seen:?}"
     );
 }
 
@@ -4172,6 +4251,37 @@ async fn min_confidence_filters_before_ast_dedup() {
     assert_eq!(v["meta"]["findings_count"], 1, "{out}");
     assert_eq!(v["findings"][0]["type"], "A");
     assert_eq!(v["findings"][0]["confidence"], "high");
+}
+
+/// `meta.min_confidence.dropped` counts findings the report lost, not raw
+/// copies: one low-graded DOM sink re-found by three passes is one finding
+/// in the unfiltered report, so filtering it drops one.
+#[tokio::test]
+async fn min_confidence_dropped_counts_folded_ast_duplicates_once() {
+    use crate::scanning::result::Confidence;
+    let ast = |param: &str| {
+        let mut r = ScanResult::builder(FindingType::AstDetected)
+            .inject_type("DOM-XSS")
+            .data("https://example.com")
+            .param(param)
+            .evidence("https://example.com:1:1 - d (Source: location.hash, Sink: innerHTML)")
+            .severity("Medium")
+            .build();
+        r.confidence = Some(Confidence::Low);
+        r
+    };
+    let all = vec![ast("-"), ast("a"), ast("b")];
+    let (out, _) =
+        render_with_min_confidence(None, all.clone(), "minconf_dropped_unfiltered").await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 1, "the three copies fold");
+    let (out, _) = render_with_min_confidence(Some("high"), all, "minconf_dropped_folded").await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 0);
+    assert_eq!(
+        v["meta"]["min_confidence"],
+        serde_json::json!({"level": "high", "dropped": 1})
+    );
 }
 
 /// The `--stream-findings` printer skips what `--min-confidence` drops (and

@@ -121,9 +121,10 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 /// payloads (checked in Stage 5), and its DOM payloads (verified in Stage 6).
 pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 
-/// Count how many results in `results` match the `--limit-result-type` filter
-/// and survive `--min-confidence` (`min_confidence`, the raw option value).
-/// `filter` must already be uppercased (normalised once at scan start).
+/// Count how many results in `results` match `filter` and survive
+/// `--min-confidence` (`min_confidence`, the raw option value). `filter` is
+/// [`ScanArgs::limit_count_filter`]: `ALL`, or the uppercase type letters that
+/// count (normalised once at scan start).
 ///
 /// This is the findings tally behind `--limit`'s early stop, the deep-scan
 /// findings cap, the multi-target ticker, and the REST/MCP live
@@ -138,8 +139,49 @@ pub(crate) fn count_matching_results(
     results
         .iter()
         .filter(|r| !r.below_min_confidence(min_confidence))
-        .filter(|r| filter == "ALL" || r.result_type.short() == filter)
+        .filter(|r| filter == "ALL" || filter.contains(r.result_type.short()))
         .count()
+}
+
+/// [`count_matching_results`] for `batch` as it is appended to `existing`,
+/// counting an AST finding only when the report will not fold it into one
+/// already counted: `dedupe_ast_results` keeps one finding per
+/// `ast_dedup_key`, and every parameter's probe re-finds the same page-level
+/// sink.
+// ponytail: a key counts once any member matches; under `--limit-result-type a`
+// a later `V` duplicate wins the fold and the counted `A` is not reported.
+pub(crate) fn count_new_matching_results(
+    existing: &[crate::scanning::result::Result],
+    batch: &[crate::scanning::result::Result],
+    filter: &str,
+    min_confidence: Option<&str>,
+) -> usize {
+    let matches = |r: &&crate::scanning::result::Result| {
+        !r.below_min_confidence(min_confidence)
+            && (filter == "ALL" || filter.contains(r.result_type.short()))
+    };
+    // Borrowed keys: this runs under the results lock on every flush, so the
+    // walk over `existing` must not allocate per result.
+    use crate::cmd::scan::ast_dedup_parts as ast_key;
+    let mut seen: Option<HashSet<(&str, &str, &str)>> = None;
+    let mut added = 0;
+    for r in batch.iter().filter(matches) {
+        let Some(key) = ast_key(r) else {
+            added += 1;
+            continue;
+        };
+        let seen = seen.get_or_insert_with(|| {
+            existing
+                .iter()
+                .filter(matches)
+                .filter_map(ast_key)
+                .collect()
+        });
+        if seen.insert(key) {
+            added += 1;
+        }
+    }
+    added
 }
 
 /// Per-target "a finding already landed for this injection point" sets, keyed
@@ -637,14 +679,14 @@ impl ScanWorkerCtx {
         }
         let mut batch = std::mem::take(local_results);
         crate::scanning::result::stamp_origin(&mut batch, self.target.url.as_str());
-        let added = count_matching_results(
-            &batch,
+        accumulate_findings(
+            &self.results,
+            &self.findings_count,
+            batch,
             &self.limit_result_type,
             self.args.min_confidence.as_deref(),
-        );
-        let mut guard = self.results.lock().await;
-        guard.extend(batch);
-        self.findings_count.fetch_add(added, Ordering::Relaxed);
+        )
+        .await;
     }
 
     /// Scan a single parameter end-to-end: acquire a worker permit, probe
@@ -1847,7 +1889,7 @@ pub async fn run_scanning(
     let req_budget = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
         effective_workers,
     )));
-    let limit_result_type: Arc<str> = Arc::from(args.limit_result_type.to_uppercase());
+    let limit_result_type: Arc<str> = Arc::from(args.limit_count_filter());
 
     // Reset WAF block counters for this scan
     crate::WAF_BLOCK_COUNT.store(0, Ordering::Relaxed);

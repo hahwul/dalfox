@@ -484,8 +484,9 @@ the moment of the `DELETE`:
 `status` is `done`, `error` or `cancelled`, the same value `GET /scan/{id}`
 reports. `error_message` is that endpoint's `error_message` too: `null` for a
 clean finish or a plain cancel, otherwise the reason (target unreachable, a
-`scan_timeout` expiry, lost session, worker panic). The target is under `url`
-here, not `target`. The POST goes through the
+`scan_timeout` expiry, lost session, worker panic). A `warnings` list is added
+when the job has one, exactly as `GET /scan/{id}` reports it. The target is
+under `url` here, not `target`. The POST goes through the
 scan's own proxy and TLS settings, times out after 10 seconds, and is not
 retried.
 
@@ -559,7 +560,7 @@ findings. Partial results stay attached. For a scan with no credentials and no
 
 Softer problems that don't fail the scan still reach you: `GET /scan/{id}` adds
 a `warnings` list (absent when empty) for conditions such as `blind_oob` failing
-to register with any server, a `session_check` baseline that could not be
+to register with any server or failing to poll it, a `session_check` baseline that could not be
 captured (monitoring inactive), or the discovered-parameter cap. A `done` scan
 with zero findings and a non-empty `warnings` is not proof of a clean target.
 

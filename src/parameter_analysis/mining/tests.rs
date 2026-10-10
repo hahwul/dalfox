@@ -1627,6 +1627,52 @@ async fn test_mine_parameters_declared_multipart_target_mines_every_field_as_mul
 }
 
 #[tokio::test]
+async fn test_mine_parameters_raw_http_multipart_capture_mines_its_fields() {
+    // A captured (Burp / raw-http) `multipart/form-data` request keeps its
+    // body verbatim. Every multipart reader parsed `data` as urlencoded, so
+    // the capture yielded zero parameters and the scan reported clean
+    // without testing one field.
+    let addr = start_raw_body_reflect_server().await;
+    let raw = format!(
+        "POST /r HTTP/1.1\r\nHost: {addr}\r\n\
+         Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryAb12\r\n\r\n\
+         ------WebKitFormBoundaryAb12\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\na\r\n\
+         ------WebKitFormBoundaryAb12\r\nContent-Disposition: form-data; name=\"up\"; filename=\"x.txt\"\r\n\
+         Content-Type: text/plain\r\n\r\nb\r\n\
+         ------WebKitFormBoundaryAb12--\r\n"
+    );
+    let mut target = crate::target_parser::parse_raw_http_request(&raw).expect("raw http");
+    let mut args = default_scan_args();
+    args.skip_mining = true;
+    args.data = target.data.clone();
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    mine_parameters(
+        &mut target,
+        &args,
+        reflection_params.clone(),
+        Arc::new(tokio::sync::Semaphore::new(2)),
+        None,
+    )
+    .await;
+
+    let mut got: Vec<(String, Location)> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .map(|p| (p.name.clone(), p.location.clone()))
+        .collect();
+    got.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        got,
+        vec![
+            ("note".to_string(), Location::MultipartBody),
+            ("up".to_string(), Location::MultipartBody)
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_mine_parameters_multipart_survives_same_named_body_param() {
     // `-d file=a -p file:multipart`: `probe_body_params` seeds `file` as a Body
     // param from the same `-d`, but the multipart slot must still be seeded —
@@ -2124,6 +2170,34 @@ async fn probe_xml_body_params_noop_on_json_body() {
 }
 
 #[tokio::test]
+async fn probe_xml_body_params_fires_on_openapi_vendor_xml_body() {
+    // An OpenAPI `application/vnd.*+xml` request body keeps its declared
+    // Content-Type; it is XML and must be mined as XML, not as a form.
+    let addr = start_xml_server().await;
+    let spec = format!(
+        r#"{{"openapi":"3.0.0","servers":[{{"url":"http://{addr}"}}],"paths":{{"/xml":{{"post":{{
+          "requestBody":{{"content":{{"application/vnd.acme+xml":{{"example":"<req><msg>seed</msg></req>"}}}}}}}}}}}}}}"#
+    );
+    let target = crate::target_parser::parse_openapi(&spec, None)
+        .expect("spec parses")
+        .targets
+        .remove(0);
+    let mut args = default_scan_args();
+    args.data = target.data.clone();
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_xml_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    assert!(
+        reflection_params
+            .lock()
+            .await
+            .iter()
+            .any(|p| p.name == "msg" && p.location == Location::XmlBody)
+    );
+}
+
+#[tokio::test]
 async fn probe_xml_body_params_fires_on_xml_prolog_without_content_type() {
     // An `<?xml` prolog is a strong enough signal to probe even when the user
     // forgot the Content-Type header.
@@ -2154,5 +2228,54 @@ fn test_detect_js_breakout_with_marker_skips_quoted_gt_in_open_tag() {
     assert_eq!(
         detect_js_breakout_with_marker(body, "4815162342").as_deref(),
         Some("\"])")
+    );
+}
+
+/// The dictionary stage re-fetches a remote wordlist whenever the startup
+/// fetch left nothing usable cached (it failed, or came back partial). That
+/// retry must go out on the scan's own network settings: it fetched with
+/// `RemoteFetchOptions::default()`, so under `--proxy` the wordlist request
+/// bypassed the proxy and went direct.
+#[tokio::test]
+async fn dictionary_remote_wordlist_fetch_goes_through_proxy() {
+    use axum::extract::Request;
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let log = seen.clone();
+    // Plain-HTTP forward proxy: reqwest sends the absolute-form URI here.
+    let app = Router::new().fallback(move |req: Request| {
+        let log = log.clone();
+        async move {
+            log.lock().unwrap().push(req.uri().to_string());
+            "proxiedword\n"
+        }
+    });
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind proxy");
+    let proxy_addr = listener.local_addr().expect("proxy addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    // `.invalid` never resolves, so only the proxy can answer this fetch.
+    let provider = "dictproxytest";
+    crate::payload::register_wordlist_provider(
+        provider,
+        vec!["http://dalfox-dict-proxy-test.invalid/wl.txt".to_string()],
+    );
+    let target = parse_target("http://127.0.0.1:1/").expect("parse target");
+    let mut args = default_scan_args();
+    args.remote_wordlists = vec![provider.to_string()];
+    args.proxy = Some(format!("http://{proxy_addr}"));
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+    probe_dictionary_params(&target, &args, reflection_params, semaphore, None).await;
+
+    let seen = seen.lock().unwrap().clone();
+    assert!(
+        seen.iter()
+            .any(|u| u.contains("dalfox-dict-proxy-test.invalid")),
+        "remote wordlist fetch must honor --proxy, proxy saw {seen:?}"
     );
 }

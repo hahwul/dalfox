@@ -833,11 +833,17 @@ pub(crate) fn decide_retry(
 /// that drops requests yields an empty finding list that reads as a verdict.
 /// Counting here keeps `failed_requests` aligned with the `total_requests`
 /// these stages already tick via `record_outbound_request`.
+///
+/// A 429 counts too: the rate limiter answered instead of the application, so
+/// the probe was never tested, and a fully throttled target otherwise reads
+/// as clean.
 pub async fn send_counted(
     request_builder: RequestBuilder,
 ) -> Result<reqwest::Response, reqwest::Error> {
     let result = request_builder.send().await;
-    if result.is_err() {
+    if result.as_ref().map_or(true, |r| {
+        r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+    }) {
         crate::tick_request_failure();
     }
     result
@@ -982,10 +988,11 @@ pub(crate) async fn read_body(resp: reqwest::Response) -> Result<String, reqwest
     read_body_capped(resp, MAX_RESPONSE_BODY_BYTES).await
 }
 
-/// [`read_body`] for injection-phase responses: a read that fails mid-body
-/// (reset, early close, stall until the timeout) is a payload that was sent but
-/// never tested, so it ticks `failed_requests` like [`send_counted`] does for a
-/// failed send instead of reading as "no reflection". Kept apart from
+/// [`read_body`] for responses from the scanned target (preflight, discovery,
+/// mining, injection): a read that fails mid-body (reset, early close, stall
+/// until the timeout) is a probe or payload that was sent but never tested, so
+/// it ticks `failed_requests` like [`send_counted`] does for a failed send
+/// instead of reading as "no reflection". Kept apart from
 /// `read_body` because the OOB poller and session probe share that one and must
 /// not flip a scan to `incomplete`.
 pub(crate) async fn read_body_counted(resp: reqwest::Response) -> Result<String, reqwest::Error> {

@@ -131,10 +131,10 @@ dalfox scan ... --include-response
 JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메타데이터 엔벨로프를 담습니다.
 
 - `dalfox_version`
-- `targets` (입력 대상)
+- `targets` (지정한 입력 대상: URL 또는 목록/명세 파일 경로. 파이프로 받은 목록은 `-`(stdin)로 표시됩니다)
 - `scan_duration_ms`
 - `total_requests`
-- `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃). 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다
+- `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃, 본문이 도중에 끊긴 경우)와 HTTP 429로 거절된 탐색·마이닝 프로브 수. 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다
 - `findings_count`
 - `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 세션이 끊긴 경우 `error_code`(Ctrl-C / `--limit` / `--scan-timeout`으로 도중에 끊긴 대상은 `error_code` 없이 `incomplete`. 세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`도), 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/#거의-같은-url-묶기) 모드와 그것이 병합한 대상 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
@@ -149,7 +149,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 
 **TOML**에서는 최상위 `[meta]` 테이블로 나타납니다(탐지 결과는 `[[results]]` 아래).
 
-**Markdown**에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다. 실패한 요청, incomplete, 중복 제거된 대상, 베이스라인, 재개처럼 무슨 일이 있었을 때만 의미 있는 행은 그때만 나타납니다.
+**Markdown**에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다. 실패한 요청, incomplete, 중복 제거된 대상, 베이스라인, 재개, `--min-confidence`처럼 무슨 일이 있었을 때만 의미 있는 행은 그때만 나타납니다.
 
 Plain 텍스트 출력은 탐지 결과만 담습니다.
 
