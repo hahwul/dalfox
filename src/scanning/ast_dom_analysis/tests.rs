@@ -5420,6 +5420,7 @@ open.onsuccess = function (e) {
 }
 mod expression_regressions;
 mod hunt_regressions;
+mod library_fp_regressions;
 mod scope_cost;
 
 #[test]

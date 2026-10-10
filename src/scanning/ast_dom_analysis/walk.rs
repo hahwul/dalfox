@@ -484,7 +484,9 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
-        self.global_taints.extend(shadowed_globals);
+        for name in shadowed_globals {
+            self.global_taints.insert(name);
+        }
         for (name, source) in escaped {
             if let Some(source) = source {
                 self.var_aliases.insert(name.clone(), source);
@@ -501,7 +503,7 @@ impl<'a> DomXssVisitor<'a> {
     /// same path. A statement form missed here just means a local escapes as
     /// if it were a global — the behaviour function literals had before this
     /// scoping existed at all.
-    fn collect_declared_names(statements: &[Statement<'a>], out: &mut HashSet<String>) {
+    pub(super) fn collect_declared_names(statements: &[Statement<'a>], out: &mut HashSet<String>) {
         for stmt in statements {
             match stmt {
                 Statement::VariableDeclaration(decl) => {

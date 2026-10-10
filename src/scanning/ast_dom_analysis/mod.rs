@@ -263,6 +263,9 @@ pub struct DomXssVulnerability {
 struct FunctionSummary {
     tainted_param_sinks: HashMap<usize, String>,
     tainted_param_returns: HashMap<usize, String>,
+    /// Outer field paths (`cfg.html`) and globals the body writes a tainted
+    /// parameter into, applied at a call site that passes a tainted argument.
+    tainted_param_writes: HashMap<usize, (Vec<String>, Vec<String>)>,
     return_without_tainted_params: Option<String>,
 }
 
@@ -381,7 +384,7 @@ struct DomXssVisitor<'a> {
     /// Field-level taint tracking: "obj.field" -> source
     field_taints: ScopedMap<String, String>,
     /// Top-level global variable taint tracking
-    global_taints: HashSet<String>,
+    global_taints: ScopedSet<String>,
     /// Track `urlVar -> base source` for `new URL(tainted)` instances.
     url_object_sources: HashMap<String, String>,
     /// Track `paramsVar -> base source` for `url.searchParams` aliases.
@@ -744,7 +747,7 @@ impl<'a> DomXssVisitor<'a> {
             source_code,
             line_starts,
             field_taints: Default::default(),
-            global_taints: HashSet::new(),
+            global_taints: Default::default(),
             url_object_sources: HashMap::new(),
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),

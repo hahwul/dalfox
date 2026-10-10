@@ -421,8 +421,8 @@ impl<'a> DomXssVisitor<'a> {
                 .or(summary_key);
         }
         let alias_owned = self.get_alias_for_callee_identifier(call).cloned();
-        if let Some(callee_key) = summary_key
-            && let Some(param_sinks) = self.function_summaries.get(&callee_key).map(|summary| {
+        if let Some(callee_key) = summary_key.as_ref()
+            && let Some(param_sinks) = self.function_summaries.get(callee_key).map(|summary| {
                 summary
                     .tainted_param_sinks
                     .iter()
@@ -436,6 +436,27 @@ impl<'a> DomXssVisitor<'a> {
                 if tainted {
                     self.report_vulnerability_with_source(call.span(), &sink_name, source_hint);
                     break;
+                }
+            }
+        }
+        if let Some(writes) = summary_key
+            .as_ref()
+            .and_then(|key| self.function_summaries.get(key))
+            .map(|summary| summary.tainted_param_writes.clone())
+        {
+            for (idx, (fields, globals)) in writes {
+                let (tainted, source) =
+                    self.resolve_param_argument_taint(call, alias_owned.as_ref(), idx);
+                if !tainted {
+                    continue;
+                }
+                let source = source.unwrap_or_else(|| "unknown".to_string());
+                for path in fields {
+                    self.field_taints.insert(path, source.clone());
+                }
+                for name in globals {
+                    self.var_aliases.insert(name.clone(), source.clone());
+                    self.global_taints.insert(name);
                 }
             }
         }

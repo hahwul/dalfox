@@ -48,6 +48,7 @@ impl<'a> DomXssVisitor<'a> {
             FunctionSummary {
                 tainted_param_sinks: HashMap::new(),
                 tainted_param_returns: HashMap::new(),
+                tainted_param_writes: HashMap::new(),
                 return_without_tainted_params: None,
             },
         );
@@ -78,10 +79,24 @@ impl<'a> DomXssVisitor<'a> {
         let mut summary = FunctionSummary {
             tainted_param_sinks: HashMap::new(),
             tainted_param_returns: HashMap::new(),
+            tainted_param_writes: HashMap::new(),
             return_without_tainted_params: None,
         };
 
+        // A per-parameter pass assumes its parameter is tainted, so the field
+        // and global writes it makes are rolled back with it and recorded as
+        // `tainted_param_writes` instead — applied only where a call actually
+        // passes a tainted argument. Writes rooted at a local or a parameter
+        // die with the call.
+        let mut locals: HashSet<String> = params.iter().cloned().collect();
+        Self::collect_declared_names(body_stmts, &mut locals);
+        let is_outer = |path: &String| {
+            let root = path.split(['.', '[']).next().unwrap_or(path);
+            root != "this" && !locals.contains(root)
+        };
         for (idx, param_name) in params.iter().enumerate() {
+            let field_taints_checkpoint = self.field_taints.checkpoint();
+            let global_taints_checkpoint = self.global_taints.checkpoint();
             self.tainted_vars.clear();
             self.var_aliases.clear();
             self.tainted_vars.insert(param_name.clone());
@@ -105,6 +120,23 @@ impl<'a> DomXssVisitor<'a> {
             }
             self.vulnerabilities.truncate(before);
             self.tainted_return_sources.clear();
+            let fields: Vec<String> = self
+                .field_taints
+                .keys_added_since(&field_taints_checkpoint)
+                .into_iter()
+                .filter(is_outer)
+                .collect();
+            let globals: Vec<String> = self
+                .global_taints
+                .keys_added_since(&global_taints_checkpoint)
+                .into_iter()
+                .filter(is_outer)
+                .collect();
+            self.global_taints.rollback(global_taints_checkpoint);
+            self.field_taints.rollback(field_taints_checkpoint);
+            if !fields.is_empty() || !globals.is_empty() {
+                summary.tainted_param_writes.insert(idx, (fields, globals));
+            }
         }
 
         // Also capture return taint that does not depend on tainted parameters
