@@ -1103,6 +1103,34 @@ async fn test_redirect_body_echo_is_not_renderable_while_location_is_set() {
 }
 
 #[tokio::test]
+async fn test_sxss_redirect_body_echo_is_not_renderable() {
+    // The `--sxss` retrieval path read a followed redirect's body as
+    // renderable, unlike the normal path above.
+    let payload = "<svg onload=alert(1) class=dlxmarker>";
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/reflect/none");
+    let param = make_param();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_retries = 1;
+    let mut url = reqwest::Url::parse(&format!("http://{addr}/redirect/body-echo")).unwrap();
+    url.query_pairs_mut().append_pair("q", payload);
+    args.sxss_url = Some(url.to_string());
+    let streak = std::sync::atomic::AtomicU32::new(0);
+    let (kind, body, ..) = check_reflection_with_response(
+        &target.build_client_or_default(),
+        &target,
+        &param,
+        payload,
+        &args,
+        &streak,
+    )
+    .await;
+    assert!(kind.is_some(), "the stored body echo is still a reflection");
+    assert!(!body.expect("reflection body").renderable);
+}
+
+#[tokio::test]
 async fn test_redirect_location_stand_in_yields_no_dom_marker_evidence() {
     // The precise false-positive mechanism: `classify_dom_evidence` finds the
     // `dalfox` marker in the old synthetic wrapper. Pin that the text now

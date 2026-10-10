@@ -2241,6 +2241,12 @@ impl ReflectionBody {
     }
 }
 
+/// A 3xx with a `Location` is followed, not rendered, so a body echo there is
+/// a reflection but never executes.
+fn is_followed_redirect(resp: &reqwest::Response) -> bool {
+    resp.status().is_redirection() && resp.headers().contains_key("location")
+}
+
 /// Status/header-level suppression gates every injection response must pass
 /// before a reflection may be recorded from it.
 ///
@@ -2704,6 +2710,7 @@ async fn fetch_injection_response(
                 .unwrap_or("")
                 .to_string();
             let is_js_content_type = crate::utils::is_javascript_content_type(&content_type);
+            let followed_redirect = is_followed_redirect(&resp);
             let text = crate::utils::http::read_body_counted(resp).await.ok()?;
             if text.is_empty() || !response_body_supports_xss(&content_type, &text) {
                 return None;
@@ -2721,10 +2728,9 @@ async fn fetch_injection_response(
                 );
                 return None;
             }
-            Some((
-                ReflectionBody::rendered(text).with_js_content_type(is_js_content_type),
-                crate::utils::is_xml_content_type(&content_type),
-            ))
+            let mut body = ReflectionBody::rendered(text).with_js_content_type(is_js_content_type);
+            body.renderable = !followed_redirect;
+            Some((body, crate::utils::is_xml_content_type(&content_type)))
         }
 
         let inject_body: Option<(ReflectionBody, bool)> = match inject_resp {
@@ -2898,10 +2904,7 @@ async fn fetch_injection_response(
                     xml_content_type: false,
                 };
             }
-            // Any other 3xx with a `Location` is followed, not rendered, so a
-            // body echo there is a reflection but never executes.
-            let followed_redirect =
-                resp.status().is_redirection() && resp.headers().contains_key("location");
+            let followed_redirect = is_followed_redirect(&resp);
             match crate::utils::http::read_body_counted(resp).await {
                 Ok(body) => {
                     if !response_body_supports_xss(&content_type, &body) {
