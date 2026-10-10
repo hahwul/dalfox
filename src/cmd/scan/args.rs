@@ -1130,15 +1130,13 @@ impl ScanArgs {
     /// scan finds on its own (form actions, external scripts) rather than the
     /// target list. Invalid patterns are skipped; startup already rejects them.
     pub(crate) fn url_in_scope(&self, url: &str) -> bool {
-        let compile = |patterns: &[String]| -> Vec<regex::Regex> {
-            patterns
-                .iter()
-                .filter_map(|p| regex::Regex::new(p).ok())
-                .collect()
-        };
-        let include = compile(&self.include_url);
+        if self.include_url.is_empty() && self.exclude_url.is_empty() {
+            return true;
+        }
+        let scope = compiled_url_scope(&self.include_url, &self.exclude_url);
+        let (include, exclude) = &scope.2;
         (include.is_empty() || include.iter().any(|r| r.is_match(url)))
-            && !compile(&self.exclude_url).iter().any(|r| r.is_match(url))
+            && !exclude.iter().any(|r| r.is_match(url))
     }
 
     /// Effective `--on-session-loss` policy: the operator's choice, else
@@ -1255,6 +1253,39 @@ impl ScanArgs {
             ..Default::default()
         }
     }
+}
+
+/// `--include-url` / `--exclude-url` compiled once and reused by
+/// [`ScanArgs::url_in_scope`], which runs per form action and external script.
+type UrlScope = (
+    Vec<String>,
+    Vec<String>,
+    (Vec<regex::Regex>, Vec<regex::Regex>),
+);
+
+// ponytail: single-entry cache; concurrent server/MCP jobs with different
+// scopes recompile on each switch (still correct). Key by job if that shows up.
+fn compiled_url_scope(include: &[String], exclude: &[String]) -> std::sync::Arc<UrlScope> {
+    use std::sync::{Arc, Mutex};
+    static CACHE: Mutex<Option<Arc<UrlScope>>> = Mutex::new(None);
+    let mut slot = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(hit) = slot.as_ref().filter(|c| c.0 == include && c.1 == exclude) {
+        return Arc::clone(hit);
+    }
+    // Invalid patterns are skipped; startup already rejects them.
+    let compile = |patterns: &[String]| -> Vec<regex::Regex> {
+        patterns
+            .iter()
+            .filter_map(|p| regex::Regex::new(p).ok())
+            .collect()
+    };
+    let scope = Arc::new((
+        include.to_vec(),
+        exclude.to_vec(),
+        (compile(include), compile(exclude)),
+    ));
+    *slot = Some(Arc::clone(&scope));
+    scope
 }
 
 #[cfg(test)]
