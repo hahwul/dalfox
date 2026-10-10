@@ -1928,6 +1928,43 @@ async fn sanitized_results_honor_min_confidence() {
     }
 }
 
+/// The job filters before it folds AST duplicates, as the CLI render does
+/// (`min_confidence_filters_before_ast_dedup`): a `V`/low duplicate must not
+/// win the fold and then take the `A`/high flow down with it.
+#[tokio::test]
+async fn sanitized_results_filter_min_confidence_before_ast_dedup() {
+    use crate::scanning::result::{Confidence, FindingType, Result as ScanResult};
+    let mut a_high = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .data("http://t/")
+        .param("q")
+        .evidence("http://t/:1:1 - d (Source: location.hash, Sink: innerHTML)")
+        .severity("Medium")
+        .build();
+    a_high.confidence = Some(Confidence::High);
+    let mut v_low = a_high.clone();
+    v_low.result_type = FindingType::Verified;
+    v_low.severity = "High".to_string();
+    v_low.confidence = Some(Confidence::Low);
+    let run = runner::ScanRun {
+        results: Arc::new(tokio::sync::Mutex::new(vec![a_high, v_low])),
+        reachability_failed: false,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: None,
+        findings_capped: false,
+        warnings: Vec::new(),
+        min_confidence: Some("high".to_string()),
+    };
+    let progress = JobProgress::default();
+    let kept = run.sanitized_results(&progress, false, false).await;
+    assert_eq!(kept.len(), 1, "the high-graded A flow survives");
+    assert_eq!(kept[0].result_type, FindingType::AstDetected);
+    assert_eq!(kept[0].confidence, Some(Confidence::High));
+}
+
 #[test]
 fn scan_option_checks_reject_an_unknown_min_confidence() {
     for ok in ["low", "high"] {

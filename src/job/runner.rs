@@ -118,11 +118,20 @@ impl ScanRun {
     ) -> Arc<Vec<SanitizedResult>> {
         // The same AST fold the CLI report applies: one DOM sink is found by
         // the preflight pass and again once per parameter, and without it the
-        // job lists (and counts, and caps) the same sink several times.
-        let deduped = crate::cmd::scan::dedupe_ast_results(self.results.lock().await.clone());
-        let kept: Vec<SanitizedResult> = deduped
+        // job lists (and counts, and caps) the same sink several times. The
+        // confidence filter runs first, as in the CLI, so the fold picks the
+        // strongest *surviving* claim rather than a low-graded winner the
+        // filter then drops along with the duplicate it beat.
+        let kept: Vec<ScanResult> = self
+            .results
+            .lock()
+            .await
             .iter()
             .filter(|r| !r.below_min_confidence(self.min_confidence.as_deref()))
+            .cloned()
+            .collect();
+        let kept: Vec<SanitizedResult> = crate::cmd::scan::dedupe_ast_results(kept)
+            .iter()
             .map(|r| r.to_sanitized(include_request, include_response))
             .collect();
         progress
