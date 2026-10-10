@@ -23,7 +23,7 @@ use axum::response::Response;
 use axum::routing::{any, get};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
@@ -3241,7 +3241,7 @@ async fn test_run_preflight_and_analysis_analyze_external_js_produces_finding() 
     let mut host_groups = std::collections::BTreeMap::new();
     host_groups.insert(host, vec![target]);
 
-    run_preflight_and_analysis(&args, &mut host_groups, &state).await;
+    run_preflight_and_analysis(&args, &mut host_groups, &state, &AtomicBool::new(false)).await;
 
     let results = state.results.lock().await;
     assert!(
@@ -3313,7 +3313,13 @@ async fn analysis_runs_host_groups_concurrently() {
         );
     }
     let t = std::time::Instant::now();
-    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![])).await;
+    run_preflight_and_analysis(
+        &args,
+        &mut groups,
+        &make_scan_state(vec![]),
+        &AtomicBool::new(false),
+    )
+    .await;
     let elapsed = t.elapsed();
     assert!(
         elapsed < std::time::Duration::from_millis(1500),
@@ -3321,6 +3327,34 @@ async fn analysis_runs_host_groups_concurrently() {
     );
     assert!(peak.load(std::sync::atomic::Ordering::SeqCst) > 1);
     assert!(groups.values().all(|g| g.len() == 1));
+}
+
+// Ctrl-C during preflight/analysis was ignored: the stage took no cancel flag,
+// so every remaining target was still preflighted, discovered and mined (hours
+// on a mass list) before the scan loop noticed and marked them all
+// interrupted. Once the flag is set no new target may be dispatched, and the
+// undispatched ones must still reach the scan loop so they are reported
+// `incomplete` instead of vanishing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn analysis_dispatches_nothing_after_ctrl_c() {
+    use super::analysis::run_preflight_and_analysis;
+    let (addr, peak) = spawn_slow_counting_server(20).await;
+    let args = analysis_only_args(2);
+    let mut groups = std::collections::BTreeMap::new();
+    groups.insert(
+        "h".to_string(),
+        (0..5)
+            .map(|i| parse_target(&format!("http://{addr}/?q={i}")).unwrap())
+            .collect::<Vec<_>>(),
+    );
+    let cancel = AtomicBool::new(true);
+    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![]), &cancel).await;
+    assert_eq!(
+        peak.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no target may be preflighted after Ctrl-C"
+    );
+    assert_eq!(groups["h"].len(), 5, "undispatched targets must be kept");
 }
 
 // The shared bound is still a bound: with `--max-concurrent-targets 1`, targets
@@ -3341,7 +3375,13 @@ async fn analysis_bound_applies_across_host_groups() {
         );
     }
     let t = std::time::Instant::now();
-    run_preflight_and_analysis(&args, &mut groups, &make_scan_state(vec![])).await;
+    run_preflight_and_analysis(
+        &args,
+        &mut groups,
+        &make_scan_state(vec![]),
+        &AtomicBool::new(false),
+    )
+    .await;
     assert_eq!(peak.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(t.elapsed() >= std::time::Duration::from_millis(800));
     assert!(groups.values().all(|g| g.len() == 2));
@@ -3380,7 +3420,7 @@ async fn analysis_restores_survivors_per_group_in_order() {
         ],
     );
     let state = make_scan_state(vec![]);
-    run_preflight_and_analysis(&args, &mut groups, &state).await;
+    run_preflight_and_analysis(&args, &mut groups, &state, &AtomicBool::new(false)).await;
 
     let urls = |k: &str| -> Vec<String> {
         groups[k]

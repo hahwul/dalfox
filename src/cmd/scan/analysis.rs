@@ -110,6 +110,7 @@ pub(crate) async fn run_preflight_and_analysis(
     args: &ScanArgs,
     host_groups: &mut std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
+    cancel: &std::sync::atomic::AtomicBool,
 ) {
     let skipped_targets = state.skipped_targets.clone();
 
@@ -156,13 +157,23 @@ pub(crate) async fn run_preflight_and_analysis(
     let processed: Vec<Vec<Target>> = local
         .run_until(async move {
             let mut handles = Vec::with_capacity(drained.len());
+            // Targets never dispatched because Ctrl-C arrived. Handed to the
+            // scan loop untouched, which reports them `incomplete`.
+            let mut undispatched: Vec<(usize, Target)> = Vec::new();
 
-            for (gi, target) in drained {
+            let mut drained = drained.into_iter();
+            while let Some((gi, target)) = drained.next() {
                 // Acquire before spawning, so at most `max_concurrent_targets`
                 // tasks are ever live — not one parked task per input target.
                 // The permit moves into the task and is released when it ends
-                // (unwinding included).
-                let Ok(permit) = sem.clone().acquire_owned().await else {
+                // (unwinding included). Ctrl-C stops dispatch, also while
+                // waiting for a permit.
+                let permit = tokio::select! {
+                    p = sem.clone().acquire_owned() => p.ok(),
+                    _ = super::scan_loop::poll_cancel(cancel) => None,
+                };
+                let Some(permit) = permit.filter(|_| !cancel.load(Ordering::Relaxed)) else {
+                    undispatched.extend(std::iter::once((gi, target)).chain(drained));
                     break;
                 };
                 // Kept outside the task so a panicking task can still be reported
@@ -213,6 +224,9 @@ pub(crate) async fn run_preflight_and_analysis(
                             .insert(target_url, crate::cmd::error_codes::INTERNAL_ERROR);
                     }
                 }
+            }
+            for (gi, target) in undispatched {
+                processed[gi].push(target);
             }
             processed
         })

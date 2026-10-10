@@ -550,7 +550,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // Preflight + parameter analysis for every target (bounded concurrency);
     // replaces each host group with the targets that survived preflight.
-    analysis::run_preflight_and_analysis(args, &mut host_groups, &state).await;
+    analysis::run_preflight_and_analysis(args, &mut host_groups, &state, &cancel_flag).await;
 
     // Blind payloads are stored attack traffic: only the survivors get them,
     // not targets capped out by `--max-targets-per-host` or dropped by
