@@ -91,12 +91,10 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     }
 
     // The dry-run / only-discovery reports exist only as plain text and JSON
-    // (`output::render_dry_run` / `render_only_discovery`); any other format
-    // used to fall through to the plain text, which a SARIF/TOML consumer
-    // cannot parse.
-    if (args.dry_run || args.only_discovery)
-        && !matches!(args.format.as_str(), "plain" | "json" | "jsonl")
-    {
+    // (`output::render_dry_run` / `render_only_discovery`). `markdown` keeps
+    // printing the plain text, which a human reader takes as is; SARIF/TOML
+    // consumers cannot parse it, so those two are refused.
+    if (args.dry_run || args.only_discovery) && matches!(args.format.as_str(), "sarif" | "toml") {
         let mode = if args.dry_run {
             "--dry-run"
         } else {
@@ -105,7 +103,10 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
         emit_error(
             &args.format,
             crate::cmd::error_codes::INVALID_INPUT_TYPE,
-            &format!("{mode} supports --format plain, json or jsonl only"),
+            &format!(
+                "{mode} does not support --format {}; use plain, markdown, json or jsonl",
+                args.format
+            ),
         );
         return Err(ScanOutcome::Error);
     }

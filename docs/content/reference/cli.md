@@ -75,7 +75,7 @@ See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-inter
 | `--include-all` | — | false | Shorthand for both include flags |
 | `--no-color` | — | false | Disable ANSI colour |
 | `--silence` | `-S` | false | Emit only findings to STDOUT |
-| `--dry-run` | — | false | Discover and plan without sending payloads (`-f plain`, `json` or `jsonl` only; other formats exit `2` with `INVALID_INPUT_TYPE`) |
+| `--dry-run` | — | false | Discover and plan without sending payloads (`-f sarif` and `toml` exit `2` with `INVALID_INPUT_TYPE`; `markdown` prints the plain report) |
 | `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`, `--baseline`) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | Cap total results shown (must be at least `1`; omit for no cap) |
@@ -129,7 +129,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--only-discovery` | false | Stop after discovery, no XSS payloads (`-f plain`, `json` or `jsonl` only, like `--dry-run`) |
+| `--only-discovery` | false | Stop after discovery, no XSS payloads (no `-f sarif` or `toml`, like `--dry-run`) |
 | `--skip-discovery` | false | Skip all discovery |
 | `--skip-reflection-header` | false | Skip header-based reflection checks |
 | `--skip-reflection-cookie` | false | Skip cookie-based reflection checks |

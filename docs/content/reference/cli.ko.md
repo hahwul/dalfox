@@ -75,7 +75,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--include-all` | — | false | 두 include 플래그의 축약형 |
 | `--no-color` | — | false | ANSI 색상을 비활성화합니다 |
 | `--silence` | `-S` | false | STDOUT에 탐지 결과만 출력합니다 |
-| `--dry-run` | — | false | 페이로드를 보내지 않고 탐색 및 계획만 수행합니다 (`-f plain`, `json`, `jsonl`만 지원하며, 다른 형식은 `INVALID_INPUT_TYPE`으로 `2`를 반환합니다) |
+| `--dry-run` | — | false | 페이로드를 보내지 않고 탐색 및 계획만 수행합니다 (`-f sarif`, `toml`은 `INVALID_INPUT_TYPE`으로 `2`를 반환하며, `markdown`은 plain 보고서를 출력합니다) |
 | `--stream-findings` | — | false | 스캔 종료 요약 이후가 아니라 각 탐지 결과가 검증되는 즉시 출력합니다 (plain 형식만; `--output`, `--limit`, `--only-poc`, `--baseline` 사용 시 자동 비활성화) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | 표시되는 전체 결과 수를 제한합니다 (`1` 이상이어야 하며, 제한하지 않으려면 생략) |
@@ -128,7 +128,7 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
-| `--only-discovery` | false | 탐색 후 중지하고 XSS 페이로드를 보내지 않습니다 (`--dry-run`과 같이 `-f plain`, `json`, `jsonl`만 지원) |
+| `--only-discovery` | false | 탐색 후 중지하고 XSS 페이로드를 보내지 않습니다 (`--dry-run`과 같이 `-f sarif`, `toml`은 지원하지 않음) |
 | `--skip-discovery` | false | 모든 탐색을 건너뜁니다 |
 | `--skip-reflection-header` | false | 헤더 기반 반사 검사를 건너뜁니다 |
 | `--skip-reflection-cookie` | false | 쿠키 기반 반사 검사를 건너뜁니다 |
