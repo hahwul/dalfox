@@ -672,3 +672,16 @@ fn dot_segment_path_examples_do_not_collapse_the_path() {
         assert_eq!(out.targets[0].url.path(), "/v1/u/1/x", "example {dots:?}");
     }
 }
+
+#[test]
+fn swagger2_host_with_a_scheme_keeps_the_real_host() {
+    // `host` is a bare authority per spec, but a scheme there is a common
+    // mistake: it was read as host `https`.
+    let spec = r##"{"swagger":"2.0","host":"http://api.example.com:8080/","basePath":"/v1",
+      "paths":{"/a":{"get":{}}}}"##;
+    let out = parse(spec);
+    assert_eq!(
+        out.targets[0].url.as_str(),
+        "http://api.example.com:8080/v1/a"
+    );
+}

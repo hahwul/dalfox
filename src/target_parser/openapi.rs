@@ -770,12 +770,21 @@ fn oas3_server_url(server: &Value) -> Result<String, String> {
 /// relative (`basePath`), which `--base-url` must anchor.
 fn swagger2_server(doc: &Value) -> Option<String> {
     let base_path = doc.get("basePath").and_then(Value::as_str).unwrap_or("/");
-    let host = doc.get("host").and_then(Value::as_str);
-    let schemes: Vec<&str> = doc
+    let mut host = doc.get("host").and_then(Value::as_str);
+    let mut schemes: Vec<&str> = doc
         .get("schemes")
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
+    // `host` is a bare authority, but `https://api.example.com/` is a common
+    // mistake that would scan the host `https`: split the scheme off, and use
+    // it when `schemes` names none.
+    if let Some((scheme, h)) = host.and_then(|h| h.split_once("://")) {
+        host = Some(h.trim_end_matches('/'));
+        if schemes.is_empty() {
+            schemes.push(scheme);
+        }
+    }
     let scheme = if schemes.is_empty() || schemes.contains(&"https") {
         "https"
     } else {
