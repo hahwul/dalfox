@@ -132,7 +132,7 @@ the file goes next.
 JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level metadata envelope:
 
 - `dalfox_version`
-- `targets` (the input targets)
+- `targets` (the input targets as named: URLs, or the list/spec file path; a piped list reports the URLs it resolved to)
 - `scan_duration_ms`
 - `total_requests`
 - `failed_requests` — requests that never got a response (reset, refused, timed out, or a body cut off mid-read) after their retries, plus discovery and mining probes refused with HTTP 429. A payload that never reached the target was never tested

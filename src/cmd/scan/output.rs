@@ -788,7 +788,13 @@ pub(crate) async fn render_results(
     // in five places — and reached only the formats whose copy was remembered.
     let scan_meta = crate::scanning::result::ScanMetadata {
         dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
-        targets: args.targets.clone(),
+        // The targets as named (URLs, or the list/spec file path). A piped
+        // list names nothing on the command line, so report what it resolved to.
+        targets: if args.targets.is_empty() {
+            all_target_urls.to_vec()
+        } else {
+            args.targets.clone()
+        },
         scan_duration_ms: scan_elapsed.as_millis() as u64,
         total_requests: requests.sent,
         failed_requests: requests.failed,

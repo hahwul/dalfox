@@ -177,6 +177,34 @@ fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
 }
 
 #[test]
+fn test_pipe_input_lists_its_targets_in_meta() {
+    // `meta.targets` echoed only the positional args, so a piped list — the
+    // whole input — reported `"targets": []`.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["pipe", "--format", "json", "-S"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute dalfox pipe");
+    child
+        .stdin
+        .take()
+        .expect("child stdin should be piped")
+        .write_all(b"http://127.0.0.1:1/?q=1\n")
+        .expect("failed to write pipe input");
+    let output = child
+        .wait_with_output()
+        .expect("failed waiting for dalfox pipe");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is one JSON document");
+    assert_eq!(
+        json["meta"]["targets"],
+        serde_json::json!(["http://127.0.0.1:1/?q=1"])
+    );
+}
+
+#[test]
 fn test_e2e_file_shadowing_ambiguity_warning() {
     let mut shadow_file = std::env::temp_dir();
     shadow_file.push(format!("dalfox-e2e-shadow-{}.com", std::process::id()));
