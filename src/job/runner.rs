@@ -460,7 +460,16 @@ pub(crate) async fn execute_scan(
                     // below just before the scan and drained right after, so it
                     // can never outlive the job or leak across concurrent jobs.
                     if args.blind_oob_enabled() {
-                        match crate::oob::OobSession::start(&args.oob_config()).await {
+                        // Registration walks up to N servers × `timeout`; a
+                        // cancel must not wait that out (it would also outlive
+                        // the drain grace and free the job's capacity slot
+                        // while this worker still runs).
+                        let oob_config = args.oob_config();
+                        let started = tokio::select! {
+                            r = crate::oob::OobSession::start(&oob_config) => r,
+                            _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => return,
+                        };
+                        match started {
                             Ok(session) => {
                                 // Successful arming is diagnostic, not a
                                 // warning; the OOB finding is the real signal.

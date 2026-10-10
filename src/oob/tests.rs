@@ -34,11 +34,16 @@ struct MockState {
     flood: usize,
     /// How many times the poller hit `/poll` — proves it ran.
     poll_count: usize,
+    /// Make `/register` hang (an unresponsive / blackholed OAST server).
+    register_hangs: bool,
 }
 
 type Shared = Arc<StdMutex<MockState>>;
 
 async fn register(State(s): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
+    if s.lock().unwrap().register_hangs {
+        tokio::time::sleep(Duration::from_secs(120)).await;
+    }
     let mut st = s.lock().unwrap();
     st.public_key_b64 = body
         .get("public-key")
@@ -592,5 +597,31 @@ async fn execute_scan_oob_drain_is_bounded_by_scan_timeout() {
     assert!(
         state.lock().unwrap().deregistered,
         "drain must still deregister"
+    );
+}
+
+/// A cancel that lands while OOB registration is stalled on an unresponsive
+/// server must not wait out `servers × timeout` before the job winds down.
+#[tokio::test]
+async fn execute_scan_cancel_interrupts_oob_registration() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let oob_addr = serve_mock_oob(state.clone()).await;
+    state.lock().unwrap().register_hangs = true;
+    let (mut target, args) = oob_job(oob_addr, 0, 0).await;
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let trip = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        trip.store(true, Ordering::Relaxed);
+    });
+    let start = std::time::Instant::now();
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(run.was_cancelled);
+    assert!(
+        start.elapsed() < Duration::from_secs(10),
+        "cancel must interrupt OOB registration (took {:?})",
+        start.elapsed()
     );
 }
