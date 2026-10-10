@@ -522,15 +522,7 @@ pub(crate) async fn resolve_targets(
                     }
                 }
                 Err(e) => {
-                    // `s` is the whole document when it came from stdin, and
-                    // the reason can quote spec text: name the source, not
-                    // its contents, and strip terminal escapes.
-                    let source = if s.contains(['\n', '\r']) || s.len() > 512 {
-                        "<inline document>"
-                    } else {
-                        s.as_str()
-                    };
-                    let msg = format!("Error parsing {label} '{source}': {e}");
+                    let msg = format!("Error parsing {label} '{}': {e}", source_name(&s));
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::PARSE_ERROR,
@@ -563,7 +555,10 @@ pub(crate) async fn resolve_targets(
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::PARSE_ERROR,
-                        &format!("Error parsing HAR '{}': {}", s, e),
+                        &crate::utils::log::sanitize_log_message(&format!(
+                            "Error parsing HAR '{}': {e}",
+                            source_name(&s)
+                        )),
                     );
                     return Err(ScanOutcome::Error);
                 }
@@ -588,7 +583,10 @@ pub(crate) async fn resolve_targets(
                     emit_error(
                         &args.format,
                         crate::cmd::error_codes::PARSE_ERROR,
-                        &format!("Error parsing raw HTTP request '{}': {}", s, e),
+                        &crate::utils::log::sanitize_log_message(&format!(
+                            "Error parsing raw HTTP request '{}': {e}",
+                            source_name(&s)
+                        )),
                     );
                     return Err(ScanOutcome::Error);
                 }
@@ -1124,6 +1122,18 @@ fn names_a_missing_file(s: &str) -> bool {
         .next()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("log"));
     !is_ambiguous_tld && looks_like_target_list_filename(s)
+}
+
+/// How a parse error names a request-bearing source (raw-http, HAR, spec):
+/// its path, or a stand-in when `s` is the document itself (the stdin buffer
+/// or a literal), whose text can be huge and carry credentials or terminal
+/// escapes. Callers still sanitize the message: the reason can quote it.
+fn source_name(s: &str) -> &str {
+    if s.contains(['\n', '\r']) || s.len() > 512 {
+        "<inline document>"
+    } else {
+        s
+    }
 }
 
 /// Load the source text for a request-bearing input (`raw-http` or `har`):

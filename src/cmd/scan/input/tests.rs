@@ -1454,3 +1454,16 @@ fn only_a_real_cap_hit_reports_input_too_large() {
     .expect_err("missing file");
     assert_eq!(file_read_error_code(&missing), error_codes::FILE_READ_ERROR);
 }
+
+#[test]
+fn parse_errors_name_an_inline_document_instead_of_echoing_it() {
+    // A piped HAR (or a raw-http literal) is the document itself: quoting it
+    // back put the whole capture, credentials and terminal escapes included,
+    // into the error.
+    assert_eq!(
+        source_name("{\"log\":{\"entries\":[]}}\n"),
+        "<inline document>"
+    );
+    assert_eq!(source_name(&"x".repeat(600)), "<inline document>");
+    assert_eq!(source_name("capture.har"), "capture.har");
+}
