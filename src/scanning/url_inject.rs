@@ -741,16 +741,7 @@ pub(crate) fn xml_request_content_type(target: &Target) -> String {
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
         .map(|(_, v)| v.trim())
-        .filter(|v| {
-            let primary = crate::utils::content_type_primary(v);
-            matches!(
-                primary.as_deref(),
-                Some("text/xml")
-                    | Some("application/xml")
-                    | Some("application/soap+xml")
-                    | Some("application/xhtml+xml")
-            )
-        })
+        .filter(|v| crate::utils::is_xml_content_type(v))
         .map(str::to_string)
         .unwrap_or_else(|| "application/xml".to_string())
 }

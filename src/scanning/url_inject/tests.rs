@@ -1013,6 +1013,7 @@ fn xml_content_type_prefers_declared_xml_family() {
             "application/soap+xml; action=\"x\"",
             "application/soap+xml; action=\"x\"",
         ),
+        ("application/vnd.acme+xml", "application/vnd.acme+xml"),
     ] {
         let target = Target {
             headers: vec![("Content-Type".to_string(), declared.to_string())],

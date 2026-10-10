@@ -2124,6 +2124,34 @@ async fn probe_xml_body_params_noop_on_json_body() {
 }
 
 #[tokio::test]
+async fn probe_xml_body_params_fires_on_openapi_vendor_xml_body() {
+    // An OpenAPI `application/vnd.*+xml` request body keeps its declared
+    // Content-Type; it is XML and must be mined as XML, not as a form.
+    let addr = start_xml_server().await;
+    let spec = format!(
+        r#"{{"openapi":"3.0.0","servers":[{{"url":"http://{addr}"}}],"paths":{{"/xml":{{"post":{{
+          "requestBody":{{"content":{{"application/vnd.acme+xml":{{"example":"<req><msg>seed</msg></req>"}}}}}}}}}}}}}}"#
+    );
+    let target = crate::target_parser::parse_openapi(&spec, None)
+        .expect("spec parses")
+        .targets
+        .remove(0);
+    let mut args = default_scan_args();
+    args.data = target.data.clone();
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_xml_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    assert!(
+        reflection_params
+            .lock()
+            .await
+            .iter()
+            .any(|p| p.name == "msg" && p.location == Location::XmlBody)
+    );
+}
+
+#[tokio::test]
 async fn probe_xml_body_params_fires_on_xml_prolog_without_content_type() {
     // An `<?xml` prolog is a strong enough signal to probe even when the user
     // forgot the Content-Type header.

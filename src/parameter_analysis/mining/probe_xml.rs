@@ -11,16 +11,7 @@ pub(super) fn request_is_xml(target: &Target, data: &str) -> bool {
         .headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-        .map(|(_, v)| {
-            matches!(
-                crate::utils::content_type_primary(v).as_deref(),
-                Some("text/xml")
-                    | Some("application/xml")
-                    | Some("application/soap+xml")
-                    | Some("application/xhtml+xml")
-            )
-        })
-        .unwrap_or(false);
+        .is_some_and(|(_, v)| crate::utils::is_xml_content_type(v));
     ct_is_xml || data.trim_start().starts_with("<?xml")
 }
 
