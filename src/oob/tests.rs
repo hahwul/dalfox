@@ -233,6 +233,7 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
         Arc::new(session),
         results.clone(),
         findings_count.clone(),
+        "ALL",
         cancel,
         /* silence */ true,
     );
@@ -255,6 +256,44 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
     assert!(
         state.lock().unwrap().deregistered,
         "session must deregister on finish"
+    );
+}
+
+/// The poller feeds the same `findings_count` that `--limit` stops on, so it
+/// must count only findings of the `--limit-result-type`, like every other
+/// producer. A blind `V` used to count under `--limit-result-type r`, so
+/// `--limit 1` stopped the scan on a finding of a type it was told to ignore.
+#[tokio::test]
+async fn oob_findings_count_honors_limit_result_type() {
+    let (state, session) = mock_session().await;
+    let (url, nonce) = session.mint_url();
+    session.registry().record(
+        nonce.clone(),
+        InjectionRecord {
+            target_url: "https://victim/?q=1".to_string(),
+            param: "q".to_string(),
+            location: "Query".to_string(),
+            payload: format!("<script src={url}></script>"),
+            method: "GET".to_string(),
+        },
+    );
+    state.lock().unwrap().pending_nonce = Some(nonce);
+    let results = Arc::new(TokioMutex::new(Vec::new()));
+    let findings_count = Arc::new(AtomicUsize::new(0));
+    let poller = spawn_poller(
+        Arc::new(session),
+        results.clone(),
+        findings_count.clone(),
+        "R",
+        Arc::new(AtomicBool::new(false)),
+        /* silence */ true,
+    );
+    poller.finish(Duration::from_millis(400)).await;
+    assert_eq!(results.lock().await.len(), 1, "the V finding is still kept");
+    assert_eq!(
+        findings_count.load(Ordering::Relaxed),
+        0,
+        "a V must not count toward --limit under --limit-result-type r"
     );
 }
 
@@ -321,6 +360,7 @@ async fn oob_poll_failures_are_reported_not_swallowed() {
         Arc::new(session),
         Arc::new(TokioMutex::new(Vec::new())),
         Arc::new(AtomicUsize::new(0)),
+        "ALL",
         Arc::new(AtomicBool::new(false)),
         /* silence */ false,
     );
@@ -342,6 +382,7 @@ async fn oob_unregistered_nonce_findings_are_capped() {
         Arc::new(session),
         results.clone(),
         Arc::new(AtomicUsize::new(0)),
+        "ALL",
         Arc::new(AtomicBool::new(false)),
         /* silence */ true,
     );
@@ -476,6 +517,7 @@ async fn poller_finish_under_cancel_still_deregisters() {
         Arc::new(session),
         results,
         findings_count,
+        "ALL",
         cancel,
         /* silence */ true,
     );

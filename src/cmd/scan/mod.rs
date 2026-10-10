@@ -618,6 +618,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             session.clone(),
             state.results.clone(),
             state.findings_count.clone(),
+            &args.limit_result_type.to_uppercase(),
             cancel_flag.clone(),
             args.silence,
         )

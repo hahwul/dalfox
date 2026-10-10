@@ -91,6 +91,7 @@ pub(crate) struct PollerHandle {
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
+    limit_result_type: Arc<str>,
     cancel: Arc<AtomicBool>,
     seen: Seen,
     stop: Arc<AtomicBool>,
@@ -114,13 +115,18 @@ impl Drop for PollerHandle {
 }
 
 /// Spawn the background poll loop. It runs until `stop`/`cancel` is set.
+/// `limit_result_type` is the uppercased `--limit-result-type`: like every
+/// other producer, the poller bumps `findings_count` only for findings of that
+/// type, so a blind `V` cannot trip `--limit` on a run limiting on `R`.
 pub(crate) fn spawn_poller(
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
+    limit_result_type: &str,
     cancel: Arc<AtomicBool>,
     silence: bool,
 ) -> PollerHandle {
+    let limit_result_type: Arc<str> = Arc::from(limit_result_type);
     let stop = Arc::new(AtomicBool::new(false));
     let seen: Seen = Arc::new(StdMutex::new(HashSet::new()));
     let state = Arc::new(PollState::default());
@@ -130,12 +136,22 @@ pub(crate) fn spawn_poller(
         let session = session.clone();
         let results = results.clone();
         let findings_count = findings_count.clone();
+        let limit_result_type = limit_result_type.clone();
         let cancel = cancel.clone();
         let stop = stop.clone();
         let seen = seen.clone();
         tokio::spawn(async move {
             while !stop.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
-                poll_once(&session, &results, &findings_count, &seen, &state, silence).await;
+                poll_once(
+                    &session,
+                    &results,
+                    &findings_count,
+                    &limit_result_type,
+                    &seen,
+                    &state,
+                    silence,
+                )
+                .await;
                 // Sleep in 1s slices so a stop/cancel cuts the wait short.
                 for _ in 0..POLL_INTERVAL_SECS {
                     if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
@@ -151,6 +167,7 @@ pub(crate) fn spawn_poller(
         session,
         results,
         findings_count,
+        limit_result_type,
         cancel,
         seen,
         stop,
@@ -194,6 +211,7 @@ impl PollerHandle {
             &self.session,
             &self.results,
             &self.findings_count,
+            &self.limit_result_type,
             &self.seen,
             &self.state,
             self.silence,
@@ -241,6 +259,7 @@ async fn poll_once(
     session: &OobSession,
     results: &Results,
     findings_count: &Arc<AtomicUsize>,
+    limit_result_type: &str,
     seen: &Seen,
     state: &PollState,
     silence: bool,
@@ -293,11 +312,9 @@ async fn poll_once(
         batch.push(build_finding(&it, record.as_ref(), session.server_domain()));
     }
 
-    if !batch.is_empty() {
-        let added = batch.len();
-        results.lock().await.extend(batch);
-        findings_count.fetch_add(added, Ordering::Relaxed);
-    }
+    // OOB findings are always `High`, so `--min-confidence` never drops one.
+    crate::scanning::accumulate_findings(results, findings_count, batch, limit_result_type, None)
+        .await;
 }
 
 /// One-line stderr notice when a callback lands (kept off stdout so JSON/SARIF

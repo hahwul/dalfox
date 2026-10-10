@@ -793,6 +793,7 @@ pub(crate) async fn execute_scan(
                             session.clone(),
                             results.clone(),
                             findings_count.clone(),
+                            &args.limit_result_type.to_uppercase(),
                             cancel_flag.clone(),
                             true,
                         ));
