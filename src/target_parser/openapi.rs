@@ -754,7 +754,8 @@ fn swagger2_server(doc: &Value) -> Option<String> {
         schemes[0]
     };
     Some(match host {
-        Some(h) => format!("{scheme}://{h}{base_path}"),
+        // A `basePath` missing its leading `/` must not run into the host.
+        Some(h) => format!("{scheme}://{h}/{}", base_path.trim_start_matches('/')),
         None => base_path.to_string(),
     })
 }

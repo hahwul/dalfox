@@ -505,6 +505,19 @@ fn swagger2_body_and_form_data() {
 }
 
 #[test]
+fn swagger2_base_path_without_leading_slash_stays_off_the_host() {
+    let spec = r#"{"swagger":"2.0","host":"api.example.com","basePath":"v1",
+                   "paths":{"/a":{"get":{}}}}"#;
+    assert_eq!(
+        parse(spec).targets[0].url.as_str(),
+        "https://api.example.com/v1/a"
+    );
+    let base = Url::parse("http://127.0.0.1:9000").unwrap();
+    let t = &parse_openapi(spec, Some(&base)).unwrap().targets[0];
+    assert_eq!(t.url.as_str(), "http://127.0.0.1:9000/v1/a");
+}
+
+#[test]
 fn billion_laughs_yaml_fails_fast() {
     let mut y = String::from("a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n");
     for i in 1..12 {
