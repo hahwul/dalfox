@@ -789,9 +789,10 @@ pub(crate) async fn render_results(
     let scan_meta = crate::scanning::result::ScanMetadata {
         dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
         // The targets as named (URLs, or the list/spec file path). A piped
-        // list names nothing on the command line, so report what it resolved to.
+        // list names nothing on the command line; name its source, `-`, the
+        // way a list file is named by its path rather than its expanded URLs.
         targets: if args.targets.is_empty() {
-            all_target_urls.to_vec()
+            vec!["-".to_string()]
         } else {
             args.targets.clone()
         },

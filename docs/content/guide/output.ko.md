@@ -131,7 +131,7 @@ dalfox scan ... --include-response
 JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메타데이터 엔벨로프를 담습니다.
 
 - `dalfox_version`
-- `targets` (지정한 입력 대상: URL 또는 목록/명세 파일 경로. 파이프로 받은 목록은 해석된 URL로 표시됩니다)
+- `targets` (지정한 입력 대상: URL 또는 목록/명세 파일 경로. 파이프로 받은 목록은 `-`(stdin)로 표시됩니다)
 - `scan_duration_ms`
 - `total_requests`
 - `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃, 본문이 도중에 끊긴 경우)와 HTTP 429로 거절된 탐색·마이닝 프로브 수. 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다

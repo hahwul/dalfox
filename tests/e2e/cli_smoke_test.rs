@@ -179,7 +179,8 @@ fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
 #[test]
 fn test_pipe_input_lists_its_targets_in_meta() {
     // `meta.targets` echoed only the positional args, so a piped list — the
-    // whole input — reported `"targets": []`.
+    // whole input — reported `"targets": []`. It names the source (`-`, stdin),
+    // like a list file is named by its path, not by its expanded URLs.
     let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
         .args(["pipe", "--format", "json", "-S"])
         .stdin(Stdio::piped())
@@ -198,10 +199,7 @@ fn test_pipe_input_lists_its_targets_in_meta() {
         .expect("failed waiting for dalfox pipe");
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout is one JSON document");
-    assert_eq!(
-        json["meta"]["targets"],
-        serde_json::json!(["http://127.0.0.1:1/?q=1"])
-    );
+    assert_eq!(json["meta"]["targets"], serde_json::json!(["-"]));
 }
 
 #[test]
