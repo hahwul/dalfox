@@ -123,7 +123,19 @@ pub fn parse_openapi(
                     budget = budget.saturating_sub(size);
                     out.targets.push(t);
                 }
-                Err(e) => out.skipped.push(format!("{label}: {e}")),
+                Err(e) => {
+                    // A skip costs its message, and a too-large one the
+                    // expansion it took to find out: path items shared by
+                    // `$ref` must not amplify through skipped operations.
+                    let skip = format!("{label}: {e}");
+                    let cost = if e == too_large() {
+                        MAX_IMPORT_REQUEST_BYTES
+                    } else {
+                        skip.len()
+                    };
+                    budget = budget.saturating_sub(cost);
+                    out.skipped.push(skip);
+                }
             }
         }
     }

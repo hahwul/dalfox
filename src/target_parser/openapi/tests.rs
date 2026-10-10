@@ -476,6 +476,36 @@ fn operation_params_override_path_item_params_by_name_and_location() {
 }
 
 #[test]
+fn too_large_skips_charge_the_import_budget() {
+    // A path item whose one operation expands past the request cap, shared by
+    // `$ref` across 100 paths: every copy used to be rebuilt to 4 MiB and
+    // skipped for free.
+    let params: Vec<Value> = (0..100)
+        .map(|i| {
+            serde_json::json!({"name": format!("p{i}"), "in": "query",
+            "schema": {"$ref": "#/components/schemas/Big"}})
+        })
+        .collect();
+    let mut paths: serde_json::Map<String, Value> = (0..100)
+        .map(|i| (format!("/a{i}"), serde_json::json!({"$ref": "#/x-item"})))
+        .collect();
+    paths.insert("/0ok".to_string(), serde_json::json!({"get": {}}));
+    let spec = serde_json::json!({
+        "openapi": "3.0.0", "servers": [{"url": "https://h"}],
+        "x-item": {"get": {"parameters": params}},
+        "paths": paths,
+        "components": {"schemas": {"Big": {"type": "string", "example": "x".repeat(64 * 1024)}}}
+    });
+    let out = parse(&spec.to_string());
+    assert!(
+        out.skipped.iter().any(|s| s.contains("stopped")),
+        "{} skipped",
+        out.skipped.len()
+    );
+    assert!(out.skipped.len() <= 70, "{} skipped", out.skipped.len());
+}
+
+#[test]
 fn hostile_paths_stay_on_the_server_origin() {
     let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://api.example.com"}],"paths":{
         "//evil.example/x":{"get":{}},
