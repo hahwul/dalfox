@@ -5605,3 +5605,51 @@ async fn collapse_under_min_confidence_does_not_underflow_the_tally() {
     assert_eq!(results.lock().await.len(), 1, "the redundant R collapses");
     assert_eq!(findings_count.load(std::sync::atomic::Ordering::Relaxed), 1);
 }
+
+/// Every parameter's Stage-0 probe re-runs the AST pass over the same page, so
+/// one page-level sink is recorded once per parameter — and the report folds
+/// those into a single finding (`dedupe_ast_results`). The tally `--limit`
+/// stops on must count the sink once too: it counted it per parameter, so
+/// `--limit 2` on a page with one sink and three parameters stopped the scan
+/// (target `incomplete`, `--state-file` retry) with one finding reported.
+#[tokio::test]
+async fn test_run_scanning_tally_counts_a_page_sink_once_across_params() {
+    use axum::{Router, response::Html, routing::get};
+
+    let page = "<html><body><div id=o></div><script>\
+                document.getElementById('o').innerHTML = location.hash.slice(1);\
+                </script></body></html>";
+    let addr =
+        spawn_regression_app(Router::new().route("/", get(move || async move { Html(page) })))
+            .await;
+
+    let mut target = parse_target(&format!("http://{addr}/?a=1&b=2&c=3")).expect("parse_target");
+    target.reflection_params = ["a", "b", "c"]
+        .iter()
+        .map(|n| Param::new(n.to_string(), "1".to_string(), Location::Query))
+        .collect();
+
+    let mut raw_args = integration_scan_args(false);
+    raw_args.skip_ast_analysis = false;
+    raw_args.limit = Some(2);
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let findings_count = Arc::new(AtomicUsize::new(0));
+    let report = run_scanning(
+        &target,
+        Arc::new(raw_args),
+        ScanRunHandles::new(results.clone(), findings_count.clone()),
+    )
+    .await;
+
+    let reported = crate::cmd::scan::dedupe_ast_results(results.lock().await.clone()).len();
+    assert_eq!(reported, 1, "fixture: one page-level sink");
+    assert_eq!(
+        findings_count.load(Ordering::Relaxed),
+        reported,
+        "the tally must count what the report keeps"
+    );
+    assert!(
+        !report.limit_stopped,
+        "one distinct finding cannot reach --limit 2"
+    );
+}

@@ -220,16 +220,15 @@ pub(crate) async fn run_ast_dom_analysis(
     results
 }
 /// Append a batch of findings to the shared results vector and bump the
-/// running findings counter. No-op when `batch` is empty. Centralizes the
-/// lock + extend + counter-update sequence shared by every preflight finding
-/// source (libs, initial AST, external JS) across the CLI, server, and MCP
-/// surfaces.
+/// running findings counter. No-op when `batch` is empty. The one
+/// lock + extend + counter-update sequence for every finding source (libs,
+/// initial AST, external JS, per-parameter workers, OOB callbacks) across the
+/// CLI, server, and MCP surfaces.
 ///
-/// The counter is bumped by the number of findings that match
-/// `limit_result_type` (already-uppercased `--limit-result-type`), mirroring
-/// [`ScanWorkerCtx::flush_results`] — otherwise N preflight findings of a
-/// non-matching type would trip `--limit N` and short-circuit the injection
-/// phase before any matching finding is produced.
+/// The counter is bumped by [`count_new_matching_results`]: only findings that
+/// match `limit_result_type` (already-uppercased `--limit-result-type`), so N
+/// findings of a non-matching type cannot trip `--limit N`, and an AST finding
+/// the report folds into one already counted is not counted again.
 pub(crate) async fn accumulate_findings(
     results: &tokio::sync::Mutex<Vec<crate::scanning::result::Result>>,
     findings_count: &std::sync::atomic::AtomicUsize,
@@ -240,8 +239,9 @@ pub(crate) async fn accumulate_findings(
     if batch.is_empty() {
         return;
     }
-    let added = count_matching_results(&batch, limit_result_type, min_confidence);
-    results.lock().await.extend(batch);
+    let mut guard = results.lock().await;
+    let added = count_new_matching_results(&guard, &batch, limit_result_type, min_confidence);
+    guard.extend(batch);
     findings_count.fetch_add(added, std::sync::atomic::Ordering::Relaxed);
 }
 /// Fetch all same-origin `<script src>` bundles referenced by `html` and run

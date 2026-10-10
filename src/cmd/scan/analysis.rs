@@ -820,18 +820,15 @@ pub(crate) async fn detect_outdated_libs(
             &target.method,
         );
         if !lib_findings.is_empty() {
-            // Count only findings matching --limit-result-type so a
-            // CWE-1104 (informational) batch can't trip --limit when
-            // the user is limiting on a different result type.
-            let added = crate::scanning::count_matching_results(
-                &lib_findings,
+            crate::scanning::result::stamp_origin(&mut lib_findings, target.url.as_str());
+            crate::scanning::accumulate_findings(
+                results_clone,
+                findings_count_clone,
+                lib_findings,
                 &args_clone.limit_result_type.to_uppercase(),
                 args_clone.min_confidence.as_deref(),
-            );
-            crate::scanning::result::stamp_origin(&mut lib_findings, target.url.as_str());
-            let mut guard = results_clone.lock().await;
-            guard.extend(lib_findings);
-            findings_count_clone.fetch_add(added, Ordering::Relaxed);
+            )
+            .await;
         }
     }
 }
@@ -867,17 +864,15 @@ async fn run_initial_ast_pass(
                 &target.method,
                 crate::scanning::ast_integration::PageSecurityPosture::from_target(target),
             );
-        if !ast_batch.is_empty() {
-            let added = crate::scanning::count_matching_results(
-                &ast_batch,
-                &args_clone.limit_result_type.to_uppercase(),
-                args_clone.min_confidence.as_deref(),
-            );
-            crate::scanning::result::stamp_origin(&mut ast_batch, target.url.as_str());
-            let mut guard = results_clone.lock().await;
-            guard.extend(ast_batch);
-            findings_count_clone.fetch_add(added, Ordering::Relaxed);
-        }
+        crate::scanning::result::stamp_origin(&mut ast_batch, target.url.as_str());
+        crate::scanning::accumulate_findings(
+            results_clone,
+            findings_count_clone,
+            ast_batch,
+            &args_clone.limit_result_type.to_uppercase(),
+            args_clone.min_confidence.as_deref(),
+        )
+        .await;
         if args_clone.analyze_external_js
             && crate::utils::response_has_markup_document(response_content_type, response_text)
         {

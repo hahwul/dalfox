@@ -142,6 +142,44 @@ pub(crate) fn count_matching_results(
         .count()
 }
 
+/// [`count_matching_results`] for `batch` as it is appended to `existing`,
+/// counting an AST finding only when the report will not fold it into one
+/// already counted: `dedupe_ast_results` keeps one finding per
+/// `ast_dedup_key`, and every parameter's probe re-finds the same page-level
+/// sink.
+// ponytail: a key counts once any member matches; under `--limit-result-type a`
+// a later `V` duplicate wins the fold and the counted `A` is not reported.
+pub(crate) fn count_new_matching_results(
+    existing: &[crate::scanning::result::Result],
+    batch: &[crate::scanning::result::Result],
+    filter: &str,
+    min_confidence: Option<&str>,
+) -> usize {
+    let matches = |r: &&crate::scanning::result::Result| {
+        !r.below_min_confidence(min_confidence)
+            && (filter == "ALL" || r.result_type.short() == filter)
+    };
+    let mut seen: Option<HashSet<String>> = None;
+    let mut added = 0;
+    for r in batch.iter().filter(matches) {
+        let Some(key) = crate::cmd::scan::ast_dedup_key(r) else {
+            added += 1;
+            continue;
+        };
+        let seen = seen.get_or_insert_with(|| {
+            existing
+                .iter()
+                .filter(matches)
+                .filter_map(crate::cmd::scan::ast_dedup_key)
+                .collect()
+        });
+        if seen.insert(key) {
+            added += 1;
+        }
+    }
+    added
+}
+
 /// Per-target "a finding already landed for this injection point" sets, keyed
 /// by [`found_param_key`].
 struct FoundParams {
@@ -637,14 +675,14 @@ impl ScanWorkerCtx {
         }
         let mut batch = std::mem::take(local_results);
         crate::scanning::result::stamp_origin(&mut batch, self.target.url.as_str());
-        let added = count_matching_results(
-            &batch,
+        accumulate_findings(
+            &self.results,
+            &self.findings_count,
+            batch,
             &self.limit_result_type,
             self.args.min_confidence.as_deref(),
-        );
-        let mut guard = self.results.lock().await;
-        guard.extend(batch);
-        self.findings_count.fetch_add(added, Ordering::Relaxed);
+        )
+        .await;
     }
 
     /// Scan a single parameter end-to-end: acquire a worker permit, probe

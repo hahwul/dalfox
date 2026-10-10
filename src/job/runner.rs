@@ -658,17 +658,14 @@ pub(crate) async fn execute_scan(
                                         &target.method,
                                         posture,
                                     );
-                                if !ast_batch.is_empty() {
-                                    let added = crate::scanning::count_matching_results(
-                                        &ast_batch,
-                                        &args.limit_result_type.to_uppercase(),
-                                        args.min_confidence.as_deref(),
-                                    );
-                                    let mut guard = results.lock().await;
-                                    guard.extend(ast_batch);
-                                    findings_count
-                                        .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
-                                }
+                                crate::scanning::accumulate_findings(
+                                    &results,
+                                    &findings_count,
+                                    ast_batch,
+                                    &args.limit_result_type.to_uppercase(),
+                                    args.min_confidence.as_deref(),
+                                )
+                                .await;
                                 if crate::utils::response_has_markup_document(
                                     response_content_type,
                                     &body,
