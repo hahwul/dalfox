@@ -160,10 +160,13 @@ pub(crate) fn count_new_matching_results(
         !r.below_min_confidence(min_confidence)
             && (filter == "ALL" || filter.contains(r.result_type.short()))
     };
-    let mut seen: Option<HashSet<String>> = None;
+    // Borrowed keys: this runs under the results lock on every flush, so the
+    // walk over `existing` must not allocate per result.
+    use crate::cmd::scan::ast_dedup_parts as ast_key;
+    let mut seen: Option<HashSet<(&str, &str, &str)>> = None;
     let mut added = 0;
     for r in batch.iter().filter(matches) {
-        let Some(key) = crate::cmd::scan::ast_dedup_key(r) else {
+        let Some(key) = ast_key(r) else {
             added += 1;
             continue;
         };
@@ -171,7 +174,7 @@ pub(crate) fn count_new_matching_results(
             existing
                 .iter()
                 .filter(matches)
-                .filter_map(crate::cmd::scan::ast_dedup_key)
+                .filter_map(ast_key)
                 .collect()
         });
         if seen.insert(key) {

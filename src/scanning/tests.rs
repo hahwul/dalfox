@@ -2598,6 +2598,26 @@ async fn test_accumulate_findings_counts_only_matching_result_type() {
     );
 }
 
+/// An AST finding (`message_id == 0`) counts toward `--limit` only when no
+/// counted finding already shares its `ast_dedup_key`.
+#[test]
+fn count_new_matching_results_folds_ast_duplicates() {
+    let ast = |evidence: &str| {
+        let mut r = make_result(FindingType::AstDetected);
+        r.message_id = 0;
+        r.evidence = evidence.to_string();
+        r
+    };
+    let mut reflected = make_result(FindingType::Reflected);
+    reflected.message_id = 1;
+    let existing = vec![reflected, ast("sink-a")];
+    let batch = vec![ast("sink-a"), ast("sink-b"), ast("sink-b")];
+    assert_eq!(
+        count_new_matching_results(&existing, &batch, "ALL", None),
+        1
+    );
+}
+
 // ---- build_request_text: the displayed PoC HTTP request ------------------
 
 use crate::target_parser::Target;
