@@ -72,10 +72,15 @@ pub fn parse_postman(
             .chars()
             .take(64)
             .collect();
+        // The path restarts at `…` once it passes 128 bytes: every skipped
+        // request copies its label into a reason, so a deep chain of long
+        // folder names must not ride along in each one.
         let label: Rc<str> = if parent.is_empty() {
             Rc::from(name)
-        } else {
+        } else if parent.len() < 128 {
             Rc::from(format!("{parent}/{name}"))
+        } else {
+            Rc::from(format!("…/{name}"))
         };
         if let Some(children) = item.get("item").and_then(Value::as_array) {
             stack.extend(children.iter().rev().map(|c| (c, label.clone())));

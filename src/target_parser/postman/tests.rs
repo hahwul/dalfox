@@ -239,6 +239,27 @@ fn non_collection_is_rejected() {
 }
 
 #[test]
+fn deep_folder_labels_stay_bounded_in_skip_reasons() {
+    // 60 nested folders with 64-char names: the full path label is ~4 KiB,
+    // and copying it into every skipped child's reason turned a small
+    // collection into hundreds of MiB of skip strings.
+    let mut c = String::new();
+    for _ in 0..60 {
+        c.push_str(&format!(r#"{{"name":"{}","item":["#, "f".repeat(64)));
+    }
+    c.push_str(&vec![r#"{"request":1}"#; 100].join(","));
+    c.push_str(&"]}".repeat(60));
+    let doc = format!(r#"{{"item":[{c},{{"name":"ok","request":"https://h/ok"}}]}}"#);
+    let out = parse_postman(&doc, None).expect("parses");
+    assert_eq!(out.skipped.len(), 100);
+    assert!(
+        out.skipped.iter().all(|s| s.len() <= 512),
+        "skip reason of {} bytes",
+        out.skipped[0].len()
+    );
+}
+
+#[test]
 fn empty_host_variable_is_skipped_not_read_from_the_path() {
     // A collection variable exported with an empty value (the environment
     // was meant to fill it) must not turn the first path segment into the
