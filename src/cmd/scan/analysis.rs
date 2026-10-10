@@ -384,68 +384,7 @@ pub(crate) async fn preflight_and_analyze_target(
     if let Some(ref marker) = args_clone.inject_marker {
         // Custom injection marker mode: skip normal discovery/mining
         // and create params from marker positions in URL/headers/body
-        use crate::parameter_analysis::{Location, Param};
-        let mut marker_params = Vec::new();
-
-        // Check URL query params
-        for (k, v) in target.url.query_pairs() {
-            if v.contains(marker.as_str()) {
-                marker_params.push(Param::new(k.to_string(), v.to_string(), Location::Query));
-            }
-        }
-
-        // Check body params
-        if let Some(ref data) = target.data {
-            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
-                if let Some(obj) = json_val.as_object() {
-                    for (k, v) in obj {
-                        if let Some(s) = v.as_str()
-                            && s.contains(marker.as_str())
-                        {
-                            marker_params.push(Param::new(
-                                k.clone(),
-                                s.to_string(),
-                                Location::JsonBody,
-                            ));
-                        }
-                    }
-                }
-            } else {
-                for pair in data.split('&') {
-                    if let Some((k, v)) = pair.split_once('=')
-                        && v.contains(marker.as_str())
-                    {
-                        // An imported multipart body keeps its wire format.
-                        let location = if target.multipart {
-                            Location::MultipartBody
-                        } else {
-                            Location::Body
-                        };
-                        marker_params.push(Param::new(k.to_string(), v.to_string(), location));
-                    }
-                }
-            }
-        }
-
-        // Check headers
-        for (k, v) in &target.headers {
-            if v.contains(marker.as_str()) {
-                marker_params.push(
-                    Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(false),
-                );
-            }
-        }
-
-        // Check cookies
-        for (k, v) in &target.cookies {
-            if v.contains(marker.as_str()) {
-                marker_params.push(
-                    Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(true),
-                );
-            }
-        }
-
-        target.reflection_params = marker_params;
+        target.reflection_params = inject_marker_params(&target, marker);
     } else {
         analyze_parameters(&mut target, &__analysis_args, multi_pb_clone).await;
     }
@@ -537,6 +476,80 @@ pub(crate) async fn preflight_and_analyze_target(
     }
 
     Some(target)
+}
+
+/// The params `--inject-marker` names: every query, body, header and cookie
+/// value carrying `marker`.
+fn inject_marker_params(target: &Target, marker: &str) -> Vec<crate::parameter_analysis::Param> {
+    use crate::parameter_analysis::{Location, Param};
+    let mut marker_params = Vec::new();
+
+    // Check URL query params
+    for (k, v) in target.url.query_pairs() {
+        if v.contains(marker) {
+            marker_params.push(Param::new(k.to_string(), v.to_string(), Location::Query));
+        }
+    }
+
+    // Check body params
+    if let Some(ref data) = target.data {
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(obj) = json_val.as_object() {
+                for (k, v) in obj {
+                    if let Some(s) = v.as_str()
+                        && s.contains(marker)
+                    {
+                        marker_params.push(Param::new(
+                            k.clone(),
+                            s.to_string(),
+                            Location::JsonBody,
+                        ));
+                    }
+                }
+            }
+        } else {
+            // An imported multipart body keeps its wire format, so its fields
+            // are the parts, not `&`/`=` pairs of the framing.
+            let (pairs, location) = if target.multipart {
+                (
+                    crate::target_parser::raw_multipart_fields(data).unwrap_or_default(),
+                    Location::MultipartBody,
+                )
+            } else {
+                (
+                    data.split('&')
+                        .filter_map(|p| p.split_once('='))
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect(),
+                    Location::Body,
+                )
+            };
+            for (k, v) in pairs {
+                if v.contains(marker) {
+                    marker_params.push(Param::new(k, v, location.clone()));
+                }
+            }
+        }
+    }
+
+    // Check headers
+    for (k, v) in &target.headers {
+        if v.contains(marker) {
+            marker_params.push(
+                Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(false),
+            );
+        }
+    }
+
+    // Check cookies
+    for (k, v) in &target.cookies {
+        if v.contains(marker) {
+            marker_params.push(
+                Param::new(k.clone(), v.clone(), Location::Header).with_cookie_identity(true),
+            );
+        }
+    }
+    marker_params
 }
 
 /// What the preflight probe captured for one target, beyond the enrichment it
@@ -908,5 +921,24 @@ async fn run_initial_ast_pass(
             )
             .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inject_marker_names_the_multipart_part() {
+        let mut target = crate::target_parser::parse_target("http://127.0.0.1:1/").unwrap();
+        target.data = Some(
+            "--X\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\nFUZZ\r\n--X--\r\n"
+                .to_string(),
+        );
+        target.multipart = true;
+        let params = inject_marker_params(&target, "FUZZ");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "q");
+        assert_eq!(params[0].value, "FUZZ");
     }
 }
