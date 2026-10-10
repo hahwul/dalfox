@@ -51,6 +51,12 @@ pub(crate) fn hydrate_target(url: &str, args: &ScanArgs) -> Result<Target, Strin
     t.ignore_return = args.ignore_return.clone();
     t.workers = args.workers;
     t.data = args.data.clone();
+    // Same rule as the CLI's `-d`: a body is multipart only when it carries
+    // its own wire framing.
+    t.multipart = args
+        .data
+        .as_deref()
+        .is_some_and(crate::target_parser::is_raw_multipart);
     t.headers = args
         .headers
         .iter()

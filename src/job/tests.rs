@@ -255,6 +255,24 @@ fn hydrate_target_lifts_cookie_header_for_server_and_mcp() {
 }
 
 #[test]
+fn hydrate_target_marks_a_raw_multipart_body_like_the_cli() {
+    let args = crate::cmd::scan::ScanArgs {
+        data: Some(
+            "--X\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\nv\r\n--X--\r\n".to_string(),
+        ),
+        ..Default::default()
+    };
+    let t = runner::hydrate_target("http://127.0.0.1:1/", &args).expect("hydrate");
+    assert!(t.multipart);
+    let args = crate::cmd::scan::ScanArgs {
+        data: Some("q=v".to_string()),
+        ..Default::default()
+    };
+    let t = runner::hydrate_target("http://127.0.0.1:1/", &args).expect("hydrate");
+    assert!(!t.multipart);
+}
+
+#[test]
 fn job_status_rejects_unknown_variant() {
     assert!(serde_json::from_str::<JobStatus>("\"finished\"").is_err());
 }
