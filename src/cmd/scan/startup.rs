@@ -90,6 +90,26 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
         return Err(ScanOutcome::Error);
     }
 
+    // The dry-run / only-discovery reports exist only as plain text and JSON
+    // (`output::render_dry_run` / `render_only_discovery`); any other format
+    // used to fall through to the plain text, which a SARIF/TOML consumer
+    // cannot parse.
+    if (args.dry_run || args.only_discovery)
+        && !matches!(args.format.as_str(), "plain" | "json" | "jsonl")
+    {
+        let mode = if args.dry_run {
+            "--dry-run"
+        } else {
+            "--only-discovery"
+        };
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            &format!("{mode} supports --format plain, json or jsonl only"),
+        );
+        return Err(ScanOutcome::Error);
+    }
+
     // Install the process-wide request rate limiter (`--rate-limit`, req/sec;
     // 0 = unlimited). Shared across every worker and target so the aggregate
     // outbound rate stays bounded regardless of fan-out. Done before any

@@ -583,6 +583,25 @@ fn test_e2e_invalid_scope_regex_is_fatal() {
     );
 }
 
+#[test]
+fn test_e2e_preview_modes_refuse_formats_they_cannot_render() {
+    // The dry-run / only-discovery reports exist only as plain text and JSON;
+    // `-f sarif|toml|markdown` used to print the plain summary on stdout, which
+    // no SARIF/TOML consumer can parse.
+    for mode in ["--dry-run", "--only-discovery"] {
+        for fmt in ["sarif", "toml", "markdown"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+                .args(["scan", mode, "-f", fmt, "http://127.0.0.1:1/?q=1"])
+                .output()
+                .expect("failed to execute dalfox scan");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(2), "{mode} {fmt}:\n{stderr}");
+            assert!(output.stdout.is_empty(), "{mode} {fmt} wrote stdout");
+            assert!(stderr.contains(mode), "{mode} {fmt}:\n{stderr}");
+        }
+    }
+}
+
 /// Every shell `dalfox completion` accepts (i.e. every `clap_complete::Shell`).
 const COMPLETION_SHELLS: [&str; 5] = ["bash", "zsh", "fish", "powershell", "elvish"];
 
