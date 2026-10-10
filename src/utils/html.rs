@@ -309,7 +309,11 @@ fn tag_is_self_closing(bytes: &[u8], gt_end: usize) -> bool {
 /// at each call site, so a page with 10 000 `<script>` tags would allocate
 /// 10 000 progressively shorter copies: quadratic memory traffic inside the
 /// very guard that exists to stop a quadratic blowup.
-fn find_ascii_case_insensitive(bytes: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+pub(crate) fn find_ascii_case_insensitive(
+    bytes: &[u8],
+    from: usize,
+    needle: &[u8],
+) -> Option<usize> {
     if needle.is_empty() || from >= bytes.len() {
         return None;
     }

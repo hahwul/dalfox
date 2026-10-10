@@ -90,11 +90,45 @@ fn script_block_re() -> &'static Regex {
     })
 }
 
-/// Iterate `<script>` blocks in the HTML response as `(open_tag, body)`.
+/// Iterate `<script>` blocks in the HTML response as `(open_tag, body)` —
+/// what [`script_block_re`] captures, found positionally. The capturing lazy
+/// regex ran on the slow engine and cost ~10 ns/byte, paid on every payload
+/// response of a page that inlines a multi-MiB bundle.
 fn script_blocks(html: &str) -> impl Iterator<Item = (&str, &str)> {
-    script_block_re()
-        .captures_iter(html)
-        .filter_map(|cap| Some((cap.get(1)?.as_str(), cap.get(2)?.as_str())))
+    use crate::utils::html::{find_ascii_case_insensitive, open_tag_end};
+    let bytes = html.as_bytes();
+    let mut from = 0;
+    std::iter::from_fn(move || {
+        loop {
+            let lt = find_ascii_case_insensitive(bytes, from, b"<script")?;
+            from = lt + 1;
+            // `\b`: `<scripts>` / `<script-x>` are other tags.
+            if bytes
+                .get(lt + 7)
+                .is_some_and(|&b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                continue;
+            }
+            let Some(body_start) = open_tag_end(html, lt) else {
+                continue;
+            };
+            // `</script\s*>`
+            let mut close = body_start;
+            let body_end = loop {
+                let at = find_ascii_case_insensitive(bytes, close, b"</script")?;
+                let mut gt = at + 8;
+                while bytes.get(gt).is_some_and(u8::is_ascii_whitespace) {
+                    gt += 1;
+                }
+                if bytes.get(gt) == Some(&b'>') {
+                    from = gt + 1;
+                    break at;
+                }
+                close = at + 1;
+            };
+            return Some((&html[lt..body_start], &html[body_start..body_end]));
+        }
+    })
 }
 
 /// Apply HTML's script-type rules to a raw `<script …>` open tag: false for
