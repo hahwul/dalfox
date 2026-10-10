@@ -114,24 +114,34 @@ const SNIFF_PREFIX_BYTES: u64 = 8 * 1024;
 /// silently never scanned.
 ///
 /// A list that is really an API spec gets a `-i openapi` / `-i postman` hint
-/// on stderr: `auto` never detects one, and its `{` / `"paths": {}` lines
-/// otherwise fail as bogus hosts with no clue why.
-pub(crate) fn target_list_lines(content: &str) -> impl Iterator<Item = &str> {
-    if let Some(kind) = spec_document_kind(content) {
-        eprintln!(
-            "[warn] the target list looks like {}, not URLs; pass `-i {kind}` to scan it",
-            if kind == "postman" {
-                "a Postman collection"
-            } else {
-                "an OpenAPI/Swagger spec"
-            }
-        );
+/// on stderr (unless `silence`): `auto` never detects one, and its `{` /
+/// `"paths": {}` lines otherwise fail as bogus hosts with no clue why.
+pub(crate) fn target_list_lines(content: &str, silence: bool) -> impl Iterator<Item = &str> {
+    if let Some(hint) = spec_document_hint(content, silence) {
+        eprintln!("{hint}");
     }
     content
         .trim_start_matches('\u{feff}')
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
+/// The [`target_list_lines`] warning for a list that is really an API spec;
+/// `None` under `--silence`.
+fn spec_document_hint(content: &str, silence: bool) -> Option<String> {
+    if silence {
+        return None;
+    }
+    let kind = spec_document_kind(content)?;
+    Some(format!(
+        "[warn] the target list looks like {}, not URLs; pass `-i {kind}` to scan it",
+        if kind == "postman" {
+            "a Postman collection"
+        } else {
+            "an OpenAPI/Swagger spec"
+        }
+    ))
 }
 
 /// `Some("openapi" | "postman")` when `content` is that kind of document.
@@ -201,7 +211,7 @@ pub(crate) async fn resolve_targets(
             ) {
                 Ok(crate::utils::fs::StdinRead::Data(buffer)) => {
                     let mut stdin_count = 0;
-                    for line in target_list_lines(&buffer) {
+                    for line in target_list_lines(&buffer, args.silence) {
                         target_strings.push((line.to_string(), TargetOrigin::List));
                         stdin_count += 1;
                     }
@@ -289,7 +299,8 @@ pub(crate) async fn resolve_targets(
                     // `#` comments skipped, leading BOM dropped) — see
                     // `target_list_lines`.
                     target_strings.extend(
-                        target_list_lines(&content).map(|l| (l.to_string(), TargetOrigin::List)),
+                        target_list_lines(&content, args.silence)
+                            .map(|l| (l.to_string(), TargetOrigin::List)),
                     );
                 }
                 Some(Err(e)) => {
@@ -360,7 +371,7 @@ pub(crate) async fn resolve_targets(
                         "target list",
                     ) {
                         Ok(content) => collected.extend(
-                            target_list_lines(&content)
+                            target_list_lines(&content, args.silence)
                                 .map(|l| (l.to_string(), TargetOrigin::List)),
                         ),
                         Err(e) => {
@@ -414,7 +425,8 @@ pub(crate) async fn resolve_targets(
                 // so `cat targets.txt | dalfox` and `dalfox scan targets.txt`
                 // behave identically.
                 piped_targets.extend(
-                    target_list_lines(&buffer).map(|l| (l.to_string(), TargetOrigin::List)),
+                    target_list_lines(&buffer, args.silence)
+                        .map(|l| (l.to_string(), TargetOrigin::List)),
                 );
                 if !args.targets.is_empty() {
                     let before_merge = piped_targets.len();

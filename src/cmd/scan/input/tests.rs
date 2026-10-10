@@ -1142,7 +1142,7 @@ async fn explicit_dedup_urls_flag_beats_an_unset_default() {
 fn target_list_lines_skips_blanks_and_comments() {
     let content = "https://a.example/\n\n   \n# a comment\n  https://b.example/  \n";
     assert_eq!(
-        target_list_lines(content).collect::<Vec<_>>(),
+        target_list_lines(content, false).collect::<Vec<_>>(),
         vec!["https://a.example/", "https://b.example/"]
     );
 }
@@ -1154,9 +1154,16 @@ fn target_list_lines_strips_a_leading_utf8_bom() {
     // `\u{feff}https://…` — a string with no parseable scheme.
     let content = "\u{feff}https://a.example/\nhttps://b.example/\n";
     assert_eq!(
-        target_list_lines(content).collect::<Vec<_>>(),
+        target_list_lines(content, false).collect::<Vec<_>>(),
         vec!["https://a.example/", "https://b.example/"]
     );
+}
+
+#[test]
+fn spec_document_hint_respects_silence() {
+    let openapi = "{\"openapi\": \"3.0.0\", \"paths\": {}}";
+    assert!(spec_document_hint(openapi, false).is_some_and(|h| h.contains("-i openapi")));
+    assert_eq!(spec_document_hint(openapi, true), None);
 }
 
 #[test]
