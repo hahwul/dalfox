@@ -467,7 +467,8 @@ JSON 본문 하나를 POST 합니다. 실행 중에 취소한 스캔은 `DELETE`
 
 `status`는 `done`, `error`, `cancelled` 중 하나로, `GET /scan/{id}`가 보고하는 값과
 같습니다. `error_message`도 해당 엔드포인트의 값과 같아서, 정상 종료나 단순 취소에서는
-`null`이고 그 밖에는 사유(대상 접근 불가, `scan_timeout` 만료, 세션 소실, 워커 패닉)입니다. 여기서는 대상이 `target`이 아니라 `url` 아래에 있습니다. 이 POST는 스캔 자신의
+`null`이고 그 밖에는 사유(대상 접근 불가, `scan_timeout` 만료, 세션 소실, 워커 패닉)입니다. 잡에 `warnings`가 있으면
+`GET /scan/{id}`와 같은 목록이 함께 붙습니다. 여기서는 대상이 `target`이 아니라 `url` 아래에 있습니다. 이 POST는 스캔 자신의
 프록시·TLS 설정을 따르며, 10초 뒤 타임아웃되고, 재시도하지 않습니다.
 
 ### 설정해 둘 만한 서버 플래그

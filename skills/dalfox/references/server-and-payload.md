@@ -35,7 +35,7 @@ Blind OOB and session-loss detection reach parity with the CLI here: the `option
 
 `POST`/`GET /scan` require an `http(s)` `target` (`url` is a legacy alias; other schemes → `400`, like `/preflight`). Unknown keys in the body or in `options` → `400`. An unreachable target ends as `error` (message contains `CONNECTION_FAILED`), not `done` with zero findings. `GET /scan` numeric query params (`worker`/`delay`/`timeout`/`rate_limit`/`scan_timeout`/`max_payloads_per_param`) that are present but unparseable → `400` rather than silently using the default. `progress.params_tested` advances live during the scan.
 
-Body errors: over `--max-body-bytes` → `413`, no JSON `Content-Type` → `415`, malformed JSON or schema errors → `400`. `POST /preflight` is bounded by `--scan-timeout` (`504` on expiry). `DELETE /scan/{id}?purge=1` is `409` while a cancelled scan's worker is still draining. The completion webhook body carries `error_message` (null unless the scan errored, timed out or lost its session).
+Body errors: over `--max-body-bytes` → `413`, no JSON `Content-Type` → `415`, malformed JSON or schema errors → `400`. `POST /preflight` is bounded by `--scan-timeout` (`504` on expiry). `DELETE /scan/{id}?purge=1` is `409` while a cancelled scan's worker is still draining. The completion webhook body carries `error_message` (null unless the scan errored, timed out or lost its session) and, when non-empty, the same `warnings` list.
 
 **Webhook/SSRF**: `callback_url` (and the scan target itself) are dialed server-side with no host filtering — loopback/link-local/private hosts are reachable. Set `--api-key` and restrict egress on untrusted binds. `--jsonp` exposes the API cross-origin (bypasses the CORS allow-list); enable deliberately.
 
