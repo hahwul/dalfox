@@ -234,7 +234,13 @@ async fn test_blind_scan_forms_posts_payload_for_same_origin_post_form() {
     let (addr, state) = start_form_server(HTML).await;
     let target = make_target(addr, "/");
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     // Two text fields -> two POSTs, one with payload in `user`, one in `msg`.
@@ -280,7 +286,13 @@ async fn test_blind_scan_forms_skips_get_forms() {
     let (addr, state) = start_form_server(HTML).await;
     let target = make_target(addr, "/");
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     // The form-bearing GET / is handled by a static Html route (not captured).
@@ -298,7 +310,13 @@ async fn test_blind_scan_forms_skips_cross_origin_action() {
     let (addr, state) = start_form_server(HTML).await;
     let target = make_target(addr, "/");
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     // Cross-origin action should be skipped; nothing posted to /submit.
@@ -316,7 +334,13 @@ async fn test_blind_scan_forms_preserves_hidden_csrf_and_skips_hidden_rotation()
     let (addr, state) = start_form_server(HTML).await;
     let target = make_target(addr, "/");
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     // Exactly one POST: the `user` field rotates in, the hidden _csrf is not
@@ -356,7 +380,13 @@ async fn test_blind_scan_forms_uses_get_to_fetch_even_when_target_is_post() {
     target.method = "POST".to_string();
     target.data = Some("seed=1".to_string());
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     // The only request we capture is the form POST to /submit.
@@ -379,7 +409,13 @@ async fn test_blind_scan_forms_overrides_caller_content_type() {
     // urlencoded type. Verify it does NOT make it onto the form POST.
     target.headers = vec![("Content-Type".to_string(), "application/json".to_string())];
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     assert_eq!(records.len(), 1);
@@ -410,7 +446,13 @@ async fn test_blind_scan_forms_skips_multipart() {
     let (addr, state) = start_form_server(HTML).await;
     let target = make_target(addr, "/");
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     assert!(records.iter().all(|r| r.method != "POST"));
@@ -425,7 +467,13 @@ async fn test_blind_scanning_sends_requests_for_query_body_header_and_cookie() {
     target.headers = vec![("x-h".to_string(), "v".to_string())];
     target.cookies = vec![("c".to_string(), "3".to_string())];
 
-    blind_scanning_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scanning_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     // 4 params (query, body, header, cookie) × every built-in template.
@@ -717,6 +765,7 @@ async fn test_blind_scanning_injects_percent_encoded_body_names_in_place() {
         &target,
         CallbackSource::Static("https://cb.example/hook"),
         None,
+        &[],
     )
     .await;
 
@@ -761,7 +810,13 @@ async fn test_blind_scan_forms_fetch_does_not_forward_accept_encoding() {
     let mut target = make_target(addr, "/");
     target.headers = vec![("Accept-Encoding".to_string(), "x-caller".to_string())];
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     assert_eq!(records.len(), 1, "one GET for the form page");
@@ -800,6 +855,7 @@ async fn test_blind_scanning_skips_a_json_body() {
         &target,
         CallbackSource::Static("https://cb.example/hook"),
         None,
+        &[],
     )
     .await;
 
@@ -829,7 +885,13 @@ async fn test_blind_scan_forms_caps_fields_and_folds_repeated_forms() {
     let (addr, state) = start_form_server(html).await;
     let target = make_target(addr, "/");
 
-    blind_scan_forms_with(&target, CallbackSource::Static("https://cb.example"), None).await;
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &[],
+    )
+    .await;
 
     let records = state.lock().await.clone();
     assert_eq!(
@@ -839,4 +901,57 @@ async fn test_blind_scan_forms_caps_fields_and_folds_repeated_forms() {
     );
     // Every field is still submitted with each request.
     assert!(records.iter().all(|r| r.body.contains("f299=v")));
+}
+
+/// `--ignore-param` means "skip these parameters entirely". Blind payloads are
+/// stored attack traffic, so a name the operator excluded (a CSRF token, a
+/// field that must not be written) must not receive one either.
+#[tokio::test]
+async fn test_blind_scanning_skips_ignored_params() {
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/?q=1&csrf=tok");
+    target.headers = vec![("X-Keep".to_string(), "v".to_string())];
+    target.cookies = vec![("sid".to_string(), "abc".to_string())];
+
+    let ignore = ["csrf".to_string(), "X-Keep".to_string(), "sid".to_string()];
+    blind_scanning_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &ignore,
+    )
+    .await;
+
+    let records = state.lock().await.clone();
+    // Only `q` is injected.
+    assert_eq!(records.len(), crate::payload::XSS_BLIND_PAYLOADS.len());
+    for r in &records {
+        assert!(r.uri.contains("csrf=tok"), "csrf was injected: {}", r.uri);
+        assert_eq!(r.headers.get("x-keep").map(String::as_str), Some("v"));
+        assert_eq!(r.headers.get("cookie").map(String::as_str), Some("sid=abc"));
+    }
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_skips_ignored_fields() {
+    static HTML: &str = r#"<html><body>
+        <form method="POST" action="/submit">
+            <input name="user" value="alice">
+            <input name="note" value="keep">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    let target = make_target(addr, "/");
+
+    blind_scan_forms_with(
+        &target,
+        CallbackSource::Static("https://cb.example"),
+        None,
+        &["note".to_string()],
+    )
+    .await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 1, "only `user` is injected: {records:?}");
+    assert!(records[0].body.contains("note=keep"));
 }

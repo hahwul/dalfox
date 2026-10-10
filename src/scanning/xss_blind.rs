@@ -183,6 +183,7 @@ pub async fn blind_scanning_with(
     target: &Target,
     source: CallbackSource<'_>,
     custom_template_path: Option<&str>,
+    ignore_params: &[String],
 ) {
     let templates = build_blind_templates(custom_template_path);
     let method = target.parse_method().to_string();
@@ -227,6 +228,9 @@ pub async fn blind_scanning_with(
     for (k, _v) in &target.cookies {
         all_params.push((k.clone(), "cookie"));
     }
+
+    // `--ignore-param` excludes a name from every injection, stored ones too.
+    all_params.retain(|(name, _)| !ignore_params.contains(name));
 
     // Send requests for each (param × template × callback channel). Custom
     // templates typically supply just one or two shapes, so the product stays
@@ -369,6 +373,7 @@ pub async fn blind_scan_forms_with(
     target: &Target,
     source: CallbackSource<'_>,
     custom_template_path: Option<&str>,
+    ignore_params: &[String],
 ) {
     use tokio::time::{Duration, sleep};
     use url::form_urlencoded;
@@ -458,7 +463,7 @@ pub async fn blind_scan_forms_with(
                     continue;
                 }
                 let value = input.value().attr("value").unwrap_or("").to_string();
-                let injectable = is_injectable_input(&input);
+                let injectable = is_injectable_input(&input) && !ignore_params.contains(&name);
                 fields.push(FormField {
                     name,
                     value,

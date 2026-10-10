@@ -97,8 +97,8 @@ pub(crate) async fn arm_and_dispatch(
                 };
                 tokio::select! {
                     _ = async {
-                        crate::scanning::blind_scanning_with(target, source, custom).await;
-                        crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                        crate::scanning::blind_scanning_with(target, source, custom, &args.ignore_param).await;
+                        crate::scanning::blind_scan_forms_with(target, source, custom, &args.ignore_param).await;
                     } => {}
                     _ = super::scan_loop::poll_cancel(cancel_flag) => break 'dispatch,
                 }

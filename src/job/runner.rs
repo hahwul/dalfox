@@ -515,8 +515,8 @@ pub(crate) async fn execute_scan(
                         // Params × templates × channels, each paced by
                         // `delay`: a cancel mid-pass stops the stored writes.
                         let inject = async {
-                            crate::scanning::blind_scanning_with(target, source, custom).await;
-                            crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                            crate::scanning::blind_scanning_with(target, source, custom, &args.ignore_param).await;
+                            crate::scanning::blind_scan_forms_with(target, source, custom, &args.ignore_param).await;
                         };
                         tokio::select! {
                             _ = inject => {}
