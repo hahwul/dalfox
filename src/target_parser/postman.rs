@@ -247,9 +247,11 @@ fn build_request(
     let url = match base_url {
         Some(base) => super::openapi::join_path(base, &rest)?,
         None => {
-            if scheme.contains("{{") || authority.contains("{{") {
+            // An empty host (a variable exported with no value) would let
+            // `http:///users` parse the first path segment as the host.
+            if authority.is_empty() || scheme.contains("{{") || authority.contains("{{") {
                 return Err(format!(
-                    "unresolved variable in host '{scheme}://{authority}' (define it in the collection or pass --base-url)"
+                    "empty or unresolved variable in host '{scheme}://{authority}' (define it in the collection or pass --base-url)"
                 ));
             }
             let s = format!("{scheme}://{authority}{rest}");

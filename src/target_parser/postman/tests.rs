@@ -237,3 +237,25 @@ fn non_collection_is_rejected() {
     assert!(parse_postman(r#"{"openapi":"3.0.0"}"#, None).is_err());
     assert!(parse_postman("openapi: 3.0.0", None).is_err());
 }
+
+#[test]
+fn empty_host_variable_is_skipped_not_read_from_the_path() {
+    // A collection variable exported with an empty value (the environment
+    // was meant to fill it) must not turn the first path segment into the
+    // host: `http:///users/list` parses as host `users`.
+    let c = r#"{"variable":[{"key":"baseUrl","value":""}],"item":[
+        {"name":"e","request":{"url":{"raw":"{{baseUrl}}/users/list"}}},
+        {"name":"ok","request":"https://h/ok"}
+    ]}"#;
+    let out = parse_postman(c, None).unwrap();
+    assert_eq!(out.targets.len(), 1, "{:?}", out.targets);
+    assert!(out.skipped[0].contains("--base-url"), "{:?}", out.skipped);
+    // --base-url still rescues it.
+    let base = Url::parse("https://staging.example").unwrap();
+    let out = parse_postman(c, Some(&base)).unwrap();
+    assert!(
+        out.targets
+            .iter()
+            .any(|t| t.url.as_str() == "https://staging.example/users/list")
+    );
+}
