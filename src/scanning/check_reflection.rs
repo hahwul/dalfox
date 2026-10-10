@@ -2898,6 +2898,10 @@ async fn fetch_injection_response(
                     xml_content_type: false,
                 };
             }
+            // Any other 3xx with a `Location` is followed, not rendered, so a
+            // body echo there is a reflection but never executes.
+            let followed_redirect =
+                resp.status().is_redirection() && resp.headers().contains_key("location");
             match crate::utils::http::read_body_counted(resp).await {
                 Ok(body) => {
                     if !response_body_supports_xss(&content_type, &body) {
@@ -2930,10 +2934,11 @@ async fn fetch_injection_response(
                             xml_content_type: false,
                         };
                     }
+                    let mut body =
+                        ReflectionBody::rendered(body).with_js_content_type(is_js_content_type);
+                    body.renderable = !followed_redirect;
                     FetchedInjection {
-                        body: Some(
-                            ReflectionBody::rendered(body).with_js_content_type(is_js_content_type),
-                        ),
+                        body: Some(body),
                         status: status_code,
                         xml_content_type,
                     }
