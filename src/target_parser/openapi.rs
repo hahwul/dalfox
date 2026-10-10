@@ -668,6 +668,12 @@ impl<'a> Op<'a> {
         });
         let schema = media.get("schema");
         let value = match example {
+            // A form example is often given already encoded: `a=1&b=2`.
+            Some(Value::String(s)) if kind == BodyKind::Form => Value::Object(
+                url::form_urlencoded::parse(s.as_bytes())
+                    .map(|(k, v)| (k.into_owned(), Value::String(v.into_owned())))
+                    .collect(),
+            ),
             Some(v) => v,
             None => Sampler::new(self.doc).sample(schema?, 0),
         };

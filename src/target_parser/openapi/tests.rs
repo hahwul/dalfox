@@ -147,6 +147,18 @@ fn form_body_via_request_body_ref_is_encoded() {
 }
 
 #[test]
+fn form_body_example_given_encoded_keeps_its_fields() {
+    let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{"/f":{"post":{
+      "requestBody":{"content":{"application/x-www-form-urlencoded":{"example":"user=a+b&q=%3Cx"}}}}}}}"##;
+    let t = &parse(spec).targets[0];
+    assert_eq!(t.data.as_deref(), Some("q=%3Cx&user=a+b"));
+    assert_eq!(
+        header(t, "Content-Type"),
+        Some("application/x-www-form-urlencoded")
+    );
+}
+
+#[test]
 fn xml_body_is_rooted_at_the_component_name() {
     let out = parse(PETSTORE_YAML);
     let xml = find(&out.targets, "POST", "/v1/xml");
