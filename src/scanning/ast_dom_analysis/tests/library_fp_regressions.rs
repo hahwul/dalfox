@@ -132,3 +132,37 @@ fn summary_call_reports_the_same_flow_every_run() {
         assert_eq!(again, first);
     }
 }
+
+/// An image never runs its `src`, so analytics beacons that put the page URL
+/// or referrer on a tracking pixel are not sinks.
+#[test]
+fn image_src_beacon_is_not_a_finding() {
+    for js in [
+        "(new Image()).src = 'https://stats.example.com/p?r=' + document.referrer + '&u=' + location.href;",
+        "new Image().src = location.hash.slice(1);",
+        "var img = new Image(); img.src = '/track?u=' + location.href;",
+        "var img = new Image(1, 1); img.src = location.hash.slice(1);",
+        "var i = document.createElement('img'); i.src = '/px.gif?ref=' + document.referrer;",
+        "var i = document.createElement('IMG'); i.setAttribute('src', location.hash.slice(1));",
+    ] {
+        assert!(found(js).is_empty(), "{js}: {:?}", found(js));
+    }
+}
+
+#[test]
+fn script_and_frame_src_still_report() {
+    for js in [
+        "var s = document.createElement('script'); s.src = location.hash.slice(1);",
+        "var f = document.createElement('iframe'); f.src = location.hash.slice(1);",
+        "document.getElementById('x').src = location.hash.slice(1);",
+        "var img = new Image(); var s = document.createElement('script'); s.src = location.hash.slice(1);",
+        // a rebound name is no longer the image
+        "var img = new Image(); img = document.createElement('script'); img.src = location.hash.slice(1);",
+        // minified bundles reuse one name for an image in one function and
+        // a script in the next
+        "function a(){ var e = new Image(); e.src = '/p'; } function b(e){ e.src = location.hash.slice(1); }",
+        "function a(){ var e = new Image(); function c(){ var e = document.createElement('script'); e.src = location.hash.slice(1); } }",
+    ] {
+        assert!(!found(js).is_empty(), "{js}");
+    }
+}

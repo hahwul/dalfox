@@ -72,6 +72,7 @@ impl<'a> DomXssVisitor<'a> {
         let css_custom_properties_checkpoint = self.css_custom_property_sources.checkpoint();
         let idb_requests_checkpoint = self.idb_request_vars.checkpoint();
         let idb_stores_checkpoint = self.idb_object_store_vars.checkpoint();
+        let image_vars_checkpoint = self.image_element_vars.checkpoint();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -162,6 +163,7 @@ impl<'a> DomXssVisitor<'a> {
             .rollback(css_custom_properties_checkpoint);
         self.idb_request_vars.rollback(idb_requests_checkpoint);
         self.idb_object_store_vars.rollback(idb_stores_checkpoint);
+        self.image_element_vars.rollback(image_vars_checkpoint);
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;

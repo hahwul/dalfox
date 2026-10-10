@@ -424,6 +424,7 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let response_vars_checkpoint = self.response_object_vars.checkpoint();
+        let image_vars_checkpoint = self.image_element_vars.checkpoint();
         let param_names = self.function_param_bindings(params);
         // `global_taints` is deliberately *not* saved wholesale — see the
         // escape handling below. Only the shadowed parameter names are lifted
@@ -448,6 +449,7 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
         for name in &own_names {
+            self.image_element_vars.remove(name.as_str());
             self.tainted_vars.remove(name.as_str());
             self.var_aliases.remove(name.as_str());
             if self.global_taints.remove(name.as_str()) {
@@ -481,6 +483,7 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
+        self.image_element_vars.rollback(image_vars_checkpoint);
         for name in shadowed_globals {
             self.global_taints.insert(name);
         }

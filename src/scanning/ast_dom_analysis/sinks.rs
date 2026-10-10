@@ -78,7 +78,9 @@ impl<'a> DomXssVisitor<'a> {
                 // would surface twice, once as `script.innerHTML` and once
                 // as the generic `innerHTML`. The script-element form is
                 // the correct one for PoC payload selection.
-                let is_sink = !script_text_sink && self.is_assignment_sink_property(prop_name);
+                let is_sink = !script_text_sink
+                    && self.is_assignment_sink_property(prop_name)
+                    && !(prop_name == "src" && self.expr_resolves_to_image(&member.object));
 
                 // Also check if the full member path is a sink (e.g., location.href)
                 let full_path_is_sink = if let Some(full_path) = self.get_member_string(member) {
@@ -170,6 +172,11 @@ impl<'a> DomXssVisitor<'a> {
             }
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
+                if self.expr_resolves_to_image(&assign.right) {
+                    self.image_element_vars.insert(target_name.to_string());
+                } else {
+                    self.image_element_vars.remove(target_name);
+                }
                 let mut assigned_instance_class = false;
                 self.clear_instance_field_taints(target_name);
                 if let Expression::NewExpression(new_expr) = &assign.right
@@ -272,11 +279,12 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(name) = attr_name_lc {
                     // `action` only counts on a real `<form>` receiver, never by
                     // name alone (see `form.action` in the assignment path).
-                    let dangerous = Self::is_dangerous_attr_name(&name)
+                    let receiver = self.get_callee_object_expr(&call.callee);
+                    let dangerous = (Self::is_dangerous_attr_name(&name)
+                        && !(name == "src"
+                            && receiver.is_some_and(|recv| self.expr_resolves_to_image(recv))))
                         || (name == "action"
-                            && self
-                                .get_callee_object_expr(&call.callee)
-                                .is_some_and(|recv| self.expr_resolves_to_form(recv)));
+                            && receiver.is_some_and(|recv| self.expr_resolves_to_form(recv)));
                     if dangerous && let Some(arg1) = call.arguments.get(1) {
                         let (tainted, source_hint) = self.argument_taint_and_source(arg1);
                         let pinned = Self::is_navigation_sink(&name)
