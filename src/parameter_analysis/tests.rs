@@ -2311,3 +2311,53 @@ async fn active_probe_sends_nothing_for_a_fragment_param() {
     assert_eq!(hits.load(Ordering::SeqCst), 0);
     assert_eq!(res.valid_specials, None);
 }
+
+/// `--delay` paces every request a target receives; discovery and mining sleep
+/// it after each probe. Active probing (Stage 3) is the same kind of request
+/// and must too, or `--delay` is silently void for a whole stage that can send
+/// a dozen probes per parameter.
+#[tokio::test]
+async fn active_probe_honors_target_delay() {
+    use axum::{Router, routing::get};
+    use std::net::Ipv4Addr;
+    use std::time::Instant;
+
+    let hits: Arc<std::sync::Mutex<Vec<Instant>>> = Arc::default();
+    let log = hits.clone();
+    // Never echoes: the batched probe reads as a block, which sends the
+    // window-overflow probe as a second request.
+    let app = Router::new().route(
+        "/p",
+        get(move || {
+            let log = log.clone();
+            async move {
+                log.lock().unwrap().push(Instant::now());
+                "static"
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+
+    let mut target = parse_target(&format!("http://{addr}/p?q=1")).unwrap();
+    target.delay = 400;
+    active_probe_param(
+        &target,
+        probe_param("q", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let hits = hits.lock().unwrap().clone();
+    assert!(hits.len() >= 2, "expected two probes, got {}", hits.len());
+    let gap = hits[1].duration_since(hits[0]);
+    assert!(
+        gap >= std::time::Duration::from_millis(300),
+        "probes must be spaced by --delay, gap was {gap:?}"
+    );
+}
