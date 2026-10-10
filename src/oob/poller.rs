@@ -43,9 +43,10 @@ struct PollState {
 }
 
 /// One WRN line on stderr (stdout stays clean for json/sarif), at most once per
-/// `flag`, and never under `--silence`.
+/// `flag`, and never under `--silence`. The flag is set either way, so
+/// [`PollerHandle::finish`] can hand the condition to a silenced server/MCP job.
 fn warn_once(silence: bool, flag: &AtomicBool, msg: &str) {
-    if !silence && !flag.swap(true, Ordering::Relaxed) {
+    if !flag.swap(true, Ordering::Relaxed) && !silence {
         crate::ceprintln!("{} {}", crate::utils::log::log_prefix("33", "WRN"), msg);
     }
 }
@@ -63,19 +64,25 @@ fn summarize_poll_error(e: &(dyn std::error::Error + Send + Sync + 'static)) -> 
     crate::utils::term::sanitize_display(&s).to_string()
 }
 
-fn warn_poll_failure(silence: bool, state: &PollState) {
+fn poll_failure_message(state: &PollState) -> String {
     let last = state
         .last_error
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
-    warn_once(
-        silence,
-        &state.warned_poll,
-        &format!(
-            "OOB polling is failing ({last}); blind callbacks are not being collected, so a clean result does not rule out blind XSS"
-        ),
-    );
+    format!(
+        "OOB polling is failing ({last}); blind callbacks are not being collected, so a clean result does not rule out blind XSS"
+    )
+}
+
+fn warn_poll_failure(silence: bool, state: &PollState) {
+    warn_once(silence, &state.warned_poll, &poll_failure_message(state));
+}
+
+fn unattributed_cap_message() -> String {
+    format!(
+        "OOB: more than {MAX_UNATTRIBUTED_FINDINGS} callbacks matched no injected payload; ignoring the rest (the correlation id is visible to the target)"
+    )
 }
 
 /// Handle to a running poller. Hold it for the scan's lifetime, then call
@@ -170,7 +177,10 @@ impl PollerHandle {
     /// Keep the background poller draining for up to `grace`, then stop it, do a
     /// final poll for anything that landed in the last interval, and deregister.
     /// A pending cancel (Ctrl-C) cuts the grace window short.
-    pub async fn finish(mut self, grace: Duration) {
+    ///
+    /// Returns the warnings the session raised (poll failures, the unattributed
+    /// cap), for a silenced server/MCP job that has no stderr to read them on.
+    pub async fn finish(mut self, grace: Duration) -> Vec<String> {
         let start = Instant::now();
         while start.elapsed() < grace && !self.cancel.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -197,6 +207,14 @@ impl PollerHandle {
             warn_poll_failure(self.silence, &self.state);
         }
         self.session.deregister().await;
+        let mut warnings = Vec::new();
+        if self.state.warned_poll.load(Ordering::Relaxed) {
+            warnings.push(poll_failure_message(&self.state));
+        }
+        if self.state.warned_cap.load(Ordering::Relaxed) {
+            warnings.push(unattributed_cap_message());
+        }
+        warnings
     }
 }
 
@@ -255,13 +273,7 @@ async fn poll_once(
         if record.is_none() {
             // Bound the forgeable path before it can grow `seen` or `results`.
             if state.unattributed.load(Ordering::Relaxed) >= MAX_UNATTRIBUTED_FINDINGS {
-                warn_once(
-                    silence,
-                    &state.warned_cap,
-                    &format!(
-                        "OOB: more than {MAX_UNATTRIBUTED_FINDINGS} callbacks matched no injected payload; ignoring the rest (the correlation id is visible to the target)"
-                    ),
-                );
+                warn_once(silence, &state.warned_cap, &unattributed_cap_message());
                 continue;
             }
         }

@@ -794,7 +794,11 @@ pub(crate) async fn execute_scan(
         } else {
             std::time::Duration::from_secs(args.blind_oob_wait())
         };
-        poller.finish(grace).await;
+        // The poller is silenced here, so what it would have printed goes on
+        // the job's warning channel: a dead OAST poll path is not a clean scan.
+        for w in poller.finish(grace).await {
+            warn(&w);
+        }
     } else if let Some(session) = &oob_session {
         // Registered but never polled (e.g. cancelled during registration):
         // still release the session so it is not left armed on the server.

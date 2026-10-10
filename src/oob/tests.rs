@@ -486,3 +486,87 @@ async fn poller_finish_under_cancel_still_deregisters() {
         "a cancelled drain must still deregister the session"
     );
 }
+
+/// Serve the mock interactsh API on an ephemeral port.
+async fn serve_mock_oob(state: Shared) -> std::net::SocketAddr {
+    let app = Router::new()
+        .route("/register", post(register))
+        .route("/poll", get(poll))
+        .route("/deregister", post(deregister))
+        .with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock interactsh");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    state.lock().unwrap().host = addr.to_string();
+    addr
+}
+
+/// A reachable scan target plus job args that arm OOB against `oob_addr`.
+async fn oob_job(
+    oob_addr: std::net::SocketAddr,
+    wait: u64,
+    scan_timeout: u64,
+) -> (
+    crate::target_parser::Target,
+    Arc<crate::cmd::scan::ScanArgs>,
+) {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind mock target");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            Router::new().route("/", get(|| async { "<html>ok</html>" })),
+        )
+        .await;
+    });
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/?q=1")).expect("target");
+    target.timeout = 30;
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        timeout: 30,
+        scan_timeout,
+        oob: crate::cmd::scan::BlindOobArgs {
+            blind_oob: Some(vec![format!("http://{oob_addr}")]),
+            blind_oob_secret: None,
+            blind_oob_wait: Some(wait),
+        },
+        ..Default::default()
+    });
+    (target, args)
+}
+
+/// A server/MCP job runs its poller silenced, so an OAST server that registers
+/// but fails every poll must still reach the job's warnings — otherwise the
+/// job settles a clean `done` although no callback could ever be collected.
+#[tokio::test]
+async fn execute_scan_surfaces_oob_poll_failure_as_job_warning() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let oob_addr = serve_mock_oob(state.clone()).await;
+    state.lock().unwrap().poll_fails = true;
+    let (mut target, args) = oob_job(oob_addr, 0, 0).await;
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(
+        state.lock().unwrap().poll_count > 0,
+        "the poller must have run"
+    );
+    assert!(
+        run.warnings
+            .iter()
+            .any(|w| w.contains("OOB polling is failing")),
+        "poll failure must reach the job warnings: {:?}",
+        run.warnings
+    );
+}

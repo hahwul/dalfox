@@ -559,7 +559,7 @@ findings. Partial results stay attached. For a scan with no credentials and no
 
 Softer problems that don't fail the scan still reach you: `GET /scan/{id}` adds
 a `warnings` list (absent when empty) for conditions such as `blind_oob` failing
-to register with any server, a `session_check` baseline that could not be
+to register with any server or failing to poll it, a `session_check` baseline that could not be
 captured (monitoring inactive), or the discovered-parameter cap. A `done` scan
 with zero findings and a non-empty `warnings` is not proof of a clean target.
 

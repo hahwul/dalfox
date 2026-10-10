@@ -138,7 +138,7 @@ Terminal jobs auto-purge after 1 hour.
 - `session_check` must be a valid regex; `session_check_url` must be an absolute `http(s)://` URL
 - `remote_payloads` / `remote_wordlists` must name registered providers (`portswigger`, `payloadbox` / `burp`, `assetnote`)
 
-**`warnings`**: `get_results_dalfox` (and `wait=true`) adds a `warnings` string list when a non-fatal condition weakens the result — `blind_oob` failed to register, a `session_check` baseline could not be captured (monitoring inactive), params were capped. Absent when empty.
+**`warnings`**: `get_results_dalfox` (and `wait=true`) adds a `warnings` string list when a non-fatal condition weakens the result — `blind_oob` failed to register or its polling failed, a `session_check` baseline could not be captured (monitoring inactive), params were capped. Absent when empty.
 
 **Encoder normalization**: If `"none"` is present anywhere, the list becomes `["none"]` only.
 
