@@ -371,22 +371,27 @@ impl<'a> Op<'a> {
 
         // Path-item parameters, then operation parameters overriding by
         // (name, in) — the OAS merge rule.
-        let mut params: Vec<&Value> = Vec::new();
-        for list in [self.item.get("parameters"), self.op.get("parameters")] {
-            for p in list.and_then(Value::as_array).into_iter().flatten() {
-                let Some(p) = resolve(self.doc, p) else {
-                    continue; // remote $ref: not fetched
-                };
-                let key = |v: &'a Value| (v.get("name"), v.get("in"));
-                params.retain(|q| key(q) != key(p));
-                params.push(p);
-                // The override scan above is quadratic; no real operation
-                // comes near this.
-                if params.len() > MAX_OP_PARAMS {
-                    return Err(format!("more than {MAX_OP_PARAMS} parameters"));
-                }
-            }
+        let all: Vec<&Value> = [self.item.get("parameters"), self.op.get("parameters")]
+            .into_iter()
+            .flat_map(|list| list.and_then(Value::as_array).into_iter().flatten())
+            .take(MAX_OP_PARAMS + 1)
+            .collect();
+        if all.len() > MAX_OP_PARAMS {
+            return Err(format!("more than {MAX_OP_PARAMS} parameters"));
         }
+        // The last declaration of each (name, in) wins, in its position.
+        // A remote `$ref` is not fetched and drops out.
+        let mut seen = std::collections::HashSet::new();
+        let mut params: Vec<&Value> = all
+            .into_iter()
+            .rev()
+            .filter_map(|p| resolve(self.doc, p))
+            .filter(|p| {
+                let key = |k| p.get(k).and_then(Value::as_str);
+                seen.insert((key("name"), key("in")))
+            })
+            .collect();
+        params.reverse();
 
         let mut path = String::with_capacity(self.path.len());
         let mut rest = self.path;

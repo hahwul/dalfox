@@ -440,6 +440,42 @@ fn large_example_referenced_many_times_does_not_amplify() {
 }
 
 #[test]
+fn shared_path_item_with_many_params_expands_in_linear_time() {
+    // One path item with 1000 parameters, `$ref`'d by 100 paths: the
+    // (name, in) override merge used to be quadratic per operation (~18 s
+    // here in a debug build).
+    let params: Vec<Value> = (0..1000)
+        .map(|i| serde_json::json!({"name": format!("p{i}"), "in": "query", "example": "1"}))
+        .collect();
+    let paths: serde_json::Map<String, Value> = (0..100)
+        .map(|i| (format!("/a{i}"), serde_json::json!({"$ref": "#/x-item"})))
+        .collect();
+    let spec = serde_json::json!({
+        "openapi": "3.0.0", "servers": [{"url": "https://h"}],
+        "x-item": {"get": {}, "parameters": params},
+        "paths": paths,
+    });
+    let start = std::time::Instant::now();
+    let out = parse(&spec.to_string());
+    assert_eq!(out.targets.len(), 100);
+    assert!(start.elapsed() < std::time::Duration::from_secs(6));
+}
+
+#[test]
+fn operation_params_override_path_item_params_by_name_and_location() {
+    let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{"/x":{
+      "parameters":[
+        {"name":"a","in":"query","example":"path-level"},
+        {"name":"a","in":"header","example":"kept"},
+        {"name":"b","in":"query","example":"b"}
+      ],
+      "get":{"parameters":[{"name":"a","in":"query","example":"op-level"}]}}}}"##;
+    let t = &parse(spec).targets[0];
+    assert_eq!(t.url.query(), Some("b=b&a=op-level"));
+    assert_eq!(header(t, "a"), Some("kept"));
+}
+
+#[test]
 fn hostile_paths_stay_on_the_server_origin() {
     let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://api.example.com"}],"paths":{
         "//evil.example/x":{"get":{}},
