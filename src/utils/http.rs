@@ -806,44 +806,6 @@ pub(crate) fn decide_retry(
     }
 }
 
-/// Send a request, counting a transport failure if it never answers.
-///
-/// The discovery and mining stages send through this rather than
-/// [`send_with_retry`] (no `--retries` budget), and every one of those call
-/// sites drops the `Err` (`if let Ok(resp) = …`, `.ok()?`). A parameter whose
-/// probe was reset is then indistinguishable from a parameter that does not
-/// reflect — so a target that drops requests yields an empty finding list that
-/// reads as a verdict.
-/// Counting here keeps `failed_requests` aligned with the `total_requests`
-/// these stages already tick via `record_outbound_request`.
-///
-/// HTTP 429 gets the always-on retry (see [`decide_retry`]): a throttled
-/// probe otherwise reads as "does not reflect", or worse, lets a later
-/// encoded-marker probe register the parameter under the wrong pre-encoding.
-/// The caller already took this attempt's rate-limit permit.
-///
-/// A 429 that outlasts the retries counts as a failure too: the rate limiter
-/// answered instead of the application, so the probe was never tested, and a
-/// fully throttled target otherwise reads as clean.
-pub async fn send_counted(
-    request_builder: RequestBuilder,
-) -> Result<reqwest::Response, reqwest::Error> {
-    let result = send_with_retry_inner(
-        request_builder,
-        0,
-        crate::cmd::scan::DEFAULT_RETRY_DELAY_MS,
-        true,
-    )
-    .await;
-    if result
-        .as_ref()
-        .is_ok_and(|r| r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS)
-    {
-        crate::tick_request_failure();
-    }
-    result
-}
-
 /// Send a request, honoring the active rate limiter and retrying retryable
 /// failures with exponential backoff.
 ///
@@ -862,34 +824,44 @@ pub async fn send_counted(
 /// Returns the final response or transport error after success or after the
 /// applicable retry budget is exhausted. If the request body was streamed
 /// (not clonable) the first response/error is returned without retrying.
+/// Send a request, counting a transport failure if it never answers.
+///
+/// The discovery and mining stages send directly rather than through
+/// [`send_with_retry`], and every one of those call sites drops the `Err`
+/// (`if let Ok(resp) = …`, `.ok()?`). A parameter whose probe was reset is
+/// then indistinguishable from a parameter that does not reflect — so a target
+/// that drops requests yields an empty finding list that reads as a verdict.
+/// Counting here keeps `failed_requests` aligned with the `total_requests`
+/// these stages already tick via `record_outbound_request`.
+///
+/// A 429 counts too: the rate limiter answered instead of the application, so
+/// the probe was never tested, and a fully throttled target otherwise reads
+/// as clean.
+pub async fn send_counted(
+    request_builder: RequestBuilder,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let result = request_builder.send().await;
+    if result.as_ref().map_or(true, |r| {
+        r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+    }) {
+        crate::tick_request_failure();
+    }
+    result
+}
+
 pub async fn send_with_retry(
     request_builder: RequestBuilder,
     max_transient_retries: u32,
     base_delay_ms: u64,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    send_with_retry_inner(request_builder, max_transient_retries, base_delay_ms, false).await
-}
-
-/// [`send_with_retry`]; `first_permit_taken` skips the rate-limit acquire for
-/// the first attempt when the caller already took it.
-async fn send_with_retry_inner(
-    request_builder: RequestBuilder,
-    max_transient_retries: u32,
-    base_delay_ms: u64,
-    first_permit_taken: bool,
-) -> Result<reqwest::Response, reqwest::Error> {
     // reqwest::RequestBuilder is not Clone, so we try_clone before each send;
     // a streamed body yields None and we fall back to a single attempt.
     let mut state = RetryState::default();
     let mut current_rb = request_builder;
-    let mut acquire = !first_permit_taken;
 
     loop {
         // Throttle every attempt so retries also count against --rate-limit.
-        if acquire {
-            crate::rate_limit_acquire().await;
-        }
-        acquire = true;
+        crate::rate_limit_acquire().await;
 
         let next_rb = current_rb.try_clone();
         let result = current_rb.send().await;
