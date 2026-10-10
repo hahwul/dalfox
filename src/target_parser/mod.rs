@@ -83,22 +83,23 @@ impl ImportedHeaders {
             }
             return;
         }
-        if name.eq_ignore_ascii_case("user-agent") {
-            self.user_agent = Some(value.to_string());
-            return;
-        }
         if is_skippable_request_header(name) {
             return;
         }
         // Drop any header reqwest can't put on an HTTP/1.1 wire (a
         // space-bearing name, a control byte such as CR/LF in the value, …).
         // Forwarded verbatim it would fail the reachability probe and every
-        // scan request, silently marking a live target unreachable.
+        // scan request, silently marking a live target unreachable. The
+        // User-Agent rides on every request too, so it is gated the same.
         if !is_forwardable_header(name, value) {
             crate::dbg_log!(
                 "dropping unsendable imported header {:?} (name/value rejected by HTTP/1.1)",
                 name
             );
+            return;
+        }
+        if name.eq_ignore_ascii_case("user-agent") {
+            self.user_agent = Some(value.to_string());
             return;
         }
         self.headers.push((name.to_string(), value.to_string()));
@@ -748,7 +749,9 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
                         cookies_vec.push((k.to_string(), v.trim().to_string()));
                     }
                 }
-            } else if name_trim.eq_ignore_ascii_case("user-agent") {
+            } else if name_trim.eq_ignore_ascii_case("user-agent")
+                && is_forwardable_header(&name_trim, &value_trim)
+            {
                 user_agent = Some(value_trim.clone());
                 headers_vec.push((name_trim, value_trim));
             } else if !is_skippable_request_header(&name_trim) {

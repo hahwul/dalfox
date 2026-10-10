@@ -24,6 +24,16 @@ fn test_parse_raw_http_absolute_form() {
 }
 
 #[test]
+fn test_parse_raw_http_drops_unsendable_user_agent() {
+    // A control byte fails the header at send(), and the UA rides on every
+    // request: kept, it made the live target read as unreachable.
+    let raw = "GET http://example.com/ HTTP/1.1\r\nUser-Agent: a\u{1}b\r\n\r\n";
+    let t = parse_raw_http_request(raw).unwrap();
+    assert_eq!(t.user_agent, None);
+    assert!(t.headers.is_empty(), "{:?}", t.headers);
+}
+
+#[test]
 fn test_parse_raw_http_skips_empty_name_cookies() {
     // A `=value` (empty-name) segment in a raw-request Cookie header must
     // not produce an empty-name cookie pair; the well-formed pairs survive.

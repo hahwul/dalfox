@@ -326,6 +326,19 @@ fn drops_headers_reqwest_cannot_send() {
     assert!(!t.headers.iter().any(|(k, _)| k == "X-Ctl"));
 }
 
+#[test]
+fn drops_unsendable_user_agent() {
+    // The User-Agent is lifted into its own field before the sendability
+    // gate, so a control byte in it went out on every request and failed
+    // each one at send(): the target read as unreachable.
+    let har = r#"{"log":{"entries":[{"request":{
+            "method":"GET","url":"https://example.com/",
+            "headers":[{"name":"User-Agent","value":"a\u0001b"}]
+        }}]}}"#;
+    let targets = parse_har(har).unwrap();
+    assert_eq!(targets[0].user_agent, None);
+}
+
 /// Go-based exporters write nil slices / empty strings as `null`; `serde(default)`
 /// alone only covers a missing key, so the whole capture used to be rejected.
 #[test]
