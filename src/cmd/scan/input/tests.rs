@@ -1159,6 +1159,25 @@ fn target_list_lines_strips_a_leading_utf8_bom() {
     );
 }
 
+#[test]
+fn spec_document_kind_names_a_spec_read_as_a_target_list() {
+    let openapi = "\u{feff}{\n  \"openapi\": \"3.0.0\",\n  \"paths\": {}\n}";
+    assert_eq!(spec_document_kind(openapi), Some("openapi"));
+    assert_eq!(spec_document_kind("{\"swagger\":\"2.0\"}"), Some("openapi"));
+    assert_eq!(
+        spec_document_kind("# api\nopenapi: 3.1.0\npaths: {}\n"),
+        Some("openapi")
+    );
+    let postman = r#"{"info":{"_postman_id":"x","name":"c"},"item":[]}"#;
+    assert_eq!(spec_document_kind(postman), Some("postman"));
+    // A URL list (even one naming an `openapi` path) and other JSON are not.
+    assert_eq!(
+        spec_document_kind("https://a.example/openapi.json\nhttps://b.example/\n"),
+        None
+    );
+    assert_eq!(spec_document_kind(r#"{"log":{"entries":[]}}"#), None);
+}
+
 #[tokio::test]
 async fn file_mode_ignores_a_leading_utf8_bom_in_the_list() {
     // A URL list saved by Notepad / Excel / PowerShell `Out-File` starts with a

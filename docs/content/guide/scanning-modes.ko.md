@@ -188,7 +188,7 @@ dalfox scan -i postman api.postman_collection.json
 dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com
 ```
 
-두 타입 모두 명시해야 합니다. `auto`는 명세를 감지하지 않으므로 `-i openapi` / `-i postman`을 넘기세요. 명세를 파이프로 넘길 수도 있습니다(`cat openapi.json | dalfox scan -i openapi`).
+두 타입 모두 명시해야 합니다. `auto`는 명세를 감지하지 않으므로 `-i openapi` / `-i postman`을 넘기세요. `-i` 없이 명세를 대상 목록으로 읽으면 써야 할 플래그를 알려 주는 경고가 나옵니다. 명세를 파이프로 넘길 수도 있습니다(`cat openapi.json | dalfox scan -i openapi`).
 
 **OpenAPI.** `get`, `post`, `put`, `patch`, `query` 오퍼레이션이 각각 대상 하나가 됩니다. `delete`, `head`, `options` 오퍼레이션은 스캔하지 않습니다. 자리표시자 ID로 DELETE에 탐색, 마이닝, 페이로드를 보내면 데이터가 지워질 수 있고, HEAD / OPTIONS 응답에는 반사될 본문이 없기 때문입니다. 건너뛴 개수는 stderr 경고로 알려 주며, Postman 요청에도 같은 규칙이 적용됩니다. 각 대상은 다음과 같이 만들어집니다:
 

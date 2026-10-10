@@ -112,12 +112,40 @@ const SNIFF_PREFIX_BYTES: u64 = 8 * 1024;
 /// bogus host, a DNS failure recorded as `skipped`, and — as long as any later
 /// line resolved — exit code 0. The one target the operator put first was
 /// silently never scanned.
+///
+/// A list that is really an API spec gets a `-i openapi` / `-i postman` hint
+/// on stderr: `auto` never detects one, and its `{` / `"paths": {}` lines
+/// otherwise fail as bogus hosts with no clue why.
 pub(crate) fn target_list_lines(content: &str) -> impl Iterator<Item = &str> {
+    if let Some(kind) = spec_document_kind(content) {
+        eprintln!(
+            "[warn] the target list looks like {}, not URLs; pass `-i {kind}` to scan it",
+            if kind == "postman" {
+                "a Postman collection"
+            } else {
+                "an OpenAPI/Swagger spec"
+            }
+        );
+    }
     content
         .trim_start_matches('\u{feff}')
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
+}
+
+/// `Some("openapi" | "postman")` when `content` is that kind of document.
+fn spec_document_kind(content: &str) -> Option<&'static str> {
+    let t = content.trim_start_matches('\u{feff}').trim_start();
+    if t.starts_with('{') {
+        if t.contains("\"_postman_id\"") || t.contains("schema.getpostman.com") {
+            return Some("postman");
+        }
+        return (t.contains("\"openapi\"") || t.contains("\"swagger\"")).then_some("openapi");
+    }
+    t.lines()
+        .any(|l| l.starts_with("openapi:") || l.starts_with("swagger:"))
+        .then_some("openapi")
 }
 
 fn is_test_harness_exe(exe: Option<&std::path::Path>) -> bool {

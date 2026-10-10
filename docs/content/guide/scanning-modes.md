@@ -188,7 +188,7 @@ dalfox scan -i postman api.postman_collection.json
 dalfox scan -i openapi openapi.yaml --base-url https://staging.example.com
 ```
 
-Both types are explicit: `auto` does not detect a spec, so pass `-i openapi` / `-i postman`. A spec can also be piped (`cat openapi.json | dalfox scan -i openapi`).
+Both types are explicit: `auto` does not detect a spec, so pass `-i openapi` / `-i postman`. A spec read as a target list without `-i` prints a warning naming the flag to use. A spec can also be piped (`cat openapi.json | dalfox scan -i openapi`).
 
 **OpenAPI.** Each `get`, `post`, `put`, `patch` and `query` operation becomes one target. `delete`, `head` and `options` operations are not scanned: discovery, mining and payloads against a DELETE with placeholder ids could destroy data, and HEAD / OPTIONS responses have no body to reflect into. They are counted in a stderr warning (the same applies to Postman requests). Each target is built like this:
 
