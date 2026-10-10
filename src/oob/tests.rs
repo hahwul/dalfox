@@ -570,3 +570,27 @@ async fn execute_scan_surfaces_oob_poll_failure_as_job_warning() {
         run.warnings
     );
 }
+
+/// `blind_oob_wait` counts against `scan_timeout` (the documented contract, and
+/// what keeps a request from outliving the server-wide `--scan-timeout` cap):
+/// the drain window is clipped to what is left of the budget.
+#[tokio::test]
+async fn execute_scan_oob_drain_is_bounded_by_scan_timeout() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let oob_addr = serve_mock_oob(state.clone()).await;
+    let (mut target, args) = oob_job(oob_addr, 600, 10).await;
+    let progress = crate::job::JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+    // Not asserting `!timed_out`: a debug-build RSA keygen under parallel test
+    // load can eat the budget, which ends the drain early too.
+    tokio::time::timeout(
+        Duration::from_secs(40),
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}),
+    )
+    .await
+    .expect("a 600s drain must not outlive a 10s scan_timeout");
+    assert!(
+        state.lock().unwrap().deregistered,
+        "drain must still deregister"
+    );
+}

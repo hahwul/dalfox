@@ -276,6 +276,45 @@ pub(crate) async fn preflight(
     })
 }
 
+/// The OOB drain window: `blind_oob_wait`, clipped to what is left of a
+/// `scan_timeout` budget (0 = unbounded). The wait counts against the budget —
+/// the documented contract, and what keeps a request inside the server-wide
+/// `--scan-timeout` cap. Only the wait is clipped; the final sweep and the
+/// deregister still run.
+fn oob_drain_wait(
+    wait_secs: u64,
+    scan_timeout: u64,
+    elapsed: std::time::Duration,
+) -> std::time::Duration {
+    let wait = std::time::Duration::from_secs(wait_secs);
+    match scan_timeout {
+        0 => wait,
+        budget => wait.min(std::time::Duration::from_secs(budget).saturating_sub(elapsed)),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn oob_drain_wait_counts_against_scan_timeout() {
+    use std::time::Duration;
+    assert_eq!(
+        oob_drain_wait(600, 0, Duration::from_secs(5)),
+        Duration::from_secs(600)
+    );
+    assert_eq!(
+        oob_drain_wait(600, 10, Duration::from_secs(4)),
+        Duration::from_secs(6)
+    );
+    assert_eq!(
+        oob_drain_wait(3, 10, Duration::from_secs(4)),
+        Duration::from_secs(3)
+    );
+    assert_eq!(
+        oob_drain_wait(30, 10, Duration::from_secs(12)),
+        Duration::ZERO
+    );
+}
+
 /// Run one job's scan to completion and report what it left behind.
 ///
 /// `warn` receives operator-facing warnings so each interface can route them
@@ -774,6 +813,7 @@ pub(crate) async fn execute_scan(
     // tripped so any in-flight workers wind down at their next checkpoint, and
     // the job settles as `cancelled` with whatever partial results it gathered
     // (plus an explanatory error_message) — the same shape as a user cancel.
+    let scan_started = std::time::Instant::now();
     let timed_out = run_within_scan_budget(args.scan_timeout, &cancel_flag, scan_fut).await;
 
     // Drain late OOB callbacks and deregister — OUTSIDE the budget, so a
@@ -792,7 +832,11 @@ pub(crate) async fn execute_scan(
         {
             std::time::Duration::ZERO
         } else {
-            std::time::Duration::from_secs(args.blind_oob_wait())
+            oob_drain_wait(
+                args.blind_oob_wait(),
+                args.scan_timeout,
+                scan_started.elapsed(),
+            )
         };
         // The poller is silenced here, so what it would have printed goes on
         // the job's warning channel: a dead OAST poll path is not a clean scan.
