@@ -1985,3 +1985,61 @@ fn scan_option_checks_reject_an_unknown_min_confidence() {
     .unwrap_err();
     assert!(err.contains("min_confidence"), "{err}");
 }
+
+/// Blind injection writes stored payloads into the target (params × templates
+/// × channels, each paced by `delay`); a cancel landing mid-pass must stop it
+/// rather than keep firing at a target nobody is waiting on.
+#[tokio::test]
+async fn cancel_stops_blind_injection_mid_pass() {
+    use axum::{Router, routing::any};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_h = hits.clone();
+    let app = Router::new().fallback(any(move || {
+        let hits = hits_h.clone();
+        async move {
+            hits.fetch_add(1, Ordering::Relaxed);
+            "ok"
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    // 8 query params × 3 blind templates = 24 requests, 200ms apart (~5s).
+    let mut target = crate::target_parser::parse_target(&format!(
+        "http://{addr}/?a=1&b=1&c=1&d=1&e=1&f=1&g=1&h=1"
+    ))
+    .expect("valid target");
+    target.delay = 200;
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        silence: true,
+        blind_callback_url: Some("https://cb.example/x".to_string()),
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let trip = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        trip.store(true, Ordering::Relaxed);
+    });
+    let start = std::time::Instant::now();
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(run.was_cancelled);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(3),
+        "cancel must stop blind injection (took {:?}, {} requests)",
+        start.elapsed(),
+        hits.load(Ordering::Relaxed)
+    );
+}

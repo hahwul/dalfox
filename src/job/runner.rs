@@ -512,8 +512,16 @@ pub(crate) async fn execute_scan(
                     if let Some(source) = source
                         && !cancel_flag.load(std::sync::atomic::Ordering::Relaxed)
                     {
-                        crate::scanning::blind_scanning_with(target, source, custom).await;
-                        crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                        // Params × templates × channels, each paced by
+                        // `delay`: a cancel mid-pass stops the stored writes.
+                        let inject = async {
+                            crate::scanning::blind_scanning_with(target, source, custom).await;
+                            crate::scanning::blind_scan_forms_with(target, source, custom).await;
+                        };
+                        tokio::select! {
+                            _ = inject => {}
+                            _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => return,
+                        }
                         oob_injected = oob_session.is_some();
                     }
 
