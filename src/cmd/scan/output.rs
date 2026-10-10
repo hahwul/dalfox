@@ -582,7 +582,18 @@ pub(crate) async fn render_results(
             .filter(|r| !args.below_min_confidence(r))
             .cloned()
             .collect();
-        let dropped = all.len() - kept.len();
+        // Counted the way the report counts: AST copies of one sink fold into
+        // one finding, so a dropped key counts once, and not at all when a
+        // kept copy still reports it.
+        let mut ast_keys: std::collections::HashSet<String> = kept
+            .iter()
+            .filter_map(super::postprocess::ast_dedup_key)
+            .collect();
+        let dropped = all
+            .iter()
+            .filter(|r| args.below_min_confidence(r))
+            .filter(|r| super::postprocess::ast_dedup_key(r).is_none_or(|k| ast_keys.insert(k)))
+            .count();
         (kept, dropped)
     };
     let mut final_results = dedupe_ast_results(kept);

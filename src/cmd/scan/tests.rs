@@ -4174,6 +4174,37 @@ async fn min_confidence_filters_before_ast_dedup() {
     assert_eq!(v["findings"][0]["confidence"], "high");
 }
 
+/// `meta.min_confidence.dropped` counts findings the report lost, not raw
+/// copies: one low-graded DOM sink re-found by three passes is one finding
+/// in the unfiltered report, so filtering it drops one.
+#[tokio::test]
+async fn min_confidence_dropped_counts_folded_ast_duplicates_once() {
+    use crate::scanning::result::Confidence;
+    let ast = |param: &str| {
+        let mut r = ScanResult::builder(FindingType::AstDetected)
+            .inject_type("DOM-XSS")
+            .data("https://example.com")
+            .param(param)
+            .evidence("https://example.com:1:1 - d (Source: location.hash, Sink: innerHTML)")
+            .severity("Medium")
+            .build();
+        r.confidence = Some(Confidence::Low);
+        r
+    };
+    let all = vec![ast("-"), ast("a"), ast("b")];
+    let (out, _) =
+        render_with_min_confidence(None, all.clone(), "minconf_dropped_unfiltered").await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 1, "the three copies fold");
+    let (out, _) = render_with_min_confidence(Some("high"), all, "minconf_dropped_folded").await;
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 0);
+    assert_eq!(
+        v["meta"]["min_confidence"],
+        serde_json::json!({"level": "high", "dropped": 1})
+    );
+}
+
 /// The `--stream-findings` printer skips what `--min-confidence` drops (and
 /// does not record it, so it cannot shadow a later kept finding), and still
 /// folds a repeat of a printed finding.
