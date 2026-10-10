@@ -230,7 +230,7 @@ dalfox scan 'https://target.app/?q=1' -b https://your-callback.example
 dalfox scan 'https://target.app/?q=1' --blind-oob
 ```
 
-`--blind-oob`는 interactsh 서버(공개 메시, 또는 `--blind-oob=oast.fun`처럼 지정한 서버)에 등록하고, 페이로드마다 콜백 호스트를 새로 발급하며, 스캔이 끝난 뒤에도 `--blind-oob-wait`초(기본값 `30`) 동안 폴링을 계속합니다. 도착한 콜백은 `detection_method: oob`인 `V` 탐지 결과가 됩니다. Blind 페이로드는 저장되는 공격 트래픽이므로 `--dry-run`, `--only-discovery`, `--skip-xss-scanning`에서는 보내지 않습니다. 템플릿과 커스텀 페이로드는 [페이로드와 인코딩](../payloads/#blind-xss)에서 다룹니다.
+`--blind-oob`는 interactsh 서버(공개 메시, 또는 `--blind-oob=oast.fun`처럼 지정한 서버)에 등록하고, 페이로드마다 콜백 호스트를 새로 발급하며, 스캔이 끝난 뒤에도 `--blind-oob-wait`초(기본값 `30`) 동안 폴링을 계속합니다. 도착한 콜백은 `detection_method: oob`인 `V` 탐지 결과가 됩니다. Blind 페이로드는 저장되는 공격 트래픽이므로 `--dry-run`, `--only-discovery`, `--skip-xss-scanning`에서는 보내지 않으며, 스캔하지 않는 대상(연결 불가, content-type 불일치, `--max-targets-per-host` 초과)에도 보내지 않습니다. 템플릿과 커스텀 페이로드는 [페이로드와 인코딩](../payloads/#blind-xss)에서 다룹니다.
 
 ## 세션 모니터링
 

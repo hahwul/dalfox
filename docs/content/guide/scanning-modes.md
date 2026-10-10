@@ -230,7 +230,7 @@ dalfox scan 'https://target.app/?q=1' -b https://your-callback.example
 dalfox scan 'https://target.app/?q=1' --blind-oob
 ```
 
-`--blind-oob` registers with an interactsh server (the public mesh, or the ones you name with `--blind-oob=oast.fun`), mints a callback host per payload, and after the scan keeps polling for `--blind-oob-wait` seconds (default `30`). A callback that arrives becomes a `V` finding with `detection_method: oob`. Blind payloads are stored attack traffic, so they are not sent under `--dry-run`, `--only-discovery`, or `--skip-xss-scanning`. Templates and custom payloads are covered in [Payloads & Encoding](../payloads/#blind-xss).
+`--blind-oob` registers with an interactsh server (the public mesh, or the ones you name with `--blind-oob=oast.fun`), mints a callback host per payload, and after the scan keeps polling for `--blind-oob-wait` seconds (default `30`). A callback that arrives becomes a `V` finding with `detection_method: oob`. Blind payloads are stored attack traffic, so they are not sent under `--dry-run`, `--only-discovery`, or `--skip-xss-scanning`, nor to a target that is not scanned (unreachable, content-type mismatch, or over `--max-targets-per-host`). Templates and custom payloads are covered in [Payloads & Encoding](../payloads/#blind-xss).
 
 ## Session monitoring
 

@@ -3641,6 +3641,45 @@ async fn blind_dispatch_respects_per_host_cap() {
     );
 }
 
+/// A target preflight drops (here: content-type mismatch) is never scanned,
+/// so it must not receive stored blind payloads either.
+#[tokio::test]
+async fn blind_dispatch_skips_targets_preflight_dropped() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let s = seen.clone();
+    let app = Router::new().fallback(any(move |uri: axum::http::Uri| {
+        let s = s.clone();
+        async move {
+            s.lock().unwrap().push(uri.to_string());
+            ([("content-type", "image/png")], "png")
+        }
+    }));
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let args = ScanArgs {
+        targets: vec![format!("http://{addr}/img?a=1")],
+        blind_callback_url: Some("https://cb.example/x".to_string()),
+        skip_mining: true,
+        skip_discovery: true,
+        skip_waf_probe: true,
+        ..default_scan_args()
+    };
+    let _ = super::run_scan(&args).await;
+    server.abort();
+
+    let seen = seen.lock().unwrap();
+    assert!(!seen.is_empty(), "preflight ran");
+    assert!(
+        !seen.iter().any(|u| u.contains("cb.example")),
+        "a content-type-mismatched target got blind payloads: {seen:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_session_marker_beyond_the_preflight_range_does_not_fail_the_scan() {
     let _serial = RUN_SCAN_LOCK.lock().await;

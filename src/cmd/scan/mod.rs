@@ -548,14 +548,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         None => Vec::new(),
     };
 
-    // Blind payloads are stored attack traffic: apply `--max-targets-per-host`
-    // first so capped-out targets (reported as skipped) never receive them.
-    analysis::apply_per_host_cap(args, &mut host_groups, &state.skipped_targets).await;
-    let oob_session = blind::arm_and_dispatch(args, &host_groups, &cancel_flag).await;
-
     // Preflight + parameter analysis for every target (bounded concurrency);
     // replaces each host group with the targets that survived preflight.
     analysis::run_preflight_and_analysis(args, &mut host_groups, &state).await;
+
+    // Blind payloads are stored attack traffic: only the survivors get them,
+    // not targets capped out by `--max-targets-per-host` or dropped by
+    // preflight (unreachable, content-type mismatch) — none of which is scanned.
+    let oob_session = blind::arm_and_dispatch(args, &host_groups, &cancel_flag).await;
 
     // Record the targets preflight dropped (unreachable, content-type
     // mismatch, per-host cap) as `error`. They are retried on the next run —
