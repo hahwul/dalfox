@@ -1116,6 +1116,21 @@ impl ScanArgs {
         r.below_min_confidence(self.min_confidence.as_deref())
     }
 
+    /// Whether `url` passes `--include-url` / `--exclude-url`, for URLs the
+    /// scan finds on its own (form actions, external scripts) rather than the
+    /// target list. Invalid patterns are skipped; startup already rejects them.
+    pub(crate) fn url_in_scope(&self, url: &str) -> bool {
+        let compile = |patterns: &[String]| -> Vec<regex::Regex> {
+            patterns
+                .iter()
+                .filter_map(|p| regex::Regex::new(p).ok())
+                .collect()
+        };
+        let include = compile(&self.include_url);
+        (include.is_empty() || include.iter().any(|r| r.is_match(url)))
+            && !compile(&self.exclude_url).iter().any(|r| r.is_match(url))
+    }
+
     /// Effective `--on-session-loss` policy: the operator's choice, else
     /// `abort`. `Option` so an explicit `--on-session-loss abort` beats a
     /// config-file `continue`; see [`ScanArgs::dedup_urls_mode`].

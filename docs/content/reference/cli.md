@@ -119,8 +119,8 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--include-url` | — | Scan only URLs matching this regex (unanchored). Repeat the flag for more patterns; a URL must match at least one. An invalid regex is a startup error |
-| `--exclude-url` | — | Skip URLs matching this regex (unanchored). Repeat the flag for more patterns. An invalid regex is a startup error |
+| `--include-url` | — | Scan only URLs matching this regex (unanchored). Repeat the flag for more patterns; a URL must match at least one. Also applies to form actions found on a page (discovery and blind-XSS form injection) and to `--analyze-external-js` scripts. An invalid regex is a startup error |
+| `--exclude-url` | — | Skip URLs matching this regex (unanchored). Repeat the flag for more patterns. Also applies to form actions found on a page (discovery and blind-XSS form injection) and to `--analyze-external-js` scripts, so `--exclude-url /logout` keeps a logout form from being probed. An invalid regex is a startup error |
 | `--ignore-param` | — | Parameter name to skip (exact match). Repeat the flag for more names |
 | `--out-of-scope` | — | Skip targets whose host matches this pattern. `*.example.com` matches `example.com` and every subdomain; any other `*` matches any run of characters (`127.0.0.*`, `*.example.*`); a value without `*` must equal the host. Case-insensitive. Repeat the flag for more patterns: `--out-of-scope '*.gov' --out-of-scope cdn.example.com`. A comma is not a separator |
 | `--out-of-scope-file` | — | File of out-of-scope patterns, one per line (blank and `#` lines skipped), same matching as `--out-of-scope`. A path that cannot be read is a fatal `FILE_READ_ERROR` — scanning on without the exclusion list would attack every host it named |

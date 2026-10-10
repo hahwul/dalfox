@@ -58,8 +58,8 @@ Every format except `plain` auto-silences the banner.
 | `-d, --data` | Request body (form or JSON) |
 | `--user-agent` | Set a custom `User-Agent` header (e.g. `--user-agent 'Mozilla/5.0'`); unset uses the built-in default |
 | `-p, --param` | Restrict to specific params. Prefer `name:location` (`query`, `body`, `json`, `multipart`, `header`, `cookie`, `graphql`, `xml`; `path` / `fragment` only filter discovered params — they cannot be synthesized). Bare `-p name` still works: if discovery did not seed it, dalfox synthesizes it (infers location from the request, defaults to `query`) so `--skip-discovery -p q` is not a silent no-op |
-| `--include-url` | Regex whitelist (multiple) |
-| `--exclude-url` | Regex blacklist (multiple) |
+| `--include-url` | Regex whitelist (multiple); also gates discovered form actions and external scripts |
+| `--exclude-url` | Regex blacklist (multiple); also gates discovered form actions and external scripts |
 | `--ignore-param` | Skip these parameter names entirely |
 | `--out-of-scope` | Domain pattern to exclude (e.g. `*.dev.example.com`). Repeat the flag per pattern — a comma is not a separator. `*` matches any run of characters (`127.0.0.*`, `*.example.*`); a leading `*.` also matches the apex (`*.example.com` covers `example.com`) |
 | `--out-of-scope-file` | File containing one pattern per line. Unreadable path = fatal `FILE_READ_ERROR` (never a warning: continuing would scan the excluded hosts) |

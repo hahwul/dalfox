@@ -75,7 +75,6 @@ pub(crate) async fn arm_and_dispatch(
                 ),
             );
         }
-        let custom = args.custom_blind_xss_payload.as_deref();
         // Serial by design, but Ctrl-C must not wait out the whole phase: the
         // flag is checked per target and also races the in-flight requests,
         // so the first SIGINT drops the current target's request and moves on
@@ -97,8 +96,8 @@ pub(crate) async fn arm_and_dispatch(
                 };
                 tokio::select! {
                     _ = async {
-                        crate::scanning::blind_scanning_with(target, source, custom, &args.ignore_param).await;
-                        crate::scanning::blind_scan_forms_with(target, source, custom, &args.ignore_param).await;
+                        crate::scanning::blind_scanning_with(target, source, args).await;
+                        crate::scanning::blind_scan_forms_with(target, source, args).await;
                     } => {}
                     _ = super::scan_loop::poll_cancel(cancel_flag) => break 'dispatch,
                 }

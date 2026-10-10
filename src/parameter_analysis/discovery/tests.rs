@@ -1645,7 +1645,12 @@ async fn test_check_form_discovery_keeps_unreflected_fields_only_when_asked() {
 
     for keep in [false, true] {
         let params = Arc::new(Mutex::new(Vec::new()));
-        check_form_discovery_with(&target, params.clone(), Arc::new(Semaphore::new(4)), keep).await;
+        let args = ScanArgs {
+            sxss: keep,
+            ..Default::default()
+        };
+        check_form_discovery_with(&target, &args, params.clone(), Arc::new(Semaphore::new(4)))
+            .await;
         let params = params.lock().await;
         let body: Vec<_> = params
             .iter()
@@ -1666,6 +1671,72 @@ async fn test_check_form_discovery_keeps_unreflected_fields_only_when_asked() {
             assert!(params.is_empty(), "{params:?}");
         }
     }
+}
+
+/// `--exclude-url` / `--include-url` say which URLs may be scanned. A form's
+/// action is a URL the scan would POST probes (and later payloads) to, so an
+/// excluded one — the classic being a navbar logout form — must not be touched.
+#[tokio::test]
+async fn test_check_form_discovery_respects_url_scope() {
+    use axum::{Router, response::Html, routing::get};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let app = Router::new()
+        .route(
+            "/",
+            get(|| async {
+                Html(r#"<form action="/logout" method="post"><input name="c"></form>"#)
+            }),
+        )
+        .route(
+            "/logout",
+            axum::routing::post(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Html("bye")
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let target = crate::target_parser::parse_target(&format!("http://{addr}/")).expect("target");
+
+    for args in [
+        ScanArgs {
+            exclude_url: vec!["/logout".to_string()],
+            ..Default::default()
+        },
+        ScanArgs {
+            include_url: vec![r"/$".to_string()],
+            ..Default::default()
+        },
+    ] {
+        let params = Arc::new(Mutex::new(Vec::new()));
+        check_form_discovery_with(&target, &args, params, Arc::new(Semaphore::new(4))).await;
+    }
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "out-of-scope form was probed"
+    );
+
+    // Control: unscoped, the form is probed.
+    let params = Arc::new(Mutex::new(Vec::new()));
+    check_form_discovery_with(
+        &target,
+        &ScanArgs::default(),
+        params,
+        Arc::new(Semaphore::new(4)),
+    )
+    .await;
+    assert!(hits.load(Ordering::SeqCst) > 0);
 }
 
 /// Serve `html` at `/` and count every other request (probes), including

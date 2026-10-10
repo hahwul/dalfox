@@ -260,18 +260,6 @@ pub(crate) async fn fetch_and_analyze_external_js(
         return Vec::new();
     }
 
-    // Compile scope filters once rather than per-URL.
-    let include_patterns: Vec<regex::Regex> = scan_args
-        .include_url
-        .iter()
-        .filter_map(|p| regex::Regex::new(p).ok())
-        .collect();
-    let exclude_patterns: Vec<regex::Regex> = scan_args
-        .exclude_url
-        .iter()
-        .filter_map(|p| regex::Regex::new(p).ok())
-        .collect();
-
     let script_urls =
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
 
@@ -288,10 +276,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
         let url_str = script_url.as_str().to_owned();
 
         // Apply --include-url / --exclude-url scope to external script URLs.
-        if !include_patterns.is_empty() && !include_patterns.iter().any(|r| r.is_match(&url_str)) {
-            continue;
-        }
-        if exclude_patterns.iter().any(|r| r.is_match(&url_str)) {
+        if !scan_args.url_in_scope(&url_str) {
             continue;
         }
 

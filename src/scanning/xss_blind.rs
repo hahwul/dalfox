@@ -182,10 +182,9 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
 pub async fn blind_scanning_with(
     target: &Target,
     source: CallbackSource<'_>,
-    custom_template_path: Option<&str>,
-    ignore_params: &[String],
+    args: &crate::cmd::scan::ScanArgs,
 ) {
-    let templates = build_blind_templates(custom_template_path);
+    let templates = build_blind_templates(args.custom_blind_xss_payload.as_deref());
     let method = target.parse_method().to_string();
     let record_url = target.url.as_str();
 
@@ -230,7 +229,7 @@ pub async fn blind_scanning_with(
     }
 
     // `--ignore-param` excludes a name from every injection, stored ones too.
-    all_params.retain(|(name, _)| !ignore_params.contains(name));
+    all_params.retain(|(name, _)| !args.ignore_param.contains(name));
 
     // Send requests for each (param × template × callback channel). Custom
     // templates typically supply just one or two shapes, so the product stays
@@ -372,13 +371,12 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
 pub async fn blind_scan_forms_with(
     target: &Target,
     source: CallbackSource<'_>,
-    custom_template_path: Option<&str>,
-    ignore_params: &[String],
+    args: &crate::cmd::scan::ScanArgs,
 ) {
     use tokio::time::{Duration, sleep};
     use url::form_urlencoded;
 
-    let templates = build_blind_templates(custom_template_path);
+    let templates = build_blind_templates(args.custom_blind_xss_payload.as_deref());
     // For form-discovery blast we keep the first template — the form
     // probe is best-effort and using every template here multiplies
     // request count without changing detection probability much.
@@ -452,6 +450,7 @@ pub async fn blind_scan_forms_with(
             let action_attr = form.value().attr("action").unwrap_or("");
             let Some(action_url) =
                 crate::utils::http::resolve_probeable_form_action(&target.url, action_attr)
+                    .filter(|u| args.url_in_scope(u.as_str()))
             else {
                 continue;
             };
@@ -463,7 +462,7 @@ pub async fn blind_scan_forms_with(
                     continue;
                 }
                 let value = input.value().attr("value").unwrap_or("").to_string();
-                let injectable = is_injectable_input(&input) && !ignore_params.contains(&name);
+                let injectable = is_injectable_input(&input) && !args.ignore_param.contains(&name);
                 fields.push(FormField {
                     name,
                     value,

@@ -493,7 +493,6 @@ pub(crate) async fn execute_scan(
                     // source, matching the CLI's `-b`/`--blind-oob` behavior
                     // (`cmd::scan::blind::arm_and_dispatch` injects forms for a
                     // callback-only run too).
-                    let custom = args.custom_blind_xss_payload.as_deref();
                     let source = match (&args.blind_callback_url, &oob_session) {
                         (Some(url), Some(session)) => Some(crate::scanning::CallbackSource::Both {
                             url: url.as_str(),
@@ -515,8 +514,8 @@ pub(crate) async fn execute_scan(
                         // Params × templates × channels, each paced by
                         // `delay`: a cancel mid-pass stops the stored writes.
                         let inject = async {
-                            crate::scanning::blind_scanning_with(target, source, custom, &args.ignore_param).await;
-                            crate::scanning::blind_scan_forms_with(target, source, custom, &args.ignore_param).await;
+                            crate::scanning::blind_scanning_with(target, source, args.as_ref()).await;
+                            crate::scanning::blind_scan_forms_with(target, source, args.as_ref()).await;
                         };
                         tokio::select! {
                             _ = inject => {}
