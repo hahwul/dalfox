@@ -181,7 +181,8 @@ pub(super) async fn probe_query_candidates(
         arbitrary_names_disproved = true;
     }
 
-    let candidates = unique_query_candidates(raw_candidates, &ctx.reflection_params).await;
+    let candidates =
+        unique_query_candidates(raw_candidates, &ctx.reflection_params, &ctx.target.url).await;
     // The spinner is shared by every analysis stage after this one, so it is
     // only cleared on the collapse early-return above (as before bucketing).
     // Clearing it here and at the end hid the progress of DOM mining and

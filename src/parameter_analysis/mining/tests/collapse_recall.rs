@@ -201,3 +201,39 @@ async fn unprobed_dom_candidates_confirm_before_folding() {
         "HTML fetch, stability sample, one candidate bucket, then three confirming sentinels"
     );
 }
+
+/// A GET form on the page posting to another endpoint is a different sink
+/// from the page's own query param of the same name. Skipping the candidate by
+/// name alone left the page-level reflection unprobed.
+#[tokio::test]
+async fn form_param_at_another_endpoint_does_not_shadow_the_page_slot() {
+    let (target, _requests, server) = selective_server().await;
+    let wordlist = TempWordlist::new("collapse-recall-form-endpoint", "cand_q\n");
+    let args = ScanArgs {
+        mining_dict_word: Some(wordlist.as_str()),
+        ..default_scan_args()
+    };
+    let form_param = Param {
+        form_action_url: Some(target.url.join("/search").unwrap().to_string()),
+        form_origin_url: Some(target.url.to_string()),
+        ..Param::new("cand_q".to_string(), "a".to_string(), Location::Query)
+    };
+    let params = Arc::new(Mutex::new(vec![form_param]));
+    probe_dictionary_params(
+        &target,
+        &args,
+        params.clone(),
+        Arc::new(Semaphore::new(1)),
+        None,
+    )
+    .await;
+    server.abort();
+    let params = params.lock().await;
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "cand_q" && p.form_action_url.is_none()),
+        "{params:?}"
+    );
+    assert_eq!(params.len(), 2, "the form slot survives too: {params:?}");
+}
