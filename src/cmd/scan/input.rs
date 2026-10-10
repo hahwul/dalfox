@@ -511,7 +511,7 @@ pub(crate) async fn resolve_targets(
                         apply_request_cli_overrides(&mut target, args);
                         parsed_targets.push(target);
                     }
-                    spec_skipped += import.skipped.len();
+                    spec_skipped += import.skipped_total;
                     spec_unscanned_methods += import.unscanned_methods;
                     for why in import.skipped {
                         if spec_skip_sample.len() >= UNPARSABLE_SAMPLE_LIMIT {

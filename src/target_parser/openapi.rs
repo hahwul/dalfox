@@ -85,8 +85,7 @@ pub fn parse_openapi(
     // `x-…` keys are specification extensions, not paths.
     'paths: for (path, item) in paths.iter().filter(|(p, _)| !p.starts_with("x-")) {
         let Some(item) = resolve(&doc, item) else {
-            out.skipped
-                .push(format!("{path}: unresolvable path item $ref"));
+            out.skip(format!("{path}: unresolvable path item $ref"));
             continue;
         };
         for method in METHODS {
@@ -99,7 +98,7 @@ pub fn parse_openapi(
             }
             let label = format!("{} {}", method.to_ascii_uppercase(), path);
             if out.targets.len() >= super::MAX_IMPORT_TARGETS || budget == 0 {
-                out.skipped.push(format!(
+                out.skip(format!(
                     "{label}: stopped — spec expands past the import size cap"
                 ));
                 break 'paths;
@@ -134,7 +133,7 @@ pub fn parse_openapi(
                         skip.len()
                     };
                     budget = budget.saturating_sub(cost);
-                    out.skipped.push(skip);
+                    out.skip(skip);
                 }
             }
         }
@@ -148,7 +147,7 @@ pub fn parse_openapi(
             .unwrap_or_default();
         return Err(format!(
             "spec yielded no scannable operation ({} skipped, {} DELETE/HEAD/OPTIONS not scanned){why}",
-            out.skipped.len(),
+            out.skipped_total,
             out.unscanned_methods
         )
         .into());

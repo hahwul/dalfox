@@ -40,17 +40,34 @@ pub(crate) fn is_unscanned_spec_method(method: &str) -> bool {
         .any(|m| m.eq_ignore_ascii_case(method))
 }
 
+/// Most skip reasons a [`SpecImport`] stores. Consumers show the count and a
+/// short sample; a junk-heavy 256 MiB document would otherwise keep a reason
+/// string per entry, gigabytes in all.
+pub(crate) const MAX_SKIP_REASONS: usize = 16;
+
 /// What a spec import (`-i openapi` / `-i postman`) produced: the targets plus
-/// one human-readable reason per operation or request that was skipped. A bad
-/// entry never aborts the import — the same per-entry leniency a target list
-/// gets — so the caller reports the skips and scans the rest.
+/// a human-readable reason for the first operations or requests that were
+/// skipped. A bad entry never aborts the import — the same per-entry leniency
+/// a target list gets — so the caller reports the skips and scans the rest.
 #[derive(Debug, Default)]
 pub struct SpecImport {
     pub targets: Vec<Target>,
+    /// Reasons for the first [`MAX_SKIP_REASONS`] skips.
     pub skipped: Vec<String>,
+    /// Every skip, including those past the stored reasons.
+    pub skipped_total: usize,
     /// DELETE / HEAD / OPTIONS operations left out by policy (see
     /// [`is_unscanned_spec_method`]) — not errors, reported separately.
     pub unscanned_methods: usize,
+}
+
+impl SpecImport {
+    pub(crate) fn skip(&mut self, reason: String) {
+        self.skipped_total += 1;
+        if self.skipped.len() < MAX_SKIP_REASONS {
+            self.skipped.push(reason);
+        }
+    }
 }
 
 /// Request headers imported from a document (HAR entry, OpenAPI header

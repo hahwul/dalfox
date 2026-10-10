@@ -90,7 +90,7 @@ pub fn parse_postman(
             continue;
         };
         if out.targets.len() >= super::MAX_IMPORT_TARGETS || budget == 0 {
-            out.skipped.push(format!(
+            out.skip(format!(
                 "{label}: stopped — collection expands past the import size cap"
             ));
             break;
@@ -107,7 +107,7 @@ pub fn parse_postman(
                 budget = budget.saturating_sub(size);
                 out.targets.push(t);
             }
-            Err(e) => out.skipped.push(format!("{label}: {e}")),
+            Err(e) => out.skip(format!("{label}: {e}")),
         }
     }
 
@@ -119,7 +119,7 @@ pub fn parse_postman(
             .unwrap_or_default();
         return Err(format!(
             "collection yielded no scannable request ({} skipped, {} DELETE/HEAD/OPTIONS not scanned){why}",
-            out.skipped.len(),
+            out.skipped_total,
             out.unscanned_methods
         )
         .into());

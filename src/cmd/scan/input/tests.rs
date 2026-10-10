@@ -426,6 +426,17 @@ async fn postman_collection_resolves_with_cli_overrides() {
 }
 
 #[tokio::test]
+async fn spec_skip_count_survives_the_capped_reason_sample() {
+    let bad = vec![r#"{"request":1}"#; 40].join(",");
+    let collection = format!(r#"{{"item":[{bad},{{"name":"ok","request":"https://h/ok"}}]}}"#);
+    let path = tmp_file("skips.postman_collection.json", &collection);
+    let args = args_from(&["-i", "postman", "-S", path.to_str().unwrap()]);
+    let resolved = resolve_targets(&args).await.expect("collection resolves");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(resolved.unparsable_lines, 40);
+}
+
+#[tokio::test]
 async fn openapi_missing_file_is_a_file_read_error() {
     let args = args_from(&["-i", "openapi", "-S", "./no-such-spec.yaml"]);
     assert!(resolve(&args).await.is_err());

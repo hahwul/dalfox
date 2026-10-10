@@ -251,7 +251,7 @@ fn deep_folder_labels_stay_bounded_in_skip_reasons() {
     c.push_str(&"]}".repeat(60));
     let doc = format!(r#"{{"item":[{c},{{"name":"ok","request":"https://h/ok"}}]}}"#);
     let out = parse_postman(&doc, None).expect("parses");
-    assert_eq!(out.skipped.len(), 100);
+    assert_eq!(out.skipped_total, 100);
     assert!(
         out.skipped.iter().all(|s| s.len() <= 512),
         "skip reason of {} bytes",
@@ -296,4 +296,17 @@ fn url_object_without_raw_is_built_from_its_parts() {
         out.targets[0].url.as_str(),
         "https://api.example.com:8443/v1/users/7?q=a%20b&flag"
     );
+}
+
+#[test]
+fn skip_reasons_are_capped_but_counted() {
+    // A junk-heavy collection stored one reason per skipped request without
+    // bound; consumers only show the count and a short sample.
+    let doc = format!(
+        r#"{{"item":[{},{{"name":"ok","request":"https://h/ok"}}]}}"#,
+        vec![r#"{"request":1}"#; 1000].join(",")
+    );
+    let out = parse_postman(&doc, None).expect("parses");
+    assert_eq!(out.skipped_total, 1000);
+    assert!(!out.skipped.is_empty() && out.skipped.len() <= super::super::MAX_SKIP_REASONS);
 }

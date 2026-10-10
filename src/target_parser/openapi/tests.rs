@@ -530,12 +530,8 @@ fn too_large_skips_charge_the_import_budget() {
         "components": {"schemas": {"Big": {"type": "string", "example": "x".repeat(64 * 1024)}}}
     });
     let out = parse(&spec.to_string());
-    assert!(
-        out.skipped.iter().any(|s| s.contains("stopped")),
-        "{} skipped",
-        out.skipped.len()
-    );
-    assert!(out.skipped.len() <= 70, "{} skipped", out.skipped.len());
+    // Fewer than the 100 shared operations: the budget stopped the import.
+    assert!(out.skipped_total <= 70, "{} skipped", out.skipped_total);
 }
 
 #[test]
@@ -635,4 +631,18 @@ fn non_spec_documents_are_rejected() {
     assert!(parse_openapi(r##"{"log":{"entries":[]}}"##, None).is_err());
     assert!(parse_openapi("not: [valid", None).is_err());
     assert!(parse_openapi(r##"{"openapi":"3.0.0"}"##, None).is_err());
+}
+
+#[test]
+fn skip_reasons_are_capped_but_counted() {
+    let mut paths = serde_json::Map::new();
+    for i in 0..1000 {
+        paths.insert(format!("/bad{i}"), serde_json::json!({"$ref": "#/nope"}));
+    }
+    paths.insert("/ok".into(), serde_json::json!({"get": {}}));
+    let spec =
+        serde_json::json!({"openapi": "3.0.0", "servers": [{"url": "https://h"}], "paths": paths});
+    let out = parse(&spec.to_string());
+    assert_eq!(out.skipped_total, 1000);
+    assert!(!out.skipped.is_empty() && out.skipped.len() <= super::super::MAX_SKIP_REASONS);
 }
