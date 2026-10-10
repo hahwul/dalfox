@@ -718,7 +718,12 @@ fn any_payload_occurrence_hits_sink(src: &str, payload: &str) -> bool {
     if occurrences.peek().is_none() {
         return false;
     }
-    let Some(spans) = cached_parsed_spans(src, SourceType::default()) else {
+    // Module first, then classic script — the same retry as
+    // `ast_dom_analysis`: inline blocks and JSONP bodies are classic scripts,
+    // and sloppy-only syntax (`<!--` comments, `with`) is a module parse error.
+    let Some(spans) = cached_parsed_spans(src, SourceType::default())
+        .or_else(|| cached_parsed_spans(src, SourceType::script()))
+    else {
         return false;
     };
     occurrences.any(|(start, _)| {

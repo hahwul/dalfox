@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn detects_breakout_in_classic_script_with_sloppy_only_syntax() {
+    // Inline `<script>` is a classic script. `<!--` comments and `with` are
+    // module parse errors, so a module-only parse read the block as inert.
+    let payload = "\"-alert(1)-\"";
+    for body in [
+        format!("<!--\nvar c = \"{payload}\";\n//-->"),
+        format!("with (document) {{ var c = \"{payload}\"; }}"),
+    ] {
+        let html = format!("<html><body><script>{body}</script></body></html>");
+        assert!(has_js_context_evidence(payload, &html), "{html}");
+    }
+}
+
+#[test]
 fn detects_alert_breakout_in_double_quoted_js_string() {
     // Mirrors brutelogic c2 case: var c2 = "<INJECT>"
     let payload = "\"-alert(1)-\"";
