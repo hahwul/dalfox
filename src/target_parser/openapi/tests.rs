@@ -341,6 +341,13 @@ fn numeric_versions_and_reused_anchors_parse() {
 }
 
 #[test]
+fn numeric_server_variable_default_is_substituted() {
+    // An unquoted YAML `default: 8443` is a number, not a string.
+    let y = "openapi: 3.0.0\nservers:\n  - url: 'https://h:{port}/v{major}'\n    variables:\n      port: {default: 8443}\n      major: {enum: [2, 1]}\npaths:\n  /a:\n    get: {}\n";
+    assert_eq!(parse(y).targets[0].url.as_str(), "https://h:8443/v2/a");
+}
+
+#[test]
 fn delete_head_options_are_counted_not_scanned() {
     let spec = r#"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{
         "/a":{"get":{},"post":{},"put":{},"patch":{},"delete":{},"head":{},"options":{}}

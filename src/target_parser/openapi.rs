@@ -724,10 +724,12 @@ fn oas3_server_url(server: &Value) -> Result<String, String> {
         let value = var
             .and_then(|v| v.get("default"))
             .or_else(|| var.and_then(|v| v.get("enum")?.as_array()?.first()))
-            .and_then(Value::as_str);
+            // YAML reads an unquoted `default: 8443` as a number.
+            .filter(|v| v.is_string() || v.is_number())
+            .map(wire_string);
         out.push_str(&rest[..open]);
         match value {
-            Some(v) => out.push_str(v),
+            Some(v) => out.push_str(&v),
             None => out.push_str(&rest[open..open + close + 1]),
         }
         rest = &rest[open + close + 1..];
