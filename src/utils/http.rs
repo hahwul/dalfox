@@ -982,10 +982,11 @@ pub(crate) async fn read_body(resp: reqwest::Response) -> Result<String, reqwest
     read_body_capped(resp, MAX_RESPONSE_BODY_BYTES).await
 }
 
-/// [`read_body`] for injection-phase responses: a read that fails mid-body
-/// (reset, early close, stall until the timeout) is a payload that was sent but
-/// never tested, so it ticks `failed_requests` like [`send_counted`] does for a
-/// failed send instead of reading as "no reflection". Kept apart from
+/// [`read_body`] for responses from the scanned target (preflight, discovery,
+/// mining, injection): a read that fails mid-body (reset, early close, stall
+/// until the timeout) is a probe or payload that was sent but never tested, so
+/// it ticks `failed_requests` like [`send_counted`] does for a failed send
+/// instead of reading as "no reflection". Kept apart from
 /// `read_body` because the OOB poller and session probe share that one and must
 /// not flip a scan to `incomplete`.
 pub(crate) async fn read_body_counted(resp: reqwest::Response) -> Result<String, reqwest::Error> {

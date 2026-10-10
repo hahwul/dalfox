@@ -1123,6 +1123,57 @@ async fn spawned_discovery_requests_reach_the_per_job_counter() {
     );
 }
 
+/// A target that sends headers and then dies mid-body (or stalls past
+/// `--timeout` before finishing it) gives discovery a response whose body can
+/// never be read. Discovery dropped that `Err` uncounted, so every probe read
+/// as "this parameter does not reflect": `0 reflected params`, `clean`,
+/// `failed_requests: 0`, exit 0 — a scan that tested nothing reading as a
+/// verdict. The failed read has to reach the failure tally like a failed send.
+#[tokio::test]
+async fn discovery_counts_a_body_that_never_finishes_as_a_failed_request() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    crate::ensure_crypto_provider();
+
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                // Promises 100000 bytes, delivers a few, hangs up.
+                let _ = sock
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\
+                          Content-Length: 100000\r\n\r\n<html><body>",
+                    )
+                    .await;
+            });
+        }
+    });
+
+    let target = parse_target(&format!("http://{addr}/?a=1")).expect("target");
+    let failures = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let params = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    crate::REQUEST_FAILURE_COUNT_JOB
+        .scope(failures.clone(), async {
+            check_query_discovery(
+                &target,
+                params.clone(),
+                std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+            )
+            .await;
+        })
+        .await;
+
+    assert!(
+        failures.load(std::sync::atomic::Ordering::Relaxed) > 0,
+        "a probe whose body was cut off was never tested and must count as a failed request"
+    );
+}
+
 /// Serves a page holding one POST form whose `action` the test chooses, and
 /// echoes any submitted body back so a probe that lands here reflects its
 /// marker. The listener is bound before the HTML is built so an action can

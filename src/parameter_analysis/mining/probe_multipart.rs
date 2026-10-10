@@ -121,7 +121,7 @@ pub async fn probe_multipart_params(
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = crate::utils::http::send_counted(request).await
-                    && let Ok(text) = crate::utils::http::read_body(r).await
+                    && let Ok(text) = crate::utils::http::read_body_counted(r).await
                     && crate::scanning::markers::probe_reflected(&text)
                 {
                     if !silence {

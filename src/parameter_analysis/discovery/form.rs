@@ -44,7 +44,7 @@ pub(crate) async fn check_form_discovery_with(
     let request = crate::utils::build_request(&client, target, method, target.url.clone(), None);
     crate::record_outbound_request().await;
     let html = match crate::utils::http::send_counted(request).await {
-        Ok(resp) => match crate::utils::http::read_body(resp).await {
+        Ok(resp) => match crate::utils::http::read_body_counted(resp).await {
             Ok(text) => text,
             Err(_) => return,
         },
@@ -389,7 +389,7 @@ pub(crate) async fn check_form_discovery_with(
             );
             crate::record_outbound_request().await;
             if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                && let Ok(text) = crate::utils::http::read_body(resp).await
+                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                 && crate::scanning::markers::probe_reflected(&text)
             {
                 let analysis = ReflectionAnalysis::of(&text);
@@ -483,7 +483,7 @@ pub(crate) async fn check_form_discovery_with(
                     );
                     crate::record_outbound_request().await;
                     if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                        && let Ok(text) = crate::utils::http::read_body(resp).await
+                        && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                         && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
@@ -562,7 +562,7 @@ pub(crate) async fn check_form_discovery_with(
                     );
                     crate::record_outbound_request().await;
                     if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                        && let Ok(text) = crate::utils::http::read_body(resp).await
+                        && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                         && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
@@ -602,7 +602,9 @@ async fn form_field_param(
     keep_unreflected: bool,
     param: Param,
 ) -> Option<Param> {
-    let text = crate::utils::http::read_body(sent.ok()?).await.ok()?;
+    let text = crate::utils::http::read_body_counted(sent.ok()?)
+        .await
+        .ok()?;
     if crate::scanning::markers::probe_reflected(&text) {
         Some(param.with_reflection_analysis(&text))
     } else {

@@ -670,7 +670,7 @@ async fn send_probe_request_detailed(
     } else {
         None
     };
-    let body_text = match crate::utils::http::read_body(resp).await {
+    let body_text = match crate::utils::http::read_body_counted(resp).await {
         Ok(body) => Some(body),
         Err(e) => {
             crate::dbg_log!("discovery response body read failed: {}", e);
@@ -1286,7 +1286,7 @@ pub async fn active_probe_param(
             );
             crate::record_outbound_request().await;
             if let Ok(resp) = crate::utils::http::send_counted(request_builder).await
-                && let Ok(text) = crate::utils::http::read_body(resp).await
+                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                 && text.contains(&raw_marker)
             {
                 param.pre_encoding = Some(enc_name.to_string());

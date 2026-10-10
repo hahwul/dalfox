@@ -15,7 +15,7 @@ use super::{
 use crate::cmd::scan::{DEFAULT_MINING_BUCKET_SIZE, MINING_BISECT_WAYS, ScanArgs};
 use crate::parameter_analysis::{InjectionContext, Location, Param, ReflectionAnalysis};
 use crate::target_parser::Target;
-use crate::utils::http::{build_request, read_body, send_counted};
+use crate::utils::http::{build_request, read_body_counted, send_counted};
 use crate::utils::shimmer::ShimmerSpinner;
 use reqwest::Client;
 use std::collections::{HashSet, VecDeque};
@@ -631,7 +631,7 @@ async fn send_query_request(
                 .get("location")
                 .and_then(|value| value.to_str().ok())
                 .map(ToString::to_string);
-            let body = read_body(response).await.ok();
+            let body = read_body_counted(response).await.ok();
             body.map(|body| QueryResponse {
                 fingerprint: fingerprint(status.as_u16(), &body, location.as_deref()),
                 body,

@@ -300,7 +300,7 @@ pub(crate) async fn preflight_content_type(
         // `--follow-redirects` this is where the chain actually ended, which is
         // the only thing the session baseline can meaningfully compare against.
         let get_final_url = get_resp.url().clone();
-        if let Ok(body) = crate::utils::http::read_body(get_resp).await {
+        if let Ok(body) = crate::utils::http::read_body_counted(get_resp).await {
             response_body = Some(body.clone());
 
             // Authenticated-state fingerprint for mid-scan session-loss

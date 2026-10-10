@@ -77,7 +77,7 @@ pub(super) async fn pre_collapse_query_probe(
                 .get("location")
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|loc| loc.contains(marker));
-        let text = crate::utils::http::read_body(resp).await.ok()?;
+        let text = crate::utils::http::read_body_counted(resp).await.ok()?;
         if !location_has_marker && !text.contains(marker) {
             return None;
         }
