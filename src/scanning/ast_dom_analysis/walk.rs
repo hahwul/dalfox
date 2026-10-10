@@ -189,7 +189,6 @@ impl<'a> DomXssVisitor<'a> {
                     if let BindingPattern::BindingIdentifier(id) = &prop.value {
                         let name = id.name.to_string();
                         self.tainted_vars.insert(name.clone());
-                        self.global_taints.insert(name.clone());
                         if let Some(ref src) = source {
                             self.var_aliases.insert(name, src.clone());
                         }
@@ -200,7 +199,6 @@ impl<'a> DomXssVisitor<'a> {
                 {
                     let name = id.name.to_string();
                     self.tainted_vars.insert(name.clone());
-                    self.global_taints.insert(name.clone());
                     if let Some(ref src) = source {
                         self.var_aliases.insert(name, src.clone());
                     }
@@ -216,7 +214,6 @@ impl<'a> DomXssVisitor<'a> {
                     if let BindingPattern::BindingIdentifier(id) = &elem {
                         let name = id.name.to_string();
                         self.tainted_vars.insert(name.clone());
-                        self.global_taints.insert(name.clone());
                         if let Some(ref src) = source {
                             self.var_aliases.insert(name, src.clone());
                         }

@@ -38,3 +38,28 @@ fn summary_walk_keeps_real_field_and_global_flows() {
         assert!(!found(js).is_empty(), "{js}");
     }
 }
+
+/// A destructured binding is local to its function. Minified bundles (Vue)
+/// reuse one-letter names in every function, so a destructured `l` escaping
+/// into the global set tainted every unrelated `l` after it.
+#[test]
+fn destructured_local_does_not_escape_its_function() {
+    for js in [
+        "function outer() { let l = function () {}; function a() { const { l } = JSON.parse(location.hash.slice(1)); return 1; } setTimeout(l, 0); }",
+        "function outer() { let l = function () {}; function a() { const [l] = location.hash.slice(1).split(','); return 1; } setTimeout(l, 0); }",
+    ] {
+        assert!(found(js).is_empty(), "{js}: {:?}", found(js));
+    }
+}
+
+#[test]
+fn destructured_binding_keeps_real_flows() {
+    for js in [
+        "const { l } = JSON.parse(location.hash.slice(1)); setTimeout(l, 0);",
+        "function a() { const [l] = location.hash.slice(1).split(','); setTimeout(l, 0); }",
+        "function a() { const { l } = JSON.parse(location.hash.slice(1)); [1].forEach(function () { document.body.innerHTML = l; }); }",
+        "const { l } = JSON.parse(location.hash.slice(1)); function b() { document.body.innerHTML = l; }",
+    ] {
+        assert!(!found(js).is_empty(), "{js}");
+    }
+}
