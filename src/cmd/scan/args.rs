@@ -1067,6 +1067,16 @@ pub struct BlindOobArgs {
 pub(crate) const DEFAULT_BLIND_OOB_WAIT_SECS: u64 = 30;
 
 impl ScanArgs {
+    /// `--remote-wordlists` worth fetching up front: dictionary mining is their
+    /// only reader, so with it skipped they would be a wasted request each.
+    pub(crate) fn remote_wordlists_in_use(&self) -> &[String] {
+        if self.skip_mining || self.skip_mining_dict {
+            &[]
+        } else {
+            &self.remote_wordlists
+        }
+    }
+
     /// Effective `--dedup-urls` mode: the operator's choice, else the built-in
     /// [`DEFAULT_DEDUP_URLS`]. The field is an `Option` so config precedence can
     /// tell "unset" from an explicit `exact`; every reader should go through

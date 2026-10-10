@@ -159,3 +159,35 @@ async fn test_unknown_provider_set_does_not_poison_a_real_one() {
 
     let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
 }
+
+/// `--skip-mining` / `--skip-mining-dict` turn off the only consumer of a
+/// remote wordlist, so startup must not fetch one: that was an outbound request
+/// per provider for a list nothing reads.
+#[tokio::test]
+async fn test_skipped_dictionary_mining_does_not_fetch_remote_wordlists() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    register_wordlist_provider(
+        "skip-mining-unused",
+        vec![format!(
+            "http://{}/list.txt",
+            listener.local_addr().unwrap()
+        )],
+    );
+    for (skip_mining, skip_mining_dict) in [(true, false), (false, true)] {
+        let args = dalfox::cmd::scan::ScanArgs {
+            targets: vec!["http://127.0.0.1:1/?q=1".to_string()],
+            remote_wordlists: vec!["skip-mining-unused".to_string()],
+            skip_mining,
+            skip_mining_dict,
+            silence: true,
+            ..Default::default()
+        };
+        let _ = dalfox::cmd::scan::run_scan(&args).await;
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), listener.accept())
+            .await
+            .is_err(),
+        "a remote wordlist was fetched although dictionary mining was skipped"
+    );
+}

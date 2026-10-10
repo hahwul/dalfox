@@ -308,10 +308,10 @@ pub(crate) async fn init_remote_providers(args: &ScanArgs) {
     }
 
     // Initialize remote payloads/wordlists if requested (honor timeout/proxy)
-    if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
+    if (!args.remote_payloads.is_empty() || !args.remote_wordlists_in_use().is_empty())
         && let Err(e) = crate::utils::init_remote_resources_with_options(
             &args.remote_payloads,
-            &args.remote_wordlists,
+            args.remote_wordlists_in_use(),
             Some(args.timeout),
             args.proxy.clone(),
         )
