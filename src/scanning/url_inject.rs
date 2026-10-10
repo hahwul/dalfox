@@ -632,7 +632,17 @@ pub(crate) fn json_body(data: Option<&str>, name: &str, param_value: &str, value
 fn multipart_fields(data: Option<&str>, name: &str, value: &str) -> Vec<(String, String)> {
     let mut fields = Vec::new();
     let mut found = false;
-    if let Some(data) = data {
+    // A captured multipart body (raw HTTP / HAR / `-d`) keeps its own framing.
+    if let Some(raw) = data.and_then(crate::target_parser::raw_multipart_fields) {
+        for (k, v) in raw {
+            if k == name {
+                fields.push((k, value.to_string()));
+                found = true;
+            } else {
+                fields.push((k, v));
+            }
+        }
+    } else if let Some(data) = data {
         for pair in data.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
                 let k = urlencoding::decode(k)

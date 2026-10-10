@@ -597,6 +597,7 @@ pub(crate) async fn resolve_targets(
                     // Only override data if explicitly provided via CLI
                     if let Some(d) = &args.data {
                         target.data = Some(d.clone());
+                        target.multipart = crate::target_parser::is_raw_multipart(d);
                     }
                     target.headers = args
                         .headers
@@ -1004,34 +1005,11 @@ fn looks_like_form_urlencoded(data: &str) -> bool {
 }
 
 /// Field names from a raw `multipart/form-data` body: the `name` attribute of
-/// each `Content-Disposition: form-data` part. Attributes are split on `;`
-/// before matching so a `filename="…"` — which contains `name="` as a
-/// substring — can't be mistaken for the field name.
+/// each `Content-Disposition: form-data` part.
 fn multipart_field_names(data: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for line in data.lines() {
-        let line = line.trim();
-        if !line
-            .to_ascii_lowercase()
-            .starts_with("content-disposition:")
-        {
-            continue;
-        }
-        for attr in line.split(';').skip(1) {
-            let attr = attr.trim();
-            let Some(value) = attr.strip_prefix("name=") else {
-                continue;
-            };
-            let value = value.trim();
-            let name = value
-                .strip_prefix('"')
-                .and_then(|v| v.split_once('"').map(|(n, _)| n))
-                .unwrap_or(value);
-            names.push(name.to_string());
-            break; // one field name per part
-        }
-    }
-    names
+    data.lines()
+        .filter_map(crate::target_parser::content_disposition_name)
+        .collect()
 }
 
 /// Default grace window for the `auto` stdin merge, in milliseconds.
@@ -1222,6 +1200,7 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     }
     if let Some(d) = &args.data {
         target.data = Some(d.clone());
+        target.multipart |= crate::target_parser::is_raw_multipart(d);
     }
     let cli_headers: Vec<(String, String)> = args
         .headers

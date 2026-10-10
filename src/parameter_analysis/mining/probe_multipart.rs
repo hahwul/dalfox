@@ -26,18 +26,27 @@ pub async fn probe_multipart_params(
     /// not turn into thousands of tasks; real forms are far smaller.
     const MAX_IMPORTED_MULTIPART_FIELDS: usize = 256;
 
+    // A captured multipart body keeps its wire framing; an imported spec's is
+    // urlencoded (see `Target::multipart`).
+    let pairs: Arc<Vec<(String, String)>> = Arc::new(
+        crate::target_parser::raw_multipart_fields(data).unwrap_or_else(|| {
+            form_urlencoded::parse(data.as_bytes())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        }),
+    );
     let mut wanted =
         crate::parameter_analysis::discovery::explicit_param_names(&args.param, "multipart");
     let mut seen: HashSet<String> = wanted.iter().cloned().collect();
     if target.multipart {
         // An imported spec/collection declared this body multipart: every
         // field of it is a multipart field, named or not.
-        for (k, _) in form_urlencoded::parse(data.as_bytes()) {
+        for (k, _) in pairs.iter() {
             if seen.len() >= MAX_IMPORTED_MULTIPART_FIELDS {
                 break;
             }
-            if seen.insert(k.to_string()) {
-                wanted.push(k.into_owned());
+            if seen.insert(k.clone()) {
+                wanted.push(k.clone());
             }
         }
     }
@@ -50,11 +59,6 @@ pub async fn probe_multipart_params(
         pb.set_message("Probing multipart fields");
     }
 
-    let pairs: Arc<Vec<(String, String)>> = Arc::new(
-        form_urlencoded::parse(data.as_bytes())
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
-    );
     let client = target.build_client_or_default();
     let marker = crate::scanning::markers::bracketed_marker();
     let silence = args.silence;

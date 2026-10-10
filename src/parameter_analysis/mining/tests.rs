@@ -1627,6 +1627,52 @@ async fn test_mine_parameters_declared_multipart_target_mines_every_field_as_mul
 }
 
 #[tokio::test]
+async fn test_mine_parameters_raw_http_multipart_capture_mines_its_fields() {
+    // A captured (Burp / raw-http) `multipart/form-data` request keeps its
+    // body verbatim. Every multipart reader parsed `data` as urlencoded, so
+    // the capture yielded zero parameters and the scan reported clean
+    // without testing one field.
+    let addr = start_raw_body_reflect_server().await;
+    let raw = format!(
+        "POST /r HTTP/1.1\r\nHost: {addr}\r\n\
+         Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryAb12\r\n\r\n\
+         ------WebKitFormBoundaryAb12\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\na\r\n\
+         ------WebKitFormBoundaryAb12\r\nContent-Disposition: form-data; name=\"up\"; filename=\"x.txt\"\r\n\
+         Content-Type: text/plain\r\n\r\nb\r\n\
+         ------WebKitFormBoundaryAb12--\r\n"
+    );
+    let mut target = crate::target_parser::parse_raw_http_request(&raw).expect("raw http");
+    let mut args = default_scan_args();
+    args.skip_mining = true;
+    args.data = target.data.clone();
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    mine_parameters(
+        &mut target,
+        &args,
+        reflection_params.clone(),
+        Arc::new(tokio::sync::Semaphore::new(2)),
+        None,
+    )
+    .await;
+
+    let mut got: Vec<(String, Location)> = reflection_params
+        .lock()
+        .await
+        .iter()
+        .map(|p| (p.name.clone(), p.location.clone()))
+        .collect();
+    got.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        got,
+        vec![
+            ("note".to_string(), Location::MultipartBody),
+            ("up".to_string(), Location::MultipartBody)
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_mine_parameters_multipart_survives_same_named_body_param() {
     // `-d file=a -p file:multipart`: `probe_body_params` seeds `file` as a Body
     // param from the same `-d`, but the multipart slot must still be seeded —

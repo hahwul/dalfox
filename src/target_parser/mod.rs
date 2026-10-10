@@ -844,11 +844,81 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
 
     Ok(Target {
         method,
+        multipart: data.as_deref().is_some_and(is_raw_multipart),
         data,
         headers: headers_vec,
         cookies: cookies_vec,
         user_agent,
         ..Target::for_url(url)
+    })
+}
+
+/// Whether `data` is a captured `multipart/form-data` body (see
+/// [`raw_multipart_fields`]).
+pub(crate) fn is_raw_multipart(data: &str) -> bool {
+    raw_multipart_fields(data).is_some()
+}
+
+/// The fields of a `multipart/form-data` body kept as captured on the wire
+/// (raw HTTP, HAR, `-d`): each part's `name` with its content, in order. The
+/// boundary is read off the body's own first line, so no `Content-Type` is
+/// needed. `None` when `data` is not such a body, which callers read as
+/// urlencoded.
+pub(crate) fn raw_multipart_fields(data: &str) -> Option<Vec<(String, String)>> {
+    let boundary = data
+        .lines()
+        .next()?
+        .trim_end_matches('\r')
+        .strip_prefix("--")
+        .filter(|b| !b.is_empty() && !b.contains(char::is_whitespace))?;
+    let delimiter = format!("--{boundary}");
+    let mut fields = Vec::new();
+    for part in data.split(delimiter.as_str()).skip(1) {
+        if part.starts_with("--") {
+            break; // close delimiter
+        }
+        let part = part
+            .strip_prefix("\r\n")
+            .or_else(|| part.strip_prefix('\n'))
+            .unwrap_or(part);
+        let Some((head, body)) = part
+            .split_once("\r\n\r\n")
+            .or_else(|| part.split_once("\n\n"))
+        else {
+            continue;
+        };
+        let Some(name) = head.lines().find_map(content_disposition_name) else {
+            continue;
+        };
+        let value = body
+            .strip_suffix("\r\n")
+            .or_else(|| body.strip_suffix('\n'))
+            .unwrap_or(body);
+        fields.push((name, value.to_string()));
+    }
+    (!fields.is_empty()).then_some(fields)
+}
+
+/// The field `name` of a `Content-Disposition: form-data` header line.
+/// Attributes are split on `;` before matching so a `filename="…"` — which
+/// contains `name="` as a substring — can't be mistaken for the field name.
+pub(crate) fn content_disposition_name(line: &str) -> Option<String> {
+    let line = line.trim();
+    if !line
+        .get(..20)
+        .is_some_and(|p| p.eq_ignore_ascii_case("content-disposition:"))
+    {
+        return None;
+    }
+    line.split(';').skip(1).find_map(|attr| {
+        let value = attr.trim().strip_prefix("name=")?.trim();
+        Some(
+            value
+                .strip_prefix('"')
+                .and_then(|v| v.split_once('"').map(|(n, _)| n))
+                .unwrap_or(value)
+                .to_string(),
+        )
     })
 }
 
