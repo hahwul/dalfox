@@ -646,3 +646,15 @@ fn skip_reasons_are_capped_but_counted() {
     assert_eq!(out.skipped_total, 1000);
     assert!(!out.skipped.is_empty() && out.skipped.len() <= super::super::MAX_SKIP_REASONS);
 }
+
+#[test]
+fn xml_array_body_has_one_root_element() {
+    // An array example rendered one root element per item: not XML.
+    let spec = r##"{"openapi":"3.0.0","servers":[{"url":"https://h"}],"paths":{"/x":{"post":
+      {"requestBody":{"content":{"application/xml":{"schema":{"type":"array",
+        "xml":{"name":"pets"},"items":{"type":"string"}},"example":["a","b"]}}}}}}}"##;
+    let out = parse(spec);
+    let data = out.targets[0].data.as_deref().unwrap();
+    roxmltree::Document::parse(data).unwrap_or_else(|e| panic!("{data}: {e}"));
+    assert_eq!(data, "<pets><item>a</item><item>b</item></pets>");
+}

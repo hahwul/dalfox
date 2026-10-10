@@ -825,7 +825,8 @@ fn xml_root(doc: &Value, schema: &Value) -> Option<String> {
 
 /// Minimal XML for a sampled value: objects become child elements, arrays
 /// repeat their element, scalars become escaped text. Names that are not
-/// XML-safe fall back to `item`.
+/// XML-safe fall back to `item`. A document has one root element, so a root
+/// array is wrapped in it with `item` children.
 fn render_xml(name: &str, v: &Value, out: &mut String, depth: usize) {
     let safe = !name.is_empty()
         && name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
@@ -833,7 +834,9 @@ fn render_xml(name: &str, v: &Value, out: &mut String, depth: usize) {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
     let name = if safe { name } else { "item" };
-    if let Value::Array(items) = v {
+    if let Value::Array(items) = v
+        && depth > 0
+    {
         for i in items {
             render_xml(name, i, out, depth + 1);
         }
@@ -849,6 +852,7 @@ fn render_xml(name: &str, v: &Value, out: &mut String, depth: usize) {
             }
         }
         Value::Object(_) => {}
+        Value::Array(_) => render_xml("item", v, out, depth + 1),
         other => {
             for c in wire_string(other).chars() {
                 match c {
