@@ -221,11 +221,11 @@ fn build_request(
         req.get("url")
     };
     let raw = match url_field {
-        Some(Value::String(s)) => s.as_str(),
-        Some(u) => u
-            .get("raw")
-            .and_then(Value::as_str)
-            .ok_or("url has no `raw` form")?,
+        Some(Value::String(s)) => s.clone(),
+        Some(u) => match u.get("raw").and_then(Value::as_str) {
+            Some(r) => r.to_string(),
+            None => raw_from_parts(u).ok_or("url has neither a `raw` form nor a `host`")?,
+        },
         None => return Err("request has no url".to_string()),
     };
     let raw = substitute(raw.trim(), vars, false)?;
@@ -400,6 +400,56 @@ fn build_request(
     target.cookies = imported.cookies;
     target.user_agent = imported.user_agent;
     Ok(target)
+}
+
+/// A url object's `raw` rebuilt from its parts, for exports that leave `raw`
+/// out (it is optional in the v2.1 schema). Disabled query entries are
+/// dropped, as Postman drops them from the wire.
+fn raw_from_parts(u: &Value) -> Option<String> {
+    // `host` / `path` are an array (path segments may be `{value}` objects)
+    // or a plain string.
+    let join = |key: &str, sep: &str| match u.get(key) {
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|s| s.get("value").map_or_else(|| text(s), text))
+            .collect::<Vec<_>>()
+            .join(sep),
+        Some(v) => text(v),
+        None => String::new(),
+    };
+    let host = join("host", ".");
+    if host.is_empty() {
+        return None;
+    }
+    let mut raw = match u.get("protocol").and_then(Value::as_str) {
+        Some(p) => format!("{p}://{host}"),
+        None => host,
+    };
+    if let Some(port) = u.get("port").map(text).filter(|p| !p.is_empty()) {
+        raw = format!("{raw}:{port}");
+    }
+    let path = join("path", "/");
+    if !path.is_empty() {
+        raw = format!("{raw}/{}", path.trim_start_matches('/'));
+    }
+    let query: Vec<String> = u
+        .get("query")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|q| q.get("disabled").and_then(Value::as_bool) != Some(true))
+        .filter_map(|q| {
+            let k = q.get("key").and_then(Value::as_str)?;
+            Some(match q.get("value") {
+                None | Some(Value::Null) => k.to_string(),
+                Some(v) => format!("{k}={}", text(v)),
+            })
+        })
+        .collect();
+    if !query.is_empty() {
+        raw = format!("{raw}?{}", query.join("&"));
+    }
+    Some(raw)
 }
 
 fn form_body<'a>(fields: impl Iterator<Item = (&'a String, &'a str)>) -> String {

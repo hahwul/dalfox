@@ -280,3 +280,20 @@ fn empty_host_variable_is_skipped_not_read_from_the_path() {
             .any(|t| t.url.as_str() == "https://staging.example/users/list")
     );
 }
+
+#[test]
+fn url_object_without_raw_is_built_from_its_parts() {
+    // `raw` is optional in the v2.1 schema; Postman's runtime builds the
+    // URL from the parts, leaving disabled query entries off.
+    let c = r#"{"variable":[{"key":"h","value":"api"}],"item":[{"name":"p","request":{"url":{
+        "protocol":"https","host":["{{h}}","example","com"],"port":"8443",
+        "path":["v1",{"type":"string","value":"users"},":id"],
+        "variable":[{"key":"id","value":"7"}],
+        "query":[{"key":"q","value":"a b"},{"key":"off","value":"1","disabled":true},{"key":"flag","value":null}]
+    }}}]}"#;
+    let out = parse_postman(c, None).unwrap();
+    assert_eq!(
+        out.targets[0].url.as_str(),
+        "https://api.example.com:8443/v1/users/7?q=a%20b&flag"
+    );
+}
