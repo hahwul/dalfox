@@ -745,6 +745,14 @@ pub(crate) async fn execute_scan(
                     session_lost = session_baseline
                         .as_ref()
                         .and_then(crate::cmd::scan::session::baseline_warning);
+                    // The CLI's print-only `SESSION?` heads-up; a silenced job
+                    // has no stderr, so it goes on the warning channel.
+                    if let Some(note) = session_baseline
+                        .as_ref()
+                        .and_then(crate::cmd::scan::session::baseline_advisory)
+                    {
+                        warn(&note);
+                    }
 
                     // `args.silence` is already `true` (set at construction), and
                     // `analyze_parameters` takes `&ScanArgs`, so pass the shared

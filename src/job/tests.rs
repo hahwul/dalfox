@@ -1986,6 +1986,48 @@ fn scan_option_checks_reject_an_unknown_min_confidence() {
     assert!(err.contains("min_confidence"), "{err}");
 }
 
+/// The CLI's `SESSION?` advisory (a baseline that redirects to an auth-shaped
+/// URL — maybe an expired SSO session, maybe not) must reach a silenced job's
+/// warnings too, or the caller reads `done` as "session was fine".
+#[tokio::test]
+async fn ambiguous_session_baseline_surfaces_as_job_warning() {
+    use axum::{Router, http::StatusCode, http::header::LOCATION, routing::get};
+
+    let app = Router::new().route(
+        "/",
+        get(|| async { (StatusCode::FOUND, [(LOCATION, "/oauth2/authorize")], "") }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/")).expect("valid target");
+    target.cookies = vec![("sid".to_string(), "x".to_string())];
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_discovery: true,
+        skip_mining: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        silence: true,
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let run =
+        crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    assert!(!run.lost_session(), "ambiguous is not a verdict");
+    assert!(
+        run.warnings.iter().any(|w| w.contains("auth-shaped URL")),
+        "the session advisory must reach the job: {:?}",
+        run.warnings
+    );
+}
+
 /// Blind injection writes stored payloads into the target (params × templates
 /// × channels, each paced by `delay`); a cancel landing mid-pass must stop it
 /// rather than keep firing at a target nobody is waiting on.
