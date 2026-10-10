@@ -340,7 +340,7 @@ async fn oob_form_callback_is_attributed_to_the_scanned_target() {
     crate::scanning::blind_scan_forms_with(
         &target,
         crate::scanning::CallbackSource::Oob(&session),
-        None,
+        &crate::cmd::scan::ScanArgs::default(),
     )
     .await;
 
