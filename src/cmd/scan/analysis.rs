@@ -825,7 +825,7 @@ pub(crate) async fn detect_outdated_libs(
                 results_clone,
                 findings_count_clone,
                 lib_findings,
-                &args_clone.limit_result_type.to_uppercase(),
+                &args_clone.limit_count_filter(),
                 args_clone.min_confidence.as_deref(),
             )
             .await;
@@ -869,7 +869,7 @@ async fn run_initial_ast_pass(
             results_clone,
             findings_count_clone,
             ast_batch,
-            &args_clone.limit_result_type.to_uppercase(),
+            &args_clone.limit_count_filter(),
             args_clone.min_confidence.as_deref(),
         )
         .await;
@@ -889,7 +889,7 @@ async fn run_initial_ast_pass(
                 results_clone,
                 findings_count_clone,
                 ext_batch,
-                &args_clone.limit_result_type.to_uppercase(),
+                &args_clone.limit_count_filter(),
                 args_clone.min_confidence.as_deref(),
             )
             .await;

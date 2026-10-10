@@ -40,7 +40,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `--include-all` | — | Sets both of the above |
 | `--stream-findings` | false | Emit each finding immediately (plain only; see the caveat in `results.md`) |
 | `--limit N` | unlimited | Cap displayed findings |
-| `--limit-result-type` | `all` | Which type counts toward `--limit`: `all`, `v`, `r`, `a`, `i` (case-insensitive). **Not an output filter** |
+| `--limit-result-type` | `all` | Which type counts toward `--limit`: `all`, `v`, `r`, `a`, `i` (case-insensitive). **Not an output filter**. Narrowed to the `--only-poc` tiers when both are set |
 | `--only-poc "v,r"` | all types | Output filter: `v`, `r`, `a`, `i`. This is the one that hides findings |
 | `--min-confidence` | `low` | `high` drops every `low`-confidence finding (all `R`, plus weak AST flows) before output, counts, `--baseline`, and the exit code; `I` is kept |
 | `--baseline PATH` | — | Diff against a previous dalfox JSON/JSONL report; only findings new since it are reported. An ordinary `-f json -o` report is the baseline |

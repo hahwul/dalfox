@@ -662,7 +662,7 @@ pub(crate) async fn execute_scan(
                                     &results,
                                     &findings_count,
                                     ast_batch,
-                                    &args.limit_result_type.to_uppercase(),
+                                    &args.limit_count_filter(),
                                     args.min_confidence.as_deref(),
                                 )
                                 .await;
@@ -682,7 +682,7 @@ pub(crate) async fn execute_scan(
                                         &results,
                                         &findings_count,
                                         ext_batch,
-                                        &args.limit_result_type.to_uppercase(),
+                                        &args.limit_count_filter(),
                                         args.min_confidence.as_deref(),
                                     )
                                     .await;
@@ -790,7 +790,7 @@ pub(crate) async fn execute_scan(
                             session.clone(),
                             results.clone(),
                             findings_count.clone(),
-                            &args.limit_result_type.to_uppercase(),
+                            &args.limit_count_filter(),
                             cancel_flag.clone(),
                             true,
                         ));

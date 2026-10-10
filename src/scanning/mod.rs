@@ -121,9 +121,10 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 /// payloads (checked in Stage 5), and its DOM payloads (verified in Stage 6).
 pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 
-/// Count how many results in `results` match the `--limit-result-type` filter
-/// and survive `--min-confidence` (`min_confidence`, the raw option value).
-/// `filter` must already be uppercased (normalised once at scan start).
+/// Count how many results in `results` match `filter` and survive
+/// `--min-confidence` (`min_confidence`, the raw option value). `filter` is
+/// [`ScanArgs::limit_count_filter`]: `ALL`, or the uppercase type letters that
+/// count (normalised once at scan start).
 ///
 /// This is the findings tally behind `--limit`'s early stop, the deep-scan
 /// findings cap, the multi-target ticker, and the REST/MCP live
@@ -138,7 +139,7 @@ pub(crate) fn count_matching_results(
     results
         .iter()
         .filter(|r| !r.below_min_confidence(min_confidence))
-        .filter(|r| filter == "ALL" || r.result_type.short() == filter)
+        .filter(|r| filter == "ALL" || filter.contains(r.result_type.short()))
         .count()
 }
 
@@ -157,7 +158,7 @@ pub(crate) fn count_new_matching_results(
 ) -> usize {
     let matches = |r: &&crate::scanning::result::Result| {
         !r.below_min_confidence(min_confidence)
-            && (filter == "ALL" || r.result_type.short() == filter)
+            && (filter == "ALL" || filter.contains(r.result_type.short()))
     };
     let mut seen: Option<HashSet<String>> = None;
     let mut added = 0;
@@ -1885,7 +1886,7 @@ pub async fn run_scanning(
     let req_budget = Arc::new(Semaphore::new(crate::utils::semaphore_permits(
         effective_workers,
     )));
-    let limit_result_type: Arc<str> = Arc::from(args.limit_result_type.to_uppercase());
+    let limit_result_type: Arc<str> = Arc::from(args.limit_count_filter());
 
     // Reset WAF block counters for this scan
     crate::WAF_BLOCK_COUNT.store(0, Ordering::Relaxed);

@@ -1086,6 +1086,30 @@ impl ScanArgs {
             .unwrap_or(BASELINE_MODE_FILTER)
     }
 
+    /// The finding types the `--limit` tally counts, as the filter string
+    /// [`crate::scanning::count_matching_results`] takes (`ALL`, or the type
+    /// letters): `--limit-result-type` narrowed to the `--only-poc` types.
+    /// `--limit` caps what the report displays, so a finding `--only-poc`
+    /// hides must not stop the scan. Empty when the two exclude each other.
+    pub(crate) fn limit_count_filter(&self) -> String {
+        let limit = self.limit_result_type.to_uppercase();
+        if self.only_poc.is_empty() {
+            return limit;
+        }
+        let shown: String = self
+            .only_poc
+            .iter()
+            .map(|s| s.trim().to_uppercase())
+            .collect();
+        if limit == "ALL" {
+            shown
+        } else if shown.contains(&limit) {
+            limit
+        } else {
+            String::new()
+        }
+    }
+
     /// Whether `--min-confidence` drops `r`; see
     /// [`crate::scanning::result::Result::below_min_confidence`].
     pub(crate) fn below_min_confidence(&self, r: &crate::scanning::result::Result) -> bool {
