@@ -167,6 +167,16 @@ impl Result {
                     md_cell(r.get("state_file").and_then(|v| v.as_str()).unwrap_or("?"))
                 );
             }
+            // Shown whenever the flag was set, like the JSON envelope: a report
+            // whose findings were all filtered must not read as a clean scan.
+            if let Some(c) = &m.min_confidence {
+                let _ = writeln!(
+                    out,
+                    "| **Min Confidence** | {} ({} finding(s) dropped) |",
+                    md_cell(c.get("level").and_then(|v| v.as_str()).unwrap_or("?")),
+                    c.get("dropped").and_then(|v| v.as_u64()).unwrap_or(0)
+                );
+            }
             // Only rendered when true — a "Complete: yes" row on every clean
             // report is noise, but its absence must never be what signals a
             // truncated run, so the true case is spelled out loudly.

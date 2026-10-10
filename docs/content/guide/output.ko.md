@@ -149,7 +149,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 
 **TOML**에서는 최상위 `[meta]` 테이블로 나타납니다(탐지 결과는 `[[results]]` 아래).
 
-**Markdown**에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다. 실패한 요청, incomplete, 중복 제거된 대상, 베이스라인, 재개처럼 무슨 일이 있었을 때만 의미 있는 행은 그때만 나타납니다.
+**Markdown**에서는 탐지 결과 요약 위에 사람이 읽을 수 있는 테이블(`## Scan Metadata` + `### Target Summary`)로 렌더링됩니다. 실패한 요청, incomplete, 중복 제거된 대상, 베이스라인, 재개, `--min-confidence`처럼 무슨 일이 있었을 때만 의미 있는 행은 그때만 나타납니다.
 
 Plain 텍스트 출력은 탐지 결과만 담습니다.
 

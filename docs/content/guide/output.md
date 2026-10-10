@@ -150,7 +150,7 @@ In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].
 
 In **TOML** it appears as a top-level `[meta]` table (findings under `[[results]]`).
 
-In **Markdown** it is rendered as human-readable tables (`## Scan Metadata` + `### Target Summary`) above the findings summary. Rows that only matter when something happened (failed requests, incomplete, deduplicated targets, baseline, resume) appear only then.
+In **Markdown** it is rendered as human-readable tables (`## Scan Metadata` + `### Target Summary`) above the findings summary. Rows that only matter when something happened (failed requests, incomplete, deduplicated targets, baseline, resume, `--min-confidence`) appear only then.
 
 Plain text output stays findings-only.
 

@@ -774,6 +774,25 @@ fn test_results_to_markdown_with_meta() {
     assert!(md.contains("**Total Findings**: 1"));
 }
 
+/// `--min-confidence` must show in the markdown metadata table as it does in
+/// the JSON envelope: a report whose findings were all filtered out otherwise
+/// reads `0` findings / `clean` with nothing saying why.
+#[test]
+fn test_results_to_markdown_with_meta_shows_min_confidence() {
+    let mut meta = mk_meta();
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(
+        !md.contains("Min Confidence"),
+        "absent when the flag is unset"
+    );
+    meta.min_confidence = Some(serde_json::json!({"level": "high", "dropped": 2}));
+    let md = Result::results_to_markdown_with_meta(&[], false, false, Some(&meta));
+    assert!(
+        md.contains("| **Min Confidence** | high (2 finding(s) dropped) |"),
+        "{md}"
+    );
+}
+
 #[test]
 fn test_results_to_toml_with_meta() {
     let result = Result::builder(FindingType::Verified)
