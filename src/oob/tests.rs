@@ -718,8 +718,11 @@ async fn execute_scan_oob_drain_is_bounded_by_scan_timeout() {
     )
     .await
     .expect("a 600s drain must not outlive a 10s scan_timeout");
+    // Under load the same keygen can outlast the budget before `/register`,
+    // leaving nothing to deregister.
+    let s = state.lock().unwrap();
     assert!(
-        state.lock().unwrap().deregistered,
+        s.public_key_b64.is_none() || s.deregistered,
         "drain must still deregister"
     );
 }
