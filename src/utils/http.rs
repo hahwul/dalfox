@@ -833,11 +833,17 @@ pub(crate) fn decide_retry(
 /// that drops requests yields an empty finding list that reads as a verdict.
 /// Counting here keeps `failed_requests` aligned with the `total_requests`
 /// these stages already tick via `record_outbound_request`.
+///
+/// A 429 counts too: the rate limiter answered instead of the application, so
+/// the probe was never tested, and a fully throttled target otherwise reads
+/// as clean.
 pub async fn send_counted(
     request_builder: RequestBuilder,
 ) -> Result<reqwest::Response, reqwest::Error> {
     let result = request_builder.send().await;
-    if result.is_err() {
+    if result.as_ref().map_or(true, |r| {
+        r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+    }) {
         crate::tick_request_failure();
     }
     result

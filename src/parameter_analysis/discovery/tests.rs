@@ -1174,6 +1174,40 @@ async fn discovery_counts_a_body_that_never_finishes_as_a_failed_request() {
     );
 }
 
+/// A target that rate-limits every probe (HTTP 429) never lets one reach the
+/// application, yet discovery read each refusal as "does not reflect": a run
+/// against a fully throttled host ended `clean`, `failed_requests: 0`, exit 0.
+#[tokio::test]
+async fn discovery_counts_a_rate_limited_probe_as_a_failed_request() {
+    crate::ensure_crypto_provider();
+    let app = Router::new().fallback(any(|| async {
+        (axum::http::StatusCode::TOO_MANY_REQUESTS, "slow down")
+    }));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("serve") });
+
+    let target = parse_target(&format!("http://{addr}/?a=1")).expect("target");
+    let failures = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    crate::REQUEST_FAILURE_COUNT_JOB
+        .scope(failures.clone(), async {
+            check_query_discovery(
+                &target,
+                std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new())),
+                std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+            )
+            .await;
+        })
+        .await;
+
+    assert!(
+        failures.load(std::sync::atomic::Ordering::Relaxed) > 0,
+        "a probe refused with 429 was never tested and must count as a failed request"
+    );
+}
+
 /// Serves a page holding one POST form whose `action` the test chooses, and
 /// echoes any submitted body back so a probe that lands here reflects its
 /// marker. The listener is bound before the HTML is built so an action can

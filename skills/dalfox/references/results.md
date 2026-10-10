@@ -263,7 +263,8 @@ exists so a report is never read as full coverage of the input list.
 `meta.incomplete: true` means the run was **not fully tested**. Three causes:
 
 - **Severe transport loss** — at least 10% of requests (and at least 3) got no
-  answer. `meta.failed_requests` has the count.
+  answer (a body cut off mid-read, or a discovery probe refused with 429,
+  counts too). `meta.failed_requests` has the count.
 - **Session loss** — static credentials (`--cookies`, `-H 'Cookie: …'`)
   expired mid-scan, so later requests hit a login page. Those targets carry
   `"status": "incomplete"` (ran, session gone by the end) or `"status":

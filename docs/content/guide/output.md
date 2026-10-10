@@ -135,7 +135,7 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `targets` (the input targets)
 - `scan_duration_ms`
 - `total_requests`
-- `failed_requests` — requests that never got a response (reset, refused, timed out) after their retries. A payload that never reached the target was never tested
+- `failed_requests` — requests that never got a response (reset, refused, timed out, or a body cut off mid-read) after their retries, plus discovery and mining probes refused with HTTP 429. A payload that never reached the target was never tested
 - `findings_count`
 - `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or its session was lost — a target that Ctrl-C / `--limit` / `--scan-timeout` cut short is `incomplete` with none (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/#collapsing-near-duplicate-urls) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
