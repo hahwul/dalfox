@@ -46,9 +46,9 @@ impl<'a> DomXssVisitor<'a> {
         self.function_summaries.insert(
             function_name.clone(),
             FunctionSummary {
-                tainted_param_sinks: HashMap::new(),
-                tainted_param_returns: HashMap::new(),
-                tainted_param_writes: HashMap::new(),
+                tainted_param_sinks: BTreeMap::new(),
+                tainted_param_returns: BTreeMap::new(),
+                tainted_param_writes: BTreeMap::new(),
                 return_without_tainted_params: None,
             },
         );
@@ -77,9 +77,9 @@ impl<'a> DomXssVisitor<'a> {
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
 
         let mut summary = FunctionSummary {
-            tainted_param_sinks: HashMap::new(),
-            tainted_param_returns: HashMap::new(),
-            tainted_param_writes: HashMap::new(),
+            tainted_param_sinks: BTreeMap::new(),
+            tainted_param_returns: BTreeMap::new(),
+            tainted_param_writes: BTreeMap::new(),
             return_without_tainted_params: None,
         };
 

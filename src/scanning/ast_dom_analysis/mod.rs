@@ -31,7 +31,7 @@ use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -261,11 +261,11 @@ pub struct DomXssVulnerability {
 /// Lightweight summary for a function declaration.
 /// Maps parameter index to a sink reached when that parameter is tainted.
 struct FunctionSummary {
-    tainted_param_sinks: HashMap<usize, String>,
-    tainted_param_returns: HashMap<usize, String>,
+    tainted_param_sinks: BTreeMap<usize, String>,
+    tainted_param_returns: BTreeMap<usize, String>,
     /// Outer field paths (`cfg.html`) and globals the body writes a tainted
     /// parameter into, applied at a call site that passes a tainted argument.
-    tainted_param_writes: HashMap<usize, (Vec<String>, Vec<String>)>,
+    tainted_param_writes: BTreeMap<usize, (Vec<String>, Vec<String>)>,
     return_without_tainted_params: Option<String>,
 }
 

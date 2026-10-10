@@ -107,3 +107,28 @@ fn navigation_with_tainted_scheme_still_reports() {
         assert!(!found(js).is_empty(), "{js}");
     }
 }
+
+/// When several tainted arguments of one call reach different sinks (htmx's
+/// `swap(elt, content, spec)`), the finding named whichever parameter a
+/// `HashMap` yielded first, so rescans of the same page disagreed on the sink
+/// and source — and `--baseline` read it as a new finding.
+#[test]
+fn summary_call_reports_the_same_flow_every_run() {
+    let js = "function swap(a, b, c) { document.body.innerHTML = a; setTimeout(b); eval(c); }\n\
+              function pick(a, b) { return a || b; }\n\
+              var h = location.hash; swap(h, h, h);\n\
+              document.write(pick(location.search, document.cookie));";
+    let first: Vec<(String, String)> = found(js).into_iter().map(|v| (v.source, v.sink)).collect();
+    assert_eq!(
+        first,
+        [
+            ("location.hash".to_string(), "innerHTML".to_string()),
+            ("location.search".to_string(), "document.write".to_string()),
+        ]
+    );
+    for _ in 0..32 {
+        let again: Vec<(String, String)> =
+            found(js).into_iter().map(|v| (v.source, v.sink)).collect();
+        assert_eq!(again, first);
+    }
+}
