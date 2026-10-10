@@ -2230,3 +2230,52 @@ fn test_detect_js_breakout_with_marker_skips_quoted_gt_in_open_tag() {
         Some("\"])")
     );
 }
+
+/// The dictionary stage re-fetches a remote wordlist whenever the startup
+/// fetch left nothing usable cached (it failed, or came back partial). That
+/// retry must go out on the scan's own network settings: it fetched with
+/// `RemoteFetchOptions::default()`, so under `--proxy` the wordlist request
+/// bypassed the proxy and went direct.
+#[tokio::test]
+async fn dictionary_remote_wordlist_fetch_goes_through_proxy() {
+    use axum::extract::Request;
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let log = seen.clone();
+    // Plain-HTTP forward proxy: reqwest sends the absolute-form URI here.
+    let app = Router::new().fallback(move |req: Request| {
+        let log = log.clone();
+        async move {
+            log.lock().unwrap().push(req.uri().to_string());
+            "proxiedword\n"
+        }
+    });
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind proxy");
+    let proxy_addr = listener.local_addr().expect("proxy addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    // `.invalid` never resolves, so only the proxy can answer this fetch.
+    let provider = "dictproxytest";
+    crate::payload::register_wordlist_provider(
+        provider,
+        vec!["http://dalfox-dict-proxy-test.invalid/wl.txt".to_string()],
+    );
+    let target = parse_target("http://127.0.0.1:1/").expect("parse target");
+    let mut args = default_scan_args();
+    args.remote_wordlists = vec![provider.to_string()];
+    args.proxy = Some(format!("http://{proxy_addr}"));
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+    probe_dictionary_params(&target, &args, reflection_params, semaphore, None).await;
+
+    let seen = seen.lock().unwrap().clone();
+    assert!(
+        seen.iter()
+            .any(|u| u.contains("dalfox-dict-proxy-test.invalid")),
+        "remote wordlist fetch must honor --proxy, proxy saw {seen:?}"
+    );
+}

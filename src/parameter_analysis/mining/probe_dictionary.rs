@@ -20,9 +20,14 @@ pub async fn probe_dictionary_params(
     let mut loaded = false;
 
     if !args.remote_wordlists.is_empty() {
+        // A no-op when startup already cached this set; otherwise this is a
+        // real fetch and must use the scan's proxy/timeout, not go direct.
         if let Err(e) = crate::payload::init_remote_wordlists_with(
             &args.remote_wordlists,
-            crate::payload::RemoteFetchOptions::default(),
+            crate::payload::RemoteFetchOptions {
+                timeout_secs: Some(args.timeout),
+                proxy: args.proxy.clone(),
+            },
         )
         .await
             && !args.silence
