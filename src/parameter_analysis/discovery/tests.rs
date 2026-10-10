@@ -239,6 +239,57 @@ async fn path_discovery_preserves_empty_route_segments() {
     );
 }
 
+/// HTTP 429 is documented as always retried (honoring `Retry-After`). The
+/// discovery probes sent without that policy, so one throttled response read
+/// as "does not reflect" and the parameter was never scanned.
+#[tokio::test]
+async fn test_check_query_discovery_retries_http_429() {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let app = Router::new().route(
+        "/r",
+        any(move |Query(params): Query<HashMap<String, String>>| {
+            let counter = counter.clone();
+            async move {
+                if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return (StatusCode::TOO_MANY_REQUESTS, [("retry-after", "1")], "")
+                        .into_response();
+                }
+                Html(params.get("q").cloned().unwrap_or_default()).into_response()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let target = parse_target(&format!("http://{addr}/r?q=1")).unwrap();
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    check_query_discovery(
+        &target,
+        reflection_params.clone(),
+        Arc::new(Semaphore::new(1)),
+    )
+    .await;
+
+    let params = reflection_params.lock().await;
+    assert!(
+        params.iter().any(|p| p.name == "q"),
+        "a 429 must be retried, not read as no reflection: {params:?}"
+    );
+    assert!(
+        params.iter().all(|p| p.pre_encoding.is_none()),
+        "{params:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_check_query_discovery_discovers_reflection_and_extends_batch() {
     let addr = start_discovery_mock_server().await;
