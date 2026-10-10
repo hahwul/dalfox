@@ -806,31 +806,14 @@ pub(crate) fn decide_retry(
     }
 }
 
-/// Send a request, honoring the active rate limiter and retrying retryable
-/// failures with exponential backoff.
-///
-/// Before *each* attempt (including retries) a permit is acquired from the
-/// process-wide / per-job rate limiter (`crate::rate_limit_acquire`) so the
-/// aggregate request rate stays under `--rate-limit`.
-///
-/// Retry behavior (see [`decide_retry`]):
-/// * HTTP 429 → always retried (up to [`MAX_429_RETRIES`]), honoring
-///   `Retry-After`.
-/// * HTTP 5xx and transient transport errors (timeouts, connection resets)
-///   → retried up to `max_transient_retries` (from `--retries`; 0 disables,
-///   the default). `base_delay_ms` (`--retry-delay`) seeds the exponential
-///   backoff, which is capped at [`BACKOFF_CAP_MS`].
-///
-/// Returns the final response or transport error after success or after the
-/// applicable retry budget is exhausted. If the request body was streamed
-/// (not clonable) the first response/error is returned without retrying.
 /// Send a request, counting a transport failure if it never answers.
 ///
-/// The discovery and mining stages send directly rather than through
-/// [`send_with_retry`], and every one of those call sites drops the `Err`
-/// (`if let Ok(resp) = …`, `.ok()?`). A parameter whose probe was reset is
-/// then indistinguishable from a parameter that does not reflect — so a target
-/// that drops requests yields an empty finding list that reads as a verdict.
+/// The discovery and mining stages send through this rather than
+/// [`send_with_retry`] (no `--retries` budget), and every one of those call
+/// sites drops the `Err` (`if let Ok(resp) = …`, `.ok()?`). A parameter whose
+/// probe was reset is then indistinguishable from a parameter that does not
+/// reflect — so a target that drops requests yields an empty finding list that
+/// reads as a verdict.
 /// Counting here keeps `failed_requests` aligned with the `total_requests`
 /// these stages already tick via `record_outbound_request`.
 ///
@@ -861,6 +844,24 @@ pub async fn send_counted(
     result
 }
 
+/// Send a request, honoring the active rate limiter and retrying retryable
+/// failures with exponential backoff.
+///
+/// Before *each* attempt (including retries) a permit is acquired from the
+/// process-wide / per-job rate limiter (`crate::rate_limit_acquire`) so the
+/// aggregate request rate stays under `--rate-limit`.
+///
+/// Retry behavior (see [`decide_retry`]):
+/// * HTTP 429 → always retried (up to [`MAX_429_RETRIES`]), honoring
+///   `Retry-After`.
+/// * HTTP 5xx and transient transport errors (timeouts, connection resets)
+///   → retried up to `max_transient_retries` (from `--retries`; 0 disables,
+///   the default). `base_delay_ms` (`--retry-delay`) seeds the exponential
+///   backoff, which is capped at [`BACKOFF_CAP_MS`].
+///
+/// Returns the final response or transport error after success or after the
+/// applicable retry budget is exhausted. If the request body was streamed
+/// (not clonable) the first response/error is returned without retrying.
 pub async fn send_with_retry(
     request_builder: RequestBuilder,
     max_transient_retries: u32,
