@@ -1200,7 +1200,9 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     }
     if let Some(d) = &args.data {
         target.data = Some(d.clone());
-        target.multipart |= crate::target_parser::is_raw_multipart(d);
+        // The imported multipart flag described the body `-d` replaced; the
+        // new body is multipart only when it carries its own wire framing.
+        target.multipart = crate::target_parser::is_raw_multipart(d);
     }
     let cli_headers: Vec<(String, String)> = args
         .headers

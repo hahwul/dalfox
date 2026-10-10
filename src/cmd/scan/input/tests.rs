@@ -789,6 +789,27 @@ fn apply_request_cli_overrides_keeps_request_method_without_flag() {
     assert_eq!(target.method, "DELETE");
 }
 
+#[test]
+fn apply_request_cli_overrides_data_replaces_an_imported_multipart_body() {
+    // `-d` is the operator's own body: the imported multipart flag described
+    // the body it replaced, and kept on it the new body was mined and sent
+    // as multipart fields.
+    let mut target = crate::target_parser::parse_target_with_method("https://h/up").unwrap();
+    target.data = Some("file=test&note=hi".to_string());
+    target.multipart = true;
+
+    let args = args_from(&["-S", "-d", r#"{"q":"x"}"#, "h"]);
+    apply_request_cli_overrides(&mut target, &args);
+    assert_eq!(target.data.as_deref(), Some(r#"{"q":"x"}"#));
+    assert!(!target.multipart);
+
+    // Without `-d` the imported multipart body stays as it was.
+    let mut target = crate::target_parser::parse_target_with_method("https://h/up").unwrap();
+    target.multipart = true;
+    apply_request_cli_overrides(&mut target, &args_from(&["-S", "h"]));
+    assert!(target.multipart);
+}
+
 // ── dedup_targets: --dedup-urls exact / signature / off ─────────────
 
 /// Parse `url` into a Target the way the non-request input paths do.
