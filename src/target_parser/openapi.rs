@@ -421,6 +421,9 @@ impl<'a> Op<'a> {
             let value = path_params
                 .get(name)
                 .map(|p| self.param_value(p))
+                // A dot-segment value survives encoding and would fold the
+                // segment away (`/u/{id}/x` → `/x`), scanning another path.
+                .filter(|v| v != "." && v != "..")
                 .unwrap_or_else(|| "1".to_string());
             path.push_str(&urlencoding::encode(&value));
             if path.len() > MAX_IMPORT_REQUEST_BYTES {

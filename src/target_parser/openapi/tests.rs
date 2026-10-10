@@ -658,3 +658,17 @@ fn xml_array_body_has_one_root_element() {
     roxmltree::Document::parse(data).unwrap_or_else(|e| panic!("{data}: {e}"));
     assert_eq!(data, "<pets><item>a</item><item>b</item></pets>");
 }
+
+#[test]
+fn dot_segment_path_examples_do_not_collapse_the_path() {
+    // `..` / `.` are unreserved, so they survived encoding and URL parsing
+    // folded them away: `/u/{id}/x` scanned `/x`.
+    for dots in ["..", "."] {
+        let spec = format!(
+            r##"{{"openapi":"3.0.0","servers":[{{"url":"https://h/v1"}}],"paths":{{"/u/{{id}}/x":{{"get":
+              {{"parameters":[{{"name":"id","in":"path","example":"{dots}"}}]}}}}}}}}"##
+        );
+        let out = parse(&spec);
+        assert_eq!(out.targets[0].url.path(), "/v1/u/1/x", "example {dots:?}");
+    }
+}
