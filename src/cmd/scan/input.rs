@@ -1467,7 +1467,12 @@ fn load_cookies_from_raw_http(
         return Err(ScanOutcome::Error);
     }
 
+    // Replace same-name cookies, like `--cookies` over a capture: appending
+    // sent `sid=old; sid=new` and first-value servers kept the stale one.
     for target in parsed_targets.iter_mut() {
+        target
+            .cookies
+            .retain(|(k, _)| !cookies_from_raw.iter().any(|(n, _)| k == n));
         target.cookies.extend(cookies_from_raw.iter().cloned());
     }
     Ok(())

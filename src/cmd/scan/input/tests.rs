@@ -455,6 +455,35 @@ async fn cookie_from_raw_appends_cookies_to_targets() {
     assert!(cookies.iter().any(|(k, v)| k == "b" && v == "2"));
 }
 
+/// Appending a name the target already carries put two values on the wire
+/// (`sid=old; sid=new`), and first-value servers kept the stale one.
+#[tokio::test]
+async fn cookie_from_raw_replaces_same_name_cookies() {
+    let p = tmp_file(
+        "cookies-replace",
+        "GET / HTTP/1.1\r\nHost: x\r\nCookie: sid=new\r\n\r\n",
+    );
+    let args = args_from(&[
+        "-i",
+        "url",
+        "-S",
+        "--cookies",
+        "sid=old; keep=1",
+        "--cookie-from-raw",
+        p.to_str().unwrap(),
+        "https://example.com/",
+    ]);
+    let targets = resolve(&args).await.expect("resolves");
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(
+        targets[0].cookies,
+        vec![
+            ("keep".to_string(), "1".to_string()),
+            ("sid".to_string(), "new".to_string())
+        ]
+    );
+}
+
 /// A `--cookie-from-raw` the operator supplied but that cannot be read must
 /// stop the run. Continuing means scanning *logged out*: the scan reports
 /// `0 XSS` and exits 0, which the CI gate that asked for the credentials

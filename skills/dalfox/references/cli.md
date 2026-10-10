@@ -26,7 +26,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 - Multipart bodies set `Target::multipart`: fields are mined as `MultipartBody` without `-p name:multipart`.
 - DELETE / HEAD / OPTIONS operations and requests are never scanned (destructive with placeholder ids / nothing to reflect); they are counted in a separate stderr warning.
 - Per-entry leniency: a bad operation is skipped, counted in one stderr `[warn] skipped N … operation(s)` line and in `meta.targets_unparsable`; `PARSE_ERROR` only when the document isn't a spec or nothing is scannable. CLI overrides, dedup, scope / `--out-of-scope`, and `--state-file` identity behave exactly as for HAR. CLI only (server/MCP stay one-request-per-call).
-- For every imported input (raw-http, har, openapi, postman): `-H` / `--cookies` **replace** same-named imported headers/cookies (no stale value ahead of yours; `-H 'Cookie: …'` replaces every cookie), and `--dedup-urls exact` keys on URL + method + body (a rotated session or drifting header still collapses), so 30 GraphQL queries to one `POST /graphql` stay 30 targets.
+- For every imported input (raw-http, har, openapi, postman): `-H` / `--cookies` **replace** same-named imported headers/cookies (no stale value ahead of yours; `-H 'Cookie: …'` replaces every cookie; `--cookie-from-raw` replaces same-named cookies too), and `--dedup-urls exact` keys on URL + method + body (a rotated session or drifting header still collapses), so 30 GraphQL queries to one `POST /graphql` stay 30 targets.
 
 ## Output & POC
 
