@@ -405,6 +405,12 @@ impl<'a> Op<'a> {
             .collect();
         params.reverse();
 
+        // Indexed once: a template can repeat `{x}` millions of times.
+        let path_params: std::collections::HashMap<&str, &Value> = params
+            .iter()
+            .filter(|p| param_is(p, "path"))
+            .filter_map(|p| Some((p.get("name")?.as_str()?, *p)))
+            .collect();
         let mut path = String::with_capacity(self.path.len());
         let mut rest = self.path;
         while let Some(open) = rest.find('{') {
@@ -413,11 +419,8 @@ impl<'a> Op<'a> {
             };
             path.push_str(&rest[..open]);
             let name = &rest[open + 1..open + close];
-            let value = params
-                .iter()
-                .find(|p| {
-                    param_is(p, "path") && p.get("name").and_then(Value::as_str) == Some(name)
-                })
+            let value = path_params
+                .get(name)
                 .map(|p| self.param_value(p))
                 .unwrap_or_else(|| "1".to_string());
             path.push_str(&urlencoding::encode(&value));

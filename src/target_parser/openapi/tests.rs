@@ -209,6 +209,27 @@ fn path_param_fill_order_and_encoding() {
 }
 
 #[test]
+fn repeated_path_placeholders_expand_in_linear_time() {
+    // 200k `{a}` placeholders next to 1000 declared parameters used to scan
+    // every parameter per placeholder (~20 s here in a debug build).
+    let params: Vec<Value> = (0..1000)
+        .map(|i| serde_json::json!({"name": format!("p{i}"), "in": "query", "example": "1"}))
+        .chain([serde_json::json!({"name": "a", "in": "path", "example": "z"})])
+        .collect();
+    let mut paths = serde_json::Map::new();
+    paths.insert(
+        format!("/{}", "{a}".repeat(200_000)),
+        serde_json::json!({"parameters": params, "get": {}}),
+    );
+    let spec =
+        serde_json::json!({"openapi": "3.0.0", "servers": [{"url": "https://h"}], "paths": paths});
+    let start = std::time::Instant::now();
+    let t = &parse(&spec.to_string()).targets[0];
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    assert_eq!(t.url.path(), format!("/{}", "z".repeat(200_000)));
+}
+
+#[test]
 fn ref_cycles_and_remote_refs_terminate_without_fetching() {
     let spec = r##"{
       "openapi": "3.0.0",
