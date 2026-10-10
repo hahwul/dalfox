@@ -75,11 +75,13 @@ const FALLBACK_TEMPLATE: &str = "\"'><script src={callback}></script>";
 /// later interaction correlates back to this exact request.
 ///
 /// `record_url` is the URL stored in the correlation registry (the target URL,
-/// or a form's action URL). `location`/`method` describe the injection point.
+/// or a form's action URL), `origin` the scanned target's URL.
+/// `location`/`method` describe the injection point.
 fn build_send_payloads(
     source: &CallbackSource<'_>,
     template: &str,
     record_url: &str,
+    origin: &str,
     param: &str,
     location: &str,
     method: &str,
@@ -95,6 +97,7 @@ fn build_send_payloads(
             nonce,
             InjectionRecord {
                 target_url: record_url.to_string(),
+                origin_target: origin.to_string(),
                 param: param.to_string(),
                 location: location.to_string(),
                 payload: payload.clone(),
@@ -231,9 +234,9 @@ pub async fn blind_scanning_with(
     for (param_name, param_type) in &all_params {
         let location = location_of(param_type);
         for template in &templates {
-            for payload in
-                build_send_payloads(&source, template, record_url, param_name, location, &method)
-            {
+            for payload in build_send_payloads(
+                &source, template, record_url, record_url, param_name, location, &method,
+            ) {
                 send_blind_request(target, param_name, &payload, param_type).await;
             }
         }
@@ -502,8 +505,15 @@ pub async fn blind_scan_forms_with(
             // One payload per callback channel (Static / Oob / Both). For OOB
             // this mints+records a fresh URL keyed to this form field.
             let field_name = &fields[field_idx].name;
-            let payloads =
-                build_send_payloads(&source, template, &action_str, field_name, "Body", "POST");
+            let payloads = build_send_payloads(
+                &source,
+                template,
+                &action_str,
+                target.url.as_str(),
+                field_name,
+                "Body",
+                "POST",
+            );
             for payload in &payloads {
                 let encoded_payload: String =
                     form_urlencoded::byte_serialize(payload.as_bytes()).collect();

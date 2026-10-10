@@ -659,7 +659,7 @@ pub(crate) async fn render_results(
     //
     // The heuristic's limitation — targets sharing a path-without-query or a
     // parent directory both match one finding — applies only to findings
-    // without an `origin_target` (OOB callbacks, deserialized results).
+    // without an `origin_target` (uncorrelated OOB callbacks, deserialized results).
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let meta = target_meta.lock().await;

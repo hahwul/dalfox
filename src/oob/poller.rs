@@ -429,6 +429,9 @@ fn build_finding(
         .message_str("Triggered Blind XSS via out-of-band (interactsh) callback")
         .build();
     result.location = location;
+    result.origin_target = record
+        .map(|r| r.origin_target.clone())
+        .filter(|o| !o.is_empty());
     result
 }
 
@@ -446,6 +449,7 @@ mod tests {
         };
         let rec = InjectionRecord {
             target_url: "https://t/\u{9d}".to_string(),
+            origin_target: String::new(),
             param: "q\x1b]8;;https://evil/\x07".to_string(),
             location: "Query".to_string(),
             payload: "<x>\r".to_string(),
@@ -471,6 +475,7 @@ mod tests {
         };
         let rec = InjectionRecord {
             target_url: "https://t/?q=1".to_string(),
+            origin_target: String::new(),
             param: "q".to_string(),
             location: "Query".to_string(),
             payload: "\"'><script src=//x></script>".to_string(),

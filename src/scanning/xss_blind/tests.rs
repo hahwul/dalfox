@@ -506,6 +506,7 @@ fn build_send_payloads_static_substitutes_callback_url() {
         &source,
         "\"'><script src={callback}></script>",
         "https://target.example/",
+        "https://target.example/",
         "q",
         "Query",
         "GET",
@@ -636,6 +637,7 @@ fn custom_template_literal_braces_survive_callback_substitution() {
     let out = build_send_payloads(
         &CallbackSource::Static("https://cb.example/hook"),
         &templates[0],
+        "https://target.example/",
         "https://target.example/",
         "q",
         "Query",

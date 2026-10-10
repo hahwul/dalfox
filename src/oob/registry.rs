@@ -8,7 +8,11 @@ use std::sync::{Mutex, PoisonError};
 /// What was injected for a given correlation nonce.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct InjectionRecord {
+    /// Where the payload was sent: the target URL, or a form's action URL.
     pub target_url: String,
+    /// The scanned target the payload was injected for, stamped on the
+    /// callback's finding as its `origin_target`. Empty when unknown.
+    pub origin_target: String,
     pub param: String,
     /// Wire location understood by `generate_poc`: `"Query"`, `"Body"`,
     /// `"Header"` (cookies fold here too). Empty when unknown.
@@ -71,6 +75,7 @@ mod tests {
             "abc1234567890".to_string(),
             InjectionRecord {
                 target_url: "https://t/?q=1".to_string(),
+                origin_target: String::new(),
                 param: "q".to_string(),
                 location: "Query".to_string(),
                 payload: "\"'><script src=//x></script>".to_string(),

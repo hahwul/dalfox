@@ -217,6 +217,7 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
         nonce.clone(),
         InjectionRecord {
             target_url: "https://victim/?q=1".to_string(),
+            origin_target: String::new(),
             param: "q".to_string(),
             location: "Query".to_string(),
             payload: format!("\"'><script src={url}></script>"),
@@ -271,6 +272,7 @@ async fn oob_findings_count_honors_limit_result_type() {
         nonce.clone(),
         InjectionRecord {
             target_url: "https://victim/?q=1".to_string(),
+            origin_target: String::new(),
             param: "q".to_string(),
             location: "Query".to_string(),
             payload: format!("<script src={url}></script>"),
@@ -295,6 +297,86 @@ async fn oob_findings_count_honors_limit_result_type() {
         0,
         "a V must not count toward --limit under --limit-result-type r"
     );
+}
+
+/// A blind payload posted to a form records the form's *action* URL, so the
+/// callback's finding points there — and `target_summary` attributed it by URL
+/// heuristic, which cannot connect `/page?x=1` to `/submit`. The target read
+/// `clean` while the findings array held its `V`. The finding must carry the
+/// scanned target as its origin, like every in-band finding does.
+#[tokio::test]
+async fn oob_form_callback_is_attributed_to_the_scanned_target() {
+    use axum::extract::State as AxState;
+    let (state, session) = mock_session().await;
+
+    let posted: Arc<StdMutex<String>> = Arc::default();
+    let page = Router::new()
+        .route(
+            "/page",
+            get(|| async {
+                axum::response::Html("<form method=post action=/submit><input name=comment></form>")
+            }),
+        )
+        .route(
+            "/submit",
+            post(
+                |AxState(p): AxState<Arc<StdMutex<String>>>, body: String| async move {
+                    *p.lock().unwrap() = body;
+                    "ok"
+                },
+            ),
+        )
+        .with_state(posted.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind target");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, page).await;
+    });
+
+    let page_url = format!("http://{addr}/page?x=1");
+    let target = crate::target_parser::parse_target(&page_url).expect("target");
+    crate::scanning::blind_scan_forms_with(
+        &target,
+        crate::scanning::CallbackSource::Oob(&session),
+        None,
+    )
+    .await;
+
+    // Fire the callback for the nonce the form payload carried.
+    let body = url::form_urlencoded::parse(posted.lock().unwrap().as_bytes())
+        .map(|(_, v)| v.into_owned())
+        .collect::<String>();
+    let corr = state.lock().unwrap().correlation_id.clone().unwrap();
+    let nonce: String = body
+        .split_once(&corr)
+        .expect("form payload carries the callback host")
+        .1
+        .chars()
+        .take(13)
+        .collect();
+    state.lock().unwrap().pending_nonce = Some(nonce);
+
+    let results = Arc::new(TokioMutex::new(Vec::new()));
+    let poller = spawn_poller(
+        Arc::new(session),
+        results.clone(),
+        Arc::new(AtomicUsize::new(0)),
+        "ALL",
+        Arc::new(AtomicBool::new(false)),
+        /* silence */ true,
+    );
+    poller.finish(Duration::from_millis(400)).await;
+
+    let found = results.lock().await;
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0].data.ends_with("/submit"),
+        "data: {}",
+        found[0].data
+    );
+    assert_eq!(found[0].origin_target.as_deref(), Some(page_url.as_str()));
 }
 
 #[tokio::test]
