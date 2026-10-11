@@ -115,7 +115,7 @@ dalfox scan ... --include-response
     "incomplete": false,
     "scan_duration_ms": 1234,
     "target_summary": [
-      { "findings_count": 1, "status": "findings", "target": "https://target.app/?q=a" }
+      { "findings_count": 1, "method": "GET", "status": "findings", "target": "https://target.app/?q=a" }
     ],
     "targets": ["https://target.app/?q=a"],
     "targets_deduplicated": 0,
@@ -136,7 +136,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 동일한 스캔 수준 메�
 - `total_requests`
 - `failed_requests` — 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃, 본문이 도중에 끊긴 경우)와 HTTP 429로 거절된 탐색·마이닝 프로브 수. 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다
 - `findings_count`
-- `target_summary[]` — 대상마다 항목 하나: `target`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 세션이 끊긴 경우 `error_code`(Ctrl-C / `--limit` / `--scan-timeout`으로 도중에 끊긴 대상은 `error_code` 없이 `incomplete`. 세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`도), 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
+- `target_summary[]` — 대상마다 항목 하나(URL + 메서드 + 요청 본문 기준이라 같은 URL의 `GET`과 `POST`는 항목이 따로 생깁니다): `target`, `method`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`, 건너뛰었거나 세션이 끊긴 경우 `error_code`(Ctrl-C / `--limit` / `--scan-timeout`으로 도중에 끊긴 대상은 `error_code` 없이 `incomplete`. 세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`도), 그리고 WAF가 탐지된 경우 `waf` 객체(`type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록)
 - `dedup_mode` / `targets_deduplicated` — 적용된 [`--dedup-urls`](../scanning-modes/#거의-같은-url-묶기) 모드와 그것이 병합한 대상 수. 축소된 입력 목록이 리포트에 드러나도록 합니다(Markdown은 실제로 병합이 있었을 때만 행을 표시합니다)
 - `targets_unparsable` — 대상 목록의 줄을 파싱하지 못했거나 OpenAPI / Postman 오퍼레이션을 만들지 못해 건너뛴 경우에만 포함됩니다. [파일 모드](../scanning-modes/#file-모드), [OpenAPI / Postman 모드](../scanning-modes/#openapi-postman-모드) 참고
 - `baseline` — `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고
@@ -316,6 +316,7 @@ total_requests = 87
 
 [[meta.target_summary]]
 findings_count = 1
+method = "GET"
 status = "findings"
 target = "https://target.app/?q=a"
 

@@ -234,6 +234,9 @@ async fn collapse_target_results(
     min_confidence: Option<&str>,
     target: &Target,
 ) {
+    // Before the lock: the key hashes the request body, and every other
+    // worker's flush waits on this mutex.
+    let target_key = target.state_key();
     let mut guard = results.lock().await;
     let original = std::mem::take(&mut *guard);
     let target_url_str = target.url.to_string();
@@ -246,7 +249,7 @@ async fn collapse_target_results(
     // poisons `limit_reached()` for the rest of a multi-target run (a silent,
     // hard-to-diagnose scan truncation).
     let before_matching = count_matching_results(&original, limit_result_type, min_confidence);
-    let collapsed = collapse_redundant_reflected(original, &target_url_str);
+    let collapsed = collapse_redundant_reflected(original, &target_key, &target_url_str);
     let after_matching = count_matching_results(&collapsed, limit_result_type, min_confidence);
     *guard = collapsed;
     if after_matching < before_matching {
@@ -678,7 +681,7 @@ impl ScanWorkerCtx {
             return;
         }
         let mut batch = std::mem::take(local_results);
-        crate::scanning::result::stamp_origin(&mut batch, self.target.url.as_str());
+        crate::scanning::result::stamp_origin(&mut batch, &self.target.state_key());
         accumulate_findings(
             &self.results,
             &self.findings_count,
@@ -2095,12 +2098,14 @@ pub async fn run_scanning(
 /// nothing about the other and must not delete the other's evidence.
 fn collapse_redundant_reflected(
     results: Vec<crate::scanning::result::Result>,
+    target_key: &str,
     target_url: &str,
 ) -> Vec<crate::scanning::result::Result> {
     use std::collections::HashSet;
-    // The recorded origin when set, else the `data`-URL heuristic.
+    // The recorded origin (a `state_key`) when set, else the `data`-URL
+    // heuristic.
     let belongs = |r: &crate::scanning::result::Result| match &r.origin_target {
-        Some(origin) => origin == target_url,
+        Some(origin) => origin == target_key,
         None => crate::utils::finding_belongs_to_target(target_url, &r.data),
     };
     let key = |r: &crate::scanning::result::Result| {

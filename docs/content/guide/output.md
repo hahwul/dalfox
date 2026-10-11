@@ -116,7 +116,7 @@ the file goes next.
     "incomplete": false,
     "scan_duration_ms": 1234,
     "target_summary": [
-      { "findings_count": 1, "status": "findings", "target": "https://target.app/?q=a" }
+      { "findings_count": 1, "method": "GET", "status": "findings", "target": "https://target.app/?q=a" }
     ],
     "targets": ["https://target.app/?q=a"],
     "targets_deduplicated": 0,
@@ -137,7 +137,7 @@ JSON, JSONL, SARIF, TOML, and Markdown outputs all carry the same scan-level met
 - `total_requests`
 - `failed_requests` — requests that never got a response (reset, refused, timed out, or a body cut off mid-read) after their retries, plus discovery and mining probes refused with HTTP 429. A payload that never reached the target was never tested
 - `findings_count`
-- `target_summary[]` — one entry per target: `target`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or its session was lost — a target that Ctrl-C / `--limit` / `--scan-timeout` cut short is `incomplete` with none (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
+- `target_summary[]` — one entry per target (URL + method + request body, so `GET` and `POST` on one URL get separate entries): `target`, `method`, `status` (`findings`, `clean`, `skipped`, or `incomplete`), `findings_count`, `error_code` when it was skipped or its session was lost — a target that Ctrl-C / `--limit` / `--scan-timeout` cut short is `incomplete` with none (plus `error_message` naming the signal when a session was lost), and a `waf` object when a WAF was detected (`detected[]` with `type` / `confidence` / `evidence`, plus a `bypass` block with the extra encoders, mutation counts, and requests sent / blocked while bypass was active)
 - `dedup_mode` / `targets_deduplicated` — the [`--dedup-urls`](../scanning-modes/#collapsing-near-duplicate-urls) mode in effect and how many targets it collapsed, so a reduced input list is visible in the report (Markdown shows the row only when something was collapsed)
 - `targets_unparsable` — only when a target-list line could not be parsed, or an OpenAPI / Postman operation could not be built, and was skipped; see [File mode](../scanning-modes/#file-mode) and [OpenAPI / Postman mode](../scanning-modes/#openapi-postman-mode)
 - `baseline` — only when `--baseline` was used; see [Baselines](#baselines-reporting-only-what-is-new)
@@ -321,6 +321,7 @@ total_requests = 87
 
 [[meta.target_summary]]
 findings_count = 1
+method = "GET"
 status = "findings"
 target = "https://target.app/?q=a"
 

@@ -274,7 +274,8 @@ pub struct Result {
     /// hint — never serialized.
     #[serde(skip)]
     pub cookie_param: bool,
-    /// URL of the scan target that produced this finding. `data` is the
+    /// [`Target::state_key`](crate::target_parser::Target::state_key) of the
+    /// scan target that produced this finding. `data` is the
     /// as-sent URL — a form action, an injected path segment — which can only
     /// be mapped back to its target by guessing, and the guess (same path, or
     /// same parent directory) credits one finding to every sibling endpoint.
@@ -295,10 +296,11 @@ pub struct Result {
     pub filter: Option<FilterFingerprint>,
 }
 
-/// Stamp `origin_target` on findings that don't carry one yet.
-pub(crate) fn stamp_origin(results: &mut [Result], target_url: &str) {
+/// Stamp `origin_target` (a target's `state_key`) on findings that don't
+/// carry one yet.
+pub(crate) fn stamp_origin(results: &mut [Result], target_key: &str) {
     for r in results.iter_mut().filter(|r| r.origin_target.is_none()) {
-        r.origin_target = Some(target_url.to_string());
+        r.origin_target = Some(target_key.to_string());
     }
 }
 

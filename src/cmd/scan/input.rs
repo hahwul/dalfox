@@ -901,7 +901,7 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         let key = if mode == "signature" {
             target_signature_key(t)
         } else {
-            format!("{}|{}|{}", t.url, t.method, request_body_digest(t))
+            t.state_key()
         };
         match chosen.entry(key) {
             std::collections::hash_map::Entry::Vacant(slot) => {
@@ -933,21 +933,6 @@ pub(crate) fn dedup_targets(targets: &mut Vec<Target>, mode: &str) -> DedupStats
         collapsed,
         sample,
     }
-}
-
-/// Digest of the request body a HAR / raw-http import carries, so `exact` dedup
-/// keeps two POSTs to one URL that differ only there. Headers and cookies stay
-/// out of the key on purpose: a browser HAR repeats one URL with a drifting
-/// `Cookie` / `Referer` / `If-None-Match`, and keying on those would turn every
-/// such repeat into another full scan of the same injection points. URL-list
-/// targets share the run-wide body, so for them this is a constant. Hashed
-/// rather than inlined: a body can be MiBs.
-fn request_body_digest(t: &Target) -> String {
-    use sha2::{Digest, Sha256};
-    t.data
-        .as_deref()
-        .map(|d| hex::encode(Sha256::digest(d.as_bytes())))
-        .unwrap_or_default()
 }
 
 /// Whether any query or form-body parameter of `t` is present but empty — the

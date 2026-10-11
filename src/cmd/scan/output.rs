@@ -5,6 +5,7 @@
 
 use super::ScanOutcome;
 use super::ScanState;
+use super::TargetRef;
 use super::args::ScanArgs;
 use super::baseline::Baseline;
 use super::logging::log_warn;
@@ -18,23 +19,33 @@ use crate::target_parser::Target;
 /// scan outcome and the `--dry-run` / `--only-discovery` previews so a dead host
 /// or typo'd URL cannot read as a clean pass in any mode.
 fn all_targets_skipped(
-    all_target_urls: &[String],
+    all_targets: &[TargetRef],
     skipped: &std::collections::HashMap<String, &'static str>,
 ) -> bool {
-    !all_target_urls.is_empty()
+    !all_targets.is_empty()
         && !skipped.is_empty()
-        && all_target_urls.iter().all(|u| skipped.contains_key(u))
+        && all_targets.iter().all(|t| skipped.contains_key(&t.key))
 }
 
 /// Skipped targets with their error codes, sorted by target for stable output.
 fn skipped_entries(
+    all_targets: &[TargetRef],
     skipped: &std::collections::HashMap<String, &'static str>,
 ) -> Vec<serde_json::Value> {
-    let mut entries: Vec<(&String, &&'static str)> = skipped.iter().collect();
+    let mut entries: Vec<(&str, &str, &str)> = all_targets
+        .iter()
+        .filter_map(|t| {
+            skipped
+                .get(&t.key)
+                .map(|code| (t.url.as_str(), t.method.as_str(), *code))
+        })
+        .collect();
     entries.sort();
     entries
         .into_iter()
-        .map(|(target, code)| serde_json::json!({ "target": target, "error_code": code }))
+        .map(|(target, method, code)| {
+            serde_json::json!({ "target": target, "method": method, "error_code": code })
+        })
         .collect()
 }
 
@@ -69,7 +80,7 @@ pub(crate) async fn render_dry_run(
     args: &ScanArgs,
     host_groups: &std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
-    all_target_urls: &[String],
+    all_targets: &[TargetRef],
 ) -> ScanOutcome {
     let skipped_targets = &state.skipped_targets;
     let mut dry_run_targets = Vec::new();
@@ -161,7 +172,7 @@ pub(crate) async fn render_dry_run(
             });
         }
         if !skipped.is_empty() {
-            meta["skipped"] = serde_json::json!(skipped_entries(&skipped));
+            meta["skipped"] = serde_json::json!(skipped_entries(all_targets, &skipped));
         }
         if !warnings.is_empty() {
             meta["warnings"] = serde_json::json!(warnings);
@@ -183,11 +194,12 @@ pub(crate) async fn render_dry_run(
         let _ = writeln!(out, "  Targets (input):     {}", total_input_targets);
         let _ = writeln!(out, "  Targets (scannable): {}", dry_run_targets.len());
         let _ = writeln!(out, "  Targets (skipped):   {}", skipped.len());
-        for e in skipped_entries(&skipped) {
+        for e in skipped_entries(all_targets, &skipped) {
             let _ = writeln!(
                 out,
-                "    - {} ({})",
+                "    - {} {} ({})",
                 e["target"].as_str().unwrap_or("?"),
+                e["method"].as_str().unwrap_or("?"),
                 e["error_code"].as_str().unwrap_or("?")
             );
         }
@@ -245,7 +257,7 @@ pub(crate) async fn render_dry_run(
         out
     };
 
-    if write_output_or_stdout(args, &report) || all_targets_skipped(all_target_urls, &skipped) {
+    if write_output_or_stdout(args, &report) || all_targets_skipped(all_targets, &skipped) {
         return ScanOutcome::Error;
     }
     ScanOutcome::Clean
@@ -255,7 +267,7 @@ pub(crate) async fn render_only_discovery(
     args: &ScanArgs,
     host_groups: &std::collections::BTreeMap<String, Vec<Target>>,
     state: &ScanState,
-    all_target_urls: &[String],
+    all_targets: &[TargetRef],
 ) -> ScanOutcome {
     let skipped = state.skipped_targets.lock().await;
     // Collect once so we can render both human-readable plain
@@ -267,6 +279,7 @@ pub(crate) async fn render_only_discovery(
             for p in &target.reflection_params {
                 entries.push(serde_json::json!({
                     "url": target.url.as_str(),
+                    "method": target.method,
                     "param": p.name,
                     "location": format!("{:?}", p.location),
                 }));
@@ -295,7 +308,7 @@ pub(crate) async fn render_only_discovery(
             }
             if !skipped.is_empty() {
                 meta["targets_skipped"] = serde_json::json!(skipped.len());
-                meta["skipped"] = serde_json::json!(skipped_entries(&skipped));
+                meta["skipped"] = serde_json::json!(skipped_entries(all_targets, &skipped));
             }
             let envelope = serde_json::json!({
                 "meta": meta,
@@ -316,7 +329,7 @@ pub(crate) async fn render_only_discovery(
             }
             if !skipped.is_empty() {
                 inner["targets_skipped"] = serde_json::json!(skipped.len());
-                inner["skipped"] = serde_json::json!(skipped_entries(&skipped));
+                inner["skipped"] = serde_json::json!(skipped_entries(all_targets, &skipped));
             }
             let meta = serde_json::json!({ "meta": inner });
             let mut out = serde_json::to_string(&meta).unwrap_or_default();
@@ -341,7 +354,7 @@ pub(crate) async fn render_only_discovery(
         }
     };
 
-    if write_output_or_stdout(args, &report) || all_targets_skipped(all_target_urls, &skipped) {
+    if write_output_or_stdout(args, &report) || all_targets_skipped(all_targets, &skipped) {
         return ScanOutcome::Error;
     }
     ScanOutcome::Clean
@@ -559,7 +572,7 @@ pub(crate) fn stream_key(result: &Result) -> String {
 pub(crate) async fn render_results(
     args: &ScanArgs,
     state: &ScanState,
-    all_target_urls: &[String],
+    all_targets: &[TargetRef],
     scan_elapsed: std::time::Duration,
     requests: RequestTally,
     stream_findings_enabled: bool,
@@ -666,7 +679,7 @@ pub(crate) async fn render_results(
         let stats_map = target_mutation_stats.lock().await;
         let session_lost = state.session_lost.lock().await;
         let interrupted = state.interrupted_targets.lock().await;
-        let mut summary = Vec::with_capacity(all_target_urls.len());
+        let mut summary = Vec::with_capacity(all_targets.len());
         // Counted over every finding, not the `--limit`-truncated display
         // slice (a target whose finding fell past the cut is not `clean`), so
         // under `--limit` the per-target counts can exceed `findings_count`.
@@ -684,21 +697,21 @@ pub(crate) async fn render_results(
         }
         let attribution =
             crate::utils::FindingAttributionIndex::new(unstamped.iter().map(|r| r.data.as_str()));
-        for url in all_target_urls {
+        for TargetRef { key, url, method } in all_targets {
             let finding_count =
-                by_origin.get(url.as_str()).copied().unwrap_or(0) + attribution.count_for(url);
+                by_origin.get(key.as_str()).copied().unwrap_or(0) + attribution.count_for(url);
             // Session loss outranks `findings` and `clean`: a target whose
             // session died was not fully tested, and reporting it as either
             // would recreate exactly the ambiguity issue #1273 is about.
             // It ranks below `skipped` only because a skipped target already
             // carries the more specific reason it never ran.
-            let (status, error_code) = if let Some(code) = skipped.get(url) {
+            let (status, error_code) = if let Some(code) = skipped.get(key) {
                 ("skipped", Some(*code))
-            } else if session_lost.contains_key(url) {
+            } else if session_lost.contains_key(key) {
                 ("incomplete", Some(crate::cmd::error_codes::SESSION_LOST))
             } else if finding_count > 0 {
                 ("findings", None)
-            } else if interrupted.contains(url) {
+            } else if interrupted.contains(key) {
                 // Cut short by Ctrl-C / `--limit` / `--scan-timeout`, or never
                 // dispatched: "nothing found" is not "clean".
                 ("incomplete", None)
@@ -707,6 +720,7 @@ pub(crate) async fn render_results(
             };
             let mut entry = serde_json::json!({
                 "target": url,
+                "method": method,
                 "status": status,
                 "findings_count": finding_count,
             });
@@ -715,17 +729,17 @@ pub(crate) async fn render_results(
             }
             // Which signal fired, verbatim. Present for both the `incomplete`
             // case above and a `skipped` target aborted by the scan loop.
-            if let Some(reason) = session_lost.get(url) {
+            if let Some(reason) = session_lost.get(key) {
                 entry["error_message"] = serde_json::json!(reason);
             }
             // Attach preflight metadata (WAF + applied bypass) when present.
             // Omitted entirely for targets where no WAF was detected, to
             // keep the common-case output lean.
-            if let Some(m) = meta.get(url) {
+            if let Some(m) = meta.get(key) {
                 let mut waf_entry = m.clone();
                 // Fold per-target effectiveness telemetry into bypass{}.
                 // Only present when bypass actually ran (target had stats).
-                if let Some(stats) = stats_map.get(url) {
+                if let Some(stats) = stats_map.get(key) {
                     let snap = stats.snapshot();
                     let mut applied: Vec<serde_json::Value> = snap
                         .variants
@@ -1033,7 +1047,7 @@ fn write_output_or_stdout(args: &ScanArgs, output_content: &str) -> bool {
 /// is Clean.
 pub(crate) async fn derive_outcome(
     args: &ScanArgs,
-    all_target_urls: &[String],
+    all_targets: &[TargetRef],
     state: &ScanState,
     final_results: &[Result],
     requests: RequestTally,
@@ -1049,8 +1063,7 @@ pub(crate) async fn derive_outcome(
     // clean pass. Treat the all-skipped case as an error instead; if
     // even one target produced any scan activity (even with zero
     // findings) the outcome falls through to Clean as before.
-    let all_unreachable =
-        all_targets_skipped(all_target_urls, &*state.skipped_targets.lock().await);
+    let all_unreachable = all_targets_skipped(all_targets, &*state.skipped_targets.lock().await);
     if all_unreachable {
         return ScanOutcome::Error;
     }

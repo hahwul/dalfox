@@ -99,7 +99,7 @@ The truncation is reported either way (`TRUNCATED_PER_HOST_CAP`), but only `sign
 
 When is it safe? When the parameter *name* is what decides where input lands — the common case. It is **not** safe when a value picks the code path: an `action=` / `mode=` / `template=` discriminator that routes to a different handler on the same path, a routing token, or a locale that swaps the rendering template. There, `signature` scans one branch and reports on all of them, which is why it stays opt-in.
 
-`--dedup-urls off` disables deduplication entirely, for the rare case where every line must be scanned as given. Note that per-target reporting is keyed by URL, so repeated lines still share one `target_summary` entry.
+`--dedup-urls off` disables deduplication entirely, for the rare case where every line must be scanned as given. Note that per-target reporting is keyed by URL, method, and request body, so repeated identical lines still share one `target_summary` entry.
 
 ## Resuming an interrupted scan
 

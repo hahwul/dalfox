@@ -169,7 +169,7 @@ See `references/advanced.md` for recommended WAF combinations.
 ## Other Useful / Diagnostic
 
 - `--cookie-from-raw request.txt` — lift cookies from a captured raw request file (CLI only)
-- `--dry-run` — preflight summary only (parameter discovery + request estimate; no attack payloads). JSON/JSONL include `meta.warnings` when `-p` specs could not be seeded (e.g. `path` / `fragment` only), and `meta.skipped` (`target` + `error_code`) for skipped targets; exits `2` if every target was skipped, like a normal scan (`--only-discovery` behaves the same). Both refuse `-f sarif` and `toml` (exit `2` with `INVALID_INPUT_TYPE` before sending a request); `-f markdown` prints the plain report. MCP equivalent: `preflight_dalfox` (note: preflight intentionally ignores `param` filters for impact estimation)
+- `--dry-run` — preflight summary only (parameter discovery + request estimate; no attack payloads). JSON/JSONL include `meta.warnings` when `-p` specs could not be seeded (e.g. `path` / `fragment` only), and `meta.skipped` (`target` + `method` + `error_code`) for skipped targets; exits `2` if every target was skipped, like a normal scan (`--only-discovery` behaves the same). Both refuse `-f sarif` and `toml` (exit `2` with `INVALID_INPUT_TYPE` before sending a request); `-f markdown` prints the plain report. MCP equivalent: `preflight_dalfox` (note: preflight intentionally ignores `param` filters for impact estimation)
 - `--debug` — show DBG lines
 - Global root flags: `--config`, `--debug`, `--no-color`, `--silence`
 

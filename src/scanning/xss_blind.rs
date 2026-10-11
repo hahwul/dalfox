@@ -75,7 +75,7 @@ const FALLBACK_TEMPLATE: &str = "\"'><script src={callback}></script>";
 /// later interaction correlates back to this exact request.
 ///
 /// `record_url` is the URL stored in the correlation registry (the target URL,
-/// or a form's action URL), `origin` the scanned target's URL.
+/// or a form's action URL), `origin` the scanned target's `state_key`.
 /// `location`/`method` describe the injection point.
 fn build_send_payloads(
     source: &CallbackSource<'_>,
@@ -187,6 +187,7 @@ pub async fn blind_scanning_with(
     let templates = build_blind_templates(args.custom_blind_xss_payload.as_deref());
     let method = target.parse_method().to_string();
     let record_url = target.url.as_str();
+    let origin = target.state_key();
 
     // Collect all params with static str types to avoid per-param String allocation
     let mut all_params: Vec<(String, &str)> = Vec::new();
@@ -238,7 +239,7 @@ pub async fn blind_scanning_with(
         let location = location_of(param_type);
         for template in &templates {
             for payload in build_send_payloads(
-                &source, template, record_url, record_url, param_name, location, &method,
+                &source, template, record_url, &origin, param_name, location, &method,
             ) {
                 send_blind_request(target, param_name, &payload, param_type).await;
             }
@@ -386,6 +387,7 @@ pub async fn blind_scan_forms_with(
         .unwrap_or(FALLBACK_TEMPLATE);
 
     let client = target.build_client_or_default();
+    let origin = target.state_key();
 
     // Always GET the form-bearing page. Reusing target.method would POST to
     // the form handler instead of fetching the landing page that renders the
@@ -513,7 +515,7 @@ pub async fn blind_scan_forms_with(
                 &source,
                 template,
                 &action_str,
-                target.url.as_str(),
+                &origin,
                 field_name,
                 "Body",
                 "POST",

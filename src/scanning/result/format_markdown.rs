@@ -194,7 +194,12 @@ impl Result {
                 out.push_str("| Target | Status | Findings | WAF |\n");
                 out.push_str("|--------|--------|----------|-----|\n");
                 for t in &m.target_summary {
-                    let tgt = t.get("target").and_then(|v| v.as_str()).unwrap_or("?");
+                    let url = t.get("target").and_then(|v| v.as_str()).unwrap_or("?");
+                    // Method first: one URL can carry several targets (#1527).
+                    let tgt = match t.get("method").and_then(|v| v.as_str()) {
+                        Some(m) => format!("{} {}", m, url),
+                        None => url.to_string(),
+                    };
                     let st = t.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                     let fc = t
                         .get("findings_count")
@@ -233,7 +238,7 @@ impl Result {
                     let _ = writeln!(
                         out,
                         "| {} | {} | {} | {} |",
-                        md_cell(tgt),
+                        md_cell(&tgt),
                         md_cell(&status_cell),
                         fc,
                         md_cell(&waf_str)

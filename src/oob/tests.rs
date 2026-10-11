@@ -376,7 +376,10 @@ async fn oob_form_callback_is_attributed_to_the_scanned_target() {
         "data: {}",
         found[0].data
     );
-    assert_eq!(found[0].origin_target.as_deref(), Some(page_url.as_str()));
+    assert_eq!(
+        found[0].origin_target.as_deref(),
+        Some(target.state_key().as_str())
+    );
 }
 
 #[tokio::test]
