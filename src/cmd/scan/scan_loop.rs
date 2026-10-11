@@ -472,7 +472,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
     // its in-flight targets detach and keep issuing requests. A
     // `JoinSet` aborts them when it drops.
     let mut target_handles = tokio::task::JoinSet::new();
-    // task id -> target URL, so a panicking task can be attributed to
+    // task id -> target `state_key`, so a panicking task can be attributed to
     // the target it was scanning (a `JoinError` carries only the id).
     let mut panicked_target_of: std::collections::HashMap<tokio::task::Id, String> =
         std::collections::HashMap::new();

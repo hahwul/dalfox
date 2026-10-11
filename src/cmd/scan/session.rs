@@ -623,7 +623,11 @@ impl SessionMonitor {
             SessionState::Lost(reason) => {
                 self.lost.lock().await.insert(key.clone(), reason.clone());
                 if !self.silence {
-                    report_loss(target.url.as_str(), &reason, self.abort_on_loss);
+                    report_loss(
+                        &format!("{} {}", target.method, target.url),
+                        &reason,
+                        self.abort_on_loss,
+                    );
                 }
                 Some(reason)
             }

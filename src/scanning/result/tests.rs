@@ -736,6 +736,7 @@ fn mk_meta() -> ScanMetadata {
             }),
             serde_json::json!({
                 "target": "https://ex2.com",
+                "method": "POST",
                 "status": "skipped",
                 "findings_count": 0,
                 "error_code": "CONNECTION_FAILED"
@@ -768,7 +769,8 @@ fn test_results_to_markdown_with_meta() {
     assert!(md.contains("| **Total Requests** | 42 |"));
     assert!(md.contains("### Target Summary"));
     assert!(md.contains("| https://example.com | findings | 1 | Cloudflare |"));
-    assert!(md.contains("| https://ex2.com | skipped (CONNECTION\\_FAILED) | 0 | none |"));
+    // Method-prefixed when the row carries one (#1527).
+    assert!(md.contains("| POST https://ex2.com | skipped (CONNECTION\\_FAILED) | 0 | none |"));
     // still has the findings summary
     assert!(md.contains("## Summary"));
     assert!(md.contains("**Total Findings**: 1"));

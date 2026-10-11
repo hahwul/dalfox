@@ -198,8 +198,8 @@ pub(crate) async fn render_dry_run(
             let _ = writeln!(
                 out,
                 "    - {} {} ({})",
-                e["method"].as_str().unwrap_or("?"),
                 e["target"].as_str().unwrap_or("?"),
+                e["method"].as_str().unwrap_or("?"),
                 e["error_code"].as_str().unwrap_or("?")
             );
         }
@@ -279,6 +279,7 @@ pub(crate) async fn render_only_discovery(
             for p in &target.reflection_params {
                 entries.push(serde_json::json!({
                     "url": target.url.as_str(),
+                    "method": target.method,
                     "param": p.name,
                     "location": format!("{:?}", p.location),
                 }));

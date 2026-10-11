@@ -234,6 +234,9 @@ async fn collapse_target_results(
     min_confidence: Option<&str>,
     target: &Target,
 ) {
+    // Before the lock: the key hashes the request body, and every other
+    // worker's flush waits on this mutex.
+    let target_key = target.state_key();
     let mut guard = results.lock().await;
     let original = std::mem::take(&mut *guard);
     let target_url_str = target.url.to_string();
@@ -246,7 +249,7 @@ async fn collapse_target_results(
     // poisons `limit_reached()` for the rest of a multi-target run (a silent,
     // hard-to-diagnose scan truncation).
     let before_matching = count_matching_results(&original, limit_result_type, min_confidence);
-    let collapsed = collapse_redundant_reflected(original, &target.state_key(), &target_url_str);
+    let collapsed = collapse_redundant_reflected(original, &target_key, &target_url_str);
     let after_matching = count_matching_results(&collapsed, limit_result_type, min_confidence);
     *guard = collapsed;
     if after_matching < before_matching {

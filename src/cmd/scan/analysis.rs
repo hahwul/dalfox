@@ -45,7 +45,7 @@ async fn record_session_baseline(
     if let Some(reason) = super::session::baseline_warning(&baseline) {
         if !args.silence {
             super::session::report_loss(
-                target.url.as_str(),
+                &format!("{} {}", target.method, target.url),
                 &reason,
                 super::session::aborts_on_loss(args),
             );
