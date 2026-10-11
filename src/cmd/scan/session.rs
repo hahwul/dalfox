@@ -601,7 +601,7 @@ impl SessionMonitor {
     /// stderr, not stdout, so the warning reaches the operator without
     /// corrupting the JSON/JSONL/SARIF payload a script is parsing.
     pub(crate) async fn check(&self, target: &Target, phase: ProbePhase) -> Option<String> {
-        let key = target.url.to_string();
+        let key = target.state_key();
         let baseline = self.baselines.lock().await.get(&key).cloned()?;
         if phase == ProbePhase::PreDispatch && !pre_dispatch_probe_due(&baseline) {
             return None;
@@ -617,13 +617,13 @@ impl SessionMonitor {
         let waf_detected = target.waf_info.as_ref().is_some_and(|w| !w.is_empty());
         match classify(&baseline, &probe, self.check_re.as_ref(), waf_detected) {
             SessionState::Alive => {
-                crate::dbg_log!("session alive ({:?}): {}", phase, key);
+                crate::dbg_log!("session alive ({:?}): {}", phase, target.url);
                 None
             }
             SessionState::Lost(reason) => {
                 self.lost.lock().await.insert(key.clone(), reason.clone());
                 if !self.silence {
-                    report_loss(&key, &reason, self.abort_on_loss);
+                    report_loss(target.url.as_str(), &reason, self.abort_on_loss);
                 }
                 Some(reason)
             }

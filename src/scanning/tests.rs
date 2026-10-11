@@ -230,7 +230,11 @@ fn test_collapse_drops_r_when_v_exists_for_same_param_and_inject_type() {
         make_typed_param_result(FindingType::Verified, "q", "inHTML"),
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
+    let after = collapse_redundant_reflected(
+        results,
+        "https://example.com/?x=1",
+        "https://example.com/?x=1",
+    );
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].result_type, FindingType::Verified);
 }
@@ -241,7 +245,11 @@ fn test_collapse_keeps_r_when_no_v_for_that_param() {
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
+    let after = collapse_redundant_reflected(
+        results,
+        "https://example.com/?x=1",
+        "https://example.com/?x=1",
+    );
     assert_eq!(after.len(), 2, "no V to cover, keep R findings");
 }
 
@@ -258,6 +266,7 @@ fn test_collapse_keeps_r_when_the_v_is_at_a_different_wire_location() {
     let after = collapse_redundant_reflected(
         vec![verified_body, reflected_query],
         "https://example.com/?x=1",
+        "https://example.com/?x=1",
     );
     assert_eq!(
         after.len(),
@@ -271,7 +280,11 @@ fn test_collapse_keeps_r_when_the_v_is_at_a_different_wire_location() {
     verified.location = "Query".to_string();
     let mut reflected = make_typed_param_result(FindingType::Reflected, "q", "inHTML");
     reflected.location = "Query".to_string();
-    let after = collapse_redundant_reflected(vec![verified, reflected], "https://example.com/?x=1");
+    let after = collapse_redundant_reflected(
+        vec![verified, reflected],
+        "https://example.com/?x=1",
+        "https://example.com/?x=1",
+    );
     assert_eq!(after.len(), 1);
 }
 
@@ -304,7 +317,11 @@ fn test_collapse_keeps_r_for_different_param_or_inject_type() {
         make_typed_param_result(FindingType::Reflected, "q", "inHTML-HPP"),
         make_typed_param_result(FindingType::Reflected, "other", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
+    let after = collapse_redundant_reflected(
+        results,
+        "https://example.com/?x=1",
+        "https://example.com/?x=1",
+    );
     assert_eq!(
         after.len(),
         3,
@@ -380,7 +397,8 @@ fn test_collapse_does_not_drop_r_from_other_targets() {
         ),
     ];
     // Run collapse for target A — must keep B's R.
-    let after = collapse_redundant_reflected(results, "http://a.example/?q=1");
+    let after =
+        collapse_redundant_reflected(results, "http://a.example/?q=1", "http://a.example/?q=1");
     assert_eq!(after.len(), 2);
     assert!(
         after
@@ -409,7 +427,7 @@ fn test_collapse_drops_r_within_path_injection_target() {
             "http://a.example/path/level1/%3Csvg%3E",
         ),
     ];
-    let after = collapse_redundant_reflected(results, target);
+    let after = collapse_redundant_reflected(results, target, target);
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].result_type, FindingType::Verified);
 }
@@ -421,7 +439,11 @@ fn test_collapse_preserves_ast_findings() {
         make_typed_param_result(FindingType::AstDetected, "q", "inHTML"),
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
+    let after = collapse_redundant_reflected(
+        results,
+        "https://example.com/?x=1",
+        "https://example.com/?x=1",
+    );
     assert_eq!(after.len(), 2);
     assert!(
         after

@@ -939,6 +939,19 @@ fn reflected_result(url: &str, param: &str, payload: &str) -> ScanResult {
         .build()
 }
 
+/// Summary rows for `GET` targets whose key is the URL itself. The renderers
+/// treat the key as opaque, so tests can seed the side maps (and stamp
+/// `origin_target`) with plain URLs.
+fn refs(urls: &[String]) -> Vec<super::TargetRef> {
+    urls.iter()
+        .map(|u| super::TargetRef {
+            key: u.clone(),
+            url: u.clone(),
+            method: "GET".to_string(),
+        })
+        .collect()
+}
+
 /// A `ScanState` with empty shared handles and the supplied results preloaded.
 fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
     ScanState {
@@ -1401,7 +1414,7 @@ async fn previews_exit_error_when_every_target_was_skipped() {
         v
     };
 
-    let outcome = render_only_discovery(&args, &none, &state, &all).await;
+    let outcome = render_only_discovery(&args, &none, &state, &refs(&all)).await;
     assert!(matches!(outcome, ScanOutcome::Error));
     let report = read_report();
     assert_eq!(report["meta"]["targets_skipped"], 2);
@@ -1411,7 +1424,7 @@ async fn previews_exit_error_when_every_target_was_skipped() {
         "CONNECTION_FAILED"
     );
 
-    let outcome = render_dry_run(&args, &none, &state, &all).await;
+    let outcome = render_dry_run(&args, &none, &state, &refs(&all)).await;
     assert!(matches!(outcome, ScanOutcome::Error));
     let report = read_report();
     assert_eq!(
@@ -1425,9 +1438,9 @@ async fn previews_exit_error_when_every_target_was_skipped() {
         .cloned()
         .chain(["http://127.0.0.1:1/z".to_string()])
         .collect();
-    let outcome = render_only_discovery(&args, &none, &state, &mixed).await;
+    let outcome = render_only_discovery(&args, &none, &state, &refs(&mixed)).await;
     assert!(matches!(outcome, ScanOutcome::Clean));
-    let outcome = render_dry_run(&args, &none, &state, &mixed).await;
+    let outcome = render_dry_run(&args, &none, &state, &refs(&mixed)).await;
     assert!(matches!(outcome, ScanOutcome::Clean));
     let _ = std::fs::remove_file(args.output.as_ref().unwrap());
 }
@@ -1533,7 +1546,7 @@ async fn render_results_to_file(
     let _ = render_results(
         &args,
         &state,
-        &urls,
+        &refs(&urls),
         std::time::Duration::from_millis(7),
         crate::cmd::scan::output::RequestTally {
             sent: 42,
@@ -1563,7 +1576,7 @@ async fn render_results_to_file_with_tally(
     let _ = render_results(
         &args,
         &state,
-        &urls,
+        &refs(&urls),
         std::time::Duration::from_millis(7),
         requests,
         false,
@@ -1620,7 +1633,7 @@ async fn a_transport_incomplete_empty_scan_does_not_exit_clean() {
     let (results, output_write_failed) = render_results(
         &args,
         &state,
-        &urls,
+        &refs(&urls),
         std::time::Duration::from_millis(7),
         requests,
         false,
@@ -1635,7 +1648,7 @@ async fn a_transport_incomplete_empty_scan_does_not_exit_clean() {
 
     let outcome = super::output::derive_outcome(
         &args,
-        &urls,
+        &refs(&urls),
         &state,
         &results,
         requests,
@@ -1840,7 +1853,7 @@ async fn test_render_results_stopped_early_targets_are_not_clean() {
     let _ = render_results(
         &args,
         &state,
-        &urls,
+        &refs(&urls),
         std::time::Duration::from_millis(7),
         crate::cmd::scan::output::RequestTally {
             sent: 42,
@@ -1886,6 +1899,77 @@ async fn test_render_results_attributes_stamped_findings_to_their_origin() {
     let summary = &v["meta"]["target_summary"];
     assert_eq!(summary[0]["status"], "clean", "{summary}");
     assert_eq!(summary[1]["status"], "findings", "{summary}");
+}
+
+/// #1527: an OpenAPI / HAR import puts `GET`, `POST` and `PUT` on one URL.
+/// Keyed by URL, the `POST`'s skip turned every row `skipped` and the `GET`'s
+/// finding was counted on all three.
+#[tokio::test]
+async fn test_target_summary_keeps_methods_on_one_url_apart() {
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let path = temp_out_path("summary_per_method");
+    args.output = Some(path.clone());
+
+    let url = "https://h/items/1";
+    let get = parse_target(url).unwrap();
+    let post = Target {
+        method: "POST".to_string(),
+        data: Some("a=1".to_string()),
+        ..parse_target(url).unwrap()
+    };
+    let put = Target {
+        method: "PUT".to_string(),
+        data: Some("a=1".to_string()),
+        ..parse_target(url).unwrap()
+    };
+    let all: Vec<super::TargetRef> = [&get, &post, &put].map(super::TargetRef::from).to_vec();
+    assert_eq!(all.len(), 3, "three distinct keys");
+
+    let mut finding = reflected_result(url, "q", "<x>");
+    finding.message_id = 606;
+    let mut batch = vec![finding];
+    crate::scanning::result::stamp_origin(&mut batch, &get.state_key());
+    let state = make_scan_state(batch);
+    state.skipped_targets.lock().await.insert(
+        post.state_key(),
+        crate::cmd::error_codes::CONTENT_TYPE_MISMATCH,
+    );
+
+    let _ = render_results(
+        &args,
+        &state,
+        &all,
+        std::time::Duration::from_millis(7),
+        crate::cmd::scan::output::RequestTally { sent: 1, failed: 0 },
+        false,
+        None,
+    )
+    .await;
+    let content = std::fs::read_to_string(&path).expect("output file written");
+    let _ = std::fs::remove_file(&path);
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    let rows: Vec<(String, String, u64)> = v["meta"]["target_summary"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| {
+            assert_eq!(t["target"], url);
+            (
+                t["method"].as_str().unwrap().to_string(),
+                t["status"].as_str().unwrap().to_string(),
+                t["findings_count"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("GET".to_string(), "findings".to_string(), 1),
+            ("POST".to_string(), "skipped".to_string(), 0),
+            ("PUT".to_string(), "clean".to_string(), 0),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -1941,7 +2025,7 @@ async fn test_render_results_target_summary_scales_with_many_targets_and_finding
     let _ = render_results(
         &args,
         &state,
-        &urls,
+        &refs(&urls),
         std::time::Duration::from_millis(7),
         crate::cmd::scan::output::RequestTally { sent: 1, failed: 0 },
         false,
@@ -2220,7 +2304,7 @@ async fn test_render_results_baseline_filter_suppresses_known_findings() {
     let (final_results, _) = render_results(
         &args,
         &state,
-        &["https://example.com/s".to_string()],
+        &refs(&["https://example.com/s".to_string()]),
         std::time::Duration::from_millis(7),
         crate::cmd::scan::output::RequestTally {
             sent: 42,
@@ -2266,7 +2350,7 @@ async fn test_render_results_baseline_annotate_marks_every_finding() {
     let (final_results, _) = render_results(
         &args,
         &state,
-        &["https://example.com/s".to_string()],
+        &refs(&["https://example.com/s".to_string()]),
         std::time::Duration::from_millis(7),
         crate::cmd::scan::output::RequestTally {
             sent: 42,
@@ -2306,7 +2390,7 @@ async fn test_render_results_baseline_meta_survives_toml_and_markdown() {
         let _ = render_results(
             &args,
             &state,
-            &["https://example.com/s".to_string()],
+            &refs(&["https://example.com/s".to_string()]),
             std::time::Duration::from_millis(7),
             crate::cmd::scan::output::RequestTally {
                 sent: 42,
@@ -2350,7 +2434,7 @@ async fn test_render_results_baseline_counts_match_the_only_poc_filtered_set() {
     let _ = render_results(
         &args,
         &state,
-        &["https://example.com/s".to_string()],
+        &refs(&["https://example.com/s".to_string()]),
         std::time::Duration::from_millis(7),
         crate::cmd::scan::output::RequestTally {
             sent: 42,
@@ -2385,7 +2469,7 @@ async fn test_render_results_disabled_baseline_reports_itself() {
     let (final_results, _) = render_results(
         &args,
         &state,
-        &["https://example.com".to_string()],
+        &refs(&["https://example.com".to_string()]),
         std::time::Duration::from_millis(7),
         crate::cmd::scan::output::RequestTally {
             sent: 42,
@@ -2521,7 +2605,7 @@ async fn test_render_results_includes_waf_summary() {
     let _ = render_results(
         &args,
         &state,
-        std::slice::from_ref(&url),
+        &refs(std::slice::from_ref(&url)),
         std::time::Duration::from_millis(1),
         crate::cmd::scan::output::RequestTally { sent: 3, failed: 0 },
         false,
@@ -2552,7 +2636,7 @@ async fn test_render_results_stdout_path_returns_results() {
     let (final_results, write_failed) = render_results(
         &args,
         &state,
-        &["https://example.com".to_string()],
+        &refs(&["https://example.com".to_string()]),
         std::time::Duration::from_millis(1),
         crate::cmd::scan::output::RequestTally { sent: 1, failed: 0 },
         true, // stream_findings_enabled → skip per-finding re-render
@@ -2581,7 +2665,7 @@ async fn test_render_results_reports_output_write_failure() {
     let (_results, write_failed) = render_results(
         &args,
         &state,
-        &["https://example.com".to_string()],
+        &refs(&["https://example.com".to_string()]),
         std::time::Duration::from_millis(1),
         crate::cmd::scan::output::RequestTally { sent: 1, failed: 0 },
         true,
@@ -3434,11 +3518,13 @@ async fn analysis_restores_survivors_per_group_in_order() {
 
     let skipped = state.skipped_targets.lock().await;
     assert_eq!(
-        skipped.get(&format!("http://{addr}/?q=a4")).copied(),
+        skipped
+            .get(&url(&format!("http://{addr}/?q=a4")).state_key())
+            .copied(),
         Some(crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP)
     );
-    assert!(skipped.contains_key(&format!("http://{dead}/?q=a2")));
-    assert!(skipped.contains_key(&format!("http://{dead}/?q=b1")));
+    assert!(skipped.contains_key(&url(&format!("http://{dead}/?q=a2")).state_key()));
+    assert!(skipped.contains_key(&url(&format!("http://{dead}/?q=b1")).state_key()));
     assert_eq!(skipped.len(), 3);
 }
 
@@ -4130,15 +4216,22 @@ async fn render_with_min_confidence(
     let (results, write_failed) = render_results(
         &args,
         &state,
-        &urls,
+        &refs(&urls),
         std::time::Duration::from_millis(7),
         requests,
         false,
         None,
     )
     .await;
-    let outcome =
-        super::output::derive_outcome(&args, &urls, &state, &results, requests, write_failed).await;
+    let outcome = super::output::derive_outcome(
+        &args,
+        &refs(&urls),
+        &state,
+        &results,
+        requests,
+        write_failed,
+    )
+    .await;
     let content = std::fs::read_to_string(&path).expect("report written");
     let _ = std::fs::remove_file(&path);
     (content, outcome)

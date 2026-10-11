@@ -91,12 +91,35 @@ impl ScanOutcome {
     }
 }
 
+/// One `target_summary` row: a target's [`Target::state_key`], which every
+/// per-target side map is keyed by, plus the URL and method the report shows.
+#[derive(Debug, Clone)]
+pub(crate) struct TargetRef {
+    pub(crate) key: String,
+    pub(crate) url: String,
+    pub(crate) method: String,
+}
+
+impl From<&Target> for TargetRef {
+    fn from(t: &Target) -> Self {
+        TargetRef {
+            key: t.state_key(),
+            url: t.url.to_string(),
+            method: t.method.clone(),
+        }
+    }
+}
+
 /// Shared scan state threaded through the preflight/analysis loop
 /// ([`analysis`]), the scanning loop ([`scan_loop`]), and result rendering
 /// ([`output`]). Bundles the cross-task `Arc` handles plus the few scalars the
 /// stages need so each stage takes a single `&ScanState` instead of a dozen
 /// parameters. Each stage rebinds the fields to owned locals up front, so the
 /// moved-out stage bodies stay verbatim from the pre-split `run_scan`.
+///
+/// Every per-target map and set here is keyed by [`Target::state_key`], never
+/// by URL alone: one URL can carry several targets (`GET` and `POST` from an
+/// OpenAPI or HAR import), and each needs its own record (#1527).
 pub(crate) struct ScanState {
     pub(crate) results: Arc<Mutex<Vec<Result>>>,
     pub(crate) findings_count: Arc<AtomicUsize>,
@@ -104,7 +127,7 @@ pub(crate) struct ScanState {
     pub(crate) target_meta: Arc<Mutex<HashMap<String, serde_json::Value>>>,
     pub(crate) target_mutation_stats:
         Arc<Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>>,
-    /// Authenticated-state fingerprint per target URL, captured during
+    /// Authenticated-state fingerprint per target, captured during
     /// preflight and re-probed by the scan loop. Absent for targets with no
     /// credentials (session monitoring is off there, and costs nothing).
     pub(crate) session_baselines: Arc<Mutex<HashMap<String, session::SessionBaseline>>>,
@@ -411,20 +434,20 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let findings_count = Arc::new(AtomicUsize::new(0));
 
     // Per-target tracking for structured output (target_summary in JSON envelope)
-    // Collect all target URLs that will be scanned, then track status per target.
+    // Collect all targets that will be scanned, then track status per target.
     //
-    // Distinct URLs only. Every downstream side map (`skipped_targets`,
-    // `target_meta`, finding attribution) is keyed by URL string, so a repeated
-    // URL — possible since `--dedup-urls off` — would emit one summary entry per
-    // occurrence, each reporting that URL's *full* finding count and sharing one
-    // skip/WAF record. The per-target counts would then no longer sum to
+    // Distinct `state_key`s only. Every downstream side map (`skipped_targets`,
+    // `target_meta`, finding attribution) is keyed by it, so a repeated target
+    // — possible since `--dedup-urls off` — would emit one summary entry per
+    // occurrence, each reporting that target's *full* finding count and sharing
+    // one skip/WAF record. The per-target counts would then no longer sum to
     // `findings_count` (which they do, except under `--limit`).
-    let all_target_urls: Vec<String> = {
+    let all_targets: Vec<TargetRef> = {
         let mut seen = std::collections::HashSet::new();
         parsed_targets
             .iter()
-            .map(|t| t.url.to_string())
-            .filter(|u| seen.insert(u.clone()))
+            .map(TargetRef::from)
+            .filter(|t| seen.insert(t.key.clone()))
             .collect()
     };
     // Insecure-mode diagnostic. By default dalfox builds its HTTP client with
@@ -448,7 +471,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         );
     }
     // Track targets that were skipped during preflight (content-type mismatch etc.)
-    // Map of skipped target URL -> error code explaining why it was skipped.
+    // Map of skipped target key -> error code explaining why it was skipped.
     // Used by target_summary to surface skips (content-type mismatch, per-host
     // truncation, etc.) instead of silently marking them clean.
     let skipped_targets: Arc<Mutex<HashMap<String, &'static str>>> =
@@ -509,7 +532,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         logging::start_overall_ticker(args, total_targets, &findings_count, &overall_done);
 
     // Bundle the cross-task handles for the preflight/analysis loop, the
-    // scanning loop, and result rendering. `host_groups`, `all_target_urls`,
+    // scanning loop, and result rendering. `host_groups`, `all_targets`,
     // `overall_ticker`, and `cancel_flag` stay as `run_scan` locals (passed
     // explicitly) because their lifetimes/ownership differ per stage.
     let state = ScanState {
@@ -588,12 +611,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // --dry-run: report what would be scanned without sending attack payloads.
     if args.dry_run {
-        return output::render_dry_run(args, &host_groups, &state, &all_target_urls).await;
+        return output::render_dry_run(args, &host_groups, &state, &all_targets).await;
     }
 
     // --only-discovery: print discovered params and exit early.
     if args.only_discovery {
-        return output::render_only_discovery(args, &host_groups, &state, &all_target_urls).await;
+        return output::render_only_discovery(args, &host_groups, &state, &all_targets).await;
     }
 
     // Computed once here so the scan loop and the end-of-scan renderer agree on
@@ -677,7 +700,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let (final_results, output_write_failed) = output::render_results(
         args,
         &state,
-        &all_target_urls,
+        &all_targets,
         scan_elapsed,
         requests,
         stream_findings_enabled,
@@ -710,7 +733,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     output::derive_outcome(
         args,
-        &all_target_urls,
+        &all_targets,
         &state,
         &final_results,
         requests,

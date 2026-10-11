@@ -110,13 +110,14 @@ async fn record_target_outcome(
     results: &Mutex<Vec<crate::scanning::result::Result>>,
     streamed_live: bool,
 ) {
+    let key = target.state_key();
     if outcome == super::state_file::TargetOutcome::Completed
         && !streamed_live
         && results
             .lock()
             .await
             .iter()
-            .any(|r| r.origin_target.as_deref() == Some(target.url.as_str()))
+            .any(|r| r.origin_target.as_deref() == Some(key.as_str()))
     {
         sf.defer_completed(target);
     } else {
@@ -397,7 +398,7 @@ async fn mark_interrupted(
 ) {
     set.lock()
         .await
-        .extend(targets.into_iter().map(|t| t.url.to_string()));
+        .extend(targets.into_iter().map(|t| t.state_key()));
 }
 
 /// Scan every target in one host group, under the global concurrency permit.
@@ -511,10 +512,10 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
         // dispatch the target anyway. Targets already in flight are not
         // recalled — their own post-scan probe covers them.
         if session_lost_group.load(Ordering::Relaxed) {
-            skipped_targets_group.lock().await.insert(
-                target.url.to_string(),
-                crate::cmd::error_codes::SESSION_LOST,
-            );
+            skipped_targets_group
+                .lock()
+                .await
+                .insert(target.state_key(), crate::cmd::error_codes::SESSION_LOST);
             // `cancelled`, not `completed`: this target was never
             // tested, so a later run must pick it up again.
             if let Some(sf) = &state_file_group {
@@ -541,7 +542,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
         let streamed_live = finding_tx_group.is_some();
 
         let multi_pb_active = multi_pb_clone_inner.is_some();
-        let panic_target_url = target.url.to_string();
+        let panic_target_key = target.state_key();
         let spawned = target_handles.spawn(async move {
                 if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
                     // Re-validate the session before spending this target's
@@ -557,7 +558,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     {
                         session_lost_target.store(true, Ordering::Relaxed);
                         skipped_targets_target.lock().await.insert(
-                            target.url.to_string(),
+                            target.state_key(),
                             crate::cmd::error_codes::SESSION_LOST,
                         );
                         if let Some(sf) = &state_file_target {
@@ -656,7 +657,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                             crate::utils::log::sanitize_log_message(target.url.as_str()),
                         );
                         skipped_targets_target.lock().await.insert(
-                            target.url.to_string(),
+                            target.state_key(),
                             crate::cmd::error_codes::INTERNAL_ERROR,
                         );
                     }
@@ -704,7 +705,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                         interrupted_targets_target
                             .lock()
                             .await
-                            .insert(target.url.to_string());
+                            .insert(target.state_key());
                     }
                     if let Some(sf) = &state_file_target {
                         let outcome = if worker_panicked {
@@ -742,7 +743,7 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                 }
                 drop(permit);
             });
-        panicked_target_of.insert(spawned.id(), panic_target_url);
+        panicked_target_of.insert(spawned.id(), panic_target_key);
     }
 
     while let Some(joined) = target_handles.join_next().await {
@@ -763,11 +764,11 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
             // it produced no findings and nothing marked it otherwise,
             // which for a scanner is the worst possible outcome. Record
             // it the same way the preflight/analysis stage does.
-            if let Some(url) = panicked_target_of.get(&e.id()) {
+            if let Some(key) = panicked_target_of.get(&e.id()) {
                 skipped_targets_group
                     .lock()
                     .await
-                    .insert(url.clone(), crate::cmd::error_codes::INTERNAL_ERROR);
+                    .insert(key.clone(), crate::cmd::error_codes::INTERNAL_ERROR);
             }
         }
         // Update global overall progress line when multiple targets

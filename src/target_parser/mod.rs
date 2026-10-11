@@ -224,6 +224,28 @@ impl Target {
         self.user_agent.as_deref().filter(|ua| !ua.is_empty())
     }
 
+    /// Identity of this target within one run: URL, method, and a digest of
+    /// the request body. `exact` dedup collapses on it, and every per-target
+    /// record (`target_summary`, skips, session loss, finding attribution via
+    /// `origin_target`) is keyed by it — so an OpenAPI / HAR import with
+    /// `GET`, `POST` and `PUT` on one URL gets one record each instead of
+    /// sharing a skip or a finding count (#1527).
+    ///
+    /// The body is hashed rather than inlined: it can be MiBs. Headers and
+    /// cookies stay out on purpose — a browser HAR repeats one URL with a
+    /// drifting `Cookie` / `Referer` / `If-None-Match`, and keying on those
+    /// would turn every such repeat into another full scan of the same
+    /// injection points.
+    pub(crate) fn state_key(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let body = self
+            .data
+            .as_deref()
+            .map(|d| hex::encode(Sha256::digest(d.as_bytes())))
+            .unwrap_or_default();
+        format!("{}|{}|{}", self.url, self.method, body)
+    }
+
     /// Construct a `Target` for `url` with empty request fields (method `GET`,
     /// no data/headers/cookies) and scan-context fields at their parse-time
     /// defaults. `resolve_targets` overwrites timeout/delay/proxy/workers/etc.

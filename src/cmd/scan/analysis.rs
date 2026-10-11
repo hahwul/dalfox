@@ -50,10 +50,7 @@ async fn record_session_baseline(
                 super::session::aborts_on_loss(args),
             );
         }
-        session_lost
-            .lock()
-            .await
-            .insert(target.url.to_string(), reason);
+        session_lost.lock().await.insert(target.state_key(), reason);
     } else if let Some(note) = super::session::baseline_advisory(&baseline)
         && !args.silence
     {
@@ -65,7 +62,7 @@ async fn record_session_baseline(
     session_baselines
         .lock()
         .await
-        .insert(target.url.to_string(), baseline);
+        .insert(target.state_key(), baseline);
 }
 
 /// Limit targets per host. Targets above the cap aren't silently dropped —
@@ -85,7 +82,7 @@ pub(crate) async fn apply_per_host_cap(
             let dropped: Vec<String> = group
                 .iter()
                 .skip(args.max_targets_per_host)
-                .map(|t| t.url.to_string())
+                .map(Target::state_key)
                 .collect();
             if !dropped.is_empty() {
                 if !args.silence {
@@ -97,8 +94,8 @@ pub(crate) async fn apply_per_host_cap(
                     );
                 }
                 let mut guard = skipped_targets.lock().await;
-                for url in dropped {
-                    guard.insert(url, crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP);
+                for key in dropped {
+                    guard.insert(key, crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP);
                 }
             }
             group.truncate(args.max_targets_per_host);
@@ -178,11 +175,11 @@ pub(crate) async fn run_preflight_and_analysis(
                 };
                 // Kept outside the task so a panicking task can still be reported
                 // against its target instead of vanishing (see the collector).
-                let panic_target_url = target.url.to_string();
+                let panic_target = (target.url.to_string(), target.state_key());
                 let ctx = ctx_template.clone();
                 handles.push((
                     gi,
-                    panic_target_url,
+                    panic_target,
                     tokio::task::spawn_local(async move {
                         let _permit = permit;
                         preflight_and_analyze_target(target, ctx).await
@@ -193,7 +190,7 @@ pub(crate) async fn run_preflight_and_analysis(
             // Collect processed targets (skipping those filtered by preflight),
             // in dispatch order — which is each group's original order.
             let mut processed: Vec<Vec<Target>> = vec![Vec::new(); group_count];
-            for (gi, target_url, handle) in handles {
+            for (gi, (target_url, target_key), handle) in handles {
                 match handle.await {
                     Ok(Some(t)) => processed[gi].push(t),
                     // Preflight deliberately dropped this target; it has
@@ -221,7 +218,7 @@ pub(crate) async fn run_preflight_and_analysis(
                         skipped_targets
                             .lock()
                             .await
-                            .insert(target_url, crate::cmd::error_codes::INTERNAL_ERROR);
+                            .insert(target_key, crate::cmd::error_codes::INTERNAL_ERROR);
                     }
                 }
             }
@@ -638,7 +635,7 @@ async fn run_target_preflight(
                 skipped_targets_clone
                     .lock()
                     .await
-                    .insert(target.url.to_string(), code);
+                    .insert(target.state_key(), code);
                 return None;
             }
             // NoContentType (e.g. GET preflight on a POST-only
@@ -727,7 +724,7 @@ async fn run_target_preflight(
                     target_mutation_stats_clone
                         .lock()
                         .await
-                        .insert(target.url.to_string(), stats);
+                        .insert(target.state_key(), stats);
                 }
 
                 // Snapshot WAF + applied bypass for target_summary
@@ -766,7 +763,7 @@ async fn run_target_preflight(
                     target_meta_clone
                         .lock()
                         .await
-                        .insert(target.url.to_string(), meta_json);
+                        .insert(target.state_key(), meta_json);
                 }
 
                 // Apply the WAF pacing hint so detected rate-limiting
@@ -807,7 +804,7 @@ async fn run_target_preflight(
             if !args_clone.deep_scan && !is_allowed_content_type(&preflight.content_type) {
                 // Skip this target early
                 skipped_targets_clone.lock().await.insert(
-                    target.url.to_string(),
+                    target.state_key(),
                     crate::cmd::error_codes::CONTENT_TYPE_MISMATCH,
                 );
                 return None;
@@ -847,7 +844,7 @@ pub(crate) async fn detect_outdated_libs(
             &target.method,
         );
         if !lib_findings.is_empty() {
-            crate::scanning::result::stamp_origin(&mut lib_findings, target.url.as_str());
+            crate::scanning::result::stamp_origin(&mut lib_findings, &target.state_key());
             crate::scanning::accumulate_findings(
                 results_clone,
                 findings_count_clone,
@@ -891,7 +888,7 @@ async fn run_initial_ast_pass(
                 &target.method,
                 crate::scanning::ast_integration::PageSecurityPosture::from_target(target),
             );
-        crate::scanning::result::stamp_origin(&mut ast_batch, target.url.as_str());
+        crate::scanning::result::stamp_origin(&mut ast_batch, &target.state_key());
         crate::scanning::accumulate_findings(
             results_clone,
             findings_count_clone,
@@ -911,7 +908,7 @@ async fn run_initial_ast_pass(
                 args_clone,
             )
             .await;
-            crate::scanning::result::stamp_origin(&mut ext_batch, target.url.as_str());
+            crate::scanning::result::stamp_origin(&mut ext_batch, &target.state_key());
             crate::scanning::accumulate_findings(
                 results_clone,
                 findings_count_clone,
