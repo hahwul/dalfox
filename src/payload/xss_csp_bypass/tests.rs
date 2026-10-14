@@ -619,6 +619,70 @@ fn test_analyze_csp_from_many_policies_is_bounded() {
     );
 }
 
+/// Every `trusted-types` directive must allow a policy name, so a policy list
+/// keeps only the names common to all of them (first policy's order). A policy
+/// without the directive restricts nothing.
+#[test]
+fn test_analyze_csp_from_trusted_types_intersect() {
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "trusted-types dompurify default lit, trusted-types lit dompurify other",
+    );
+    assert_eq!(
+        a.trusted_types,
+        Some(vec!["dompurify".to_string(), "lit".to_string()])
+    );
+
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "trusted-types default, script-src 'self'",
+    );
+    assert_eq!(a.trusted_types, Some(vec!["default".to_string()]));
+
+    let a = analyze_csp_from(
+        "Content-Security-Policy",
+        "trusted-types a, trusted-types b",
+    );
+    assert_eq!(a.trusted_types, Some(vec![]));
+}
+
+/// A `<meta>` policy is bounded only by the 16 MiB body cap, so two
+/// `trusted-types` lists can each carry ~1M names. Intersecting them must stay
+/// linear: the old per-name `Vec::contains` took ~15 s here even in a release build.
+#[test]
+fn test_analyze_csp_from_trusted_types_intersection_is_linear() {
+    const N: usize = 100_000;
+    let names = |p: &str| {
+        (0..N)
+            .map(|i| format!("{p}{i}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let list = format!("trusted-types {}, trusted-types {}", names("a"), names("b"));
+    let start = std::time::Instant::now();
+    let a = analyze_csp_from("Content-Security-Policy", &list);
+    assert_eq!(a.trusted_types, Some(vec![]));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "took {:?}",
+        start.elapsed()
+    );
+}
+
+/// Hosts matching the same gadgets add nothing: the payload set (and its order)
+/// equals the first host's alone. Gadgets are picked before formatting, so a
+/// hostile ~1M-host allowlist no longer formats one payload per host × gadget.
+#[test]
+fn test_gadget_payloads_independent_of_matching_host_count() {
+    let one = get_csp_bypass_payloads(&analyze_csp("script-src angularjquery0.com"));
+    assert!(!one.is_empty());
+    let hosts: String = (0..5_000)
+        .map(|i| format!(" angularjquery{i}.com"))
+        .collect();
+    let many = get_csp_bypass_payloads(&analyze_csp(&format!("script-src{hosts}")));
+    assert_eq!(many, one);
+}
+
 // --- hostile / fallback policy shapes ---------------------------------------
 
 /// The policy is attacker-controlled: a header with thousands of nonces must not
