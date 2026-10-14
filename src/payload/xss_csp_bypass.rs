@@ -181,7 +181,12 @@ fn merge_policies(mut a: CspAnalysis, b: CspAnalysis) -> CspAnalysis {
         require_trusted_types_for: a.require_trusted_types_for || b.require_trusted_types_for,
         trusted_types: match (a.trusted_types, b.trusted_types) {
             // A policy name must be allowed by every `trusted-types` directive.
-            (Some(x), Some(y)) => Some(x.into_iter().filter(|n| y.contains(n)).collect()),
+            // Hashed: a `<meta>` policy can list ~1M names, and a linear
+            // `contains` per name made the intersection quadratic.
+            (Some(x), Some(y)) => {
+                let allowed: std::collections::HashSet<&String> = y.iter().collect();
+                Some(x.into_iter().filter(|n| allowed.contains(n)).collect())
+            }
             (x, y) => x.or(y),
         },
     }
@@ -475,11 +480,22 @@ pub(crate) fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
     } else {
         // Host-allowlist CSP: emit the gadgets whose host pattern matches an
         // allowed origin (replaces the former hardcoded CDN branches).
+        // Gadgets are collected before formatting: a hostile `<meta>` policy
+        // can list ~1M matching hosts, and one formatted payload per
+        // host × gadget held hundreds of MB until the final dedup.
+        let mut picked: Vec<&crate::payload::gadget_db::ScriptGadget> = Vec::new();
         for domain in &analysis.whitelisted_domains {
             for gadget in crate::payload::gadget_db::gadgets_for_host(domain) {
-                payloads.push(markers::fill_markers(gadget.template));
+                if !picked.iter().any(|g| std::ptr::eq(*g, gadget)) {
+                    picked.push(gadget);
+                }
             }
         }
+        payloads.extend(
+            picked
+                .into_iter()
+                .map(|g| markers::fill_markers(g.template)),
+        );
     }
 
     dedup_preserve_order(payloads)
