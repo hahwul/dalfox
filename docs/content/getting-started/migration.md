@@ -5,9 +5,9 @@ weight = 5
 toc = true
 +++
 
-Dalfox v3 is a complete rewrite in Rust, replacing the legacy Go architecture. The Go sources live on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2) and receive critical security backports only — all new work happens in v3.
+Dalfox v3 is a full rewrite in Rust that replaces the Go codebase. The Go sources live on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2) and get critical security backports only. All new work happens in v3.
 
-This page maps a v2 workflow onto v3: which subcommands collapsed, which flags were renamed, what was retired and why, and what you get in return.
+This page maps a v2 workflow onto v3: which subcommands were merged, which flags were renamed, what was removed and why, and what is new.
 
 ## 1. Subcommand consolidation
 
@@ -15,12 +15,12 @@ v3 unifies the scan subcommands behind a single entrypoint.
 
 | v2 usage | v3 equivalent | Note |
 | :--- | :--- | :--- |
-| `dalfox url [url]` | `dalfox scan [url]` | Or just `dalfox [url]` — `scan` is the default subcommand, but the bare form takes no scan flags beyond `--config`, `--debug`, `--no-color` and `-S` |
+| `dalfox url [url]` | `dalfox scan [url]` | Or `dalfox [url]`, since `scan` is the default subcommand. The bare form takes no scan flags beyond `--config`, `--debug`, `--no-color` and `-S` |
 | `dalfox file [file]` | `dalfox scan [file]` | Input type is auto-detected |
 | `dalfox pipe` | `cat targets \| dalfox scan` (or `dalfox scan --input-type pipe`) | Piped input is read from `stdin` natively |
-| `dalfox sxss [url]` | `dalfox scan [url] --sxss` | Stored XSS is a scan option now — see [Stored XSS](../../guide/stored-xss/) |
-| `dalfox server --type mcp` | `dalfox mcp` | MCP is its own stdio subcommand — see [MCP Server](../../integrations/mcp/) |
-| `dalfox server` | `dalfox server` | Binds `127.0.0.1` by default instead of v2's `0.0.0.0`; pass `--host 0.0.0.0` to listen on every interface. The port is still `6664`, and `--type` is gone — see [REST API Server](../../integrations/server/) |
+| `dalfox sxss [url]` | `dalfox scan [url] --sxss` | Stored XSS is now a scan option. See [Stored XSS](../../guide/stored-xss/) |
+| `dalfox server --type mcp` | `dalfox mcp` | MCP is its own stdio subcommand. See [MCP Server](../../integrations/mcp/) |
+| `dalfox server` | `dalfox server` | Binds `127.0.0.1` by default instead of v2's `0.0.0.0`; pass `--host 0.0.0.0` to listen on every interface. The port is still `6664`, and `--type` is gone. See [REST API Server](../../integrations/server/) |
 | `dalfox payload --entity-event-handler`, `--entity-useful-tags`, `--entity-special-chars`, `--remote-portswigger`, `--remote-payloadbox` | `dalfox payload event-handlers`, `useful-tags`, `special-chars`, `portswigger`, `payloadbox` | One positional selector replaces the switches. `--enum-*`, `--entity-gf`, `--make-bulk` and `--encoder-url` have no selector; run `dalfox payload --help` for the ones that exist |
 
 {{ alert(type="info", body="The legacy url, file and pipe subcommands survive as hidden aliases. All three keep their v2 shape: dalfox url URL works, and so does dalfox url -u URL. Prefer dalfox scan URL in new scripts. sxss did not survive: stored-XSS scanning moved onto the scan subcommand as the --sxss flag.") }}
@@ -47,17 +47,17 @@ The full, generated flag list lives in the [CLI Reference](../../reference/cli/)
 
 ## 3. Retired features and their replacements
 
-Some legacy flags and the heavyweight engines behind them were dropped to keep v3 fast, safe, and focused on XSS.
+Some legacy flags were dropped, along with the heavy engines behind them. The table says why and what to use instead.
 
 | Retired v2 flag | Alternative | Why |
 | :--- | :--- | :--- |
 | `--use-bav`, `--skip-bav` | None. | **Scope**. Basic Another Vulnerability (BAV) checks are gone; v3 is strictly an XSS scanner. Use a dedicated scanner for non-XSS classes. |
 | `--found-action <cmd>`, `--found-action-shell` | [REST API webhooks](../../integrations/server/), or pipe stdout (`dalfox scan ... \| post-script.sh`). | **Security**. Arbitrary shell execution on every finding invited RCE and throttled concurrency. |
-| `--skip-headless`, `--force-headless-verification` | Nothing to configure — static analysis runs by default (`--skip-ast-analysis` turns it off). | **Engine replaced**. Headless Chrome (`chromedp`) is gone. v3 verifies with a compiler-grade JavaScript parser (`oxc`), tracing data flows and DOM sinks without a browser. See [Detection Model](../../guide/detection-model/). |
+| `--skip-headless`, `--force-headless-verification` | Nothing to configure. Static analysis runs by default (`--skip-ast-analysis` turns it off). | **Engine replaced**. Headless Chrome (`chromedp`) is gone. v3 verifies with a compiler-grade JavaScript parser (`oxc`), tracing data flows and DOM sinks without a browser. See [Detection Model](../../guide/detection-model/). |
 | `--grep <file>`, `--skip-grepping` | None. | **Engine replaced**. Regex response matching gave way to context-aware AST analysis. `--only-poc g` (grep findings) went with it. |
-| `--report`, `--report-format` | `-f markdown -o <file>`, `-f sarif -o <file>`. | **Standardization**. Report flags folded into the output format flags — see [Output & Reports](../../guide/output/). |
+| `--report`, `--report-format` | `-f markdown -o <file>`, `-f sarif -o <file>`. | **Standardization**. Report flags folded into the output format flags. See [Output & Reports](../../guide/output/). |
 | `--max-cpu` | Automatic. | **Architecture**. The async scheduler (`tokio`) allocates work across cores; manual CPU pinning is obsolete. |
-| `--no-spinner` | Automatic. | **UI**. Spinners and progress bars draw only when stdout is a terminal and `-S` is off. The banner is dropped for `-S` and for every format except `plain`. |
+| `--no-spinner` | Automatic. | **UI**. Spinners and progress bars draw only on an interactive terminal with `-S` off (progress bars also need `plain` output). The banner is dropped for `-S` and for every format except `plain`. |
 | `--context-aware`, `--magic-char-test` | Nothing to configure. | **Built in**. Every reflected parameter gets per-character probes (`valid_specials` / `invalid_specials`) that steer payload selection. |
 | `--deep-domxss`, `--detailed-analysis`, `--fast-scan`, `--har-file-path`, `--output-all` | None. | **Removed**. No v3 flag replaces them; v3 reads HAR files as input but does not record one. |
 
@@ -65,20 +65,20 @@ Because headless verification is gone, a finding's evidence class matters more t
 
 ## 4. What v3 adds
 
-- **MCP server (`dalfox mcp`)** — exposes Dalfox to AI coding assistants over JSON-RPC on stdio, replacing v2's `server --type mcp`. See [MCP Server](../../integrations/mcp/).
-- **Hard time budget (`--scan-timeout <secs>`)** — caps the payload-injection stage per target so a half-hung server can't stall the run. Preflight, discovery and mining run before that stage and are not covered by it; there only the per-request `--timeout` applies. (`dalfox server` and MCP apply their `scan_timeout` to the whole job.)
-- **Payload cap (`--max-payloads-per-param <int>`)** — keeps combinatorial payload expansion (bypasses × encoders) from turning into a request burst.
-- **Preflight (`--dry-run`)** — reports discovered parameters and an estimated request count without sending a single payload.
-- **Adaptive WAF evasion (`--waf-evasion`)** — the flag existed in v2 as a fixed `worker=1, delay=3s` preset. In v3 it randomizes inter-request timing (whether or not a WAF was detected) and escalates a cooldown when blocked responses cluster. See [WAF Bypass](../../guide/waf-bypass/).
-- **HTTP parameter pollution (`--hpp`)** — duplicates query parameters to slip past string-matching WAF layers.
-- **Managed OAST (`--blind-oob`)** — registers an interactsh session and correlates callbacks to the payload that caused them, alongside the plain `-b` callback URL.
-- **Pacing and retries (`--rate-limit`, `--retries`)** — a global requests-per-second cap shared by every worker, and backoff retries on 5xx and transient errors.
-- **Resumable and incremental runs (`--state-file`, `--baseline`)** — skip targets a previous run completed, or report only findings new since an earlier JSON report.
-- **Session monitoring** — on automatically whenever the scan carries credentials (`--session-check` pins it to a marker you choose); an authenticated scan whose session drops is reported as incomplete instead of clean. See [Session monitoring](../../guide/scanning-modes/#session-monitoring).
-- **Shell completions (`dalfox completion <shell>`)** — bash, zsh, fish, PowerShell, and Elvish.
+- **MCP server (`dalfox mcp`)**: exposes Dalfox to AI coding assistants over JSON-RPC on stdio, replacing v2's `server --type mcp`. See [MCP Server](../../integrations/mcp/).
+- **Hard time budget (`--scan-timeout <secs>`)**: caps the payload-injection stage per target so a half-hung server can't stall the run. Preflight, discovery and mining run before that stage and are not covered by it; there only the per-request `--timeout` applies. (`dalfox server` and MCP apply their `scan_timeout` to the whole job.)
+- **Payload cap (`--max-payloads-per-param <int>`)**: keeps combinatorial payload expansion (bypasses × encoders) from turning into a request burst.
+- **Preflight (`--dry-run`)**: reports discovered parameters and an estimated request count without sending a single payload.
+- **Adaptive WAF evasion (`--waf-evasion`)**: the flag existed in v2 as a fixed `worker=1, delay=3s` preset. In v3 it randomizes inter-request timing (whether or not a WAF was detected) and escalates a cooldown when blocked responses cluster. See [WAF Bypass](../../guide/waf-bypass/).
+- **HTTP parameter pollution (`--hpp`)**: duplicates query parameters to slip past string-matching WAF layers.
+- **Managed OAST (`--blind-oob`)**: registers an interactsh session and correlates callbacks to the payload that caused them, alongside the plain `-b` callback URL.
+- **Pacing and retries (`--rate-limit`, `--retries`)**: a global requests-per-second cap shared by every worker, and backoff retries on 5xx and transient errors.
+- **Resumable and incremental runs (`--state-file`, `--baseline`)**: skip targets a previous run completed, or report only findings new since an earlier JSON report.
+- **Session monitoring**: on automatically whenever the scan carries credentials (`--session-check` pins it to a marker you choose); an authenticated scan whose session drops is reported as incomplete instead of clean. See [Session monitoring](../../guide/scanning-modes/#session-monitoring).
+- **Shell completions (`dalfox completion <shell>`)**: bash, zsh, fish, PowerShell, and Elvish.
 
 ## Next steps
 
-- Re-read the [scanning modes](../../guide/scanning-modes/) — the flags you reach for by reflex may have moved.
+- Re-read the [scanning modes](../../guide/scanning-modes/). Flags you type from habit may have moved.
 - Move your recurring v2 command line into a [config file](../configuration/).
 - Skim the [CLI Reference](../../reference/cli/) for flags that have no v2 ancestor at all.

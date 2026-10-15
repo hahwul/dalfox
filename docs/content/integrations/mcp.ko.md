@@ -5,7 +5,7 @@ weight = 2
 toc = true
 +++
 
-**Model Context Protocol**(MCP)은 AI 클라이언트가 외부 도구(tool)와 통신할 수 있게 해주는 개방형 표준입니다. `dalfox mcp`는 stdio 기반 MCP 서버를 실행하여 Claude Desktop, Claude Code, Cursor를 비롯한 모든 MCP 호환 클라이언트가 Dalfox 스캔을 직접 구동할 수 있게 합니다.
+**Model Context Protocol**(MCP)은 AI 클라이언트가 외부 도구(tool)와 통신하기 위한 개방형 표준입니다. `dalfox mcp`는 stdio 기반 MCP 서버를 띄워서 Claude Desktop, Claude Code, Cursor 등 MCP 호환 클라이언트가 Dalfox 스캔을 직접 실행하게 합니다.
 
 ## 서버 시작하기
 
@@ -13,7 +13,7 @@ toc = true
 dalfox mcp
 ```
 
-이 서버는 `stdin`/`stdout`을 통해 MCP로 통신합니다. 클라이언트에서 실행하세요. 터미널에서 직접 실행하지 않습니다.
+이 서버는 `stdin`/`stdout`으로 MCP 메시지를 주고받습니다. 클라이언트에서 실행하세요. 터미널에서 직접 실행하지 않습니다.
 
 ## Claude Desktop 설정
 
@@ -40,11 +40,11 @@ claude mcp add dalfox -- dalfox mcp
 
 ## 사용 가능한 도구(tool)
 
-여섯 개의 도구(tool)가 노출됩니다. 스캔은 기본적으로 비동기입니다. 스캔을 제출하고, 결과를 폴링한 뒤, 다음 작업으로 넘어갑니다. (`preflight_dalfox`는 그 자리에서 답하고, `scan_with_dalfox`는 `wait: true`를 주면 블로킹합니다 — 둘 다 요청하면 진행률을 스트리밍합니다.)
+도구(tool)는 여섯 개입니다. 스캔은 기본적으로 비동기입니다. 스캔을 제출하고, 결과를 폴링한 뒤, 다음 작업으로 넘어갑니다. `preflight_dalfox`는 그 자리에서 답하고, `scan_with_dalfox`는 `wait: true`를 주면 끝날 때까지 기다립니다. 둘 다 요청하면 진행률을 스트리밍합니다.
 
 ### `scan_with_dalfox`
 
-스캔을 제출합니다. 즉시 반환합니다.
+스캔을 제출합니다. `wait: true`를 주지 않으면 바로 반환합니다.
 
 ```json
 {
@@ -77,30 +77,30 @@ claude mcp add dalfox -- dalfox mcp
 고정된 우선순위 순서(`url` → `html` → `htmlpad` → `2url` → `3url`
 → `4url` → `base64` → `unicode` → `zwsp`)로 적용하고 출력을 중복
 제거합니다. 인코딩을 완전히 비활성화하려면 `["none"]`을 사용하세요.
-`--encoders` / `-e` CLI 플래그와 대응됩니다. 알 수 없는 인코더 이름은 곧바로
-거부됩니다 — 그렇지 않으면 어떤 인코더에도 매칭되지 않아 스캔의 페이로드
-커버리지가 조용히 줄어듭니다.
+`--encoders` / `-e` CLI 플래그와 대응됩니다. 알 수 없는 인코더 이름은
+거부합니다. 받아들이면 어떤 인코더에도 매칭되지 않아 스캔의 페이로드
+커버리지가 조용히 줄어들기 때문입니다.
 
 `method`는 CLI가 허용하는 것과 동일한 메서드 집합으로 검증되며 자동으로 대문자로
-변환됩니다(`"post"` → `"POST"`). 지원하지 않는 메서드를 보내면 잘못된 메서드를
-전송하는 스캔이 실행되는 대신 오류가 반환됩니다.
+변환됩니다(`"post"` → `"POST"`). 지원하지 않는 메서드를 보내면 엉뚱한 메서드로
+스캔을 돌리지 않고 오류를 돌려줍니다.
 
 `blind_callback_url`은 비어 있거나(= 블라인드 XSS 사용 안 함) `http://` /
 `https://`로 시작해야 합니다. 이 값을 설정하면 *저장형* 블라인드 XSS 주입이
-켜집니다 — `<script src=...>` 페이로드가 모든 쿼리·바디·헤더·쿠키 파라미터에
-기록되어 대상에 그대로 남습니다. 그래서 콜백을 받을 수 없는 값은 그 페이로드만
-남기고 아무 소득도 없으므로 아예 거부합니다. `remote_payloads` /
+켜집니다. `<script src=...>` 페이로드가 모든 쿼리·바디·헤더·쿠키 파라미터에
+기록되어 대상에 그대로 남습니다. 콜백을 받을 수 없는 값이면 페이로드만 남고
+얻는 것이 없으므로 아예 거부합니다. `remote_payloads` /
 `remote_wordlists`도 등록된 프로바이더인지 검사합니다. 인식되지 않는 이름은
 조용히 아무것도 받아오지 않은 채, 요청한 페이로드 커버리지가 빠진 스캔을
 `done`으로 보고하게 만들기 때문입니다.
 
 `blind_oob`는 CLI의 `--blind-oob`가 켜는 것과 같은 관리형 OAST(interactsh)
 채널입니다. 공개 메시를 쓰려면 `true`, 서버를 지정하려면 interactsh 호스트
-목록(`["oast.fun"]`)을 넘기면 됩니다. Dalfox가 등록하고, 콜백을 유발한 페이로드와
-상관시키며, 직접 폴링하므로 리스너를 운영하지 않아도 콜백이 `detection_method: "oob"`인
+목록(`["oast.fun"]`)을 넘기면 됩니다. Dalfox가 등록과 폴링을 직접 하고, 각 콜백을
+그 콜백을 일으킨 페이로드와 짝지으므로 리스너를 운영하지 않아도 콜백이 `detection_method: "oob"`인
 `V` 탐지 결과가 됩니다. 폴러는 스캔에 묶여 있어 스캔이 시작되면 함께 시작하고,
 끝나거나 취소·삭제되면 멈춥니다. `blind_oob_wait`(`0`–`600`, 기본값 `30`)은 스캔의
-마지막 요청 이후 폴링을 얼마나 지속할지로 `scan_timeout`에 포함됩니다. 자가 호스팅
+마지막 요청 뒤에 폴링을 몇 초 더 이어갈지 정하며, 이 시간도 `scan_timeout`에 포함됩니다. 자가 호스팅
 인증 토큰은 CLI/설정 전용입니다.
 
 `session_check`(인증된 응답에 계속 매칭되어야 하는 정규식)와 `session_check_url`(대상
@@ -120,19 +120,19 @@ claude mcp add dalfox -- dalfox mcp
 전용입니다. MCP 인자가 따로 없으며, 보내면 에러가 납니다.)
 
 `detect_outdated_libs`는 옵트인 방식입니다(기본값 `false`). 오래되었거나
-알려진 취약점이 있는 JS 라이브러리에 대해 정보성 `[I]` 탐지 결과도
+알려진 취약점이 있는 JS 라이브러리도 정보성 `[I]` 탐지 결과로
 내보내려면 `true`로 설정하세요(CWE-1104, 추가 요청 0건). 꺼두면 스캔은 XSS만
 보고합니다.
 
 `rate_limit`은 스캔의 아웃바운드 초당 요청 수를 제한합니다(`0` = 무제한,
-기본값). 모든 워커 태스크에 걸쳐 적용됩니다 — 불안정한 대상을 부드럽게
-다루거나 WAF 임계값 아래로 유지하는 데 사용하세요.
+기본값). 모든 워커 태스크에 걸쳐 적용됩니다. 불안정한 대상을 살살 다루거나
+WAF 임계값 아래로 유지할 때 쓰세요.
 
 `scan_timeout`은 스캔 전체에 허용되는 실제 경과 시간(초)입니다(기본값 `0` =
 무제한). 요청별 `timeout`과는 구별됩니다. 시간이 초과되면 스캔이 중단되고
 부분 탐지 결과를 유지하며 `scan_timeout`을 언급하는 `error_message`와 함께
-`cancelled` 상태로 정리됩니다. 길거나 `deep_scan` 실행에 한도를 두어
-에이전트의 폴링 루프가 반드시 종료되도록 설정하세요.
+`cancelled` 상태로 정리됩니다. 오래 걸리는 스캔이나 `deep_scan`에 이 값을
+두면 에이전트의 폴링 루프가 반드시 끝납니다.
 
 위 블록은 발췌입니다. 이 도구가 받는 모든 필드와 각각의 기본값은 다음과
 같습니다. 필수 필드는 `target` 하나뿐입니다.
@@ -162,6 +162,10 @@ claude mcp add dalfox -- dalfox mcp
   "analyze_external_js": false,
   "detect_outdated_libs": false,
   "blind_callback_url": null,
+  "blind_oob": null,
+  "blind_oob_wait": 30,
+  "session_check": null,
+  "session_check_url": null,
   "workers": 50,
   "rate_limit": 0,
   "waf_bypass": "auto",
@@ -169,7 +173,7 @@ claude mcp add dalfox -- dalfox mcp
   "force_waf": null,
   "waf_evasion": false,
   "waf_min_confidence": 0.3,
-  "min_confidence": "high",
+  "min_confidence": null,
   "remote_payloads": [],
   "remote_wordlists": [],
   "max_payloads_per_param": 0,
@@ -183,9 +187,9 @@ claude mcp add dalfox -- dalfox mcp
 `"name=value"` 형태의 항목을, `headers`는 `"Name: Value"` 형태의 전체 줄을
 받으며, `user_agent`는 `User-Agent` 헤더를 덮어씁니다.
 
-도구가 모르는 필드명은 조용히 버려지지 않고 **거부**됩니다. 호출은 JSON-RPC
+도구가 모르는 필드명은 조용히 버리지 않고 거부합니다. 호출은 JSON-RPC
 오류(`-32602`, invalid params)로 돌아오며, 문제가 된 키와 허용되는 키 전체
-목록을 담습니다. 그렇지 않으면 `cookies`를 한 글자만 틀려도 대상이 비인증 상태로
+목록을 담습니다. 버린다면 `cookies`를 한 글자만 틀려도 대상이 비인증 상태로
 스캔되고, 아무것도 찾지 못한 채 `status: "done"`으로 끝나 실제 클린 결과와
 구분할 수 없게 됩니다. 거부된 호출에는 `scan_id`가 없으므로 폴링할 대상도
 없고, 실행된 스캔으로 오해할 여지도 없습니다.
@@ -223,7 +227,7 @@ claude mcp add dalfox -- dalfox mcp
   닿기도 전에 거부합니다. 별칭은 인자를 검증 없이 그대로 넘기는 호출자를 위한
   것이니, 가급적 정식 이름을 쓰세요.
 
-`preflight_dalfox`는 `scan_with_dalfox`보다 의도적으로 **좁은** 집합을 받습니다.
+`preflight_dalfox`는 `scan_with_dalfox`보다 의도적으로 좁은 집합을 받습니다.
 페이로드를 보내지 않으므로 속도 조절·워커·WAF 처리·블라인드 XSS·대기에 관한
 옵션은 작용할 대상이 없어 거부됩니다. 받는 필드는 아래에 따로 적어두었습니다.
 (REST의 `POST /preflight`는 대신 스캔 본문 전체를 받고, `delay`, `worker`,
@@ -344,7 +348,7 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 경고가 경고 대상보다 먼저 읽히도록 JSON의 첫 번째 키로 직렬화됩니다.
 `evidence`, `response`, `request`, `payload`, `param`, `location`,
 `message_str` 필드는 스캔 대상이 고른 바이트를 그대로 인용한 것이고, 그 대상은
-지금 시험받고 있는 쪽입니다 — 에이전트는 이를 보고할 데이터로만 읽어야 하며
+지금 시험받고 있는 쪽입니다. 따라서 에이전트는 이를 보고할 데이터로만 읽어야 하며
 절대 지시로 받아들이면 안 됩니다. 스캔된 페이지는 모델에게 건네는 지시문처럼
 보이는 텍스트를 심어둘 수 있고, 거기에 따르면 다음 호출의 `target`, `proxy`,
 `blind_callback_url`, `include_*`를 대상이 고르게 됩니다. `preflight_dalfox`도
@@ -356,12 +360,12 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 2 MiB로 제한됩니다. 탐지 결과가 몇 건 나올지는 호출자가 아니라 대상이 정하기
 때문입니다. 이 예산으로
 페이지가 잘리면 `pagination`에 `truncated_by_size: true`와 `max_page_bytes`가
-추가됩니다 — `limit`이 요청한 것보다 적게 돌아왔을 뿐, 나머지는 다음
+추가됩니다. `limit`이 요청한 것보다 적게 돌아왔을 뿐, 나머지는 다음
 `offset`에 그대로 있습니다. 예산보다 큰 단일 탐지 결과는 버리지 않고 혼자
 내보내므로 페이지 넘기기가 멈추지 않습니다.
 
 `progress.estimated_completion_pct`와 `params_tested`는 발견된 각 파라미터가
-완료될 때마다 실시간으로 증가합니다. 따라서 폴링 간격을 조절하는 데 사용할 수 있습니다 —
+완료될 때마다 실시간으로 증가하므로 폴링 간격을 조절하는 데 쓸 수 있습니다.
 `suggested_poll_interval_ms`를 따르세요. 스캔이 `queued`를 벗어나면 상태 응답에
 `settled`도 담깁니다.
 종료된 워커가 아직 정리 중이면 `false`이고, 레코드를 삭제해도 안전해지면
@@ -370,17 +374,17 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 
 대상에 도달할 수 없으면(DNS 실패, 연결 거부, TLS 오류, 타임아웃) 스캔은 빈
 `results`와 함께 `done`으로 끝나는 대신 `CONNECTION_FAILED`를 포함하는
-`error_message`와 함께 `status: "error"`로 끝납니다 — `preflight_dalfox`가
-`reachable: false`로 보고하는 것과 동일한 구분입니다. `target`은
+`error_message`와 함께 `status: "error"`로 끝납니다. `preflight_dalfox`가
+`reachable: false`로 보고하는 것과 같은 구분입니다. `target`은
 `http://` 또는 `https://`로 시작해야 합니다.
 
-**인증 세션이 스캔 도중 끊어진 경우**도 마찬가지입니다. 호출이 자격증명(`cookies`,
+인증 세션이 스캔 도중 끊어진 경우도 마찬가지입니다. 호출이 자격증명(`cookies`,
 또는 `headers`의 `Cookie` / `Authorization` 항목)을 담고 있거나 `session_check` /
 `session_check_url`을 명시하면, Dalfox는 스캔 전에
 인증된 응답의 지문을 잡아 두고 스캔이 끝날 때 다시 확인합니다. 그 사이에 세션이
 만료됐다면 빈 `results`와 함께 `done`으로 끝나는 대신 `SESSION_LOST:`로 시작하는
 `error_message`와 함께 `status: "error"`로 종료됩니다. 이런 스캔을 "XSS 없음"으로
-요약하지 마십시오 — 실제로 테스트된 것이 없습니다. 자격증명도 `session_check`도 넘기지
+요약하지 마세요. 실제로 테스트된 것이 없습니다. 자격증명도 `session_check`도 넘기지
 않으면 모니터링은 비용이 들지 않습니다.
 
 스캔을 실패시키지는 않는 문제도 전달됩니다. 결과에는 `blind_oob`가 어떤 서버에도
@@ -400,8 +404,8 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 `limit`으로 목록을 페이지 단위로 넘깁니다(`limit: 0`이 기본값이며 `offset`부터 전부 반환).
 
 `total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms, started_at_ms,
-finished_at_ms, duration_ms}]`, `pagination: {offset, limit, returned, has_more}`를 반환하며, 실패한 스캔에는 `error_message`가 붙습니다 —
-이것이 없으면 `status: "error", result_count: 0`인 행은 깨끗하게 끝난 스캔과 똑같아 보입니다.
+finished_at_ms, duration_ms}]`, `pagination: {offset, limit, returned, has_more}`를 반환하며, 실패한 스캔에는 `error_message`가 붙습니다.
+이 값이 없으면 `status: "error", result_count: 0`인 행은 깨끗하게 끝난 스캔과 똑같아 보입니다.
 
 ### `cancel_scan_dalfox`
 
@@ -428,7 +432,7 @@ finished_at_ms, duration_ms}]`, `pagination: {offset, limit, returned, has_more}
 
 ### `preflight_dalfox`
 
-페이로드를 보내지 **않고** 대상을 분석합니다. 스캔을 확정하기 전에 범위를 정하는 데 유용합니다.
+페이로드를 보내지 않고 대상을 분석합니다. 스캔하기 전에 대상의 규모를 가늠할 때 쓰세요.
 
 받는 모든 필드와 각각의 기본값입니다. 필수 필드는 `target` 하나뿐입니다:
 
@@ -502,9 +506,9 @@ MCP 서버는 활성(대기 중이거나 실행 중인) 스캔을 최대 100개,
 
 `openWorldHint: true`는 네트워크로 제3자 호스트에 도달하는 도구(tool)를 가리킵니다.
 `destructiveHint: true`는 무언가를 영구히 바꿔 놓을 수 있는 둘을 가리킵니다. 하나는
-기록을 버리고, 다른 하나는 발견된 모든 파라미터에 페이로드를 주입합니다 — 직접 넘긴
+기록을 버리고, 다른 하나는 발견된 모든 파라미터에 페이로드를 주입합니다. 직접 넘긴
 `POST` 본문도 포함되고, `blind_callback_url`을 설정했다면 대상에 남는 저장형
-`<script src=...>`까지 포함됩니다. `preflight_dalfox` 역시 read-only가 **아닙니다**:
+`<script src=...>`까지 포함됩니다. `preflight_dalfox` 역시 read-only가 *아닙니다*.
 공격 페이로드는 보내지 않지만 `method`와 `data`를 받고 마이닝 단계가 프로브 요청을
 보내므로, `POST` preflight는 대상의 상태를 바꿀 수 있습니다.
 
@@ -518,29 +522,29 @@ MCP 서버는 활성(대기 중이거나 실행 중인) 스캔을 최대 100개,
 
 **진행률.** `wait=true`인 `scan_with_dalfox` 호출이나 `preflight_dalfox` 호출에
 `_meta.progressToken`을 붙이면, 호출이 열려 있는 동안 Dalfox가 그 토큰으로
-`notifications/progress`를 흘려보냅니다 — 몇 분이 걸릴 수 있는 작업에서 클라이언트가
-조용한 스피너 대신 실제 움직임을 보여줍니다. 스캔의 경우 숫자 `progress`는 누적 전송
+`notifications/progress`를 보냅니다. 몇 분이 걸릴 수 있는 작업에서 클라이언트가
+멈춘 스피너 대신 실제 진행 상황을 보여줄 수 있습니다. 스캔의 경우 숫자 `progress`는 누적 전송
 요청 수이고, 단계, 테스트한 파라미터 수, 지금까지의 탐지 결과, 대상에 끝내 닿지 못한 요청
 수는 `message`에 담깁니다. `preflight_dalfox`는 대신 2초마다 하트비트를 보냅니다
-(`analyzing target (Ns elapsed)`). 종료 상태에 대해서는 아무것도 보내지 않습니다. 그
+(`analyzing target (Ns elapsed)`). 종료 상태는 따로 알리지 않습니다. 그
 신호는 도구(tool) 호출의 결과 자체입니다.
 
 **취소.** 진행 중인 `wait=true` 호출에 `notifications/cancelled`를 보내면 대기만이 아니라
-스캔 자체가 멈춥니다 — 작업은 `the client cancelled the tool call`이라는
-`error_message`와 함께 `cancelled`로 정리되고, 그때까지 찾은 것은 유지됩니다. 대기
-예산이 그냥 만료되는 경우(`wait_timed_out: true`)와는 의도적으로 다릅니다. 그때는 계속
-폴링할 수 있도록 스캔이 살아 있습니다.
+스캔 자체가 멈춥니다. 작업은 `the client cancelled the tool call`이라는
+`error_message`와 함께 `cancelled`로 정리되고, 그때까지 찾은 것은 유지됩니다. 반면 대기
+예산이 만료된 경우(`wait_timed_out: true`)에는 스캔이 계속 돌기 때문에 이어서
+폴링할 수 있습니다.
 
 **리소스.** 스캔은 호출 대상일 뿐 아니라 주소를 가진 리소스이기도 합니다:
 
 | URI | 내용 |
 |-----|------|
-| `dalfox://scans` | 작업 목록 — `list_scans_dalfox`가 반환하는 것과 같은 본문 |
-| `dalfox://scan/{scan_id}` | 스캔 하나의 상태·진행률·탐지 결과 — `get_results_dalfox`와 같은 본문 |
+| `dalfox://scans` | 작업 목록. `list_scans_dalfox`가 반환하는 것과 같은 본문 |
+| `dalfox://scan/{scan_id}` | 스캔 하나의 상태·진행률·탐지 결과. `get_results_dalfox`와 같은 본문 |
 
 `resources/list`는 목록과 함께 추적 중인 스캔을 하나씩 돌려줍니다(커서로 페이징). 호스트의
 컨텍스트 선택기에 빈 템플릿이 아니라 실제 스캔이 뜬다는 뜻입니다. 목록 리소스를 읽을 때는
-200행에서 스스로 끊습니다 — `resources/read`에는 페이지 인자가 없으므로, 어디서 잘렸는지는
+200행에서 끊습니다. `resources/read`에는 페이지 인자가 없으므로, 어디서 잘렸는지는
 본문의 `pagination`이 말해 줍니다. `scan_with_dalfox`와 `get_results_dalfox`의
 결과에는 그 스캔을 가리키는 `resource_link` 콘텐츠 블록도 함께 실려서, 모델이 결과를 다시
 인용하게 하는 대신 클라이언트가 탐지 결과를 그대로 첨부할 수 있습니다. 이 블록을 해석하지
@@ -571,7 +575,7 @@ MCP 서버는 활성(대기 중이거나 실행 중인) 스캔을 최대 100개,
 
 CLI와 같은 규칙이 적용되며, Dalfox가 대신 확인해 주지는 못합니다: **테스트 권한이 있는 대상만 스캔하세요.** 에이전트의 시스템 프롬프트에서 "모든 스캔 전에 범위를 확인하세요"와 같은 명시적 사용자 확인 단계 뒤에 Dalfox MCP 호출을 두는 것을 고려하세요.
 
-**탐지 결과는 에이전트에게 신뢰할 수 없는 입력입니다.** CLI나 REST API와 달리 MCP는 스캔 출력을 "읽은 대로 행동하는" 모델에게 건네고, 탐지 결과에 인용된 바이트는 전부 대상이 고른 것입니다. Dalfox는 그런 응답에 `_untrusted_content_notice`를 붙이지만 이는 상기시키는 라벨이지 샌드박스가 아닙니다 — 범위 결정(어느 대상, 어느 프록시, 어느 콜백)은 운영자가 쥐고 있어야 하며, 스캐너가 페이지에서 읽어온 무언가가 그것을 바꾸게 두면 안 됩니다.
+**탐지 결과는 에이전트에게 신뢰할 수 없는 입력입니다.** CLI나 REST API와 달리 MCP는 스캔 출력을 "읽은 대로 행동하는" 모델에게 건네고, 탐지 결과에 인용된 바이트는 전부 대상이 고른 것입니다. Dalfox는 그런 응답에 `_untrusted_content_notice`를 붙이지만 이 라벨은 주의를 환기할 뿐 격리 장치가 아닙니다. 범위 결정(어느 대상, 어느 프록시, 어느 콜백)은 운영자가 쥐고 있어야 하며, 스캐너가 페이지에서 읽어온 무언가가 그것을 바꾸게 두면 안 됩니다.
 
 스캔의 `error_message`도 마찬가지입니다. 인증 세션이 스캔 도중 끊기면 Dalfox는
 *오리진*이 리다이렉트한 URL을 그대로 보고하므로, 탐지 결과가 하나도 없는 스캔에서도 그

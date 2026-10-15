@@ -7,19 +7,19 @@ toc = true
 
 Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.
 
-Under the hood there are four working subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server), plus `completion`, which prints shell completion scripts. Everything below labelled "URL / File / Pipe / Raw HTTP / HAR / OpenAPI / Postman / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
+Dalfox has four working subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server), plus `completion`, which prints shell completion scripts. The URL, File, Pipe, Raw HTTP, HAR, and OpenAPI / Postman modes below are input shapes that `scan` reads through `--input-type`. Stored XSS and Blind XSS are `scan` flags. None of them is a separate subcommand.
 
-> The fan-out input shapes (`file`, `pipe`, `raw-http`, `har`, `openapi`, `postman`) are `scan`-only: each expands one input into many targets. The `server` and `mcp` interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.
+> The fan-out input shapes (`file`, `pipe`, `raw-http`, `har`, `openapi`, `postman`) are `scan`-only: each expands one input into many targets. The `server` and `mcp` interfaces take one target per call: one URL plus explicit method, headers, cookies, and body (what one HAR entry carries). To replay a captured session there, send one call per request.
 
 ## Auto (default)
 
-Just give Dalfox a URL. It figures out the rest.
+Give Dalfox a URL and it works out the rest.
 
 ```bash
 dalfox 'https://target.app/search?q=test'
 ```
 
-Under the hood, Dalfox uses the `scan` subcommand with `--input-type auto`. It auto-detects whether the argument is a URL, a URL-list file, a raw HTTP request file, a HAR file, or a stream on `stdin`.
+This runs the `scan` subcommand with `--input-type auto`, which detects whether the argument is a URL, a URL-list file, a raw HTTP request file, a HAR file, or a stream on `stdin`. API specs are not detected; see [OpenAPI / Postman mode](#openapi-postman-mode).
 
 The bare form takes only targets and the global flags (`--config`, `--debug`, `--no-color`, `-S`). Any scan flag needs the subcommand spelled out: `dalfox scan https://target.app -p q`, not `dalfox https://target.app -p q`.
 
@@ -46,9 +46,9 @@ dalfox scan --input-type file urls.txt
 
 Comments (`#`) and blank lines are ignored. Each URL runs through the full pipeline.
 
-A line that is not a scannable target — `mailto:`, `javascript:`, `tel:`, an `ftp://` URL, a truncated fragment, the kind of thing every `gau` / `katana` / `waybackurls` dump carries — is **skipped with a warning**, not treated as fatal; one stray line in a 50k-URL list no longer costs you the whole run. The count lands in `meta.targets_unparsable` so a report never reads as full coverage of a list it partly discarded. If *nothing* in the list parses, that is an error.
+A line that is not a scannable target is skipped with a warning, so one stray line in a 50k-URL list does not stop the run. Typical examples are `mailto:`, `javascript:`, and `tel:` links, `ftp://` URLs, and truncated fragments, which most `gau` / `katana` / `waybackurls` dumps contain. The skipped count goes into `meta.targets_unparsable`, so a report never reads as full coverage of a list it partly discarded. If *no* line in the list parses, the run fails with an error.
 
-A path you meant as a file but which isn't there (`dalfox scan ./urls.txt`, `-i har capture.har`) is reported as a missing file. It is never quietly reinterpreted as a hostname — that used to produce one DNS failure and an otherwise clean-looking exit 0.
+A path you meant as a file but which isn't there (`dalfox scan ./urls.txt`, `-i har capture.har`) is reported as a missing file (`FILE_READ_ERROR`). Dalfox does not reinterpret it as a hostname.
 
 ## Pipe mode
 
@@ -71,39 +71,39 @@ cat urls.txt | dalfox scan https://target.app/one
 # [info] Merged 12 target(s) from stdin and 1 target(s) from arguments
 ```
 
-Here the command-line target is already enough to scan, so Dalfox waits only ~500 ms for `stdin` to produce its first byte. A pipe that a wrapper, CI job, or job runner left open and idle is skipped with a warning instead of blocking the run. Once the stream does start talking, it's read to the end — a long or slowly written list is never truncated.
+Here the command-line target is already enough to scan, so Dalfox waits only ~500 ms for `stdin` to produce its first byte. A pipe that a wrapper, CI job, or job runner left open and idle is skipped with a warning instead of blocking the run. Once the stream starts sending data, Dalfox reads it to the end, so a long or slowly written list is never truncated.
 
 Two knobs adjust that. `DALFOX_STDIN_WAIT_MS` raises the wait, or disables the merge with `0` (see [Environment](../../reference/environment/)); `--input-type pipe` says `stdin` *is* the input, so Dalfox waits for it however long it takes.
 
 ### Collapsing near-duplicate URLs
 
-By default Dalfox only drops targets that are byte-identical (`--dedup-urls exact`): the full URL, query values included, plus the method (and, for HAR / raw HTTP entries, the captured body). A `gau` / `katana` / `waybackurls` dump rarely looks like that — it is usually the same handful of endpoints with thousands of harvested values, and `?id=1` … `?id=9999` are 9999 separate full scans of one injection point.
+By default Dalfox only drops targets that are byte-identical (`--dedup-urls exact`): the full URL with its query values, the method, and the request body. A `gau` / `katana` / `waybackurls` dump rarely has exact duplicates. It is usually the same handful of endpoints with thousands of harvested values, and `?id=1` … `?id=9999` become 9999 separate full scans of one injection point.
 
-`--dedup-urls signature` collapses them. The key is the method, scheme, host, port, path, and the *sorted set of parameter names* — query and body (form, JSON, multipart) alike. Values are excluded, so a value-only family becomes one target. Dalfox logs what it dropped, and the count lands in the scan metadata (`dedup_mode`, `targets_deduplicated`) so a collapsed run is never read as full coverage of the list.
+`--dedup-urls signature` collapses them. The key is the method, scheme, host, port, path, and the *sorted set of parameter names*, taken from the query and the body alike (form fields, top-level JSON keys, multipart fields). Values are excluded, so URLs that differ only in values become one target. Dalfox logs what it dropped, and the count goes into the scan metadata (`dedup_mode`, `targets_deduplicated`), so a collapsed run is never read as full coverage of the list.
 
-The surviving representative is the first member listed, except that a member whose parameters all carry a value beats an earlier one with an empty value: recon dumps often list `?id=` before `?id=42`, and a valueless URL frequently 404s, which would report the whole family clean off a dud. Scope filters (`--include-url`, `--exclude-url`, `--out-of-scope`) are applied *before* dedup, so they always get to rule members out first.
+The URL that stays is the first one listed, with one exception: a URL whose parameters all carry a value wins over an earlier one with an empty value. Recon dumps often list `?id=` before `?id=42`, and a valueless URL often returns 404, which would report the whole group clean based on a dead page. Scope filters (`--include-url`, `--exclude-url`, `--out-of-scope`) run *before* dedup, so they always get to rule URLs out first.
 
 ```bash
 gau target.app | dalfox scan --dedup-urls signature
 # INF dedup (signature): 8214 duplicate target(s) collapsed, 37 remaining — dropped e.g. …
 ```
 
-**The bigger win is coverage, not saved requests.** `--max-targets-per-host` caps a host at 100 targets by default, and a recon dump arrives sorted — so one endpoint's thousands of harvested values are contiguous and consume the entire budget before any other endpoint is reached. Measured on a 5200-URL list (5000 × `/html?q=N`, then 200 distinct `/users/N`):
+The main gain is coverage. `--max-targets-per-host` caps a host at 100 targets by default, and a recon dump arrives sorted, so one endpoint's thousands of harvested values sit next to each other and use up the whole budget before any other endpoint is reached. Measured on a 5200-URL list (5000 × `/html?q=N`, then 200 distinct `/users/N`):
 
 | Mode | What the 100-target budget was spent on |
 |------|------------------------------------------|
-| `exact` (default) | 100 variants of `/html` — the 200 `/users/N` endpoints never scanned |
+| `exact` (default) | 100 variants of `/html`; the 200 `/users/N` endpoints are never scanned |
 | `signature` | 1 × `/html` + 99 distinct `/users/N` |
 
 The truncation is reported either way (`TRUNCATED_PER_HOST_CAP`), but only `signature` spends the budget on *different* endpoints. Raise `--max-targets-per-host` as well if you want both.
 
-When is it safe? When the parameter *name* is what decides where input lands — the common case. It is **not** safe when a value picks the code path: an `action=` / `mode=` / `template=` discriminator that routes to a different handler on the same path, a routing token, or a locale that swaps the rendering template. There, `signature` scans one branch and reports on all of them, which is why it stays opt-in.
+It is safe when the parameter *name* decides where input lands, which is the common case. It is **not** safe when a value picks the code path: an `action=` / `mode=` / `template=` discriminator that routes to a different handler on the same path, a routing token, or a locale that swaps the rendering template. There, `signature` scans one branch and reports on all of them, which is why it stays opt-in.
 
-`--dedup-urls off` disables deduplication entirely, for the rare case where every line must be scanned as given. Note that per-target reporting is keyed by URL, method, and request body, so repeated identical lines still share one `target_summary` entry.
+`--dedup-urls off` disables deduplication entirely, for the rare case where every line must be scanned as given. Per-target reporting is keyed by URL, method, and request body, so repeated identical lines still share one `target_summary` entry.
 
 ## Resuming an interrupted scan
 
-Ctrl-C stops a scan cleanly and still reports what was found, but on its own it buys you a partial report and nothing else: nothing records *which* targets finished, so re-running a 50k-URL list that stopped at 80% redoes the 80%. The same applies to a crash, a dropped SSH session, or an OOM on a shared box.
+Ctrl-C stops a scan cleanly and still reports what was found, but that is only a partial report. Nothing records *which* targets finished, so re-running a 50k-URL list that stopped at 80% redoes the 80%. The same applies to a crash, a dropped SSH session, or an OOM on a shared box.
 
 `--state-file` (opt-in; without it nothing is recorded) records each target as it reaches a terminal state, and skips the finished ones on the next run:
 
@@ -116,7 +116,7 @@ dalfox scan --input-type file urls.txt --state-file scan.state
 # INF resume: 6042 target(s) already completed per scan.state, 1958 left to scan
 ```
 
-**Only completed targets are skipped.** Anything whose coverage is unknown is scanned again. A target that produced findings is recorded `completed` only after the report is written (findings live in memory until then), so a kill, an OOM, or a failed `--output` write cannot leave a target skipped with its findings lost; it is simply scanned again. Targets with no findings are recorded as soon as they finish, and everything is recorded immediately under `--stream-findings`:
+**Only completed targets are skipped.** Anything whose coverage is unknown is scanned again. A target that produced findings is recorded `completed` only after the report is written (findings live in memory until then). A kill, an OOM, or a failed `--output` write therefore cannot leave a target skipped with its findings lost; it is scanned again. Targets with no findings are recorded as soon as they finish, and everything is recorded immediately under `--stream-findings`:
 
 | Recorded outcome | When | Next run |
 |------------------|------|----------|
@@ -132,15 +132,15 @@ A target's resume identity is its URL, its method, and a hash of the request dat
 Warning: scan configuration changed since 'scan.state' was written (recorded a5f8…, now 6447…) — starting fresh (previous state kept at 'scan.state.bak')
 ```
 
-The old file is set aside rather than overwritten, because it is a record of real work, and losing 40k completions to a reset would be worse than the redundant scan. Nothing is ever destroyed in place — a file at that path that is *not* a Dalfox state file (a typo pointing at your target list, say) is refused outright rather than adopted.
+The old file is moved aside instead of overwritten because it records real work, and losing 40k completions to a reset would be worse than a redundant scan. Dalfox never destroys a file in place. If the file at that path is *not* a Dalfox state file (say, a typo pointing at your target list), Dalfox refuses to use it.
 
-Output and pacing flags are deliberately outside that hash — `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response` / `--include-all`, `--silence`, `--no-color`, `--stream-findings`, `--baseline` / `--baseline-mode`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, and the target list and `--input-type` themselves. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file — including `--deep-scan`, `--encoders`, `--custom-payload`, the mining and discovery toggles, the WAF options, `--limit` together with `--only-poc` and `--min-confidence` (they decide which findings count toward it), and the header and cookie *names* in `--headers` / `--cookies` (plus non-credential header values). Run-wide credential values and the `--cookie-from-raw` path are not hashed, as described above.
+Output and pacing flags are left out of that hash: `--format`, `--output`, `--poc-type`, `--include-request` / `--include-response` / `--include-all`, `--silence`, `--no-color`, `--stream-findings`, `--baseline` / `--baseline-mode`, `--timeout`, `--scan-timeout`, `--delay`, `--rate-limit`, `--retries`, `--retry-delay`, `--workers`, `--max-concurrent-targets`, and the target list and `--input-type` themselves. Raising a timeout or slowing a scan down is the normal reaction to an interrupted run, and none of it changes what an already-completed target was tested with. Anything that changes payloads, discovery, coverage, or credentials does invalidate the file. That includes `--deep-scan`, `--encoders`, `--custom-payload`, the mining and discovery toggles, the WAF options, `--limit` together with `--limit-result-type`, `--only-poc`, and `--min-confidence` (they decide which findings count toward it), and the header and cookie *names* in `--headers` / `--cookies` (plus non-credential header values). Run-wide credential values and the `--cookie-from-raw` path are not hashed, as described above.
 
 The hash also covers Dalfox's major version and every other scan option, so an upgrade that adds a scan flag starts every state file over once. That errs toward a redundant scan, never a silent skip.
 
 The file is append-only JSONL: one header line, then one line per target. A hard kill can at worst tear the final line, which is skipped on read while every complete record before it still counts. A target whose outcome is unchanged from the last run is not re-recorded, so a permanently unreachable host does not grow the file once per run.
 
-`--dry-run` and `--only-discovery` open the file **read-only**: their plan reflects the resume, but they send no attack payloads and complete nothing, so they never create it, extend it, or set it aside — pricing out `--deep-scan` with a `--dry-run` cannot cost you a campaign. Every envelope that applies the filter (scan, dry-run, only-discovery, Markdown) carries a `resumed` block with the state-file path and how many targets were skipped, so a short report from a resumed run is never mistaken for full coverage of the input list.
+`--dry-run` and `--only-discovery` open the file **read-only**: their plan reflects the resume, but they send no attack payloads and complete nothing, so they never create, extend, or move the file. Estimating a `--deep-scan` run with `--dry-run` cannot lose your progress. Every envelope that applies the filter (scan, dry-run, only-discovery, Markdown) carries a `resumed` block with the state-file path and how many targets were skipped, so a short report from a resumed run is never mistaken for full coverage of the input list.
 
 CLI only: `dalfox server` and MCP run one scan per job with their own lifecycle, and never resume a previous process's work.
 
@@ -156,7 +156,7 @@ The file is a standard raw HTTP request (method + path + headers + blank line + 
 
 A request line with a bare path (`GET /search HTTP/1.1`) does not say whether the request went over HTTP or HTTPS, so Dalfox takes the scheme from the capture: a `:scheme` pseudo-header wins, then any other HTTP/2 sign (an `HTTP/2` / `HTTP/3` request line or an `:authority` pseudo-header) means HTTPS, then a `Host` ending in `:443`; anything else is scanned over `http://`. An absolute URL in the request line (`GET https://app/search HTTP/1.1`) is used as is.
 
-For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../../integrations/caido/)**. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
+For live proxy workflows (especially Caido Active Workflows), see the [Caido integration guide](../../integrations/caido/). It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
 
 ## HAR mode
 
@@ -171,9 +171,9 @@ dalfox scan --input-type har capture.har
 mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
 ```
 
-Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped by URL + method + body, so two POSTs to the same URL with different bodies are both scanned; entries that differ only in headers or cookies (a rotated session, a drifting `Referer`) collapse. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
+Flattening a HAR to a plain list of URLs throws away the method, headers, cookies, and body. HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed as captured. Each `log.entries[].request` becomes one target and runs through the same scope filters as every other mode. Duplicates are dropped by URL + method + body, so two POSTs to the same URL with different bodies are both scanned; entries that differ only in headers or cookies (a rotated session, a drifting `Referer`) collapse. Pass `--dedup-urls off` to keep every entry. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
 
-CLI request flags still apply on top, for HAR, raw HTTP, OpenAPI and Postman alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). A `-H` header replaces every imported header of the same name (case-insensitive), and a `--cookies` cookie replaces the imported cookie of the same name, so a stale captured session or a spec's placeholder value never goes out ahead of yours; differently named ones are kept. `-H 'Cookie: …'` replaces the captured cookies (and any `--cookies`) outright; use `--cookies` to add or replace individual cookies. Without those flags each request keeps its captured shape. `--include-url` / `--out-of-scope` narrow the set.
+CLI request flags still apply on top, for HAR, raw HTTP, OpenAPI and Postman alike. `-X`, `-d`, and `--user-agent` replace each captured request's method, body, and User-Agent; `-H` and `--cookies` are added to it (e.g. `-H "Authorization: Bearer …"` lands on every entry). A `-H` header replaces every imported header of the same name (case-insensitive), and a `--cookies` cookie replaces the imported cookie of the same name, so a stale captured session or a spec's placeholder value never goes out ahead of yours; differently named ones are kept. `-H 'Cookie: …'` replaces the captured cookies (and any `--cookies`) outright; use `--cookies` to add or replace individual cookies. Without those flags each request keeps its captured shape. `--include-url`, `--exclude-url`, and `--out-of-scope` narrow the set.
 
 ## OpenAPI / Postman mode
 
@@ -204,7 +204,7 @@ Both types are explicit: `auto` does not detect a spec, so pass `-i openapi` / `
 
 **Leniency.** One bad operation or request (an unresolved host, a non-`http(s)` server, an unusable body) is skipped, not fatal; a warning on stderr counts the skips and quotes a few. The run fails with `PARSE_ERROR` only when the document is not a spec or nothing in it is scannable. Files are read under the same size cap as other inputs (`INPUT_TOO_LARGE`).
 
-The expanded targets then go through the same pipeline as a HAR import: CLI request flags apply on top (see above), duplicates collapse on URL + method + body, skipped operations are counted in `meta.targets_unparsable`, `--include-url` / `--out-of-scope` narrow the set, and `--state-file` fingerprints each target's method, body, headers and cookies.
+The expanded targets then go through the same pipeline as a HAR import: CLI request flags apply on top (see above), duplicates collapse on URL + method + body, skipped operations are counted in `meta.targets_unparsable`, `--include-url` / `--exclude-url` / `--out-of-scope` narrow the set, and `--state-file` fingerprints each target's method, body, headers and cookies.
 
 ## Stored XSS mode (SXSS)
 
@@ -216,7 +216,7 @@ dalfox scan https://target.app/post-comment \
   --sxss-url https://target.app/comments
 ```
 
-Dalfox injects into the first URL, then fetches the second to check whether the payload landed. It also checks the page the form was found on, the form's `action` (same origin only), and the injection target itself, so `--sxss-url` is optional. Because a stored sink does not echo in the immediate response, `--sxss` also tests the fields of discovered forms and, when `-p` is not set, the request's own query and `-d` body parameters, even when they don't reflect during discovery. See the [Stored XSS guide](../stored-xss/) for the full flow.
+Dalfox injects into the first URL, then fetches the second to check whether the payload landed. It also checks the page the form was found on, the form's `action` (only on the same origin, or the same host upgraded from `http` to `https`), and the injection target itself, so `--sxss-url` is optional. Because a stored sink does not echo in the immediate response, `--sxss` also tests the fields of discovered forms and, when `-p` is not set, the request's own query and `-d` body parameters, even when they don't reflect during discovery. See the [Stored XSS guide](../stored-xss/) for the full flow.
 
 ## Blind XSS
 
@@ -234,21 +234,9 @@ dalfox scan 'https://target.app/?q=1' --blind-oob
 
 ## Session monitoring
 
-Static credentials (`--cookies`, `-H 'Cookie: …'`, `-H 'Authorization: …'`,
-`--cookie-from-raw`, or the ones inside a captured raw HTTP / HAR request) are
-attached to every request and never revisited. If that session expires an hour
-into a long scan, every request after it is answered by a login page, nothing
-reflects, and Dalfox exits `0` with an empty report — indistinguishable from a
-genuinely clean target.
+Static credentials (`--cookies`, `-H 'Cookie: …'`, `-H 'Authorization: …'`, `--cookie-from-raw`, or the ones inside a captured raw HTTP / HAR request) are attached to every request and never checked again. If that session expires an hour into a long scan, every later request gets a login page, nothing reflects, and Dalfox exits `0` with an empty report. That looks exactly like a clean target.
 
-Session monitoring closes that gap. During preflight Dalfox fingerprints the
-authenticated landing response (status, where the request landed after
-redirects, whether a login form was already on the page) at **no extra request
-cost** — it reuses the body preflight already fetched. It then re-probes after
-each target's injection stage, and again at the dispatch boundary when the
-baseline is already more than 30 seconds old. (On a short or single-target run
-only the post-scan probe fires; re-probing a baseline that is seconds old
-proves nothing.)
+Session monitoring catches this. During preflight Dalfox fingerprints the authenticated landing response: the status, where the request landed after redirects, and whether a login form was already on the page. This costs **no extra request**, because it reuses the body preflight already fetched. Dalfox then probes again after each target's injection stage, and also at the dispatch boundary when the baseline is more than 30 seconds old. (On a short or single-target run only the post-scan probe fires, since re-checking a baseline taken seconds ago proves nothing.)
 
 ```bash
 # Nothing to configure: credentials switch it on.
@@ -263,17 +251,11 @@ A session is reported lost when any of these fires:
 | The request now lands on a login-shaped URL | `302 → /users/sign_in` |
 | A password field appeared where the baseline had none | the app now renders the login wall inline |
 
-`403` is also what an origin or WAF returns once it decides to block a scanner.
-When Dalfox has already fingerprinted a WAF on the target, the `403` signal is
-suppressed entirely — a block explains it better than an expired session, and
-calling it a logout would abort the host group over a WAF rule. Use
-`--session-check` if you need `403`-as-expiry on a WAF-fronted origin.
+`403` is also what an origin or WAF returns once it decides to block a scanner. When Dalfox has already fingerprinted a WAF on the target, it ignores the `403` signal. A block explains it better than an expired session, and treating it as a logout would abort the whole host group over one WAF rule. Use `--session-check` if you need `403`-as-expiry on a WAF-fronted origin.
 
 ### Making it exact
 
-The heuristics are deliberately narrow — the default is to abort, so a false
-positive costs a whole scan. When you know exactly what an authenticated
-response looks like, say so and the heuristics step aside:
+The heuristics are kept narrow on purpose: the default action is to abort, so a false positive costs a whole scan. When you know what an authenticated response looks like, pass it with `--session-check` and Dalfox uses that instead of the heuristics:
 
 ```bash
 dalfox scan 'https://app.example.com/dashboard?q=1' \
@@ -282,63 +264,28 @@ dalfox scan 'https://app.example.com/dashboard?q=1' \
   --session-check-url https://app.example.com/api/me
 ```
 
-The one exception is a probe response that came back incomplete (a `206`, or
-a body cut short) before reaching where the marker sat in the baseline: an
-absent marker proves nothing there, so the heuristics are consulted as a
-fallback.
+There is one exception. If a probe response came back incomplete (a `206`, or a body cut short) before reaching the spot where the marker sat in the baseline, a missing marker proves nothing, so Dalfox falls back to the heuristics.
 
-`--session-check-url` is worth setting when the scan target is expensive,
-paginated, or itself public — point it at a cheap authenticated endpoint
-instead. The baseline is then taken from that endpoint too (one extra preflight
-request per target, only when you set the flag), so a login-shaped probe path
-like `/auth/session` is compared against its own authenticated response rather
-than against the target's.
+Set `--session-check-url` when the scan target is expensive, paginated, or public: point it at a cheap authenticated endpoint instead. The baseline is then taken from that endpoint too (one extra preflight request per target, only when you set the flag). That way a login-shaped probe path like `/auth/session` is compared against its own authenticated response, not the target's.
 
 ### What happens on loss
 
-`--on-session-loss abort` (the default) stops the affected target and skips the
-remaining targets for that host: continuing to spend the request budget against
-a login page has no upside. `--on-session-loss continue` keeps scanning, for
-targets where the heuristics misfire.
+`--on-session-loss abort` (the default) stops the affected target and skips the remaining targets for that host, since spending more requests on a login page gains nothing. `--on-session-loss continue` keeps scanning, for targets where the heuristics misfire.
 
-Either way the run is honest about it:
+Either way, the run reports it:
 
 - a `SESSION LOST` line on **stderr**, so structured stdout stays parseable
-- the target reported as `incomplete` (or `skipped`) with `error_code: SESSION_LOST`
-  and the signal that fired in `error_message`
+- the target reported as `incomplete` (or `skipped`) with `error_code: SESSION_LOST` and the signal that fired in `error_message`
 - `meta.incomplete: true` in the [scan metadata envelope](../output/#scan-metadata-envelope)
-- exit code `2` under `abort` when the run found nothing — so
-  `dalfox scan … && echo "no XSS found"` cannot print that line after being
-  logged out. A run that *did* find something still exits `1`; findings are
-  real regardless, and `meta.incomplete` carries the caveat. `continue` leaves
-  the exit code alone entirely.
+- exit code `2` under `abort` when the run found nothing, so `dalfox scan … && echo "no XSS found"` cannot print that line after being logged out. A run that *did* find something still exits `1`: the findings are real, and `meta.incomplete` carries the caveat. `continue` leaves the exit code alone.
 
-Dalfox also flags the case where the **preflight** response already looks
-unauthenticated — or where a `--session-check` marker never matched the baseline
-at all (a typo, or a marker that lives on another page). Both are reported as
-`SESSION_LOST` rather than merely logged: from such a baseline no later probe
-can detect a *change*, so stale credentials would otherwise produce a silent,
-completely clean run. The target is still scanned; the flag and exit code are
-what make the result honest.
+Dalfox also flags two cases at **preflight**: the response already looks unauthenticated, or a `--session-check` marker never matched the baseline (a typo, or a marker that lives on another page). Both are reported as `SESSION_LOST`, not just logged. From such a baseline no later probe can detect a *change*, so stale credentials would otherwise produce a silent, fully clean run. The target is still scanned; the flag and exit code keep the result honest.
 
-"Already looks unauthenticated" means the sign-in page itself: a `401`, an
-inline password field, or a redirect onto `/login`, `/signin`, `/users/sign_in`.
-A redirect onto a merely auth-*shaped* path is not enough: plenty of apps serve
-their authenticated home from `/auth/home` or `/sso/dashboard`, and calling that
-a dead session would fail a scan whose session was fine. Dalfox prints a
-`SESSION?` advisory for that case instead — visible, but with no `SESSION_LOST`
-entry, no `meta.incomplete`, and no effect on the exit code. If your app is one
-of those and you want the check to be exact anyway, `--session-check` settles
-it.
+"Already looks unauthenticated" means the sign-in page itself: a `401`, an inline password field, or a redirect to `/login`, `/signin`, or `/users/sign_in`. A redirect to a path that only *looks* auth-related is not enough. Many apps serve their authenticated home from `/auth/home` or `/sso/dashboard`, and calling that a dead session would fail a scan whose session was fine. For that case Dalfox prints a `SESSION?` advisory instead. It is visible, but adds no `SESSION_LOST` entry, does not set `meta.incomplete`, and does not change the exit code. If your app is one of those and you want an exact check, use `--session-check`.
 
-Monitoring is off (and costs nothing) when the request carries no cookies and
-no `Cookie` / `Authorization` header, and neither `--session-check` flag is
-set. Logging in is out of scope: this is detection only.
+Monitoring is off (and costs nothing) when the request carries no cookies and no `Cookie` / `Authorization` header, and neither `--session-check` flag is set. Dalfox does not log in for you; this feature only detects a lost session.
 
-`dalfox server` and MCP jobs use the same detection rules, checked on the
-job's baseline and once after the scan: a lost session ends the job as `error`
-with a `SESSION_LOST:` message. Jobs take no `--session-check` equivalent, so
-they rely on the heuristics.
+`dalfox server` and MCP jobs use the same detection rules, checked against the job's baseline and once after the scan. A lost session ends the job as `error` with a `SESSION_LOST:` message. Jobs have no `--session-check` equivalent, so they rely on the heuristics.
 
 ## Server mode
 

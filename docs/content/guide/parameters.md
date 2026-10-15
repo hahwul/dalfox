@@ -5,14 +5,14 @@ weight = 2
 toc = true
 +++
 
-Finding XSS starts with finding the right parameter. Dalfox's discovery engine is a multi-stage pipeline; you rarely need to understand all of it, but knowing the moving parts helps when you want to tune a scan.
+Finding XSS starts with finding the right parameter. Dalfox finds parameters in several stages. You rarely need to know all of them, but it helps when you tune a scan.
 
 ## The pipeline, briefly
 
 1. **Discovery:** Probe the inputs the request already carries: query values (and query parameter *names*), headers, cookies, path segments, and the fields of forms found on the page. URL-fragment keys are listed too (and can be named with `-p`), but a fragment never reaches the server, so the scan never fuzzes them.
 2. **Mining:** Probe the body parameters of `-d` (form, JSON, GraphQL variables, XML, multipart), then look for names the request doesn't carry: a dictionary wordlist and the `id`/`name` of `<input>` elements in the response.
 3. **Active probing:** Probe each parameter to learn which special characters survive, and detect servers that URL-decode more than once.
-4. **Payload generation:** Build context-aware payload sets (HTML, JS, attribute, CSS). Before a parameter's payloads go out, a **fast probe** sends one sandwich-marker request (plus a numeric-only fallback for filters that strip letters). If nothing reflects, the heavy payload loops are skipped for that parameter unless `--deep-scan` is set. When active probing already saw the marker come back, the fast probe reuses that answer instead of sending its own request.
+4. **Payload generation:** Build context-aware payload sets (HTML, JS, attribute, CSS). Before a parameter's payloads go out, a fast probe sends one sandwich-marker request (plus a numeric-only fallback for filters that strip letters). If nothing reflects, the heavy payload loops are skipped for that parameter unless `--deep-scan` is set. When active probing already saw the marker come back, the fast probe reuses that answer instead of sending its own request.
 5. **Reflection check:** Send the payload, then see whether it comes back.
 6. **DOM verification:** Parse the response and confirm the payload reached an executable position. AST-based DOM-XSS analysis runs once over the landing page itself, then once per parameter on the fast-probe response (or on the first reflection response when the fast probe was skipped).
 
@@ -33,7 +33,7 @@ Locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, 
 Without a location hint (`-p q` only):
 
 1. If discovery/mining already found a param with that name, it is kept (filter).
-2. Otherwise Dalfox **synthesizes** it: location is inferred from the request (URL query → body → cookies → headers), defaulting to `query`.
+2. Otherwise Dalfox creates it: location is inferred from the request (URL query → body → cookies → headers), defaulting to `query`.
 
 That means recipes like `-p q --skip-discovery --skip-mining` still test `q` instead of silently scanning nothing.
 
@@ -55,19 +55,14 @@ Dictionary and DOM candidates are tested in buckets of up to 64 names per reques
 
 On a page whose body differs between identical requests (a rotating widget, a timestamp), only a status-code change counts as such a response change. A multi-name bucket that fails, or that the server rejects for its size (a query-length limit), is split and retried rather than dropped.
 
-With no custom or remote wordlist selected, the built-in seed keeps Dalfox's
-historical XSS-oriented names and adds an attributed, broader Param Miner seed
-covering API, authentication, pagination, feature flags, media, and operational
-names.
+With no `-W` or remote wordlist, Dalfox uses its built-in list: XSS-oriented names plus a broader set taken from gori's Param Miner wordlist (API, authentication, pagination, feature flags, media, and operational names).
 
 ### Auto-collapse
 
-Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this in two ways:
+Some pages echo every parameter you send (a search page that prints the whole query, for example). On those, every wordlist name would reflect and the scan would test each one. Dalfox handles this in two ways:
 
-- **Sentinel pre-probe:** Before iterating the wordlist, three random-looking parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic `any` Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (>15 entries) for the pre-probe to pay off.
-- **EWMA collapse:** After bucket processing, Dalfox watches the rolling reflection ratio. A high ratio (≥85% after at least 15 candidate names and 5 reflections) triggers a confirmation check for smaller lists. If the sentinels also reflect, mined Query params are folded into the same `any` placeholder; if they do not, every confirmed candidate is kept. A negative sentinel therefore does not cut coverage from the rest of a large wordlist.
-
-The sentinel-confirmed route produces one synthetic Query injection point. A negative sentinel preserves the individual reflected names, while still benefiting from bucketed requests.
+- **Sentinel pre-probe:** Before the wordlist runs, Dalfox tests three made-up parameter names that no real app uses. If all three reflect, the page echoes anything. Mining is skipped and one synthetic `any` query parameter takes its place. This costs at most 3 requests and only runs when the wordlist has more than 15 entries.
+- **EWMA collapse:** After the buckets are done, Dalfox looks at the rolling reflection ratio. If it is 85% or higher after at least 15 candidate names and 5 reflections, Dalfox runs the sentinel check (for lists too small to have run it up front). If the sentinels reflect, the mined query parameters are folded into the same `any` parameter. If they don't, every reflected name is kept, so a selective page never loses coverage.
 
 ## Pruning the noise
 
@@ -129,7 +124,7 @@ To move faster or work around a fragile target, skip parts of the pipeline:
 
 What you name explicitly survives these flags. Body parameters from `-d` are probed even under `--skip-mining`, and a `-p name:header` or `-p name:cookie` is probed even under the matching `--skip-reflection-*` flag. The payload-side skips (`--skip-xss-scanning`, `--skip-ast-analysis`, `--skip-waf-probe`) are listed in the [CLI reference](../../reference/cli/).
 
-> `--skip-mining-dom` only stops dalfox from harvesting parameter *names* out of the response HTML. It does **not** disable DOM-XSS detection: the static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/#skipping-payload-stages). To filter those findings out of the output instead, use `--only-poc v,r`. See [Detection Model](../detection-model/) for how the two subsystems differ and what each evidence tier proves.
+> `--skip-mining-dom` only stops Dalfox from collecting parameter *names* from the response HTML. It does not turn off DOM-XSS detection. The static analysis of inline `<script>` blocks (which emits the `[A]` AST-detected findings, source→sink flows such as `location.hash` → `innerHTML`) is a separate pass controlled by [`--skip-ast-analysis`](../payloads/#skipping-payload-stages). To filter those findings out of the output instead, use `--only-poc v,r`. See [Detection Model](../detection-model/) for how the two subsystems differ and what each evidence tier proves.
 
 ## Injection markers
 
@@ -141,7 +136,7 @@ dalfox scan https://target.app/api \
   -d '{"filter":"FUZZ"}'
 ```
 
-With a marker set, discovery, mining, and active probing are skipped. Every query value, form-body value, top-level JSON string value, header value, and cookie value that contains `FUZZ` becomes a parameter, and each payload replaces that whole value. A marker anywhere else (a path segment, a nested JSON field) is not picked up.
+With a marker set, discovery, mining, and active probing are skipped. Every query value, form-body value, multipart field (when the body is raw multipart, as in an imported raw HTTP request), top-level JSON string value, header value, and cookie value that contains `FUZZ` becomes a parameter, and each payload replaces that whole value. A marker anywhere else (a path segment, a nested JSON field) is not picked up.
 
 You can also target a query parameter or a header directly:
 
@@ -176,9 +171,9 @@ Composable pipelines are inferred from the parameter's existing value. When it d
 | Bare URL-encoded JSON `?blob=%7B…%7D` | `JsonField(/leaf)` |
 | JWT/JWS `?token=h.p.s` | `JsonField(/leaf) → Base64Url → JwtAssemble` |
 
-Each leaf is registered as a separate Param using bracket-style display naming. A payload at the `move_url` field of `qs` shows up as `qs[move_url]`, and an array element appears as `qs[items][0]`. The wire-level substitution still targets the original parent param (`qs`), so the request looks normal to the server.
+Each leaf becomes its own parameter with a bracket-style name. A payload at the `move_url` field of `qs` shows up as `qs[move_url]`, and an array element appears as `qs[items][0]`. The wire-level substitution still targets the original parent param (`qs`), so the request looks normal to the server.
 
-For JWTs the original header and signature segments are preserved verbatim. The signature won't match the modified payload, so this only fires on endpoints that don't verify the token. Properly-signed JWTs return no findings. That's expected behaviour, not a miss.
+For JWTs the original header and signature segments are preserved verbatim. The signature won't match the modified payload, so this only works on endpoints that don't verify the token. An endpoint that checks the signature returns no findings, which is expected.
 
 If your target uses a wrapping that Dalfox doesn't auto-detect, `--inject-marker` (see above) can still pin the injection point, but the payload is then sent as is, without the wrapping.
 
@@ -186,7 +181,7 @@ If your target uses a wrapping that Dalfox doesn't auto-detect, `--inject-marker
 
 When the request body (`-d`, or a captured `raw-http` / `har` request) is a GraphQL or XML document, Dalfox treats its inner values as injection points instead of testing the raw body as one opaque blob.
 
-**GraphQL** (a JSON body; detection goes by the body's shape, not its content type): a body that carries both a GraphQL operation (a `query`/`mutation` field whose value starts with `query`/`mutation`/`subscription` or the anonymous `{ … }` shorthand) **and** a `variables` object has every string leaf inside `variables` probed, and each one that reflects becomes its own `graphql` parameter (named `variables.<path>`). Each payload rebuilds the whole request — the operation and the other variables ride along unchanged — so the server always receives a valid, parseable GraphQL request.
+**GraphQL** (a JSON body; detection goes by the body's shape, not its content type): a body that carries both a GraphQL operation (a `query`/`mutation` field whose value starts with `query`/`mutation`/`subscription` or the anonymous `{ … }` shorthand) **and** a `variables` object has every string leaf inside `variables` probed, and each one that reflects becomes its own `graphql` parameter (named `variables.<path>`). Each payload rebuilds the whole request with the operation and the other variables unchanged, so the server always receives a valid GraphQL request.
 
 ```bash
 dalfox scan https://target.app/graphql \
@@ -196,9 +191,9 @@ dalfox scan https://target.app/graphql \
 # → variables.q is injected as a `graphql` parameter
 ```
 
-A plain REST endpoint that merely has a field named `query` (a search box, `{"query":"laptop"}`) is **not** treated as GraphQL — the `variables` object and an operation-shaped value are both required, so ordinary JSON bodies stay on the normal `json` path.
+A plain REST endpoint that only has a field named `query` (a search box, `{"query":"laptop"}`) is not treated as GraphQL. Both the `variables` object and an operation-shaped value are required, so ordinary JSON bodies stay on the normal `json` path.
 
-**XML / SOAP** (`text/xml`, `application/xml`, `application/soap+xml`, `application/xhtml+xml`, or a body with an `<?xml …?>` prolog): each element text node and attribute value is probed, and each one that reflects becomes an `xml` parameter. A byte-range splice injects the payload in place, leaving every other byte of the document — namespaces, sibling elements, the SOAP envelope — untouched, and the request's XML content-type is preserved.
+**XML / SOAP** (a `Content-Type` of `text/xml`, `application/xml`, or any `+xml` type such as `application/soap+xml`, or a body that starts with an `<?xml …?>` prolog): each element text node and attribute value is probed, and each one that reflects becomes an `xml` parameter. The payload is spliced in place. Every other byte of the document (namespaces, sibling elements, the SOAP envelope) stays as it was, and the request keeps its XML content type.
 
 ```bash
 dalfox scan https://target.app/soap \
@@ -208,20 +203,20 @@ dalfox scan https://target.app/soap \
 # → the <term> text node is injected as an `xml` parameter
 ```
 
-As with every reflected finding, a value only grades `[V]` when the response is a document a browser would render as markup (see [Detection Model](../detection-model/#what-the-response-content-type-allows)) — a GraphQL API that answers `application/json`, or an XML service that echoes an escaped value, is correctly reported as inert. The real reach is an admin view, report, or error page that renders the reflected value as markup.
+As with every reflected finding, a value only grades `[V]` when the response is a document a browser would render as markup (see [Detection Model](../detection-model/#what-the-response-content-type-allows)). A GraphQL API that answers with `application/json`, or an XML service that echoes an escaped value, is reported as inert. The real risk is an admin view, report, or error page that renders the reflected value as markup.
 
 ## Reflection probe shape
 
-Every discovery and mining probe sends a sandwich marker (`OPEN + INNER + CLOSE`) instead of a single token. The response is then classified into one of four cases:
+Every discovery and mining probe sends a sandwich marker (`OPEN + INNER + CLOSE`) instead of a single token. A probe counts as reflected whenever `INNER` comes back, whatever happened to the ends:
 
-| Reflection | Meaning |
-|------------|---------|
-| **Full** | The complete `OPEN+INNER+CLOSE` survived. Standard reflection. |
-| **PrefixOnly** | `OPEN+INNER` is present, `CLOSE` was stripped. Suggests a suffix-strip filter. |
-| **SuffixOnly** | `INNER+CLOSE` is present, `OPEN` was stripped. Suggests a prefix-strip filter. |
-| **InnerOnly** | Only `INNER` survives. Suggests a regex extract or both wraps removed. |
+| What came back | Likely cause |
+|----------------|--------------|
+| `OPEN+INNER+CLOSE` | Plain reflection |
+| `OPEN+INNER` | A filter stripped the end of the value |
+| `INNER+CLOSE` | A filter stripped the start of the value |
+| `INNER` only | A regex extracted part of the value, or both ends were stripped |
 
-All four are treated as "reflected": discovery records the parameter and the scan proceeds. A naive single-token check would have missed every case except *Full*, leaving prefix-/suffix-stripping endpoints undetected. The marker tokens are scan-unique (`dlx`/`dlxmid`/`xld` prefixes plus 8 hex chars per scan), so accidental collisions in HTML are negligible.
+In each case discovery records the parameter and the scan goes on. A single-token check would only catch the first row and miss endpoints that strip a prefix or suffix. The marker tokens are generated randomly each time Dalfox starts (`dlx`/`dlxmid`/`xld` plus 8 hex characters), so an accidental match in a page is very unlikely.
 
 ## What makes a finding "verified"
 

@@ -26,7 +26,7 @@ Dalfox는 설정 디렉터리를 하나만 고릅니다.
 input_type = "auto"   # auto, url, file, pipe, raw-http, har, openapi, postman
 # base_url = "https://staging.example.com"  # openapi/postman: 모든 요청의 스킴+호스트(+포트), 경로 접두어. 명세 서버 경로는 뒤에 붙음
 dedup_urls = "exact"  # exact, signature (파라미터 값만 다른 URL 병합), off
-# state_file = "scan.state"  # 완료된 대상을 기록해 재실행 시 건너뜁니다. CLI 전용 — `dalfox server`/MCP는 무시
+# state_file = "scan.state"  # 완료된 대상을 기록해 재실행 시 건너뜁니다. CLI 전용이며 `dalfox server`/MCP는 무시
 
 # OUTPUT
 format = "plain"
@@ -141,16 +141,16 @@ debug = false
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`, `postman` |
-| `base_url` | string | — | `openapi` / `postman` 입력 전용: 모든 요청의 스킴, 호스트, 포트를 정하고 경로 접두어가 됩니다. 명세 서버의 경로는 그 뒤에 붙습니다. 절대 `http(s)` URL이어야 하며, 그 밖의 값은 경고와 함께 무시합니다([OpenAPI / Postman 모드](../../guide/scanning-modes/#openapi-postman-모드)) |
+| `base_url` | string |  | `openapi` / `postman` 입력 전용: 모든 요청의 스킴, 호스트, 포트를 정하고 경로 접두어가 됩니다. 명세 서버의 경로는 그 뒤에 붙습니다. 절대 `http(s)` URL이어야 하며, 그 밖의 값은 경고와 함께 무시합니다([OpenAPI / Postman 모드](../../guide/scanning-modes/#openapi-postman-모드)) |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature`(파라미터 값만 다른 URL을 하나로 병합), `off` |
-| `state_file` | string | — | 완료된 대상을 기록해 재실행 시 건너뜁니다([중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)). **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
+| `state_file` | string |  | 완료된 대상을 기록해 재실행 시 건너뜁니다([중단된 스캔 이어하기](../../guide/scanning-modes/#중단된-스캔-이어하기)). CLI 전용이며 `dalfox server`/MCP는 무시합니다 |
 
 ### 출력
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `format` | string | `"plain"` | `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml` |
-| `output` | string | — | 출력 파일 경로 |
+| `output` | string |  | 출력 파일 경로 |
 | `include_request` | bool | `false` | 원본 HTTP 요청 첨부 |
 | `include_response` | bool | `false` | 응답 본문 첨부 |
 | `include_all` | bool | `false` | 위 둘을 함께 적용하는 축약 |
@@ -158,10 +158,10 @@ debug = false
 | `dry_run` | bool | `false` | 페이로드를 전송하지 않음 |
 | `stream_findings` | bool | `false` | 스캔 종료 요약 이후가 아니라 스캔 도중에 각 탐지 결과를 출력 (plain 형식만; `output`, `limit`, `only_poc`, `baseline` 중 하나라도 설정되면 꺼짐) |
 | `poc_type` | string | `"plain"` | `plain`, `curl`, `httpie`, `http-request` |
-| `limit` | int | — | 결과 개수 상한 (`1` 이상이어야 하며, `0`은 경고와 함께 무시) |
+| `limit` | int |  | 결과 개수 상한 (`1` 이상이어야 하며, `0`은 경고와 함께 무시) |
 | `limit_result_type` | string | `"all"` | 집계 대상 타입: `all`, `v`, `r`, `a`, `i` |
 | `only_poc` | array | `[]` | 출력 필터: `["v","a"]` |
-| `baseline` | string | — | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다([베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)). **CLI 전용** — `dalfox server`/MCP는 무시합니다 |
+| `baseline` | string |  | 비교할 이전 JSON/JSONL 리포트. 그 이후 새로 생긴 건만 보고합니다([베이스라인](../../guide/output/#베이스라인-새로-생긴-것만-보고하기)). CLI 전용이며 `dalfox server`/MCP는 무시합니다 |
 | `baseline_mode` | string | `"filter"` | `filter`는 알려진 건을 제거, `annotate`는 유지한 채 `new` 표시 |
 | `min_confidence` | string | `"low"` | `high`는 `low` 등급 탐지 결과를 출력과 종료 코드보다 먼저 제거 (`I`는 유지) |
 | `no_color` | bool | `false` | ANSI 색상 비활성화 |
@@ -171,21 +171,21 @@ debug = false
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `param` | array | `[]` | 파라미터 이름 (선택적으로 `name:location`) |
-| `data` | string | — | 요청 본문 |
+| `data` | string |  | 요청 본문 |
 | `headers` | array | `[]` | HTTP 헤더 |
 | `cookies` | array | `[]` | 쿠키 문자열 |
 | `method` | string | `"GET"` | HTTP 메서드 (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY`) |
-| `user_agent` | string | — | User-Agent 재정의 |
-| `cookie_from_raw` | string | — | 쿠키용 원본 요청 파일 |
+| `user_agent` | string |  | User-Agent 재정의 |
+| `cookie_from_raw` | string |  | 쿠키용 원본 요청 파일 |
 
 ### 세션
 
-스캔 도중 세션 만료 감지 — [세션 모니터링](../../guide/scanning-modes/#세션-모니터링)을 참고하세요.
+스캔 도중 세션이 끊기는지 감지하는 키입니다. [세션 모니터링](../../guide/scanning-modes/#세션-모니터링)을 참고하세요.
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `session_check` | string | — | 인증된 응답 본문에 계속 매칭되어야 하는 정규식 |
-| `session_check_url` | string | — | 재검증 전용 프로브 URL (절대 `http(s)://`) |
+| `session_check` | string |  | 인증된 응답 본문에 계속 매칭되어야 하는 정규식 |
+| `session_check_url` | string |  | 재검증 전용 프로브 URL (절대 `http(s)://`) |
 | `on_session_loss` | string | `"abort"` | `abort` 또는 `continue` |
 
 ### 스코프
@@ -196,7 +196,7 @@ debug = false
 | `exclude_url` | array | `[]` | 건너뛸 URL의 정규식 패턴(부분 매칭) |
 | `ignore_param` | array | `[]` | 건너뛸 파라미터 이름(정확히 일치) |
 | `out_of_scope` | array | `[]` | 건너뛸 호스트 패턴, 항목 하나에 하나씩(`["*.gov", "cdn.example.com"]`). `*.example.com`은 `example.com`과 하위 도메인에 맞고, 그 밖의 위치에 있는 `*`는 임의의 문자열에 맞으며, `*`가 없는 값은 호스트와 정확히 같아야 합니다. 한 항목 안의 쉼표는 구분자가 아닙니다 |
-| `out_of_scope_file` | string | — | 스코프 외 패턴을 한 줄에 하나씩 적은 파일. 읽을 수 없는 경로면 스캔을 중단합니다 |
+| `out_of_scope_file` | string |  | 스코프 외 패턴을 한 줄에 하나씩 적은 파일. 읽을 수 없는 경로면 스캔을 중단합니다 |
 
 ### 탐색 및 마이닝
 
@@ -207,11 +207,11 @@ debug = false
 | `skip_reflection_header` | bool | `false` | 헤더 반사 검사 건너뜀 |
 | `skip_reflection_cookie` | bool | `false` | 쿠키 반사 검사 건너뜀 |
 | `skip_reflection_path` | bool | `false` | 경로 반사 검사 건너뜀 |
-| `mining_dict_word` | string | — | 워드리스트 경로 |
+| `mining_dict_word` | string |  | 워드리스트 경로 |
 | `remote_wordlists` | array | `[]` | `burp`, `assetnote` |
 | `skip_mining` | bool | `false` | 모든 마이닝 건너뜀 |
 | `skip_mining_dict` | bool | `false` | 사전 기반 마이닝 건너뜀 |
-| `skip_mining_dom` | bool | `false` | HTML `id`/`name` 속성에서 파라미터 이름 수집 건너뜀 (DOM-XSS 탐지가 아님 — `skip_ast_analysis` 참고) |
+| `skip_mining_dom` | bool | `false` | HTML `id`/`name` 속성에서 파라미터 이름을 수집하지 않습니다. DOM-XSS 탐지는 그대로이며, 끄려면 `skip_ast_analysis`를 씁니다 |
 
 ### 네트워크
 
@@ -223,7 +223,7 @@ debug = false
 | `rate_limit` | int | `0` | 모든 워커/대상이 공유하는 전역 요청 속도 상한 (req/sec); `0` = 무제한, 최대 `100000` |
 | `retries` | int | `0` | 5xx / 일시적 전송 오류를 이 횟수만큼 재시도 (`0` = 끔, 최대 `100`; 429는 항상 재시도) |
 | `retry_delay` | int | `1000` | `retries` 시도 사이의 기본 백오프 (ms, 지수 증가; 최대 `60000`) |
-| `proxy` | string | — | 프록시 URL (`http(s)://` 또는 `socks4/5(h)://`); 원격 페이로드/워드리스트를 가져올 때도 사용 |
+| `proxy` | string |  | 프록시 URL (스킴: `http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`); 원격 페이로드/워드리스트를 가져올 때도 사용 |
 | `insecure` | bool | `true` | TLS 인증서 검증 건너뜀; 검증을 강제하려면 `false`로 설정. 스캔 대상과 `--blind-oob=`로 지정한 OAST 서버에 적용되며, 공개 interactsh 메시는 항상 검증 |
 | `follow_redirects` | bool | `false` | 3xx 응답 추적 |
 | `ignore_return` | array | `[]` | 무시할 HTTP 상태 코드, 정수로 지정 (`[302, 403]`) |
@@ -242,20 +242,20 @@ debug = false
 |-----|------|---------|-------------|
 | `encoders` | array | `["url","html"]` | 적용할 인코더: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `remote_payloads` | array | `[]` | 원격 페이로드 소스: `portswigger`, `payloadbox` |
-| `custom_blind_xss_payload` | string | — | 블라인드 템플릿 파일. 각 줄에 `{callback}`이 있어야 합니다(없는 줄은 건너뜀) |
-| `blind_callback_url` | string | — | 블라인드 XSS 콜백 URL (`--blind` / `-b` 플래그) |
-| `blind_oob` | array | — | interactsh로 OOB/OAST 블라인드 XSS 활성화 (`[]` = 공개 메시; 또는 서버 이름 지정). `--blind-oob`와 동일 |
-| `blind_oob_secret` | string | — | 자체 호스팅 interactsh 서버용 인증 토큰 |
+| `custom_blind_xss_payload` | string |  | 블라인드 템플릿 파일. 각 줄에 `{callback}`이 있어야 합니다(없는 줄은 건너뜀) |
+| `blind_callback_url` | string |  | 블라인드 XSS 콜백 URL (`--blind` / `-b` 플래그) |
+| `blind_oob` | array |  | interactsh로 OOB/OAST 블라인드 XSS 활성화 (`[]` = 공개 메시; 또는 서버 이름 지정). `--blind-oob`와 동일 |
+| `blind_oob_secret` | string |  | 자체 호스팅 interactsh 서버용 인증 토큰 |
 | `blind_oob_wait` | int | `30` | 페이로드 전송 후 OOB 콜백을 계속 폴링할 시간(초) |
-| `custom_payload` | string | — | 커스텀 페이로드 파일(한 줄에 하나) |
+| `custom_payload` | string |  | 커스텀 페이로드 파일(한 줄에 하나) |
 | `only_custom_payload` | bool | `false` | 커스텀 페이로드만 사용; `custom_payload`(또는 `--custom-payload`)가 함께 없으면 스캔이 종료 코드 `2`로 끝남 |
-| `inject_marker` | string | — | 페이로드로 치환할 토큰 |
+| `inject_marker` | string |  | 페이로드로 치환할 토큰 |
 | `custom_alert_value` | string | `"1"` | `alert(X)` 값 |
 | `custom_alert_type` | string | `"none"` | `none` 또는 `str` |
 | `skip_xss_scanning` | bool | `false` | 공격 없이 탐색만 수행 |
 | `deep_scan` | bool | `false` | 첫 탐지 결과 이후에도 계속 진행 |
 | `sxss` | bool | `false` | Stored XSS 모드 활성화 |
-| `sxss_url` | string | — | 조회 URL |
+| `sxss_url` | string |  | 조회 URL |
 | `sxss_method` | string | `"GET"` | 조회 메서드 (`method`와 같은 값 집합) |
 | `sxss_retries` | int | `3` | 조회 URL을 가져올 때의 재시도 횟수 (최대 `20`) |
 | `max_payloads_per_param` | int | `0` | 파라미터당 테스트하는 기본 페이로드 상한 (`0`은 `deep_scan`이 켜져 있지 않으면 세트당 3000개 안전 상한을 적용) |
@@ -270,7 +270,7 @@ debug = false
 |-----|------|---------|-------------|
 | `waf_bypass` | string | `"auto"` | `auto` 또는 `off`(탐지와 보고만). `force`도 받지만 `auto`와 똑같이 동작하며, WAF를 고르는 것은 `force_waf`입니다 |
 | `skip_waf_probe` | bool | `false` | 능동적 핑거프린팅 건너뜀 |
-| `force_waf` | string | — | 탐지 결과 대신 대상을 이 WAF로 간주 (`--force-waf`와 같은 이름, 대소문자 무관) |
+| `force_waf` | string |  | 탐지 결과 대신 대상을 이 WAF로 간주 (`--force-waf`와 같은 이름, 대소문자 무관) |
 | `waf_evasion` | bool | `false` | 적응형 회피: 요청 간 랜덤 지터(WAF 탐지 여부와 무관) + 차단 클러스터에 대한 점증 쿨다운 (`rate_limit`과 함께 사용) |
 | `waf_min_confidence` | float | `0.3` | 이 신뢰도 미만의 핑거프린트 제거 (0.0–1.0); 기본값은 약한 매칭을 억제 |
 
@@ -293,10 +293,10 @@ CLI 플래그  >  설정 파일  >  내장 기본값
 
 설정 값은 CLI 인자 파서를 거치지 않으므로, Dalfox는 파일을 읽을 때 따로 검사합니다.
 
-- 선택지가 정해진 키(`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `min_confidence`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`)에 잘못된 값을 넣거나, 알 수 없는 `method` / `sxss_method` / `force_waf`, 올바른 정규식이 아닌 `session_check`, 절대 URL이 아닌 `session_check_url`, `limit = 0`을 쓰면 stderr에 `Warning:`이 출력됩니다. 해당 키는 내장 기본값으로 돌아가고 스캔은 계속됩니다. `method`, `sxss_method`, `force_waf`는 플래그와 똑같이 대소문자가 정규화됩니다.
-- `proxy`, `sxss_url`, `session_check_url`은 플래그와 같은 시작 검사를 거칩니다. Dalfox가 라우팅할 수 없는 프록시 스킴이나 스킴이 `http`/`https`가 아닌 URL이면 `PARSE_ERROR`(종료 코드 `2`)로 스캔이 중단됩니다.
+- 선택지가 정해진 키(`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `min_confidence`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`)에 잘못된 값을 넣거나, 알 수 없는 `method` / `sxss_method` / `force_waf`, 올바른 정규식이 아닌 `session_check`, 절대 URL이 아닌 `session_check_url`, `limit = 0`을 쓰면 stderr에 `Warning:`이 출력됩니다. 그 키는 내장 기본값으로 돌아가고 스캔은 계속됩니다. `method`, `sxss_method`, `force_waf`는 플래그와 똑같이 대소문자가 정규화됩니다.
+- `proxy`, `sxss_url`, `session_check_url`, `include_url`, `exclude_url`은 플래그와 같은 시작 검사를 거칩니다. Dalfox가 라우팅할 수 없는 프록시 스킴, 스킴이 `http`/`https`가 아닌 URL, 올바른 정규식이 아닌 스코프 패턴이 있으면 `PARSE_ERROR`(종료 코드 `2`)로 스캔이 중단됩니다.
 - 숫자 키는 대응하는 플래그와 같은 범위 제한을 받습니다(`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). 범위를 벗어나면 `INVALID_INPUT_TYPE`(종료 코드 `2`)으로 스캔이 중단됩니다.
 - 알 수 없는 키와 `[scan]` 테이블 밖에 둔 키는 무시되며, stderr에 ``Warning: config <path>: unknown key `scan.header` ignored`` 경고가 출력되므로 철자나 위치가 틀린 키를 알아챌 수 있습니다.
-- 파싱에 실패한 파일(TOML 문법 오류, `workers = "10"`처럼 타입이 틀린 값 등)은 통째로 무시됩니다. `--config`로 지정한 파일이면 문제가 된 줄과 열을 짚은 경고가 출력되고(값 자체는 자격 증명일 수 있어 출력하지 않습니다), 기본 경로의 파일이면 아무 메시지 없이 무시됩니다.
+- 파싱에 실패한 파일(TOML 문법 오류, `workers = "10"`처럼 타입이 틀린 값 등)은 통째로 버리고 내장 기본값으로 실행합니다. 이때 문제가 된 줄과 열을 짚은 경고를 출력합니다(값은 자격 증명일 수 있어 출력하지 않습니다). `--config`로 지정한 파일과 기본 디렉터리의 파일 모두 같습니다.
 
 예시는 [시작하기 → 설정](../../getting-started/configuration/)을 참고하세요.

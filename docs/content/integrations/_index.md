@@ -13,4 +13,4 @@ Dalfox works well on the command line, but it also speaks REST and MCP, ships a 
 - **[Caido Workflows](./caido/):** Drive Dalfox from Caido Active Workflows and Findings for real-time automated XSS testing inside your proxy sessions.
 - **[Agent Skill](./skills/):** A drop-in `SKILL.md` that teaches Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents how to drive Dalfox safely. Install with `npx skills add hahwul/dalfox`.
 
-All integrations share the exact same scanning engine as the CLI. Results are identical; only the plumbing differs.
+All integrations run the same scanning engine as the CLI; only the plumbing differs.

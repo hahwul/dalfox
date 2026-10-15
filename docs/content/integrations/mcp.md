@@ -40,11 +40,11 @@ claude mcp add dalfox -- dalfox mcp
 
 ## Available tools
 
-Six tools are exposed. Scans are async by default: submit one, poll for results, then move on. (`preflight_dalfox` answers in-line, and `scan_with_dalfox` blocks when you pass `wait: true` — both stream progress if you ask for it.)
+Six tools are exposed. Scans are async by default: submit one, poll for results, then move on. `preflight_dalfox` answers in-line, and `scan_with_dalfox` blocks when you pass `wait: true`. Both stream progress if you ask for it.
 
 ### `scan_with_dalfox`
 
-Submit a scan. Returns immediately.
+Submit a scan. The call returns right away unless you pass `wait: true`.
 
 ```json
 {
@@ -77,24 +77,23 @@ mutation coverage. Order does not matter. The scanner applies encoders
 in a fixed priority order (`url` → `html` → `htmlpad` → `2url` → `3url`
 → `4url` → `base64` → `unicode` → `zwsp`) and de-duplicates the output.
 Use `["none"]` to disable encoding entirely. Mirrors the `--encoders` /
-`-e` CLI flag. An unknown encoder name is rejected outright — it would
-otherwise match nothing and quietly shrink the scan's payload coverage.
+`-e` CLI flag. An unknown encoder name is rejected, because it would match
+nothing and quietly shrink the scan's payload coverage.
 
 `method` is validated against the same verb set the CLI accepts and is
 uppercased for you (`"post"` → `"POST"`). Sending an unsupported verb is an
 error rather than a scan that puts the wrong method on the wire.
 
 `blind_callback_url` must be empty (meaning "no blind XSS") or start with
-`http://` / `https://`. Setting it arms *stored* blind-XSS injection —
+`http://` / `https://`. Setting it arms *stored* blind-XSS injection:
 `<script src=...>` payloads are written into every query, body, header and
-cookie parameter and stay in the target — so a value that could never receive
-a callback is rejected outright rather than leaving those payloads behind for
-nothing. `remote_payloads` / `remote_wordlists` are likewise checked against
+cookie parameter and stay in the target. A value that could never receive a
+callback would leave those payloads behind for nothing, so it is rejected. `remote_payloads` / `remote_wordlists` are likewise checked against
 the registered providers, because an unrecognized name would silently fetch
 nothing and let the scan report `done` with the payload coverage the caller
 asked for quietly missing.
 
-`blind_oob` is the managed OAST (interactsh) channel — the same thing the CLI's
+`blind_oob` is the managed OAST (interactsh) channel, the same one the CLI's
 `--blind-oob` arms. Pass `true` for the public mesh or a list of interactsh
 hosts (`["oast.fun"]`); Dalfox registers, correlates each callback to the
 payload that caused it, and polls on its own, so a callback becomes a `V`
@@ -126,7 +125,7 @@ informational `[I]` findings for outdated / known-vulnerable JS libraries
 (CWE-1104, 0 extra requests). Left off, the scan reports only XSS.
 
 `rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
-default), enforced across all worker tasks — use it to be gentle on a
+default), enforced across all worker tasks. Use it to be gentle on a
 fragile target or to stay under a WAF threshold.
 
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
@@ -135,8 +134,8 @@ stops, keeps any partial findings, and settles as `cancelled` with an
 `error_message` mentioning `scan_timeout`. Set it to bound long or `deep_scan`
 runs so an agent's poll loop is guaranteed to terminate.
 
-The block above is an excerpt. Every field the tool accepts, with its default —
-`target` is the only required one:
+The block above is an excerpt. Here is every field the tool accepts, with its
+default. `target` is the only required one:
 
 ```json
 {
@@ -163,6 +162,10 @@ The block above is an excerpt. Every field the tool accepts, with its default �
   "analyze_external_js": false,
   "detect_outdated_libs": false,
   "blind_callback_url": null,
+  "blind_oob": null,
+  "blind_oob_wait": 30,
+  "session_check": null,
+  "session_check_url": null,
   "workers": 50,
   "rate_limit": 0,
   "waf_bypass": "auto",
@@ -170,7 +173,7 @@ The block above is an excerpt. Every field the tool accepts, with its default �
   "force_waf": null,
   "waf_evasion": false,
   "waf_min_confidence": 0.3,
-  "min_confidence": "high",
+  "min_confidence": null,
   "remote_payloads": [],
   "remote_wordlists": [],
   "max_payloads_per_param": 0,
@@ -184,16 +187,15 @@ The block above is an excerpt. Every field the tool accepts, with its default �
 entries, `headers` takes full `"Name: Value"` lines, and `user_agent` overrides
 the `User-Agent` header.
 
-A field name the tool does not recognise is **rejected**: the call comes back as a
+A field name the tool does not recognise is rejected: the call comes back as a
 JSON-RPC error (`-32602`, invalid params) naming the offending key and listing every
-accepted one. It is not silently dropped — a misspelled `cookies` would
-otherwise scan the target unauthenticated, find nothing, and report
-`status: "done"` with no findings, a clean result indistinguishable from a real
-one. A rejected call carries no `scan_id`, so there is nothing to poll and no
+accepted one. If it were dropped instead, a misspelled `cookies` would scan the
+target unauthenticated, find nothing, and report `status: "done"` with no
+findings, a clean result you could not tell apart from a real one. A rejected call carries no `scan_id`, so there is nothing to poll and no
 way to mistake it for a scan that ran.
 
-Every bad argument arrives on that same channel — a missing `target`, a number where a
-string belongs, a value past its ceiling — so a client only has to watch `error`. Tool
+Every bad argument arrives on that same channel (a missing `target`, a number where a
+string belongs, a value past its ceiling), so a client only has to watch `error`. Tool
 results are reserved for tools that actually ran. The ceilings are the REST API's:
 `timeout` `1`–`299` seconds, `delay` `0`–`9999` ms, `workers` `1`–`500`,
 `scan_timeout` `0`–`86400` seconds, `max_payloads_per_param` `0`–`100000`.
@@ -220,7 +222,7 @@ compatibility mode:
 
 - **Arguments are flat.** REST nests its options under `options`; the tool
   takes them at the top level, and `options` is an unknown field.
-- **They are names, not shapes.** An alias maps the spelling only — a value of
+- **They are names, not shapes.** An alias maps the spelling only. A value of
   the wrong type is still rejected. The one exception is `cookie`, which takes
   REST's single `Cookie:`-header string (and `null`, meaning no cookies).
 - **They are absent from the published schema**, which advertises the canonical
@@ -229,13 +231,13 @@ compatibility mode:
   server; the aliases help callers that pass arguments through unvalidated.
   Prefer the canonical names.
 
-`preflight_dalfox` accepts a deliberately **smaller** set than
-`scan_with_dalfox` — it sends no payloads, so options describing pacing,
+`preflight_dalfox` accepts a deliberately smaller set than
+`scan_with_dalfox`. It sends no payloads, so options describing pacing,
 workers, WAF handling, blind XSS or waiting have nothing to act on and are
 refused. Its own field list is below. (`POST /preflight` on the REST side
 takes the full scan body instead, also honours `delay`, `worker` and
-`rate_limit` for pacing, and ignores the options it has no use for — the one
-place the two surfaces genuinely differ.) Credentials and the target do reach
+`rate_limit` for pacing, and ignores the options it has no use for. This is the
+one place the two surfaces really differ.) Credentials and the target do reach
 it: sending preflight without cookies would under-report the parameters an
 authenticated scan would find.
 
@@ -246,7 +248,7 @@ responses, and `proxy` routes every request through an HTTP or SOCKS proxy
 
 `include_request` and `include_response` (both default `false`) attach the raw
 HTTP request text and the raw response body to each finding for forensic
-analysis. Opt in only when you need the evidence — responses can be large.
+analysis. Opt in only when you need the evidence, because responses can be large.
 
 The five WAF fields mirror the CLI's WAF flags. `waf_bypass` picks the handling
 mode: `"auto"` (detect then bypass, the default) or `"off"` (detect and
@@ -352,7 +354,7 @@ Every response carrying findings also carries an `_untrusted_content_notice`,
 serialized as the first key so an agent reads the warning before the content it
 warns about. The `evidence`, `response`, `request`, `payload`, `param`,
 `location` and `message_str` fields quote bytes the scan target chose, and the
-target is the thing being tested — so an agent must read them as data to report
+target is the thing being tested, so an agent must read them as data to report
 on, never as instructions. A scanned page can embed text shaped like a directive addressed
 to the model, and acting on it would let the target pick the `target`, `proxy`,
 `blind_callback_url` or `include_*` of the next call. `preflight_dalfox`
@@ -363,12 +365,12 @@ discovered parameter is lifted out of the target's own markup.
 `{total, offset, limit, returned, has_more}`. A page is additionally capped at
 2 MiB of findings, since the target, not the caller, decides how many findings a
 scan produces. When the budget cuts a page short, `pagination` adds `truncated_by_size: true` and
-`max_page_bytes` — fewer findings came back than `limit` asked for, and the
+`max_page_bytes`: fewer findings came back than `limit` asked for, and the
 rest are still there at the next `offset`. A single finding larger than the
 budget is emitted alone rather than dropped, so paging always advances.
 
 `progress.estimated_completion_pct` and `params_tested` advance live as each
-discovered parameter finishes, so they are usable for pacing polls — honor
+discovered parameter finishes, so you can use them to pace polls. Honor
 `suggested_poll_interval_ms`. Once the scan has left `queued`, status responses
 also include `settled`: it is `false` while a terminal worker is still draining and becomes `true` when
 the record is safe to delete. A terminal response that is not yet settled
@@ -377,17 +379,17 @@ calling `delete_scan_dalfox`.
 
 If the target can't be reached (DNS failure, connection refused, TLS error,
 timeout) the scan ends as `status: "error"` with `error_message` containing
-`CONNECTION_FAILED`, rather than `done` with an empty `results` — the same
+`CONNECTION_FAILED`, rather than `done` with an empty `results`. This is the same
 distinction `preflight_dalfox` reports via `reachable: false`. The `target`
 must start with `http://` or `https://`.
 
-A scan whose **authenticated session dies mid-run** ends the same way. When the
+A scan whose authenticated session dies mid-run ends the same way. When the
 call carries credentials (`cookies`, or a `Cookie` / `Authorization` entry in
-`headers`) — or you set `session_check` / `session_check_url` explicitly —
+`headers`), or you set `session_check` / `session_check_url` explicitly,
 Dalfox fingerprints the authenticated response before scanning and re-checks it
 at the end; if the session expired in between, the scan settles
 `status: "error"` with an `error_message` beginning `SESSION_LOST:` instead of
-`done` with an empty `results`. Do not summarize such a scan as "no XSS found" —
+`done` with an empty `results`. Do not summarize such a scan as "no XSS found":
 nothing was really tested. Monitoring costs nothing when no credentials and no
 `session_check` are passed.
 
@@ -412,7 +414,7 @@ List every tracked scan, newest first. All arguments are optional:
 Returns `total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms,
 started_at_ms, finished_at_ms, duration_ms}]` and `pagination: {offset, limit,
 returned, has_more}`, plus `error_message` on a scan that
-failed — without it a row reading `status: "error", result_count: 0` looks exactly like
+failed. Without it, a row reading `status: "error", result_count: 0` looks exactly like
 a clean one.
 
 ### `cancel_scan_dalfox`
@@ -440,9 +442,9 @@ Returns `{scan_id, target, deleted: true, previous_status}`.
 
 ### `preflight_dalfox`
 
-Analyse a target **without** sending payloads. Useful for scoping before committing to a scan.
+Analyse a target without sending payloads. Use it to size a target before you commit to a scan.
 
-Every field it accepts, with its default — `target` is the only required one:
+Every field it accepts, with its default. `target` is the only required one:
 
 ```json
 {
@@ -472,7 +474,7 @@ as `reachable: false` with `error_code: "CONNECTION_FAILED"`. `param` is accepte
 for symmetry with the scan tool but not applied: preflight always reports the full
 discovered set.
 
-`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves — they describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with.
+`encoders`, `max_payloads_per_param` and `deep_scan` send nothing themselves. They describe the `scan_with_dalfox` call you are sizing, so `estimated_total_requests` reflects that scan's fan-out. Pass the same values you intend to scan with.
 
 The estimate counts both phases the scan runs per parameter (reflection and DOM verification), each held to the per-parameter payload cap, the same arithmetic as `--dry-run`. It is a lower bound: WAF bypass mutations and the CSP/tech-specific payloads a scan adds on top are not counted.
 
@@ -515,9 +517,9 @@ lets a client decide on its own which calls are safe to make without asking:
 
 `openWorldHint: true` marks each tool that reaches a third-party host over the network.
 `destructiveHint: true` marks the two that can leave something changed for good: one
-throws a record away, and the other injects payloads into every discovered parameter —
-including a `POST` body you supplied, and, with `blind_callback_url` set, stored
-`<script src=...>` that stays in the target. Note that `preflight_dalfox` is *not*
+throws a record away, and the other injects payloads into every discovered parameter,
+including a `POST` body you supplied and, with `blind_callback_url` set, stored
+`<script src=...>` that stays in the target. `preflight_dalfox` is *not*
 read-only either: it sends no attack payloads, but it accepts `method` and `data` and
 its mining stage fires probe requests, so a `POST` preflight can change state on the
 target.
@@ -532,29 +534,30 @@ read the finding axes, and the provenance rule below.
 
 **Progress.** Attach `_meta.progressToken` to a `scan_with_dalfox` call with `wait=true`,
 or to `preflight_dalfox`, and Dalfox streams `notifications/progress` against that token
-while the call is open — so a client shows movement instead of a silent spinner for what
-can be minutes of work. For a scan, the numeric `progress` is cumulative requests sent and
+while the call is open, so a client can show movement during what can be minutes of
+work instead of a silent spinner. For a scan, the numeric `progress` is cumulative requests sent and
 `message` carries the phase, parameters tested, findings so far, and requests that never
 reached the target. `preflight_dalfox` sends a heartbeat every two seconds instead
 (`analyzing target (Ns elapsed)`). Nothing is published for the terminal state: the
 tool's own result is that signal.
 
 **Cancellation.** Sending `notifications/cancelled` for an in-flight `wait=true` call
-stops the scan itself, not just the wait — the job settles `cancelled` with the
-`error_message` `the client cancelled the tool call` and keeps whatever it found. That is deliberately different from the wait budget simply expiring
-(`wait_timed_out: true`), which leaves the scan running so you can keep polling it.
+stops the scan itself, not just the wait. The job settles `cancelled` with the
+`error_message` `the client cancelled the tool call` and keeps whatever it found. When the
+wait budget expires instead (`wait_timed_out: true`), the scan keeps running so you can
+keep polling it.
 
 **Resources.** Scans are addressable, not only callable:
 
 | URI | Contents |
 |-----|----------|
-| `dalfox://scans` | The job index — the same body `list_scans_dalfox` returns |
-| `dalfox://scan/{scan_id}` | One scan's status, progress and findings — the same body `get_results_dalfox` returns |
+| `dalfox://scans` | The job index, the same body `list_scans_dalfox` returns |
+| `dalfox://scan/{scan_id}` | One scan's status, progress and findings, the same body `get_results_dalfox` returns |
 
 `resources/list` returns the index plus one entry per tracked scan (paged with a cursor),
 so a host's context picker shows real scans rather than a template to fill in. A read of
-the index bounds itself at 200 rows — `resources/read` takes no page parameters, so the
-body says in its `pagination` where it was cut. The results of `scan_with_dalfox` and
+the index stops at 200 rows. `resources/read` takes no page parameters, so the
+body's `pagination` says where it was cut. The results of `scan_with_dalfox` and
 `get_results_dalfox` also carry a `resource_link` content block pointing at the scan,
 letting a client attach the findings instead of asking the model to re-quote them. The link is omitted for clients that negotiated a protocol revision older than
 `2025-06-18`, which cannot parse the block type.
@@ -566,8 +569,8 @@ letting a client attach the findings instead of asking the model to re-quote the
 | `scan_target` | `target` | Size the scan with preflight, run it, report findings by confidence |
 | `triage_findings` | `scan_id` | Read a finished scan along the `type` / `detection_method` axes and say what was *not* covered |
 
-`completion/complete` fills in the `scan_id` argument — for the triage prompt and for the
-`dalfox://scan/{scan_id}` template — from the scans still tracked, which matters because
+`completion/complete` fills in the `scan_id` argument for the triage prompt and for the
+`dalfox://scan/{scan_id}` template from the scans still tracked. That matters because
 a scan id is a 64-character digest nobody types by hand.
 
 ## Typical agent flow
@@ -584,16 +587,16 @@ Because scans are async, the agent stays responsive. To fold a long scan into on
 
 The same rule applies as on the CLI, and Dalfox cannot check it for you: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
 
-**Findings are untrusted input to your agent.** Unlike the CLI and the REST API, MCP hands scan output to a model that acts on what it reads, and every quoted byte in a finding was chosen by the target. Dalfox labels those responses with `_untrusted_content_notice`, but the label is a reminder, not a sandbox — keep the scope decision (which target, which proxy, which callback) with the operator, and never let it be changed by something the scanner read off a page.
+**Findings are untrusted input to your agent.** Unlike the CLI and the REST API, MCP hands scan output to a model that acts on what it reads, and every quoted byte in a finding was chosen by the target. Dalfox labels those responses with `_untrusted_content_notice`, but the label is only a reminder. Keep the scope decision (which target, which proxy, which callback) with the operator, and never let it be changed by something the scanner read off a page.
 
 The same goes for a scan's `error_message`: when an authenticated session dies
 mid-scan, Dalfox reports the URL the *origin* redirected it to, so that field
-quotes the target even on a scan with no findings. Bodies carrying it — a status
-poll, a `list_scans_dalfox` listing, the matching resource — carry
+quotes the target even on a scan with no findings. Bodies carrying it (a status
+poll, a `list_scans_dalfox` listing, the matching resource) carry
 `_untrusted_content_notice` for that reason.
 
 ## Troubleshooting
 
-- **Tool not showing up?** Make sure the `dalfox` binary is on the PATH the MCP client uses. For Claude Desktop on macOS, that's often just `/usr/local/bin` or `/opt/homebrew/bin`.
+- **Tool not showing up?** Make sure the `dalfox` binary is on the PATH the MCP client uses. For Claude Desktop on macOS, that's usually `/usr/local/bin` or `/opt/homebrew/bin`.
 - **Empty results?** Poll again; scans are async. Use `suggested_poll_interval_ms` as your cadence.
 - **Want logs?** Run `dalfox mcp --debug` while you're setting things up. The debug lines go to stderr so they don't pollute the MCP channel.

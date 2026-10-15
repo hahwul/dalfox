@@ -9,7 +9,7 @@ Dalfox는 시작할 때 설정 파일을 읽으므로 매번 같은 플래그를
 
 ## 파일 위치
 
-Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG_CONFIG_HOME/dalfox/config.toml`을, 그렇지 않으면 `$HOME/.config/dalfox/config.toml`을 읽습니다. 같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
+Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG_CONFIG_HOME/dalfox/config.toml`을, 그렇지 않으면 `$HOME/.config/dalfox/config.toml`을 읽습니다. `HOME`이 없으면(대부분의 Windows 환경) `%USERPROFILE%\.config\dalfox`를 씁니다. 같은 디렉터리에 `config.toml`이 없으면 `config.json`을 읽습니다.
 
 `--config`로 다른 위치를 지정할 수 있습니다.
 
@@ -17,7 +17,7 @@ Dalfox는 `XDG_CONFIG_HOME`이 설정되어 있고 비어 있지 않으면 `$XDG
 dalfox --config ./dalfox.toml scan https://target.app
 ```
 
-파일이 없으면 Dalfox는 처음 실행할 때 기본 경로에 템플릿을 만듭니다. 모든 줄이 주석 처리되어 있으므로 직접 고치기 전까지는 아무것도 바꾸지 않습니다.
+파일이 없으면 Dalfox는 처음 실행할 때 기본 경로에 템플릿을 만듭니다. 템플릿의 설정은 모두 주석 처리되어 있으므로 직접 고치기 전까지는 아무것도 바뀌지 않습니다. `--config`로 지정한 경로에 파일이 없을 때도 같은 방식으로 만듭니다(이름이 `.json`으로 끝나면 빈 `{"scan": {}}`).
 
 ## 최소 설정
 
@@ -30,7 +30,7 @@ workers = 100
 encoders = ["url", "html"]
 ```
 
-스캔을 실행하면 해당 플래그가 자동으로 적용됩니다.
+스캔을 실행하면 이 값들이 자동으로 적용됩니다.
 
 ```bash
 dalfox 'https://target.app/?q=test'
@@ -54,7 +54,7 @@ dalfox scan --workers 20 https://target.app
 
 ## 형식
 
-Dalfox는 TOML과 JSON을 모두 지원합니다. TOML이 기본값이며, 도구나 UI에서 파일을 생성하는 경우 JSON이 편리합니다.
+Dalfox는 TOML과 JSON을 모두 읽습니다. 기본은 TOML이고, 다른 도구로 파일을 생성한다면 JSON이 편합니다.
 
 ```toml
 # ~/.config/dalfox/config.toml

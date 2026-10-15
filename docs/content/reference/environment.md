@@ -5,7 +5,7 @@ weight = 3
 toc = true
 +++
 
-Dalfox respects a small set of environment variables for configuration that doesn't belong in a file or on the command line.
+Dalfox reads the environment variables below.
 
 | Variable | Used by | Purpose |
 |----------|---------|---------|
@@ -49,7 +49,7 @@ XDG_CONFIG_HOME=./.config dalfox scan https://target.app
 
 ## Not environment variables
 
-A few things that *look* like they should be environment variables but aren't:
+These settings have no environment variable:
 
 - **Proxy.** Use `--proxy` or `proxy` in config. Scan traffic and the interactsh OOB client ignore `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` to avoid accidental traffic interception. The one exception is downloading remote lists (`--remote-payloads`, `--remote-wordlists`, `dalfox payload portswigger|payloadbox`): without `--proxy`, those requests follow the standard proxy variables.
 - **Timeout, workers, format.** CLI flag or config only.

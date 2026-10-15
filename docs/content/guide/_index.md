@@ -4,14 +4,14 @@ description = "Learn how Dalfox discovers parameters, selects XSS payloads, veri
 weight = 2
 +++
 
-The guide covers the concepts that make Dalfox effective: how parameters are discovered, which payloads run where, how Stored XSS detection works, how to handle WAFs, and what each finding actually proves.
+The guide explains how Dalfox works: how it discovers parameters, which payloads run where, how Stored XSS detection works, how to handle WAFs, and what each finding proves.
 
 Each page is self-contained. Read them in order the first time, then come back as reference.
 
 ## Topics
 
-- **[Scanning Modes](./scanning-modes/):** Single URL, file batch, pipe, raw HTTP, HAR, stored and blind XSS, server, and MCP.
-- **[Parameters &amp; Discovery](./parameters/):** How Dalfox finds inputs, prunes false-positives, and mines wordlists.
+- **[Scanning Modes](./scanning-modes/):** Single URL, file batch, pipe, raw HTTP, HAR, OpenAPI / Postman, stored and blind XSS, server, and MCP.
+- **[Parameters &amp; Discovery](./parameters/):** How Dalfox finds inputs, prunes false positives, and mines wordlists.
 - **[Payloads &amp; Encoding](./payloads/):** Built-in payload families, encoders, and custom wordlists.
 - **[WAF Bypass](./waf-bypass/):** Fingerprinting WAFs and applying evasive mutations.
 - **[Stored XSS](./stored-xss/):** Inject on one URL, verify on another.
