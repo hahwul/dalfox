@@ -8,8 +8,8 @@ use crate::cmd::scan::ScanArgs;
 
 #[derive(Args)]
 pub struct UrlArgs {
-    /// Target URL to scan. Optional: the v2 positional form
-    /// (`dalfox url <URL>`) lands in the flattened `targets` instead.
+    /// Target URL to scan. Optional: `dalfox url <URL>` (v2 positional form)
+    /// works too.
     #[arg(short = 'u', long = "url", value_name = "URL")]
     pub url: Option<String>,
 

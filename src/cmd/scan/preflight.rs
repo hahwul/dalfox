@@ -421,10 +421,9 @@ pub(crate) async fn finish_waf_detection(
         };
     }
 
-    // Drop fingerprints below the user-configured minimum confidence.
-    // Default 0.0 keeps every match; users tighten this to suppress
-    // weak signals (0.3 "Request blocked", 0.5 "Server: Google
-    // Frontend", etc.) that often false-positive on benign origins.
+    // Drop fingerprints below the user-configured minimum confidence
+    // (default 0.3, so 0.15 "Server: Google Frontend" is dropped while
+    // 0.3 "Request blocked" is kept; 0.0 keeps every match).
     if args.waf_min_confidence > 0.0 {
         waf_result
             .detected
