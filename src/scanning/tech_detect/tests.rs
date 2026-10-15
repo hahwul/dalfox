@@ -225,8 +225,64 @@ fn test_angular_payloads_generated() {
         evidence: "test".to_string(),
     });
     let payloads = get_tech_specific_payloads(&result);
-    assert!(!payloads.is_empty());
-    assert!(payloads.iter().any(|p| p.contains("constructor")));
+    // One AngularJS 1.6+ gadget. The redundant `$on.constructor` and the dead
+    // `charAt`/`$eval` sandbox-escape (fired on no tested version) were dropped.
+    assert_eq!(payloads.len(), 1);
+    assert!(payloads[0].contains("constructor.constructor"));
+    assert!(!payloads.iter().any(|p| p.contains("$on.constructor")));
+    assert!(!payloads.iter().any(|p| p.contains("charAt")));
+}
+
+#[test]
+fn test_modern_angular_ng_version_emits_no_dead_payload() {
+    // Angular 2+ (identified solely by `ng-version`) AOT-compiles templates
+    // and is not vulnerable to AngularJS 1.x `{{…}}` injection, so the gadget
+    // must be suppressed — a pure request saving with no recall loss.
+    let mut result = TechDetectionResult::default();
+    result.detected.push(TechDetection {
+        tech: TechType::Angular,
+        evidence: "ng-version attribute".to_string(),
+    });
+    assert!(get_tech_specific_payloads(&result).is_empty());
+
+    // But a genuine AngularJS 1.x marker still fires the gadget.
+    let mut v1 = TechDetectionResult::default();
+    v1.detected.push(TechDetection {
+        tech: TechType::Angular,
+        evidence: "ng-app attribute".to_string(),
+    });
+    assert_eq!(get_tech_specific_payloads(&v1).len(), 1);
+}
+
+#[test]
+fn angular_1x_with_ng_version_still_fires_gadget() {
+    // End-to-end guard for the ordering/dedup invariant the suppression relies
+    // on: a page carrying BOTH an AngularJS 1.x marker and an Angular-2+
+    // `ng-version` attribute must keep the 1.x evidence (ng-app precedes
+    // ng-version in BODY_RULES and `merge_detection` keeps the first hit), so
+    // the gadget still fires. If this ever flips, a real 1.x target would be
+    // silently skipped — a recall loss this test is here to catch.
+    let headers = make_headers(&[]);
+    let body = "<html ng-app><div ng-version=\"1.8.3\">{{x}}</div></html>";
+    let result = detect_technologies(&headers, Some(body));
+    let angular = result
+        .detected
+        .iter()
+        .find(|d| d.tech == TechType::Angular)
+        .expect("Angular detected");
+    assert_ne!(
+        angular.evidence,
+        super::NG_VERSION_EVIDENCE,
+        "a 1.x marker must win the dedup over ng-version"
+    );
+    assert_eq!(
+        get_tech_specific_payloads(&result)
+            .iter()
+            .filter(|p| p.contains("constructor.constructor"))
+            .count(),
+        1,
+        "AngularJS 1.x gadget must still fire when ng-version is also present"
+    );
 }
 
 #[test]
@@ -389,7 +445,13 @@ fn test_vue_payloads_generated() {
         evidence: "test".to_string(),
     });
     let payloads = get_tech_specific_payloads(&result);
-    assert!(payloads.iter().any(|p| p.contains("constructor")));
+    // The CSTI gadget must be the Vue 2 + Vue 3 universal one; the Vue-2-only
+    // `_c` / `this.constructor` gadgets were inert under Vue 3 and are gone.
+    assert!(
+        payloads.iter().any(|p| p.contains("$emit.constructor")),
+        "Vue gadget must use the v2+v3 universal `$emit.constructor` escape"
+    );
+    assert!(!payloads.iter().any(|p| p.contains("_c.constructor")));
     assert!(payloads.iter().any(|p| p.contains("v-html")));
 }
 
