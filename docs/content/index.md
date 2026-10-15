@@ -12,7 +12,7 @@ template = "landing"
       before it hunts you.
     </h1>
     <p class="hero-desc">
-      Reflected, Stored, and DOM-based flaws, discovered and verified with AST-level precision across every parameter.
+      Finds reflected, stored, and DOM-based XSS in every parameter, then checks each hit in the parsed HTML and JavaScript.
     </p>
     <div class="hero-actions">
       <a href="./getting-started/" class="btn btn-primary">
@@ -51,7 +51,7 @@ template = "landing"
 <section class="section section--terminal">
   <div class="section-inner">
     <h2 class="section-title">One command, a verified finding</h2>
-    <p class="section-desc">Point Dalfox at a target and it discovers parameters, probes contexts, injects, and confirms the hit at the DOM level before it ever reaches your report.</p>
+    <p class="section-desc">Point Dalfox at a target. It finds the parameters, probes each context, injects payloads, and checks the hit in the parsed DOM before it reports it.</p>
     <div class="terminal-demo">
       <div class="hero-visual">
         <div class="terminal">
@@ -107,7 +107,7 @@ template = "landing"
   <div class="section-inner">
     <p class="section-eyebrow">// Capabilities</p>
     <h2 class="section-title">One scanner, the whole XSS workflow</h2>
-    <p class="section-desc">Run it against one URL or a full pipeline: CLI, file batch, pipe, server, or MCP. The same engine sits underneath each one, and every finding comes back parsed, DOM-verified, and reported in a format you can act on.</p>
+    <p class="section-desc">Run it against one URL or a whole pipeline: CLI, file batch, pipe, server, or MCP. The same engine runs underneath each one, and every finding is graded by the evidence behind it.</p>
     <div class="features-grid">
       <div class="feature-cell wide">
         <div class="feature-icon">
@@ -127,21 +127,21 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
         </div>
         <h3>Parameter intelligence</h3>
-        <p>Mining, static analysis, structural pre-encoding detection, and context-aware charset probing give every parameter a full attack profile.</p>
+        <p>Mining, static analysis, pre-encoding detection, and per-character probes tell Dalfox where each parameter lands and which characters survive.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
         </div>
         <h3>WAF aware</h3>
-        <p>Fingerprints popular WAFs and mutates payloads with encoding, casing, and polyglot tactics to slip through.</p>
+        <p>Fingerprints common WAFs and mutates payloads with encoding, case changes, and whitespace and entity tricks to get past them.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
         </div>
         <h3>Built for pipelines</h3>
-        <p>Pipe, file-batch, and server modes fit into CI/CD. Chain Dalfox behind your proxy, crawler, or recon stack.</p>
+        <p>Pipe, file-batch, and server modes fit into CI/CD. Chain Dalfox after your proxy, crawler, or recon tools.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
@@ -155,7 +155,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </div>
         <h3>Reports you can ship</h3>
-        <p>Export to the format your workflow speaks, from terse CLI output to SARIF for GitHub code scanning.</p>
+        <p>Pick the output your workflow reads, from terse CLI lines to SARIF for GitHub code scanning.</p>
         <div class="feature-tags">
           <span class="feature-tag">JSON</span>
           <span class="feature-tag">JSONL</span>
@@ -163,7 +163,6 @@ template = "landing"
           <span class="feature-tag">SARIF</span>
           <span class="feature-tag">TOML</span>
           <span class="feature-tag">Plain</span>
-          <span class="feature-tag">Silence</span>
         </div>
       </div>
     </div>
@@ -194,19 +193,19 @@ template = "landing"
       <div class="mode-panels">
         <div class="mode-panel" data-mode="url">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
-          <p>Point Dalfox at a single URL. It mines parameters, probes each context, and verifies every hit at the DOM level.</p>
+          <p>Scan a single URL. Dalfox mines parameters, probes each context, and checks every hit in the parsed response.</p>
         </div>
         <div class="mode-panel" data-mode="file">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
-          <p>Sweep a whole list of targets from a file, one URL per line, with the same engine and one report.</p>
+          <p>Scan a list of targets from a file, one URL per line, into one report.</p>
         </div>
         <div class="mode-panel" data-mode="pipe">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
-          <p>Read targets from stdin so Dalfox drops straight into your crawler or recon pipeline.</p>
+          <p>Read targets from stdin, so Dalfox sits at the end of your crawler or recon pipeline.</p>
         </div>
         <div class="mode-panel" data-mode="sxss">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
-          <p>Inject on one endpoint, then confirm the payload fires on another. Stored XSS, verified end to end.</p>
+          <p>Inject on one endpoint, then check the page where the stored payload shows up.</p>
         </div>
         <div class="mode-panel" data-mode="server">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
@@ -214,7 +213,7 @@ template = "landing"
         </div>
         <div class="mode-panel" data-mode="mcp">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
-          <p>Expose Dalfox as an MCP tool so agents and IDEs can scan on your behalf.</p>
+          <p>Expose Dalfox as MCP tools so agents and IDEs can run scans for you.</p>
         </div>
       </div>
     </div>
@@ -224,21 +223,21 @@ template = "landing"
 <section class="section">
   <div class="section-inner">
     <h2 class="section-title">From install to verified finding in three steps</h2>
-    <p class="section-desc">Dalfox drops into whatever you already run. No setup ritual, no orchestration layer to stand up first.</p>
+    <p class="section-desc">Dalfox is a single binary. Install it and run it, with nothing else to set up first.</p>
     <div class="how-steps">
       <div class="how-step">
         <h3>Install</h3>
-        <p>Grab Dalfox through Homebrew, Snap, Chocolatey, Nix, cargo, or a prebuilt binary. One command, no runtime to manage.</p>
+        <p>Install with Homebrew, Snap, the AUR, Chocolatey, Nix, Docker, cargo, or a prebuilt binary. There is no runtime to manage.</p>
         <code>brew install dalfox</code>
       </div>
       <div class="how-step">
         <h3>Point at a target</h3>
-        <p>Give it a URL, a file, or pipe in a crawl. Dalfox mines parameters, probes contexts, and adapts.</p>
+        <p>Give it a URL or a file, or pipe in a crawl. Dalfox mines parameters and probes each context.</p>
         <code>dalfox scan https://target.app</code>
       </div>
       <div class="how-step">
         <h3>Ship the findings</h3>
-        <p>Export to SARIF, JSON, or Markdown, or proxy results to your pipeline. Findings come verified, not guessed.</p>
+        <p>Export to SARIF, JSON, or Markdown for CI, tickets, or code scanning. Each finding says how strong its evidence is.</p>
         <code>dalfox scan urls.txt -f sarif -o report.sarif</code>
       </div>
     </div>
@@ -248,7 +247,7 @@ template = "landing"
 <section class="section section--community">
   <div class="section-inner">
     <h2 class="section-title">Built in the open, by hunters everywhere</h2>
-    <p class="section-desc">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or trade payloads with the community. Every contribution makes the next scan sharper.</p>
+    <p class="section-desc">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or share payloads with the community.</p>
     <div class="community-links">
       <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">Contributing guide</a>
       <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">Browse open issues →</a>

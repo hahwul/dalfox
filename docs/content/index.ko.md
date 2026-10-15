@@ -12,7 +12,7 @@ template = "landing"
       당하기 전에.
     </h1>
     <p class="hero-desc">
-      반사형, 저장형, DOM 기반 취약점을 파라미터마다 AST 수준의 정밀도로 찾아내고 검증합니다.
+      파라미터마다 반사형, 저장형, DOM 기반 XSS를 찾고, 적중한 결과를 파싱한 HTML과 JavaScript에서 다시 확인합니다.
     </p>
     <div class="hero-actions">
       <a href="./getting-started/" class="btn btn-primary">
@@ -51,7 +51,7 @@ template = "landing"
 <section class="section section--terminal">
   <div class="section-inner">
     <h2 class="section-title">명령 하나로, 검증된 결과까지</h2>
-    <p class="section-desc">Dalfox에 대상을 넘기면 파라미터를 탐색하고, 컨텍스트를 확인하고, 페이로드를 주입한 뒤, 리포트에 담기 전에 DOM 수준에서 적중을 확인합니다.</p>
+    <p class="section-desc">대상을 넘기면 Dalfox가 파라미터를 찾고, 컨텍스트를 확인하고, 페이로드를 주입합니다. 보고하기 전에 파싱한 DOM에서 적중 여부를 확인합니다.</p>
     <div class="terminal-demo">
       <div class="hero-visual">
         <div class="terminal">
@@ -107,7 +107,7 @@ template = "landing"
   <div class="section-inner">
     <p class="section-eyebrow">// 기능</p>
     <h2 class="section-title">스캐너 하나로 XSS 작업 전체를</h2>
-    <p class="section-desc">URL 하나든 전체 파이프라인이든 그대로 돌립니다. CLI, 파일 배치, 파이프, 서버, MCP까지 어느 쪽이든 같은 엔진이 동작하고, 모든 결과는 파싱과 DOM 검증을 거쳐 바로 활용할 수 있는 형식으로 돌아옵니다.</p>
+    <p class="section-desc">URL 하나든 파이프라인 전체든 그대로 돌릴 수 있습니다. CLI, 파일 배치, 파이프, 서버, MCP 어디서든 같은 엔진이 동작하고, 모든 결과에는 증거가 얼마나 강한지에 따라 등급이 붙습니다.</p>
     <div class="features-grid">
       <div class="feature-cell wide">
         <div class="feature-icon">
@@ -127,21 +127,21 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
         </div>
         <h3>파라미터 인텔리전스</h3>
-        <p>마이닝, 정적 분석, 구조적 사전 인코딩 탐지, 컨텍스트 인식 문자셋 프로빙으로 모든 파라미터에 완전한 공격 프로파일을 만듭니다.</p>
+        <p>마이닝, 정적 분석, 사전 인코딩 탐지, 문자별 프로브로 파라미터가 어디에 반사되는지, 어떤 문자가 살아남는지 파악합니다.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
         </div>
         <h3>WAF 인식</h3>
-        <p>주요 WAF를 핑거프린팅하고 인코딩, 대소문자 변형, 폴리글롯 기법으로 페이로드를 변형해 우회합니다.</p>
+        <p>주요 WAF를 핑거프린팅하고 인코딩, 대소문자 변형, 공백·엔티티 기법으로 페이로드를 바꿔 우회합니다.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
         </div>
         <h3>파이프라인을 위한 설계</h3>
-        <p>파이프, 파일 배치, 서버 모드가 CI/CD에 들어맞습니다. 프록시, 크롤러, 정찰 스택 뒤에 Dalfox를 연결하세요.</p>
+        <p>파이프, 파일 배치, 서버 모드를 CI/CD에 그대로 쓸 수 있습니다. 프록시, 크롤러, 정찰 도구 뒤에 Dalfox를 연결하세요.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
@@ -155,7 +155,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </div>
         <h3>바로 제출할 수 있는 리포트</h3>
-        <p>터미널의 간결한 출력부터 GitHub 코드 스캐닝용 SARIF까지, 작업 흐름에 맞는 형식으로 내보냅니다.</p>
+        <p>터미널용 간결한 출력부터 GitHub 코드 스캐닝용 SARIF까지, 작업 흐름에 맞는 형식을 고르세요.</p>
         <div class="feature-tags">
           <span class="feature-tag">JSON</span>
           <span class="feature-tag">JSONL</span>
@@ -163,7 +163,6 @@ template = "landing"
           <span class="feature-tag">SARIF</span>
           <span class="feature-tag">TOML</span>
           <span class="feature-tag">Plain</span>
-          <span class="feature-tag">Silence</span>
         </div>
       </div>
     </div>
@@ -194,19 +193,19 @@ template = "landing"
       <div class="mode-panels">
         <div class="mode-panel" data-mode="url">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
-          <p>Dalfox에 URL 하나를 넘기세요. 파라미터를 마이닝하고, 각 컨텍스트를 프로빙하고, 모든 적중을 DOM 수준에서 검증합니다.</p>
+          <p>URL 하나를 스캔합니다. 파라미터를 마이닝하고, 컨텍스트마다 프로빙하고, 적중한 결과를 파싱한 응답에서 확인합니다.</p>
         </div>
         <div class="mode-panel" data-mode="file">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
-          <p>파일에 담긴 대상 목록을 한 줄에 하나씩, 같은 엔진과 하나의 리포트로 훑습니다.</p>
+          <p>파일에 한 줄에 하나씩 적힌 대상 목록을 스캔해 리포트 하나로 모읍니다.</p>
         </div>
         <div class="mode-panel" data-mode="pipe">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
-          <p>stdin으로 대상을 읽어 Dalfox를 크롤러나 정찰 파이프라인에 곧장 연결합니다.</p>
+          <p>stdin으로 대상을 읽으므로 크롤러나 정찰 파이프라인 끝에 바로 붙일 수 있습니다.</p>
         </div>
         <div class="mode-panel" data-mode="sxss">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
-          <p>한 엔드포인트에서 주입하고, 페이로드가 다른 곳에서 실행되는지 확인합니다. 저장형 XSS를 처음부터 끝까지 검증합니다.</p>
+          <p>한 엔드포인트에 주입하고, 저장된 페이로드가 나타나는 다른 페이지를 확인합니다.</p>
         </div>
         <div class="mode-panel" data-mode="server">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
@@ -214,7 +213,7 @@ template = "landing"
         </div>
         <div class="mode-panel" data-mode="mcp">
           <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
-          <p>Dalfox를 MCP 도구로 노출해 에이전트와 IDE가 대신 스캔하도록 합니다.</p>
+          <p>Dalfox를 MCP 도구로 노출해 에이전트와 IDE가 스캔을 대신 돌리게 합니다.</p>
         </div>
       </div>
     </div>
@@ -224,21 +223,21 @@ template = "landing"
 <section class="section">
   <div class="section-inner">
     <h2 class="section-title">설치부터 검증된 결과까지, 세 단계로</h2>
-    <p class="section-desc">Dalfox는 이미 쓰고 있는 환경에 그대로 들어갑니다. 거창한 설치 절차도, 먼저 세워야 할 오케스트레이션 계층도 없습니다.</p>
+    <p class="section-desc">Dalfox는 실행 파일 하나입니다. 설치하고 바로 실행하면 되고, 미리 준비할 것이 없습니다.</p>
     <div class="how-steps">
       <div class="how-step">
         <h3>설치</h3>
-        <p>Homebrew, Snap, Chocolatey, Nix, cargo, 또는 사전 빌드된 바이너리로 Dalfox를 받으세요. 명령 하나면 되고, 관리할 런타임이 없습니다.</p>
+        <p>Homebrew, Snap, AUR, Chocolatey, Nix, Docker, cargo, 사전 빌드된 바이너리 중 편한 방법으로 설치하세요. 따로 관리할 런타임은 없습니다.</p>
         <code>brew install dalfox</code>
       </div>
       <div class="how-step">
         <h3>대상 지정</h3>
-        <p>URL이나 파일을 주거나 크롤링 결과를 파이프로 넘기세요. Dalfox가 파라미터를 마이닝하고 컨텍스트를 프로빙하며 상황에 맞춰 조정합니다.</p>
+        <p>URL이나 파일을 주거나 크롤링 결과를 파이프로 넘기세요. Dalfox가 파라미터를 마이닝하고 컨텍스트마다 프로빙합니다.</p>
         <code>dalfox scan https://target.app</code>
       </div>
       <div class="how-step">
         <h3>결과 전달</h3>
-        <p>SARIF, JSON, Markdown으로 내보내거나 결과를 파이프라인으로 프록시하세요. 결과는 추측이 아니라 검증을 거쳐 나옵니다.</p>
+        <p>CI, 티켓, 코드 스캐닝에 맞춰 SARIF, JSON, Markdown으로 내보내세요. 결과마다 증거가 얼마나 강한지 표시됩니다.</p>
         <code>dalfox scan urls.txt -f sarif -o report.sarif</code>
       </div>
     </div>
@@ -248,7 +247,7 @@ template = "landing"
 <section class="section section--community">
   <div class="section-inner">
     <h2 class="section-title">곳곳의 헌터들과 함께, 오픈소스로</h2>
-    <p class="section-desc">Dalfox는 직접 쓰는 사람들의 손으로 다듬어집니다. 이슈를 열고, 풀 리퀘스트를 보내고, 커뮤니티와 페이로드를 나눠 보세요. 기여 하나하나가 다음 스캔을 더 날카롭게 만듭니다.</p>
+    <p class="section-desc">Dalfox는 직접 쓰는 사람들이 함께 다듬습니다. 이슈를 열고, 풀 리퀘스트를 보내고, 커뮤니티와 페이로드를 나눠 보세요.</p>
     <div class="community-links">
       <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">기여 가이드</a>
       <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">열린 이슈 보기 →</a>

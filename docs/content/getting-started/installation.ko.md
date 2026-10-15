@@ -5,7 +5,7 @@ weight = 2
 toc = true
 +++
 
-플랫폼에 맞는 설치 방법을 고르세요. Dalfox는 별도로 관리할 런타임 없이 단일 실행 파일 하나로 배포됩니다.
+플랫폼에 맞는 설치 방법을 고르세요. Dalfox는 실행 파일 하나로 배포되며 따로 관리할 런타임이 없습니다.
 
 ## Homebrew (macOS & Linux)
 
@@ -66,9 +66,9 @@ nix run github:hahwul/dalfox -- scan https://example.com
 nix profile install github:hahwul/dalfox
 ```
 
-Dalfox는 nixpkgs에 등록되어 있습니다. 최신 릴리스는 먼저 `unstable`에 올라오므로, 릴리스 사이 기간에는 위 flake 쪽이 `nixpkgs`보다 앞서 있습니다.
+Dalfox는 nixpkgs에도 있지만, 새 릴리스는 `unstable`에 먼저 들어가고 반영까지 시간이 걸릴 수 있습니다. flake는 이 저장소의 `main` 브랜치에서 빌드하므로 뒤처지지 않습니다.
 
-flake가 지원하는 시스템은 `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`입니다. nixpkgs `unstable`이 `x86_64-darwin`을 제외했기 때문에 Intel macOS는 빠져 있으니, 아래의 `macos-x86_64` 릴리스 아카이브를 쓰세요.
+flake가 지원하는 시스템은 `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`입니다. nixpkgs `unstable`이 `x86_64-darwin`을 뺐기 때문에 Intel macOS는 지원하지 않습니다. 아래의 `macos-x86_64` 릴리스 아카이브를 쓰세요.
 
 이 flake가 고정한 nixpkgs 대신 사용자의 `nixpkgs`로 Dalfox를 빌드하려면 오버레이를 쓰세요. 시스템 flake에서는 이렇게 선언합니다.
 
@@ -97,7 +97,7 @@ flake가 지원하는 시스템은 `x86_64-linux`, `aarch64-linux`, `aarch64-dar
 }
 ```
 
-flake는 Dalfox 자체를 개발할 때 쓰는 셸도 제공합니다. Rust 툴체인과 [`just`](https://github.com/casey/just), 테스트 하네스가 필요로 하는 Crystal 런타임이 들어 있고 `dalfox` 바이너리는 포함하지 않습니다.
+flake는 Dalfox 자체를 개발할 때 쓰는 셸도 제공합니다. Rust 툴체인, [`just`](https://github.com/casey/just), 저장소의 `scripts/`가 쓰는 Crystal 컴파일러가 들어 있고, `dalfox` 바이너리는 들어 있지 않습니다.
 
 ```bash
 git clone https://github.com/hahwul/dalfox && cd dalfox
@@ -145,7 +145,7 @@ Rust 1.93 이상이 필요합니다(크레이트의 `rust-version`). `~/.cargo/b
 - `linux-aarch64` (glibc), `linux-aarch64-musl` (정적 링크)
 - `windows-x86_64`
 
-아카이브 이름은 `dalfox-v<version>-<platform>` 형식이며, macOS와 Linux는 `.tar.gz`, Windows는 `.zip`입니다. Linux는 두 아키텍처 모두 `.deb`와 `.rpm` 패키지도 나오고, 모든 아카이브와 패키지에는 `.sha256`이 붙으며 `checksum.txt`도 함께 올라갑니다. 릴리스마다 CycloneDX SBOM(`dalfox.cdx.xml`)도 포함됩니다.
+아카이브 이름은 `dalfox-v<version>-<platform>` 형식이며, macOS와 Linux는 `.tar.gz`, Windows는 `.zip`입니다. Linux는 두 아키텍처 모두 `.deb`와 `.rpm` 패키지도 나오고, 모든 아카이브와 패키지 옆에는 각각의 `.sha256` 파일이 있고, 릴리스마다 CycloneDX SBOM(`dalfox.cdx.xml`)도 올라갑니다.
 
 ## 소스에서 빌드
 
@@ -168,7 +168,7 @@ dalfox --version
 
 ## 셸 자동완성
 
-`hahwul/dalfox` Homebrew tap, AUR 패키지, `.deb` / `.rpm` 패키지, Nix flake로 설치하면 bash·zsh·fish 자동완성(과 `dalfox(1)` man 페이지)이 함께 설치되므로 따로 할 일이 없습니다.
+`hahwul/dalfox` Homebrew tap, AUR 패키지, `.deb` / `.rpm` 패키지, Nix flake로 설치하면 bash·zsh·fish 자동완성과 `dalfox(1)` man 페이지가 함께 설치됩니다.
 
 코어 `brew install dalfox` formula, Snap, Docker, Cargo, 릴리스 아카이브, 소스 빌드처럼 다른 방법으로 설치했다면 직접 생성하면 됩니다.
 
@@ -178,11 +178,11 @@ dalfox completion zsh > "${fpath[1]}/_dalfox"
 dalfox completion fish > ~/.config/fish/completions/dalfox.fish
 ```
 
-`powershell`과 `elvish`도 지원합니다. 자세한 내용은 [CLI 레퍼런스](../../reference/cli/)를 참조하세요.
+`powershell`과 `elvish`도 지원합니다. 자세한 내용은 [CLI 레퍼런스](../../reference/cli/)를 참고하세요.
 
 ## 도움말 보기
 
-Dalfox는 [clap](https://github.com/clap-rs/clap)을 쓰기 때문에 도움말을 언제든 볼 수 있습니다.
+모든 명령에 도움말이 들어 있습니다.
 
 ```bash
 dalfox --help

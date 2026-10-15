@@ -70,13 +70,13 @@ dalfox scan https://api.target.app/v1/users \
   --cookies "session=abc123"
 ```
 
-Or point Dalfox at a **raw HTTP request** file you captured from your proxy:
+Or point Dalfox at a raw HTTP request file you saved from your proxy:
 
 ```bash
 dalfox scan --input-type raw-http request.txt
 ```
 
-Or replay an entire **HAR** export (from browser DevTools or a proxy) — Dalfox scans every request in it, preserving each one's method, headers, cookies, and body:
+Or replay a whole HAR export from browser DevTools or a proxy. Dalfox scans every request in it and keeps each one's method, headers, cookies, and body:
 
 ```bash
 dalfox scan capture.har            # auto-detected
@@ -94,7 +94,7 @@ dalfox scan https://target.app \
 
 Blind payloads go into the parameters the request already carries (query, a form-encoded `-d` body, `-H` headers, cookies) and into the same-origin POST forms on the page. Parameters found later by discovery or mining get none. If a payload fires later in an admin panel, your callback server records it.
 
-Or let Dalfox manage an [interactsh](https://github.com/projectdiscovery/interactsh) (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:
+Or let Dalfox run the [interactsh](https://github.com/projectdiscovery/interactsh) (OAST) side for you. It registers a session, polls for callbacks, and matches each callback to the payload that sent it:
 
 ```bash
 dalfox scan https://target.app --blind-oob             # public interactsh mesh
@@ -121,14 +121,14 @@ Each finding is tagged:
 
 | Tag | Meaning |
 |-----|---------|
-| `[V]` | **Vulnerable**: Dalfox asserts the input is exploitable — the payload reached an executable position in the parsed response (for example a DOM element carrying Dalfox's marker), or an out-of-band callback fired |
+| `[V]` | **Vulnerable**: Dalfox claims the input is exploitable. The payload reached an executable position in the parsed response (for example a DOM element carrying Dalfox's marker), or an out-of-band callback fired |
 | `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
 | `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
 | `[I]` | **Informational**: not an XSS claim, e.g. a known-vulnerable JS library from the opt-in `--detect-outdated-libs` |
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 
-`[V]` is not browser execution. Dalfox drives no browser, by design. A pure client-side DOM-XSS reports as `[A]` today and is worth confirming in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (how strongly the evidence supports the claim) — see [Detection Model](../../guide/detection-model/).
+`[V]` does not mean the payload ran in a browser. Dalfox does not drive a browser, by design. A purely client-side DOM XSS is reported as `[A]`, so confirm it in a browser. Each finding also carries `detection_method` (how it was found) and `confidence` (how strongly the evidence supports the claim). See [Detection Model](../../guide/detection-model/).
 
 ## Next steps
 

@@ -24,12 +24,12 @@ dalfox server \
   --log-file /var/log/dalfox.log
 ```
 
-`--log-file` records every submitted target URL, which routinely carries the
-credential that made the target worth scanning, so a new log file is created
-mode `0600`. An existing file keeps whatever permissions it already has — the
-server warns at startup if it is readable by group or other, which is what an
-in-place upgrade from an older version leaves behind. Adjust your log shipper's
-uid rather than widening the file.
+`--log-file` records every submitted target URL, which often carries the
+credential that made the target worth scanning. On Unix a new log file is
+created with mode `0600`. An existing file keeps the permissions it already
+has, and the server warns at startup if group or other can read it. Adjust your
+log shipper's uid rather than widening the file. If the log file can't be
+opened, the server exits with an error instead of starting.
 
 ### Authentication
 
@@ -39,11 +39,11 @@ If `--api-key` is set (or `DALFOX_API_KEY` is exported), every request must incl
 X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73
 ```
 
-If you don't set an API key, the server accepts unauthenticated requests; bind to `127.0.0.1` in that case.
+If you don't set an API key, the server accepts unauthenticated requests; bind to `127.0.0.1` in that case. The server warns at startup when it is bound to a non-loopback address with no API key.
 
 Nothing throttles or locks out a wrong key, so its length is the only thing
 standing between an attacker who can reach the port and a valid key. Use at
-least 24 random characters — the server warns at startup for anything shorter:
+least 24 random characters. The server warns at startup for anything shorter:
 
 ```bash
 export DALFOX_API_KEY="$(openssl rand -hex 16)"
@@ -53,18 +53,19 @@ export DALFOX_API_KEY="$(openssl rand -hex 16)"
 
 Binding to `127.0.0.1` keeps the network out, but it does not keep *browsers*
 out: a web page you happen to visit can make your own browser call a loopback
-API. That matters here more than for most services, because `GET /scan` starts a
-scan from query parameters alone and `callback_url` POSTs the findings anywhere
-— so an attacker never needs to read a response to get the results.
+API. That matters here more than for most services: `GET /scan` starts a scan
+from query parameters alone, and `callback_url` POSTs the findings anywhere. An
+attacker never needs to read a response to get the results.
 
 The server therefore refuses requests that a browser identifies as cross-site:
 
 - an `Origin` header that isn't in `--allowed-origins`, or
-- `Sec-Fetch-Site: cross-site` / `same-site` (the header browsers attach to
-  every subresource load, including `<img>` and `<script>`).
+- a `Sec-Fetch-Site` value other than `same-origin` or `none`, such as
+  `cross-site` or `same-site` (browsers attach this header to every subresource
+  load, including `<img>` and `<script>`).
 
-Both are answered with `403`. Non-browser clients — curl, the CLI, agents, your
-CI job — send neither header and are unaffected.
+Both are answered with `403`. Non-browser clients (curl, the CLI, agents, your
+CI job) send neither header and are unaffected.
 
 The `Host` header is checked the same way, which is what blocks DNS rebinding
 (a hostname the attacker controls, re-resolved to your machine, which the
@@ -76,7 +77,7 @@ you bound to are always accepted; any other hostname must be listed:
 dalfox server --allowed-hosts "dalfox.internal,scan.corp.example"
 ```
 
-To let a real web UI call the API, name its origin — that is the supported way
+To let a real web UI call the API, name its origin. That is the supported way
 through the gate:
 
 ```bash
@@ -99,13 +100,13 @@ No CORS headers are sent at all unless `--allowed-origins` is set. When it is,
 `--cors-allow-methods` defaults to `GET,POST,OPTIONS,PUT,PATCH,DELETE` and
 `--cors-allow-headers` to `Content-Type,X-API-KEY,Authorization`.
 
-Both forms are matched against the **whole** `Origin`, so a pattern can never
-accept a longer host that merely contains it — `regex:https://app\.example\.com`
-does not match `https://app.example.com.evil.com`. Writing the anchors yourself
-is still fine; they are redundant, not wrong. The flip side is that a pattern
-has to cover the port when the origins it describes carry one
-(`regex:https://app\.example\.com(:8443)?`). Exact entries are compared
-case-insensitively.
+Both forms are matched against the whole `Origin`, so a pattern never accepts a
+longer host that happens to contain it: `regex:https://app\.example\.com` does
+not match `https://app.example.com.evil.com`. Writing the anchors yourself is
+fine but redundant. The flip side is that a pattern has to cover the port when
+the origins it describes carry one (`regex:https://app\.example\.com(:8443)?`).
+Exact entries are compared case-insensitively. A regex that doesn't compile is
+dropped with a startup warning, so the origin it described gets `403`.
 
 `--allowed-origins '*'` means every origin is allowed, which switches the
 cross-site gate off the same way `--jsonp` does. The server warns at startup
@@ -121,8 +122,8 @@ dalfox server --jsonp --callback-param-name callback
 ```
 
 JSONP is delivered to `<script src>` loads, which carry no `Origin` to check, so
-enabling it necessarily switches off the cross-site gate described above — any
-site can then launch scans through this API and read the results. Pair it with
+enabling it switches off the cross-site gate described above. Any site can then
+launch scans through this API and read the results. Pair it with
 `--api-key`, or prefer CORS (`--allowed-origins`), which keeps the gate on. The
 server prints a startup warning when `--jsonp` is enabled without an API key.
 
@@ -153,10 +154,11 @@ untrusted `Host`, see [Browser requests](#browser-requests)), `404` (unknown sca
 id), `409` (purge of a scan that is still active or draining), `413` (body over
 `--max-body-bytes`), `415` (body without a JSON `Content-Type`), `500` (a
 preflight that failed inside the server), `503` (at capacity) and `504` (a
-preflight that outlived the `--scan-timeout` cap). The exceptions are a CORS
+preflight that outlived its `scan_timeout` or the server's `--scan-timeout`). The exceptions are a CORS
 preflight (`OPTIONS`), which answers `204` with no body (or a bare `403` when the
 browser gate refuses it), and a path or method not in the table, which gets a
-bare `404` / `405`.
+bare `404` / `405`. Every envelope also carries `Cache-Control: no-store` and
+`X-Content-Type-Options: nosniff`.
 
 ### Submit a scan
 
@@ -175,7 +177,7 @@ curl -X POST http://127.0.0.1:6664/scan \
   }'
 ```
 
-The scan target field is `target` (matching the MCP `scan_with_dalfox` tool and the response payload). The legacy field name `url` is still accepted as an alias, in the JSON body and in the `?target=` / `?url=` query string alike, so existing clients keep working.
+The scan target field is `target`, the same name the MCP `scan_with_dalfox` tool and the response use. `url` is accepted as an alias, both in the JSON body and as `?url=` in the `GET /scan` query string. The target must start with `http://` or `https://`; anything else is a `400`.
 
 Options go under `options`. An unknown key, at the top level or inside
 `options`, is rejected with `400` instead of being ignored, so a flat body such
@@ -246,8 +248,8 @@ Response (while running):
 curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/scans?status=running'
 ```
 
-`status` is one of `queued`, `running`, `done`, `error`, `cancelled` (anything
-else is a `400`). `offset` and `limit` page through the list (`limit=0`, the
+`status` is one of `queued`, `running`, `done`, `error`, `cancelled`, in any
+case (anything else is a `400`). `offset` and `limit` page through the list (`limit=0`, the
 default, returns everything from `offset` on). Scans come back newest first:
 
 ```json
@@ -273,7 +275,8 @@ default, returns everything from `offset` on). Scans come back newest first:
 }
 ```
 
-A row for a failed scan also carries its `error_message`, so it can't be
+A row also carries `error_message` whenever the scan has one (a failure, a
+`scan_timeout` expiry, a capped `deep_scan`), so a failed scan can't be
 mistaken for a clean one with `result_count: 0`.
 
 ### Cancel a scan
@@ -303,7 +306,7 @@ curl -X POST http://127.0.0.1:6664/preflight \
   -d '{"target":"https://target.app"}'
 ```
 
-Response includes `params_discovered`, `estimated_total_requests`, and a list of parameters so you can scope before committing to a real scan.
+Use it to see what a scan would cover before you start one.
 
 The body is the same `{target, options}` shape as `POST /scan`. The data comes
 back as `{target, reachable, method, params_discovered, estimated_total_requests,
@@ -311,8 +314,9 @@ params: [{name, location, estimated_requests}]}`. An unreachable target returns
 `reachable: false` with `error_code: "CONNECTION_FAILED"` and no parameters.
 Preflight is not silent on the wire: discovery and mining send real requests,
 paced by the request's `delay`, `worker` and `rate_limit` (and capped by the
-server's `--rate-limit`). At most 32 preflights run at once; beyond that the
-server answers `503`.
+server's `--rate-limit`). It is bounded by the request's `scan_timeout` and the
+server's `--scan-timeout`, and answers `504` when that runs out. At most 32
+preflights run at once; beyond that the server answers `503`.
 
 ### Health
 
@@ -320,7 +324,7 @@ server answers `503`.
 curl http://127.0.0.1:6664/health
 ```
 
-Returns `status: "ok"`, version, `auth_required`, and the list of supported endpoints. Good for uptime checks. It needs no API key, but the browser gate in [Browser requests](#browser-requests) still applies.
+Returns `status: "ok"`, `version`, `auth_required`, and `endpoints` (the supported endpoints, each as `{method, path, description}`). Good for uptime checks. It needs no API key, but the browser gate in [Browser requests](#browser-requests) still applies.
 
 ## ScanOptions reference (request body)
 
@@ -407,7 +411,7 @@ tested with (default `0` = no explicit cap, the built-in payload safety cap
 still applies). Use a small value (e.g. `10`–`50`) for smoke scans. Mirrors the
 MCP scan tool's field of the same name.
 
-The five WAF fields mirror the CLI's WAF flags and are all optional — omit them
+The five WAF fields mirror the CLI's WAF flags and are all optional. Omit them
 and the scanner defaults apply. `waf_bypass` selects the handling mode:
 `"auto"` (detect then bypass, the default) or `"off"` (detect and report
 only); `"force"` is accepted and behaves like `"auto"`. `skip_waf_probe`
@@ -422,9 +426,12 @@ in `[0.0, 1.0]` (default `0.3`); fingerprints below it are discarded.
 results. `I` findings carry no grade and are kept. `GET /scan` takes it as a
 query parameter.
 
-`method`, `encoders`, `remote_payloads` and `remote_wordlists` are checked
-against the same values the CLI accepts, and an unknown verb, encoder or
-provider name is a `400`. `method` is uppercased for you (`"post"` → `"POST"`).
+`method`, `encoders`, `remote_payloads`, `remote_wordlists`, `waf_bypass`,
+`force_waf` and `min_confidence` are checked against the same values the CLI
+accepts, and an unknown value is a `400`. `method` is uppercased for you
+(`"post"` → `"POST"`). Each `header` entry must be in `Name: value` form, and a
+`header`, `user_agent` or `cookie` value that can't be sent as an HTTP header
+(a control character, for example) is also a `400`.
 
 `blind` must be empty (meaning "no blind XSS") or an absolute `http://` /
 `https://` URL; anything else is a `400`. Setting it arms *stored* blind-XSS
@@ -432,10 +439,11 @@ injection: `<script src=...>` payloads are written into every query, body,
 header and cookie parameter and stay in the target.
 
 `blind_oob` is the managed OAST (interactsh) channel, the server/MCP equivalent
-of the CLI's `--blind-oob`: pass `true` for the public mesh or a list of server
-hosts (`["oast.fun","oast.me"]`), and Dalfox registers, correlates each
-callback to the payload that caused it, and polls — a callback becomes a `V`
-finding with `detection_method: "oob"`. The poller is bound to the job: it is
+of the CLI's `--blind-oob`: pass `true` for the public mesh or a list of up to
+8 server hosts (`["oast.fun","oast.me"]`). Dalfox registers, polls, and
+correlates each callback to the payload that caused it, so you don't run a
+listener yourself. A callback becomes a `V` finding with
+`detection_method: "oob"`. The poller is bound to the job: it is
 started when the scan starts and stopped when it ends, is cancelled, or is
 deleted, and it counts against the job caps. `blind_oob_wait` (`0`–`600`,
 default `30`) is how long to keep polling after the scan's last request; it
@@ -492,25 +500,26 @@ retried.
 
 ### Server flags worth setting
 
-- `--rate-limit <rps>` — cap every scan's outbound request rate (protects targets).
-- `--scan-timeout <secs>` — hard wall-clock budget per scan; bounds long or
-  `deep_scan` jobs so one target can't pin a worker indefinitely. Also bounds
-  `POST /preflight`, which answers `504` on expiry.
-- `--max-concurrent-scans <n>` — reject new submissions with `503` once `n`
+- `--rate-limit <rps>`: cap every scan's outbound request rate (protects
+  targets). `0` or unset means unlimited.
+- `--scan-timeout <secs>`: hard wall-clock budget per scan (`0` or unset means
+  unbounded). Bounds long or `deep_scan` jobs so one target can't pin a worker
+  indefinitely. Also bounds `POST /preflight`, which answers `504` on expiry.
+- `--max-concurrent-scans <n>`: reject new submissions with `503` once `n`
   scans are queued/running (default `100`, `0` = unlimited). Bounds memory and
   the blocking pool against a flood of submissions. A cancelled scan keeps its
   slot until its worker has actually stopped (at most five minutes), so a
   cancel does not free capacity instantly.
-- `--max-body-bytes <n>` — explicit request-body cap for `POST /scan` and
-  `/preflight` (default `1048576` = 1 MiB); an oversized body is refused with
-  `413` before the handler parses it.
-- `--max-retained-scans <n>` — cap on *finished* scans kept in memory (default
+- `--max-body-bytes <n>`: request-body cap for `POST /scan` and `/preflight`
+  (default `1048576` = 1 MiB). An oversized body is refused with `413` before
+  the handler parses it.
+- `--max-retained-scans <n>`: cap on finished scans kept in memory (default
   `1000`, `0` = unlimited). `--max-concurrent-scans` only counts active scans,
-  so without this a flood of quick scans holds every result — response bodies
-  included, when `include_response` was set — until the one-hour retention TTL.
+  so without this a flood of quick scans holds every result (response bodies
+  included, when `include_response` was set) until the one-hour retention TTL.
   Once the cap is hit the oldest finished scans are dropped; queued and running
   scans are never dropped.
-- `--allowed-hosts <names>` — extra hostnames accepted in the request `Host`
+- `--allowed-hosts <names>`: extra hostnames accepted in the request `Host`
   header, on top of the bind host, `localhost`, and any IP literal. Needed when
   a reverse proxy forwards a public hostname; see
   [Browser requests](#browser-requests).
@@ -527,14 +536,15 @@ queued → cancelled
 Terminal states (`done`, `error`, `cancelled`) are sticky. A queued scan can be
 cancelled before it starts. Jobs live in memory only: a finished scan is kept
 for one hour (or until `--max-retained-scans` evicts it) and nothing survives a
-restart. On `SIGINT`/`SIGTERM` the server stops accepting connections, finishes
-the HTTP responses already in flight, and exits; scans still running are
-abandoned rather than waited for (no completion webhook fires for them).
+restart. On `SIGINT`/`SIGTERM` the server stops accepting connections, waits up
+to 10 seconds for HTTP responses already in flight, and exits. Scans still
+running are abandoned rather than waited for, and no completion webhook fires
+for them.
 
 A single scan tests at most 512 parameters. On a target that exposes more, the
-discovered set is truncated and the scan still ends `done`; the only trace is a
-`discovered params capped to 512` warning in the server log. Split such a
-target with `param` if every parameter matters.
+discovered set is truncated and the scan still ends `done`, with a
+`discovered params capped to 512 (dropped N)` entry in `warnings` and in the
+server log. Split such a target with `param` if every parameter matters.
 
 A `deep_scan` scan, which records one finding per reflecting payload, stops once
 it has about 2000 findings (requests already in flight can add a few more). It
@@ -542,16 +552,15 @@ still ends `done`, and `error_message` says the results are partial.
 
 A target that can't be connected to (DNS failure, connection refused, TLS
 error, timeout) ends as `error` with an `error_message` of
-`target unreachable: connection failed (CONNECTION_FAILED)` — not `done` with
-zero findings, so you can tell "scanned, nothing found" apart from "never
-reached the host." Use `POST /preflight` first if you want to check
-reachability without launching a scan. The `target` must start with `http://` or
-`https://`; any other scheme is rejected with `400` (same as `/preflight`).
+`target unreachable: connection failed (CONNECTION_FAILED)`. It does not end
+`done` with zero findings, so you can tell "scanned, nothing found" apart from
+"never reached the host." Use `POST /preflight` first if you want to check
+reachability without launching a scan.
 
-The same rule covers a **dead session**. When the scan request carries
-credentials (a `cookie`, or a `Cookie` / `Authorization` entry in `header`) — or
-you set `session_check` / `session_check_url` explicitly — Dalfox fingerprints
-the authenticated response before scanning and re-checks it when the scan ends.
+The same rule covers a dead session. When the scan request carries credentials
+(a `cookie`, or a `Cookie` / `Authorization` entry in `header`), or you set
+`session_check` / `session_check_url`, Dalfox fingerprints the authenticated
+response before scanning and re-checks it when the scan ends.
 If the session expired in between (every later request answered by a login page,
 nothing reflecting), the scan ends as `error` with an `error_message` beginning
 `SESSION_LOST:` and the signal that fired, rather than `done` with zero
@@ -588,25 +597,25 @@ sudo systemctl enable --now dalfox
 
 ## Security notes
 
-- **Bind to localhost** unless you absolutely need remote access — but treat
-  that as keeping the *network* out, not as a security boundary. A web page you
-  visit can reach a loopback API through your own browser, which is what the
-  cross-site and `Host` gate in [Browser requests](#browser-requests) blocks.
+- **Bind to localhost** unless you need remote access. That keeps the network
+  out, but it is not a security boundary on its own: a web page you visit can
+  reach a loopback API through your own browser. The cross-site and `Host` gate
+  in [Browser requests](#browser-requests) is what blocks that.
 - **Always set `--api-key`** on a remote bind.
 - **Keep the API key out of logs.** Dalfox does not log it, but reverse proxies might.
 - **Put it behind TLS** (nginx, Caddy, Traefik) if you expose it over a network.
 - **`callback_url` and the scan target are server-side requests.** Dalfox is a
   URL scanner: it dials whatever target you submit, and on completion it POSTs
   the result JSON to `callback_url`. Only `http(s)` schemes are dialed, but the
-  *host* is not filtered — loopback, link-local (e.g. cloud metadata at
+  host is not filtered: loopback, link-local (e.g. cloud metadata at
   `169.254.169.254`), and private addresses are all reachable. On an
-  unauthenticated bind this is a server-side request forgery + exfiltration
+  unauthenticated bind this is a server-side request forgery and exfiltration
   primitive for anyone who can submit a scan, so set `--api-key` and restrict
   egress when exposing the API to untrusted callers.
 - **`--jsonp` makes `GET` endpoints readable cross-origin** via `<script>`,
-  which is not subject to the CORS allow-list — and, because a script load
-  carries no `Origin` to check, it also switches off the cross-site gate.
-  Enable it only when you intend that, and pair it with `--api-key`.
+  which the CORS allow-list doesn't cover. A script load also carries no
+  `Origin` to check, so it switches off the cross-site gate too. Enable it only
+  when you intend that, and pair it with `--api-key`.
 - **Bound scan runtime with `--scan-timeout`.** The per-request `timeout` only
   caps a single HTTP request; a scan with many parameters and payloads (or
   `deep_scan`) can still run for a long time. Set `--scan-timeout <secs>` so

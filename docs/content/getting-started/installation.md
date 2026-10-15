@@ -5,7 +5,7 @@ weight = 2
 toc = true
 +++
 
-Pick the installer that fits your platform. Dalfox ships as a single self-contained binary, with no runtime to manage.
+Pick the installer that fits your platform. Dalfox is a single binary with no runtime to manage.
 
 ## Homebrew (macOS & Linux)
 
@@ -66,9 +66,9 @@ nix run github:hahwul/dalfox -- scan https://example.com
 nix profile install github:hahwul/dalfox
 ```
 
-Dalfox lives in nixpkgs. The newest releases land in `unstable` first, so the flake above is ahead of `nixpkgs` between releases.
+Dalfox is in nixpkgs, where a new release reaches `unstable` first and can take a while. The flake builds from this repository's `main` branch, so it is never behind.
 
-The flake builds for `x86_64-linux`, `aarch64-linux` and `aarch64-darwin`. Intel macOS is not among them because nixpkgs `unstable` dropped `x86_64-darwin` — use the `macos-x86_64` release archive below instead.
+The flake builds for `x86_64-linux`, `aarch64-linux` and `aarch64-darwin`. Intel macOS is not on the list because nixpkgs `unstable` dropped `x86_64-darwin`. Use the `macos-x86_64` release archive below instead.
 
 To build Dalfox against your own `nixpkgs` instead of the one this flake pins, use the overlay. In your system flake:
 
@@ -97,7 +97,7 @@ Then, in a module that receives `inputs`:
 }
 ```
 
-The flake also exposes a development shell for working on Dalfox itself — the Rust toolchain, [`just`](https://github.com/casey/just) and the Crystal runtime the test harnesses need, but not the `dalfox` binary:
+The flake also has a development shell for working on Dalfox itself. It carries the Rust toolchain, [`just`](https://github.com/casey/just), and the Crystal compiler the repo's `scripts/` need, but not the `dalfox` binary:
 
 ```bash
 git clone https://github.com/hahwul/dalfox && cd dalfox
@@ -145,7 +145,7 @@ We publish the following per release:
 - `linux-aarch64` (glibc), `linux-aarch64-musl` (statically linked)
 - `windows-x86_64`
 
-Archives are named `dalfox-v<version>-<platform>`: `.tar.gz` on macOS and Linux, `.zip` on Windows. Linux also gets `.deb` and `.rpm` packages for both architectures, every archive and package ships with a `.sha256` alongside a combined `checksum.txt`, and each release carries a CycloneDX SBOM (`dalfox.cdx.xml`).
+Archives are named `dalfox-v<version>-<platform>`: `.tar.gz` on macOS and Linux, `.zip` on Windows. Linux also gets `.deb` and `.rpm` packages for both architectures. Every archive and package has its own `.sha256` file next to it, and each release carries a CycloneDX SBOM (`dalfox.cdx.xml`).
 
 ## Build from source
 
@@ -168,7 +168,7 @@ You should see a single line such as `dalfox 3.2.4`.
 
 ## Shell completions
 
-The `hahwul/dalfox` Homebrew tap, the AUR package, the `.deb` / `.rpm` packages and the Nix flake install bash, zsh and fish completions (and the `dalfox(1)` man page) for you — nothing else to do.
+The `hahwul/dalfox` Homebrew tap, the AUR package, the `.deb` / `.rpm` packages and the Nix flake install bash, zsh and fish completions and the `dalfox(1)` man page for you.
 
 Installed another way (the core `brew install dalfox` formula, Snap, Docker, Cargo, a release archive, a source build)? Generate them yourself:
 
@@ -178,11 +178,11 @@ dalfox completion zsh > "${fpath[1]}/_dalfox"
 dalfox completion fish > ~/.config/fish/completions/dalfox.fish
 ```
 
-`powershell` and `elvish` are supported too — see the [CLI reference](../../reference/cli/).
+`powershell` and `elvish` work too. See the [CLI reference](../../reference/cli/).
 
 ## Getting help
 
-Dalfox uses [clap](https://github.com/clap-rs/clap), so help is always accessible:
+Every command has built-in help:
 
 ```bash
 dalfox --help

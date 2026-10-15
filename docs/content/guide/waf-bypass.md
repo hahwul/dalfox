@@ -9,10 +9,10 @@ Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatica
 
 ## How it works
 
-1. Dalfox matches the preflight response's headers and body against its fingerprint rules (no extra request), then sends one **provocation probe**: the target's own request with `dalfox_waf_probe=<script>alert(1)</script>` appended to the query.
+1. Dalfox matches the preflight response's headers and body against its fingerprint rules (no extra request), then sends one provocation probe: the target's own request with `dalfox_waf_probe=<script>alert(1)</script>` appended to the query. `--dry-run` never sends this probe.
 2. If a known WAF signature shows up (headers like `cf-ray`, body markers like "Attention required!"), Dalfox notes the WAF and its confidence. A probe answered with 403/406/429/503 and no recognisable signature is recorded as an unknown WAF, unless the plain preflight request already got that same status (an auth wall or maintenance page) or the 429 carries `Retry-After` (plain rate limiting).
-3. The scanner merges the WAF's **extra encoders** into your encoder list and adds the WAF's **mutation list** to the payload generator.
-4. Payload mutations are capped (4 variants per base payload) so request volume stays sane. The cap only applies once a WAF is detected, so the extra effort lands exactly on the scans that need it.
+3. The scanner adds the WAF's extra encoders to your encoder list and the WAF's mutation list to the payload generator.
+4. Mutations are capped at 4 variants per base payload to keep the request count in check. This extra work only happens when a WAF is detected.
 
 This is all on by default. You only touch flags if you want to disable or steer it.
 
@@ -69,7 +69,7 @@ Accepted names (case-insensitive): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, 
 dalfox scan https://target.app --waf-bypass off
 ```
 
-No extra encoders, no mutations, no per-WAF pacing, and no provocation probe: just your configured payloads. Passive detection still runs on the preflight response, so a detected WAF is still reported in `target_summary`.
+No extra encoders, no mutations, no per-WAF pacing, and no provocation probe. Only your configured payloads are sent. Passive detection still runs on the preflight response, so a detected WAF is still reported in `target_summary`.
 
 ### Skip the probe
 
@@ -81,13 +81,13 @@ Still uses passive detection on the preflight response's headers and body, but s
 
 ### Evasion throttle
 
-`--waf-evasion` switches Dalfox to **adaptive timing** instead of a blunt slowdown: it randomizes the inter-request interval (jitter) so the cadence can't be fingerprinted, and escalates a cooldown pause whenever it sees a cluster of blocked responses (403/406/429/503). The jitter applies whether or not a WAF was detected: with no `--delay` and no WAF pacing hint, each pause lands between 75 and 225 ms. The flag also sends each parameter's payloads one at a time instead of concurrently. The per-WAF pacing hint (for example 100 ms per request for Cloudflare, or 1.5 s when the WAF was inferred only from a 429/503 probe response) is applied automatically on detection, even without the flag.
+`--waf-evasion` turns on adaptive timing. It randomizes the inter-request interval (jitter) so the cadence can't be fingerprinted, and escalates a cooldown pause whenever it sees a cluster of blocked responses (403/406/429/503). The jitter applies whether or not a WAF was detected: with no `--delay` and no WAF pacing hint, each pause lands between 75 and 225 ms. The flag also sends each parameter's payloads one at a time instead of concurrently. The per-WAF pacing hint (for example 100 ms per request for Cloudflare, or 1.5 s when the WAF was inferred only from a 429/503 probe response) is applied automatically on detection, even without the flag.
 
 ```bash
 dalfox scan https://target.app --waf-evasion
 ```
 
-For a hard ceiling on the request rate (independent of WAF detection and shared across **all** workers and targets), combine it with `--rate-limit` (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since `--delay` only spaces a single worker:
+For a hard ceiling on the request rate (independent of WAF detection and shared across all workers and targets), combine it with `--rate-limit` (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since `--delay` only spaces a single worker:
 
 ```bash
 # At most 15 requests/second across the whole scan, with adaptive evasion
@@ -105,9 +105,9 @@ Each fingerprint carries a confidence score (0.0–1.0). Generic markers like `R
 dalfox scan https://target.app --waf-min-confidence 0.7
 ```
 
-Default is `0.3` (suppresses weak/generic matches like `Server: Google Frontend`). Pass `--waf-min-confidence 0.0` to keep every match, or raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.
+Default is `0.3` (suppresses weak/generic matches like `Server: Google Frontend`). A match equal to the threshold is kept, so `Request blocked` (0.3) passes the default. Pass `--waf-min-confidence 0.0` to keep every match, or raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.
 
-## Mutation tactics (under the hood)
+## Mutation tactics
 
 Different WAFs fall to different tricks. A small sample:
 
@@ -128,7 +128,7 @@ Different WAFs fall to different tricks. A small sample:
 | **Scheme break** | `href=java&#9;script:alert(1)` | Literal `javascript:` scheme regex (URL-parser strips the TAB) |
 | **Entity scheme** | `href=&#106;avascript:alert(1)` | Literal `javascript:` scheme regex (attribute-decoded) |
 
-Slash separators are emitted only where the HTML tokenizer will still begin a new attribute; a slash after an unquoted value is part of that value, so Dalfox preserves the whitespace there. Keyword entity encoding, scheme break, and entity scheme rely on the HTML tokenizer decoding character references **inside attribute values** before the URL parser or event-handler JS compiler sees them. Dalfox applies those entity mutations only in attribute, event-handler, and `javascript:`-URL positions, and skips them for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
+Slash separators are emitted only where the HTML tokenizer will still begin a new attribute; a slash after an unquoted value is part of that value, so Dalfox preserves the whitespace there. Keyword entity encoding, scheme break, and entity scheme rely on the HTML tokenizer decoding character references inside attribute values before the URL parser or event-handler JS compiler sees them. Dalfox applies those entity mutations only in attribute, event-handler, and `javascript:`-URL positions, and skips them for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
 
 Dalfox does not split JavaScript identifiers with comments (`al/**/ert`). JavaScript treats the comment as a token boundary, so that form cannot call `alert`; the scanner skips the wasted variant.
 
@@ -136,9 +136,9 @@ You don't configure these directly; they're selected automatically per WAF. To i
 
 ## Inspection-window overflow
 
-Some WAFs (e.g. AWS WAF-style configs) only inspect the **first N bytes** of a parameter value. A vector at the start of the value trips a block, but the same vector reflects untouched once it's pushed past the inspected window.
+Some WAFs (e.g. AWS WAF-style configs) only inspect the first N bytes of a parameter value. A vector at the start of the value trips a block, but the same vector reflects untouched once it's pushed past the inspected window.
 
-During active probing, when a parameter's special-character probe comes back fully blocked, Dalfox re-tries it behind a long benign filler prefix. If the characters now reflect, it concludes the value sits behind a size-limited inspection window and automatically prepends that filler to every payload for the parameter — so the real vector always lands past the window. The reported PoC URL includes the filler, so it reproduces as-is. This is automatic; nothing to configure.
+During active probing, when a parameter's special-character probe comes back fully blocked, Dalfox re-tries it behind a long benign filler prefix. If the characters now reflect, it concludes the value sits behind a size-limited inspection window and prepends that filler to every payload for the parameter, so the real vector lands past the window. The reported PoC URL includes the filler, so it reproduces as is. There is nothing to configure.
 
 ## Combining with encoders
 

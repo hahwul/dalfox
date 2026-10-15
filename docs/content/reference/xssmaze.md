@@ -1,6 +1,6 @@
 +++
 title = "XSSMaze Score"
-description = "Dalfox XSSMaze coverage score, methodology, and category breakdown measured against the main branch."
+description = "Dalfox XSSMaze coverage score, methodology, and category breakdown, measured against the XSSMaze main image."
 weight = 4
 toc = true
 +++
@@ -205,13 +205,13 @@ _Generated 2026-09-13T09:06:30Z · image `ghcr.io/hahwul/xssmaze:main` (`ghcr.io
 ## Methodology
 
 - **Targets:** every endpoint returned by XSSMaze's `/map/json`, grouped by its catalog `type` (category).
-- **Per-endpoint scan:** Dalfox scans the endpoint URL with parameter mining disabled (`--skip-mining`), `--timeout 7` and `--scan-timeout 40`. Every query parameter the catalog declares is present in the URL (missing ones are added with a placeholder value), header injection points are targeted with `-p <name>:header`, and POST bodies are seeded with `-d` (sent as a form first, retried as JSON only if the form pass finds nothing). Discovery and reflection checks stay on, so Dalfox finds the real injection point itself — the catalog's parameter names are advisory — and path cases still resolve.
+- **Per-endpoint scan:** Dalfox scans the endpoint URL with parameter mining disabled (`--skip-mining`), `--timeout 7` and `--scan-timeout 40`. Every query parameter the catalog declares is present in the URL (missing ones are added with a placeholder value), header injection points are targeted with `-p <name>:header`, and POST bodies are seeded with `-d` (sent as a form first, retried as JSON only if the form pass finds nothing). Discovery and reflection checks stay on, so Dalfox finds the real injection point itself and path cases still resolve. The catalog's parameter names are only hints.
 - **Detected:** an endpoint counts as detected when Dalfox returns at least one finding of any type (`V`, `R`, or `A`) or exits `1`.
-- **Verified:** the subset where Dalfox found the payload in an executable position in the parsed DOM (finding type `V`). Not browser execution — see [Detection Model](../../guide/detection-model/).
+- **Verified:** the subset where Dalfox found the payload in an executable position in the parsed DOM (finding type `V`). This is not browser execution; see [Detection Model](../../guide/detection-model/).
 - **Rate:** `detected / endpoints`, per category and overall.
 
 Each snapshot is pinned to the Dalfox version that produced it and the exact XSSMaze image digest, both shown beneath the table. The raw data lives in [`docs/data/xssmaze-score.json`](https://github.com/hahwul/dalfox/blob/main/docs/data/xssmaze-score.json).
 
 ## Reading the numbers
 
-A high rate in a category means Dalfox reliably reaches and confirms those sinks; a low rate flags contexts worth investing in next. Because each scan is pointed at a known endpoint and skips mining, this measures Dalfox's **detection and verification** capability rather than its parameter-discovery breadth; discovery is exercised separately by the functional test suite. Scores move as both Dalfox and XSSMaze evolve, so always read them alongside the versions stamped under the table.
+A high rate in a category means Dalfox reliably finds those sinks. A low rate marks contexts worth working on next. Each scan targets a known endpoint and skips mining, so the score measures detection and verification, not parameter discovery. The functional test suite covers discovery separately. Scores change as Dalfox and XSSMaze change, so read them together with the versions stamped under the table.

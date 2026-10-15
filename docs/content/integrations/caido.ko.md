@@ -6,13 +6,13 @@ toc = true
 aliases = ["/ko/page/running/caido/"]
 +++
 
-Dalfox는 [Caido](https://caido.io) 워크플로 안에서 잘 작동합니다. 관심 있는 모든 요청(이나 선택한 트래픽)을 Dalfox 엔진에 곧바로 넣고, 탐지 결과를 클릭 한 번으로 Caido Findings로 전환할 수 있습니다.
+[Caido](https://caido.io) 워크플로에서 Dalfox를 실행할 수 있습니다. 캡처한 요청(전부 또는 고른 요청만)을 Dalfox로 보내고, 탐지 결과를 Caido Findings로 만듭니다.
 
-이 페이지는 현재 권장 패턴(v3)과 워크플로 작성자를 곤란하게 만드는 흔한 "bool 함정"을 다룹니다.
+이 페이지는 v3 권장 구성과, 워크플로 작성자가 자주 걸리는 불리언 함정을 다룹니다.
 
 ## 핵심 패턴
 
-Caido Workflows는 셸 단계를 실행할 수 있습니다. 이 단계는 현재 요청을(보통 JSON으로) stdin으로 받습니다. 원시 HTTP를 추출하여 `--input-type raw-http`로 Dalfox에 넘긴 다음, Finding을 생성할지 결정합니다.
+Caido Workflows는 셸 단계를 실행할 수 있습니다. 이 단계는 현재 요청을(보통 JSON으로) stdin으로 받습니다. 원시 HTTP 요청을 꺼내 `--input-type raw-http`로 Dalfox에 넘긴 다음, Finding을 만들지 정합니다.
 
 ### 최소 워크플로 단계 (bash/zsh)
 
@@ -61,12 +61,12 @@ fi
 
 ### Caido 불리언 함정 (중요)
 
-Caido의 Workflow If/Else 노드는 자체 [bool 규칙](https://docs.caido.io/app/reference/workflow_data_types.html#bool)을 사용하여 단계 출력을 평가합니다. 사람(이나 일반적인 셸)에게 "참 같아 보이는" 많은 문자열이 Caido 내부에서는 `false`가 됩니다.
+Caido의 Workflow If/Else 노드는 자체 [bool 규칙](https://docs.caido.io/app/reference/workflow_data_types.html#bool)으로 단계 출력을 판정합니다. 사람이나 일반 셸에게는 참처럼 보이는 문자열도 Caido에서는 `false`가 되는 경우가 많습니다.
 
-**신뢰할 수 있는 커뮤니티 패턴**([이 댓글의 @m4dni5](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370)가 공유):
+다음 패턴이 안정적으로 동작합니다([이 댓글에서 @m4dni5](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370)가 공유):
 
 - 탐지 결과가 있을 때는 실제 Dalfox 출력(이나 비어 있지 않은 마커)을 내보냅니다. Caido는 이를 "False" 분기로 봅니다.
-- 깨끗할 때는 `1`이나 `true` 같은 단순한 참 토큰을 명시적으로 내보냅니다. 이는 "True" 분기로 갑니다.
+- 깨끗할 때는 `1`이나 `true` 같은 단순한 참 토큰을 직접 내보냅니다. 이 값은 "True" 분기로 갑니다.
 
 그런 다음 이렇게 연결합니다:
 - `False` → **Create Finding**
@@ -82,12 +82,12 @@ Caido의 Workflow If/Else 노드는 자체 [bool 규칙](https://docs.caido.io/a
 | `-S` / `--silence` | POC / 탐지 결과 라인만 stdout으로 나갑니다 (Caido 로그의 노이즈 감소) |
 | `--no-color`      | 탐지 결과, 검색, 내보내기를 위한 깔끔한 텍스트 (커뮤니티 워크플로 예시에서 제안됨) |
 | `--poc-type curl` (또는 `httpie`, `http-request`) | Caido Finding에서 바로 사용할 수 있는 재현 코드 |
-| `--timeout 6-10`  | 요청별 예산; 워크플로를 빠르게 유지 |
+| `--timeout 6-10`  | 요청당 타임아웃(초). 워크플로 실행이 길어지지 않게 합니다 |
 | `--waf-bypass auto` | 이미 기본값입니다. 트래픽이 프록시를 거친다고 `off`로 끌 필요는 없습니다 |
 
 Finding 증거에 전체 마크다운 보고서를 담고 싶다면 `-f markdown`을 추가할 수도 있습니다.
 
-**silence 참고:** `-S`는 로그를 억제하지만, 탐지 결과가 있으면 PoC 라인은
+`-S`는 로그를 숨기지만, 탐지 결과가 있으면 PoC 라인은
 여전히 stdout으로 나가고, 깨끗한 실행에서도 빈 줄 하나는 출력됩니다. 이 빈 줄
 하나만으로도 `1`이 Caido가 `true`로 읽지 않는 값이 되어 버립니다. 스크립트가
 Dalfox 출력을 단계 결과로 그대로 흘려보내지 않고 변수에 담는 이유입니다.
@@ -107,7 +107,7 @@ Dalfox 출력을 단계 결과로 그대로 흘려보내지 않고 변수에 담
      - 심각도: 규칙에 따라 High / Medium
    - **True 분기 (깨끗)**: Set Color(녹색)나 Add Tag `dalfox-clean`
 
-호스트, 메서드, 파라미터 이름 같은 Caido의 컨텍스트를 Finding에 더 담을 수도 있습니다.
+호스트, 메서드, 파라미터 이름 같은 Caido 컨텍스트를 Finding에 더 넣을 수도 있습니다.
 
 ## 대안: 파일 단계 먼저 사용하기
 
@@ -121,14 +121,14 @@ Dalfox 출력을 단계 결과로 그대로 흘려보내지 않고 변수에 담
 ## 팁 및 함정
 
 - **바이너리 위치**: Caido의 PATH에는 brew, asdf, linuxbrew가 포함되지 않을 수 있습니다. 전체 경로를 사용하거나 워크플로 / Caido 설정에서 `DALFOX_PATH` 환경 변수를 설정하고 `$DALFOX_PATH`를 참조하세요.
-- **성능**: 트래픽이 많을 때는 Dalfox 단계 *앞에* Content-Type이나 스코프 내 필터를 추가하세요. Dalfox는 빠르지만 모든 이미지/스타일시트를 스캔할 필요는 없습니다.
+- **성능**: 트래픽이 많을 때는 Dalfox 단계 *앞에* Content-Type이나 스코프 내 필터를 추가하세요. 이미지나 스타일시트까지 전부 스캔할 이유는 없습니다.
 - **Blind XSS**: Caido가 구동하는 트래픽에서 대역 외(out-of-band) 탐지를 원할 때 `--blind https://your.collaborator/`를 추가하세요.
-- **DOM XSS**: 기본 설정으로 바로 작동합니다 (AST 분석이 응답에서 실행됩니다).
-- **JSON 출력**: 이후 워크플로 노드에서 더 고급 후처리를 하려면 `--format jsonl`을 사용하여 스트림을 파싱할 수 있습니다.
+- **DOM XSS**: 추가 플래그가 필요 없습니다. AST 분석은 기본으로 켜져 있습니다.
+- **JSON 출력**: 이후 워크플로 노드에서 결과를 후처리하려면 `--format jsonl`을 쓰고 한 줄씩 파싱하세요.
 
 ## v2 가이드에서 업데이트하기
 
-이전 Dalfox v2 문서는 `dalfox pipe --rawdata`를 사용했습니다. v3에서 이에 해당하는 것은 `dalfox scan --input-type raw-http <파일>`입니다. 일반 파일 경로만 받습니다. 원시 요청을 stdin으로 넘기면(`dalfox pipe -i raw-http`) 대상을 찾지 못하고, 프로세스 치환(`<(...)`)은 "not a regular file"로 거부됩니다. 위 스크립트가 임시 파일을 쓰는 이유가 이것입니다.
+이전 Dalfox v2 문서는 `dalfox pipe --rawdata`를 사용했습니다. v3에서는 `dalfox scan --input-type raw-http <파일>`을 씁니다. 일반 파일 경로만 받습니다. 원시 요청을 stdin으로 넘기면(`dalfox pipe -i raw-http`) 대상을 찾지 못하고, 프로세스 치환(`<(...)`)은 "not a regular file"로 거부됩니다. 위 스크립트가 임시 파일을 쓰는 이유가 이것입니다.
 
 표준 raw-http 사용법은 [스캔 모드](../../guide/scanning-modes/#raw-http-모드) 페이지를 참조하세요.
 

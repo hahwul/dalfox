@@ -26,7 +26,7 @@ The config file only applies to CLI scans. `dalfox server` and `dalfox mcp` take
 input_type = "auto"   # auto, url, file, pipe, raw-http, har, openapi, postman
 # base_url = "https://staging.example.com"  # openapi/postman: scheme+host(+port) for every request, path prefix; the spec server path is appended
 dedup_urls = "exact"  # exact, signature (collapse URLs differing only in param values), off
-# state_file = "scan.state"  # record completed targets and skip them on re-run. CLI only — ignored by `dalfox server` / MCP
+# state_file = "scan.state"  # record completed targets and skip them on re-run. CLI only; `dalfox server` and MCP ignore it
 
 # OUTPUT
 format = "plain"
@@ -141,16 +141,16 @@ debug = false
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `input_type` | string | `"auto"` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`, `postman` |
-| `base_url` | string | — | For `openapi` / `postman` inputs: supplies scheme, host and port for every request and is a path prefix; the spec server's path is appended. An absolute `http(s)` URL; anything else is ignored with a warning ([OpenAPI / Postman mode](../../guide/scanning-modes/#openapi-postman-mode)) |
+| `base_url` | string |  | For `openapi` / `postman` inputs: supplies scheme, host and port for every request and is a path prefix; the spec server's path is appended. An absolute `http(s)` URL; anything else is ignored with a warning ([OpenAPI / Postman mode](../../guide/scanning-modes/#openapi-postman-mode)) |
 | `dedup_urls` | string | `"exact"` | `exact`, `signature` (collapse URLs differing only in param values), `off` |
-| `state_file` | string | — | Record completed targets and skip them on re-run ([Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-interrupted-scan)). **CLI only** — ignored by `dalfox server` / MCP |
+| `state_file` | string |  | Record completed targets and skip them on re-run ([Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-interrupted-scan)). CLI only; `dalfox server` and MCP ignore it |
 
 ### Output
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `format` | string | `"plain"` | `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml` |
-| `output` | string | — | Output file path |
+| `output` | string |  | Output file path |
 | `include_request` | bool | `false` | Attach raw HTTP request |
 | `include_response` | bool | `false` | Attach response body |
 | `include_all` | bool | `false` | Shorthand for both |
@@ -158,10 +158,10 @@ debug = false
 | `dry_run` | bool | `false` | Don't send payloads |
 | `stream_findings` | bool | `false` | Print each finding mid-scan instead of after the end-of-scan summary (plain format only; off when `output`, `limit`, `only_poc` or `baseline` is set) |
 | `poc_type` | string | `"plain"` | `plain`, `curl`, `httpie`, `http-request` |
-| `limit` | int | — | Cap on result count (must be at least `1`; `0` is ignored with a warning) |
+| `limit` | int |  | Cap on result count (must be at least `1`; `0` is ignored with a warning) |
 | `limit_result_type` | string | `"all"` | Which types count: `all`, `v`, `r`, `a`, `i` |
 | `only_poc` | array | `[]` | Filter output: `["v","a"]` |
-| `baseline` | string | — | Previous JSON/JSONL report to diff against; only findings new since it are reported ([Baselines](../../guide/output/#baselines-reporting-only-what-is-new)). **CLI only** — ignored by `dalfox server` / MCP |
+| `baseline` | string |  | Previous JSON/JSONL report to diff against; only findings new since it are reported ([Baselines](../../guide/output/#baselines-reporting-only-what-is-new)). CLI only; `dalfox server` and MCP ignore it |
 | `baseline_mode` | string | `"filter"` | `filter` drops known findings, `annotate` keeps them and marks each `new` |
 | `min_confidence` | string | `"low"` | `high` drops low-confidence findings before output and the exit code (`I` kept) |
 | `no_color` | bool | `false` | Disable ANSI colour |
@@ -171,21 +171,21 @@ debug = false
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `param` | array | `[]` | Parameter names (optionally `name:location`) |
-| `data` | string | — | Request body |
+| `data` | string |  | Request body |
 | `headers` | array | `[]` | HTTP headers |
 | `cookies` | array | `[]` | Cookie strings |
 | `method` | string | `"GET"` | HTTP method (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY`) |
-| `user_agent` | string | — | User-Agent override |
-| `cookie_from_raw` | string | — | Raw-request file for cookies |
+| `user_agent` | string |  | User-Agent override |
+| `cookie_from_raw` | string |  | Raw-request file for cookies |
 
 ### Session
 
-Mid-scan session-loss detection — see [Session monitoring](../../guide/scanning-modes/#session-monitoring).
+These keys control session-loss detection during a scan. See [Session monitoring](../../guide/scanning-modes/#session-monitoring).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `session_check` | string | — | Regex that must keep matching an authenticated response body |
-| `session_check_url` | string | — | Dedicated probe URL for re-validation (absolute `http(s)://`) |
+| `session_check` | string |  | Regex that must keep matching an authenticated response body |
+| `session_check_url` | string |  | Dedicated probe URL for re-validation (absolute `http(s)://`) |
 | `on_session_loss` | string | `"abort"` | `abort` or `continue` |
 
 ### Scope
@@ -196,7 +196,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `exclude_url` | array | `[]` | Regex patterns (unanchored) of URLs to skip |
 | `ignore_param` | array | `[]` | Parameter names to skip (exact match) |
 | `out_of_scope` | array | `[]` | Host patterns to skip, one per entry (`["*.gov", "cdn.example.com"]`). `*.example.com` matches `example.com` and its subdomains; any other `*` matches any run of characters; a value without `*` must equal the host. A comma inside an entry is not a separator |
-| `out_of_scope_file` | string | — | File of out-of-scope patterns, one per line. Unreadable path aborts the scan |
+| `out_of_scope_file` | string |  | File of out-of-scope patterns, one per line. Unreadable path aborts the scan |
 
 ### Discovery & mining
 
@@ -207,11 +207,11 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `skip_reflection_header` | bool | `false` | Skip header reflection checks |
 | `skip_reflection_cookie` | bool | `false` | Skip cookie reflection checks |
 | `skip_reflection_path` | bool | `false` | Skip path reflection checks |
-| `mining_dict_word` | string | — | Wordlist path |
+| `mining_dict_word` | string |  | Wordlist path |
 | `remote_wordlists` | array | `[]` | `burp`, `assetnote` |
 | `skip_mining` | bool | `false` | Skip all mining |
 | `skip_mining_dict` | bool | `false` | Skip dictionary mining |
-| `skip_mining_dom` | bool | `false` | Skip mining parameter names from HTML `id`/`name` attributes (not DOM-XSS detection — see `skip_ast_analysis`) |
+| `skip_mining_dom` | bool | `false` | Skip mining parameter names from HTML `id`/`name` attributes. DOM-XSS detection stays on; `skip_ast_analysis` turns that off |
 
 ### Network
 
@@ -223,7 +223,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 | `rate_limit` | int | `0` | Global request rate cap (req/sec) shared across all workers/targets; `0` = unlimited, max `100000` |
 | `retries` | int | `0` | Retry 5xx / transient transport errors this many times (`0` = off, max `100`; 429 always retried) |
 | `retry_delay` | int | `1000` | Base backoff (ms) between `retries` attempts (exponential; max `60000`) |
-| `proxy` | string | — | Proxy URL (`http(s)://` or `socks4/5(h)://`); also used for remote payload/wordlist fetches |
+| `proxy` | string |  | Proxy URL (`http`, `https`, `socks4`, `socks4a`, `socks5` or `socks5h` scheme); also used for remote payload/wordlist fetches |
 | `insecure` | bool | `true` | Skip TLS certificate verification; set `false` to enforce validation. Covers the scan target and an OAST server named with `--blind-oob=`; the public interactsh mesh is always verified |
 | `follow_redirects` | bool | `false` | Follow 3xx responses |
 | `ignore_return` | array | `[]` | HTTP status codes to ignore, as integers (`[302, 403]`) |
@@ -242,20 +242,20 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 |-----|------|---------|-------------|
 | `encoders` | array | `["url","html"]` | Encoders to apply: `none`, `url`, `2url`, `3url`, `4url`, `html`, `htmlpad`, `base64`, `unicode`, `zwsp` |
 | `remote_payloads` | array | `[]` | Remote payload sources: `portswigger`, `payloadbox` |
-| `custom_blind_xss_payload` | string | — | Blind template file; each line must contain `{callback}` (lines without it are skipped) |
-| `blind_callback_url` | string | — | Blind XSS callback URL (the `--blind` / `-b` flag) |
-| `blind_oob` | array | — | Enable OOB/OAST blind XSS via interactsh (`[]` = public mesh; or name servers). Mirrors `--blind-oob` |
-| `blind_oob_secret` | string | — | Auth token for a self-hosted interactsh server |
+| `custom_blind_xss_payload` | string |  | Blind template file; each line must contain `{callback}` (lines without it are skipped) |
+| `blind_callback_url` | string |  | Blind XSS callback URL (the `--blind` / `-b` flag) |
+| `blind_oob` | array |  | Enable OOB/OAST blind XSS via interactsh (`[]` = public mesh; or name servers). Mirrors `--blind-oob` |
+| `blind_oob_secret` | string |  | Auth token for a self-hosted interactsh server |
 | `blind_oob_wait` | int | `30` | Seconds to keep polling for OOB callbacks after payloads are sent |
-| `custom_payload` | string | — | Custom payload file, one payload per line |
+| `custom_payload` | string |  | Custom payload file, one payload per line |
 | `only_custom_payload` | bool | `false` | Use only custom payloads; the scan exits `2` unless `custom_payload` (or `--custom-payload`) is also set |
-| `inject_marker` | string | — | Token to replace with payloads |
+| `inject_marker` | string |  | Token to replace with payloads |
 | `custom_alert_value` | string | `"1"` | `alert(X)` value |
 | `custom_alert_type` | string | `"none"` | `none` or `str` |
 | `skip_xss_scanning` | bool | `false` | Discovery without attack |
 | `deep_scan` | bool | `false` | Continue after first finding |
 | `sxss` | bool | `false` | Enable Stored XSS mode |
-| `sxss_url` | string | — | Retrieval URL |
+| `sxss_url` | string |  | Retrieval URL |
 | `sxss_method` | string | `"GET"` | Retrieval method (same set as `method`) |
 | `sxss_retries` | int | `3` | Retries when fetching the retrieval URL (max `20`) |
 | `max_payloads_per_param` | int | `0` | Cap base payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `deep_scan` is set) |
@@ -270,7 +270,7 @@ Mid-scan session-loss detection — see [Session monitoring](../../guide/scannin
 |-----|------|---------|-------------|
 | `waf_bypass` | string | `"auto"` | `auto` or `off` (detect and report only). `force` is accepted and behaves like `auto`; `force_waf` is what picks the WAF |
 | `skip_waf_probe` | bool | `false` | Skip active fingerprinting |
-| `force_waf` | string | — | Treat the target as this WAF instead of what detection found (same names as `--force-waf`, case-insensitive) |
+| `force_waf` | string |  | Treat the target as this WAF instead of what detection found (same names as `--force-waf`, case-insensitive) |
 | `waf_evasion` | bool | `false` | Adaptive evasion: randomized inter-request jitter (with or without a detected WAF) + escalating cooldown on block clusters (pairs with `rate_limit`) |
 | `waf_min_confidence` | float | `0.3` | Drop fingerprints below this confidence (0.0–1.0); default suppresses weak matches |
 
@@ -294,9 +294,9 @@ CLI flag  >  Config file  >  Built-in default
 Config values skip the CLI's argument parser, so Dalfox checks them when it loads the file:
 
 - An invalid value for a fixed-choice key (`format`, `poc_type`, `limit_result_type`, `only_poc`, `baseline_mode`, `min_confidence`, `custom_alert_type`, `dedup_urls`, `waf_bypass`, `on_session_loss`, `encoders`), an unknown `method` / `sxss_method` / `force_waf`, a `session_check` that is not a valid regex, a `session_check_url` that is not an absolute URL, or `limit = 0` prints a `Warning:` on stderr. That key then falls back to its built-in default and the scan continues. `method`, `sxss_method` and `force_waf` are case-normalised the same way the flags are.
-- `proxy`, `sxss_url` and `session_check_url` go through the same startup checks as their flags. A proxy scheme Dalfox cannot route, or a URL whose scheme is not `http`/`https`, stops the scan with `PARSE_ERROR` (exit `2`).
+- `proxy`, `sxss_url`, `session_check_url`, `include_url` and `exclude_url` go through the same startup checks as their flags. A proxy scheme Dalfox cannot route, a URL whose scheme is not `http`/`https`, or a scope pattern that is not a valid regex stops the scan with `PARSE_ERROR` (exit `2`).
 - Numeric keys have the same limits as their flags (`workers`, `timeout`, `delay`, `scan_timeout`, `rate_limit`, `retries`, `retry_delay`, `sxss_retries`, `max_concurrent_targets`, `max_targets_per_host`, `waf_min_confidence`). An out-of-range value stops the scan with `INVALID_INPUT_TYPE` (exit `2`).
 - Unknown keys, and keys placed outside the `[scan]` table, are ignored with a ``Warning: config <path>: unknown key `scan.header` ignored`` on stderr, so a misspelled or misplaced key is visible.
-- A file that fails to parse (a TOML syntax error, or a value of the wrong type such as `workers = "10"`) is dropped whole. With `--config` Dalfox prints a warning naming the line and column (not the value, which may be a credential). The default-path file is dropped silently.
+- A file that fails to parse (a TOML syntax error, or a value of the wrong type such as `workers = "10"`) is dropped whole, and the run uses built-in defaults. Dalfox prints a warning naming the line and column, but not the value, which may be a credential. This applies to a `--config` file and to the file in the default directory.
 
 See [Getting Started → Configuration](../../getting-started/configuration/) for examples.

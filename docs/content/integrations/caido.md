@@ -6,13 +6,13 @@ toc = true
 aliases = ["/page/running/caido/"]
 +++
 
-Dalfox works well inside [Caido](https://caido.io) workflows. You can feed every interesting request (or selected traffic) straight into Dalfox's engine and turn findings into Caido Findings with one click.
+You can run Dalfox from [Caido](https://caido.io) workflows: send captured requests (all of them, or only the ones you select) to Dalfox and turn its findings into Caido Findings.
 
-This page covers the current recommended pattern (v3) and the common "bool gotcha" that trips up workflow authors.
+This page shows the recommended v3 setup and the boolean gotcha that trips up many workflow authors.
 
 ## The core pattern
 
-Caido Workflows can execute a shell step. The step receives the current request (usually as JSON) on stdin. Extract the raw HTTP, hand it to Dalfox via `--input-type raw-http`, then decide whether to create a Finding.
+Caido Workflows can execute a shell step. The step receives the current request (usually as JSON) on stdin. Extract the raw HTTP request, pass it to Dalfox with `--input-type raw-http`, then decide whether to create a Finding.
 
 ### Minimal workflow step (bash/zsh)
 
@@ -63,7 +63,7 @@ fi
 
 Caido's Workflow If/Else node evaluates step output using its own [bool rules](https://docs.caido.io/app/reference/workflow_data_types.html#bool). Many strings that look "truthy" to a human (or a normal shell) become `false` inside Caido.
 
-**The reliable community pattern** (shared by [@m4dni5 in this comment](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370)):
+This pattern works reliably (shared by [@m4dni5 in this comment](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370)):
 
 - When you have a finding, emit the actual Dalfox output (or a non-empty marker). Caido will see it as the "False" branch.
 - When clean, explicitly emit a simple truthy token such as `1` or `true`. This goes to the "True" branch.
@@ -82,12 +82,12 @@ finding path: on the clean path the step's whole output is the single token `1`.
 | `-S` / `--silence` | Only POC / finding lines go to stdout (less noise in Caido logs) |
 | `--no-color`      | Clean text for findings, search, and exports (suggested in the community workflow example) |
 | `--poc-type curl` (or `httpie`, `http-request`) | Ready-to-use repro in the Caido Finding |
-| `--timeout 6-10`  | Per-request budget; keeps workflows snappy |
+| `--timeout 6-10`  | Per-request timeout in seconds; keeps each workflow run short |
 | `--waf-bypass auto` | The default already; don't turn it `off` just because traffic comes through a proxy |
 
 You can also add `-f markdown` if you want the full markdown report captured in the Finding evidence.
 
-**Note on silence:** `-S` suppresses the logs, but the PoC lines still go to
+`-S` suppresses the logs, but the PoC lines still go to
 stdout when there are findings, and a clean run still prints one empty line.
 That empty line is enough to turn a bare `1` into something Caido no longer
 reads as `true`, which is why the script captures Dalfox's output instead of
@@ -108,7 +108,7 @@ Typical Caido workflow graph:
      - Severity: High / Medium depending on your rules
    - **True branch (clean)**: Set Color (green) or Add Tag `dalfox-clean`
 
-You can enrich the Finding with more context from Caido (host, method, parameter names, etc.).
+You can add more Caido context to the Finding, such as host, method, and parameter names.
 
 ## Alternative: using a file step first
 
@@ -122,10 +122,10 @@ This adds a step to the workflow graph but is easier to debug.
 ## Tips & gotchas
 
 - **Binary location**: Caido's PATH may not include brew, asdf, or linuxbrew. Use a full path or set `DALFOX_PATH` env in the workflow / Caido settings and reference `$DALFOX_PATH`.
-- **Performance**: On busy browsing, add a Content-Type or in-scope filter *before* the Dalfox step. Dalfox is fast but you don't need to scan every image/stylesheet.
+- **Performance**: On busy browsing, add a Content-Type or in-scope filter *before* the Dalfox step. There is no point scanning every image and stylesheet.
 - **Blind XSS**: Add `--blind https://your.collaborator/` when you want out-of-band detection from Caido-driven traffic.
-- **DOM XSS**: Works out of the box (AST analysis runs on responses).
-- **JSON output**: For more advanced post-processing in later workflow nodes you can use `--format jsonl` and parse the stream.
+- **DOM XSS**: No extra flags needed. AST analysis is on by default.
+- **JSON output**: To post-process results in later workflow nodes, use `--format jsonl` and parse it line by line.
 
 ## Updating from v2 guides
 

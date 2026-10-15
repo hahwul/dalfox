@@ -9,7 +9,7 @@ Dalfox reads a config file on startup so you don't have to pass the same flags e
 
 ## Where the file lives
 
-Dalfox reads `$XDG_CONFIG_HOME/dalfox/config.toml` when `XDG_CONFIG_HOME` is set and non-empty, and `$HOME/.config/dalfox/config.toml` otherwise. A `config.json` in the same directory is read when there is no `config.toml`.
+Dalfox reads `$XDG_CONFIG_HOME/dalfox/config.toml` when `XDG_CONFIG_HOME` is set and non-empty, and `$HOME/.config/dalfox/config.toml` otherwise (`%USERPROFILE%\.config\dalfox` when `HOME` is unset, as on most Windows setups). A `config.json` in the same directory is read when there is no `config.toml`.
 
 You can point anywhere else with `--config`:
 
@@ -17,7 +17,7 @@ You can point anywhere else with `--config`:
 dalfox --config ./dalfox.toml scan https://target.app
 ```
 
-If no file exists, Dalfox creates a template at the default path the first time you run it. Every line in it is commented out, so it changes nothing until you edit it.
+If no file exists, Dalfox creates a template at the default path the first time you run it. Every setting in that template is commented out, so it changes nothing until you edit it. A `--config` path that does not exist yet is created the same way (as an empty `{"scan": {}}` when the name ends in `.json`).
 
 ## A minimal config
 
@@ -54,7 +54,7 @@ Scan flags need the explicit `scan` subcommand; the bare `dalfox <TARGET>` form 
 
 ## Formats
 
-Dalfox supports both TOML and JSON. TOML is the default; JSON is handy if you generate the file from a tool or UI.
+Dalfox reads both TOML and JSON. TOML is the default. JSON is handy if another tool generates the file.
 
 ```toml
 # ~/.config/dalfox/config.toml

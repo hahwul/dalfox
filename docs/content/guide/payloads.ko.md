@@ -5,7 +5,7 @@ weight = 3
 toc = true
 +++
 
-Dalfox는 컨텍스트를 인식하는 엄선된 페이로드 라이브러리를 내장하고 있습니다. 대부분은 여기에 신경 쓸 일이 없습니다. 엔진이 각 주입 컨텍스트에 맞는 페이로드를 알아서 고릅니다. 이 페이지에서는 내장된 내용과 이를 확장하는 방법을 다룹니다.
+Dalfox는 페이로드 라이브러리를 내장하고 있고, 주입 컨텍스트에 맞는 페이로드를 알아서 고릅니다. 그래서 대부분의 스캔은 페이로드 설정이 필요 없습니다. 이 페이지에서는 내장된 내용과 확장하는 방법을 다룹니다.
 
 ## 페이로드 계열
 
@@ -35,36 +35,36 @@ Dalfox는 여러 계열로부터 페이로드를 구성합니다:
 - `<style>` 내부 → `</style>` 브레이크아웃 뒤에 HTML 태그
 - 알 수 없음 → HTML, 속성, mXSS, DOM 클로버링, URL 프로토콜 페이로드를 번갈아 섞은 조합
 
-덕분에 적중률은 높이면서 요청 수는 적정선으로 유지합니다.
+컨텍스트에 맞는 페이로드만 보내므로 요청 수가 줄어듭니다.
 
-## CSP 인식 우회 페이로드
+## CSP 우회 페이로드
 
-프리플라이트(preflight) 단계가 `Content-Security-Policy`(또는 `…-Report-Only`) 헤더나 같은 정책을 담은 `<meta http-equiv>`를 발견하면, Dalfox는 이를 파싱하여 스크립트 실행 페이로드를 해당 정책의 실제 약점에 맞게 조정합니다. 페이로드는 실제로 악용 가능한 지시어(directive)에 대해서만 생성되므로, CSP가 없는(또는 견고하게 설정된) 대상은 추가 요청을 보지 않습니다.
+프리플라이트 응답에 `Content-Security-Policy`(또는 `…-Report-Only`) 헤더가 있거나 같은 정책이 `<meta http-equiv>` 태그에 들어 있으면, Dalfox는 정책을 파싱해서 그 약점을 노리는 스크립트 페이로드를 추가합니다. 실제로 악용할 수 있는 지시어(directive)에만 페이로드를 추가하므로, CSP가 없는 대상에는 요청이 늘지 않습니다.
 
-| CSP 형태 | Dalfox가 내보내는 페이로드 |
+| CSP 형태 | Dalfox가 보내는 페이로드 |
 |-----------|-------------------|
-| `unsafe-inline` / `unsafe-eval` | 직접 인라인 / `eval` 계열 페이로드 |
-| `base-uri` / `object-src` 누락 | `<base>` 하이재킹 / `<object>`/`<embed>` 주입 |
-| `script-src` 내의 `data:` / `blob:` | `<script src=data:…>` / `Blob` URL 로더 |
-| 화이트리스트에 등록된 CDN 호스트 | 해당 호스트에 맞는 JSONP / 프레임워크 **스크립트 가젯** |
-| `strict-dynamic` | DOM 스크립트 가젯(RequireJS `data-main`, `document.write` 자가 전파, AngularJS 부트스트랩)과, nonce가 캡처된 경우 **nonce 재사용** |
+| `unsafe-inline` / `unsafe-eval` | 인라인 페이로드, `eval` 계열 페이로드 |
+| `base-uri` / `object-src` 없음 | `<base>` 하이재킹, `<object>`/`<embed>` 주입 |
+| `script-src`에 `data:` / `blob:` | `<script src=data:…>`, `Blob` URL 로더 |
+| 허용 목록에 있는 CDN 호스트 | 그 호스트에 알려진 JSONP / 프레임워크 스크립트 가젯 |
+| `strict-dynamic` | DOM 스크립트 가젯(RequireJS `data-main`, `document.write` 자가 전파, AngularJS 부트스트랩). nonce를 확보했다면 nonce 재사용 페이로드도 보냅니다 |
 
-특히 눈여겨볼 형태가 둘 있습니다:
+이 중 두 가지는 조금 더 설명이 필요합니다.
 
-- **`strict-dynamic`.** `strict-dynamic` 하에서는 브라우저가 호스트 허용 목록을 무시하므로, 평범한 `<script src=allowed-host>`는 더 이상 로드되지 않습니다. Dalfox는 DOM 스크립트 가젯(이미 신뢰된 스크립트가 공격자 스크립트를 생성하게 만드는 페이로드)으로 전환하고, 정책이 nonce를 고정(pin)하면 `<script nonce=…>` 재사용 페이로드를 내보냅니다(nonce가 정적이거나 예측 가능하거나 반사될 때 효과적).
-- **Nonce / 해시 고정(pinning).** `'nonce-…'` 및 `'sha256-…'` 토큰이 파싱되어 정책 분류에 사용됩니다. `strict-dynamic`도 없고 가젯 호스트도 없는 순수 무작위 nonce/해시 정책은 *견고함(hardened)*으로 취급됩니다. Dalfox는 그런 정책에 요청을 낭비하지 않습니다.
+- `strict-dynamic`: 브라우저가 호스트 허용 목록을 무시하므로 평범한 `<script src=allowed-host>`는 로드되지 않습니다. 그래서 Dalfox는 DOM 스크립트 가젯으로 바꿉니다. 이미 신뢰받는 스크립트가 공격자 스크립트를 만들게 하는 페이로드입니다. 정책에 nonce가 고정되어 있으면 `<script nonce=…>` 페이로드도 보냅니다. nonce가 고정값이거나, 예측 가능하거나, 응답에 반사될 때 통합니다.
+- nonce / 해시 고정: Dalfox는 `'nonce-…'`와 `'sha256-…'` 토큰을 읽어 정책을 분류합니다. `strict-dynamic`도 가젯 호스트도 없이 무작위 nonce나 해시에만 의존하는 정책은 견고한(hardened) 정책으로 보고 스크립트 페이로드를 보내지 않습니다. `base-uri`나 `object-src`가 없을 때 `<base>`, `<object>` 페이로드만 보냅니다.
 
 가젯은 공개된 CSP 우회 연구(JSONBee, cure53 H5SC, Google CSP Evaluator)에서 가져왔습니다.
 
-## Trusted Types 인식
+## Trusted Types
 
-[Trusted Types](https://web.dev/articles/trusted-types)는 견고하게 설계된 앱에서 DOM-XSS를 완화하는 주된 수단입니다. Dalfox의 AST DOM-XSS 분석기는 이를 이해합니다:
+[Trusted Types](https://web.dev/articles/trusted-types)는 보안을 강화한 앱에서 쓰는 대표적인 DOM-XSS 방어 수단입니다. Dalfox의 AST DOM-XSS 분석기는 이를 고려합니다.
 
-- **엄격한(strict)** 정책 콜백(`createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`)은 다른 새니타이저와 마찬가지로 오염(taint)을 제거하므로, `p.createHTML(x)`를 거쳐 전달된 값은 더 이상 보고되지 않습니다.
-- **관대한(permissive)** 기본 정책(우회 가능한 것으로 잘 알려진 no-op `createPolicy('default', {createHTML: x => x})`)은 보호 수단으로 *오인되지 않습니다*. 탐지 결과는 유지되고 플래그가 지정됩니다.
-- 응답 CSP가 `require-trusted-types-for 'script'`를 강제하고, **동시에** 페이지가 엄격한 `'default'` 정책을 정의하면, 브라우저가 모든 TrustedHTML 싱크를 자동으로 새니타이즈합니다. Dalfox는 이 경우 오탐이 될 탐지 결과를 억제합니다.
+- `createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`처럼 엄격한 정책 콜백은 새니타이저로 봅니다. `p.createHTML(x)`를 거친 값은 보고하지 않습니다.
+- 잘 알려진 no-op 정책 `createPolicy('default', {createHTML: x => x})` 같은 느슨한 기본 정책은 방어로 치지 않습니다. 탐지 결과는 그대로 남습니다.
+- 응답 CSP가 `require-trusted-types-for 'script'`를 강제하고 페이지가 엄격한 `'default'` 정책까지 정의하면, 브라우저가 모든 TrustedHTML 싱크를 알아서 새니타이즈합니다. 이 경우 Dalfox는 오탐이 될 결과를 빼고 보고합니다.
 
-이 분류기는 의도적으로 보수적입니다. 안전함을 입증할 수 없는 것은 무엇이든 관대한(permissive) 상태로 남으므로, 탐지 결과가 유지됩니다. 억제는 강제(enforcement) 없이는 결코 발동하지 않으므로, 기본 정책을 정의했지만 `require-trusted-types-for`를 빠뜨린 페이지는 여전히 보고됩니다. 즉, 미탐(false negative)이 도입되지 않습니다.
+분류기는 보수적으로 판단합니다. 안전하다고 증명하지 못한 정책은 느슨한 정책으로 보므로 결과가 남습니다. 결과를 빼는 것은 정책이 강제될 때뿐입니다. 기본 정책을 정의했어도 `require-trusted-types-for`가 없는 페이지는 계속 보고됩니다.
 
 ## 인코더
 
@@ -146,10 +146,10 @@ dalfox payload special-chars | wc -l
 
 `--json`을 붙이면 JSON 배열로 출력합니다(`dalfox payload all --json`은 모든 로컬 그룹을 하나의 배열로 합치고, 셀렉터 없이 `dalfox payload --json`을 실행하면 셀렉터별 개수를 출력합니다).
 
-`special-chars` 그룹은 수동 반사 테스트에 유용합니다. 각 바이트를 하나씩 주입해 어떤 문자가
-그대로 반사되는지, 어떤 문자가 HTML/URL 인코딩되어 돌아오는지, 어떤 문자가 제거되는지 확인할 수
-있습니다. `functions`와 `awesome-alert`는 *눈으로* 실행을 확인하고 호스트/오리진을 표시하도록
-선별되어 있어, 스크린샷 한 장으로 영향을 증명할 수 있습니다.
+`special-chars` 그룹은 수동 반사 테스트에 유용합니다. 항목을 하나씩 주입해 어떤 문자가
+그대로 돌아오는지, 어떤 문자가 HTML/URL 인코딩되어 돌아오는지, 어떤 문자가 제거되는지 확인할 수
+있습니다. `functions`는 눈에 보이게 실행되는 호출을 모았고, `awesome-alert`는 호스트나 오리진까지
+보여 주므로 스크린샷 한 장으로 영향을 증명할 수 있습니다.
 
 ## "alert" 커스터마이징
 
@@ -214,7 +214,7 @@ dalfox scan https://target.app --deep-scan
 | `--skip-xss-scanning` | 탐색과 프로빙만 수행; 페이로드 주입 없음 |
 | `--skip-ast-analysis` | 인라인 스크립트의 AST 기반 DOM-XSS 탐지 건너뛰기 (`[A]` 결과) |
 
-`--skip-ast-analysis`는 `source → sink` 흐름(예: `location.hash` → `innerHTML`)을 `[A]`(AST 탐지) 결과로 보고하는 정적 DOM-XSS 패스를 제어하며, 파라미터 마이닝과는 독립적입니다. `--skip-mining-dom`은 이 패스에 영향을 주지 **않습니다**. 패스는 그대로 두고 결과에서만 숨기려면 `--only-poc v,r`을 사용하세요. `[A]`가 실제로 무엇을 증명하는지, 그리고 순수 클라이언트 사이드 DOM-XSS가 왜 `[V]`에 도달하지 못하는지는 [탐지 모델](../detection-model/) 문서에서 다룹니다.
+`--skip-ast-analysis`는 `source → sink` 흐름(예: `location.hash` → `innerHTML`)을 `[A]`(AST 탐지) 결과로 보고하는 정적 DOM-XSS 패스를 끕니다. 이 패스는 파라미터 마이닝과 별개이며, `--skip-mining-dom`은 이 패스에 영향을 주지 않습니다. 패스는 그대로 두고 결과에서만 숨기려면 `--only-poc v,r`을 사용하세요. `[A]`가 실제로 무엇을 증명하는지, 그리고 순수 클라이언트 사이드 DOM-XSS가 왜 `[V]`에 도달하지 못하는지는 [탐지 모델](../detection-model/) 문서에서 다룹니다.
 
 ## 다음 단계
 
