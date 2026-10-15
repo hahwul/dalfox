@@ -389,7 +389,13 @@ fn test_vue_payloads_generated() {
         evidence: "test".to_string(),
     });
     let payloads = get_tech_specific_payloads(&result);
-    assert!(payloads.iter().any(|p| p.contains("constructor")));
+    // The CSTI gadget must be the Vue 2 + Vue 3 universal one; the Vue-2-only
+    // `_c` / `this.constructor` gadgets were inert under Vue 3 and are gone.
+    assert!(
+        payloads.iter().any(|p| p.contains("$emit.constructor")),
+        "Vue gadget must use the v2+v3 universal `$emit.constructor` escape"
+    );
+    assert!(!payloads.iter().any(|p| p.contains("_c.constructor")));
     assert!(payloads.iter().any(|p| p.contains("v-html")));
 }
 

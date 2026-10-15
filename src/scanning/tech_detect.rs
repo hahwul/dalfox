@@ -319,13 +319,19 @@ pub(crate) fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<Str
                 ));
             }
             TechType::Vue => {
-                // Vue.js template injection (v2/v3)
+                // Vue template injection. `$emit.constructor('…')()` reaches
+                // the `Function` constructor through the component instance's
+                // `$emit` method and fires in BOTH Vue 2 and Vue 3
+                // (browser-verified). The legacy `_c.constructor` /
+                // `constructor.constructor` gadgets are Vue-2 only — they are
+                // inert under Vue 3's `with`-free render proxy, where bare
+                // `constructor` / `_c` no longer resolve in expression scope.
+                // `$emit` is a reserved `$`-prefixed instance property on both
+                // majors, so it cannot be shadowed by component data. Verified
+                // via the trailing `<span class=MARKER>` element (a real tag
+                // injection), not by alert execution.
                 payloads.push(format!(
-                    "{{{{_c.constructor('alert(1)')()}}}} <span class={}>",
-                    class_marker
-                ));
-                payloads.push(format!(
-                    "{{{{this.constructor.constructor('alert(1)')()}}}} <span class={}>",
+                    "{{{{$emit.constructor('alert(1)')()}}}} <span class={}>",
                     class_marker
                 ));
                 // v-html injection marker
