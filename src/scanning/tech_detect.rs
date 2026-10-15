@@ -116,6 +116,11 @@ const HEADER_RULES: &[(&str, &str, TechType, &str)] = &[
     ),
 ];
 
+/// Evidence string for the Angular-2+ `ng-version` marker. Shared between the
+/// `BODY_RULES` entry that sets it and the `get_tech_specific_payloads`
+/// suppression check that reads it, so the two can never drift apart.
+const NG_VERSION_EVIDENCE: &str = "ng-version attribute";
+
 /// `(lowercase body substring, tech, evidence)`.
 const BODY_RULES: &[(&str, TechType, &str)] = &[
     // Angular
@@ -128,7 +133,7 @@ const BODY_RULES: &[(&str, TechType, &str)] = &[
     ("ng-model", TechType::Angular, "ng-model attribute"),
     ("angular.min.js", TechType::Angular, "angular.min.js script"),
     ("angular.js", TechType::Angular, "angular.js script"),
-    ("ng-version", TechType::Angular, "ng-version attribute"),
+    ("ng-version", TechType::Angular, NG_VERSION_EVIDENCE),
     // React
     (
         "data-reactroot",
@@ -303,18 +308,35 @@ pub(crate) fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<Str
     for detection in &techs.detected {
         match &detection.tech {
             TechType::Angular => {
-                // Angular template injection (AngularJS 1.x)
+                // `ng-version` is emitted only by Angular 2+ (as the root
+                // element attribute), which AOT-compiles templates and is not
+                // vulnerable to the AngularJS 1.x `{{…}}` expression injection
+                // below. When that is the *only* Angular signal, the gadget is
+                // dead, so skip it. BODY_RULES lists `ng-version` last, and
+                // `merge_detection` keeps the first match, so any AngularJS 1.x
+                // marker (ng-app / ng-controller / ng-model / angular.js) would
+                // have won the dedup and set a different evidence string — and
+                // the `{{…}}` fallback heuristic sets yet another — so those
+                // paths still fire (regression-guarded by
+                // `angular_1x_with_ng_version_still_fires_gadget`). Exact match,
+                // not substring: if the evidence string ever changes, this fails
+                // in the safe direction (one dead gadget sent to an Angular-2+
+                // page), never by suppressing a real 1.x target (recall loss).
+                if detection.evidence == NG_VERSION_EVIDENCE {
+                    continue;
+                }
+                // AngularJS 1.x template injection. `constructor.constructor(
+                // '…')()` reaches the `Function` constructor on AngularJS 1.6+
+                // (the expression sandbox was removed in 1.6); browser-verified
+                // firing on 1.6.9 and 1.8.3. The former `$on.constructor` gadget
+                // had identical version coverage (redundant) and the old
+                // `charAt`/`$eval` sandbox-escape fired on none of 1.2/1.4/1.5/
+                // 1.6/1.8 (dead), so both were dropped. Sandboxed ≤1.5 is not
+                // reached by any single stable gadget and is effectively extinct
+                // (1.6 shipped in 2016). Verified via the trailing
+                // `<span class=MARKER>` element, not by alert execution.
                 payloads.push(format!(
                     "{{{{constructor.constructor('alert(1)')()}}}} <span class={}>",
-                    class_marker
-                ));
-                payloads.push(format!(
-                    "{{{{$on.constructor('alert(1)')()}}}} <span class={}>",
-                    class_marker
-                ));
-                // Angular expression sandbox escape (various versions)
-                payloads.push(format!(
-                    "{{{{a]constructor.prototype.charAt=[].join;$eval('x]alert(1)//');}}}} <span class={}>",
                     class_marker
                 ));
             }
