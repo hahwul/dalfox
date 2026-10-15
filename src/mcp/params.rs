@@ -182,7 +182,7 @@ pub(crate) struct ScanWithDalfoxParams {
     // header lines forwarded to the attacker-supplied target URL — the same
     // class of arbitrary file read addressed in v2 by GHSA-35wr-x7v6-9fv2.
     // MCP callers can supply cookies directly via the `cookies` field.
-    /// Encoding strategies to apply to payloads. Available: url, html, base64, 2url, 3url, 4url, none.
+    /// Encoding strategies to apply to payloads. Available: url, html, htmlpad, base64, 2url, 3url, 4url, unicode, zwsp, none.
     /// Default: ["url", "html"]
     #[serde(default = "default_encoders")]
     pub encoders: Vec<String>,
@@ -268,16 +268,17 @@ pub(crate) struct ScanWithDalfoxParams {
 
     /// Cap the scan's outbound request rate (requests/second). 0 = unlimited
     /// (the default). Use this to be gentle on a fragile target or to stay
-    /// under a WAF's threshold. Now enforced across all worker tasks.
+    /// under a WAF's threshold. Enforced across all worker tasks.
     #[serde(default)]
     pub rate_limit: u32,
 
-    /// WAF handling mode: "auto" (detect then bypass), "force" (use force_waf),
-    /// or "off" (detect only). Default: "auto"
+    /// WAF handling mode: "auto" (detect then bypass), "force" (same as "auto";
+    /// use force_waf to pin a WAF), or "off" (detect only). Default: "auto"
     #[serde(default = "default_waf_bypass")]
     pub waf_bypass: String,
 
-    /// Skip the WAF fingerprinting probe entirely. Default: false
+    /// Skip the WAF provocation probe; detection still reads the normal
+    /// preflight response. Default: false
     #[serde(default)]
     pub skip_waf_probe: bool,
 

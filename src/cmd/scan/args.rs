@@ -668,11 +668,11 @@ pub struct ScanArgs {
     /// `--insecure=false` to enforce certificate validation. Applies to the
     /// scan target and to an OAST server named with `--blind-oob=`; the public
     /// interactsh mesh is always verified. Example: --insecure=false
-    ///
-    /// Stored as Option so presence is distinguishable from the default:
-    /// `None` means the user didn't pass the flag (config may set it; the
-    /// effective value is `unwrap_or(true)`), while `Some(_)` is an explicit
-    /// CLI choice that always wins over config — in either direction.
+    //
+    // Stored as Option so presence is distinguishable from the default:
+    // `None` means the user didn't pass the flag (config may set it; the
+    // effective value is `unwrap_or(true)`), while `Some(_)` is an explicit
+    // CLI choice that always wins over config — in either direction.
     #[arg(
         long,
         num_args = 0..=1,
@@ -844,12 +844,12 @@ pub struct ScanArgs {
     pub detect_outdated_libs: bool,
 
     #[clap(help_heading = "WAF")]
-    /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (detect-only; no payload mutations). Default: auto
+    /// WAF bypass mode: auto (detect+bypass), force (same as auto; pin a WAF with --force-waf), off (detect-only; no payload mutations). Default: auto
     #[arg(long, default_value = DEFAULT_WAF_BYPASS, value_parser = clap::builder::PossibleValuesParser::new(WAF_BYPASS_VALUES.iter().copied()))]
     pub waf_bypass: String,
 
     #[clap(help_heading = "WAF")]
-    /// Skip WAF fingerprinting probes (header-only detection, no provocation request)
+    /// Skip the WAF provocation probe; detect only from the normal preflight response (headers and body)
     #[arg(long)]
     pub skip_waf_probe: bool,
 
@@ -859,21 +859,21 @@ pub struct ScanArgs {
     pub force_waf: Option<String>,
 
     #[clap(help_heading = "WAF")]
-    /// Adaptive WAF evasion: when a WAF is detected, randomize inter-request
-    /// timing (jitter) and escalate a cooldown pause on clusters of blocked
-    /// responses, instead of the old blunt workers=1/delay=3000 preset. Pairs
-    /// well with --rate-limit. The per-WAF pacing hint is applied automatically
-    /// on detection even without this flag.
+    /// Cautious, stealthy pacing whether or not a WAF is detected: one request
+    /// at a time per parameter, a randomized pause between requests (at least
+    /// ~150 ms on average), and an escalating cooldown on runs of 403/406
+    /// blocks. Pairs well with --rate-limit. The per-WAF pacing hint is
+    /// applied automatically on detection even without this flag.
     #[arg(long)]
     pub waf_evasion: bool,
 
     #[clap(help_heading = "WAF")]
-    /// Discard WAF fingerprints below this confidence (0.0–1.0). Default
-    /// (0.3) filters weak signals like `Server: Google Frontend` (0.15 —
-    /// emitted by every Google-hosted property regardless of Cloud Armor)
-    /// and generic "Request blocked" body markers. Real WAF signatures
-    /// (Cloudflare 0.9+, AWS WAF 0.95) are kept. Pass `--waf-min-confidence 0.0`
-    /// to keep every match.
+    /// Discard WAF fingerprints below this confidence (0.0–1.0); a match at
+    /// exactly the threshold is kept. The default (0.3) filters weak signals
+    /// like `Server: Google Frontend` (0.15, sent by every Google-hosted
+    /// property regardless of Cloud Armor). Real WAF signatures (Cloudflare
+    /// 0.9+, AWS WAF 0.95) are kept. Pass `--waf-min-confidence 0.0` to keep
+    /// every match.
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE)]
     pub waf_min_confidence: f32,
 
@@ -1033,9 +1033,13 @@ pub struct PreflightOptions {
     pub encoders: Vec<String>,
 }
 
-/// OOB/OAST (interactsh) blind-XSS flags, flattened into [`ScanArgs`]. Grouped
-/// into one sub-struct so adding OOB support touches a single `ScanArgs` field
-/// instead of three. `Default` (all-unset) means OOB is disabled.
+// OOB/OAST (interactsh) blind-XSS flags, flattened into `ScanArgs`. Grouped
+// into one sub-struct so adding OOB support touches a single `ScanArgs` field
+// instead of three. `Default` (all-unset) means OOB is disabled.
+//
+// Plain `//`, not `///`: clap turns a flattened `Args` struct's doc comment
+// into the `about` of every command that flattens it, which printed this
+// note as the description of the hidden `url` / `file` / `pipe` commands.
 #[derive(Args, Clone, Debug, Default, PartialEq)]
 pub struct BlindOobArgs {
     #[clap(help_heading = "XSS SCANNING")]

@@ -104,7 +104,7 @@ Terminal jobs auto-purge after 1 hour.
   "session_check_url": "https://app/me",           // probe this instead of the target when checking the session
   "workers": 50,                                   // 1-500 (hard validated)
   "waf_bypass": "auto",                            // "auto" (detect then bypass) or "off" (detect only); "force" is accepted but acts like auto
-  "skip_waf_probe": false,                         // skip the active WAF fingerprinting probe entirely
+  "skip_waf_probe": false,                         // skip the active WAF provocation probe; passive detection still runs
   "force_waf": "cloudflare",                       // pin a WAF profile in any waf_bypass mode; omit to auto-detect
   "waf_evasion": false,                            // adaptive evasion: request jitter + cooldown on clusters of blocks
   "waf_min_confidence": 0.3,                       // 0.0–1.0 floor; weaker fingerprints are discarded
