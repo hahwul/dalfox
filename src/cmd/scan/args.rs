@@ -668,6 +668,13 @@ pub struct ScanArgs {
     /// `--insecure=false` to enforce certificate validation. Applies to the
     /// scan target and to an OAST server named with `--blind-oob=`; the public
     /// interactsh mesh is always verified. Example: --insecure=false
+    ///
+    /// The config file key `insecure` sets the same thing; a value given on
+    /// the command line always wins over the config file.
+    //
+    // Keep a second `///` paragraph here: it is what makes clap render
+    // `scan --help` in long layout (`[default: …]` on its own line), which
+    // scripts/surface_parity.cr parses.
     //
     // Stored as Option so presence is distinguishable from the default:
     // `None` means the user didn't pass the flag (config may set it; the
