@@ -9,6 +9,15 @@ use axum::routing::any;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 
+/// [`check_form_discovery_with`] under default scan args.
+async fn check_form_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
+    check_form_discovery_with(target, &ScanArgs::default(), reflection_params, semaphore).await;
+}
+
 fn default_scan_args() -> crate::cmd::scan::ScanArgs {
     crate::cmd::scan::ScanArgs {
         insecure: Some(true),

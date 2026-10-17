@@ -92,14 +92,6 @@ impl WafDetectionResult {
         self.detected.is_empty()
     }
 
-    /// Return the highest-confidence WAF detected, if any.
-    #[cfg(test)]
-    pub(crate) fn primary(&self) -> Option<&WafFingerprint> {
-        self.detected
-            .iter()
-            .max_by(|a, b| a.confidence.total_cmp(&b.confidence))
-    }
-
     /// Return all detected WAF types.
     pub(crate) fn waf_types(&self) -> Vec<&WafType> {
         self.detected.iter().map(|f| &f.waf_type).collect()

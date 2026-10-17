@@ -56,30 +56,17 @@ pub async fn probe_graphql_params(
         let client_clone = client.clone();
         let url = target.url.clone();
         let target_clone = arc_target.clone();
-        let semaphore_clone = semaphore.clone();
-        let delay = target.delay;
-        let pb_clone = pb.clone();
         let pipeline = nf.pipeline.clone();
+        let pipeline_for_request = pipeline.clone();
         let original_value = nf.original_value.clone();
-        let name_for_task = name.clone();
 
-        let handle = tokio::spawn(crate::with_job_scopes(
-            crate::JobScopes::capture(),
-            async move {
-                let permit = semaphore_clone
-                    .acquire()
-                    .await
-                    .expect("acquire semaphore permit");
-
+        let handle = crate::parameter_analysis::spawn_reflection_probe(
+            semaphore.clone(),
+            target.delay,
+            pb.clone(),
+            move || {
                 // Rebuild the full request with the marker in this one variable.
-                let body = match pipeline.apply(marker) {
-                    Ok(b) => b,
-                    Err(_) => {
-                        drop(permit);
-                        return None;
-                    }
-                };
-
+                let body = pipeline_for_request.apply(marker).ok()?;
                 let base = crate::utils::build_body_request_base(
                     &client_clone,
                     &target_clone,
@@ -87,39 +74,22 @@ pub async fn probe_graphql_params(
                     url,
                     Some(body),
                 );
-                let request = crate::utils::apply_header_overrides(
+                Some(crate::utils::apply_header_overrides(
                     base,
                     &[("Content-Type".to_string(), "application/json".to_string())],
-                );
-
-                crate::record_outbound_request().await;
-                let mut discovered: Option<Param> = None;
-                if let Ok(r) = crate::utils::http::send_counted(request).await
-                    && let Ok(text) = crate::utils::http::read_body_counted(r).await
-                    && crate::scanning::markers::probe_reflected(&text)
-                {
-                    if !silence {
-                        eprintln!("Discovered GraphQL variable: {}", name_for_task);
-                    }
-                    discovered = Some(
-                        Param {
-                            pre_encoding_pipeline: Some(pipeline),
-                            ..Param::new(name_for_task, original_value, Location::GraphqlBody)
-                        }
-                        .with_reflection_analysis(&text),
-                    );
-                }
-
-                if delay > 0 {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                drop(permit);
-                if let Some(ref pb) = pb_clone {
-                    pb.inc(1);
-                }
-                discovered
+                ))
             },
-        ));
+            move |text| {
+                if !silence {
+                    eprintln!("Discovered GraphQL variable: {}", name);
+                }
+                Param {
+                    pre_encoding_pipeline: Some(pipeline),
+                    ..Param::new(name, original_value, Location::GraphqlBody)
+                }
+                .with_reflection_analysis(text)
+            },
+        );
         handles.push(handle);
     }
 

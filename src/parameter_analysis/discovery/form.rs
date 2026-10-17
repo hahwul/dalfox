@@ -3,18 +3,9 @@
 use super::*;
 use std::collections::HashSet;
 
-/// Discover POST form parameters by parsing HTML forms from the GET response.
-#[cfg(test)]
-pub async fn check_form_discovery(
-    target: &Target,
-    reflection_params: Arc<Mutex<Vec<Param>>>,
-    semaphore: Arc<Semaphore>,
-) {
-    check_form_discovery_with(target, &ScanArgs::default(), reflection_params, semaphore).await;
-}
-
-/// [`check_form_discovery`] under the scan's `args`, which can keep form fields
-/// whose submission did not echo the probe marker.
+/// Discover POST form parameters by parsing HTML forms from the GET response,
+/// under the scan's `args`, which can keep form fields whose submission did
+/// not echo the probe marker.
 ///
 /// That happens under `--sxss`. Every probe here keeps a field only
 /// when the marker comes back in the *immediate* response, which a stored sink
@@ -43,13 +34,8 @@ pub(crate) async fn check_form_discovery_with(
     // Fetch the page via GET to find forms
     let method = reqwest::Method::GET;
     let request = crate::utils::build_request(&client, target, method, target.url.clone(), None);
-    crate::record_outbound_request().await;
-    let html = match crate::utils::http::send_counted(request).await {
-        Ok(resp) => match crate::utils::http::read_body_counted(resp).await {
-            Ok(text) => text,
-            Err(_) => return,
-        },
-        Err(_) => return,
+    let Some(html) = crate::parameter_analysis::fetch_text(request).await else {
+        return;
     };
 
     /// Most fields probed per discovered form. See the truncation site below:
@@ -199,9 +185,8 @@ pub(crate) async fn check_form_discovery_with(
                     None,
                 )
                 .multipart(form);
-                crate::record_outbound_request().await;
                 if let Some(param) = form_field_param(
-                    crate::utils::http::send_counted(rb).await,
+                    crate::parameter_analysis::fetch_text(rb).await,
                     keep_unreflected,
                     Param {
                         form_action_url: Some(form_url.to_string()),
@@ -212,9 +197,7 @@ pub(crate) async fn check_form_discovery_with(
                             crate::parameter_analysis::Location::MultipartBody,
                         )
                     },
-                )
-                .await
-                {
+                ) {
                     batch.push(param);
                 }
                 if target.delay > 0 {
@@ -273,9 +256,8 @@ pub(crate) async fn check_form_discovery_with(
                         "application/x-www-form-urlencoded".to_string(),
                     )],
                 );
-                crate::record_outbound_request().await;
                 if let Some(param) = form_field_param(
-                    crate::utils::http::send_counted(rb).await,
+                    crate::parameter_analysis::fetch_text(rb).await,
                     keep_unreflected,
                     Param {
                         form_action_url: Some(form_url.to_string()),
@@ -286,9 +268,7 @@ pub(crate) async fn check_form_discovery_with(
                             crate::parameter_analysis::Location::Body,
                         )
                     },
-                )
-                .await
-                {
+                ) {
                     batch.push(param);
                 }
                 if target.delay > 0 {
@@ -343,9 +323,8 @@ pub(crate) async fn check_form_discovery_with(
                 }
                 let m = reqwest::Method::GET;
                 let rb = crate::utils::build_request(&client, target, m, test_url.clone(), None);
-                crate::record_outbound_request().await;
                 if let Some(param) = form_field_param(
-                    crate::utils::http::send_counted(rb).await,
+                    crate::parameter_analysis::fetch_text(rb).await,
                     keep_unreflected,
                     Param {
                         form_action_url: Some(form_url.to_string()),
@@ -356,9 +335,7 @@ pub(crate) async fn check_form_discovery_with(
                             crate::parameter_analysis::Location::Query,
                         )
                     },
-                )
-                .await
-                {
+                ) {
                     batch.push(param);
                 }
                 if target.delay > 0 {
@@ -389,9 +366,7 @@ pub(crate) async fn check_form_discovery_with(
                 rb,
                 &[("Content-Type".to_string(), "application/json".to_string())],
             );
-            crate::record_outbound_request().await;
-            if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
+            if let Some(text) = crate::parameter_analysis::fetch_text(rb).await
                 && crate::scanning::markers::probe_reflected(&text)
             {
                 let analysis = ReflectionAnalysis::of(&text);
@@ -483,9 +458,7 @@ pub(crate) async fn check_form_discovery_with(
                         rb,
                         &[("Content-Type".to_string(), "application/json".to_string())],
                     );
-                    crate::record_outbound_request().await;
-                    if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                        && let Ok(text) = crate::utils::http::read_body_counted(resp).await
+                    if let Some(text) = crate::parameter_analysis::fetch_text(rb).await
                         && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
@@ -562,9 +535,7 @@ pub(crate) async fn check_form_discovery_with(
                         rb,
                         &[("Content-Type".to_string(), "application/json".to_string())],
                     );
-                    crate::record_outbound_request().await;
-                    if let Ok(resp) = crate::utils::http::send_counted(rb).await
-                        && let Ok(text) = crate::utils::http::read_body_counted(resp).await
+                    if let Some(text) = crate::parameter_analysis::fetch_text(rb).await
                         && crate::scanning::markers::probe_reflected(&text)
                     {
                         batch.push(
@@ -599,14 +570,8 @@ pub(crate) async fn check_form_discovery_with(
 /// `keep_unreflected` asks for it (`--sxss`, see [`check_form_discovery_with`]),
 /// dropped otherwise. A probe that never got a response keeps nothing either
 /// way — an unreachable form is not evidence of a stored sink.
-async fn form_field_param(
-    sent: Result<reqwest::Response, reqwest::Error>,
-    keep_unreflected: bool,
-    param: Param,
-) -> Option<Param> {
-    let text = crate::utils::http::read_body_counted(sent.ok()?)
-        .await
-        .ok()?;
+fn form_field_param(text: Option<String>, keep_unreflected: bool, param: Param) -> Option<Param> {
+    let text = text?;
     if crate::scanning::markers::probe_reflected(&text) {
         Some(param.with_reflection_analysis(&text))
     } else {

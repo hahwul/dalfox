@@ -34,59 +34,42 @@ pub async fn check_cookie_discovery(
         let cookies = target.cookies.clone();
         let data = target.data.clone();
         let parsed_method = target.parse_method();
-        let delay = target.delay;
-        let semaphore_clone = semaphore.clone();
         let cookie_name = cookie_name.clone();
         let cookie_value = cookie_value.clone();
+        let probed_name = cookie_name.clone();
         let target_clone = arc_target.clone();
 
-        // Spawn task returning Option<Param> for batched collection
-        let handle = tokio::spawn(crate::with_job_scopes(
-            crate::JobScopes::capture(),
-            async move {
-                let permit = semaphore_clone
-                    .acquire()
-                    .await
-                    .expect("acquire semaphore permit");
-                let m = parsed_method;
+        let handle = crate::parameter_analysis::spawn_reflection_probe(
+            semaphore.clone(),
+            target.delay,
+            None,
+            move || {
                 // Compose cookie header overriding the probed cookie while preserving others
                 let others =
-                    crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
+                    crate::utils::compose_cookie_header_excluding(&cookies, Some(&probed_name));
                 let cookie_header = match others {
-                    Some(s) => format!("{}; {}={}", s, cookie_name, test_value),
-                    None => format!("{}={}", cookie_name, test_value),
+                    Some(s) => format!("{}; {}={}", s, probed_name, test_value),
+                    None => format!("{}={}", probed_name, test_value),
                 };
-                let request = crate::utils::build_request_with_cookie(
+                Some(crate::utils::build_request_with_cookie(
                     &client_clone,
                     &target_clone,
-                    m,
+                    parsed_method,
                     url,
-                    data.clone(),
+                    data,
                     Some(cookie_header),
-                );
-                crate::record_outbound_request().await;
-                let mut discovered: Option<Param> = None;
-                if let Ok(resp) = crate::utils::http::send_counted(request).await
-                    && let Ok(text) = crate::utils::http::read_body_counted(resp).await
-                    && crate::scanning::markers::probe_reflected(&text)
-                {
-                    discovered = Some(
-                        Param::new(
-                            cookie_name,
-                            cookie_value,
-                            crate::parameter_analysis::Location::Header,
-                        )
-                        .with_cookie_identity(true)
-                        .with_reflection_analysis(&text),
-                    );
-                }
-                if delay > 0 {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                drop(permit);
-                discovered
+                ))
             },
-        ));
+            move |text| {
+                Param::new(
+                    cookie_name,
+                    cookie_value,
+                    crate::parameter_analysis::Location::Header,
+                )
+                .with_cookie_identity(true)
+                .with_reflection_analysis(text)
+            },
+        );
         handles.push(handle);
     }
 

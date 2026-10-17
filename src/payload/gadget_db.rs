@@ -123,12 +123,6 @@ static GADGETS: &[ScriptGadget] = &[
     },
 ];
 
-/// All registered gadgets.
-#[cfg(test)]
-pub(crate) fn all() -> &'static [ScriptGadget] {
-    GADGETS
-}
-
 /// Gadgets reachable when `allowed_origin` (a value from a `script-src` host
 /// allowlist) is present. Used for CSPs *without* `strict-dynamic`, where a
 /// whitelisted host genuinely permits loading a `<script src>` from it.

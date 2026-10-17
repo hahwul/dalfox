@@ -80,19 +80,6 @@ impl ProviderCache {
             .is_some_and(|e| e.retry_at.is_none_or(|at| std::time::Instant::now() < at))
     }
 
-    /// Make a partial entry due for a retry now. (Not by subtracting the
-    /// backoff from an `Instant`: that underflows on a freshly booted Windows
-    /// host, whose monotonic clock starts near zero.)
-    #[cfg(test)]
-    fn expire_partial(&self, key: &[String]) {
-        let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(e) = m.get_mut(key)
-            && let Some(at) = e.retry_at.as_mut()
-        {
-            *at = std::time::Instant::now();
-        }
-    }
-
     /// Cache `lines` under `key`. Returns `false` when the cache is full and
     /// this is a new set — never evicting a live entry, which a job mid-scan
     /// may still be reading.

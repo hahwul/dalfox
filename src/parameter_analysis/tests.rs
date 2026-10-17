@@ -857,14 +857,13 @@ fn test_char_reflected_in_segment_detects_raw_encoded_and_percent() {
 }
 
 #[test]
-fn test_contains_ascii_ci() {
-    assert!(contains_ascii_ci("abc%3Cdef", "%3c"));
-    assert!(contains_ascii_ci("abc%3cdef", "%3C"));
-    assert!(contains_ascii_ci("anything", ""));
-    assert!(!contains_ascii_ci("ab", "abc")); // needle longer than haystack
-    assert!(!contains_ascii_ci("abcdef", "%3c"));
+fn test_find_ascii_ci() {
+    assert_eq!(find_ascii_ci("abc%3Cdef", "%3c"), Some(3));
+    assert_eq!(find_ascii_ci("abc%3cdef", "%3C"), Some(3));
+    assert_eq!(find_ascii_ci("ab", "abc"), None); // needle longer than haystack
+    assert_eq!(find_ascii_ci("abcdef", "%3c"), None);
     // Boundary match at the very end.
-    assert!(contains_ascii_ci("xy%3C", "%3c"));
+    assert_eq!(find_ascii_ci("xy%3C", "%3c"), Some(2));
 }
 
 // ===== Issue #1072: quote-escape classification =====

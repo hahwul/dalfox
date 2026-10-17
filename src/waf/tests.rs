@@ -10,6 +10,15 @@ use std::collections::HashMap;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+impl WafDetectionResult {
+    /// Return the highest-confidence WAF detected, if any.
+    fn primary(&self) -> Option<&WafFingerprint> {
+        self.detected
+            .iter()
+            .max_by(|a, b| a.confidence.total_cmp(&b.confidence))
+    }
+}
+
 #[derive(Default)]
 struct ProbeRecorder {
     /// Number of times the GET handler was hit.

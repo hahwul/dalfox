@@ -1,5 +1,19 @@
 use super::*;
 
+impl ProviderCache {
+    /// Make a partial entry due for a retry now. (Not by subtracting the
+    /// backoff from an `Instant`: that underflows on a freshly booted Windows
+    /// host, whose monotonic clock starts near zero.)
+    fn expire_partial(&self, key: &[String]) {
+        let mut m = self.map().lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(e) = m.get_mut(key)
+            && let Some(at) = e.retry_at.as_mut()
+        {
+            *at = std::time::Instant::now();
+        }
+    }
+}
+
 #[test]
 fn test_sanitize_lines_strips_comments_and_blanks() {
     let input = "payload1\n  \n# comment\n// comment\n; comment\n  payload2  \n";
