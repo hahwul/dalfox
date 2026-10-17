@@ -2135,7 +2135,7 @@ pub(crate) fn resolve_sxss_check_urls(
     // page's HTML. Fetching it carries the operator's headers and cookies, so it
     // has to clear the same bar as any other credentialed request -- the
     // target's own origin, or a same-host TLS upgrade of it.
-    // `check_form_discovery` already refuses to record anything else; this keeps
+    // `check_form_discovery_with` already refuses to record anything else; this keeps
     // the request-issuing side honest if that ever changes.
     if let Some(ref action) = param.form_action_url
         && let Ok(u) = url::Url::parse(action)

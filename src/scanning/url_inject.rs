@@ -705,7 +705,7 @@ pub(crate) fn multipart_poc_body(data: Option<&str>, name: &str, value: &str) ->
 /// target's own URL. A form-discovered body param reflects at the action
 /// endpoint, not at the page that contained the form.
 ///
-/// Belt and braces on the destination: `check_form_discovery` already refuses
+/// Belt and braces on the destination: `check_form_discovery_with` already refuses
 /// to record an action the scan may not send credentials to (anything but the
 /// target's own origin, or a same-host TLS upgrade of it -- see
 /// [`crate::utils::http::same_origin_or_tls_upgrade`]), so this should never
