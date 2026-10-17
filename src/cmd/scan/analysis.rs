@@ -861,7 +861,7 @@ pub(crate) async fn detect_outdated_libs(
 /// Run the AST DOM-XSS pass over the landing page captured by preflight.
 ///
 /// CLI-only. The analyzer it calls
-/// (`scanning::ast_integration::run_initial_ast_dom_analysis`) is what the
+/// (`scanning::ast_integration::run_initial_ast_dom_analysis_for_response`) is what the
 /// `server` and MCP paths share, so all three surfaces report the same DOM-XSS
 /// findings for the same page — but editing *this* wrapper moves the CLI alone.
 /// Security posture comes from the `Target`, which preflight already enriched.
