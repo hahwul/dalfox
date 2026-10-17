@@ -17,6 +17,8 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let field_taints_checkpoint = self.field_taints.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
+        self.page_url_objects.remove(param_name);
 
         self.tainted_vars.insert(param_name.to_string());
         self.var_aliases
@@ -48,6 +50,7 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.field_taints.rollback(field_taints_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
     }
     /// Walk a handler whose event parameter is destructured —
     /// `({ data }) => …`. Only the properties that carry the untrusted value
@@ -69,6 +72,7 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let field_taints_checkpoint = self.field_taints.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
         let mut shadowed_globals = Vec::new();
         for prop in &pattern.properties {
             if self
@@ -82,6 +86,7 @@ impl<'a> DomXssVisitor<'a> {
             let mut names = Vec::new();
             Self::collect_binding_pattern_names(&prop.value, &mut names);
             for name in names {
+                self.page_url_objects.remove(name.as_str());
                 self.tainted_vars.remove(name.as_str());
                 self.var_aliases.remove(name.as_str());
                 if self.global_taints.remove(name.as_str()) {
@@ -93,6 +98,7 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.field_taints.rollback(field_taints_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
         for name in shadowed_globals {
             self.global_taints.insert(name);
         }

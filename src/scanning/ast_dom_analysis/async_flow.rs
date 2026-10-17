@@ -335,9 +335,11 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let response_vars_checkpoint = self.response_object_vars.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
 
         if let Some(name) = &param_name {
             // A fresh parameter binding shadows any same-named outer state.
+            self.page_url_objects.remove(name);
             self.tainted_vars.remove(name);
             self.var_aliases.remove(name);
             self.response_object_vars.remove(name);
@@ -366,6 +368,7 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
 
         result_kind
     }

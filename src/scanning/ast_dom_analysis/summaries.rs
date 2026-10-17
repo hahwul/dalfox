@@ -97,8 +97,10 @@ impl<'a> DomXssVisitor<'a> {
         let mut locals: HashSet<String> = params.iter().cloned().collect();
         Self::collect_declared_names(body_stmts, &mut locals);
         let local_names_checkpoint = self.local_names.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
         for name in &locals {
             self.local_names.insert(name.clone());
+            self.page_url_objects.remove(name.as_str());
         }
         let is_outer = |path: &String| {
             let root = path.split(['.', '[']).next().unwrap_or(path);
@@ -183,6 +185,7 @@ impl<'a> DomXssVisitor<'a> {
         self.idb_object_store_vars.rollback(idb_stores_checkpoint);
         self.image_element_vars.rollback(image_vars_checkpoint);
         self.local_names.rollback(local_names_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;

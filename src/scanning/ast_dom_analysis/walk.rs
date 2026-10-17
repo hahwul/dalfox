@@ -463,6 +463,7 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
         let local_names_checkpoint = self.local_names.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
         for name in &own_names {
             self.local_names.insert(name.clone());
             self.image_element_vars.remove(name.as_str());
@@ -506,6 +507,7 @@ impl<'a> DomXssVisitor<'a> {
         self.response_object_vars.rollback(response_vars_checkpoint);
         self.image_element_vars.rollback(image_vars_checkpoint);
         self.local_names.rollback(local_names_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
         for name in shadowed_globals {
             self.global_taints.insert(name);
         }
@@ -632,6 +634,7 @@ impl<'a> DomXssVisitor<'a> {
         let mut names = Vec::new();
         Self::collect_binding_pattern_names(pattern, &mut names);
         for name in names {
+            self.page_url_objects.remove(name.as_str());
             self.tainted_vars.insert(name.clone());
             self.var_aliases.insert(name, source.to_string());
         }

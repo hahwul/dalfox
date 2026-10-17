@@ -53,6 +53,12 @@ impl<'a> DomXssVisitor<'a> {
         match &assign.left {
             AssignmentTarget::StaticMemberExpression(member) => {
                 let prop_name = member.property.name.as_str();
+                // `u.href = x` / `u.host = x` — no longer the page's own URL.
+                if !matches!(prop_name, "search" | "hash" | "searchParams")
+                    && let Expression::Identifier(obj_id) = &member.object
+                {
+                    self.page_url_objects.remove(obj_id.name.as_str());
+                }
                 self.analyze_onmessage_assignment(
                     assign.span(),
                     &member.object,
@@ -191,6 +197,11 @@ impl<'a> DomXssVisitor<'a> {
             }
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
+                if self.expr_is_page_url_object(&assign.right) {
+                    self.page_url_objects.insert(target_name.to_string());
+                } else {
+                    self.page_url_objects.remove(target_name);
+                }
                 if self.expr_resolves_to_image(&assign.right) {
                     self.image_element_vars.insert(target_name.to_string());
                 } else {

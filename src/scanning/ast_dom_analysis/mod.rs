@@ -393,8 +393,10 @@ struct DomXssVisitor<'a> {
     local_names: ScopedSet<String>,
     /// Variables bound to `new URL(location)` / `new URL(document.URL)` — a
     /// copy of the page's own URL, whose scheme and host the attacker cannot
-    /// pick (unlike `new URL(location.hash.slice(1))`).
-    page_url_objects: HashSet<String>,
+    /// pick (unlike `new URL(location.hash.slice(1))`). Scoped like
+    /// `tainted_vars`, and any rebinding of the name drops it, since the
+    /// entry *pins* a sink: a stale one would hide a real flow.
+    page_url_objects: ScopedSet<String>,
     /// Track `paramsVar -> base source` for `url.searchParams` aliases.
     url_search_params_sources: HashMap<String, String>,
     /// Track variables known to hold URLSearchParams objects.
@@ -764,7 +766,7 @@ impl<'a> DomXssVisitor<'a> {
             field_taints: Default::default(),
             global_taints: Default::default(),
             url_object_sources: HashMap::new(),
-            page_url_objects: HashSet::new(),
+            page_url_objects: Default::default(),
             local_names: Default::default(),
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),

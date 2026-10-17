@@ -107,6 +107,26 @@ fn common_source_spellings_and_propagation_shapes_are_tracked() {
     }
 }
 
+/// A page-URL copy pins the navigation sinks it feeds, so the binding must not
+/// outlive its scope or survive a rebinding — a stale entry hides a real flow.
+#[test]
+fn a_page_url_binding_does_not_pin_other_values_of_the_same_name() {
+    for js in [
+        "function a(){ const url = new URL(location); history.replaceState(null,'',url); } function go(url){ location.href = url; } go(location.hash.slice(1));",
+        "const url = new URL(location.href); history.replaceState(null,'',url); const go = function (url) { location.href = url; }; go(location.hash.slice(1));",
+        "const url = new URL(location.href); fetch('/next').then(r => r.json()).then(function (url) { location.href = url; });",
+        "let u = new URL(location); u = location.hash.slice(1); location.href = u;",
+        "var u = new URL(location.hash.slice(1)); [1].forEach(function(){ const u = new URL(location); }); location.href = u.href;",
+        "const u = new URL(location); u.href = decodeURIComponent(location.hash.slice(1)); location.href = u;",
+    ] {
+        let found = findings(js);
+        assert!(
+            found.iter().any(|v| v.sink == "location.href"),
+            "{js}: {found:?}"
+        );
+    }
+}
+
 #[test]
 fn neutralized_or_unrelated_values_stay_clean() {
     for js in [
