@@ -159,20 +159,17 @@ pub(crate) fn extract_meta_csp(html: &str) -> Option<(String, String)> {
 /// stack was fingerprinted). Built once per scan so [`generate_param_jobs`]
 /// can clone the merged set per parameter instead of recomputing it.
 pub(crate) fn build_shared_payloads(target: &Target) -> Vec<String> {
-    let csp_bypass_payloads: Vec<String> = target
+    target
         .csp_analysis
-        .as_ref()
-        .map(crate::payload::xss_csp_bypass::get_csp_bypass_payloads)
-        .unwrap_or_default();
-    let tech_payloads: Vec<String> = target
-        .tech_info
-        .as_ref()
-        .map(crate::scanning::tech_detect::get_tech_specific_payloads)
-        .unwrap_or_default();
-    let mut shared = Vec::with_capacity(csp_bypass_payloads.len() + tech_payloads.len());
-    shared.extend(csp_bypass_payloads);
-    shared.extend(tech_payloads);
-    shared
+        .iter()
+        .flat_map(crate::payload::xss_csp_bypass::get_csp_bypass_payloads)
+        .chain(
+            target
+                .tech_info
+                .iter()
+                .flat_map(crate::scanning::tech_detect::get_tech_specific_payloads),
+        )
+        .collect()
 }
 /// Expand a parameter's base payload set into its WAF-bypass variants,
 /// keeping the two bypass axes orthogonal instead of multiplying them.

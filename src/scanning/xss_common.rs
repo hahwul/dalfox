@@ -17,8 +17,7 @@ static CUSTOM_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = Onc
 /// key that avoids requiring `Hash`/`Eq` on `InjectionContext`). Callers own and
 /// mutate the returned `Vec`, so we hand back a clone and the cache can't be
 /// corrupted.
-static DYNAMIC_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, std::sync::Arc<Vec<String>>>>> =
-    OnceLock::new();
+static DYNAMIC_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
 /// Generate dynamic payloads based on the injection context (memoized).
 pub(crate) fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
@@ -27,13 +26,13 @@ pub(crate) fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<Strin
     if let Ok(guard) = cache.lock()
         && let Some(cached) = guard.get(&key)
     {
-        return cached.as_ref().clone();
+        return cached.clone();
     }
-    let payloads = std::sync::Arc::new(generate_dynamic_payloads_uncached(context));
+    let payloads = generate_dynamic_payloads_uncached(context);
     if let Ok(mut guard) = cache.lock() {
-        guard.insert(key, std::sync::Arc::clone(&payloads));
+        guard.insert(key, payloads.clone());
     }
-    payloads.as_ref().clone()
+    payloads
 }
 
 /// Build the per-context payload catalog from scratch. Wrapped by the memoizing
@@ -530,17 +529,13 @@ pub(crate) fn get_dynamic_payloads(
     context: &InjectionContext,
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let mut base_payloads = vec![];
-
-    if args.only_custom_payload {
-        if let Some(path) = &args.custom_payload {
-            base_payloads.extend(load_custom_payloads(path)?);
-        }
+    let mut base_payloads = if args.only_custom_payload {
+        vec![]
     } else {
-        base_payloads.extend(generate_dynamic_payloads(context));
-        if let Some(path) = &args.custom_payload {
-            base_payloads.extend(load_custom_payloads(path)?);
-        }
+        generate_dynamic_payloads(context)
+    };
+    if let Some(path) = &args.custom_payload {
+        base_payloads.extend(load_custom_payloads(path)?);
     }
 
     // Include remote payloads, but only for a scan that actually asked for

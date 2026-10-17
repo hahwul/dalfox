@@ -360,6 +360,13 @@ fn test_hpp_preserves_fragment() {
     assert!(out.ends_with("#frag"));
 }
 
+fn build_hpp_urls(base: &url::Url, param: &Param, injected: &str) -> Vec<(String, HppPosition)> {
+    [HppPosition::Last, HppPosition::First, HppPosition::Both]
+        .iter()
+        .filter_map(|&pos| build_hpp_url(base, param, injected, pos).map(|url| (url, pos)))
+        .collect()
+}
+
 #[test]
 fn test_build_hpp_urls_returns_3_variants() {
     let base = make_url("https://example.com/?q=safe");

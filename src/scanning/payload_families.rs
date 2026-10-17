@@ -43,10 +43,6 @@ pub(crate) fn framework_sink_suffix(sink: &str) -> &'static str {
 ///
 /// Mirrors the SXSS prefixing convention (`sxss-inHTML-VHtml`) so
 /// downstream parsers don't have to special-case ordering.
-#[cfg(test)]
-pub(crate) fn inject_type_for_payload(sxss: bool, payload: &str) -> String {
-    inject_type_for_payload_with_sink(sxss, payload, None)
-}
 pub(crate) fn inject_type_for_payload_with_sink(
     sxss: bool,
     payload: &str,
@@ -210,12 +206,8 @@ pub(crate) fn hoist_angle_free_payloads(
 pub(crate) fn get_fallback_reflection_payloads(
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let mut base_payloads = vec![];
-
-    if args.only_custom_payload {
-        if let Some(path) = &args.custom_payload {
-            base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
-        }
+    let mut base_payloads = if args.only_custom_payload {
+        vec![]
     } else {
         // Round-robin interleave the reflection families so any prefix of the
         // list samples *every* family proportionally — the same #1156 diversity
@@ -234,17 +226,17 @@ pub(crate) fn get_fallback_reflection_payloads(
         // HTML family, event-handler order inside the attribute family, …), so
         // the encoder pass and downstream dedup see the same members as before —
         // only their interleaving changes.
-        base_payloads = interleave_payload_families(vec![
+        interleave_payload_families(vec![
             crate::payload::get_dynamic_xss_html_payloads(),
             crate::payload::get_dynamic_xss_attribute_payloads(),
             crate::payload::get_mxss_payloads(),
             crate::payload::get_protocol_injection_payloads(),
-        ]);
-        // Custom payloads keep their appended position (after the built-in
-        // families), matching the pre-interleave order and the custom-only arm.
-        if let Some(path) = &args.custom_payload {
-            base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
-        }
+        ])
+    };
+    // Custom payloads keep their appended position (after the built-in
+    // families), matching the pre-interleave order.
+    if let Some(path) = &args.custom_payload {
+        base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
     }
 
     // Apply encoder policy to unique base payloads
@@ -408,10 +400,7 @@ pub(crate) fn get_dom_payloads(
     // window; on an HTML body they parse-fail as whole-document JS and add no
     // findings. Skipped only when the user restricts to custom payloads.
     if !args.only_custom_payload {
-        let jsonp = get_jsonp_callback_payloads();
-        if !jsonp.is_empty() {
-            payloads.splice(0..0, jsonp);
-        }
+        payloads.splice(0..0, get_jsonp_callback_payloads());
     }
     Ok(payloads)
 }
@@ -500,49 +489,32 @@ pub(crate) fn get_dom_payloads_for_context(
             let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
             Ok(out)
         }
-        // Unknown context: use HTML + Attribute payloads (+ custom if provided), never error
+        // Unknown context: use local (non-remote) built-in payloads (+ custom
+        // if provided), never error
         None => {
-            // Use only local HTML/Attribute payloads (exclude remote) for DOM verification in unknown contexts
-            let mut base_payloads = vec![];
-
-            if args.only_custom_payload {
-                if let Some(path) = &args.custom_payload {
-                    // Avoid erroring when custom payload file is missing
-                    base_payloads.extend(
-                        crate::scanning::xss_common::load_custom_payloads(path)
-                            .unwrap_or_else(|_| vec![]),
-                    );
-                }
-            } else {
-                // Issue #1156: round-robin interleave the evidence families so
-                // every DOM-evidence kind (HTML-tag, event-handler/attribute,
-                // mXSS, DOM-clobbering, protocol/URL) is represented in any
-                // prefix of the list — in particular within the first
-                // `INERT_ECHO_BUDGET` payloads the DOM-phase early exit samples.
-                // Plain concatenation appended the protocol/mXSS generators last
-                // (thousands of payloads in), so the early exit could cut them
-                // entirely on a raw-reflecting URL-attribute echo, where the
-                // protocol payload is the only verifier. Within-family ordering
-                // (e.g. HTML attribute-breakout templates first) is preserved.
-                base_payloads = interleave_payload_families(vec![
-                    crate::payload::get_dynamic_xss_html_payloads(),
-                    crate::payload::get_dynamic_xss_attribute_payloads(),
-                    crate::payload::get_mxss_payloads(),
-                    crate::payload::get_dom_clobbering_payloads(),
-                    crate::payload::get_protocol_injection_payloads(),
-                ]);
-                if let Some(path) = &args.custom_payload {
-                    base_payloads.extend(
-                        crate::scanning::xss_common::load_custom_payloads(path)
-                            .unwrap_or_else(|_| vec![]),
-                    );
-                }
-            }
-
-            // Ensure we always have DOM-capable payloads for non-JS contexts
-            if base_payloads.is_empty() {
-                base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
-                base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
+            // Issue #1156: round-robin interleave the evidence families so
+            // every DOM-evidence kind (HTML-tag, event-handler/attribute,
+            // mXSS, DOM-clobbering, protocol/URL) is represented in any
+            // prefix of the list — in particular within the first
+            // `INERT_ECHO_BUDGET` payloads the DOM-phase early exit samples.
+            // Plain concatenation appended the protocol/mXSS generators last
+            // (thousands of payloads in), so the early exit could cut them
+            // entirely on a raw-reflecting URL-attribute echo, where the
+            // protocol payload is the only verifier. Within-family ordering
+            // (e.g. HTML attribute-breakout templates first) is preserved.
+            let mut base_payloads = interleave_payload_families(vec![
+                crate::payload::get_dynamic_xss_html_payloads(),
+                crate::payload::get_dynamic_xss_attribute_payloads(),
+                crate::payload::get_mxss_payloads(),
+                crate::payload::get_dom_clobbering_payloads(),
+                crate::payload::get_protocol_injection_payloads(),
+            ]);
+            if let Some(path) = &args.custom_payload {
+                // Avoid erroring when custom payload file is missing
+                base_payloads.extend(
+                    crate::scanning::xss_common::load_custom_payloads(path)
+                        .unwrap_or_else(|_| vec![]),
+                );
             }
 
             // Expand with shared encoder policy helper

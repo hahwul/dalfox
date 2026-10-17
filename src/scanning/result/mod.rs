@@ -48,28 +48,6 @@ impl FindingType {
         }
     }
 
-    /// Human-readable descriptive name for logs and verbose output.
-    ///
-    /// `Verified` became `Vulnerable`: "verify" names an *act*, which is what
-    /// made readers ask what dalfox had verified and with what — the answer
-    /// ("we parsed the response") was never what the word implied. The new word
-    /// states the claim instead.
-    ///
-    /// `Reflected` is deliberately left alone. It is still literally accurate:
-    /// today `R` holds exactly the findings whose payload came back in the
-    /// response. It stops being accurate only when the tier migration moves
-    /// low-confidence AST flows into `R`, so the rename belongs to that release,
-    /// not this one.
-    #[cfg(test)]
-    pub(crate) fn description(&self) -> &'static str {
-        match self {
-            FindingType::Verified => "Vulnerable",
-            FindingType::AstDetected => "AST-Detected",
-            FindingType::Reflected => "Reflected",
-            FindingType::Informational => "Informational",
-        }
-    }
-
     /// Detailed description suitable for agents and structured output.
     pub(crate) fn long_description(&self) -> &'static str {
         match self {

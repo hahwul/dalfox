@@ -1,5 +1,6 @@
 use super::*;
 use crate::parameter_analysis::{Location, Param};
+use crate::scanning::url_inject::{build_json_body_request, build_multipart_request};
 use crate::target_parser::Target;
 use crate::target_parser::parse_target;
 use axum::{
@@ -12,6 +13,19 @@ use axum::{
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::time::{Duration, sleep};
+
+fn has_marker_evidence(payload: &str, text: &str) -> bool {
+    if !payload_has_any_marker(payload) {
+        return false;
+    }
+    let document = crate::utils::html::parse_document_bounded(text);
+    has_marker_evidence_in_doc(payload, &document)
+}
+
+/// Boolean view for evidence fixtures that don't need the kind.
+fn has_dom_evidence(payload: &str, text: &str) -> bool {
+    classify_dom_evidence(payload, text).is_some()
+}
 
 #[derive(Clone)]
 struct TestState {
@@ -1474,7 +1488,7 @@ fn test_fixtures_reflect_entity_structural_roundtrip_with_decoders() {
     // then require that "alert(1)" appears in payload or (more relevant here)
     // in decode_html_entities(payload). The shared decoder must succeed.
     assert!(
-        crate::scanning::check_dom_verification::has_dom_evidence(&payload, &body),
+        has_dom_evidence(&payload, &body),
         "structural with entity-encoded sink value in payload must yield DOM evidence via decoder"
     );
     let kind = crate::scanning::check_reflection::classify_reflection(&body, &payload);
