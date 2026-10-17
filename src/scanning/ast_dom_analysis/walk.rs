@@ -81,13 +81,15 @@ impl<'a> DomXssVisitor<'a> {
             // common (especially minified) loop form.
             Statement::ForOfStatement(for_of) => {
                 self.walk_expression(&for_of.right);
+                // `for (const [k, v] of params)` binds through a pattern.
                 if self.is_tainted(&for_of.right)
                     && let ForStatementLeft::VariableDeclaration(var_decl) = &for_of.left
                 {
+                    let source = self
+                        .find_source_in_expr(&for_of.right)
+                        .unwrap_or_else(|| "unknown source".to_string());
                     for decl in &var_decl.declarations {
-                        if let BindingPattern::BindingIdentifier(id) = &decl.id {
-                            self.tainted_vars.insert(id.name.to_string());
-                        }
+                        self.taint_binding_pattern(&decl.id, &source);
                     }
                 }
                 self.branch_depth += 1;
@@ -180,28 +182,28 @@ impl<'a> DomXssVisitor<'a> {
                 self.bind_declarator_identifier(id, init);
             }
 
-            // Handle object destructuring: const { a, b } = tainted → a, b all tainted
-            if let BindingPattern::ObjectPattern(obj_pat) = &decl.id
-                && self.is_tainted(init)
-            {
-                let source = self.find_source_in_expr(init);
+            // Object destructuring: `const { a, b } = tainted` taints every
+            // binding, and `const { hash } = location` taints the properties
+            // that are sources even though the object itself is not. A
+            // property's own source wins the label, so the PoC lands in the
+            // right part of the URL.
+            if let BindingPattern::ObjectPattern(obj_pat) = &decl.id {
+                let whole = self.is_tainted(init).then(|| {
+                    self.find_source_in_expr(init)
+                        .unwrap_or_else(|| "unknown source".to_string())
+                });
                 for prop in &obj_pat.properties {
-                    if let BindingPattern::BindingIdentifier(id) = &prop.value {
-                        let name = id.name.to_string();
-                        self.tainted_vars.insert(name.clone());
-                        if let Some(ref src) = source {
-                            self.var_aliases.insert(name, src.clone());
-                        }
+                    let own = self
+                        .get_property_key_name(&prop.key)
+                        .and_then(|key| self.object_property_source(init, &key));
+                    if let Some(source) = own.or_else(|| whole.clone()) {
+                        self.taint_binding_pattern(&prop.value, &source);
                     }
                 }
                 if let Some(rest) = &obj_pat.rest
-                    && let BindingPattern::BindingIdentifier(id) = &rest.argument
+                    && let Some(source) = &whole
                 {
-                    let name = id.name.to_string();
-                    self.tainted_vars.insert(name.clone());
-                    if let Some(ref src) = source {
-                        self.var_aliases.insert(name, src.clone());
-                    }
+                    self.taint_binding_pattern(&rest.argument, source);
                 }
             }
 
@@ -418,6 +420,18 @@ impl<'a> DomXssVisitor<'a> {
         params: &FormalParameters<'a>,
         statements: &[Statement<'a>],
     ) {
+        self.walk_function_literal_body_seeded(params, statements, &[]);
+    }
+    /// [`walk_function_literal_body`](Self::walk_function_literal_body) for a
+    /// function whose arguments are known at the call: `seeds` taints the
+    /// parameter at each index (an IIFE's arguments, the element an iteration
+    /// method hands its callback).
+    pub(super) fn walk_function_literal_body_seeded(
+        &mut self,
+        params: &FormalParameters<'a>,
+        statements: &[Statement<'a>],
+        seeds: &[(usize, String)],
+    ) {
         // Journal checkpoints rather than clones: a clone per body made `N`
         // tainted bindings followed by `N` callbacks O(N²). The rollback below
         // restores exactly what a clone would have held.
@@ -448,12 +462,19 @@ impl<'a> DomXssVisitor<'a> {
                 _ => {}
             }
         }
+        let local_names_checkpoint = self.local_names.checkpoint();
         for name in &own_names {
+            self.local_names.insert(name.clone());
             self.image_element_vars.remove(name.as_str());
             self.tainted_vars.remove(name.as_str());
             self.var_aliases.remove(name.as_str());
             if self.global_taints.remove(name.as_str()) {
                 shadowed_globals.push(name.clone());
+            }
+        }
+        for (idx, source) in seeds {
+            if let Some(param) = params.items.get(*idx) {
+                self.taint_binding_pattern(&param.pattern, source);
             }
         }
 
@@ -484,6 +505,7 @@ impl<'a> DomXssVisitor<'a> {
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
         self.image_element_vars.rollback(image_vars_checkpoint);
+        self.local_names.rollback(local_names_checkpoint);
         for name in shadowed_globals {
             self.global_taints.insert(name);
         }
@@ -605,7 +627,41 @@ impl<'a> DomXssVisitor<'a> {
         names
     }
 
-    fn collect_binding_pattern_names(pattern: &BindingPattern<'a>, names: &mut Vec<String>) {
+    /// Taint every name `pattern` binds, labelled with `source`.
+    pub(super) fn taint_binding_pattern(&mut self, pattern: &BindingPattern<'a>, source: &str) {
+        let mut names = Vec::new();
+        Self::collect_binding_pattern_names(pattern, &mut names);
+        for name in names {
+            self.tainted_vars.insert(name.clone());
+            self.var_aliases.insert(name, source.to_string());
+        }
+    }
+
+    /// Source label for property `key` read off `object` when `object` is
+    /// not itself tainted but the property is a source (`location` → `hash`).
+    pub(super) fn object_property_source(
+        &self,
+        object: &Expression<'a>,
+        key: &str,
+    ) -> Option<String> {
+        let base = if self.expr_is_location_object(object) {
+            // Only the parts the attacker writes; `origin` / `host` are the
+            // page's own and lead same-origin redirects.
+            if !matches!(key, "hash" | "search" | "href" | "pathname") {
+                return None;
+            }
+            "location".to_string()
+        } else {
+            self.get_expr_string(object)?
+        };
+        let path = format!("{base}.{key}");
+        self.sources.contains(path.as_str()).then_some(path)
+    }
+
+    pub(super) fn collect_binding_pattern_names(
+        pattern: &BindingPattern<'a>,
+        names: &mut Vec<String>,
+    ) {
         match pattern {
             BindingPattern::BindingIdentifier(id) => names.push(id.name.to_string()),
             BindingPattern::ObjectPattern(obj) => {

@@ -600,7 +600,21 @@ impl<'a> DomXssVisitor<'a> {
         tainted.then(|| source.unwrap_or_else(|| "unknown source".to_string()))
     }
     pub(super) fn static_member_is_tainted(&self, member: &StaticMemberExpression<'a>) -> bool {
+        // The page's own origin is not attacker input, even read off a copy.
+        if matches!(
+            member.property.name.as_str(),
+            "origin" | "protocol" | "host" | "hostname" | "port"
+        ) && self.expr_is_page_url_object(&member.object)
+        {
+            return false;
+        }
         if self.url_search_params_source_for_member(member).is_some() {
+            return true;
+        }
+        if self.url_object_part_source(member).is_some() {
+            return true;
+        }
+        if self.storage_property_source(member).is_some() {
             return true;
         }
         if self.class_accessor_taint_source(member).is_some() {
@@ -644,6 +658,17 @@ impl<'a> DomXssVisitor<'a> {
                         | "document.cookie"
                 )
             })
+        {
+            return false;
+        }
+        // `.length` of what a built-in string/array method returns is a number
+        // whatever the receiver was — JSON data cannot carry methods, so these
+        // calls always reach the built-ins.
+        if member.property.name == "length"
+            && let Expression::CallExpression(call) = &member.object
+            && self
+                .get_callee_property_name(&call.callee)
+                .is_some_and(|method| BUILTIN_STRING_ARRAY_METHODS.contains(&method.as_str()))
         {
             return false;
         }
@@ -762,9 +787,14 @@ impl<'a> DomXssVisitor<'a> {
             }
             // `new Proxy(taintedTarget, handler)` and the collection
             // constructors hand their argument's values back out on read.
-            Expression::NewExpression(new_expr) => self
-                .taint_forwarding_new_argument(new_expr)
-                .is_some_and(|arg| self.is_tainted(arg)),
+            Expression::NewExpression(new_expr) => {
+                self.taint_forwarding_new_argument(new_expr)
+                    .is_some_and(|arg| self.is_tainted(arg))
+                    || self.url_search_params_source_for_expr(expr).is_some()
+                    || self
+                        .url_object_source_from_new_expression(new_expr)
+                        .is_some()
+            }
             _ => false,
         }
     }
@@ -814,3 +844,27 @@ impl<'a> DomXssVisitor<'a> {
         });
     }
 }
+
+/// Built-in string/array methods whose result's `.length` is a plain number.
+const BUILTIN_STRING_ARRAY_METHODS: &[&str] = &[
+    "split",
+    "slice",
+    "substring",
+    "substr",
+    "trim",
+    "trimStart",
+    "trimEnd",
+    "toLowerCase",
+    "toUpperCase",
+    "replace",
+    "replaceAll",
+    "match",
+    "concat",
+    "padStart",
+    "padEnd",
+    "filter",
+    "map",
+    "flatMap",
+    "flat",
+    "getAll",
+];

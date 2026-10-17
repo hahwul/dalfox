@@ -55,11 +55,36 @@ impl<'a> DomXssVisitor<'a> {
             Some(callee_str.to_string())
         }
     }
+    /// `localStorage.token` / `sessionStorage['k']`-style property reads, the
+    /// shorthand for `getItem`. The `Storage` API members themselves are not
+    /// stored values.
+    pub(super) fn storage_property_source(
+        &self,
+        member: &StaticMemberExpression<'a>,
+    ) -> Option<String> {
+        let object = self.get_expr_string(&member.object)?;
+        let storage = object.strip_prefix("window.").unwrap_or(&object);
+        if !matches!(storage, "localStorage" | "sessionStorage") {
+            return None;
+        }
+        let key = member.property.name.as_str();
+        if matches!(
+            key,
+            "length" | "key" | "getItem" | "setItem" | "removeItem" | "clear"
+        ) {
+            return None;
+        }
+        Some(format!("{storage}.getItem({key})"))
+    }
     pub(super) fn url_source_from_argument(&self, arg: &Argument<'a>) -> Option<String> {
         let expr = match arg {
             Argument::SpreadElement(spread) => &spread.argument,
             _ => arg.as_expression()?,
         };
+        // `new URL(location)` stringifies the `Location` object to its href.
+        if self.expr_is_location_object(expr) {
+            return Some("location.search".to_string());
+        }
         self.find_source_in_expr(expr)
             .map(|source| self.normalize_search_param_source(&source))
     }
@@ -100,6 +125,56 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         self.url_object_source_for_expr(&member.object)
+    }
+    /// Source label for a URL component read off a `URL` object built from a
+    /// source — `new URL(location).hash`, `u.search`. The object as a whole
+    /// is labelled by its query (see `normalize_search_param_source`), which
+    /// would send a `.hash` read's PoC payload to the wrong place, so a
+    /// location-derived URL reports the component actually read.
+    pub(super) fn url_object_part_source(
+        &self,
+        member: &StaticMemberExpression<'a>,
+    ) -> Option<String> {
+        let prop = member.property.name.as_str();
+        if !matches!(prop, "hash" | "search" | "href" | "pathname") {
+            return None;
+        }
+        let base = self.url_object_source_for_expr(&member.object)?;
+        Some(if self.expr_is_page_url_object(&member.object) {
+            format!("location.{prop}")
+        } else {
+            base
+        })
+    }
+    /// The whole URL of the page — the `Location` object or a full-URL string
+    /// property of it — as opposed to a piece the attacker can cut out of it.
+    pub(super) fn expr_is_whole_page_url(&self, expr: &Expression<'a>) -> bool {
+        self.expr_is_location_object(expr)
+            || self.get_expr_string(expr).is_some_and(|path| {
+                let path = path
+                    .trim_start_matches("window.")
+                    .trim_start_matches("self.")
+                    .trim_start_matches("document.");
+                matches!(path, "location.href" | "URL" | "documentURI" | "baseURI")
+            })
+    }
+    /// `new URL(location)` or a variable bound to one (see `page_url_objects`).
+    pub(super) fn expr_is_page_url_object(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::Identifier(id) => self.page_url_objects.contains(id.name.as_str()),
+            Expression::NewExpression(new_expr) => {
+                matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "URL")
+                    && new_expr
+                        .arguments
+                        .first()
+                        .and_then(|arg| arg.as_expression())
+                        .is_some_and(|arg| self.expr_is_whole_page_url(arg))
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.expr_is_page_url_object(&paren.expression)
+            }
+            _ => false,
+        }
     }
     pub(super) fn url_search_params_source_for_expr(
         &self,

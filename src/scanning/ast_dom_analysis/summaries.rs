@@ -22,21 +22,26 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
     }
+    /// Parameter names by position. A destructured parameter keeps its slot
+    /// under an unbindable `#<index>` placeholder so the indices still line up
+    /// with call-site arguments; the summary loop skips placeholders.
     pub(super) fn extract_param_names(&self, params: &FormalParameters<'a>) -> Vec<String> {
         params
             .items
             .iter()
-            .filter_map(|param| match &param.pattern {
-                BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
-                _ => None,
+            .enumerate()
+            .map(|(idx, param)| match &param.pattern {
+                BindingPattern::BindingIdentifier(id) => id.name.to_string(),
+                _ => format!("#{idx}"),
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
     pub(super) fn register_function_summary(
         &mut self,
         function_name: String,
         params: Vec<String>,
         body_stmts: &[Statement<'a>],
+        concise: bool,
     ) {
         if self.function_summaries.contains_key(&function_name) {
             return;
@@ -91,11 +96,18 @@ impl<'a> DomXssVisitor<'a> {
         // die with the call.
         let mut locals: HashSet<String> = params.iter().cloned().collect();
         Self::collect_declared_names(body_stmts, &mut locals);
+        let local_names_checkpoint = self.local_names.checkpoint();
+        for name in &locals {
+            self.local_names.insert(name.clone());
+        }
         let is_outer = |path: &String| {
             let root = path.split(['.', '[']).next().unwrap_or(path);
             root != "this" && !locals.contains(root)
         };
         for (idx, param_name) in params.iter().enumerate() {
+            if param_name.starts_with('#') {
+                continue;
+            }
             let field_taints_checkpoint = self.field_taints.checkpoint();
             let global_taints_checkpoint = self.global_taints.checkpoint();
             self.tainted_vars.clear();
@@ -108,6 +120,9 @@ impl<'a> DomXssVisitor<'a> {
 
             let before = self.vulnerabilities.len();
             self.walk_statements(body_stmts);
+            if concise {
+                self.collect_concise_return(body_stmts);
+            }
             for vuln in &self.vulnerabilities[before..] {
                 if vuln.sink != "__return__" {
                     summary
@@ -148,6 +163,9 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_return_sources.clear();
         let before = self.vulnerabilities.len();
         self.walk_statements(body_stmts);
+        if concise {
+            self.collect_concise_return(body_stmts);
+        }
         if let Some(source) = self.tainted_return_sources.first() {
             summary.return_without_tainted_params = Some(source.clone());
         }
@@ -164,11 +182,26 @@ impl<'a> DomXssVisitor<'a> {
         self.idb_request_vars.rollback(idb_requests_checkpoint);
         self.idb_object_store_vars.rollback(idb_stores_checkpoint);
         self.image_element_vars.rollback(image_vars_checkpoint);
+        self.local_names.rollback(local_names_checkpoint);
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;
 
         self.function_summaries.insert(function_name, summary);
+    }
+    /// A concise arrow (`n => expr`) has no `return` statement — its body
+    /// *is* the returned expression — so record it the way the `return` walk
+    /// in `walk_statement` would.
+    fn collect_concise_return(&mut self, body_stmts: &[Statement<'a>]) {
+        let Some(Statement::ExpressionStatement(stmt)) = body_stmts.first() else {
+            return;
+        };
+        if self.is_tainted(&stmt.expression) {
+            let source = self
+                .find_source_in_expr(&stmt.expression)
+                .unwrap_or_else(|| "unknown source".to_string());
+            self.tainted_return_sources.push(source);
+        }
     }
     pub(super) fn register_function_declaration(&mut self, func_decl: &Function<'a>) {
         let Some(id) = &func_decl.id else {
@@ -181,6 +214,7 @@ impl<'a> DomXssVisitor<'a> {
             id.name.to_string(),
             self.extract_param_names(&func_decl.params),
             &body.statements,
+            false,
         );
     }
     pub(super) fn register_object_literal_method_summaries(
@@ -204,6 +238,7 @@ impl<'a> DomXssVisitor<'a> {
                             summary_name,
                             self.extract_param_names(&func_expr.params),
                             &body.statements,
+                            false,
                         );
                     }
                 }
@@ -212,6 +247,7 @@ impl<'a> DomXssVisitor<'a> {
                         summary_name,
                         self.extract_param_names(&arrow_expr.params),
                         &arrow_expr.body.statements,
+                        arrow_expr.expression,
                     );
                 }
                 _ => {}
@@ -241,6 +277,7 @@ impl<'a> DomXssVisitor<'a> {
                 format!("{}.{}", class_name, method_name),
                 self.extract_param_names(&method_def.value.params),
                 &body.statements,
+                false,
             );
         }
     }

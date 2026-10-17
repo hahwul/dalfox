@@ -32,6 +32,7 @@ impl<'a> DomXssVisitor<'a> {
                 var_name.to_string(),
                 self.extract_param_names(&func_expr.params),
                 &body.statements,
+                false,
             );
         }
         // Register summaries for arrow functions assigned to variables.
@@ -40,6 +41,7 @@ impl<'a> DomXssVisitor<'a> {
                 var_name.to_string(),
                 self.extract_param_names(&arrow_expr.params),
                 &arrow_expr.body.statements,
+                arrow_expr.expression,
             );
         }
         // Register summaries for object literal methods assigned to variables.
@@ -92,10 +94,16 @@ impl<'a> DomXssVisitor<'a> {
             && let Some(source) = self.url_object_source_from_new_expression(new_expr)
         {
             self.url_object_sources.insert(var_name.to_string(), source);
+            if self.expr_is_page_url_object(init) {
+                self.page_url_objects.insert(var_name.to_string());
+            } else {
+                self.page_url_objects.remove(var_name);
+            }
             assigned_url_object_source = true;
         }
         if !assigned_url_object_source {
             self.url_object_sources.remove(var_name);
+            self.page_url_objects.remove(var_name);
         }
 
         // `const store = tx.objectStore('notes')` — remember the store so a
@@ -444,7 +452,9 @@ impl<'a> DomXssVisitor<'a> {
             Expression::TaggedTemplateExpression(tagged) => self.tagged_template_source(tagged),
             Expression::NewExpression(new_expr) => self
                 .taint_forwarding_new_argument(new_expr)
-                .and_then(|arg| self.find_source_in_expr(arg)),
+                .and_then(|arg| self.find_source_in_expr(arg))
+                .or_else(|| self.url_search_params_source_for_expr(expr))
+                .or_else(|| self.url_object_source_from_new_expression(new_expr)),
             _ => None,
         }
     }
@@ -524,6 +534,12 @@ impl<'a> DomXssVisitor<'a> {
         member: &StaticMemberExpression<'a>,
     ) -> Option<String> {
         if let Some(source) = self.url_search_params_source_for_member(member) {
+            return Some(source);
+        }
+        if let Some(source) = self.url_object_part_source(member) {
+            return Some(source);
+        }
+        if let Some(source) = self.storage_property_source(member) {
             return Some(source);
         }
         if let Some(source) = self.class_accessor_taint_source(member) {

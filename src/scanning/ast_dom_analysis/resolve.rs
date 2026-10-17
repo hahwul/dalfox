@@ -172,6 +172,14 @@ impl<'a> DomXssVisitor<'a> {
                 .or_else(|| Some(id.name.to_string())),
             Expression::StaticMemberExpression(member) => self.get_member_string(member),
             Expression::ComputedMemberExpression(member) => self.get_computed_member_string(member),
+            // `new Renderer(el).render(x)` — a method on a fresh instance.
+            Expression::NewExpression(new_expr) => match &new_expr.callee {
+                Expression::Identifier(class_id) => Some(class_id.name.to_string()),
+                _ => None,
+            },
+            Expression::ParenthesizedExpression(paren) => {
+                self.get_summary_object_prefix(&paren.expression)
+            }
             _ => None,
         }
     }
@@ -316,6 +324,11 @@ impl<'a> DomXssVisitor<'a> {
         let Some(_guard) = self.enter_recursion() else {
             return false;
         };
+        // The page's own URL — `top.location = self.location` frame-busting,
+        // or a `new URL(location)` copy with its query rewritten.
+        if self.expr_is_location_object(expr) || self.expr_is_page_url_object(expr) {
+            return true;
+        }
         match expr {
             Expression::StringLiteral(s) => literal_pins_url_scheme(&s.value),
             Expression::TemplateLiteral(t) => {
@@ -339,7 +352,11 @@ impl<'a> DomXssVisitor<'a> {
             Expression::ParenthesizedExpression(p) => self.url_scheme_is_pinned(&p.expression),
             // The page's own URL (or its scheme / path) leads, unmodified.
             Expression::StaticMemberExpression(member) => {
-                self.get_member_string(member).is_some_and(|path| {
+                // …also read off a `URL` copy of it (`new URL(location.href).pathname`).
+                matches!(
+                    self.url_object_part_source(member).as_deref(),
+                    Some("location.href" | "location.pathname")
+                ) || self.get_member_string(member).is_some_and(|path| {
                     let path = path
                         .trim_start_matches("window.")
                         .trim_start_matches("self.")

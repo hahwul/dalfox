@@ -387,6 +387,14 @@ struct DomXssVisitor<'a> {
     global_taints: ScopedSet<String>,
     /// Track `urlVar -> base source` for `new URL(tainted)` instances.
     url_object_sources: HashMap<String, String>,
+    /// Names the function body being walked binds itself (parameters and
+    /// top-level declarations), so a local `location` is not mistaken for the
+    /// global `Location` object.
+    local_names: ScopedSet<String>,
+    /// Variables bound to `new URL(location)` / `new URL(document.URL)` — a
+    /// copy of the page's own URL, whose scheme and host the attacker cannot
+    /// pick (unlike `new URL(location.hash.slice(1))`).
+    page_url_objects: HashSet<String>,
     /// Track `paramsVar -> base source` for `url.searchParams` aliases.
     url_search_params_sources: HashMap<String, String>,
     /// Track variables known to hold URLSearchParams objects.
@@ -545,6 +553,10 @@ const DOM_SOURCES: &[&str] = &[
     "self.location.pathname",
     "top.location",
     "parent.location",
+    // `document.location` is the same `Location` object as `window.location`;
+    // the second-level alias is enough for `document.location.hash` (see above).
+    "document.location",
+    "globalThis.location",
     "localStorage",
     "sessionStorage",
     "localStorage.getItem",
@@ -752,6 +764,8 @@ impl<'a> DomXssVisitor<'a> {
             field_taints: Default::default(),
             global_taints: Default::default(),
             url_object_sources: HashMap::new(),
+            page_url_objects: HashSet::new(),
+            local_names: Default::default(),
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
