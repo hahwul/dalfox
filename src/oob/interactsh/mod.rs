@@ -24,7 +24,7 @@ const NONCE_LEN: usize = 13;
 /// the project's capped-body policy for scanned targets. Sized generously (a
 /// single poll can carry a whole batch of base64+AES-wrapped interactions) so a
 /// busy session doesn't routinely truncate; truncation mid-JSON drops the whole
-/// batch (lost blind-XSS evidence), so [`OobSession::poll`] makes a cap hit loud
+/// batch (lost blind-XSS evidence), so [`InteractshClient::poll`] makes a cap hit loud
 /// rather than letting the parse error vanish at debug level.
 const OOB_MAX_BODY_BYTES: usize = 32 << 20; // 32 MiB
 /// Upper bound on the pre-allocation hint for the decrypted-interaction buffer,
@@ -145,10 +145,6 @@ impl InteractshClient {
         &self.correlation_id
     }
 
-    fn base_url(&self) -> &str {
-        &self.base
-    }
-
     /// Register the public key + correlation-id with the server.
     pub async fn register(&self) -> ClientResult<()> {
         let body = wire::RegisterRequest {
@@ -158,7 +154,7 @@ impl InteractshClient {
         };
         let mut req = self
             .http
-            .post(format!("{}/register", self.base_url()))
+            .post(format!("{}/register", self.base))
             .json(&body);
         if let Some(t) = &self.token {
             req = req.header(reqwest::header::AUTHORIZATION, t);
@@ -200,9 +196,7 @@ impl InteractshClient {
     pub async fn poll(&self) -> ClientResult<Vec<OobInteraction>> {
         let url = format!(
             "{}/poll?id={}&secret={}",
-            self.base_url(),
-            self.correlation_id,
-            self.secret_key
+            self.base, self.correlation_id, self.secret_key
         );
         let mut req = self.http.get(url);
         if let Some(t) = &self.token {
@@ -265,7 +259,7 @@ impl InteractshClient {
         };
         let mut req = self
             .http
-            .post(format!("{}/deregister", self.base_url()))
+            .post(format!("{}/deregister", self.base))
             .json(&body);
         if let Some(t) = &self.token {
             req = req.header(reqwest::header::AUTHORIZATION, t);
@@ -274,11 +268,6 @@ impl InteractshClient {
     }
 }
 
-/// Split a user-supplied server value into `(base_url, host)`. The scheme
-/// defaults to `https` (public interactsh) but an explicit `http://` is honored
-/// for self-hosted servers behind a TLS-terminating proxy (and for tests). The
-/// returned host (no scheme/path, trailing dot stripped, lowercased) is what
-/// gets embedded in payload callback hosts.
 /// Whether the OAST client may skip certificate verification for `host`.
 ///
 /// `--insecure` is a statement about the *scan target*, which dalfox does not
@@ -338,24 +327,6 @@ fn is_tls_intercepting_proxy(proxy: &str) -> bool {
     matches!(scheme, "http" | "https")
 }
 
-/// Split a `--blind-oob` server into its API base URL and the bare
-/// `host[:port]` used in callback hosts and in the public-mesh check.
-///
-/// Normalization goes through `url::Url` rather than string surgery, because
-/// the result feeds [`accept_invalid_certs`]: every spelling of the same
-/// endpoint has to reduce to the same host, or a mesh domain could be written
-/// so that it reads as an operator-named server and slips out of certificate
-/// verification. Hand-rolled parsing missed several — `oast.pro:0443` (leading
-/// zero in the port), `oast.pro.:443` (the trailing-dot strip ran before the
-/// port strip), and `x@oast.pro` / `oast.pro?x=1` / `oast.pro#f`, which also
-/// left userinfo, a query or a fragment glued into the base URL. `Url` folds
-/// all of them: it lowercases the host, parses the port numerically and drops
-/// the scheme's default, and keeps userinfo, path, query and fragment in
-/// fields we simply do not read.
-///
-/// An input `Url` cannot parse falls back to the old string split. That path
-/// only produces a host no mesh domain can spell, so it lands on the
-/// operator-named side, which is where an unparseable custom server belongs.
 /// Parse `server` into `(base_url, host)` via `url::Url`, returning `None` when
 /// it does not name a dialable host. The single definition of "what spelling of
 /// an interactsh server is valid" — shared with `job::normalize_blind_oob`, so
@@ -393,6 +364,24 @@ pub(crate) fn parse_server_host(server: &str) -> Option<(String, String)> {
     Some((format!("{scheme}://{host}"), host))
 }
 
+/// Split a `--blind-oob` server into its API base URL and the bare
+/// `host[:port]` used in callback hosts and in the public-mesh check.
+///
+/// Normalization goes through `url::Url` rather than string surgery, because
+/// the result feeds [`accept_invalid_certs`]: every spelling of the same
+/// endpoint has to reduce to the same host, or a mesh domain could be written
+/// so that it reads as an operator-named server and slips out of certificate
+/// verification. Hand-rolled parsing missed several — `oast.pro:0443` (leading
+/// zero in the port), `oast.pro.:443` (the trailing-dot strip ran before the
+/// port strip), and `x@oast.pro` / `oast.pro?x=1` / `oast.pro#f`, which also
+/// left userinfo, a query or a fragment glued into the base URL. `Url` folds
+/// all of them: it lowercases the host, parses the port numerically and drops
+/// the scheme's default, and keeps userinfo, path, query and fragment in
+/// fields we simply do not read.
+///
+/// An input `Url` cannot parse falls back to the old string split. That path
+/// only produces a host no mesh domain can spell, so it lands on the
+/// operator-named side, which is where an unparseable custom server belongs.
 fn split_server(server: &str) -> (String, String) {
     if let Some(parsed) = parse_server_host(server) {
         return parsed;

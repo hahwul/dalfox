@@ -282,8 +282,6 @@ impl ScanRequestSpec {
     pub(crate) fn from_rest_options(
         target: String,
         opts: &crate::server::types::ScanOptions,
-        include_request: bool,
-        include_response: bool,
         scan_timeout: u64,
         rate_limit: u32,
         force_waf: Option<String>,
@@ -313,8 +311,8 @@ impl ScanRequestSpec {
             // Passed through verbatim; `None` stays "unspecified".
             insecure: opts.insecure,
             proxy: opts.proxy.clone(),
-            include_request,
-            include_response,
+            include_request: opts.include_request.unwrap_or(d.include_request),
+            include_response: opts.include_response.unwrap_or(d.include_response),
             skip_mining: opts.skip_mining.unwrap_or(d.skip_mining),
             skip_discovery: opts.skip_discovery.unwrap_or(d.skip_discovery),
             deep_scan: opts.deep_scan.unwrap_or(d.deep_scan),

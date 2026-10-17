@@ -23,8 +23,6 @@ pub(crate) fn spawn_scan_task(
     job_id: String,
     url: String,
     opts: ScanOptions,
-    include_request: bool,
-    include_response: bool,
     lease: WorkerLease,
 ) {
     tokio::task::spawn_blocking(move || {
@@ -49,14 +47,7 @@ pub(crate) fn spawn_scan_task(
 
         let rt_ref = &rt;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-            rt_ref.block_on(run_scan_job(
-                state,
-                job_id,
-                url,
-                opts,
-                include_request,
-                include_response,
-            ));
+            rt_ref.block_on(run_scan_job(state, job_id, url, opts));
         }));
 
         if let Err(panic) = result {
@@ -183,14 +174,7 @@ enum StartDecision {
     Missing,
 }
 
-pub(crate) async fn run_scan_job(
-    state: AppState,
-    job_id: String,
-    url: String,
-    opts: ScanOptions,
-    include_request: bool,
-    include_response: bool,
-) {
+pub(crate) async fn run_scan_job(state: AppState, job_id: String, url: String, opts: ScanOptions) {
     // Grab progress counters and cancellation flag
     let decision = {
         let mut jobs = state.jobs.lock().await;
@@ -267,8 +251,6 @@ pub(crate) async fn run_scan_job(
         ScanRequestSpec::from_rest_options(
             url.clone(),
             &opts,
-            include_request,
-            include_response,
             // Capped by the server-wide `--scan-timeout` when set. Enforced
             // below by wrapping the scan future.
             effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
@@ -340,7 +322,7 @@ pub(crate) async fn run_scan_job(
     }
 
     let final_results_arc = run
-        .sanitized_results(&progress, include_request, include_response)
+        .sanitized_results(&progress, args.include_request, args.include_response)
         .await;
     let (callback_url, final_status, error_message, warnings) =
         match state.jobs.lock().await.get_mut(&job_id) {

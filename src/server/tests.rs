@@ -418,8 +418,6 @@ async fn test_run_scan_job_invalid_target_sets_error() {
         id.clone(),
         "not a valid target".to_string(),
         ScanOptions::default(),
-        false,
-        false,
     )
     .await;
 
@@ -1090,14 +1088,7 @@ async fn test_run_scan_job_exposes_requests_sent_before_completion() {
         jobs.get(&id).expect("job").progress.clone()
     };
 
-    let scan_fut = run_scan_job(
-        state.clone(),
-        id.clone(),
-        format!("http://{}/", addr),
-        opts,
-        false,
-        false,
-    );
+    let scan_fut = run_scan_job(state.clone(), id.clone(), format!("http://{}/", addr), opts);
     tokio::pin!(scan_fut);
 
     let mut observed_mid_flight: u64 = 0;
@@ -1153,14 +1144,7 @@ async fn test_run_scan_job_populates_live_request_counter() {
 
     let run = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        run_scan_job(
-            state.clone(),
-            id.clone(),
-            format!("http://{}/", addr),
-            opts,
-            false,
-            false,
-        ),
+        run_scan_job(state.clone(), id.clone(), format!("http://{}/", addr), opts),
     )
     .await;
     assert!(run.is_ok(), "run_scan_job should complete in time");
@@ -1256,7 +1240,7 @@ async fn run_job_and_settle(
     };
     let run = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        run_scan_job(state.clone(), id.to_string(), url, opts, false, false),
+        run_scan_job(state.clone(), id.to_string(), url, opts),
     )
     .await;
     assert!(run.is_ok(), "scan should finish in time");
@@ -1325,8 +1309,6 @@ async fn test_run_scan_job_detects_session_loss_without_the_ast_preflight() {
             id.clone(),
             format!("http://{}/?a=1", addr),
             opts,
-            false,
-            false,
         ),
     )
     .await;
@@ -1409,7 +1391,7 @@ async fn test_run_scan_job_wires_live_params_tested_counter() {
     let url = format!("http://{}/?a=1&b=2&c=3", addr);
     let run = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        run_scan_job(state.clone(), id.clone(), url, opts, false, false),
+        run_scan_job(state.clone(), id.clone(), url, opts),
     )
     .await;
     assert!(run.is_ok(), "scan should finish in time");
@@ -1476,14 +1458,7 @@ async fn test_run_scan_job_success_marks_done() {
 
     let run = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        run_scan_job(
-            state.clone(),
-            id.clone(),
-            format!("http://{}/", addr),
-            opts,
-            false,
-            false,
-        ),
+        run_scan_job(state.clone(), id.clone(), format!("http://{}/", addr), opts),
     )
     .await;
     assert!(run.is_ok(), "run_scan_job should complete in time");
@@ -1527,8 +1502,6 @@ async fn test_run_scan_job_scan_timeout_marks_cancelled_with_partial_results() {
             id.clone(),
             format!("http://{}/?q=test", addr),
             opts,
-            false,
-            false,
         ),
     )
     .await;
@@ -1603,8 +1576,6 @@ async fn test_scan_timeout_bounds_a_slow_remote_payload_fetch() {
             id.clone(),
             format!("http://{}/?q=test", target),
             opts,
-            false,
-            false,
         ),
     )
     .await;
@@ -1705,8 +1676,6 @@ async fn test_run_scan_job_webhook_reports_cancelled_status() {
             id.clone(),
             format!("http://{}/", target_addr),
             opts,
-            false,
-            false,
         ),
     )
     .await;
@@ -1788,8 +1757,6 @@ async fn test_run_scan_job_webhook_reports_done_status() {
             id.clone(),
             format!("http://{}/", target_addr),
             opts,
-            false,
-            false,
         ),
     )
     .await;
@@ -1858,8 +1825,6 @@ async fn test_run_scan_job_webhook_carries_job_warnings() {
             id.clone(),
             format!("http://{}/", target_addr),
             opts,
-            false,
-            false,
         ),
     )
     .await
@@ -1960,8 +1925,6 @@ async fn test_run_scan_job_unreachable_target_fires_error_webhook() {
             id.clone(),
             format!("http://{}/", dead_addr),
             opts,
-            false,
-            false,
         ),
     )
     .await;
@@ -2908,8 +2871,6 @@ async fn test_run_scan_job_unreachable_target_sets_error() {
             timeout: Some(2),
             ..ScanOptions::default()
         },
-        false,
-        false,
     )
     .await;
 
@@ -3184,14 +3145,7 @@ async fn test_run_scan_job_webhook_fires_on_pre_start_cancellation() {
 
     let run = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        run_scan_job(
-            state.clone(),
-            id.clone(),
-            target_url.to_string(),
-            opts,
-            false,
-            false,
-        ),
+        run_scan_job(state.clone(), id.clone(), target_url.to_string(), opts),
     )
     .await;
     assert!(run.is_ok(), "pre-cancelled run_scan_job should return fast");
@@ -3263,14 +3217,7 @@ async fn test_run_scan_job_pre_cancel_webhook_falls_back_when_url_unparseable() 
 
     let run = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        run_scan_job(
-            state.clone(),
-            id.clone(),
-            target_url.to_string(),
-            opts,
-            false,
-            false,
-        ),
+        run_scan_job(state.clone(), id.clone(), target_url.to_string(), opts),
     )
     .await;
     assert!(run.is_ok(), "pre-cancelled run_scan_job should return fast");
@@ -3354,14 +3301,7 @@ async fn test_webhook_carries_the_error_message_for_error_and_timeout() {
     };
     tokio::time::timeout(
         Duration::from_secs(20),
-        run_scan_job(
-            state.clone(),
-            "slow".to_string(),
-            target,
-            opts,
-            false,
-            false,
-        ),
+        run_scan_job(state.clone(), "slow".to_string(), target, opts),
     )
     .await
     .expect("scan_timeout must bound the job");
@@ -3911,14 +3851,7 @@ async fn test_run_scan_job_analyze_external_js_produces_external_js_findings() {
 
     let run = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        run_scan_job(
-            state.clone(),
-            id.clone(),
-            format!("http://{}/", addr),
-            opts,
-            false,
-            false,
-        ),
+        run_scan_job(state.clone(), id.clone(), format!("http://{}/", addr), opts),
     )
     .await;
     assert!(run.is_ok(), "run_scan_job must complete in time");
@@ -4316,8 +4249,6 @@ async fn test_run_scan_job_omits_user_agent_header_when_explicitly_empty() {
             max_payloads_per_param: Some(1),
             ..ScanOptions::default()
         },
-        false,
-        false,
     )
     .await;
 
@@ -4355,8 +4286,6 @@ async fn test_run_scan_job_honors_max_payloads_per_param() {
                 skip_ast_analysis: Some(true),
                 ..ScanOptions::default()
             },
-            false,
-            false,
         )
         .await;
         progress
@@ -5886,8 +5815,6 @@ async fn test_run_scan_job_populates_live_failure_counter() {
             id.clone(),
             format!("http://{addr}/?q=1"),
             opts,
-            false,
-            false,
         ),
     )
     .await;

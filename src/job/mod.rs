@@ -1255,12 +1255,6 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
-/// Send one request mirroring the scan's HTTP configuration (method, headers,
-/// cookies, User-Agent, body, proxy, timeout, redirects). Returns true iff a
-/// response came back — content/status are not inspected.
-///
-/// Used by preflight reachability probes so the result reflects what a real
-/// scan would see, not what a default reqwest client sees.
 /// True when `url` (after trimming) carries an `http`/`https` scheme. The
 /// scheme is matched case-insensitively because URI schemes are
 /// case-insensitive (RFC 3986 §3.1) and `parse_target` already lowercases the
@@ -1348,15 +1342,12 @@ where
     }
 }
 
-fn build_reachability_request(target: &Target) -> reqwest::RequestBuilder {
-    let client = target.build_client_or_default();
-    // Reachability is a preflight check, so mirror the CLI's bodyless HEAD
-    // instead of sending the caller's scan method/body (which can perform a
-    // write before scanning starts). Use the shared preflight builder to keep
-    // the configured headers, cookies, and User-Agent intact.
-    crate::utils::build_preflight_request(&client, target, true, None)
-}
-
+/// Send one request through the scan's HTTP configuration (headers, cookies,
+/// User-Agent, proxy, timeout, redirects). Returns true iff a response came
+/// back — content/status are not inspected.
+///
+/// Used by preflight reachability probes so the result reflects what a real
+/// scan would see, not what a default reqwest client sees.
 pub async fn send_reachability_probe(target: &Target) -> bool {
     send_reachability_probe_inner(target, None, None)
         .await
@@ -1411,8 +1402,14 @@ async fn send_reachability_probe_inner(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
+        // Reachability is a preflight check, so mirror the CLI's bodyless HEAD
+        // instead of sending the caller's scan method/body (which can perform a
+        // write before scanning starts). Use the shared preflight builder to keep
+        // the configured headers, cookies, and User-Agent intact.
+        let client = target.build_client_or_default();
+        let request = crate::utils::build_preflight_request(&client, target, true, None);
         let response = tokio::select! {
-            response = build_reachability_request(target).send() => response,
+            response = request.send() => response,
             _ = wait_for_cancellation(cancel_flag) => return None,
         };
         if cancelled() {
