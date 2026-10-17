@@ -84,6 +84,25 @@ impl<'a> DomXssVisitor<'a> {
             .contains(&callee.as_str())
             .then_some(callee)
     }
+    /// Source when `call` invokes a page function whose summary says it
+    /// returns tainted data for these arguments. Only the summary counts here,
+    /// not the "tainted argument taints the result" fallback: an unknown API
+    /// handed a tainted value resolves to whatever it resolves to.
+    pub(super) fn summary_return_source(&self, call: &CallExpression<'a>) -> Option<String> {
+        let key = self.get_summary_key_for_callee_expr(&call.callee)?;
+        let summary = self.function_summaries.get(&key)?;
+        if let Some(source) = &summary.return_without_tainted_params {
+            return Some(source.clone());
+        }
+        let alias = self.get_alias_for_callee_identifier(call);
+        summary
+            .tainted_param_returns
+            .iter()
+            .find_map(|(idx, fallback)| {
+                let (tainted, source) = self.resolve_param_argument_taint(call, alias, *idx);
+                tainted.then(|| source.unwrap_or_else(|| fallback.clone()))
+            })
+    }
     /// Recognise a `Promise` *static* combinator whose settled value carries
     /// taint from its argument — `Promise.resolve(x)`, and the array
     /// combinators `Promise.all/allSettled/race/any([… x …])`.
@@ -147,6 +166,7 @@ impl<'a> DomXssVisitor<'a> {
                     if self.is_fetch_call(inner)
                         || self.async_tainted_source_call(inner).is_some()
                         || self.promise_combinator_source(inner).is_some()
+                        || self.summary_return_source(inner).is_some()
                     {
                         return true;
                     }
@@ -207,13 +227,21 @@ impl<'a> DomXssVisitor<'a> {
         }
 
         // `Promise.resolve(tainted)` / `Promise.all([… tainted …])` settle to a
-        // value that carries the argument's taint into the next `.then`.
-        if let Some(source) = self.promise_combinator_source(call) {
+        // value that carries the argument's taint into the next `.then`, and so
+        // does a page helper whose summary returns taint
+        // (`async function getQ() { return params.get('q'); }`).
+        if let Some(source) = self
+            .promise_combinator_source(call)
+            .or_else(|| self.summary_return_source(call))
+        {
             for arg in &call.arguments {
                 if let Some(expr) = arg.as_expression() {
                     self.walk_expression(expr);
                 }
             }
+            // The chain driver replaces the ordinary call walk, so a helper's
+            // own parameter→sink flow has to be checked here.
+            self.handle_summary_and_sink_call(call);
             return PromiseValueKind::Tainted(source);
         }
 
@@ -307,9 +335,11 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let response_vars_checkpoint = self.response_object_vars.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
 
         if let Some(name) = &param_name {
             // A fresh parameter binding shadows any same-named outer state.
+            self.page_url_objects.remove(name);
             self.tainted_vars.remove(name);
             self.var_aliases.remove(name);
             self.response_object_vars.remove(name);
@@ -338,6 +368,7 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.response_object_vars.rollback(response_vars_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
 
         result_kind
     }

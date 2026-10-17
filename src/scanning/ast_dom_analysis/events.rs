@@ -17,6 +17,8 @@ impl<'a> DomXssVisitor<'a> {
         let tainted_checkpoint = self.tainted_vars.checkpoint();
         let aliases_checkpoint = self.var_aliases.checkpoint();
         let field_taints_checkpoint = self.field_taints.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
+        self.page_url_objects.remove(param_name);
 
         self.tainted_vars.insert(param_name.to_string());
         self.var_aliases
@@ -48,6 +50,79 @@ impl<'a> DomXssVisitor<'a> {
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.field_taints.rollback(field_taints_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
+    }
+    /// Walk a handler whose event parameter is destructured —
+    /// `({ data }) => …`. Only the properties that carry the untrusted value
+    /// for this event kind are tainted; `origin`, `source`, `type` and the
+    /// rest stay clean.
+    pub(super) fn walk_destructured_event_handler_body(
+        &mut self,
+        pattern: &ObjectPattern<'a>,
+        event_source: &str,
+        statements: &oxc_allocator::Vec<'a, Statement<'a>>,
+    ) {
+        let tainted_fields: &[&str] = match event_source {
+            "event.newValue" => &["newValue", "oldValue"],
+            "e.target.value" | "event.target.value" | "indexedDB" => &["target"],
+            "location.hash" => &["newURL", "oldURL"],
+            "history.state" => &["state"],
+            _ => &["data"],
+        };
+        let tainted_checkpoint = self.tainted_vars.checkpoint();
+        let aliases_checkpoint = self.var_aliases.checkpoint();
+        let field_taints_checkpoint = self.field_taints.checkpoint();
+        let page_url_checkpoint = self.page_url_objects.checkpoint();
+        let mut shadowed_globals = Vec::new();
+        for prop in &pattern.properties {
+            if self
+                .get_property_key_name(&prop.key)
+                .is_some_and(|key| tainted_fields.contains(&key.as_str()))
+            {
+                self.taint_binding_pattern(&prop.value, event_source);
+                continue;
+            }
+            // `({ origin }) => …` binds a clean `origin` over any outer one.
+            let mut names = Vec::new();
+            Self::collect_binding_pattern_names(&prop.value, &mut names);
+            for name in names {
+                self.page_url_objects.remove(name.as_str());
+                self.tainted_vars.remove(name.as_str());
+                self.var_aliases.remove(name.as_str());
+                if self.global_taints.remove(name.as_str()) {
+                    shadowed_globals.push(name);
+                }
+            }
+        }
+        self.walk_statements(statements);
+        self.tainted_vars.rollback(tainted_checkpoint);
+        self.var_aliases.rollback(aliases_checkpoint);
+        self.field_taints.rollback(field_taints_checkpoint);
+        self.page_url_objects.rollback(page_url_checkpoint);
+        for name in shadowed_globals {
+            self.global_taints.insert(name);
+        }
+    }
+    /// Walk a handler body with its first parameter bound as the event, in
+    /// either the plain (`e => …`) or destructured (`({ data }) => …`) form.
+    /// False when the parameter has neither shape.
+    pub(super) fn walk_event_handler_param(
+        &mut self,
+        param: Option<&FormalParameter<'a>>,
+        event_source: &str,
+        statements: &oxc_allocator::Vec<'a, Statement<'a>>,
+    ) -> bool {
+        match param.map(|p| &p.pattern) {
+            Some(BindingPattern::BindingIdentifier(id)) => {
+                self.walk_event_handler_body(id.name.as_str(), event_source, statements);
+                true
+            }
+            Some(BindingPattern::ObjectPattern(pattern)) => {
+                self.walk_destructured_event_handler_body(pattern, event_source, statements);
+                true
+            }
+            _ => false,
+        }
     }
     pub(super) fn message_event_source_for_receiver(&self, receiver: &Expression<'a>) -> String {
         // Descends a `.`-chain receiver outside the main walkers (reached from
@@ -154,25 +229,22 @@ impl<'a> DomXssVisitor<'a> {
 
         match right {
             Expression::FunctionExpression(func) => {
-                if let Some(param) = func.params.items.first()
-                    && let BindingPattern::BindingIdentifier(id) = &param.pattern
-                    && let Some(body) = &func.body
-                {
+                if let Some(body) = &func.body {
                     let event_source = self.message_event_source_for_receiver(receiver);
-                    self.walk_event_handler_body(id.name.as_str(), &event_source, &body.statements);
+                    self.walk_event_handler_param(
+                        func.params.items.first(),
+                        &event_source,
+                        &body.statements,
+                    );
                 }
             }
             Expression::ArrowFunctionExpression(arrow) => {
-                if let Some(param) = arrow.params.items.first()
-                    && let BindingPattern::BindingIdentifier(id) = &param.pattern
-                {
-                    let event_source = self.message_event_source_for_receiver(receiver);
-                    self.walk_event_handler_body(
-                        id.name.as_str(),
-                        &event_source,
-                        &arrow.body.statements,
-                    );
-                }
+                let event_source = self.message_event_source_for_receiver(receiver);
+                self.walk_event_handler_param(
+                    arrow.params.items.first(),
+                    &event_source,
+                    &arrow.body.statements,
+                );
             }
             Expression::Identifier(handler_id) => {
                 if let Some(sink_name) = self

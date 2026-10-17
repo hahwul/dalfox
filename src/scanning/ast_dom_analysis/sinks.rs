@@ -30,10 +30,35 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        // Assigning the `Location` object itself (`location = url`,
+        // `window.location = url`) navigates exactly like `location.href = url`.
+        let assigns_location = match &assign.left {
+            AssignmentTarget::StaticMemberExpression(member) => self
+                .get_member_string(member)
+                .is_some_and(|path| is_location_object_path(&path)),
+            AssignmentTarget::AssignmentTargetIdentifier(id) => {
+                id.name == "location" && !self.local_names.contains("location")
+            }
+            _ => false,
+        };
+        if assigns_location && right_tainted && !self.url_scheme_is_pinned(&assign.right) {
+            self.report_vulnerability_with_source(
+                assign.span(),
+                "location.href",
+                right_source.clone(),
+            );
+        }
+
         // Check if we're assigning to a sink property
         match &assign.left {
             AssignmentTarget::StaticMemberExpression(member) => {
                 let prop_name = member.property.name.as_str();
+                // `u.href = x` / `u.host = x` — no longer the page's own URL.
+                if !matches!(prop_name, "search" | "hash" | "searchParams")
+                    && let Expression::Identifier(obj_id) = &member.object
+                {
+                    self.page_url_objects.remove(obj_id.name.as_str());
+                }
                 self.analyze_onmessage_assignment(
                     assign.span(),
                     &member.object,
@@ -172,6 +197,11 @@ impl<'a> DomXssVisitor<'a> {
             }
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
+                if self.expr_is_page_url_object(&assign.right) {
+                    self.page_url_objects.insert(target_name.to_string());
+                } else {
+                    self.page_url_objects.remove(target_name);
+                }
                 if self.expr_resolves_to_image(&assign.right) {
                     self.image_element_vars.insert(target_name.to_string());
                 } else {
@@ -907,26 +937,26 @@ impl<'a> DomXssVisitor<'a> {
             // The second argument might be a function with event parameter
             if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
                 // Mark the first parameter as tainted (it's the event object)
-                if let Some(param) = func.params.items.first()
-                    && let BindingPattern::BindingIdentifier(id) = &param.pattern
-                    && let Some(body) = &func.body
+                if let Some(body) = &func.body
                     && let Some(event_source) = event_source.as_deref()
+                    && self.walk_event_handler_param(
+                        func.params.items.first(),
+                        event_source,
+                        &body.statements,
+                    )
                 {
-                    self.walk_event_handler_body(id.name.as_str(), event_source, &body.statements);
                     return true;
                 }
             }
             // Also handle arrow functions
             if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
-                && let Some(param) = arrow.params.items.first()
-                && let BindingPattern::BindingIdentifier(id) = &param.pattern
                 && let Some(event_source) = event_source.as_deref()
-            {
-                self.walk_event_handler_body(
-                    id.name.as_str(),
+                && self.walk_event_handler_param(
+                    arrow.params.items.first(),
                     event_source,
                     &arrow.body.statements,
-                );
+                )
+            {
                 return true;
             }
 
@@ -965,12 +995,9 @@ impl<'a> DomXssVisitor<'a> {
             && !self.jquery_arg_forces_selector(arg_expr)
         {
             let source = self.find_source_in_expr(arg_expr);
+            // A sink nested in the argument (`$(eval(location.hash))`) is
+            // reported by the argument walk at the end of `walk_call_expression`.
             self.report_vulnerability_with_source(call.span(), "jQuery$", source);
-            // Walk the (tainted) argument so a nested sink inside it — e.g.
-            // `$(eval(location.hash))` — is also reported; the trailing
-            // `walk_expression(&call.callee)` only descends the `$` callee,
-            // never the call's arguments.
-            self.walk_expression(arg_expr);
         }
     }
     /// `Object.assign(target, {...})` writing a sink property.
@@ -1034,18 +1061,8 @@ impl<'a> DomXssVisitor<'a> {
     /// True when `expr` denotes the `Location` object, in any of its global
     /// spellings.
     pub(super) fn expr_is_location_object(&self, expr: &Expression<'a>) -> bool {
-        matches!(
-            self.get_expr_string(expr).as_deref(),
-            Some(
-                "location"
-                    | "window.location"
-                    | "document.location"
-                    | "self.location"
-                    | "top.location"
-                    | "parent.location"
-                    | "globalThis.location"
-            )
-        )
+        self.get_expr_string(expr)
+            .is_some_and(|path| is_location_object_path(&path))
     }
     /// True when `expr` is an element the page just looked up or created.
     /// Deliberately narrow — the point is to separate a DOM node from a plain
@@ -1160,6 +1177,10 @@ impl<'a> DomXssVisitor<'a> {
             return;
         }
 
+        if self.handle_iife(call) {
+            return;
+        }
+
         if self.handle_object_assign_sink(call) {
             return;
         }
@@ -1197,53 +1218,119 @@ impl<'a> DomXssVisitor<'a> {
         // analyzed. The classic shape is a `setTimeout` / `setInterval` /
         // `requestAnimationFrame` / `queueMicrotask` body — e.g.
         // `setTimeout(function(){ el.innerHTML = location.search }, 0)`. The
-        // callback never runs at parse time, and the call's arguments are not
-        // walked anywhere else (the trailing `walk_expression(&call.callee)`
-        // only descends the callee), so without this the body is invisible.
+        // callback never runs at parse time, and the trailing
+        // `walk_expression(&call.callee)` only descends the callee, so this is
+        // where the arguments — callbacks and data alike — get walked.
         // Cases that own their callback walking (`addEventListener`, `.then`
         // chains, `Reflect.apply`, …) `return` early and never reach here.
         self.walk_callback_argument_bodies(call);
     }
     /// Walk function/arrow callbacks passed as call arguments, each with an
     /// isolated taint scope so a callback-local variable (`var q = …` inside
-    /// the callback) does not leak taint into the enclosing scope. Only
-    /// callback-shaped arguments are descended; data arguments keep their
-    /// existing taint-evaluation-only treatment.
+    /// the callback) does not leak taint into the enclosing scope. Data
+    /// arguments are walked as ordinary expressions.
     pub(super) fn walk_callback_argument_bodies(&mut self, call: &CallExpression<'a>) {
-        for arg in &call.arguments {
+        let element_seeds = self.iteration_callback_seeds(call);
+        for (idx, arg) in call.arguments.iter().enumerate() {
             if let Some(expr) = arg.as_expression() {
-                self.walk_callback_argument_expression(expr);
+                let seeds = if idx == 0 {
+                    element_seeds.as_slice()
+                } else {
+                    &[]
+                };
+                self.walk_callback_argument_expression(expr, seeds);
             }
         }
+    }
+    /// The callback parameter an iteration method fills with an element of a
+    /// tainted receiver — `[q].forEach(v => …)`, `params.forEach(v => …)`,
+    /// `list.reduce((acc, v) => …)` — as a seed for its body walk.
+    fn iteration_callback_seeds(&self, call: &CallExpression<'a>) -> Vec<(usize, String)> {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return Vec::new();
+        };
+        let element_param = match method.as_str() {
+            "forEach" | "map" | "flatMap" | "filter" | "find" | "findIndex" | "findLast"
+            | "findLastIndex" | "some" | "every" => 0,
+            "reduce" | "reduceRight" => 1,
+            _ => return Vec::new(),
+        };
+        let Some(receiver) = self.get_callee_object_expr(&call.callee) else {
+            return Vec::new();
+        };
+        if !self.is_tainted(receiver) {
+            return Vec::new();
+        }
+        let source = self
+            .find_source_in_expr(receiver)
+            .unwrap_or_else(|| "unknown source".to_string());
+        vec![(element_param, source)]
+    }
+    /// An immediately invoked function — `(function (v) { … })(location.hash)`
+    /// — runs its body with the call's arguments bound to its parameters,
+    /// which the generic callee walk (parameters shadowed, clean) cannot see.
+    pub(super) fn handle_iife(&mut self, call: &CallExpression<'a>) -> bool {
+        let mut callee = &call.callee;
+        while let Expression::ParenthesizedExpression(paren) = callee {
+            callee = &paren.expression;
+        }
+        let (params, statements) = match callee {
+            Expression::FunctionExpression(func) => match &func.body {
+                Some(body) => (&func.params, &body.statements),
+                None => return false,
+            },
+            Expression::ArrowFunctionExpression(arrow) => (&arrow.params, &arrow.body.statements),
+            _ => return false,
+        };
+        let seeds: Vec<(usize, String)> = call
+            .arguments
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, arg)| {
+                let (tainted, source) = self.argument_taint_and_source(arg);
+                tainted.then(|| (idx, source.unwrap_or_else(|| "unknown source".to_string())))
+            })
+            .collect();
+        self.walk_function_literal_body_seeded(params, statements, &seeds);
+        self.walk_callback_argument_bodies(call);
+        true
     }
     /// A callback reaches a call either directly (`setTimeout(fn)`) or as a
     /// property of an options object (`$.ajax({ success: fn })`) — the shape
     /// every jQuery/axios-style API uses. Both defer the body the same way, so
     /// both are descended; anything else is left to taint evaluation.
-    fn walk_callback_argument_expression(&mut self, expr: &Expression<'a>) {
+    ///
+    /// Any other argument is walked as an ordinary expression, so a sink call
+    /// nested in it (`el.appendChild(range.createContextualFragment(q))`) is
+    /// still seen.
+    fn walk_callback_argument_expression(
+        &mut self,
+        expr: &Expression<'a>,
+        seeds: &[(usize, String)],
+    ) {
         let Some(_guard) = self.enter_recursion() else {
             return;
         };
         match expr {
             Expression::FunctionExpression(func) => {
                 if let Some(body) = &func.body {
-                    self.walk_isolated_callback_body(&func.params, &body.statements);
+                    self.walk_isolated_callback_body(&func.params, &body.statements, seeds);
                 }
             }
             Expression::ArrowFunctionExpression(arrow) => {
-                self.walk_isolated_callback_body(&arrow.params, &arrow.body.statements);
+                self.walk_isolated_callback_body(&arrow.params, &arrow.body.statements, seeds);
             }
             Expression::ObjectExpression(object) => {
                 for property in &object.properties {
                     if let ObjectPropertyKind::ObjectProperty(property) = property {
-                        self.walk_callback_argument_expression(&property.value);
+                        self.walk_callback_argument_expression(&property.value, &[]);
                     }
                 }
             }
             Expression::ParenthesizedExpression(paren) => {
-                self.walk_callback_argument_expression(&paren.expression);
+                self.walk_callback_argument_expression(&paren.expression, seeds);
             }
-            _ => {}
+            _ => self.walk_expression(expr),
         }
     }
     /// A callback body additionally isolates `field_taints`: an argument
@@ -1253,12 +1340,27 @@ impl<'a> DomXssVisitor<'a> {
         &mut self,
         params: &FormalParameters<'a>,
         statements: &[Statement<'a>],
+        seeds: &[(usize, String)],
     ) {
         // A journal checkpoint, not a clone — see `walk_function_literal_body`.
         let field_taints_checkpoint = self.field_taints.checkpoint();
-        self.walk_function_literal_body(params, statements);
+        self.walk_function_literal_body_seeded(params, statements, seeds);
         self.field_taints.rollback(field_taints_checkpoint);
     }
+}
+
+/// The global spellings of the `Location` object.
+fn is_location_object_path(path: &str) -> bool {
+    matches!(
+        path,
+        "location"
+            | "window.location"
+            | "document.location"
+            | "self.location"
+            | "top.location"
+            | "parent.location"
+            | "globalThis.location"
+    )
 }
 
 /// `window.parseInt` → `parseInt`; other names unchanged.

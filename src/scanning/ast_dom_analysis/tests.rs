@@ -5418,6 +5418,7 @@ open.onsuccess = function (e) {
         "a named object-store variable should still resolve: {vulns:?}"
     );
 }
+mod dataflow_regressions;
 mod expression_regressions;
 mod hunt_regressions;
 mod library_fp_regressions;
