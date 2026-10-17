@@ -182,8 +182,8 @@ pub(crate) fn wave_tracker_shared(
 /// `ProgressBar::set_message`, so the parameter-mining code keeps working
 /// verbatim after swapping `Option<ProgressBar>` for `Option<ShimmerSpinner>`
 /// — and the `{wave}` key built by [`wave_tracker_shared`] over the same cell
-/// (see [`label_cell`](Self::label_cell)) shimmers whatever it holds. The
-/// remaining methods just delegate to the wrapped bar.
+/// shimmers whatever it holds. The remaining methods just delegate to the
+/// wrapped bar.
 #[derive(Clone)]
 pub struct ShimmerSpinner {
     bar: indicatif::ProgressBar,
@@ -195,12 +195,6 @@ impl ShimmerSpinner {
     /// `{wave}` via [`wave_tracker_shared`] over this same cell.
     pub fn new(bar: indicatif::ProgressBar, label: Arc<Mutex<String>>) -> Self {
         Self { bar, label }
-    }
-
-    /// The shared label cell, for wiring the `{wave}` tracker to this spinner.
-    #[cfg(test)]
-    pub(crate) fn label_cell(&self) -> Arc<Mutex<String>> {
-        self.label.clone()
     }
 
     /// The wrapped bar, e.g. to finish it via `scanning::finish_scan_bar`.

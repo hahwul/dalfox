@@ -4,7 +4,7 @@ use super::output::{
 };
 use super::poc::{generate_poc, render_finding_block};
 use super::postprocess::{dedupe_ast_results, extract_context};
-use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
+use super::preflight::{PreflightOutcome, preflight_content_type};
 use super::validation::validate_numeric_args;
 use super::{
     CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
@@ -15,6 +15,7 @@ use crate::REQUEST_COUNTER_TEST_LOCK as RUN_SCAN_LOCK;
 use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::scanning::result::{FindingType, Result as ScanResult};
 use crate::target_parser::{Target, parse_target};
+use crate::utils::is_xss_scannable_content_type;
 use crate::waf::bypass::{MutationStats, MutationType};
 use axum::Router;
 use axum::body::Body;
@@ -230,25 +231,27 @@ fn validate_numeric_args_rejects_waf_min_confidence_out_of_range() {
 
 #[test]
 fn test_allowed_content_types() {
-    assert!(is_allowed_content_type("text/html"));
-    assert!(is_allowed_content_type("text/html; charset=utf-8"));
-    assert!(is_allowed_content_type("application/xml"));
-    assert!(is_allowed_content_type("application/json"));
-    assert!(is_allowed_content_type("application/javascript"));
-    assert!(is_allowed_content_type("image/svg+xml"));
+    assert!(is_xss_scannable_content_type("text/html"));
+    assert!(is_xss_scannable_content_type("text/html; charset=utf-8"));
+    assert!(is_xss_scannable_content_type("application/xml"));
+    assert!(is_xss_scannable_content_type("application/json"));
+    assert!(is_xss_scannable_content_type("application/javascript"));
+    assert!(is_xss_scannable_content_type("image/svg+xml"));
 }
 
 #[test]
 fn test_denied_content_types() {
-    assert!(!is_allowed_content_type("image/png"));
-    assert!(!is_allowed_content_type("application/octet-stream"));
+    assert!(!is_xss_scannable_content_type("image/png"));
+    assert!(!is_xss_scannable_content_type("application/octet-stream"));
 }
 
 #[test]
 fn test_edge_cases() {
-    assert!(!is_allowed_content_type(""));
-    assert!(!is_allowed_content_type("invalid"));
-    assert!(is_allowed_content_type("application/json; charset=utf-8"));
+    assert!(!is_xss_scannable_content_type(""));
+    assert!(!is_xss_scannable_content_type("invalid"));
+    assert!(is_xss_scannable_content_type(
+        "application/json; charset=utf-8"
+    ));
 }
 
 #[test]

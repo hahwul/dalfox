@@ -62,13 +62,8 @@ fn test_parse_header_line_invalid_cases() {
 
 #[test]
 fn test_parse_headers_filters_invalid_entries() {
-    let input = vec![
-        "X-One: 1".to_string(),
-        "BrokenHeader".to_string(),
-        ": missing-name".to_string(),
-        "X-Two: 2".to_string(),
-    ];
-    let parsed = parse_headers(&input);
+    let input = ["X-One: 1", "BrokenHeader", ": missing-name", "X-Two: 2"];
+    let parsed: Vec<_> = input.into_iter().filter_map(parse_header_line).collect();
     assert_eq!(parsed.len(), 2);
     assert_eq!(parsed[0], ("X-One".to_string(), "1".to_string()));
     assert_eq!(parsed[1], ("X-Two".to_string(), "2".to_string()));

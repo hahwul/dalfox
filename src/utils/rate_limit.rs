@@ -34,11 +34,9 @@ pub(crate) const EVASION_FLOOR_MS: u64 = 150;
 ///
 /// Implemented as a GCRA (Generic Cell Rate Algorithm) limiter: it tracks a
 /// single "theoretical arrival time" (TAT) for the next conforming request
-/// and spaces grants by `interval = 1 / rate`. A configurable `tolerance`
-/// allows a short initial burst before steady-state pacing applies; the
-/// default ([`per_second`](RateLimiter::per_second)) uses a burst of one,
-/// i.e. strict even spacing — the safest choice for shared-IP WAF thresholds
-/// and the whole reason this type exists.
+/// and spaces grants by `interval = 1 / rate` with a burst of one, i.e.
+/// strict even spacing — the safest choice for shared-IP WAF thresholds and
+/// the whole reason this type exists.
 ///
 /// `acquire` is `async` and safe to call from many tasks at once: each call
 /// reserves a distinct future slot, so concurrent workers wake staggered by
@@ -47,9 +45,6 @@ pub(crate) const EVASION_FLOOR_MS: u64 = 150;
 pub(crate) struct RateLimiter {
     /// Minimum spacing between grants (`1 / rate`).
     interval: Duration,
-    /// Burst tolerance: a request may be admitted up to this far ahead of the
-    /// theoretical schedule. Zero means strict even spacing.
-    tolerance: Duration,
     /// GCRA theoretical arrival time of the next request.
     tat: Mutex<Instant>,
 }
@@ -60,23 +55,14 @@ impl RateLimiter {
     /// "unlimited" as "no limiter installed" and pay zero overhead on the
     /// hot path.
     pub(crate) fn per_second(rate: u32) -> Option<Arc<Self>> {
-        Self::with_burst(rate, 1)
-    }
-
-    /// Build a limiter for `rate` requests/second allowing up to `burst`
-    /// requests to fire back-to-back before steady-state pacing applies.
-    /// `burst` is clamped to at least 1. Returns `None` when `rate == 0`.
-    pub(crate) fn with_burst(rate: u32, burst: u32) -> Option<Arc<Self>> {
         if rate == 0 {
             return None;
         }
         // nanos-per-request; rate >= 1 so this never divides by zero and is
         // at most 1e9 (1 req/s) — well within Duration's range.
         let interval = Duration::from_nanos(1_000_000_000u64 / rate as u64);
-        let tolerance = interval.saturating_mul(burst.max(1) - 1);
         Some(Arc::new(Self {
             interval,
-            tolerance,
             tat: Mutex::new(Instant::now()),
         }))
     }
@@ -99,18 +85,14 @@ impl RateLimiter {
         // is a single Instant, so recovering the inner value is safe.
         let mut tat = self.tat.lock().unwrap_or_else(|p| p.into_inner());
 
-        // A request conforms when it arrives at or after `tat - tolerance`.
-        let earliest = tat.checked_sub(self.tolerance).unwrap_or(now);
-        if now >= earliest {
-            // Conforming: advance TAT from whichever is later of the stored
-            // TAT and now (an idle gap collapses back to `now`, so idle time
-            // never accumulates burst credit beyond `tolerance`).
-            let base = if *tat > now { *tat } else { now };
-            *tat = base + self.interval;
+        if now >= *tat {
+            // Conforming: an idle gap collapses TAT back to `now`, so idle
+            // time never accumulates burst credit.
+            *tat = now + self.interval;
             Duration::ZERO
         } else {
             // Too early: wait until the slot opens and reserve it.
-            let wait = earliest.saturating_duration_since(now);
+            let wait = tat.saturating_duration_since(now);
             *tat += self.interval;
             wait
         }

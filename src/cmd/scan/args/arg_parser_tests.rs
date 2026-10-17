@@ -330,6 +330,74 @@ fn force_waf_arg_normalizes_known_alias() {
 }
 
 #[test]
+fn force_waf_arg_accepts_exactly_the_waf_alias_set() {
+    // The alias list `parse_force_waf_arg` used to carry inline.
+    let aliases = [
+        "cloudflare",
+        "cf",
+        "aws",
+        "awswaf",
+        "aws-waf",
+        "akamai",
+        "imperva",
+        "incapsula",
+        "modsecurity",
+        "modsec",
+        "owasp-crs",
+        "owaspcrs",
+        "crs",
+        "sucuri",
+        "f5",
+        "bigip",
+        "f5-bigip",
+        "barracuda",
+        "fortiweb",
+        "forti",
+        "azure",
+        "azurewaf",
+        "azure-waf",
+        "cloudarmor",
+        "cloud-armor",
+        "gcp",
+        "fastly",
+        "wordfence",
+        "citrix",
+        "netscaler",
+    ];
+    for a in aliases {
+        assert_eq!(parse_force_waf_arg(a).unwrap(), a);
+        assert_eq!(
+            parse_force_waf_arg(&format!(" {} ", a.to_uppercase())).unwrap(),
+            a
+        );
+    }
+    for bad in [
+        "",
+        " ",
+        "unknown",
+        "cloudflair",
+        "aws waf",
+        "modsecurity2",
+        "Ｃloudflare",
+    ] {
+        assert_eq!(
+            parse_force_waf_arg(bad).unwrap_err(),
+            format!(
+                "unknown WAF '{bad}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence, citrix)"
+            )
+        );
+    }
+}
+
+#[test]
+fn http_method_arg_error_text_is_stable() {
+    assert_eq!(
+        parse_http_method_arg(" trace ").unwrap_err(),
+        "unsupported HTTP method 'TRACE' (expected one of: GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, QUERY)"
+    );
+}
+
+#[test]
 fn force_waf_arg_rejects_unknown() {
     let err = parse_force_waf_arg("notawaf").unwrap_err();
     assert!(err.contains("unknown WAF"), "got: {}", err);

@@ -227,18 +227,23 @@ impl<'a> FindingAttributionIndex<'a> {
     }
 }
 
-/// Fetch both remote lists, **not** short-circuiting on the first failure, and
-/// report every failure together.
+/// Initialize remote resources with explicit options (timeout/proxy).
+/// Use this in contexts (like server jobs) where you want to honor user/network options.
 ///
-/// The `?`-chained version stopped at the first error, which mattered once an
-/// all-failed fetch started returning `Err` instead of caching an empty list: a
-/// payload-provider outage silently skipped the wordlist fetch too, so a scan
-/// that asked for both lost the one that was actually reachable.
-async fn fetch_both(
+/// Fetches both remote lists, **not** short-circuiting on the first failure,
+/// and reports every failure together: a `?`-chained version stopped at the
+/// first error, so a payload-provider outage silently skipped the wordlist
+/// fetch too, and a scan that asked for both lost the one that was reachable.
+pub async fn init_remote_resources_with_options(
     payload_providers: &[String],
     wordlist_providers: &[String],
-    opts: crate::payload::RemoteFetchOptions,
+    timeout_secs: Option<u64>,
+    proxy: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let opts = crate::payload::RemoteFetchOptions {
+        timeout_secs,
+        proxy,
+    };
     let mut errors: Vec<String> = Vec::new();
     if !payload_providers.is_empty()
         && let Err(e) =
@@ -256,21 +261,6 @@ async fn fetch_both(
     } else {
         Err(errors.join("; ").into())
     }
-}
-
-/// Initialize remote resources with explicit options (timeout/proxy).
-/// Use this in contexts (like server jobs) where you want to honor user/network options.
-pub async fn init_remote_resources_with_options(
-    payload_providers: &[String],
-    wordlist_providers: &[String],
-    timeout_secs: Option<u64>,
-    proxy: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let opts = crate::payload::RemoteFetchOptions {
-        timeout_secs,
-        proxy,
-    };
-    fetch_both(payload_providers, wordlist_providers, opts).await
 }
 
 #[cfg(test)]

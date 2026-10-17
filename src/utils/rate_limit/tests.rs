@@ -15,8 +15,6 @@ fn interval_matches_rate() {
     // 10 req/s => 100ms spacing.
     let limiter = RateLimiter::per_second(10).unwrap();
     assert_eq!(limiter.interval, Duration::from_millis(100));
-    // strict spacing by default (burst of 1) => no tolerance window.
-    assert_eq!(limiter.tolerance, Duration::ZERO);
 }
 
 #[test]
@@ -56,20 +54,6 @@ fn idle_does_not_accumulate_burst_credit() {
     );
     // The next back-to-back request still pays a full interval.
     assert_eq!(limiter.reserve(later), Duration::from_millis(200));
-}
-
-#[test]
-fn burst_tolerance_allows_initial_burst_then_paces() {
-    // burst=3 lets three requests through immediately, then steady pacing.
-    let limiter = RateLimiter::with_burst(10, 3).unwrap(); // 100ms interval, 200ms tolerance
-    let now = Instant::now();
-
-    assert_eq!(limiter.reserve(now), Duration::ZERO);
-    assert_eq!(limiter.reserve(now), Duration::ZERO);
-    assert_eq!(limiter.reserve(now), Duration::ZERO);
-    // Fourth request must wait: the burst window is exhausted.
-    assert_eq!(limiter.reserve(now), Duration::from_millis(100));
-    assert_eq!(limiter.reserve(now), Duration::from_millis(200));
 }
 
 #[tokio::test]
