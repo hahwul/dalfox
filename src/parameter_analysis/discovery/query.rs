@@ -148,9 +148,7 @@ pub async fn check_query_discovery(
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
-            crate::record_outbound_request().await;
-            if let Ok(resp) = crate::utils::http::send_counted(request).await
-                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
+            if let Some(text) = crate::parameter_analysis::fetch_text(request).await
                 && crate::scanning::markers::probe_reflected(&text)
             {
                 // For pre-encoded params (base64/2base64), skip special char
@@ -219,9 +217,7 @@ pub async fn check_query_discovery(
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
-            crate::record_outbound_request().await;
-            if let Ok(resp) = crate::utils::http::send_counted(request).await
-                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
+            if let Some(text) = crate::parameter_analysis::fetch_text(request).await
                 && crate::scanning::markers::probe_reflected(&text)
             {
                 discovered_names.insert(display_name.clone());
@@ -265,9 +261,7 @@ pub async fn check_query_discovery(
             let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let m = target.parse_method();
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
-            crate::record_outbound_request().await;
-            if let Ok(resp) = crate::utils::http::send_counted(request).await
-                && let Ok(text) = crate::utils::http::read_body_counted(resp).await
+            if let Some(text) = crate::parameter_analysis::fetch_text(request).await
                 && text.contains(numeric_marker)
             {
                 discovered_names.insert(name.clone());
@@ -305,9 +299,7 @@ pub async fn check_query_discovery(
         let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
         let m = target.parse_method();
         let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
-        crate::record_outbound_request().await;
-        if let Ok(resp) = crate::utils::http::send_counted(request).await
-            && let Ok(text) = crate::utils::http::read_body_counted(resp).await
+        if let Some(text) = crate::parameter_analysis::fetch_text(request).await
             && crate::scanning::markers::probe_reflected(&text)
         {
             batch.push(

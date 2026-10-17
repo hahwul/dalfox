@@ -38,20 +38,6 @@ use serde_json::{self, Value};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
-/// Parameters after Stage 1 (Discovery) and Stage 2 (Mining).
-/// Each `Param` has naive `valid_specials`/`invalid_specials` and a tentative
-/// `injection_context`, but `pre_encoding` is still `None`.
-// Named for the stage contract documented in `lib.rs`'s pipeline table; both
-// are plain `Vec<Param>`, so nothing needs to construct them by name.
-#[allow(dead_code)]
-pub(crate) type DiscoveredParams = Vec<Param>;
-
-/// Parameters after Stage 3 (Active Probing).
-/// Each `Param` now carries actively confirmed `valid_specials`/`invalid_specials`,
-/// a refined `injection_context`, and auto-detected `pre_encoding`.
-#[allow(dead_code)]
-pub(crate) type ProbedParams = Vec<Param>;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Location {
     Query,
@@ -540,28 +526,21 @@ pub(crate) fn encoded_variants(c: char) -> Vec<&'static str> {
     }
 }
 
-/// Byte offset of the first ASCII-case-insensitive occurrence of `needle` in
-/// `haystack`, or `None`.
+/// Byte offset of the first ASCII-case-insensitive occurrence of a non-empty
+/// `needle` in `haystack`.
 ///
 /// Markers are `dlx`/`xld` plus 8 hex digits, so case-folding them cannot
 /// collide with anything else in a response — while a server that
 /// case-normalizes reflected input (title-case, `upcase`, `downcase`) breaks an
 /// exact-case `find` and makes the marker look filtered.
 fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
-    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
-    if n.is_empty() {
-        return Some(0);
-    }
-    if h.len() < n.len() {
-        return None;
-    }
-    h.windows(n.len()).position(|w| w.eq_ignore_ascii_case(n))
+    crate::utils::html::find_ascii_case_insensitive(haystack.as_bytes(), 0, needle.as_bytes())
 }
 
 /// Whether `body` carries either probe marker, matched case-insensitively.
 fn body_has_probe_marker(body: &str) -> bool {
-    contains_ascii_ci(body, crate::scanning::markers::open_marker())
-        || contains_ascii_ci(body, crate::scanning::markers::close_marker())
+    find_ascii_ci(body, crate::scanning::markers::open_marker()).is_some()
+        || find_ascii_ci(body, crate::scanning::markers::close_marker()).is_some()
 }
 
 /// Extract segment between first open marker and subsequent close marker.
@@ -738,25 +717,7 @@ fn char_reflected_in_segment(segment: &str, c: char) -> bool {
     // the bytes case-insensitively instead so the hot probe path allocates only
     // the tiny needle.
     let pct = format!("%{:02X}", c as u32);
-    if contains_ascii_ci(segment, &pct) {
-        return true;
-    }
-    false
-}
-
-/// ASCII-case-insensitive substring search without allocating either operand.
-/// Used on the active-probe hot path where the alternative
-/// (`haystack.to_ascii_uppercase().contains(needle)`) copied the whole haystack
-/// once per probed character.
-fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
-    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
-    if n.is_empty() {
-        return true;
-    }
-    if h.len() < n.len() {
-        return false;
-    }
-    h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
+    find_ascii_ci(segment, &pct).is_some()
 }
 
 /// Active probe for one parameter. Sends a single **batched** probe carrying
@@ -1785,6 +1746,49 @@ pub(crate) async fn extend_with_joined(
     if !batch.is_empty() {
         reflection_params.lock().await.extend(batch);
     }
+}
+
+/// Send one counted request and read its body; `None` on a send or read error.
+pub(crate) async fn fetch_text(request: reqwest::RequestBuilder) -> Option<String> {
+    crate::record_outbound_request().await;
+    let resp = crate::utils::http::send_counted(request).await.ok()?;
+    crate::utils::http::read_body_counted(resp).await.ok()
+}
+
+/// Spawn one discovery/mining reflection probe. Under a `semaphore` permit it
+/// builds the request (`None` aborts without pacing), sends it, and turns a
+/// marker-reflecting body into a param via `make_param`; then sleeps `delay`
+/// ms, releases the permit and ticks `pb`.
+pub(crate) fn spawn_reflection_probe<B, P>(
+    semaphore: Arc<Semaphore>,
+    delay: u64,
+    pb: Option<crate::utils::shimmer::ShimmerSpinner>,
+    build_request: B,
+    make_param: P,
+) -> tokio::task::JoinHandle<Option<Param>>
+where
+    B: FnOnce() -> Option<reqwest::RequestBuilder> + Send + 'static,
+    P: FnOnce(&str) -> Param + Send + 'static,
+{
+    tokio::spawn(crate::with_job_scopes(
+        crate::JobScopes::capture(),
+        async move {
+            let permit = semaphore.acquire().await.expect("acquire semaphore permit");
+            let request = build_request()?;
+            let discovered = fetch_text(request)
+                .await
+                .filter(|text| crate::scanning::markers::probe_reflected(text))
+                .map(|text| make_param(&text));
+            if delay > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+            }
+            drop(permit);
+            if let Some(ref pb) = pb {
+                pb.inc(1);
+            }
+            discovered
+        },
+    ))
 }
 
 #[cfg(test)]

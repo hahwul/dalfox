@@ -26,105 +26,67 @@ pub(crate) async fn start_scan_handler(
     // is now consistent across happy and error paths for clients.
     req: Result<Json<ScanRequest>, JsonRejection>,
 ) -> impl IntoResponse {
-    if let Err(denied) = authorize_request(&state, &headers) {
-        log(&state, "AUTH", &denied.log_message("/scan"));
-        return make_api_response(
-            &state,
-            &headers,
-            &params,
-            denied.status(),
-            &denied.api_response(),
-        );
+    let r = Reply::new(&state, &headers, &params);
+    if let Some(refused) = r.authorize("/scan").await {
+        return refused;
     }
 
-    purge_expired_jobs(&state).await;
-
     let req = match req {
-        Ok(Json(r)) => r,
+        Ok(Json(req)) => req,
         Err(rej) => {
-            return api_error(
-                &state,
-                &headers,
-                &params,
-                json_rejection_status(&rej),
-                format!("invalid request body: {}", rej),
-            );
+            let msg = format!("invalid request body: {}", rej);
+            return r.err(json_rejection_status(&rej), msg);
         }
     };
 
     // Trim once and use the trimmed value throughout (validation, scan_id,
     // stored target, dispatch) so whitespace variants stay consistent.
     let url = req.target.trim().to_string();
-    if url.is_empty() {
-        return api_error(
-            &state,
-            &headers,
-            &params,
-            StatusCode::BAD_REQUEST,
-            "target is required",
-        );
+    if let Err(msg) = check_scan_target(&url) {
+        return r.err(StatusCode::BAD_REQUEST, msg);
     }
-    // Require an http(s) scheme, matching /preflight and the MCP scan tool.
-    // Without this, a garbage target (e.g. "ftp://x" or a bare host) was
-    // queued and "scanned", silently finishing as `done` with 0 findings —
-    // indistinguishable from a real target that simply had no XSS.
-    if !has_http_scheme(&url) {
-        return api_error(
-            &state,
-            &headers,
-            &params,
-            StatusCode::BAD_REQUEST,
-            "target must start with http:// or https://",
-        );
-    }
-    if let Err(msg) = crate::job::check_target_parses(&url) {
-        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
-    }
+    queue_scan(&r, url, req.options.unwrap_or_default()).await
+}
 
+/// Target checks shared by POST and GET /scan. The http(s) scheme requirement
+/// matches /preflight and the MCP scan tool: without it a garbage target (e.g.
+/// "ftp://x" or a bare host) was queued and "scanned", silently finishing as
+/// `done` with 0 findings — indistinguishable from a real target that simply
+/// had no XSS.
+fn check_scan_target(url: &str) -> Result<(), String> {
+    if url.is_empty() {
+        return Err("target is required".to_string());
+    }
+    if !has_http_scheme(url) {
+        return Err("target must start with http:// or https://".to_string());
+    }
+    crate::job::check_target_parses(url)
+}
+
+/// Shared tail of POST and GET /scan: validate, admit, dispatch.
+async fn queue_scan(r: &Reply<'_>, url: String, mut opts: ScanOptions) -> ApiReply {
     // `&mut`: validation also normalizes (e.g. uppercases `method`), and the
     // normalized options are what gets dispatched to the scan below.
-    let mut opts = req.options.clone().unwrap_or_default();
     if let Err(msg) = validate_scan_options(&mut opts) {
-        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
+        return r.err(StatusCode::BAD_REQUEST, msg);
     }
-    let include_request = opts.include_request.unwrap_or(false);
-    let include_response = opts.include_response.unwrap_or(false);
-    let callback_url = opts.callback_url.clone();
 
     // Reserve a unique scan_id and insert the queued job under one lock so a
     // same-target resubmission in the same nanosecond can't clobber an
     // in-flight job (see make_scan_id's nonce), and so the concurrency cap is
     // checked race-free against the live job count. 503 when at capacity.
-    let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
-        Some(admitted) => admitted,
-        None => {
-            return api_error(
-                &state,
-                &headers,
-                &params,
-                StatusCode::SERVICE_UNAVAILABLE,
-                at_capacity_message(&state),
-            );
-        }
+    let callback_url = opts.callback_url.clone();
+    let Some((id, lease)) = try_admit_and_queue(r.state, &url, callback_url).await else {
+        return r.err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            at_capacity_message(r.state),
+        );
     };
-    log(&state, "JOB", &format!("queued id={} url={}", id, url));
+    log(r.state, "JOB", &format!("queued id={} url={}", id, url));
 
-    spawn_scan_task(
-        state.clone(),
-        id.clone(),
-        url.clone(),
-        opts,
-        include_request,
-        include_response,
-        lease,
-    );
-
-    api_ok(
-        &state,
-        &headers,
-        &params,
-        serde_json::json!({ "scan_id": id, "target": url }),
-    )
+    let body = serde_json::json!({ "scan_id": id, "target": url });
+    spawn_scan_task(r.state.clone(), id, url, opts, lease);
+    r.ok(body)
 }
 
 pub(crate) async fn get_result_handler(
@@ -133,18 +95,10 @@ pub(crate) async fn get_result_handler(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if let Err(denied) = authorize_request(&state, &headers) {
-        log(&state, "AUTH", &denied.log_message("/result"));
-        return make_api_response(
-            &state,
-            &headers,
-            &params,
-            denied.status(),
-            &denied.api_response(),
-        );
+    let r = Reply::new(&state, &headers, &params);
+    if let Some(refused) = r.authorize("/result").await {
+        return refused;
     }
-
-    purge_expired_jobs(&state).await;
 
     let job = {
         let jobs = state.jobs.lock().await;
@@ -174,15 +128,9 @@ pub(crate) async fn get_result_handler(
             if j.is_terminal() {
                 log(&state, "RESULT", &format!("id={} status={}", id, j.status));
             }
-            api_ok(&state, &headers, &params, payload)
+            r.ok(payload)
         }
-        None => api_error(
-            &state,
-            &headers,
-            &params,
-            StatusCode::NOT_FOUND,
-            "not found",
-        ),
+        None => r.err(StatusCode::NOT_FOUND, "not found"),
     }
 }
 
@@ -285,18 +233,10 @@ pub(crate) async fn get_scan_handler(
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if let Err(denied) = authorize_request(&state, &headers) {
-        log(&state, "AUTH", &denied.log_message("/scan"));
-        return make_api_response(
-            &state,
-            &headers,
-            &params,
-            denied.status(),
-            &denied.api_response(),
-        );
+    let r = Reply::new(&state, &headers, &params);
+    if let Some(refused) = r.authorize("/scan").await {
+        return refused;
     }
-
-    purge_expired_jobs(&state).await;
 
     // Trim once and use the trimmed value throughout, so whitespace variants
     // of the same URL validate, hash to the same scan_id, and store the same
@@ -314,180 +254,71 @@ pub(crate) async fn get_scan_handler(
         .unwrap_or_default()
         .trim()
         .to_string();
-    if url.is_empty() {
-        return api_error(
-            &state,
-            &headers,
-            &params,
-            StatusCode::BAD_REQUEST,
-            "target is required",
-        );
+    if let Err(msg) = check_scan_target(&url) {
+        return r.err(StatusCode::BAD_REQUEST, msg);
     }
-    // Require an http(s) scheme, matching POST /scan, /preflight, and MCP.
-    if !has_http_scheme(&url) {
-        return api_error(
-            &state,
-            &headers,
-            &params,
-            StatusCode::BAD_REQUEST,
-            "target must start with http:// or https://",
-        );
+    match scan_options_from_query(&params) {
+        Ok(opts) => queue_scan(&r, url, opts).await,
+        Err(msg) => r.err(StatusCode::BAD_REQUEST, msg),
     }
-    if let Err(msg) = crate::job::check_target_parses(&url) {
-        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
-    }
+}
 
-    // Build ScanOptions from query parameters
-    let headers_param = params.get("header").cloned().unwrap_or_default();
-    let opt_headers: Vec<String> = split_header_query_param(&headers_param);
-    let encoders: Vec<String> = params
-        .get("encoders")
-        .filter(|s| !s.is_empty())
-        .map(|s| split_csv(s))
-        .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]);
-    let cookie = params.get("cookie").cloned();
-    // A present-but-unparseable numeric query param is a 400, not a silent
-    // fallback to the default (which is what `.parse().ok()` used to do).
-    // Types infer from the `parse_num_query` turbofishes — worker:usize,
-    // delay/timeout/scan_timeout:u64, rate_limit:u32, each wrapped in Option.
-    let (worker, delay, timeout, rate_limit, scan_timeout, max_payloads_per_param) = match (
-        parse_num_query::<usize>(&params, "worker"),
-        parse_num_query::<u64>(&params, "delay"),
-        parse_num_query::<u64>(&params, "timeout"),
-        parse_num_query::<u32>(&params, "rate_limit"),
-        parse_num_query::<u64>(&params, "scan_timeout"),
-        parse_num_query::<usize>(&params, "max_payloads_per_param"),
-    ) {
-        (Ok(w), Ok(d), Ok(t), Ok(rl), Ok(st), Ok(mp)) => (w, d, t, rl, st, mp),
-        (Err(msg), ..)
-        | (_, Err(msg), ..)
-        | (_, _, Err(msg), ..)
-        | (_, _, _, Err(msg), ..)
-        | (_, _, _, _, Err(msg), _)
-        | (.., Err(msg)) => {
-            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
-        }
-    };
-    let blind = params.get("blind").cloned();
-    let blind_oob_wait = match parse_num_query::<u64>(&params, "blind_oob_wait") {
-        Ok(v) => v,
-        Err(msg) => {
-            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
-        }
-    };
-    let method = params
-        .get("method")
-        .cloned()
-        .unwrap_or_else(|| "GET".to_string());
-    let data_opt = params.get("data").cloned();
-    let user_agent = params.get("user_agent").cloned();
+/// `ScanOptions` from the `GET /scan` query. A present-but-unparseable number
+/// is an `Err` (a 400) naming the first bad key in the order below, not a silent
+/// fallback to the default (which is what `.parse().ok()` used to do). Absent
+/// keys stay `None` and take the JSON body's defaults.
+fn scan_options_from_query(params: &HashMap<String, String>) -> Result<ScanOptions, String> {
+    let s = |k: &str| params.get(k).cloned();
+    let csv = |k: &str| params.get(k).map(|v| split_csv(v));
     // Lenient boolean parse (1/true/yes/on) shared with DELETE; see parse_bool_query.
-    let include_request = parse_bool_query(&params, "include_request");
-    let include_response = parse_bool_query(&params, "include_response");
-
-    let param_list: Option<Vec<String>> = params.get("param").map(|s| split_csv(s));
-    let proxy = params.get("proxy").cloned();
-    let follow_redirects = parse_bool_query(&params, "follow_redirects");
-    let skip_mining = parse_bool_query(&params, "skip_mining");
-    let skip_discovery = parse_bool_query(&params, "skip_discovery");
-    let deep_scan = parse_bool_query(&params, "deep_scan");
-    let skip_ast_analysis = parse_bool_query(&params, "skip_ast_analysis");
-    let analyze_external_js = parse_bool_query(&params, "analyze_external_js");
-    let detect_outdated_libs = parse_bool_query(&params, "detect_outdated_libs");
-    let waf_bypass = params.get("waf_bypass").cloned();
-    let skip_waf_probe = parse_opt_bool_query(&params, "skip_waf_probe");
-    let force_waf = params.get("force_waf").cloned();
-    let waf_evasion = parse_opt_bool_query(&params, "waf_evasion");
-    // Present-but-unparseable is a 400 (same policy as the numeric params
-    // above); the [0.0, 1.0] range is enforced by `validate_scan_options`.
-    let waf_min_confidence = match parse_num_query::<f32>(&params, "waf_min_confidence") {
-        Ok(v) => v,
-        Err(msg) => {
-            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
-        }
-    };
-
-    let mut opts = ScanOptions {
-        cookie,
-        worker,
-        delay,
-        timeout,
-        blind,
-        header: Some(opt_headers),
-        method: Some(method),
-        data: data_opt,
-        user_agent,
-        encoders: Some(encoders),
-        remote_payloads: params.get("remote_payloads").map(|s| split_csv(s)),
-        remote_wordlists: params.get("remote_wordlists").map(|s| split_csv(s)),
-        include_request: Some(include_request),
-        include_response: Some(include_response),
-        callback_url: params.get("callback_url").cloned(),
-        param: param_list,
-        proxy,
+    let flag = |k: &str| parse_opt_bool_query(params, k);
+    Ok(ScanOptions {
+        worker: parse_num_query(params, "worker")?,
+        delay: parse_num_query(params, "delay")?,
+        timeout: parse_num_query(params, "timeout")?,
+        rate_limit: parse_num_query(params, "rate_limit")?,
+        scan_timeout: parse_num_query(params, "scan_timeout")?,
+        max_payloads_per_param: parse_num_query(params, "max_payloads_per_param")?,
+        blind_oob_wait: parse_num_query(params, "blind_oob_wait")?,
+        // The [0.0, 1.0] range is enforced by `validate_scan_options`.
+        waf_min_confidence: parse_num_query(params, "waf_min_confidence")?,
+        cookie: s("cookie"),
+        blind: s("blind"),
+        header: params.get("header").map(|h| split_header_query_param(h)),
+        method: s("method"),
+        data: s("data"),
+        user_agent: s("user_agent"),
+        // An empty `?encoders=` is "unset", not "no encoders".
+        encoders: params
+            .get("encoders")
+            .filter(|v| !v.is_empty())
+            .map(|v| split_csv(v)),
+        remote_payloads: csv("remote_payloads"),
+        remote_wordlists: csv("remote_wordlists"),
+        include_request: flag("include_request"),
+        include_response: flag("include_response"),
+        callback_url: s("callback_url"),
+        param: csv("param"),
+        proxy: s("proxy"),
         // Absent ?insecure leaves None so the scan path applies its
         // insecure-by-default; ?insecure=false opts into TLS validation.
-        insecure: parse_opt_bool_query(&params, "insecure"),
-        follow_redirects: Some(follow_redirects),
-        skip_mining: Some(skip_mining),
-        skip_discovery: Some(skip_discovery),
-        deep_scan: Some(deep_scan),
-        skip_ast_analysis: Some(skip_ast_analysis),
-        analyze_external_js: Some(analyze_external_js),
-        detect_outdated_libs: Some(detect_outdated_libs),
-        waf_bypass,
-        skip_waf_probe,
-        force_waf,
-        waf_evasion,
-        waf_min_confidence,
-        min_confidence: params.get("min_confidence").cloned(),
-        rate_limit,
-        scan_timeout,
-        max_payloads_per_param,
+        insecure: flag("insecure"),
+        follow_redirects: flag("follow_redirects"),
+        skip_mining: flag("skip_mining"),
+        skip_discovery: flag("skip_discovery"),
+        deep_scan: flag("deep_scan"),
+        skip_ast_analysis: flag("skip_ast_analysis"),
+        analyze_external_js: flag("analyze_external_js"),
+        detect_outdated_libs: flag("detect_outdated_libs"),
+        waf_bypass: s("waf_bypass"),
+        skip_waf_probe: flag("skip_waf_probe"),
+        force_waf: s("force_waf"),
+        waf_evasion: flag("waf_evasion"),
+        min_confidence: s("min_confidence"),
         blind_oob: params.get("blind_oob").and_then(|v| blind_oob_query(v)),
-        blind_oob_wait,
-        session_check: params.get("session_check").cloned(),
-        session_check_url: params.get("session_check_url").cloned(),
-    };
-
-    if let Err(msg) = validate_scan_options(&mut opts) {
-        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
-    }
-
-    let callback_url = opts.callback_url.clone();
-    // Reserve a unique scan_id and enforce the concurrency cap under one lock
-    // (see POST /scan). 503 when at capacity.
-    let (id, lease) = match try_admit_and_queue(&state, &url, callback_url).await {
-        Some(admitted) => admitted,
-        None => {
-            return api_error(
-                &state,
-                &headers,
-                &params,
-                StatusCode::SERVICE_UNAVAILABLE,
-                at_capacity_message(&state),
-            );
-        }
-    };
-    log(&state, "JOB", &format!("queued id={} url={}", id, url));
-
-    let id_for_resp = id.clone();
-    spawn_scan_task(
-        state.clone(),
-        id,
-        url.clone(),
-        opts,
-        include_request,
-        include_response,
-        lease,
-    );
-
-    api_ok(
-        &state,
-        &headers,
-        &params,
-        serde_json::json!({ "scan_id": id_for_resp, "target": url }),
-    )
+        session_check: s("session_check"),
+        session_check_url: s("session_check_url"),
+    })
 }
 
 // GET /health — server info and capability discovery
@@ -500,22 +331,12 @@ pub(crate) async fn health_handler(
     // unauthenticated callers. The source gate still applies, so a web page
     // the operator visits can't use it to fingerprint whether a dalfox server
     // is listening on their machine.
+    let r = Reply::new(&state, &headers, &params);
     if let Err(denied) = check_request_source(&state, &headers) {
-        log(&state, "AUTH", &denied.log_message("/health"));
-        return make_api_response(
-            &state,
-            &headers,
-            &params,
-            denied.status(),
-            &denied.api_response(),
-        );
+        return r.deny(&denied, "/health");
     }
 
-    api_ok(
-        &state,
-        &headers,
-        &params,
-        serde_json::json!({
+    r.ok(serde_json::json!({
             "status": "ok",
             "version": env!("CARGO_PKG_VERSION"),
             // Match `check_api_key`: an empty `Some("")` falls through to
@@ -534,8 +355,7 @@ pub(crate) async fn health_handler(
                 {"method": "POST", "path": "/preflight", "description": "Parameter discovery without attack payloads"},
                 {"method": "GET",  "path": "/health", "description": "Server info and capability discovery"},
             ],
-        }),
-    )
+    }))
 }
 
 // DELETE /scan/{id} — cancel a scan
@@ -545,18 +365,10 @@ pub(crate) async fn cancel_scan_handler(
     Path(id): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if let Err(denied) = authorize_request(&state, &headers) {
-        log(&state, "AUTH", &denied.log_message("/scan/{id}"));
-        return make_api_response(
-            &state,
-            &headers,
-            &params,
-            denied.status(),
-            &denied.api_response(),
-        );
+    let r = Reply::new(&state, &headers, &params);
+    if let Some(refused) = r.authorize("/scan/{id}").await {
+        return refused;
     }
-
-    purge_expired_jobs(&state).await;
 
     // When ?purge=1, delete the job from memory instead of (or in addition to)
     // cancelling it. Only allowed once the job is evictable (terminal and its
@@ -583,24 +395,19 @@ pub(crate) async fn cancel_scan_handler(
                         )
                     };
                     drop(jobs);
-                    return api_error(&state, &headers, &params, StatusCode::CONFLICT, msg);
+                    return r.err(StatusCode::CONFLICT, msg);
                 }
                 let previous_status = job.status.clone();
                 let target_url = job.target_url.clone();
                 jobs.remove(&id);
                 drop(jobs);
                 log(&state, "JOB", &format!("purged id={}", id));
-                return api_ok(
-                    &state,
-                    &headers,
-                    &params,
-                    serde_json::json!({
-                        "scan_id": id,
-                        "target": target_url,
-                        "deleted": true,
-                        "previous_status": previous_status,
-                    }),
-                );
+                return r.ok(serde_json::json!({
+                    "scan_id": id,
+                    "target": target_url,
+                    "deleted": true,
+                    "previous_status": previous_status,
+                }));
             }
 
             let previous_status = job.status.clone();
@@ -614,27 +421,16 @@ pub(crate) async fn cancel_scan_handler(
             let target_url = job.target_url.clone();
             drop(jobs);
             log(&state, "JOB", &format!("cancelled id={}", id));
-            api_ok(
-                &state,
-                &headers,
-                &params,
-                serde_json::json!({
-                    "scan_id": id,
-                    "target": target_url,
-                    "cancelled": was_active,
-                    "previous_status": previous_status
-                }),
-            )
+            r.ok(serde_json::json!({
+                "scan_id": id,
+                "target": target_url,
+                "cancelled": was_active,
+                "previous_status": previous_status
+            }))
         }
         None => {
             drop(jobs);
-            api_error(
-                &state,
-                &headers,
-                &params,
-                StatusCode::NOT_FOUND,
-                "not found",
-            )
+            r.err(StatusCode::NOT_FOUND, "not found")
         }
     }
 }
@@ -645,23 +441,15 @@ pub(crate) async fn list_scans_handler(
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    if let Err(denied) = authorize_request(&state, &headers) {
-        log(&state, "AUTH", &denied.log_message("/scans"));
-        return make_api_response(
-            &state,
-            &headers,
-            &params,
-            denied.status(),
-            &denied.api_response(),
-        );
+    let r = Reply::new(&state, &headers, &params);
+    if let Some(refused) = r.authorize("/scans").await {
+        return refused;
     }
-
-    purge_expired_jobs(&state).await;
 
     let filter_status =
         match crate::job::parse_status_filter(params.get("status").map(String::as_str)) {
             Ok(f) => f,
-            Err(msg) => return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg),
+            Err(msg) => return r.err(StatusCode::BAD_REQUEST, msg),
         };
 
     // Optional pagination. offset defaults to 0, limit == 0 means return all.
@@ -673,9 +461,7 @@ pub(crate) async fn list_scans_handler(
         parse_num_query::<usize>(&params, "limit"),
     ) {
         (Ok(o), Ok(l)) => (o.unwrap_or(0), l.unwrap_or(0)),
-        (Err(msg), _) | (_, Err(msg)) => {
-            return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
-        }
+        (Err(msg), _) | (_, Err(msg)) => return r.err(StatusCode::BAD_REQUEST, msg),
     };
 
     // Built under the lock, serialized after it is released: holding the
@@ -688,7 +474,7 @@ pub(crate) async fn list_scans_handler(
         limit,
         false,
     );
-    api_ok(&state, &headers, &params, body)
+    r.ok(body)
 }
 
 /// Internal error surface for the preflight pipeline. Produces the right
@@ -715,49 +501,33 @@ pub(crate) async fn preflight_handler(
     // responses the same shape as success responses.
     req: Result<Json<ScanRequest>, JsonRejection>,
 ) -> impl IntoResponse {
-    if let Err(denied) = authorize_request(&state, &headers) {
-        log(&state, "AUTH", &denied.log_message("/preflight"));
-        return make_api_response(
-            &state,
-            &headers,
-            &params,
-            denied.status(),
-            &denied.api_response(),
-        );
+    let r = Reply::new(&state, &headers, &params);
+    if let Some(refused) = r.authorize("/preflight").await {
+        return refused;
     }
 
-    purge_expired_jobs(&state).await;
-
     let req = match req {
-        Ok(Json(r)) => r,
+        Ok(Json(req)) => req,
         Err(rej) => {
-            return api_error(
-                &state,
-                &headers,
-                &params,
-                json_rejection_status(&rej),
-                format!("invalid request body: {}", rej),
-            );
+            let msg = format!("invalid request body: {}", rej);
+            return r.err(json_rejection_status(&rej), msg);
         }
     };
 
     let target_url = req.target.trim().to_string();
     if target_url.is_empty() || !has_http_scheme(&target_url) {
-        return api_error(
-            &state,
-            &headers,
-            &params,
+        return r.err(
             StatusCode::BAD_REQUEST,
             "target must start with http:// or https://",
         );
     }
 
-    // `&mut`: validation normalizes too (see start_scan_handler), and the
-    // normalized `method` is what the preflight target and its request-count
-    // estimate are built from.
-    let mut opts = req.options.clone().unwrap_or_default();
+    // `&mut`: validation normalizes too (see queue_scan), and the normalized
+    // `method` is what the preflight target and its request-count estimate
+    // are built from.
+    let mut opts = req.options.unwrap_or_default();
     if let Err(msg) = validate_scan_options(&mut opts) {
-        return api_error(&state, &headers, &params, StatusCode::BAD_REQUEST, msg);
+        return r.err(StatusCode::BAD_REQUEST, msg);
     }
 
     let timeout_secs = opts
@@ -789,10 +559,7 @@ pub(crate) async fn preflight_handler(
     let preflight_permit = match state.preflight_sem.clone().try_acquire_owned() {
         Ok(p) => p,
         Err(_) => {
-            return api_error(
-                &state,
-                &headers,
-                &params,
+            return r.err(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "preflight capacity reached; retry shortly",
             );
@@ -866,11 +633,8 @@ pub(crate) async fn preflight_handler(
         .unwrap_or(Err(PreflightError::TaskPanicked));
 
     match outcome {
-        Ok(body) => api_ok(&state, &headers, &params, body),
-        Err(PreflightError::BadUrl(msg)) => api_error(
-            &state,
-            &headers,
-            &params,
+        Ok(body) => r.ok(body),
+        Err(PreflightError::BadUrl(msg)) => r.err(
             StatusCode::BAD_REQUEST,
             format!("invalid target URL: {}", msg),
         ),
@@ -880,30 +644,18 @@ pub(crate) async fn preflight_handler(
                 "ERR",
                 &format!("preflight runtime build failed: {}", msg),
             );
-            api_error(
-                &state,
-                &headers,
-                &params,
+            r.err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "preflight runtime unavailable",
             )
         }
-        Err(PreflightError::TimedOut(secs)) => api_error(
-            &state,
-            &headers,
-            &params,
+        Err(PreflightError::TimedOut(secs)) => r.err(
             StatusCode::GATEWAY_TIMEOUT,
             format!("preflight exceeded the {secs}s scan timeout"),
         ),
         Err(PreflightError::TaskPanicked) => {
             log(&state, "ERR", "preflight task panicked");
-            api_error(
-                &state,
-                &headers,
-                &params,
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "preflight task panicked",
-            )
+            r.err(StatusCode::INTERNAL_SERVER_ERROR, "preflight task panicked")
         }
     }
 }

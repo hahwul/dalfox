@@ -1479,6 +1479,11 @@ fn test_inert_in_scripts_full_brutelogic_response() {
 
 // --- Path-injection status-code filter ---
 
+/// Body-less status-code-only path suppression, pinned by the tests below.
+fn should_suppress_path_reflection(location: &Location, status_code: u16) -> bool {
+    matches!(location, Location::Path) && !(200..300).contains(&status_code)
+}
+
 #[test]
 fn test_suppress_path_reflection_on_404() {
     assert!(should_suppress_path_reflection(&Location::Path, 404));

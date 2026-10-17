@@ -1,4 +1,4 @@
-//! Background OOB poller: drives [`OobSession::poll`], correlates each callback
+//! Background OOB poller: drives the interactsh poll, correlates each callback
 //! back to the request that caused it, and merges a finding into the shared
 //! results vector. Poll requests go to the OAST server (not the target), so they
 //! deliberately never touch the request counter or the target rate limiter.
@@ -26,7 +26,6 @@ const POLL_INTERVAL_SECS: u64 = 5;
 pub(crate) const MAX_UNATTRIBUTED_FINDINGS: usize = 1000;
 
 type Results = Arc<TokioMutex<Vec<ScanResult>>>;
-type Seen = Arc<StdMutex<HashSet<String>>>;
 
 /// What the poll loop has observed, shared by the background task and the
 /// final sweep so a dead OAST server can be reported once instead of reading as
@@ -85,29 +84,40 @@ fn unattributed_cap_message() -> String {
     )
 }
 
-/// Handle to a running poller. Hold it for the scan's lifetime, then call
-/// [`finish`](PollerHandle::finish) to drain the grace window and deregister.
-pub(crate) struct PollerHandle {
+/// Everything the background poll loop and the final sweep share.
+struct Poller {
     session: Arc<OobSession>,
     results: Results,
     findings_count: Arc<AtomicUsize>,
-    limit_result_type: Arc<str>,
+    limit_result_type: String,
     cancel: Arc<AtomicBool>,
-    seen: Seen,
-    stop: Arc<AtomicBool>,
+    seen: StdMutex<HashSet<String>>,
+    stop: AtomicBool,
+    state: PollState,
+    silence: bool,
+}
+
+impl Poller {
+    fn stopped(&self) -> bool {
+        self.stop.load(Ordering::Relaxed) || self.cancel.load(Ordering::Relaxed)
+    }
+}
+
+/// Handle to a running poller. Hold it for the scan's lifetime, then call
+/// [`finish`](PollerHandle::finish) to drain the grace window and deregister.
+pub(crate) struct PollerHandle {
+    shared: Arc<Poller>,
     /// `Option` so [`finish`](PollerHandle::finish) can take the handle to await
     /// it, while [`Drop`] still aborts a handle dropped without `finish` (panic,
     /// early return) — the background poll loop must never outlive its job.
     task: Option<JoinHandle<()>>,
-    state: Arc<PollState>,
-    silence: bool,
 }
 
 impl Drop for PollerHandle {
     fn drop(&mut self) {
         // `finish` already took the handle and awaited it; only a handle
         // dropped *without* `finish` still owns a live task to abort.
-        self.stop.store(true, Ordering::Relaxed);
+        self.shared.stop.store(true, Ordering::Relaxed);
         if let Some(task) = self.task.take() {
             task.abort();
         }
@@ -126,54 +136,35 @@ pub(crate) fn spawn_poller(
     cancel: Arc<AtomicBool>,
     silence: bool,
 ) -> PollerHandle {
-    let limit_result_type: Arc<str> = Arc::from(limit_result_type);
-    let stop = Arc::new(AtomicBool::new(false));
-    let seen: Seen = Arc::new(StdMutex::new(HashSet::new()));
-    let state = Arc::new(PollState::default());
-
-    let task = {
-        let state = state.clone();
-        let session = session.clone();
-        let results = results.clone();
-        let findings_count = findings_count.clone();
-        let limit_result_type = limit_result_type.clone();
-        let cancel = cancel.clone();
-        let stop = stop.clone();
-        let seen = seen.clone();
-        tokio::spawn(async move {
-            while !stop.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
-                poll_once(
-                    &session,
-                    &results,
-                    &findings_count,
-                    &limit_result_type,
-                    &seen,
-                    &state,
-                    silence,
-                )
-                .await;
-                // Sleep in 1s slices so a stop/cancel cuts the wait short.
-                for _ in 0..POLL_INTERVAL_SECS {
-                    if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-        })
-    };
-
-    PollerHandle {
+    let shared = Arc::new(Poller {
         session,
         results,
         findings_count,
-        limit_result_type,
+        limit_result_type: limit_result_type.to_string(),
         cancel,
-        seen,
-        stop,
-        task: Some(task),
-        state,
+        seen: StdMutex::new(HashSet::new()),
+        stop: AtomicBool::new(false),
+        state: PollState::default(),
         silence,
+    });
+
+    let p = shared.clone();
+    let task = tokio::spawn(async move {
+        while !p.stopped() {
+            poll_once(&p).await;
+            // Sleep in 1s slices so a stop/cancel cuts the wait short.
+            for _ in 0..POLL_INTERVAL_SECS {
+                if p.stopped() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    });
+
+    PollerHandle {
+        shared,
+        task: Some(task),
     }
 }
 
@@ -182,11 +173,11 @@ impl PollerHandle {
     /// after `finish` has consumed the handle.
     #[cfg(test)]
     pub(crate) fn probe(&self) -> impl Fn() -> (bool, usize) + use<> {
-        let s = self.state.clone();
+        let s = self.shared.clone();
         move || {
             (
-                s.warned_poll.load(Ordering::Relaxed),
-                s.unattributed.load(Ordering::Relaxed),
+                s.state.warned_poll.load(Ordering::Relaxed),
+                s.state.unattributed.load(Ordering::Relaxed),
             )
         }
     }
@@ -198,38 +189,28 @@ impl PollerHandle {
     /// Returns the warnings the session raised (poll failures, the unattributed
     /// cap), for a silenced server/MCP job that has no stderr to read them on.
     pub async fn finish(mut self, grace: Duration) -> Vec<String> {
+        let p = self.shared.clone();
         let start = Instant::now();
-        while start.elapsed() < grace && !self.cancel.load(Ordering::Relaxed) {
+        while start.elapsed() < grace && !p.cancel.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        self.stop.store(true, Ordering::Relaxed);
+        p.stop.store(true, Ordering::Relaxed);
         if let Some(task) = self.task.take() {
             let _ = task.await;
         }
         // Final sweep to catch interactions queued during the last poll gap.
-        poll_once(
-            &self.session,
-            &self.results,
-            &self.findings_count,
-            &self.limit_result_type,
-            &self.seen,
-            &self.state,
-            self.silence,
-        )
-        .await;
+        poll_once(&p).await;
         // A short `--blind-oob-wait` may only ever see one poll, which is below
         // the in-loop threshold; never having succeeded is enough to say so.
-        if self.state.ok.load(Ordering::Relaxed) == 0
-            && self.state.failed.load(Ordering::Relaxed) > 0
-        {
-            warn_poll_failure(self.silence, &self.state);
+        if p.state.ok.load(Ordering::Relaxed) == 0 && p.state.failed.load(Ordering::Relaxed) > 0 {
+            warn_poll_failure(p.silence, &p.state);
         }
-        self.session.deregister().await;
+        p.session.deregister().await;
         let mut warnings = Vec::new();
-        if self.state.warned_poll.load(Ordering::Relaxed) {
-            warnings.push(poll_failure_message(&self.state));
+        if p.state.warned_poll.load(Ordering::Relaxed) {
+            warnings.push(poll_failure_message(&p.state));
         }
-        if self.state.warned_cap.load(Ordering::Relaxed) {
+        if p.state.warned_cap.load(Ordering::Relaxed) {
             warnings.push(unattributed_cap_message());
         }
         warnings
@@ -255,16 +236,9 @@ fn dedup_key(nonce: &str, it: &OobInteraction) -> String {
 }
 
 /// Poll once and merge any new, correlated callbacks into `results`.
-async fn poll_once(
-    session: &OobSession,
-    results: &Results,
-    findings_count: &Arc<AtomicUsize>,
-    limit_result_type: &str,
-    seen: &Seen,
-    state: &PollState,
-    silence: bool,
-) {
-    let interactions = match session.poll().await {
+async fn poll_once(p: &Poller) {
+    let (session, state, silence) = (&p.session, &p.state, p.silence);
+    let interactions = match session.client.poll().await {
         Ok(v) => {
             state.ok.fetch_add(1, Ordering::Relaxed);
             state.consecutive_failed.store(0, Ordering::Relaxed);
@@ -287,8 +261,11 @@ async fn poll_once(
 
     let mut batch: Vec<ScanResult> = Vec::new();
     for it in interactions {
-        let nonce = session.extract_nonce(&it.full_id).unwrap_or_default();
-        let record = session.registry().lookup(&nonce);
+        let nonce = session
+            .client
+            .extract_nonce(&it.full_id)
+            .unwrap_or_default();
+        let record = session.registry.lookup(&nonce);
         if record.is_none() {
             // Bound the forgeable path before it can grow `seen` or `results`.
             if state.unattributed.load(Ordering::Relaxed) >= MAX_UNATTRIBUTED_FINDINGS {
@@ -298,7 +275,7 @@ async fn poll_once(
         }
         let dedup_key = dedup_key(&nonce, &it);
         {
-            let mut guard = seen.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut guard = p.seen.lock().unwrap_or_else(PoisonError::into_inner);
             if !guard.insert(dedup_key) {
                 continue;
             }
@@ -313,8 +290,14 @@ async fn poll_once(
     }
 
     // OOB findings are always `High`, so `--min-confidence` never drops one.
-    crate::scanning::accumulate_findings(results, findings_count, batch, limit_result_type, None)
-        .await;
+    crate::scanning::accumulate_findings(
+        &p.results,
+        &p.findings_count,
+        batch,
+        &p.limit_result_type,
+        None,
+    )
+    .await;
 }
 
 /// One-line stderr notice when a callback lands (kept off stdout so JSON/SARIF

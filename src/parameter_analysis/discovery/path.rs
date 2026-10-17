@@ -145,14 +145,9 @@ pub async fn check_path_discovery(
                                     bracket_url,
                                     data.clone(),
                                 );
-                                crate::record_outbound_request().await;
-                                match crate::utils::http::send_counted(probe).await {
-                                    Ok(r) => match crate::utils::http::read_body_counted(r).await {
-                                        Ok(t) => t.contains(&needle),
-                                        Err(_) => false,
-                                    },
-                                    Err(_) => false,
-                                }
+                                crate::parameter_analysis::fetch_text(probe)
+                                    .await
+                                    .is_some_and(|t| t.contains(&needle))
                             } else {
                                 true
                             };

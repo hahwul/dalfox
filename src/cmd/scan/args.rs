@@ -242,45 +242,16 @@ pub fn format_is_machine(format: &str) -> bool {
 /// the targeted bypass mutations.
 pub(crate) fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String> {
     let lower = s.trim().to_ascii_lowercase();
-    let known = [
-        "cloudflare",
-        "cf",
-        "aws",
-        "awswaf",
-        "aws-waf",
-        "akamai",
-        "imperva",
-        "incapsula",
-        "modsecurity",
-        "modsec",
-        "owasp-crs",
-        "owaspcrs",
-        "crs",
-        "sucuri",
-        "f5",
-        "bigip",
-        "f5-bigip",
-        "barracuda",
-        "fortiweb",
-        "forti",
-        "azure",
-        "azurewaf",
-        "azure-waf",
-        "cloudarmor",
-        "cloud-armor",
-        "gcp",
-        "fastly",
-        "wordfence",
-        "citrix",
-        "netscaler",
-    ];
-    if known.contains(&lower.as_str()) {
-        Ok(lower)
-    } else {
+    if matches!(
+        super::preflight::parse_waf_type(&lower),
+        crate::waf::WafType::Unknown(_)
+    ) {
         Err(format!(
             "unknown WAF '{}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence, citrix)",
             s
         ))
+    } else {
+        Ok(lower)
     }
 }
 
@@ -323,13 +294,14 @@ pub(crate) fn parse_http_method_arg(s: &str) -> std::result::Result<String, Stri
         return Err("HTTP method must not be empty".to_string());
     }
     let upper = trimmed.to_ascii_uppercase();
-    match upper.as_str() {
-        // QUERY is RFC 10008 (safe/idempotent body-bearing method).
-        "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "OPTIONS" | "PATCH" | "QUERY" => Ok(upper),
-        other => Err(format!(
-            "unsupported HTTP method '{}' (expected one of: GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, QUERY)",
-            other
-        )),
+    let known = crate::target_parser::KNOWN_HTTP_METHODS;
+    if known.contains(&upper.as_str()) {
+        Ok(upper)
+    } else {
+        Err(format!(
+            "unsupported HTTP method '{upper}' (expected one of: {})",
+            known.join(", ")
+        ))
     }
 }
 

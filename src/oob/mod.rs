@@ -127,16 +127,6 @@ impl OobSession {
         self.client.server_domain()
     }
 
-    pub fn extract_nonce(&self, full_id: &str) -> Option<String> {
-        self.client.extract_nonce(full_id)
-    }
-
-    pub async fn poll(
-        &self,
-    ) -> Result<Vec<OobInteraction>, Box<dyn std::error::Error + Send + Sync>> {
-        self.client.poll().await
-    }
-
     pub async fn deregister(&self) {
         self.client.deregister().await
     }

@@ -1,5 +1,64 @@
 use super::*;
 
+fn extract_javascript_from_html(html: &str) -> Vec<String> {
+    js_blocks_from_document(&crate::utils::html::parse_document_bounded(html))
+}
+
+fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<String>) {
+    let document = crate::utils::html::parse_document_bounded(html);
+    (
+        js_blocks_from_document(&document),
+        script_element_ids_from_document(&document),
+    )
+}
+
+fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
+    has_self_bootstrap_verification_normalized(&normalize_js_for_pattern_matching(js_code), source)
+}
+
+fn analyze_javascript_for_dom_xss(
+    js_code: &str,
+) -> Vec<(
+    crate::scanning::ast_dom_analysis::DomXssVulnerability,
+    String,
+    String,
+)> {
+    analyze_javascript_for_dom_xss_with_html_context(
+        js_code,
+        &Default::default(),
+        &Default::default(),
+        false,
+    )
+}
+
+fn run_initial_ast_dom_analysis(
+    response_text: &str,
+    target_url: &str,
+    target_method: &str,
+    posture: PageSecurityPosture,
+) -> Vec<crate::scanning::result::Result> {
+    run_initial_ast_dom_analysis_for_response(
+        response_text,
+        "text/html",
+        target_url,
+        target_method,
+        posture,
+    )
+}
+
+impl PageSecurityPosture {
+    /// Posture straight from a response: enforcing header, then report-only
+    /// header, then a `<meta http-equiv>` policy.
+    fn from_response(headers: &reqwest::header::HeaderMap, body: &str) -> Self {
+        match crate::scanning::csp_header_from_response(headers, body) {
+            Some((name, policy)) => Self::from_csp(Some(
+                &crate::payload::xss_csp_bypass::analyze_csp_from(&name, &policy),
+            )),
+            None => Self::default(),
+        }
+    }
+}
+
 #[test]
 fn inactive_script_bodies_do_not_produce_dom_findings() {
     for attrs in [
@@ -1262,7 +1321,7 @@ fn test_run_initial_ast_dom_analysis_drops_internal_light_check_wording() {
         var q = new URLSearchParams(location.search).get('q');
         document.getElementById('out').innerHTML = q;
     </script></body></html>"#;
-    let results = super::run_initial_ast_dom_analysis(
+    let results = run_initial_ast_dom_analysis(
         html,
         "https://example.com/",
         "GET",

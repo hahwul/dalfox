@@ -91,7 +91,7 @@ pub async fn check_discovery(
     // so a URL like `/search.jsp?query=…` whose response also embeds
     // `<form><input name="query">` lands the same (name, location) twice
     // — once from `check_query_discovery`, once from
-    // `check_form_discovery`. Without dedup we'd double the scan cost
+    // `check_form_discovery_with`. Without dedup we'd double the scan cost
     // and double every POC line. Collapse here before handing the list
     // to the scanner.
     {

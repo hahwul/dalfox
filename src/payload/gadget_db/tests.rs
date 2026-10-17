@@ -1,5 +1,10 @@
 use super::*;
 
+/// All registered gadgets.
+fn all() -> &'static [ScriptGadget] {
+    GADGETS
+}
+
 #[test]
 fn test_all_non_empty() {
     assert!(!all().is_empty());

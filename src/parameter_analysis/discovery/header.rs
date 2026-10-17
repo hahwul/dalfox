@@ -49,14 +49,9 @@ async fn detect_blanket_header_echo(target: &Target) -> bool {
     );
     let overrides = vec![(guard_name, test_value.to_string())];
     let request = crate::utils::apply_header_overrides(base, &overrides);
-    crate::record_outbound_request().await;
-    match crate::utils::http::send_counted(request).await {
-        Ok(resp) => match crate::utils::http::read_body_counted(resp).await {
-            Ok(text) => crate::scanning::markers::probe_reflected(&text),
-            Err(_) => false,
-        },
-        Err(_) => false,
-    }
+    crate::parameter_analysis::fetch_text(request)
+        .await
+        .is_some_and(|text| crate::scanning::markers::probe_reflected(&text))
 }
 
 pub async fn check_header_discovery(
@@ -122,49 +117,37 @@ pub async fn check_header_discovery(
         let url = target.url.clone();
         let data = target.data.clone();
         let parsed_method = target.parse_method();
-        let delay = target.delay;
-        let semaphore_clone = semaphore.clone();
         let header_name = header_name.clone();
         let header_value = header_value.clone();
+        let override_name = header_name.clone();
         let target_clone = arc_target.clone();
 
-        // Spawn task returning Option<Param> to batch reduce mutex contention
-        let handle = tokio::spawn(crate::with_job_scopes(
-            crate::JobScopes::capture(),
-            async move {
-                let permit = semaphore_clone
-                    .acquire()
-                    .await
-                    .expect("acquire semaphore permit");
-                let m = parsed_method;
-                let base =
-                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
-                let overrides = vec![(header_name.clone(), test_value.to_string())];
-                let request = crate::utils::apply_header_overrides(base, &overrides);
-                crate::record_outbound_request().await;
-                let mut discovered: Option<Param> = None;
-                if let Ok(resp) = crate::utils::http::send_counted(request).await
-                    && let Ok(text) = crate::utils::http::read_body_counted(resp).await
-                    && crate::scanning::markers::probe_reflected(&text)
-                {
-                    discovered = Some(
-                        Param::new(
-                            header_name,
-                            header_value,
-                            crate::parameter_analysis::Location::Header,
-                        )
-                        .with_cookie_identity(false)
-                        .with_reflection_analysis(&text)
-                        .with_framework_sink(&text),
-                    );
-                }
-                if delay > 0 {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                drop(permit);
-                discovered
+        let handle = crate::parameter_analysis::spawn_reflection_probe(
+            semaphore.clone(),
+            target.delay,
+            None,
+            move || {
+                let base = crate::utils::build_request(
+                    &client_clone,
+                    &target_clone,
+                    parsed_method,
+                    url,
+                    data,
+                );
+                let overrides = vec![(override_name, test_value.to_string())];
+                Some(crate::utils::apply_header_overrides(base, &overrides))
             },
-        ));
+            move |text| {
+                Param::new(
+                    header_name,
+                    header_value,
+                    crate::parameter_analysis::Location::Header,
+                )
+                .with_cookie_identity(false)
+                .with_reflection_analysis(text)
+                .with_framework_sink(text)
+            },
+        );
         handles.push(handle);
     }
 

@@ -86,7 +86,7 @@ impl PreEncodingType {
 ///
 /// Returns the encoded payload, or the original if no encoding is needed.
 pub(crate) fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
-    match pre_encoding.as_deref().and_then(PreEncodingType::parse) {
+    match pre_encoding_type(pre_encoding) {
         Some(enc) => enc.encode(payload),
         None => payload.to_string(),
     }

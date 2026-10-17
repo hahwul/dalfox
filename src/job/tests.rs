@@ -617,15 +617,8 @@ fn into_scan_args_applies_the_fixed_surface_policy() {
 #[test]
 fn rest_defaults_track_the_cli_constants() {
     let opts = crate::server::types::ScanOptions::default();
-    let spec = ScanRequestSpec::from_rest_options(
-        "http://example.com".to_string(),
-        &opts,
-        false,
-        false,
-        0,
-        0,
-        None,
-    );
+    let spec =
+        ScanRequestSpec::from_rest_options("http://example.com".to_string(), &opts, 0, 0, None);
 
     assert_eq!(spec.workers, crate::cmd::scan::DEFAULT_WORKERS);
     assert_eq!(spec.method, crate::cmd::scan::DEFAULT_METHOD);
@@ -656,8 +649,6 @@ fn rest_and_mcp_requests_agree_on_scan_args() {
     let rest = ScanRequestSpec::from_rest_options(
         "http://example.com/?q=1".to_string(),
         &crate::server::types::ScanOptions::default(),
-        false,
-        false,
         0,
         0,
         None,
@@ -761,14 +752,14 @@ fn rest_non_default_options_reach_scan_args() {
         session_check: Some("Sign out".to_string()),
         session_check_url: Some("https://app/me".to_string()),
         min_confidence: Some("high".to_string()),
+        include_request: Some(true),
+        include_response: Some(true),
         ..Default::default()
     };
 
     let args = ScanRequestSpec::from_rest_options(
         "http://example.com/?q=1".to_string(),
         &opts,
-        true,                           // include_request
-        true,                           // include_response
         1234,                           // scan_timeout (already capped by the handler)
         42,                             // rate_limit (already capped)
         Some("cloudflare".to_string()), // force_waf (already normalized)
@@ -1304,8 +1295,6 @@ fn mcp_rest_spellings_reach_scan_args() {
             "blind": "http://cb.example/x",
         }))
         .expect("REST options deserialize"),
-        false,
-        false,
         0,
         0,
         None,

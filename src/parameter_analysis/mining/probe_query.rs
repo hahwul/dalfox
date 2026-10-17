@@ -211,7 +211,7 @@ pub(super) async fn probe_query_candidates(
 
     let bucket_size = initial_bucket_size(&target, &candidates);
     let mut pending: VecDeque<Vec<String>> = initial_buckets(&target, candidates, bucket_size);
-    let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
+    let mut stats = MiningSampleStats::new();
     let parallel = ctx.args.workers.clamp(1, 64);
     let mut active = JoinSet::new();
 
@@ -256,14 +256,13 @@ pub(super) async fn probe_query_candidates(
         }
 
         if result.response_received {
-            let mut st = stats.lock().await;
             for _ in 0..result.reflected_names {
-                st.record_attempt();
-                st.record_reflection();
+                stats.record_attempt();
+                stats.record_reflection();
             }
             for _ in 0..result.non_reflected_names {
-                st.record_attempt();
-                st.record_non_reflection();
+                stats.record_attempt();
+                stats.record_non_reflection();
             }
         }
 
@@ -275,17 +274,13 @@ pub(super) async fn probe_query_candidates(
         pending.extend(result.children);
     }
 
-    let collapsed = {
-        let mut st = stats.lock().await;
-        st.collapsed = st.should_collapse();
-        if st.collapsed && !silence {
-            eprintln!(
-                "[mining-collapse] high reflection EWMA {:.2} after {} attempts ({} reflections)",
-                st.ewma_ratio, st.attempts, st.reflections
-            );
-        }
-        st.collapsed
-    };
+    let collapsed = stats.should_collapse();
+    if collapsed && !silence {
+        eprintln!(
+            "[mining-collapse] high reflection EWMA {:.2} after {} attempts ({} reflections)",
+            stats.ewma_ratio, stats.attempts, stats.reflections
+        );
+    }
     if collapsed {
         // The EWMA identifies pages that reflect most candidates. It is not
         // enough evidence to replace selective reflected names with `any`;

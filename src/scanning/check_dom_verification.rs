@@ -22,37 +22,27 @@
 use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::Client;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use tokio::time::{Duration, sleep};
 
 use super::decode_html_entities;
 use super::selectors;
 
-fn cached_class_marker_selector() -> &'static scraper::Selector {
-    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
-    SEL.get_or_init(|| {
-        let marker = crate::scanning::markers::class_marker();
-        scraper::Selector::parse(&format!(".{}", marker)).expect("valid class marker selector")
-    })
-}
+static CLASS_MARKER_SELECTOR: LazyLock<scraper::Selector> = LazyLock::new(|| {
+    let marker = crate::scanning::markers::class_marker();
+    scraper::Selector::parse(&format!(".{}", marker)).expect("valid class marker selector")
+});
 
-fn cached_id_marker_selector() -> &'static scraper::Selector {
-    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
-    SEL.get_or_init(|| {
-        let marker = crate::scanning::markers::id_marker();
-        scraper::Selector::parse(&format!("#{}", marker)).expect("valid id marker selector")
-    })
-}
+static ID_MARKER_SELECTOR: LazyLock<scraper::Selector> = LazyLock::new(|| {
+    let marker = crate::scanning::markers::id_marker();
+    scraper::Selector::parse(&format!("#{}", marker)).expect("valid id marker selector")
+});
 
-fn cached_legacy_class_selector() -> &'static scraper::Selector {
-    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
-    SEL.get_or_init(|| scraper::Selector::parse(".dalfox").expect("valid selector"))
-}
+static LEGACY_CLASS_SELECTOR: LazyLock<scraper::Selector> =
+    LazyLock::new(|| scraper::Selector::parse(".dalfox").expect("valid selector"));
 
-fn cached_legacy_id_selector() -> &'static scraper::Selector {
-    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
-    SEL.get_or_init(|| scraper::Selector::parse("#dalfox").expect("valid selector"))
-}
+static LEGACY_ID_SELECTOR: LazyLock<scraper::Selector> =
+    LazyLock::new(|| scraper::Selector::parse("#dalfox").expect("valid selector"));
 
 fn payload_uses_legacy_class_marker(payload: &str) -> bool {
     payload.contains("class=dalfox")
@@ -404,10 +394,7 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     let class_ok = if has_class || has_legacy_class {
         let mut found = false;
         if has_class {
-            found = document
-                .select(cached_class_marker_selector())
-                .next()
-                .is_some();
+            found = document.select(&CLASS_MARKER_SELECTOR).next().is_some();
             if !found {
                 // Case-folded fallback for servers that uppercase/lowercase
                 // reflected input. Markers are 11-char `dlx<hex>` strings
@@ -418,10 +405,7 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
             }
         }
         if !found && has_legacy_class {
-            found = document
-                .select(cached_legacy_class_selector())
-                .next()
-                .is_some();
+            found = document.select(&LEGACY_CLASS_SELECTOR).next().is_some();
             if !found {
                 found = any_element_has_class_ascii_ci(document, "dalfox");
             }
@@ -434,19 +418,13 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     let id_ok = if has_id || has_legacy_id {
         let mut found = false;
         if has_id {
-            found = document
-                .select(cached_id_marker_selector())
-                .next()
-                .is_some();
+            found = document.select(&ID_MARKER_SELECTOR).next().is_some();
             if !found {
                 found = any_element_has_id_ascii_ci(document, id_marker);
             }
         }
         if !found && has_legacy_id {
-            found = document
-                .select(cached_legacy_id_selector())
-                .next()
-                .is_some();
+            found = document.select(&LEGACY_ID_SELECTOR).next().is_some();
             if !found {
                 found = any_element_has_id_ascii_ci(document, "dalfox");
             }
@@ -498,15 +476,6 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     }
 
     true
-}
-
-#[cfg(test)]
-pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
-    if !payload_has_any_marker(payload) {
-        return false;
-    }
-    let document = crate::utils::html::parse_document_bounded(text);
-    has_marker_evidence_in_doc(payload, &document)
 }
 
 /// Case-insensitive ASCII prefix check without allocating a lowercased copy.
@@ -1165,19 +1134,10 @@ fn has_inline_handler_breakout_evidence_in_doc(payload: &str, document: &scraper
     false
 }
 
-/// Test-only boolean view for evidence fixtures that don't need the kind.
-#[cfg(test)]
-pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
-    classify_dom_evidence(payload, text).is_some()
-}
-
 // The injection request builders live in `url_inject` so the reflection,
 // light-verify, and DOM-verify paths cannot drift apart again (they had:
-// light-verify was omitting the urlencoded `Content-Type`). Re-exported so
-// this module's tests keep addressing them through `super::*`.
+// light-verify was omitting the urlencoded `Content-Type`).
 pub(crate) use crate::scanning::url_inject::build_inject_request;
-#[cfg(test)]
-pub(crate) use crate::scanning::url_inject::{build_json_body_request, build_multipart_request};
 
 /// Verify DOM evidence in a stored XSS scenario by checking secondary URLs.
 async fn verify_sxss_dom(

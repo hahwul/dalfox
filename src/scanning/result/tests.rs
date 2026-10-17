@@ -4,7 +4,6 @@ use serde_json;
 #[test]
 fn informational_finding_type_labels_and_serde() {
     assert_eq!(FindingType::Informational.short(), "I");
-    assert_eq!(FindingType::Informational.description(), "Informational");
     assert!(
         FindingType::Informational
             .long_description()

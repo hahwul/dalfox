@@ -93,6 +93,7 @@ pub async fn probe_json_body_params(
                     .expect("acquire semaphore permit");
 
                 // Build mutated JSON with this key set to marker
+                // `base_json` is an object (checked above).
                 let mut root = (*base_json_clone).clone();
                 if let Some(map) = root.as_object_mut() {
                     map.insert(
@@ -101,23 +102,8 @@ pub async fn probe_json_body_params(
                             crate::scanning::markers::bracketed_marker().to_string(),
                         ),
                     );
-                } else {
-                    let mut map = serde_json::Map::new();
-                    map.insert(
-                        param_name_cloned.clone(),
-                        serde_json::Value::String(
-                            crate::scanning::markers::bracketed_marker().to_string(),
-                        ),
-                    );
-                    root = serde_json::Value::Object(map);
                 }
-                let body = serde_json::to_string(&root).unwrap_or_else(|_| {
-                    format!(
-                        "{{\"{}\":\"{}\"}}",
-                        param_name_cloned,
-                        crate::scanning::markers::bracketed_marker()
-                    )
-                });
+                let body = root.to_string();
 
                 let base = crate::utils::build_body_request_base(
                     &client_clone,

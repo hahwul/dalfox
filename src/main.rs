@@ -416,22 +416,18 @@ async fn main() {
         Some(Commands::Scan(args)) => args.silence,
         _ => false,
     };
-    let config_silence = config_load
+    let config_scan = config_load
         .as_ref()
         .ok()
-        .and_then(|r| r.config.scan.as_ref())
-        .and_then(|s| s.silence)
-        .unwrap_or(false);
+        .and_then(|r| r.config.scan.as_ref());
+    let config_silence = config_scan.and_then(|s| s.silence).unwrap_or(false);
     // A machine-readable `format` set *only* in the config file (not on the CLI)
     // must also suppress the banner — otherwise the ASCII banner is prepended to
     // the machine-format document on stdout and breaks any pipeline that
     // configures the format via file rather than `--format`. `is_machine_format`
     // above only sees CLI args, so fold the config value in the same way
     // `config_silence` folds the config `silence`.
-    let config_machine_format = config_load
-        .as_ref()
-        .ok()
-        .and_then(|r| r.config.scan.as_ref())
+    let config_machine_format = config_scan
         .and_then(|s| s.format.as_deref())
         .map(dalfox::cmd::scan::format_is_machine)
         .unwrap_or(false);
@@ -442,12 +438,7 @@ async fn main() {
     // fold it in here, the same way `config_silence` and `config_machine_format`
     // are folded above. Everything after the banner was already correct —
     // `run_scan` sets the global `NO_COLOR` from the merged args.
-    let config_no_color = config_load
-        .as_ref()
-        .ok()
-        .and_then(|r| r.config.scan.as_ref())
-        .and_then(|s| s.no_color)
-        .unwrap_or(false);
+    let config_no_color = config_scan.and_then(|s| s.no_color).unwrap_or(false);
     let banner_color = color_enabled && !config_no_color;
     if config_no_color {
         dalfox::NO_COLOR.store(true, std::sync::atomic::Ordering::Relaxed);

@@ -235,7 +235,6 @@ pub(super) struct MiningSampleStats {
     pub(super) attempts: usize,
     pub(super) reflections: usize,
     pub(super) ewma_ratio: f64,
-    pub(super) collapsed: bool,
 }
 
 impl MiningSampleStats {
@@ -244,7 +243,6 @@ impl MiningSampleStats {
             attempts: 0,
             reflections: 0,
             ewma_ratio: EWMA_START_VALUE,
-            collapsed: false,
         }
     }
     pub(super) fn record_attempt(&mut self) {
@@ -263,8 +261,7 @@ impl MiningSampleStats {
         self.ewma_ratio = EWMA_ALPHA * instant + (1.0 - EWMA_ALPHA) * self.ewma_ratio;
     }
     pub(super) fn should_collapse(&self) -> bool {
-        !self.collapsed
-            && self.attempts >= COLLAPSE_MIN_ATTEMPTS
+        self.attempts >= COLLAPSE_MIN_ATTEMPTS
             && self.reflections >= COLLAPSE_MIN_REFLECTIONS
             && self.ewma_ratio >= COLLAPSE_EWMA_THRESHOLD
     }

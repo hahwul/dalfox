@@ -477,29 +477,6 @@ pub(crate) fn build_hpp_url(
     Some(result)
 }
 
-/// Generate all HPP URL variants for a given payload.
-/// Returns up to 3 variants (Last, First, Both) for query params, empty vec for others.
-#[cfg(test)]
-pub(crate) fn build_hpp_urls(
-    base: &url::Url,
-    param: &Param,
-    injected: &str,
-) -> Vec<(String, HppPosition)> {
-    [HppPosition::Last, HppPosition::First, HppPosition::Both]
-        .iter()
-        .filter_map(|&pos| build_hpp_url(base, param, injected, pos).map(|url| (url, pos)))
-        .collect()
-}
-
-/// Build an `application/x-www-form-urlencoded` body that carries `value` for
-/// `name`, replacing every matching occurrence when the param is already
-/// present and appending it otherwise. Updating all duplicates ensures both
-/// first-value and last-value servers receive the payload.
-///
-/// This is the single source of truth for form-body injection. It was
-/// previously copy-pasted (byte-identical) across the reflection check, light
-/// verify, DOM verify, and PoC builders; keeping one implementation prevents
-/// the drift those parallel copies were prone to.
 /// True when `param` is one of the target's cookies rather than a plain
 /// request header.
 ///
@@ -561,6 +538,15 @@ pub(crate) fn build_header_request(
     }
 }
 
+/// Build an `application/x-www-form-urlencoded` body that carries `value` for
+/// `name`, replacing every matching occurrence when the param is already
+/// present and appending it otherwise. Updating all duplicates ensures both
+/// first-value and last-value servers receive the payload.
+///
+/// This is the single source of truth for form-body injection. It was
+/// previously copy-pasted (byte-identical) across the reflection check, light
+/// verify, DOM verify, and PoC builders; keeping one implementation prevents
+/// the drift those parallel copies were prone to.
 pub(crate) fn urlencoded_body(data: Option<&str>, name: &str, value: &str) -> String {
     match data {
         Some(data) => {
@@ -719,7 +705,7 @@ pub(crate) fn multipart_poc_body(data: Option<&str>, name: &str, value: &str) ->
 /// target's own URL. A form-discovered body param reflects at the action
 /// endpoint, not at the page that contained the form.
 ///
-/// Belt and braces on the destination: `check_form_discovery` already refuses
+/// Belt and braces on the destination: `check_form_discovery_with` already refuses
 /// to record an action the scan may not send credentials to (anything but the
 /// target's own origin, or a same-host TLS upgrade of it -- see
 /// [`crate::utils::http::same_origin_or_tls_upgrade`]), so this should never
@@ -770,50 +756,6 @@ fn typed_body_request(
     let base =
         crate::utils::build_body_request_base(client, target, method, parsed_url, Some(body));
     crate::utils::apply_header_overrides(base, &[("Content-Type".to_string(), content_type)])
-}
-
-/// GraphQL body injection. The param's `pre_encoding_pipeline` has already
-/// rebuilt the full request body (query + all variables, the target variable
-/// carrying `value`), so it ships verbatim as `application/json`.
-pub(crate) fn build_graphql_body_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    value: &str,
-) -> reqwest::RequestBuilder {
-    typed_body_request(
-        client,
-        target,
-        param,
-        value.to_string(),
-        "application/json".to_string(),
-    )
-}
-
-/// XML / SOAP body injection. The param's `pre_encoding_pipeline` (a `Splice`)
-/// has already re-glued the original document around the injection point, so
-/// `value` is the complete XML body; it ships with the request's declared XML
-/// content-type (see [`xml_request_content_type`]).
-pub(crate) fn build_xml_body_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    value: &str,
-) -> reqwest::RequestBuilder {
-    let content_type = xml_request_content_type(target);
-    typed_body_request(client, target, param, value.to_string(), content_type)
-}
-
-/// `application/x-www-form-urlencoded` body injection.
-pub(crate) fn build_body_request(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    value: &str,
-) -> reqwest::RequestBuilder {
-    let body = urlencoded_body(target.data.as_deref(), &param.name, value);
-    let content_type = "application/x-www-form-urlencoded".to_string();
-    typed_body_request(client, target, param, body, content_type)
 }
 
 /// `application/json` body injection.
@@ -882,11 +824,33 @@ pub(crate) fn build_inject_request(
         // A cookie param must go into the `Cookie` header, not a header named
         // after the cookie — see `build_header_request`.
         Location::Header => build_header_request(client, target, param, value, default_method),
-        Location::Body => build_body_request(client, target, param, value),
+        Location::Body => typed_body_request(
+            client,
+            target,
+            param,
+            urlencoded_body(target.data.as_deref(), &param.name, value),
+            "application/x-www-form-urlencoded".to_string(),
+        ),
         Location::JsonBody => build_json_body_request(client, target, param, value),
         Location::MultipartBody => build_multipart_request(client, target, param, value),
-        Location::GraphqlBody => build_graphql_body_request(client, target, param, value),
-        Location::XmlBody => build_xml_body_request(client, target, param, value),
+        // The param's `pre_encoding_pipeline` has already rebuilt the full
+        // GraphQL body (query + all variables), so `value` ships verbatim.
+        Location::GraphqlBody => typed_body_request(
+            client,
+            target,
+            param,
+            value.to_string(),
+            "application/json".to_string(),
+        ),
+        // The `Splice` pipeline has already re-glued the original document
+        // around the injection point, so `value` is the complete XML body.
+        Location::XmlBody => typed_body_request(
+            client,
+            target,
+            param,
+            value.to_string(),
+            xml_request_content_type(target),
+        ),
         _ => build_url_inject_request(client, target, param, value, default_method),
     }
 }

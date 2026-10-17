@@ -389,7 +389,7 @@ enum_flags.each do |f|
   key = flag_config[f.long]?
   next unless key
   next if FLAGS_WITHOUT_VALUE_CONST.has_key?(f.long)
-  m = normalize_body.match(/&mut self\.#{Regex.escape(key)},\s*crate::cmd::scan::([A-Z0-9_]+),/m)
+  m = normalize_body.match(/&mut self\.#{Regex.escape(key)},\s*(?:crate::cmd::)?scan::([A-Z0-9_]+),/m)
   unless m
     unvalidated << "#{f.long} (scan.#{key})"
     next

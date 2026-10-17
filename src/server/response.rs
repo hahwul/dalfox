@@ -28,20 +28,6 @@ pub(crate) fn validate_jsonp_callback(cb: &str) -> Option<String> {
     Some(cb.to_string())
 }
 
-/// Try to extract a valid JSONP callback from query params. Returns `Some(cb)` if JSONP is
-/// enabled and a valid callback name is present; `None` otherwise.
-pub(crate) fn extract_jsonp_callback(
-    state: &AppState,
-    params: &std::collections::HashMap<String, String>,
-) -> Option<String> {
-    if !state.jsonp_enabled {
-        return None;
-    }
-    params
-        .get(&state.callback_param_name)
-        .and_then(|s| validate_jsonp_callback(s))
-}
-
 /// Build the final HTTP response body, applying JSONP wrapping when a valid callback is present.
 /// Returns `(content_type_override, body_string)`.  When `jsonp_cb` is `Some`, the body is
 /// wrapped as `callback(json);` and the content-type is set to `application/javascript`.
@@ -79,9 +65,13 @@ pub(crate) fn make_api_response<T: Serialize>(
     params: &std::collections::HashMap<String, String>,
     status: StatusCode,
     resp: &T,
-) -> (StatusCode, HeaderMap, String) {
+) -> ApiReply {
     let mut cors = build_cors_headers(state, req_headers);
-    let cb = extract_jsonp_callback(state, params);
+    // JSONP only when enabled and the named query param is a valid callback.
+    let cb = (state.jsonp_enabled)
+        .then(|| params.get(&state.callback_param_name))
+        .flatten()
+        .and_then(|s| validate_jsonp_callback(s));
     let (ct, body) = build_response_body(resp, cb.as_deref());
     // Always set an explicit Content-Type so the body is never served as
     // axum's `String` default of `text/plain; charset=utf-8`:
@@ -110,33 +100,70 @@ pub(crate) fn make_api_response<T: Serialize>(
     (status, cors, body)
 }
 
-/// `{code, msg}` error envelope whose `code` mirrors the HTTP status.
-pub(crate) fn api_error(
-    state: &AppState,
-    req_headers: &HeaderMap,
-    params: &std::collections::HashMap<String, String>,
-    status: StatusCode,
-    msg: impl Into<String>,
-) -> (StatusCode, HeaderMap, String) {
-    let resp = ApiResponse::<serde_json::Value> {
-        code: status.as_u16() as i32,
-        msg: msg.into(),
-        data: None,
-    };
-    make_api_response(state, req_headers, params, status, &resp)
+pub(crate) type ApiReply = (StatusCode, HeaderMap, String);
+
+/// The request context every API response is built from: CORS keys on
+/// `headers`, JSONP on `params`.
+pub(crate) struct Reply<'a> {
+    pub(crate) state: &'a AppState,
+    headers: &'a HeaderMap,
+    params: &'a std::collections::HashMap<String, String>,
 }
 
-/// `{code: 200, msg: "ok", data}` success envelope.
-pub(crate) fn api_ok<T: Serialize>(
-    state: &AppState,
-    req_headers: &HeaderMap,
-    params: &std::collections::HashMap<String, String>,
-    data: T,
-) -> (StatusCode, HeaderMap, String) {
-    let resp = ApiResponse {
-        code: 200,
-        msg: "ok".to_string(),
-        data: Some(data),
-    };
-    make_api_response(state, req_headers, params, StatusCode::OK, &resp)
+impl<'a> Reply<'a> {
+    pub(crate) fn new(
+        state: &'a AppState,
+        headers: &'a HeaderMap,
+        params: &'a std::collections::HashMap<String, String>,
+    ) -> Self {
+        Self {
+            state,
+            headers,
+            params,
+        }
+    }
+
+    /// `{code: 200, msg: "ok", data}` success envelope.
+    pub(crate) fn ok<T: Serialize>(&self, data: T) -> ApiReply {
+        let resp = ApiResponse {
+            code: 200,
+            msg: "ok".to_string(),
+            data: Some(data),
+        };
+        make_api_response(self.state, self.headers, self.params, StatusCode::OK, &resp)
+    }
+
+    /// `{code, msg}` error envelope whose `code` mirrors the HTTP status.
+    pub(crate) fn err(&self, status: StatusCode, msg: impl Into<String>) -> ApiReply {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: status.as_u16() as i32,
+            msg: msg.into(),
+            data: None,
+        };
+        make_api_response(self.state, self.headers, self.params, status, &resp)
+    }
+
+    /// Log a refused request under `route` and answer with its envelope.
+    pub(crate) fn deny(&self, denied: &Denied, route: &str) -> ApiReply {
+        log(self.state, "AUTH", &denied.log_message(route));
+        let resp = denied.api_response();
+        make_api_response(
+            self.state,
+            self.headers,
+            self.params,
+            denied.status(),
+            &resp,
+        )
+    }
+
+    /// Preamble of every API-key route: the full authorization gate, then the
+    /// throttled retention purge. `Some` is the refusal (logged under `route`)
+    /// to return as-is.
+    pub(crate) async fn authorize(&self, route: &str) -> Option<ApiReply> {
+        if let Err(denied) = authorize_request(self.state, self.headers) {
+            return Some(self.deny(&denied, route));
+        }
+        purge_expired_jobs(self.state).await;
+        None
+    }
 }

@@ -53,6 +53,15 @@ pub(crate) fn start_spinner(
     if !enabled || !spinner_allowed {
         return None;
     }
+    Some(spawn_shimmer_line(move || label.clone()))
+}
+
+/// Redraw `text()` as one shimmering, width-truncated line every
+/// `shimmer::FRAME_MS` until the returned sender fires; then clear the line
+/// and acknowledge on the returned receiver.
+fn spawn_shimmer_line(
+    text: impl Fn() -> String + Send + 'static,
+) -> (oneshot::Sender<()>, oneshot::Receiver<()>) {
     let (tx, mut rx) = oneshot::channel::<()>();
     let (done_tx, done_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
@@ -60,11 +69,12 @@ pub(crate) fn start_spinner(
         let mut phase = 0usize;
         loop {
             // Reserve 2 columns for the glyph + its trailing space; truncate
-            // the label (display-width aware, with an ellipsis) so the whole
+            // the text (display-width aware, with an ellipsis) so the whole
             // line fits on one row. `\x1b[K` clears any leftover from a
             // previous, longer frame without a full-line repaint flicker.
+            let text = text();
             let budget = crate::utils::term::term_cols().saturating_sub(2).max(8);
-            let visible = console::truncate_str(&label, budget, "…");
+            let visible = console::truncate_str(&text, budget, "…");
             crate::cprint!(
                 "\r{} {}\x1b[K",
                 shimmer::spin_glyph(phase),
@@ -83,7 +93,7 @@ pub(crate) fn start_spinner(
             phase = phase.wrapping_add(1);
         }
     });
-    Some((tx, done_rx))
+    (tx, done_rx)
 }
 
 /// The single "overall N/M targets · P% · F findings" line that shimmers at the
@@ -106,46 +116,14 @@ pub(crate) fn start_overall_ticker(
         && total_targets > 1
         && crate::utils::term::stdout_is_tty()
     {
-        let findings_count_clone = findings_count.clone();
-        let overall_done_clone = overall_done.clone();
-        let total_targets_copy = total_targets;
-        let (tx, mut rx) = oneshot::channel::<()>();
-        let (done_tx, done_rx) = oneshot::channel::<()>();
-        tokio::spawn(async move {
-            use crate::utils::shimmer;
-            let mut phase = 0usize;
-            loop {
-                let done = overall_done_clone.load(Ordering::Relaxed);
-                let percent = (done * 100) / std::cmp::max(1, total_targets_copy);
-                let findings = findings_count_clone.load(Ordering::Relaxed);
-                let text = format!(
-                    "overall  {done}/{total_targets_copy} targets · {percent}% · {findings} findings"
-                );
-                // Truncate to the terminal width (reserving the glyph + space)
-                // and clear to EOL so the metallic line never wraps onto a
-                // second row, which would desync the `\r` redraw.
-                let budget = crate::utils::term::term_cols().saturating_sub(2).max(8);
-                let visible = console::truncate_str(&text, budget, "…");
-                crate::cprint!(
-                    "\r{} {}\x1b[K",
-                    shimmer::spin_glyph(phase),
-                    shimmer::shimmer(visible.as_ref(), phase)
-                );
-                let _ = io::stdout().flush();
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(shimmer::FRAME_MS as u64)) => {},
-                    _ = &mut rx => {
-                        // clear the line and exit
-                        crate::cprint!("\r\x1b[2K\r");
-                        let _ = io::stdout().flush();
-                        let _ = done_tx.send(());
-                        break;
-                    }
-                }
-                phase = phase.wrapping_add(1);
-            }
-        });
-        Some((tx, done_rx))
+        let findings_count = findings_count.clone();
+        let overall_done = overall_done.clone();
+        Some(spawn_shimmer_line(move || {
+            let done = overall_done.load(Ordering::Relaxed);
+            let percent = (done * 100) / std::cmp::max(1, total_targets);
+            let findings = findings_count.load(Ordering::Relaxed);
+            format!("overall  {done}/{total_targets} targets · {percent}% · {findings} findings")
+        }))
     } else {
         None
     }

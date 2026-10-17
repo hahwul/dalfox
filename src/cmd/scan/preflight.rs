@@ -6,10 +6,6 @@ use super::args::ScanArgs;
 use reqwest::header::CONTENT_TYPE;
 use std::time::Duration;
 
-pub(crate) fn is_allowed_content_type(ct: &str) -> bool {
-    crate::utils::is_xss_scannable_content_type(ct)
-}
-
 /// Byte budget for the preflight body fetch, sent as `Range: bytes=0-8191`.
 ///
 /// Named rather than inlined because the session baseline is derived from this
@@ -432,7 +428,7 @@ pub(crate) async fn finish_waf_detection(
     waf_result
 }
 
-fn parse_waf_type(s: &str) -> crate::waf::WafType {
+pub(super) fn parse_waf_type(s: &str) -> crate::waf::WafType {
     match s.to_ascii_lowercase().as_str() {
         "cloudflare" | "cf" => crate::waf::WafType::Cloudflare,
         "aws" | "awswaf" | "aws-waf" => crate::waf::WafType::AwsWaf,

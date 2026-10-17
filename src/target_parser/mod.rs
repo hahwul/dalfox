@@ -549,7 +549,7 @@ pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
 
     if parts.len() >= 2 {
         let potential_method = parts[0].to_uppercase();
-        if is_known_http_method(&potential_method) {
+        if KNOWN_HTTP_METHODS.contains(&potential_method.as_str()) {
             let url = parts[1].to_string();
             let body = parts
                 .get(2)
@@ -565,14 +565,9 @@ pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
 
 /// Methods recognized in `METHOD URL [BODY]` shorthand and raw-HTTP request lines.
 /// Includes RFC 10008 QUERY (safe/idempotent with a body).
-const KNOWN_HTTP_METHODS: [&str; 8] = [
+pub(crate) const KNOWN_HTTP_METHODS: [&str; 8] = [
     "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "QUERY",
 ];
-
-#[inline]
-fn is_known_http_method(method: &str) -> bool {
-    KNOWN_HTTP_METHODS.iter().any(|m| m.eq(&method))
-}
 
 /// Parse a target string that may be in "METHOD URL [BODY]" format or a plain URL.
 /// This is a wrapper around parse_target that handles the METHOD URL [BODY] format.
@@ -604,7 +599,7 @@ pub fn is_raw_http_request(s: &str) -> bool {
     let first = strip_bom(s).lines().next().unwrap_or("").trim_start();
     let mut it = first.split_whitespace();
     if let Some(method) = it.next()
-        && is_known_http_method(method)
+        && KNOWN_HTTP_METHODS.contains(&method)
         && first.contains(" HTTP/")
     {
         return true;

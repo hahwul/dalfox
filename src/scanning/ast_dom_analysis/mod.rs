@@ -774,22 +774,6 @@ impl<'a> DomXssVisitor<'a> {
             default_tt_policy: None,
         }
     }
-    fn with_script_element_ids(mut self, ids: impl Into<Arc<HashSet<String>>>) -> Self {
-        self.script_element_ids = ids.into();
-        self
-    }
-    fn with_reflected_markup(mut self, markup: impl Into<Arc<PageMarkup>>) -> Self {
-        self.reflected_markup = markup.into();
-        self
-    }
-    /// Mark that the page enforces `require-trusted-types-for 'script'`, so a
-    /// strict `'default'` Trusted Types policy genuinely neutralizes TrustedHTML
-    /// sinks and those findings can be suppressed. Off by default — when off,
-    /// behaviour is identical to before Trusted Types awareness existed.
-    fn with_trusted_types_enforced(mut self, enforced: bool) -> Self {
-        self.trusted_types_enforced = enforced;
-        self
-    }
     /// Enter one recursive analysis step. Returns `None` — telling the caller to
     /// bail with a safe default (`false` / `None` / stop walking) — once the
     /// shared recursion depth has reached [`MAX_AST_VISIT_DEPTH`] or the walk has
@@ -890,21 +874,12 @@ impl AstDomAnalyzer {
             return Ok(Vec::new());
         }
 
-        let script_element_ids = Arc::clone(&self.script_element_ids);
-        let reflected_markup = Arc::clone(&self.reflected_markup);
-        let trusted_types_enforced = self.trusted_types_enforced;
-
         // Fast path: a script this small can't nest a parser-recursion vector
         // deep enough to overflow a normal worker stack (see [`INLINE_PARSE_BYTES`]),
         // so parse it inline and skip the thread-spawn cost the common small
         // inline `<script>` block would otherwise pay on every call.
         if source_code.len() <= INLINE_PARSE_BYTES {
-            return Self::analyze_on_stack(
-                source_code,
-                script_element_ids,
-                reflected_markup,
-                trusted_types_enforced,
-            );
+            return self.analyze_on_stack(source_code);
         }
 
         // Larger input may carry a deep multi-byte statement/assignment chain
@@ -915,14 +890,7 @@ impl AstDomAnalyzer {
         std::thread::scope(|scope| {
             let handle = std::thread::Builder::new()
                 .stack_size(ANALYZE_STACK_BYTES)
-                .spawn_scoped(scope, move || {
-                    Self::analyze_on_stack(
-                        source_code,
-                        script_element_ids,
-                        reflected_markup,
-                        trusted_types_enforced,
-                    )
-                });
+                .spawn_scoped(scope, || self.analyze_on_stack(source_code));
             match handle {
                 // A panic inside the parse/walk (not a stack overflow, which
                 // would abort the process) degrades to "no findings" rather than
@@ -941,12 +909,7 @@ impl AstDomAnalyzer {
     /// Parse `source_code` and run the DOM-XSS walk, returning the findings.
     /// Factored out of [`analyze`] so it can run on a dedicated large-stack
     /// thread.
-    fn analyze_on_stack(
-        source_code: &str,
-        script_element_ids: Arc<HashSet<String>>,
-        reflected_markup: Arc<PageMarkup>,
-        trusted_types_enforced: bool,
-    ) -> Result<Vec<DomXssVulnerability>, String> {
+    fn analyze_on_stack(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();
 
         // Module first, so `import`/`export`/top-level `await` bundles keep
@@ -967,10 +930,12 @@ impl AstDomAnalyzer {
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
-        let mut visitor = DomXssVisitor::new(source_code)
-            .with_script_element_ids(script_element_ids)
-            .with_reflected_markup(reflected_markup)
-            .with_trusted_types_enforced(trusted_types_enforced);
+        let mut visitor = DomXssVisitor {
+            script_element_ids: Arc::clone(&self.script_element_ids),
+            reflected_markup: Arc::clone(&self.reflected_markup),
+            trusted_types_enforced: self.trusted_types_enforced,
+            ..DomXssVisitor::new(source_code)
+        };
         visitor.walk_statements(&ret.program.body);
         if visitor.work_steps.get() >= visitor.work_budget {
             crate::dbg_log!(

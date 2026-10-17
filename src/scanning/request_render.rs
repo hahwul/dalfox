@@ -6,6 +6,7 @@ use super::*;
 
 pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     use crate::parameter_analysis::Location;
+    use std::fmt::Write as _;
     // The scan applies `apply_param_encoding` to every injected value before it
     // goes on the wire (see `check_reflection`/`check_dom_verification`), so a
     // param that requires pre-encoding (e.g. an auto-detected base64 field) is
@@ -98,22 +99,17 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
     let mut buf = String::with_capacity(512);
 
     // Request line
-    buf.push_str(&method);
-    buf.push(' ');
-    buf.push_str(url.path());
+    let _ = write!(buf, "{} {}", method, url.path());
     if let Some(q) = url.query() {
-        buf.push('?');
-        buf.push_str(q);
+        let _ = write!(buf, "?{q}");
     }
-    buf.push_str(" HTTP/1.1\r\nHost: ");
-    buf.push_str(url.host_str().unwrap_or(""));
+    let _ = write!(buf, " HTTP/1.1\r\nHost: {}", url.host_str().unwrap_or(""));
     // `Host` is host *and port*. Dropping it made every PoC against a
     // non-default port replay to :80/:443 — a different service, or nothing.
     // `Url::port()` is already `None` for the scheme's default port, which is
     // exactly when the Host header should omit it.
     if let Some(port) = url.port() {
-        buf.push(':');
-        buf.push_str(&port.to_string());
+        let _ = write!(buf, ":{port}");
     }
 
     // A `Location::Header` param is injected into the request itself, not the
@@ -140,65 +136,43 @@ pub(crate) fn build_request_text(target: &Target, param: &Param, payload: &str) 
         if content_type.is_some() && k.eq_ignore_ascii_case("content-type") {
             continue;
         }
-        buf.push_str("\r\n");
-        buf.push_str(k);
-        buf.push_str(": ");
-        buf.push_str(v);
+        let _ = write!(buf, "\r\n{k}: {v}");
     }
     if injected_header {
-        buf.push_str("\r\n");
-        buf.push_str(&param.name);
-        buf.push_str(": ");
-        buf.push_str(&field_value);
+        let _ = write!(buf, "\r\n{}: {}", param.name, field_value);
     }
     // Body injectors always set their own `Content-Type` on the wire; a
     // Query/Path injector re-sends the original body verbatim and passes
     // `None` here, keeping whatever the target captured.
     if let Some(ct) = &content_type {
-        buf.push_str("\r\nContent-Type: ");
-        buf.push_str(ct);
+        let _ = write!(buf, "\r\nContent-Type: {ct}");
     }
 
     // Cookies. For a cookie param the injected value is written first and the
     // target's other cookies follow, matching `build_header_request` — those
     // neighbours often carry the session state the sink needs to render at all.
     if cookie_param {
-        buf.push_str("\r\nCookie: ");
-        buf.push_str(&param.name);
-        buf.push('=');
-        buf.push_str(&field_value);
+        let _ = write!(buf, "\r\nCookie: {}={}", param.name, field_value);
         if let Some(rest) =
             crate::utils::compose_cookie_header_excluding(&target.cookies, Some(&param.name))
             && !rest.is_empty()
         {
-            buf.push_str("; ");
-            buf.push_str(&rest);
+            let _ = write!(buf, "; {rest}");
         }
-    } else if !target.cookies.is_empty()
-        && !target
-            .headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+    } else if !target
+        .headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+        && let Some(cookies) = crate::utils::compose_cookie_header_excluding(&target.cookies, None)
     {
         // Mirrors `apply_headers_ua_cookies`: `target.cookies` are auto-attached
         // only when the target does not already carry its own Cookie header
         // (already emitted above), never as a second Cookie line.
-        buf.push_str("\r\nCookie: ");
-        for (i, (k, v)) in target.cookies.iter().enumerate() {
-            if i > 0 {
-                buf.push_str("; ");
-            }
-            buf.push_str(k);
-            buf.push('=');
-            buf.push_str(v);
-        }
+        let _ = write!(buf, "\r\nCookie: {cookies}");
     }
 
     if let Some(data) = &body {
-        buf.push_str("\r\nContent-Length: ");
-        buf.push_str(&data.len().to_string());
-        buf.push_str("\r\n\r\n");
-        buf.push_str(data);
+        let _ = write!(buf, "\r\nContent-Length: {}\r\n\r\n{}", data.len(), data);
     } else {
         buf.push_str("\r\n");
     }

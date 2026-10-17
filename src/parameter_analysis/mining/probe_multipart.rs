@@ -86,21 +86,19 @@ pub async fn probe_multipart_params(
         let client_clone = client.clone();
         let url = target.url.clone();
         let target_clone = shared_target.clone();
-        let semaphore_clone = semaphore.clone();
         let pairs_clone = pairs.clone();
         let field_name = field.clone();
 
-        let handle = tokio::spawn(crate::with_job_scopes(
-            crate::JobScopes::capture(),
-            async move {
-                let permit = semaphore_clone
-                    .acquire()
-                    .await
-                    .expect("acquire semaphore permit");
+        // No `pb` tick: this probe never advanced the spinner.
+        let handle = crate::parameter_analysis::spawn_reflection_probe(
+            semaphore.clone(),
+            delay,
+            None,
+            move || {
                 let mut form = reqwest::multipart::Form::new();
                 let mut placed = false;
                 for (k, v) in pairs_clone.iter() {
-                    if *k == field_name {
+                    if *k == field {
                         form = form.text(k.clone(), marker.to_string());
                         placed = true;
                     } else {
@@ -108,41 +106,30 @@ pub async fn probe_multipart_params(
                     }
                 }
                 if !placed {
-                    form = form.text(field_name.clone(), marker.to_string());
+                    form = form.text(field, marker.to_string());
                 }
 
                 let method =
                     crate::scanning::url_inject::body_location_method(&target_clone.method);
-                let request = crate::utils::build_body_request_base(
-                    &client_clone,
-                    &target_clone,
-                    method,
-                    url,
-                    None,
+                Some(
+                    crate::utils::build_body_request_base(
+                        &client_clone,
+                        &target_clone,
+                        method,
+                        url,
+                        None,
+                    )
+                    .multipart(form),
                 )
-                .multipart(form);
-                crate::record_outbound_request().await;
-
-                let mut discovered: Option<Param> = None;
-                if let Ok(r) = crate::utils::http::send_counted(request).await
-                    && let Ok(text) = crate::utils::http::read_body_counted(r).await
-                    && crate::scanning::markers::probe_reflected(&text)
-                {
-                    if !silence {
-                        eprintln!("Discovered multipart field: {}", field_name);
-                    }
-                    discovered = Some(
-                        Param::new(field_name, marker.to_string(), Location::MultipartBody)
-                            .with_reflection_analysis(&text),
-                    );
-                }
-                if delay > 0 {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-                drop(permit);
-                discovered
             },
-        ));
+            move |text| {
+                if !silence {
+                    eprintln!("Discovered multipart field: {}", field_name);
+                }
+                Param::new(field_name, marker.to_string(), Location::MultipartBody)
+                    .with_reflection_analysis(text)
+            },
+        );
         handles.push(handle);
     }
 

@@ -72,12 +72,9 @@ fn shimmer_spinner_set_message_updates_shared_cell() {
         indicatif::ProgressBar::hidden(),
         Arc::new(Mutex::new("Analyzing…".to_string())),
     );
-    assert_eq!(&*sp.label_cell().lock().unwrap(), "Analyzing…");
+    assert_eq!(&*sp.label.lock().unwrap(), "Analyzing…");
     sp.set_message("Mining dictionary parameters");
-    assert_eq!(
-        &*sp.label_cell().lock().unwrap(),
-        "Mining dictionary parameters"
-    );
+    assert_eq!(&*sp.label.lock().unwrap(), "Mining dictionary parameters");
 }
 
 #[test]

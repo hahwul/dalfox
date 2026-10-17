@@ -391,7 +391,7 @@ pub async fn blind_scan_forms_with(
 
     // Always GET the form-bearing page. Reusing target.method would POST to
     // the form handler instead of fetching the landing page that renders the
-    // form, mirroring parameter_analysis::discovery::form::check_form_discovery.
+    // form, mirroring parameter_analysis::discovery::form::check_form_discovery_with.
     // Through the shared builder, which also drops a caller `Accept-Encoding`:
     // setting it by hand turns off reqwest's decompression, the page comes back
     // as compressed bytes, and no form is ever found.

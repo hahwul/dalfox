@@ -122,21 +122,29 @@ fn test_inject_type_for_payload_adds_csti_suffix() {
     // reporters distinguish client-side template injection findings
     // from generic HTML reflections.
     assert_eq!(
-        super::inject_type_for_payload(false, "{{constructor.constructor('alert(1)')()}}"),
+        super::inject_type_for_payload_with_sink(
+            false,
+            "{{constructor.constructor('alert(1)')()}}",
+            None
+        ),
         "inHTML-CSTI"
     );
     assert_eq!(
-        super::inject_type_for_payload(true, "{{constructor.constructor('alert(1)')()}}"),
+        super::inject_type_for_payload_with_sink(
+            true,
+            "{{constructor.constructor('alert(1)')()}}",
+            None
+        ),
         "sxss-inHTML-CSTI"
     );
     // Non-template payloads keep the legacy label so existing
     // consumers don't have to relearn the format.
     assert_eq!(
-        super::inject_type_for_payload(false, "<svg/onload=alert(1)>"),
+        super::inject_type_for_payload_with_sink(false, "<svg/onload=alert(1)>", None),
         "inHTML"
     );
     assert_eq!(
-        super::inject_type_for_payload(true, "<svg/onload=alert(1)>"),
+        super::inject_type_for_payload_with_sink(true, "<svg/onload=alert(1)>", None),
         "sxss-inHTML"
     );
 }

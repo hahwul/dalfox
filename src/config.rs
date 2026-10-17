@@ -499,114 +499,87 @@ impl ScanConfig {
     /// exactly as their CLI parsers do, so a valid-but-differently-cased value
     /// is accepted rather than dropped.
     pub fn normalize_and_validate(&mut self) -> Vec<String> {
+        use crate::cmd::scan;
         let mut warnings = Vec::new();
 
-        // `base_url` — same check as `--base-url`'s clap parser.
-        if let Some(u) = &self.base_url {
-            match crate::cmd::scan::parse_base_url_arg(u) {
-                Ok(v) => self.base_url = Some(v),
-                Err(e) => {
-                    warnings.push(format!("config scan.base_url: {e}; ignoring"));
-                    self.base_url = None;
+        // Fields with a clap value-parser of their own, run here because a
+        // config value never passes through clap: `method` / `sxss_method` are
+        // upper-cased (a lowercase `post` would break the case-sensitive method
+        // comparisons downstream) and `force_waf` lower-cased and checked
+        // against the known WAF aliases (a typo would otherwise fall into the
+        // silent `WafType::Unknown` bucket that skips targeted bypasses).
+        type ArgParser = fn(&str) -> std::result::Result<String, String>;
+        let parsed: [(&mut Option<String>, ArgParser, &str); 4] = [
+            (
+                &mut self.base_url,
+                scan::parse_base_url_arg,
+                "scan.base_url",
+            ),
+            (&mut self.method, scan::parse_http_method_arg, "scan.method"),
+            (
+                &mut self.sxss_method,
+                scan::parse_http_method_arg,
+                "scan.sxss_method",
+            ),
+            (
+                &mut self.force_waf,
+                scan::parse_force_waf_arg,
+                "scan.force_waf",
+            ),
+        ];
+        for (field, parse, name) in parsed {
+            match field.as_deref().map(parse) {
+                Some(Ok(v)) => *field = Some(v),
+                Some(Err(e)) => {
+                    warnings.push(format!("config {name}: {e}; ignoring"));
+                    *field = None;
                 }
-            }
-        }
-
-        // `method` — uppercase + validate, mirroring `--method`'s parser so a
-        // config `method = "post"` becomes "POST" instead of silently breaking
-        // the case-sensitive method comparisons downstream.
-        if let Some(m) = &self.method {
-            match crate::cmd::scan::parse_http_method_arg(m) {
-                Ok(upper) => self.method = Some(upper),
-                Err(e) => {
-                    warnings.push(format!("config scan.method: {e}; ignoring"));
-                    self.method = None;
-                }
-            }
-        }
-
-        // `sxss_method` — same normalization as `method` above. `--sxss-method`
-        // now carries clap's parser, but a config value never passes through
-        // clap, so `sxss_method = "post"` would still reach
-        // `reqwest::Method::from_str` as the literal extension verb `post`.
-        if let Some(m) = &self.sxss_method {
-            match crate::cmd::scan::parse_http_method_arg(m) {
-                Ok(upper) => self.sxss_method = Some(upper),
-                Err(e) => {
-                    warnings.push(format!("config scan.sxss_method: {e}; ignoring"));
-                    self.sxss_method = None;
-                }
-            }
-        }
-
-        // `force_waf` — lowercase + validate against the known WAF aliases,
-        // mirroring `--force-waf`'s parser so a typo doesn't fall into the
-        // silent `WafType::Unknown` bucket that skips targeted bypasses.
-        if let Some(w) = &self.force_waf {
-            match crate::cmd::scan::parse_force_waf_arg(w) {
-                Ok(lower) => self.force_waf = Some(lower),
-                Err(e) => {
-                    warnings.push(format!("config scan.force_waf: {e}; ignoring"));
-                    self.force_waf = None;
-                }
+                None => {}
             }
         }
 
         // Single-value enum fields validated against clap's possible values.
-        reject_unless_allowed(
-            &mut self.format,
-            crate::cmd::scan::FORMAT_VALUES,
-            "scan.format",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.poc_type,
-            crate::cmd::scan::POC_TYPE_VALUES,
-            "scan.poc_type",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.limit_result_type,
-            crate::cmd::scan::LIMIT_RESULT_TYPE_VALUES,
-            "scan.limit_result_type",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.baseline_mode,
-            crate::cmd::scan::BASELINE_MODE_VALUES,
-            "scan.baseline_mode",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.min_confidence,
-            crate::cmd::scan::MIN_CONFIDENCE_VALUES,
-            "scan.min_confidence",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.custom_alert_type,
-            crate::cmd::scan::CUSTOM_ALERT_TYPE_VALUES,
-            "scan.custom_alert_type",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.dedup_urls,
-            crate::cmd::scan::DEDUP_URLS_VALUES,
-            "scan.dedup_urls",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.waf_bypass,
-            crate::cmd::scan::WAF_BYPASS_VALUES,
-            "scan.waf_bypass",
-            &mut warnings,
-        );
-        reject_unless_allowed(
-            &mut self.on_session_loss,
-            crate::cmd::scan::ON_SESSION_LOSS_VALUES,
-            "scan.on_session_loss",
-            &mut warnings,
-        );
+        for (field, allowed, name) in [
+            (&mut self.format, scan::FORMAT_VALUES, "scan.format"),
+            (&mut self.poc_type, scan::POC_TYPE_VALUES, "scan.poc_type"),
+            (
+                &mut self.limit_result_type,
+                scan::LIMIT_RESULT_TYPE_VALUES,
+                "scan.limit_result_type",
+            ),
+            (
+                &mut self.baseline_mode,
+                scan::BASELINE_MODE_VALUES,
+                "scan.baseline_mode",
+            ),
+            (
+                &mut self.min_confidence,
+                scan::MIN_CONFIDENCE_VALUES,
+                "scan.min_confidence",
+            ),
+            (
+                &mut self.custom_alert_type,
+                scan::CUSTOM_ALERT_TYPE_VALUES,
+                "scan.custom_alert_type",
+            ),
+            (
+                &mut self.dedup_urls,
+                scan::DEDUP_URLS_VALUES,
+                "scan.dedup_urls",
+            ),
+            (
+                &mut self.waf_bypass,
+                scan::WAF_BYPASS_VALUES,
+                "scan.waf_bypass",
+            ),
+            (
+                &mut self.on_session_loss,
+                scan::ON_SESSION_LOSS_VALUES,
+                "scan.on_session_loss",
+            ),
+        ] {
+            reject_unless_allowed(field, allowed, name, &mut warnings);
+        }
 
         // `session_check` — compiled on every probe, potentially an hour into
         // the scan. A config file skips clap entirely, so validate the pattern
@@ -635,13 +608,13 @@ impl ScanConfig {
         // Comma-delimited enum list fields.
         reject_list_unless_allowed(
             &mut self.only_poc,
-            crate::cmd::scan::ONLY_POC_VALUES,
+            scan::ONLY_POC_VALUES,
             "scan.only_poc",
             &mut warnings,
         );
         reject_list_unless_allowed(
             &mut self.encoders,
-            crate::cmd::scan::ENCODER_VALUES,
+            scan::ENCODER_VALUES,
             "scan.encoders",
             &mut warnings,
         );

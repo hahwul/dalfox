@@ -8,10 +8,11 @@
 use super::ScanState;
 use super::args::ScanArgs;
 use super::logging::start_spinner;
-use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
+use super::preflight::{PreflightOutcome, preflight_content_type};
 use super::session::SessionBaseline;
 use crate::parameter_analysis::analyze_parameters;
 use crate::target_parser::Target;
+use crate::utils::is_xss_scannable_content_type;
 use crate::utils::log::log_prefix;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -801,7 +802,7 @@ async fn run_target_preflight(
             // `--deep-scan` deliberately scans every content type,
             // whereas a normal scan drops denylisted types (images,
             // fonts, etc.) that can't carry reflected/DOM XSS.
-            if !args_clone.deep_scan && !is_allowed_content_type(&preflight.content_type) {
+            if !args_clone.deep_scan && !is_xss_scannable_content_type(&preflight.content_type) {
                 // Skip this target early
                 skipped_targets_clone.lock().await.insert(
                     target.state_key(),
@@ -860,7 +861,7 @@ pub(crate) async fn detect_outdated_libs(
 /// Run the AST DOM-XSS pass over the landing page captured by preflight.
 ///
 /// CLI-only. The analyzer it calls
-/// (`scanning::ast_integration::run_initial_ast_dom_analysis`) is what the
+/// (`scanning::ast_integration::run_initial_ast_dom_analysis_for_response`) is what the
 /// `server` and MCP paths share, so all three surfaces report the same DOM-XSS
 /// findings for the same page — but editing *this* wrapper moves the CLI alone.
 /// Security posture comes from the `Target`, which preflight already enriched.

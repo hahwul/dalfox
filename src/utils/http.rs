@@ -46,34 +46,12 @@ pub fn compose_cookie_header_excluding(
     cookies: &[(String, String)],
     exclude_name: Option<&str>,
 ) -> Option<String> {
-    if cookies.is_empty() {
-        return None;
-    }
-
-    // Estimate capacity to avoid reallocations
-    let estimated_len = cookies
+    let s = cookies
         .iter()
-        .map(|(k, v)| k.len() + v.len() + 2)
-        .sum::<usize>();
-    let mut s = String::with_capacity(estimated_len);
-
-    let mut first = true;
-    for (k, v) in cookies {
-        if let Some(name) = exclude_name
-            && k == name
-        {
-            continue;
-        }
-
-        if !first {
-            s.push_str("; ");
-        }
-        s.push_str(k);
-        s.push('=');
-        s.push_str(v);
-        first = false;
-    }
-
+        .filter(|(k, _)| exclude_name != Some(k.as_str()))
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("; ");
     if s.is_empty() { None } else { Some(s) }
 }
 
@@ -363,19 +341,6 @@ pub(crate) fn parse_header_line(line: &str) -> Option<(String, String)> {
     Some((name.to_string(), value.to_string()))
 }
 
-/// Parse a list of raw header lines into (name, value) pairs.
-/// Ignores lines without ":" or with empty header names.
-#[cfg(test)]
-pub(crate) fn parse_headers(lines: &[String]) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for l in lines {
-        if let Some((k, v)) = parse_header_line(l) {
-            out.push((k, v));
-        }
-    }
-    out
-}
-
 /// Extract primary type/subtype (lowercased) from a Content-Type header.
 /// Returns None for invalid formats.
 #[inline]
@@ -515,28 +480,20 @@ pub(crate) fn is_javascript_content_type(ct: &str) -> bool {
 /// useful scan surfaces. Later finding gates decide whether the response can
 /// execute in the relevant browser context.
 pub(crate) fn is_xss_scannable_content_type(ct: &str) -> bool {
-    if is_htmlish_content_type(ct) || is_xml_content_type(ct) {
+    // `image/svg+xml` is covered by the `+xml` suffix in `is_xml_content_type`.
+    if is_htmlish_content_type(ct) || is_xml_content_type(ct) || is_javascript_content_type(ct) {
         return true;
     }
-
-    let Some(primary) = content_type_primary(ct) else {
-        return false;
-    };
-
-    matches!(
-        primary.as_str(),
-        "application/json"
-            | "text/json"
-            | "application/javascript"
-            | "text/javascript"
-            | "application/ecmascript"
-            | "text/ecmascript"
-            | "application/x-javascript"
-            | "image/svg+xml"
-            // Plain-text endpoints remain useful scan surfaces; body-aware
-            // finding gates suppress them as markup documents.
-            | "text/plain"
-    )
+    content_type_primary(ct).is_some_and(|primary| {
+        matches!(
+            primary.as_str(),
+            "application/json"
+                | "text/json"
+                // Plain-text endpoints remain useful scan surfaces; body-aware
+                // finding gates suppress them as markup documents.
+                | "text/plain"
+        )
+    })
 }
 
 /// True when a response Content-Type renders as inert *data* in a browser —

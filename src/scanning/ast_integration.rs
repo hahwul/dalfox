@@ -19,8 +19,8 @@ pub(crate) fn extract_script_element_ids(html: &str) -> HashSet<String> {
 /// Collect the `id` attribute of every `<script>` element in an already-parsed
 /// document. Factored out of [`extract_script_element_ids`] so callers that
 /// also need the JS blocks can share a single `Html::parse_document` pass via
-/// [`extract_js_and_script_ids`] instead of parsing the (up to 16 MiB) body
-/// twice.
+/// [`extract_js_script_ids_and_reflected_markup`] instead of parsing the (up
+/// to 16 MiB) body twice.
 fn script_element_ids_from_document(document: &Html) -> HashSet<String> {
     let mut ids = HashSet::new();
     let selector = selectors::script();
@@ -35,29 +35,8 @@ fn script_element_ids_from_document(document: &Html) -> HashSet<String> {
     ids
 }
 
-/// Extract JavaScript code from HTML response
-/// Looks for <script> tags and inline event handlers
-#[cfg(test)]
-pub(crate) fn extract_javascript_from_html(html: &str) -> Vec<String> {
-    let document = crate::utils::html::parse_document_bounded(html);
-    js_blocks_from_document(&document)
-}
-
-/// Parse `html` once and return BOTH the JS blocks (see
-/// [`extract_javascript_from_html`]) and the `<script>` element ids (see
-/// [`extract_script_element_ids`]). The AST DOM-analysis entry points need
-/// both for the same response body; calling the two extractors separately
-/// parsed the full response through html5ever twice. Sharing one parse tree
-/// yields byte-identical results at half the HTML-parse cost.
-#[cfg(test)]
-pub(crate) fn extract_js_and_script_ids(html: &str) -> (Vec<String>, HashSet<String>) {
-    let document = crate::utils::html::parse_document_bounded(html);
-    let js_blocks = js_blocks_from_document(&document);
-    let script_ids = script_element_ids_from_document(&document);
-    (js_blocks, script_ids)
-}
-
-/// [`extract_js_and_script_ids`] plus the [`PageMarkup`] of the same
+/// Parse `html` once and return the JS blocks, the `<script>` element ids
+/// (see [`extract_script_element_ids`]) and the [`PageMarkup`] of the same
 /// parse, for a response whose request carried a scan marker in the tested
 /// parameter.
 ///
@@ -298,9 +277,8 @@ fn xml_script_type_is_javascript(script_type: &str) -> bool {
 }
 
 /// Extract JS blocks (inline `<script>` bodies, `on*` handler bodies, and
-/// `javascript:` href bodies) from an already-parsed document. Factored out of
-/// [`extract_javascript_from_html`] so [`extract_js_and_script_ids`] can reuse
-/// a single parse.
+/// `javascript:` href bodies) from an already-parsed document, so callers can
+/// share a single parse.
 fn js_blocks_from_document(document: &Html) -> Vec<String> {
     use std::collections::HashSet;
     let mut js_code = Vec::new();
@@ -517,22 +495,6 @@ impl PageSecurityPosture {
 
     pub(crate) fn from_target(target: &crate::target_parser::Target) -> Self {
         Self::from_csp(target.csp_analysis.as_ref())
-    }
-
-    /// Posture straight from a response: enforcing header, then report-only
-    /// header, then a `<meta http-equiv>` policy. The server / MCP runner now
-    /// stores the policy on the target (via the same
-    /// `csp_header_from_response` + `analyze_csp_from` pair) and uses
-    /// [`Self::from_target`] like the CLI; this composition keeps the
-    /// precedence directly testable.
-    #[cfg(test)]
-    pub(crate) fn from_response(headers: &reqwest::header::HeaderMap, body: &str) -> Self {
-        match crate::scanning::csp_header_from_response(headers, body) {
-            Some((name, policy)) => Self::from_csp(Some(
-                &crate::payload::xss_csp_bypass::analyze_csp_from(&name, &policy),
-            )),
-            None => Self::default(),
-        }
     }
 }
 
@@ -1109,12 +1071,6 @@ fn has_storage_bootstrap(normalized_js: &str, storage_api: &str, key: &str) -> b
     normalized_js.contains(&single) || normalized_js.contains(&double)
 }
 
-/// [`has_self_bootstrap_verification_normalized`] on a raw script block.
-#[cfg(test)]
-pub(crate) fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
-    has_self_bootstrap_verification_normalized(&normalize_js_for_pattern_matching(js_code), source)
-}
-
 /// Confirm pages that bootstrap a non-URL DOM source from a predictable query
 /// parameter in the same script block, which lets Dalfox emit a stronger result
 /// for deterministic self-triggering xssmaze-style flows.
@@ -1252,26 +1208,9 @@ pub(crate) fn has_self_bootstrap_verification_normalized(
     false
 }
 
-/// Analyze JavaScript code for DOM XSS vulnerabilities using AST analysis
-/// Returns a list of (vulnerability, payload, description) tuples
-#[cfg(test)]
-pub(crate) fn analyze_javascript_for_dom_xss(
-    js_code: &str,
-) -> Vec<(
-    crate::scanning::ast_dom_analysis::DomXssVulnerability,
-    String,
-    String,
-)> {
-    analyze_javascript_for_dom_xss_with_html_context(
-        js_code,
-        &Default::default(),
-        &Default::default(),
-        false,
-    )
-}
-
-/// Same as `analyze_javascript_for_dom_xss`, but supplies the AST analyzer
-/// with the set of `<script>` element IDs observed in the surrounding HTML
+/// Analyze JavaScript code for DOM XSS vulnerabilities using AST analysis,
+/// returning (vulnerability, payload, description) tuples. Supplies the AST
+/// analyzer with the set of `<script>` element IDs observed in the surrounding HTML
 /// so inline `getElementById('id').innerText = tainted` shapes resolve to
 /// a JS-eval sink. Use `extract_script_element_ids(html)` to build the set.
 ///
@@ -1395,24 +1334,8 @@ pub(crate) fn build_ast_dom_xss_result(
 /// CLI does — they previously skipped it because they didn't run the
 /// preflight step that produced the response body, so identical
 /// targets produced 0 findings via API but multiple via CLI.
-#[cfg(test)]
-pub(crate) fn run_initial_ast_dom_analysis(
-    response_text: &str,
-    target_url: &str,
-    target_method: &str,
-    posture: PageSecurityPosture,
-) -> Vec<crate::scanning::result::Result> {
-    run_initial_ast_dom_analysis_for_response(
-        response_text,
-        "text/html",
-        target_url,
-        target_method,
-        posture,
-    )
-}
-
-/// Run initial-page AST analysis only when the response is a browser-active
-/// markup document. `text/html` and sniffable unknown types use the HTML
+///
+/// Runs only when the response is a browser-active markup document. `text/html` and sniffable unknown types use the HTML
 /// parser; XML response types use the namespace-aware XML extractor.
 pub(crate) fn run_initial_ast_dom_analysis_for_response(
     response_text: &str,

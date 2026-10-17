@@ -331,22 +331,6 @@ pub(crate) fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     false
 }
 
-/// True when a path-segment parameter's "reflection" should be ignored because
-/// it came from a non-2xx response. Error pages frequently echo the requested
-/// URL/path verbatim, producing reflections that don't represent real
-/// injection points.
-///
-/// **Note**: this is the body-less fast path. The full scan-time check uses
-/// [`should_suppress_path_reflection_with_body`], which keeps non-2xx
-/// findings when the marker reflects outside URL-style attributes — those
-/// are genuinely exploitable error-page XSS (e.g. a 404 template that
-/// renders the requested URI inside `<td>...</td>`). Retained for legacy
-/// tests pinning the conservative status-code-only semantics.
-#[cfg(test)]
-fn should_suppress_path_reflection(location: &Location, status_code: u16) -> bool {
-    matches!(location, Location::Path) && !(200..300).contains(&status_code)
-}
-
 /// HTML attributes that carry URL values. Reflections that land *only*
 /// inside one of these are noise: browsers parse them as URLs, so an
 /// injected `<` doesn't open a tag and the payload can't escape into a
@@ -791,7 +775,8 @@ fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
     found
 }
 
-/// Body-aware version of [`should_suppress_path_reflection`]. Lets
+/// True when a path-segment parameter's "reflection" should be ignored
+/// because it came from a non-2xx response that only echoes the URL. Lets
 /// exploitable error-page reflections (404 templates that render the URI
 /// in `<td>`, 500 fallbacks that emit `<h1>You searched for X</h1>`,
 /// etc.) reach the V/R reporter so users don't lose those true positives.
@@ -2150,7 +2135,7 @@ pub(crate) fn resolve_sxss_check_urls(
     // page's HTML. Fetching it carries the operator's headers and cookies, so it
     // has to clear the same bar as any other credentialed request -- the
     // target's own origin, or a same-host TLS upgrade of it.
-    // `check_form_discovery` already refuses to record anything else; this keeps
+    // `check_form_discovery_with` already refuses to record anything else; this keeps
     // the request-issuing side honest if that ever changes.
     if let Some(ref action) = param.form_action_url
         && let Ok(u) = url::Url::parse(action)
@@ -2533,7 +2518,7 @@ pub(crate) struct StoreProbeOutcome {
 /// gates the whole catalog.
 fn store_probe_attempts(args: &crate::cmd::scan::ScanArgs, url_count: usize) -> u64 {
     let base = args.sxss_retries.max(1) as u64;
-    (base + url_count.saturating_sub(1) as u64).max(base)
+    base + url_count.saturating_sub(1) as u64
 }
 
 /// Per-parameter store-probe (baseline-gated). Injects the reflection markers
