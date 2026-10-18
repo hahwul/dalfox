@@ -121,7 +121,7 @@ impl<'a> DomXssVisitor<'a> {
             self.tainted_return_sources.clear();
 
             let before = self.vulnerabilities.len();
-            self.walk_statements(body_stmts);
+            self.with_own_this(|v| v.walk_statements(body_stmts));
             if concise {
                 self.collect_concise_return(body_stmts);
             }

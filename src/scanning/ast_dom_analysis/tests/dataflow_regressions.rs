@@ -209,6 +209,10 @@ fn neutralized_or_unrelated_values_stay_clean() {
         "class A { constructor() { this.v = location.hash; } } el.innerHTML = this.v;",
         "function A() { this.u = location.hash; } function B() { el.innerHTML = this.u; }",
         "function A() { this.u = location.hash; } el.innerHTML = this.u;",
+        "class C { constructor() { this.v = location.hash; } bind() { window.addEventListener('message', function (e) { el.innerHTML = this.v; }); } }",
+        "class C { constructor() { this.v = location.hash; } bind() { window.onmessage = function (e) { el.innerHTML = this.v; }; } }",
+        "this.v = location.hash; class B { r(a) { el.innerHTML = this.v; return a; } } new B().r(location.search);",
+        "class C { constructor() { this.v = location.hash; } load() { var get = db.transaction('n').objectStore('n').get('k'); get.onsuccess = function (ev) { el.innerHTML = this.v; }; } }",
         // A non-arrow function, a nested class and the class itself (static)
         // each have their own `this`.
         "class C { constructor() { this.v = location.hash; } r() { [1].forEach(function () { el.innerHTML = this.v; }); } }",

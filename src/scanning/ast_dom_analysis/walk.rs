@@ -757,11 +757,12 @@ impl<'a> DomXssVisitor<'a> {
     /// Run `walk` with a `this` of its own (a class, a non-arrow function), so
     /// the `this.*` fields written and read inside never meet another
     /// object's: each `this` gets its own `this@N` path root.
-    pub(super) fn with_own_this(&mut self, walk: impl FnOnce(&mut Self)) {
+    pub(super) fn with_own_this<R>(&mut self, walk: impl FnOnce(&mut Self) -> R) -> R {
         self.this_scopes += 1;
         let outer = std::mem::replace(&mut self.this_scope, self.this_scopes);
-        walk(self);
+        let result = walk(self);
         self.this_scope = outer;
+        result
     }
 
     /// The member path for `this.<property>` in the current `this`.
