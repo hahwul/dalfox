@@ -125,7 +125,9 @@ impl<'a> DomXssVisitor<'a> {
                 // its parameters shadowed, which is what keeps the two from
                 // reporting the same flow twice.
                 if let Some(body) = &func_decl.body {
-                    self.walk_function_literal_body(&func_decl.params, &body.statements);
+                    self.with_own_this(|v| {
+                        v.walk_function_literal_body(&func_decl.params, &body.statements)
+                    });
                 }
             }
             Statement::ClassDeclaration(class_decl) => {
@@ -135,6 +137,7 @@ impl<'a> DomXssVisitor<'a> {
                         class_decl,
                     );
                 }
+                self.walk_class_body(class_decl);
             }
             Statement::ReturnStatement(return_stmt) => {
                 if let Some(argument) = &return_stmt.argument {
@@ -364,12 +367,15 @@ impl<'a> DomXssVisitor<'a> {
             // lookup fires the sink finding.
             Expression::FunctionExpression(func) => {
                 if let Some(body) = &func.body {
-                    self.walk_function_literal_body(&func.params, &body.statements);
+                    self.with_own_this(|v| {
+                        v.walk_function_literal_body(&func.params, &body.statements)
+                    });
                 }
             }
             Expression::ArrowFunctionExpression(arrow) => {
                 self.walk_function_literal_body(&arrow.params, &arrow.body.statements);
             }
+            Expression::ClassExpression(class) => self.walk_class_body(class),
             // Dynamic `import(tainted)` runs an attacker-controlled module
             // (issue #1022). Detect it here; reached both as a bare statement
             // (`import(t);`) and as the object of a chain (`import(t).then(…)`)
@@ -472,6 +478,9 @@ impl<'a> DomXssVisitor<'a> {
             if self.global_taints.remove(name.as_str()) {
                 shadowed_globals.push(name.clone());
             }
+        }
+        for param in &params.items {
+            self.taint_tainted_defaults(&param.pattern, param.initializer.as_deref());
         }
         for (idx, source) in seeds {
             if let Some(param) = params.items.get(*idx) {
@@ -637,6 +646,97 @@ impl<'a> DomXssVisitor<'a> {
             self.page_url_objects.remove(name.as_str());
             self.tainted_vars.insert(name.clone());
             self.var_aliases.insert(name, source.to_string());
+        }
+    }
+
+    /// A default applies whenever the argument is missing, so a tainted one
+    /// (`(v = location.hash) => …`, `({q = location.hash} = {})`) taints what
+    /// it binds.
+    fn taint_tainted_defaults(
+        &mut self,
+        pattern: &BindingPattern<'a>,
+        default: Option<&Expression<'a>>,
+    ) {
+        if let Some(default) = default
+            && self.is_tainted(default)
+        {
+            let source = self
+                .find_source_in_expr(default)
+                .unwrap_or_else(|| "unknown source".to_string());
+            self.taint_binding_pattern(pattern, &source);
+        }
+        match pattern {
+            BindingPattern::AssignmentPattern(assign) => {
+                self.taint_tainted_defaults(&assign.left, Some(&assign.right));
+            }
+            BindingPattern::ObjectPattern(obj) => {
+                for property in &obj.properties {
+                    self.taint_tainted_defaults(&property.value, None);
+                }
+            }
+            BindingPattern::ArrayPattern(array) => {
+                for element in array.elements.iter().flatten() {
+                    self.taint_tainted_defaults(element, None);
+                }
+            }
+            BindingPattern::BindingIdentifier(_) => {}
+        }
+    }
+
+    /// Walk a class's members the way function literals are walked: free
+    /// variables a method reads (`render() { el.innerHTML = location.hash }`)
+    /// are real flows, while parameter flows stay with the method summaries.
+    ///
+    /// Field initializers and then the constructor go first, the order they
+    /// run in, so the `this.*` fields they taint reach the other methods.
+    fn walk_class_body(&mut self, class: &Class<'a>) {
+        self.with_own_this(|v| v.walk_class_members(class));
+    }
+
+    fn walk_class_members(&mut self, class: &Class<'a>) {
+        let mut members: Vec<_> = class.body.body.iter().collect();
+        members.sort_by_key(|elem| match elem {
+            ClassElement::PropertyDefinition(_) => 0,
+            ClassElement::MethodDefinition(m) if m.kind == MethodDefinitionKind::Constructor => 1,
+            _ => 2,
+        });
+        for elem in members {
+            match elem {
+                ClassElement::MethodDefinition(method) => {
+                    if let Some(body) = &method.value.body {
+                        self.walk_function_literal_body(&method.value.params, &body.statements);
+                    }
+                }
+                ClassElement::PropertyDefinition(property) => {
+                    if let Some(value) = &property.value {
+                        if !property.r#static
+                            && self.is_tainted(value)
+                            && let Some(key) = self.get_property_key_name(&property.key)
+                        {
+                            let source = self
+                                .find_source_in_expr(value)
+                                .unwrap_or_else(|| "unknown source".to_string());
+                            self.field_taints.insert(format!("this.{key}"), source);
+                        }
+                        self.walk_expression(value);
+                    }
+                }
+                ClassElement::StaticBlock(block) => self.walk_statements(&block.body),
+                _ => {}
+            }
+        }
+    }
+
+    /// Run `walk` over code with its own `this` (a class, a non-arrow
+    /// function): the `this.*` fields it taints are dropped afterwards, so
+    /// they cannot reach a same-named field on another object's `this`.
+    pub(super) fn with_own_this(&mut self, walk: impl FnOnce(&mut Self)) {
+        let checkpoint = self.field_taints.checkpoint();
+        walk(self);
+        for key in self.field_taints.keys_added_since(&checkpoint) {
+            if key.starts_with("this.") {
+                self.field_taints.remove(&key);
+            }
         }
     }
 

@@ -164,7 +164,7 @@ impl<'a> DomXssVisitor<'a> {
         self.collecting_tainted_returns = true;
         self.tainted_return_sources.clear();
         let before = self.vulnerabilities.len();
-        self.walk_statements(body_stmts);
+        self.with_own_this(|v| v.walk_statements(body_stmts));
         if concise {
             self.collect_concise_return(body_stmts);
         }
@@ -238,11 +238,21 @@ impl<'a> DomXssVisitor<'a> {
                 Expression::FunctionExpression(func_expr) => {
                     if let Some(body) = &func_expr.body {
                         self.register_function_summary(
-                            summary_name,
+                            summary_name.clone(),
                             self.extract_param_names(&func_expr.params),
                             &body.statements,
                             false,
                         );
+                    }
+                    // `{ get v() { return location.hash } }` — reading `o.v`
+                    // runs the getter.
+                    if p.kind == PropertyKind::Get
+                        && let Some(source) = self
+                            .function_summaries
+                            .get(&summary_name)
+                            .and_then(|summary| summary.return_without_tainted_params.clone())
+                    {
+                        self.field_taints.insert(summary_name, source);
                     }
                 }
                 Expression::ArrowFunctionExpression(arrow_expr) => {
