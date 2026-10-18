@@ -37,7 +37,7 @@ impl<'a> DomXssVisitor<'a> {
         let property = member.property.name.as_str();
         match &member.object {
             Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
-            Expression::ThisExpression(_) => Some(format!("this.{property}")),
+            Expression::ThisExpression(_) => Some(self.this_path(property)),
             Expression::StaticMemberExpression(inner) => self
                 .get_member_string(inner)
                 .map(|obj| format!("{}.{}", obj, property)),
@@ -70,7 +70,7 @@ impl<'a> DomXssVisitor<'a> {
         let property = self.get_computed_property_string(member)?;
         match &member.object {
             Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
-            Expression::ThisExpression(_) => Some(format!("this.{property}")),
+            Expression::ThisExpression(_) => Some(self.this_path(&property)),
             Expression::StaticMemberExpression(inner) => self
                 .get_member_string(inner)
                 .map(|obj| format!("{}.{}", obj, property)),

@@ -104,7 +104,7 @@ impl<'a> DomXssVisitor<'a> {
         }
         let is_outer = |path: &String| {
             let root = path.split(['.', '[']).next().unwrap_or(path);
-            root != "this" && !locals.contains(root)
+            !root.starts_with("this@") && !locals.contains(root)
         };
         for (idx, param_name) in params.iter().enumerate() {
             if param_name.starts_with('#') {

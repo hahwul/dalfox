@@ -391,6 +391,10 @@ struct DomXssVisitor<'a> {
     /// top-level declarations), so a local `location` is not mistaken for the
     /// global `Location` object.
     local_names: ScopedSet<String>,
+    /// The `this` that `this.*` paths currently resolve against, and how many
+    /// have been handed out — see `with_own_this`.
+    this_scope: usize,
+    this_scopes: usize,
     /// Variables bound to `new URL(location)` / `new URL(document.URL)` — a
     /// copy of the page's own URL, whose scheme and host the attacker cannot
     /// pick (unlike `new URL(location.hash.slice(1))`). Scoped like
@@ -768,6 +772,8 @@ impl<'a> DomXssVisitor<'a> {
             url_object_sources: HashMap::new(),
             page_url_objects: Default::default(),
             local_names: Default::default(),
+            this_scope: 0,
+            this_scopes: 0,
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),

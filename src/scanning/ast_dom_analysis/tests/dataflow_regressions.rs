@@ -112,6 +112,18 @@ fn common_source_spellings_and_propagation_shapes_are_tracked() {
             "class C { constructor() { this.state = {v: location.hash}; } r() { el.innerHTML = this.state.v; } }",
             "location.hash",
         ),
+        (
+            "class C { constructor() { this.v = location.hash; } h = () => { el.innerHTML = this.v; }; }",
+            "location.hash",
+        ),
+        (
+            "class C { static v = location.hash; static r() { el.innerHTML = this.v; } }",
+            "location.hash",
+        ),
+        (
+            "class C { constructor() { this.v = location.hash; } r() { [1].forEach(() => { el.innerHTML = this.v; }); } }",
+            "location.hash",
+        ),
         // An arrow shares the enclosing method's `this`.
         (
             "class C { constructor() { fetch('/').then(() => { this.v = location.hash; }); } r() { el.innerHTML = this.v; } }",
@@ -196,6 +208,19 @@ fn neutralized_or_unrelated_values_stay_clean() {
         "class A { constructor() { this.v = location.hash; } } class B { r() { el.innerHTML = this.v; } }",
         "class A { constructor() { this.v = location.hash; } } el.innerHTML = this.v;",
         "function A() { this.u = location.hash; } function B() { el.innerHTML = this.u; }",
+        "function A() { this.u = location.hash; } el.innerHTML = this.u;",
+        // A non-arrow function, a nested class and the class itself (static)
+        // each have their own `this`.
+        "class C { constructor() { this.v = location.hash; } r() { [1].forEach(function () { el.innerHTML = this.v; }); } }",
+        "class C { constructor() { this.v = location.hash; } r() { class D { m() { el.innerHTML = this.v; } } } }",
+        "class C { static init() { this.v = location.hash; } r() { el.innerHTML = this.v; } }",
+        "class C { static { this.v = location.hash; } } el.innerHTML = this.v;",
+        "class C { constructor() { this.v = location.hash; } r() { fetch('/').then(function () { el.innerHTML = this.v; }); } }",
+        "this.v = location.hash; class B { r() { el.innerHTML = this.v; } }",
+        "(function () { this.v = location.hash; })(); var o = { m() { el.innerHTML = this.v; } };",
+        "fetch('/').then(function () { this.v = location.hash; }); var o = { m() { el.innerHTML = this.v; } };",
+        "const f = () => { this.v = location.hash; }; class B { r() { el.innerHTML = this.v; } }",
+        "class C { #v = location.hash; r() { el.innerHTML = this.v; } }",
         "var o = { a() { this.u = location.hash; } }; var p = { b() { el.innerHTML = this.u; } };",
         "const v = location.hash; class C { r(v) { el.innerHTML = v; } }",
         "class C { v = 'static'; r() { el.innerHTML = this.v; } }",

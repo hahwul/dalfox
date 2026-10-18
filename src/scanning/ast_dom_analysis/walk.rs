@@ -125,9 +125,7 @@ impl<'a> DomXssVisitor<'a> {
                 // its parameters shadowed, which is what keeps the two from
                 // reporting the same flow twice.
                 if let Some(body) = &func_decl.body {
-                    self.with_own_this(|v| {
-                        v.walk_function_literal_body(&func_decl.params, &body.statements)
-                    });
+                    self.walk_function_literal_body(&func_decl.params, &body.statements);
                 }
             }
             Statement::ClassDeclaration(class_decl) => {
@@ -367,9 +365,7 @@ impl<'a> DomXssVisitor<'a> {
             // lookup fires the sink finding.
             Expression::FunctionExpression(func) => {
                 if let Some(body) = &func.body {
-                    self.with_own_this(|v| {
-                        v.walk_function_literal_body(&func.params, &body.statements)
-                    });
+                    self.walk_function_literal_body(&func.params, &body.statements);
                 }
             }
             Expression::ArrowFunctionExpression(arrow) => {
@@ -433,6 +429,20 @@ impl<'a> DomXssVisitor<'a> {
     /// parameter at each index (an IIFE's arguments, the element an iteration
     /// method hands its callback).
     pub(super) fn walk_function_literal_body_seeded(
+        &mut self,
+        params: &FormalParameters<'a>,
+        statements: &[Statement<'a>],
+        seeds: &[(usize, String)],
+    ) {
+        // An arrow shares the enclosing `this`; any other function binds its own.
+        if params.kind == FormalParameterKind::ArrowFormalParameters {
+            self.walk_function_scope(params, statements, seeds);
+        } else {
+            self.with_own_this(|v| v.walk_function_scope(params, statements, seeds));
+        }
+    }
+
+    fn walk_function_scope(
         &mut self,
         params: &FormalParameters<'a>,
         statements: &[Statement<'a>],
@@ -687,36 +697,53 @@ impl<'a> DomXssVisitor<'a> {
     /// variables a method reads (`render() { el.innerHTML = location.hash }`)
     /// are real flows, while parameter flows stay with the method summaries.
     ///
-    /// Field initializers and then the constructor go first, the order they
-    /// run in, so the `this.*` fields they taint reach the other methods.
+    /// Instance members share one `this` and static members (the class
+    /// itself) another. Instance fields with plain values and then the
+    /// constructor go first, the order they run in, so the `this.*` fields
+    /// they taint reach the methods and the function-valued fields.
     fn walk_class_body(&mut self, class: &Class<'a>) {
-        self.with_own_this(|v| v.walk_class_members(class));
-    }
-
-    fn walk_class_members(&mut self, class: &Class<'a>) {
-        let mut members: Vec<_> = class.body.body.iter().collect();
-        members.sort_by_key(|elem| match elem {
-            ClassElement::PropertyDefinition(_) => 0,
+        let (statics, mut instance): (Vec<_>, Vec<_>) =
+            class.body.body.iter().partition(|elem| match elem {
+                ClassElement::MethodDefinition(m) => m.r#static,
+                ClassElement::PropertyDefinition(p) => p.r#static,
+                ClassElement::AccessorProperty(p) => p.r#static,
+                ClassElement::StaticBlock(_) => true,
+                ClassElement::TSIndexSignature(_) => false,
+            });
+        instance.sort_by_key(|elem| match elem {
+            ClassElement::PropertyDefinition(p) => match &p.value {
+                Some(
+                    Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_),
+                ) => 2,
+                _ => 0,
+            },
             ClassElement::MethodDefinition(m) if m.kind == MethodDefinitionKind::Constructor => 1,
             _ => 2,
         });
+        self.with_own_this(|v| v.walk_class_members(&statics));
+        self.with_own_this(|v| v.walk_class_members(&instance));
+    }
+
+    fn walk_class_members(&mut self, members: &[&ClassElement<'a>]) {
         for elem in members {
             match elem {
                 ClassElement::MethodDefinition(method) => {
                     if let Some(body) = &method.value.body {
-                        self.walk_function_literal_body(&method.value.params, &body.statements);
+                        self.walk_function_scope(&method.value.params, &body.statements, &[]);
                     }
                 }
                 ClassElement::PropertyDefinition(property) => {
                     if let Some(value) = &property.value {
-                        if !property.r#static
+                        // ponytail: `#private` fields are skipped; `this.#v`
+                        // reads are not resolved either.
+                        if !matches!(property.key, PropertyKey::PrivateIdentifier(_))
                             && self.is_tainted(value)
                             && let Some(key) = self.get_property_key_name(&property.key)
                         {
                             let source = self
                                 .find_source_in_expr(value)
                                 .unwrap_or_else(|| "unknown source".to_string());
-                            self.field_taints.insert(format!("this.{key}"), source);
+                            self.field_taints.insert(self.this_path(&key), source);
                         }
                         self.walk_expression(value);
                     }
@@ -727,17 +754,19 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Run `walk` over code with its own `this` (a class, a non-arrow
-    /// function): the `this.*` fields it taints are dropped afterwards, so
-    /// they cannot reach a same-named field on another object's `this`.
+    /// Run `walk` with a `this` of its own (a class, a non-arrow function), so
+    /// the `this.*` fields written and read inside never meet another
+    /// object's: each `this` gets its own `this@N` path root.
     pub(super) fn with_own_this(&mut self, walk: impl FnOnce(&mut Self)) {
-        let checkpoint = self.field_taints.checkpoint();
+        self.this_scopes += 1;
+        let outer = std::mem::replace(&mut self.this_scope, self.this_scopes);
         walk(self);
-        for key in self.field_taints.keys_added_since(&checkpoint) {
-            if key.starts_with("this.") {
-                self.field_taints.remove(&key);
-            }
-        }
+        self.this_scope = outer;
+    }
+
+    /// The member path for `this.<property>` in the current `this`.
+    pub(super) fn this_path(&self, property: &str) -> String {
+        format!("this@{}.{property}", self.this_scope)
     }
 
     /// Source label for property `key` read off `object` when `object` is
