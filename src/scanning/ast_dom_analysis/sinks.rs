@@ -153,6 +153,14 @@ impl<'a> DomXssVisitor<'a> {
                     }
                 }
             }
+            AssignmentTarget::PrivateFieldExpression(field) => {
+                if right_tainted && let Some(path) = self.private_field_path(field) {
+                    let source = right_source
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    self.field_taints.insert(path, source);
+                }
+            }
             AssignmentTarget::ComputedMemberExpression(member) => {
                 let prop_name = self.get_computed_property_string(member);
                 if let Some(property_name) = prop_name.as_deref() {
@@ -1212,8 +1220,19 @@ impl<'a> DomXssVisitor<'a> {
         if self.handle_member_method_sink(call) {
             return;
         }
-        // Walk the callee
-        self.walk_expression(&call.callee);
+        // Walk the callee. `function () { … }.bind(this)` runs with the
+        // enclosing `this`, not one of its own.
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && member.property.name == "bind"
+            && let Expression::FunctionExpression(func) = member.object.without_parentheses()
+            && let Some(Argument::ThisExpression(_)) = call.arguments.first()
+        {
+            if let Some(body) = &func.body {
+                self.walk_function_scope(&func.params, &body.statements, &[], true);
+            }
+        } else {
+            self.walk_expression(&call.callee);
+        }
 
         // Descend into function/arrow callbacks passed as arguments so a
         // source→sink flow that lives *inside* a deferred callback is still
@@ -1284,7 +1303,7 @@ impl<'a> DomXssVisitor<'a> {
             Expression::ArrowFunctionExpression(arrow) => (&arrow.params, &arrow.body.statements),
             _ => return false,
         };
-        let seeds: Vec<(usize, String)> = call
+        let mut seeds: Vec<(usize, String)> = call
             .arguments
             .iter()
             .enumerate()
@@ -1293,6 +1312,25 @@ impl<'a> DomXssVisitor<'a> {
                 tainted.then(|| (idx, source.unwrap_or_else(|| "unknown source".to_string())))
             })
             .collect();
+        // A parameter the call leaves out takes its default. With a spread
+        // the count is unknown, so the body walk assumes the defaults.
+        if !call
+            .arguments
+            .iter()
+            .any(|arg| matches!(arg, Argument::SpreadElement(_)))
+        {
+            self.arity_known.insert(params.span);
+            for (idx, param) in params.items.iter().enumerate().skip(call.arguments.len()) {
+                if let Some(default) = param.initializer.as_deref()
+                    && self.is_tainted(default)
+                {
+                    let source = self
+                        .find_source_in_expr(default)
+                        .unwrap_or_else(|| "unknown source".to_string());
+                    seeds.push((idx, source));
+                }
+            }
+        }
         self.walk_function_literal_body_seeded(params, statements, &seeds);
         self.walk_callback_argument_bodies(call);
         true
@@ -1347,7 +1385,7 @@ impl<'a> DomXssVisitor<'a> {
         // A journal checkpoint, not a clone — see `walk_function_literal_body`.
         let field_taints_checkpoint = self.field_taints.checkpoint();
         self.walk_function_literal_body_seeded(params, statements, seeds);
-        self.field_taints.rollback(field_taints_checkpoint);
+        self.rollback_fields_keeping_this(field_taints_checkpoint);
     }
 }
 

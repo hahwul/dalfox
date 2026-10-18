@@ -32,12 +32,18 @@ pub struct PageMarkup {
     /// copy of the parameter even when the value carries no marker (an attack
     /// payload such as `');alert(1)//`).
     pub(crate) sent_value: Option<String>,
+    /// The script being analysed was loaded from a `<script src>` whose URL
+    /// carries a marker, so `document.currentScript.src` holds the parameter.
+    pub(crate) current_script_src: bool,
 }
 
 impl PageMarkup {
     /// No slot carries a marker (form ids do not count).
     pub(crate) fn is_empty(&self) -> bool {
-        self.attrs.is_empty() && self.text.is_empty() && self.css_custom_properties.is_empty()
+        self.attrs.is_empty()
+            && self.text.is_empty()
+            && self.css_custom_properties.is_empty()
+            && !self.current_script_src
     }
 
     /// Add every slot `other` proved.
@@ -117,6 +123,18 @@ impl<'a> DomXssVisitor<'a> {
             return None;
         }
         let prop = member.property.name.as_str();
+        if self.reflected_markup.current_script_src
+            && prop == "src"
+            && let Expression::StaticMemberExpression(inner) = &member.object
+            && self.get_member_string(inner).is_some_and(|path| {
+                matches!(
+                    path.as_str(),
+                    "document.currentScript" | "window.document.currentScript"
+                )
+            })
+        {
+            return Some("markup:document.currentScript.src".to_string());
+        }
         if matches!(prop, "textContent" | "innerText") {
             let id = self.reflected_element_id(&member.object)?;
             return self

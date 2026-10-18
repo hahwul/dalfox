@@ -16,6 +16,9 @@ pub(crate) const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
 const MAX_AST_LIGHT_VERIFY: usize = 32;
 /// Ceiling on findings per call that keep a response copy (<= 64 KiB each).
 const MAX_AST_EVIDENCE_BODIES: usize = 64;
+/// Ceiling on parameter-carrying `<script src>` fetches per call (one call
+/// per parameter).
+const MAX_REFLECTED_SCRIPTS: usize = 4;
 
 /// Run AST-based DOM XSS static analysis on the given response HTML.
 ///
@@ -36,6 +39,7 @@ pub(crate) async fn run_ast_dom_analysis(
     xml_response: bool,
     ast_seen: &mut HashSet<String>,
     cancel: Option<&std::sync::atomic::AtomicBool>,
+    scan_args: &ScanArgs,
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
     // Light-verify outcome per distinct payload: the request depends only on
@@ -59,15 +63,46 @@ pub(crate) async fn run_ast_dom_analysis(
     }
     reflected_markup.sent_value = Some(injected.to_string());
     let posture = crate::scanning::ast_integration::PageSecurityPosture::from_target(target);
+    // A same-origin `<script src>` whose URL carries the parameter hands it to
+    // that script as `document.currentScript.src`.
+    let mut script_markup = reflected_markup.clone();
+    script_markup.current_script_src = true;
+    let script_markup = Arc::new(script_markup);
     // Shared across blocks: a per-block clone is O(blocks x ids).
     let (script_element_ids, reflected_markup) =
         (Arc::new(script_element_ids), Arc::new(reflected_markup));
-    for js_code in js_blocks {
+    // A fetched script also carries its URL and the query keys holding the
+    // parameter.
+    type ScriptOrigin = Option<(String, HashSet<String>)>;
+    let mut blocks: Vec<(String, &Arc<_>, ScriptOrigin)> = js_blocks
+        .into_iter()
+        .map(|js| (js, &reflected_markup, None))
+        .collect();
+    if scan_args.analyze_external_js && !xml_response {
+        for url in reflected_script_srcs(response_text, &target.url, injected) {
+            if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+                break;
+            }
+            let url_str = url.as_str().to_owned();
+            if !scan_args.url_in_scope(&url_str) {
+                continue;
+            }
+            let keys = url
+                .query_pairs()
+                .filter(|(_, value)| carries_param(value, injected))
+                .map(|(key, _)| key.into_owned())
+                .collect();
+            if let Some(body) = fetch_external_js(client, target, url, scan_args).await {
+                blocks.push((body, &script_markup, Some((url_str, keys))));
+            }
+        }
+    }
+    for (js_code, markup, script_url) in blocks {
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &js_code,
                 &script_element_ids,
-                &reflected_markup,
+                markup,
                 posture.trusted_types_enforced,
             );
         // Normalized once per block (not per finding), and only once a
@@ -75,6 +110,22 @@ pub(crate) async fn run_ast_dom_analysis(
         // running it after the `ast_seen` skip changes nothing but the cost.
         let mut normalized_js: Option<String> = None;
         for (vuln, payload, description) in findings {
+            // From a fetched script, only what the parameter feeds through
+            // `currentScript.src` (and, for `.get(key)`, a key that holds it):
+            // its other flows belong to the page-level external-JS pass.
+            if let Some((_, keys)) = &script_url {
+                let Some(rest) = vuln
+                    .source
+                    .strip_prefix("markup:document.currentScript.src")
+                else {
+                    continue;
+                };
+                if let Some(key) = rest.strip_prefix(".get(").and_then(|r| r.split(')').next())
+                    && !keys.contains(key)
+                {
+                    continue;
+                }
+            }
             let ast_key = format!(
                 "{}|{}|{}|{}|{}",
                 param.name, vuln.line, vuln.column, vuln.source, vuln.sink
@@ -130,13 +181,17 @@ pub(crate) async fn run_ast_dom_analysis(
                 .param(param.name.clone())
                 .payload(payload.clone())
                 .evidence(format!(
-                    "{}:{}:{} - {} (Source: {}, Sink: {})",
+                    "{}:{}:{} - {} (Source: {}, Sink: {}){}",
                     target.url.as_str(),
                     vuln.line,
                     vuln.column,
                     description,
                     vuln.source,
-                    vuln.sink
+                    vuln.sink,
+                    script_url
+                        .as_ref()
+                        .map(|(u, _)| format!(" [script: {u}]"))
+                        .unwrap_or_default(),
                 ))
                 .cwe("CWE-79")
                 .severity("Medium")
@@ -280,32 +335,9 @@ pub(crate) async fn fetch_and_analyze_external_js(
             continue;
         }
 
-        let rb =
-            crate::utils::build_request(client, target, reqwest::Method::GET, script_url, None);
-        let send_result =
-            crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay).await;
-        // Count this external-JS fetch (up to MAX_EXTERNAL_JS_FILES per page);
-        // its retries, if any, are counted inside send_with_retry. These GETs
-        // were previously missing from REQUEST_COUNT / the live req/s rate.
-        crate::tick_request_count();
-        let resp = match send_result {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        if !resp.status().is_success() {
+        let Some(body) = fetch_external_js(client, target, script_url, scan_args).await else {
             continue;
-        }
-        // Read one byte past the analysis cap, not the 16 MiB body cap: an
-        // oversized script is discarded below, so buffering the rest of it
-        // (per script, per page) was pure waste.
-        let body = match crate::utils::http::read_body_capped(resp, MAX_EXTERNAL_JS_BYTES + 1).await
-        {
-            Ok(b) => b,
-            Err(_) => continue,
         };
-        if body.len() > MAX_EXTERNAL_JS_BYTES {
-            continue;
-        }
 
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
@@ -355,6 +387,48 @@ pub(crate) async fn fetch_and_analyze_external_js(
 
     results
 }
+/// GET one external script, `None` when it fails or exceeds
+/// [`MAX_EXTERNAL_JS_BYTES`].
+async fn fetch_external_js(
+    client: &reqwest::Client,
+    target: &Target,
+    url: url::Url,
+    scan_args: &ScanArgs,
+) -> Option<String> {
+    let rb = crate::utils::build_request(client, target, reqwest::Method::GET, url, None);
+    let send_result =
+        crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay).await;
+    // Count this external-JS fetch; its retries, if any, are counted inside
+    // send_with_retry.
+    crate::tick_request_count();
+    let resp = send_result.ok().filter(|r| r.status().is_success())?;
+    // Read one byte past the analysis cap, not the 16 MiB body cap: an
+    // oversized script is discarded, so buffering the rest of it was waste.
+    let body = crate::utils::http::read_body_capped(resp, MAX_EXTERNAL_JS_BYTES + 1)
+        .await
+        .ok()?;
+    (body.len() <= MAX_EXTERNAL_JS_BYTES).then_some(body)
+}
+
+/// Same-origin `<script src>` URLs in `html` that carry the scanned parameter:
+/// this scan's marker, or the value `injected` sent.
+fn reflected_script_srcs(html: &str, base: &url::Url, injected: &str) -> Vec<url::Url> {
+    crate::scanning::ast_integration::extract_same_origin_script_srcs(html, base)
+        .into_iter()
+        .filter(|url| {
+            urlencoding::decode(url.as_str()).is_ok_and(|decoded| carries_param(&decoded, injected))
+        })
+        .take(MAX_REFLECTED_SCRIPTS)
+        .collect()
+}
+
+/// `s` carries this scan's marker or the value `injected` sent (too short a
+/// value could match by accident).
+fn carries_param(s: &str, injected: &str) -> bool {
+    crate::scanning::markers::carries_scan_marker(s)
+        || (injected.len() >= 8 && s.contains(injected))
+}
+
 pub(crate) fn ast_source_uses_browser_url_surface(source: &str) -> bool {
     source.contains("location.hash")
         || source.contains("location.search")

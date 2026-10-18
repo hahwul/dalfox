@@ -154,6 +154,69 @@ fn common_source_spellings_and_propagation_shapes_are_tracked() {
             "const o = {get v() { return location.hash; }}; el.innerHTML = o.v;",
             "location.hash",
         ),
+        (
+            "function getParam(name, url = window.location.href) { var m = new RegExp('[?&]' + name + '=([^&#]*)').exec(url); return m ? decodeURIComponent(m[1]) : ''; } el.innerHTML = getParam('q');",
+            "location.href",
+        ),
+        (
+            "const getParam = (name, url = location.href) => new URL(url).searchParams.get(name); el.innerHTML = getParam('q');",
+            "location.href",
+        ),
+        (
+            "(function (a, v = location.hash) { el.innerHTML = v; })('x');",
+            "location.hash",
+        ),
+        // The runtime picks how many arguments a callback or method gets, so
+        // its defaults apply.
+        (
+            "el.addEventListener('click', function (e, v = location.hash) { el.innerHTML = v; });",
+            "location.hash",
+        ),
+        (
+            "setTimeout(function (v = location.hash) { el.innerHTML = v; });",
+            "location.hash",
+        ),
+        (
+            "[1].forEach(function (x, i, a, v = location.hash) { el.innerHTML = v; });",
+            "location.hash",
+        ),
+        (
+            "(function (v = location.hash) { el.innerHTML = v; })(...[]);",
+            "location.hash",
+        ),
+        (
+            "class C { x = location.hash; m(v = this.x) { el.innerHTML = v; } }",
+            "location.hash",
+        ),
+        (
+            "class C { #v = location.hash; r() { el.innerHTML = this.#v; } }",
+            "location.hash",
+        ),
+        (
+            "class C { constructor() { this.#v = location.hash; } #v; r() { el.innerHTML = this.#v; } }",
+            "location.hash",
+        ),
+        (
+            "class C { constructor() { this.v = location.hash; } bind() { el.addEventListener('click', function () { el.innerHTML = this.v; }.bind(this)); } }",
+            "location.hash",
+        ),
+        (
+            "class C { constructor() { setTimeout(() => { this.v = location.hash; }); } r() { el.innerHTML = this.v; } }",
+            "location.hash",
+        ),
+        (
+            "class C { constructor() { el.addEventListener('message', (e) => { this.v = e.data; }); } r() { el.innerHTML = this.v; } }",
+            "data",
+        ),
+        // `new W(x)` runs W's body, or the class constructor, with `x`.
+        (
+            "function W(u) { this.u = u; el.innerHTML = this.u; } new W(location.hash);",
+            "location.hash",
+        ),
+        (
+            "class C { constructor(u) { el.innerHTML = u; } } new C(location.hash);",
+            "location.hash",
+        ),
     ] {
         let found = findings(js);
         assert!(
@@ -231,6 +294,25 @@ fn neutralized_or_unrelated_values_stay_clean() {
         "class C { static v = location.hash; r() { el.innerHTML = this.v; } }",
         "const v = location.hash; function f(v = 'x') { el.innerHTML = v; } f();",
         "const o = {get v() { return 'x'; }}; el.innerHTML = o.v;",
+        // A default only applies when the argument is left out.
+        "function outer(x) { function inner(v = x) { el.innerHTML = v; } inner(); }",
+        "function outer(x) { const inner = (v = x) => v; el.innerHTML = inner(); } outer('a');",
+        "class C { constructor(opts) { function h(v = opts) { el.innerHTML = v; } h(); } } new C({});",
+        // …and not when the name it is called by belongs to another function.
+        "function get(name, url = location.href) { return new URL(url).searchParams.get(name); } function q() { function get(k) { return store[k]; } el.innerHTML = get('a'); } q();",
+        "function e(t, n = location.search) { return n; } function r() { var e = function (t) { return t; }; el.innerHTML = e(1); } r();",
+        "function render(html = location.hash) { el.innerHTML = html; } render('<b>x</b>');",
+        "const f = (a, v = location.hash) => { el.innerHTML = v; }; f(1, 'x');",
+        "(function (v = location.hash) { el.innerHTML = v; })('x');",
+        "class C { #v = 'a'; r() { el.innerHTML = this.#v; } }",
+        "class C { v = location.hash; r() { el.innerHTML = this.#v; } }",
+        "class C { constructor() { this.v = location.hash; } r() { el.addEventListener('click', function () { el.innerHTML = this.v; }.bind(el)); } }",
+        "class C { constructor() { setTimeout(function () { this.v = location.hash; }); } r() { el.innerHTML = this.v; } }",
+        "function W(u) { el.innerHTML = u; } new W('x');",
+        "class C { constructor(u) { el.innerHTML = u; } } new C('<b>');",
+        // `currentScript.src` is a source only for a script loaded from a
+        // marker-carrying URL (see `PageMarkup::current_script_src`).
+        "document.write(new URL(document.currentScript.src).searchParams.get('msg'));",
     ] {
         let found = findings(js);
         assert!(found.is_empty(), "{js}: {found:?}");
@@ -251,4 +333,33 @@ fn a_sink_nested_in_a_jquery_argument_is_reported_once() {
         1,
         "{found:?}"
     );
+}
+
+#[test]
+fn current_script_src_is_a_source_only_for_a_reflected_script_url() {
+    let markup = PageMarkup {
+        current_script_src: true,
+        ..Default::default()
+    };
+    let found = AstDomAnalyzer::new()
+        .with_reflected_markup(markup)
+        .analyze(
+            "var self = document.currentScript.src; var msg = new URL(self).searchParams.get('msg') || ''; if (msg) { document.write(msg); }",
+        )
+        .unwrap();
+    assert!(
+        found
+            .iter()
+            .any(|v| v.sink == "document.write" && v.source.starts_with("markup:")),
+        "{found:?}"
+    );
+
+    // Other reflected slots on the page do not make it a source.
+    let mut markup = PageMarkup::default();
+    markup.text.insert("t".to_string());
+    let found = AstDomAnalyzer::new()
+        .with_reflected_markup(markup)
+        .analyze("document.write(document.currentScript.src);")
+        .unwrap();
+    assert!(found.is_empty(), "{found:?}");
 }

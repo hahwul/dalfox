@@ -976,6 +976,7 @@ impl ScanWorkerCtx {
                     probe_response_is_xml,
                     &mut state.ast_seen,
                     self.cancel.as_deref(),
+                    &self.args,
                 )
                 .await;
                 for f in &ast_findings {
@@ -1204,6 +1205,7 @@ impl ScanWorkerCtx {
                         xml_content_type,
                         &mut state.ast_seen,
                         self.cancel.as_deref(),
+                        &self.args,
                     )
                     .await;
                     for f in &ast_findings {

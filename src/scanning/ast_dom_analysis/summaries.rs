@@ -39,11 +39,17 @@ impl<'a> DomXssVisitor<'a> {
     pub(super) fn register_function_summary(
         &mut self,
         function_name: String,
-        params: Vec<String>,
+        formal_params: &FormalParameters<'a>,
         body_stmts: &[Statement<'a>],
         concise: bool,
     ) {
-        if self.function_summaries.contains_key(&function_name) {
+        self.arity_known.insert(formal_params.span);
+        if let Some(existing) = self.function_summaries.get_mut(&function_name) {
+            // Another function under the same name (minified bundles reuse
+            // `e`/`t`): a call that leaves an argument out may be either.
+            if existing.params_span != formal_params.span {
+                existing.tainted_param_defaults.clear();
+            }
             return;
         }
 
@@ -51,12 +57,29 @@ impl<'a> DomXssVisitor<'a> {
         self.function_summaries.insert(
             function_name.clone(),
             FunctionSummary {
-                tainted_param_sinks: BTreeMap::new(),
-                tainted_param_returns: BTreeMap::new(),
-                tainted_param_writes: BTreeMap::new(),
-                return_without_tainted_params: None,
+                params_span: formal_params.span,
+                ..Default::default()
             },
         );
+        let params = self.extract_param_names(formal_params);
+        // Read against the live state, before the passes below clear it. A
+        // default fed by an enclosing summary pass's *assumed* parameter
+        // (`fn_param_N`) is not a source.
+        let tainted_param_defaults = formal_params
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, param)| {
+                let default = param.initializer.as_deref()?;
+                if !self.is_tainted(default) {
+                    return None;
+                }
+                let source = self
+                    .find_source_in_expr(default)
+                    .unwrap_or_else(|| "unknown source".to_string());
+                (!source.starts_with("fn_param_")).then_some((idx, source))
+            })
+            .collect();
 
         // The summary walk starts from empty taint/alias state (each pass
         // clears it below), so the live maps are moved out and moved back
@@ -83,10 +106,9 @@ impl<'a> DomXssVisitor<'a> {
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
 
         let mut summary = FunctionSummary {
-            tainted_param_sinks: BTreeMap::new(),
-            tainted_param_returns: BTreeMap::new(),
-            tainted_param_writes: BTreeMap::new(),
-            return_without_tainted_params: None,
+            tainted_param_defaults,
+            params_span: formal_params.span,
+            ..Default::default()
         };
 
         // A per-parameter pass assumes its parameter is tainted, so the field
@@ -121,7 +143,7 @@ impl<'a> DomXssVisitor<'a> {
             self.tainted_return_sources.clear();
 
             let before = self.vulnerabilities.len();
-            self.with_own_this(|v| v.walk_statements(body_stmts));
+            self.with_function_this(formal_params, |v| v.walk_statements(body_stmts));
             if concise {
                 self.collect_concise_return(body_stmts);
             }
@@ -164,7 +186,7 @@ impl<'a> DomXssVisitor<'a> {
         self.collecting_tainted_returns = true;
         self.tainted_return_sources.clear();
         let before = self.vulnerabilities.len();
-        self.with_own_this(|v| v.walk_statements(body_stmts));
+        self.with_function_this(formal_params, |v| v.walk_statements(body_stmts));
         if concise {
             self.collect_concise_return(body_stmts);
         }
@@ -215,7 +237,7 @@ impl<'a> DomXssVisitor<'a> {
         };
         self.register_function_summary(
             id.name.to_string(),
-            self.extract_param_names(&func_decl.params),
+            &func_decl.params,
             &body.statements,
             false,
         );
@@ -239,7 +261,7 @@ impl<'a> DomXssVisitor<'a> {
                     if let Some(body) = &func_expr.body {
                         self.register_function_summary(
                             summary_name.clone(),
-                            self.extract_param_names(&func_expr.params),
+                            &func_expr.params,
                             &body.statements,
                             false,
                         );
@@ -258,7 +280,7 @@ impl<'a> DomXssVisitor<'a> {
                 Expression::ArrowFunctionExpression(arrow_expr) => {
                     self.register_function_summary(
                         summary_name,
-                        self.extract_param_names(&arrow_expr.params),
+                        &arrow_expr.params,
                         &arrow_expr.body.statements,
                         arrow_expr.expression,
                     );
@@ -277,7 +299,10 @@ impl<'a> DomXssVisitor<'a> {
             let ClassElement::MethodDefinition(method_def) = elem else {
                 continue;
             };
-            if !matches!(method_def.kind, MethodDefinitionKind::Method) {
+            if !matches!(
+                method_def.kind,
+                MethodDefinitionKind::Method | MethodDefinitionKind::Constructor
+            ) {
                 continue;
             }
             let Some(method_name) = self.get_property_key_name(&method_def.key) else {
@@ -288,7 +313,7 @@ impl<'a> DomXssVisitor<'a> {
             };
             self.register_function_summary(
                 format!("{}.{}", class_name, method_name),
-                self.extract_param_names(&method_def.value.params),
+                &method_def.value.params,
                 &body.statements,
                 false,
             );
