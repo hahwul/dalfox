@@ -34,7 +34,9 @@ impl<'a> DomXssVisitor<'a> {
         base_source: &str,
         param_name: &str,
     ) -> String {
-        if base_source.starts_with("URLSearchParams.get(") {
+        // A `markup:` base is still the server's copy of the scanned
+        // parameter, not the page URL's query.
+        if base_source.starts_with("URLSearchParams.get(") || base_source.starts_with("markup:") {
             format!("{base_source}.get({param_name})")
         } else {
             format!("URLSearchParams.get({param_name})")

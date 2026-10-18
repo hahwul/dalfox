@@ -13,6 +13,7 @@ impl<'a> DomXssVisitor<'a> {
             Expression::Identifier(id) => Some(id.name.to_string()),
             Expression::StaticMemberExpression(member) => self.get_member_string(member),
             Expression::ComputedMemberExpression(member) => self.get_computed_member_string(member),
+            Expression::PrivateFieldExpression(field) => self.private_field_path(field),
             Expression::MetaProperty(meta) => {
                 Some(format!("{}.{}", meta.meta.name, meta.property.name))
             }
@@ -38,6 +39,9 @@ impl<'a> DomXssVisitor<'a> {
         match &member.object {
             Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
             Expression::ThisExpression(_) => Some(self.this_path(property)),
+            Expression::PrivateFieldExpression(inner) => self
+                .private_field_path(inner)
+                .map(|obj| format!("{}.{}", obj, property)),
             Expression::StaticMemberExpression(inner) => self
                 .get_member_string(inner)
                 .map(|obj| format!("{}.{}", obj, property)),
@@ -50,6 +54,11 @@ impl<'a> DomXssVisitor<'a> {
             )),
             _ => None,
         }
+    }
+    /// `this.#v` — keyed with its `#` so it never meets a public `this.v`.
+    pub(super) fn private_field_path(&self, field: &PrivateFieldExpression) -> Option<String> {
+        matches!(field.object, Expression::ThisExpression(_))
+            .then(|| self.this_path(&format!("#{}", field.field.name)))
     }
     /// Get string representation of computed member property if statically resolvable.
     pub(super) fn get_computed_property_string(

@@ -49,7 +49,7 @@ impl<'a> DomXssVisitor<'a> {
 
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
-        self.field_taints.rollback(field_taints_checkpoint);
+        self.rollback_fields_keeping_this(field_taints_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
     }
     /// Walk a handler whose event parameter is destructured —
@@ -97,7 +97,7 @@ impl<'a> DomXssVisitor<'a> {
         self.walk_statements(statements);
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
-        self.field_taints.rollback(field_taints_checkpoint);
+        self.rollback_fields_keeping_this(field_taints_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
         for name in shadowed_globals {
             self.global_taints.insert(name);

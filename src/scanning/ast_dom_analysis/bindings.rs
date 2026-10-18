@@ -30,7 +30,7 @@ impl<'a> DomXssVisitor<'a> {
         {
             self.register_function_summary(
                 var_name.to_string(),
-                self.extract_param_names(&func_expr.params),
+                &func_expr.params,
                 &body.statements,
                 false,
             );
@@ -39,7 +39,7 @@ impl<'a> DomXssVisitor<'a> {
         if let Expression::ArrowFunctionExpression(arrow_expr) = init {
             self.register_function_summary(
                 var_name.to_string(),
-                self.extract_param_names(&arrow_expr.params),
+                &arrow_expr.params,
                 &arrow_expr.body.statements,
                 arrow_expr.expression,
             );
@@ -431,6 +431,9 @@ impl<'a> DomXssVisitor<'a> {
                 None
             }
             Expression::ComputedMemberExpression(member) => self.computed_member_source(member),
+            Expression::PrivateFieldExpression(field) => self
+                .private_field_path(field)
+                .and_then(|path| self.field_taints.get(&path).cloned()),
             Expression::ChainExpression(chain) => match &chain.expression {
                 ChainElement::CallExpression(call) => self.call_taint_and_source(call).1,
                 ChainElement::StaticMemberExpression(member) => self.static_member_source(member),

@@ -141,7 +141,7 @@ full-window batching would have reached.
 | `--max-payloads-per-param` | 0 | Cap on base payloads per parameter (reflection and DOM sets each). `0` = built-in cap of 3000 per set unless `--deep-scan`. WAF/encoder variants are added on top |
 | `--skip-xss-scanning` | false | Discovery only (different from `--only-discovery`) |
 | `--skip-ast-analysis` | false | Disable oxc-based DOM XSS detection |
-| `--analyze-external-js` | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`) |
+| `--analyze-external-js` | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`). Per parameter, it also fetches up to 4 scripts whose `src` URL carries the parameter and reads `document.currentScript.src` in them as a source |
 | `--detect-outdated-libs` | false | Also report outdated / known-vulnerable JS libraries as informational `[I]` findings (CWE-1104; 0 extra requests — inspects already-fetched script) |
 | `--hpp` | false | HTTP Parameter Pollution (duplicate query params) |
 

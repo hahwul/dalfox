@@ -325,6 +325,25 @@ impl<'a> DomXssVisitor<'a> {
                 // Handle new Function(tainted) - constructor calls with tainted arguments
                 if let Expression::Identifier(id) = &new_expr.callee {
                     let callee_name = id.name.as_str();
+                    // `new W(x)` runs W's body, or the class's constructor.
+                    let param_sinks = self
+                        .function_summaries
+                        .get(&format!("{callee_name}.constructor"))
+                        .or_else(|| self.function_summaries.get(callee_name))
+                        .map(|summary| summary.tainted_param_sinks.clone())
+                        .unwrap_or_default();
+                    for (idx, sink_name) in param_sinks {
+                        if let Some(arg) = new_expr.arguments.get(idx)
+                            && let (true, source) = self.argument_taint_and_source(arg)
+                        {
+                            self.report_vulnerability_with_source(
+                                new_expr.span(),
+                                &sink_name,
+                                source,
+                            );
+                            break;
+                        }
+                    }
                     // Check if this is a sink constructor (e.g., Function)
                     if self.sinks.contains(callee_name) {
                         for arg in &new_expr.arguments {
@@ -434,19 +453,18 @@ impl<'a> DomXssVisitor<'a> {
         statements: &[Statement<'a>],
         seeds: &[(usize, String)],
     ) {
-        // An arrow shares the enclosing `this`; any other function binds its own.
-        if params.kind == FormalParameterKind::ArrowFormalParameters {
-            self.walk_function_scope(params, statements, seeds);
-        } else {
-            self.with_own_this(|v| v.walk_function_scope(params, statements, seeds));
-        }
+        let apply_defaults = !self.arity_known.contains(&params.span);
+        self.with_function_this(params, |v| {
+            v.walk_function_scope(params, statements, seeds, apply_defaults)
+        });
     }
 
-    fn walk_function_scope(
+    pub(super) fn walk_function_scope(
         &mut self,
         params: &FormalParameters<'a>,
         statements: &[Statement<'a>],
         seeds: &[(usize, String)],
+        apply_defaults: bool,
     ) {
         // Journal checkpoints rather than clones: a clone per body made `N`
         // tainted bindings followed by `N` callbacks O(N²). The rollback below
@@ -489,8 +507,16 @@ impl<'a> DomXssVisitor<'a> {
                 shadowed_globals.push(name.clone());
             }
         }
+        // A default nested in a parameter's pattern applies whatever the
+        // argument. The parameter's own default applies when the call leaves
+        // the argument out: decided per call where the calls are seen
+        // (`tainted_param_defaults`, IIFE seeds), assumed for a callback or
+        // handler the runtime calls with however many arguments it likes.
+        // ponytail: a named function never called in this script (an inline
+        // `onload="show()"`) gets no default taint.
         for param in &params.items {
-            self.taint_tainted_defaults(&param.pattern, param.initializer.as_deref());
+            let default = param.initializer.as_deref().filter(|_| apply_defaults);
+            self.taint_tainted_defaults(&param.pattern, default);
         }
         for (idx, source) in seeds {
             if let Some(param) = params.items.get(*idx) {
@@ -729,16 +755,19 @@ impl<'a> DomXssVisitor<'a> {
             match elem {
                 ClassElement::MethodDefinition(method) => {
                     if let Some(body) = &method.value.body {
-                        self.walk_function_scope(&method.value.params, &body.statements, &[]);
+                        // Methods are called by code this analysis may not
+                        // see (frameworks, other scripts), so defaults apply.
+                        self.walk_function_scope(&method.value.params, &body.statements, &[], true);
                     }
                 }
                 ClassElement::PropertyDefinition(property) => {
                     if let Some(value) = &property.value {
-                        // ponytail: `#private` fields are skipped; `this.#v`
-                        // reads are not resolved either.
-                        if !matches!(property.key, PropertyKey::PrivateIdentifier(_))
-                            && self.is_tainted(value)
-                            && let Some(key) = self.get_property_key_name(&property.key)
+                        let key = match &property.key {
+                            PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
+                            key => self.get_property_key_name(key),
+                        };
+                        if self.is_tainted(value)
+                            && let Some(key) = key
                         {
                             let source = self
                                 .find_source_in_expr(value)
@@ -765,9 +794,46 @@ impl<'a> DomXssVisitor<'a> {
         result
     }
 
+    /// Run `walk` in the `this` a function with `params` sees: its own, unless
+    /// it is an arrow.
+    pub(super) fn with_function_this<R>(
+        &mut self,
+        params: &FormalParameters<'a>,
+        walk: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        if params.kind == FormalParameterKind::ArrowFormalParameters {
+            walk(self)
+        } else {
+            self.with_own_this(walk)
+        }
+    }
+
     /// The member path for `this.<property>` in the current `this`.
     pub(super) fn this_path(&self, property: &str) -> String {
         format!("this@{}.{property}", self.this_scope)
+    }
+
+    /// Roll `field_taints` back to `checkpoint`, except the fields the walk
+    /// added to the current `this`: an arrow callback's `this.v = …` writes
+    /// the enclosing object, which outlives the callback.
+    pub(super) fn rollback_fields_keeping_this(&mut self, checkpoint: scoped_state::Checkpoint) {
+        let own = self.this_path("");
+        let kept: Vec<(String, String)> = self
+            .field_taints
+            .keys_added_since(&checkpoint)
+            .into_iter()
+            .filter(|key| key.starts_with(&own))
+            .filter_map(|key| {
+                self.field_taints
+                    .get(&key)
+                    .cloned()
+                    .map(|source| (key, source))
+            })
+            .collect();
+        self.field_taints.rollback(checkpoint);
+        for (key, source) in kept {
+            self.field_taints.insert(key, source);
+        }
     }
 
     /// Source label for property `key` read off `object` when `object` is

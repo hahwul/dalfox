@@ -260,9 +260,16 @@ pub struct DomXssVulnerability {
 
 /// Lightweight summary for a function declaration.
 /// Maps parameter index to a sink reached when that parameter is tainted.
+#[derive(Default)]
 struct FunctionSummary {
     tainted_param_sinks: BTreeMap<usize, String>,
     tainted_param_returns: BTreeMap<usize, String>,
+    /// Parameters whose default value is tainted: a call that leaves the
+    /// argument out passes the default's source.
+    tainted_param_defaults: BTreeMap<usize, String>,
+    /// The summarised function's parameter list, telling a second function
+    /// registered under the same name apart from this one.
+    params_span: oxc_span::Span,
     /// Outer field paths (`cfg.html`) and globals the body writes a tainted
     /// parameter into, applied at a call site that passes a tainted argument.
     tainted_param_writes: BTreeMap<usize, (Vec<String>, Vec<String>)>,
@@ -349,6 +356,10 @@ struct DomXssVisitor<'a> {
     sanitizers: &'static HashSet<&'static str>,
     /// Function summaries used for lightweight inter-procedural taint tracking
     function_summaries: HashMap<String, FunctionSummary>,
+    /// Parameter lists (by span) of functions whose calls this analysis sees
+    /// with their arguments — summarised functions and IIFEs — so their
+    /// defaults apply per call, not to every walk of the body.
+    arity_known: HashSet<oxc_span::Span>,
     /// Numeric built-ins (see [`NUMERIC_COERCIONS`]) the page overrides by
     /// assignment — `window.parseInt = …`, `Number.parseInt = …`,
     /// `parseInt = …` — so the name no longer coerces to a number.
@@ -758,6 +769,7 @@ impl<'a> DomXssVisitor<'a> {
             sinks: &*STATIC_SINKS,
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
+            arity_known: HashSet::new(),
             overridden_coercions: HashSet::new(),
             instance_classes: Default::default(),
             class_ctor_param_fields: HashMap::new(),

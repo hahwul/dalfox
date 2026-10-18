@@ -2221,8 +2221,18 @@ async fn test_run_ast_dom_analysis_bounds_light_verify_requests_and_evidence() {
     let client = target.build_client_or_default();
     let mut seen = HashSet::new();
 
-    let results =
-        run_ast_dom_analysis(&client, &target, &param, &page, "m", false, &mut seen, None).await;
+    let results = run_ast_dom_analysis(
+        &client,
+        &target,
+        &param,
+        &page,
+        "m",
+        false,
+        &mut seen,
+        None,
+        &ScanArgs::default(),
+    )
+    .await;
 
     assert!(
         results.len() >= n,
@@ -2263,6 +2273,7 @@ async fn test_run_ast_dom_analysis_skips_light_verify_once_cancelled() {
         false,
         &mut seen,
         Some(&cancel),
+        &ScanArgs::default(),
     )
     .await;
 
@@ -2287,8 +2298,18 @@ async fn test_run_ast_dom_analysis_poc_url_uses_param_pre_encoding() {
     let client = target.build_client_or_default();
     let mut seen = HashSet::new();
 
-    let results =
-        run_ast_dom_analysis(&client, &target, &param, &page, "m", false, &mut seen, None).await;
+    let results = run_ast_dom_analysis(
+        &client,
+        &target,
+        &param,
+        &page,
+        "m",
+        false,
+        &mut seen,
+        None,
+        &ScanArgs::default(),
+    )
+    .await;
 
     let r = results
         .iter()
@@ -2304,6 +2325,90 @@ async fn test_run_ast_dom_analysis_poc_url_uses_param_pre_encoding() {
         r.data.contains(&urlencoding::encode(wire).into_owned()) || r.data.contains(wire),
         "PoC URL carries the as-sent payload: {}",
         r.data
+    );
+}
+
+#[tokio::test]
+async fn test_run_ast_dom_analysis_reads_a_reflected_script_src_with_external_js() {
+    // The server writes the parameter into a same-origin `<script src>` and
+    // the script reads it back through `document.currentScript.src`
+    // (xssmaze domsource-level4). The test server answers `/` with the script.
+    // Only the `msg` key carries the parameter, and the script's other flow
+    // belongs to the page-level external-JS pass.
+    let boot = "var u = new URL(document.currentScript.src); document.write(u.searchParams.get('msg')); document.write(u.searchParams.get('v')); document.body.innerHTML = location.hash;";
+    let (addr, hits) = spawn_counting_page(boot.to_string()).await;
+    let target = parse_target(&format!("http://{addr}/?q=1")).expect("parse_target");
+    let param = Param::new("q".to_string(), "1".to_string(), Location::Query);
+    let client = target.build_client_or_default();
+    let marker = crate::scanning::markers::bracketed_marker();
+    let page = format!(
+        "<html><body><script src=\"/?msg={}&v=1\"></script></body></html>",
+        urlencoding::encode(marker)
+    );
+    let on = ScanArgs {
+        analyze_external_js: true,
+        ..Default::default()
+    };
+
+    let off = run_ast_dom_analysis(
+        &client,
+        &target,
+        &param,
+        &page,
+        marker,
+        false,
+        &mut HashSet::new(),
+        None,
+        &ScanArgs::default(),
+    )
+    .await;
+    assert!(off.is_empty(), "opt-in only: {off:?}");
+    assert_eq!(hits.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+    let results = run_ast_dom_analysis(
+        &client,
+        &target,
+        &param,
+        &page,
+        marker,
+        false,
+        &mut HashSet::new(),
+        None,
+        &on,
+    )
+    .await;
+    assert_eq!(results.len(), 1, "{results:?}");
+    let r = &results[0];
+    assert!(
+        r.evidence.contains("document.currentScript.src.get(msg)"),
+        "{}",
+        r.evidence
+    );
+    assert!(!r.poc_url_complete, "the PoC injects the parameter");
+    assert!(r.evidence.contains("[script: "), "{}", r.evidence);
+
+    let unmarked = page.replace(&*urlencoding::encode(marker), "static");
+    let before = hits.load(std::sync::atomic::Ordering::Relaxed);
+    let results = run_ast_dom_analysis(
+        &client,
+        &target,
+        &param,
+        &unmarked,
+        marker,
+        false,
+        &mut HashSet::new(),
+        None,
+        &on,
+    )
+    .await;
+    assert!(
+        results.is_empty(),
+        "a script URL without the parameter: {results:?}"
+    );
+    assert_eq!(
+        hits.load(std::sync::atomic::Ordering::Relaxed),
+        before,
+        "a script URL without the parameter is not fetched"
     );
 }
 

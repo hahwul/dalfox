@@ -191,7 +191,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--sxss-retries` | `3` | 저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수 (최대 `20`; 재시도마다 500 ms × 시도 횟수만큼 대기, 최대 5초) |
 | `--max-payloads-per-param` | `0` | 파라미터별로 테스트하는 기본 페이로드 수 제한 (`0`은 `--deep-scan`이 없으면 세트당 3000개의 내장 안전 상한을 적용). WAF 우회 변형과 일부 공용 페이로드는 상한 적용 뒤에 추가되므로 실제 개수는 더 많을 수 있습니다 |
 | `--skip-ast-analysis` | false | AST DOM-XSS 분석(`[A]` 결과를 만드는 source→sink 패스)을 건너뜁니다. `--skip-mining-dom`으로는 꺼지지 않습니다 |
-| `--analyze-external-js` | false | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석을 수행합니다 (프리플라이트, 대상별 1회; 최대 16개 파일, 각 512 KiB; `--include-url`/`--exclude-url`을 준수) |
+| `--analyze-external-js` | false | 동일 출처의 `<script src>` 번들을 가져와 AST DOM-XSS 분석을 수행합니다 (프리플라이트, 대상별 1회; 최대 16개 파일, 각 512 KiB; `--include-url`/`--exclude-url`을 준수). 파라미터마다 `src` URL에 파라미터 값이 들어간 스크립트도 최대 4개 가져와, 그 안의 `document.currentScript.src`를 source로 봅니다 |
 | `--hpp` | false | HTTP 파라미터 오염(HPP) |
 | `--detect-outdated-libs` | false | 오래되었거나 알려진 취약점이 있는 JS 라이브러리도 보고합니다 (정보성, CWE-1104; 추가 요청 0회) |
 

@@ -765,6 +765,9 @@ impl<'a> DomXssVisitor<'a> {
                 })
             }
             Expression::ComputedMemberExpression(member) => self.computed_member_is_tainted(member),
+            Expression::PrivateFieldExpression(field) => self
+                .private_field_path(field)
+                .is_some_and(|path| self.field_taints.contains_key(&path)),
             Expression::ChainExpression(chain) => self.chain_is_tainted(chain),
             Expression::ParenthesizedExpression(paren) => {
                 // Parentheses don't affect taint

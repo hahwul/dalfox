@@ -66,8 +66,29 @@ impl<'a> DomXssVisitor<'a> {
         if let Some(arg) = call.arguments.get(param_idx) {
             self.argument_taint_and_source(arg)
         } else {
-            (false, None)
+            self.missing_argument_default(call, param_idx)
         }
+    }
+    /// A call that leaves argument `param_idx` out passes the parameter's
+    /// default (`function get(name, url = location.href)` called as
+    /// `get('q')`). Unknown once a spread can fill the slot.
+    fn missing_argument_default(
+        &self,
+        call: &CallExpression<'a>,
+        param_idx: usize,
+    ) -> (bool, Option<String>) {
+        if call
+            .arguments
+            .iter()
+            .any(|arg| matches!(arg, Argument::SpreadElement(_)))
+        {
+            return (false, None);
+        }
+        let source = self
+            .get_summary_key_for_callee_expr(&call.callee)
+            .and_then(|key| self.function_summaries.get(&key))
+            .and_then(|summary| summary.tainted_param_defaults.get(&param_idx));
+        (source.is_some(), source.cloned())
     }
     pub(super) fn resolve_apply_argument_taint_at(
         &self,

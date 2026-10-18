@@ -192,7 +192,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--sxss-retries` | `3` | Retries on the retrieval URL when fetching stored output (max `20`; each retry waits 500 ms × attempt, capped at 5 s) |
 | `--max-payloads-per-param` | `0` | Cap base payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `--deep-scan` is set). WAF-bypass variants and a few shared payloads are added after the cap, so the real per-parameter count can be higher |
 | `--skip-ast-analysis` | false | Skip AST DOM-XSS analysis, the source→sink pass that emits `[A]` findings. `--skip-mining-dom` does not do this |
-| `--analyze-external-js` | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`) |
+| `--analyze-external-js` | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`). Per parameter, it also fetches up to 4 scripts whose `src` URL carries the parameter and reads `document.currentScript.src` in them as a source |
 | `--hpp` | false | HTTP Parameter Pollution |
 | `--detect-outdated-libs` | false | Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests) |
 
