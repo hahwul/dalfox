@@ -355,7 +355,11 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
-        self.walk_statements(statements);
+        if matches!(expr, Expression::FunctionExpression(_)) {
+            self.with_own_this(|v| v.walk_statements(statements));
+        } else {
+            self.walk_statements(statements);
+        }
 
         let result_kind = match return_expr {
             Some(re) if self.is_tainted(re) => PromiseValueKind::Tainted(

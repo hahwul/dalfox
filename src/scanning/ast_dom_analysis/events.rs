@@ -231,11 +231,13 @@ impl<'a> DomXssVisitor<'a> {
             Expression::FunctionExpression(func) => {
                 if let Some(body) = &func.body {
                     let event_source = self.message_event_source_for_receiver(receiver);
-                    self.walk_event_handler_param(
-                        func.params.items.first(),
-                        &event_source,
-                        &body.statements,
-                    );
+                    self.with_own_this(|v| {
+                        v.walk_event_handler_param(
+                            func.params.items.first(),
+                            &event_source,
+                            &body.statements,
+                        )
+                    });
                 }
             }
             Expression::ArrowFunctionExpression(arrow) => {
@@ -289,15 +291,15 @@ impl<'a> DomXssVisitor<'a> {
             return;
         }
 
-        let (param, statements) = match right {
+        let (param, statements, owns_this) = match right {
             Expression::FunctionExpression(func) => {
                 let Some(body) = &func.body else {
                     return;
                 };
-                (func.params.items.first(), &body.statements)
+                (func.params.items.first(), &body.statements, true)
             }
             Expression::ArrowFunctionExpression(arrow) => {
-                (arrow.params.items.first(), &arrow.body.statements)
+                (arrow.params.items.first(), &arrow.body.statements, false)
             }
             _ => return,
         };
@@ -308,6 +310,10 @@ impl<'a> DomXssVisitor<'a> {
         // A cursor request hands the record one level deeper, on
         // `ev.target.result.value`; both spellings resolve through the
         // parameter binding `walk_event_handler_body` installs.
-        self.walk_event_handler_body(&param_name, "indexedDB", statements);
+        if owns_this {
+            self.with_own_this(|v| v.walk_event_handler_body(&param_name, "indexedDB", statements));
+        } else {
+            self.walk_event_handler_body(&param_name, "indexedDB", statements);
+        }
     }
 }

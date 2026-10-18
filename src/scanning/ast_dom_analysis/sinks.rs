@@ -939,11 +939,13 @@ impl<'a> DomXssVisitor<'a> {
                 // Mark the first parameter as tainted (it's the event object)
                 if let Some(body) = &func.body
                     && let Some(event_source) = event_source.as_deref()
-                    && self.walk_event_handler_param(
-                        func.params.items.first(),
-                        event_source,
-                        &body.statements,
-                    )
+                    && self.with_own_this(|v| {
+                        v.walk_event_handler_param(
+                            func.params.items.first(),
+                            event_source,
+                            &body.statements,
+                        )
+                    })
                 {
                     return true;
                 }
