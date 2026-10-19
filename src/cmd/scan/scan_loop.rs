@@ -808,6 +808,25 @@ mod tests {
         }
     }
 
+    // `--dedup-urls off` can list a target twice: marking the never-dispatched
+    // copy must not erase the SCAN_TIMEOUT its sibling already recorded.
+    #[tokio::test]
+    async fn mark_interrupted_keeps_a_recorded_reason() {
+        let a = crate::target_parser::parse_target("http://a.example/?q=1").unwrap();
+        let b = crate::target_parser::parse_target("http://b.example/?q=1").unwrap();
+        let set = tokio::sync::Mutex::new(std::collections::HashMap::from([(
+            a.state_key(),
+            Some(crate::cmd::error_codes::SCAN_TIMEOUT),
+        )]));
+        super::mark_interrupted(&set, [a.clone(), b.clone()]).await;
+        let set = set.lock().await;
+        assert_eq!(
+            set[&a.state_key()],
+            Some(crate::cmd::error_codes::SCAN_TIMEOUT)
+        );
+        assert_eq!(set[&b.state_key()], None);
+    }
+
     // Regression for the multi-target `--scan-timeout` abort: a per-target
     // timeout must flip ONLY the target's own flag and leave the shared SIGINT
     // flag untouched, so sibling/pending targets keep scanning.
