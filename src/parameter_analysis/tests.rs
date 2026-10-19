@@ -710,6 +710,27 @@ fn test_extract_reflected_segment_finds_marker_bounds() {
     assert_eq!(seg, "middle");
 }
 
+/// An escaped `<title>` echo ahead of a raw body echo: the fingerprint read
+/// only the first copy and reported `<` / `>` as encoded on a page the
+/// finding then exploited raw.
+#[test]
+fn filter_fingerprint_reads_every_reflection() {
+    let (o, c) = (
+        crate::scanning::markers::open_marker(),
+        crate::scanning::markers::close_marker(),
+    );
+    let body = format!("<title>{o}&lt;&gt;{c}</title><div>{o}<>{c}</div>");
+    let f = FilterFingerprint::from_segment(&joined_reflected_segments(&body), &['<', '>']);
+    assert_eq!(f.allowed, vec!['<', '>'], "{f:?}");
+    assert!(f.encoded.is_empty(), "{f:?}");
+
+    // NUL join: a copy ending in `&` must not pair with the next copy's
+    // `lt;` into an `&lt;` that reads as an encoded `<`.
+    let body = format!("{o}&{c}{o}lt;{c}");
+    let f = FilterFingerprint::from_segment(&joined_reflected_segments(&body), &['<']);
+    assert_eq!(f.blocked, vec!['<'], "{f:?}");
+}
+
 #[tokio::test]
 async fn test_active_probe_param_query_path_failure_paths() {
     let target = probe_target();
