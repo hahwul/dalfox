@@ -73,8 +73,8 @@ What reads `confidence`:
   `target_summary` counts, `--baseline`, `--limit` (both the early stop and the
   display cut), and the exit code. `I` findings carry no grade and are kept.
   The default (`low`) keeps everything. When set, `meta.min_confidence`
-  reports `{level, dropped}`, so a target reading `clean` because every finding
-  was filtered is distinguishable from one that found nothing. A run whose only
+  reports `{level, dropped}`; `dropped` is run-wide, so non-zero means some
+  `clean` target may hide filtered findings, not which one. A run whose only
   findings were `low` exits `0` under `high`.
 - **Dedup** ranks duplicate AST findings by type, then severity, then
   confidence (`high` before `low`).

@@ -181,7 +181,9 @@ pub(crate) async fn resolve_targets(
 
     let input_type = detect_input_type(args, stdin_is_piped, &mut buffered_stdin)?;
     if args.base_url.is_some() && !matches!(input_type.as_str(), "openapi" | "postman") {
-        eprintln!("[warn] base_url (--base-url or config `scan.base_url`) only applies to `-i openapi` / `-i postman`; ignoring it");
+        eprintln!(
+            "[warn] base_url (--base-url or config `scan.base_url`) only applies to `-i openapi` / `-i postman`; ignoring it"
+        );
     }
 
     // Each string is tagged with where it came from: a parse failure is fatal

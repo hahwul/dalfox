@@ -136,9 +136,9 @@ only. Three things act on it:
   `--baseline`, `--limit` (the early stop and the display cut), and the exit
   code. `I` findings carry no grade (they are not XSS claims) and are always
   kept. The default, `low`, keeps everything. When it is set,
-  `meta.min_confidence` reports `{level, dropped}`, so a target that reads
-  `clean` because all of its findings were filtered can be told apart from one
-  that found nothing. The same option is `min_confidence` in the config file,
+  `meta.min_confidence` reports `{level, dropped}`. `dropped` counts the whole
+  run, not each target: a non-zero value says some `clean` target may have had
+  its findings filtered, not which one. The same option is `min_confidence` in the config file,
   the REST API, and MCP.
 - AST deduplication breaks a type + severity tie on the grade (`high` first).
 - The exit code follows the filter above: a run whose only findings were

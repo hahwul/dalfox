@@ -290,7 +290,12 @@ pub(crate) async fn accumulate_findings(
     batch: Vec<crate::scanning::result::Result>,
     limit_result_type: &str,
     min_confidence: Option<&str>,
+    discard_below_min_confidence: bool,
 ) {
+    let mut batch = batch;
+    if discard_below_min_confidence {
+        batch.retain(|r| !r.below_min_confidence(min_confidence));
+    }
     if batch.is_empty() {
         return;
     }

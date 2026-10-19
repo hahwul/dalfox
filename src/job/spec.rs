@@ -248,6 +248,9 @@ impl ScanRequestSpec {
             // Applied to the job's results when it settles
             // (`ScanRun::sanitized_results`), as the CLI applies it at render.
             min_confidence: self.min_confidence,
+            // ... and dropped as collected, so the findings cap above bounds
+            // what the job stores rather than only what it reports.
+            discard_below_min_confidence: true,
 
             // The poller lifecycle is bound to the job in
             // `job::runner::execute_scan`. No `blind_oob_secret`: a self-hosted

@@ -1321,6 +1321,14 @@ fn async_jobs_cap_findings_and_say_so() {
         Some(super::MAX_FINDINGS_PER_JOB)
     );
     assert_eq!(ScanRequestSpec::default().into_scan_args().limit, None);
+    // Only stored findings are bounded by the cap, so jobs drop what
+    // `min_confidence` rejects instead of storing it uncounted.
+    assert!(
+        ScanRequestSpec::default()
+            .into_scan_args()
+            .discard_below_min_confidence
+    );
+    assert!(!crate::cmd::scan::ScanArgs::default().discard_below_min_confidence);
 
     let run = runner::ScanRun {
         results: Default::default(),

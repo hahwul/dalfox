@@ -669,6 +669,7 @@ pub(crate) async fn execute_scan(
                                     ast_batch,
                                     &args.limit_count_filter(),
                                     args.min_confidence.as_deref(),
+                                    args.discard_below_min_confidence,
                                 )
                                 .await;
                                 if crate::utils::response_has_markup_document(
@@ -689,6 +690,7 @@ pub(crate) async fn execute_scan(
                                         ext_batch,
                                         &args.limit_count_filter(),
                                         args.min_confidence.as_deref(),
+                                    args.discard_below_min_confidence,
                                     )
                                     .await;
                                 }
