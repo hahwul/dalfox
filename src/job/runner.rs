@@ -473,7 +473,8 @@ pub(crate) async fn execute_scan(
                     // fails soft, so a registration outage warns and the scan
                     // proceeds without it. The poller is bound to THIS job's
                     // results/findings/cancel (nothing process-global), spawned
-                    // below just before the scan and drained right after, so it
+                    // below once the payloads are out and drained after the
+                    // scan, so it
                     // can never outlive the job or leak across concurrent jobs.
                     if args.blind_oob_enabled() {
                         // Registration walks up to N servers × `timeout`; a

@@ -729,6 +729,12 @@ fn filter_fingerprint_reads_every_reflection() {
     let body = format!("{o}&{c}{o}lt;{c}");
     let f = FilterFingerprint::from_segment(&joined_reflected_segments(&body), &['<']);
     assert_eq!(f.blocked, vec!['<'], "{f:?}");
+
+    // A truncated copy (no CLOSE) must not drag the markup up to the next
+    // copy's CLOSE into the verdict: every copy here is encoded.
+    let body = format!("<meta content=\"{o}&lt;\"><p>{o}&lt;&gt;{c}</p>");
+    let f = FilterFingerprint::from_segment(&joined_reflected_segments(&body), &['<', '>', '"']);
+    assert!(f.allowed.is_empty(), "{f:?}");
 }
 
 #[tokio::test]

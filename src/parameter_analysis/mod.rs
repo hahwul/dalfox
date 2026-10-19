@@ -570,9 +570,15 @@ fn joined_reflected_segments(body: &str) -> String {
     const MAX_SEGMENTS: usize = 64;
     let mut segments = Vec::new();
     let mut rest = body;
+    let open = crate::scanning::markers::open_marker();
     while segments.len() < MAX_SEGMENTS
-        && let Some(seg) = extract_reflected_segment(rest)
+        && let Some(mut seg) = extract_reflected_segment(rest)
     {
+        // A copy cut off before its CLOSE pairs its OPEN with the next copy's
+        // CLOSE, pulling raw page markup in between; keep only the last copy.
+        while let Some(k) = find_ascii_ci(seg, open) {
+            seg = &seg[k + open.len()..];
+        }
         segments.push(seg);
         // `seg` borrows from `rest`; resume after it and its close marker.
         let consumed = seg.as_ptr() as usize - rest.as_ptr() as usize + seg.len();
