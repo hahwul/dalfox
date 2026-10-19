@@ -685,3 +685,17 @@ fn swagger2_host_with_a_scheme_keeps_the_real_host() {
         "http://api.example.com:8080/v1/a"
     );
 }
+
+#[test]
+fn wide_all_of_stops_at_the_node_budget() {
+    // Spent `sample` calls return at once, but the `allOf` loop kept walking
+    // the array: a wide list cost its full length per operation.
+    let wide: Vec<Value> = (0..MAX_SCHEMA_NODES * 5)
+        .map(|_| serde_json::json!({"type": "object"}))
+        .collect();
+    let schema = serde_json::json!({ "allOf": wide });
+    let doc = Value::Null;
+    let mut s = Sampler::new(&doc);
+    s.sample(&schema, 0);
+    assert!(s.nodes <= MAX_SCHEMA_NODES + 1, "visited {}", s.nodes);
+}
