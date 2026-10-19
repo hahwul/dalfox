@@ -222,9 +222,9 @@ runs first: output in every format, `--stream-findings`, `target_summary`
 counts, `--baseline`, `--limit` (the early stop and the display cut), and the
 exit code all see the filtered set. `I` findings carry no grade and are kept.
 The default `low` keeps everything. When the flag is set, the envelope carries
-`meta.min_confidence: {"level": "high", "dropped": N}`, so a target reading
-`clean` because all of its findings were filtered is never mistaken for one
-that found nothing.
+`meta.min_confidence: {"level": "high", "dropped": N}`. `N` counts the whole
+run, not each target: a non-zero value says some `clean` target may have had
+its findings filtered, not which one.
 
 Cap the number of results:
 

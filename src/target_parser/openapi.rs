@@ -274,6 +274,11 @@ impl<'a> Sampler<'a> {
         if let Some(all) = schema.get("allOf").and_then(Value::as_array) {
             let mut merged = Map::new();
             for sub in all {
+                // Each spent `sample` returns at once, but the loop itself
+                // still walks the array: stop it with the node budget.
+                if self.nodes > MAX_SCHEMA_NODES {
+                    break;
+                }
                 match self.sample(sub, depth + 1) {
                     Value::Object(m) => merged.extend(m),
                     other if all.len() == 1 => return other,

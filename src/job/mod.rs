@@ -421,10 +421,20 @@ pub(crate) fn normalize_blind_oob(req: &mut Option<spec::BlindOobRequest>) -> Re
         // Reject a single-label host (`ture`, a `true`/`false` typo, a bare
         // word): interactsh servers are FQDNs or host:port / IP, and a bare
         // label would otherwise register against a doomed host. The host part
-        // before any `:port` must carry a dot (FQDN) or be an IP literal.
+        // before any `:port` must carry a dot (FQDN) or be an IP literal —
+        // unless a port or scheme was given, which no typo carries
+        // (`localhost:8080`, a compose service `http://interactsh`).
         let bare = host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h);
-        let looks_like_host =
-            bare.contains('.') || bare.starts_with('[') || bare.parse::<std::net::IpAddr>().is_ok();
+        let looks_like_host = bare.contains('.')
+            || bare.starts_with('[')
+            || bare.parse::<std::net::IpAddr>().is_ok()
+            || bare.len() != host.len()
+            || ["http://", "https://"].iter().any(|p| {
+                server
+                    .trim()
+                    .get(..p.len())
+                    .is_some_and(|s| s.eq_ignore_ascii_case(p))
+            });
         if !looks_like_host {
             return Err(format!(
                 "blind_oob server '{}' is a single-label host; name a full interactsh domain (e.g. \"oast.fun\") or host:port",

@@ -560,6 +560,35 @@ fn extract_reflected_segment(body: &str) -> Option<&str> {
     Some(&rest[..end_rel])
 }
 
+/// Every OPEN…CLOSE reflection in `body`, NUL-joined for
+/// [`FilterFingerprint::from_segment`] (NUL keeps a trailing `&` from pairing
+/// with the next segment's `lt;`). A param echoed twice with different
+/// handling (an escaped `<title>` copy before a raw body copy) is classified
+/// by what any copy let through, not by whichever comes first.
+fn joined_reflected_segments(body: &str) -> String {
+    // ponytail: first 64 copies; a hostile echo-everything page needs no more.
+    const MAX_SEGMENTS: usize = 64;
+    let mut segments = Vec::new();
+    let mut rest = body;
+    let open = crate::scanning::markers::open_marker();
+    while segments.len() < MAX_SEGMENTS
+        && let Some(mut seg) = extract_reflected_segment(rest)
+    {
+        // A copy cut off before its CLOSE pairs its OPEN with the next copy's
+        // CLOSE, pulling raw page markup in between; keep only the last copy.
+        while let Some(k) = find_ascii_ci(seg, open) {
+            seg = &seg[k + open.len()..];
+        }
+        segments.push(seg);
+        // `seg` borrows from `rest`; resume after it and its close marker.
+        let consumed = seg.as_ptr() as usize - rest.as_ptr() as usize + seg.len();
+        rest = &rest[consumed..];
+        let close = crate::scanning::markers::close_marker();
+        rest = rest.get(close.len()..).unwrap_or("");
+    }
+    segments.join("\0")
+}
+
 /// Send one probe request that injects `payload` into `param`'s location and
 /// return the response text combined with any redirect Location header. The
 /// payload is sent verbatim — pre-encoding must already be applied by the
@@ -1002,7 +1031,11 @@ pub async fn active_probe_param(
         .and_then(extract_reflected_segment)
     {
         Some(segment) => {
-            param.filter = Some(FilterFingerprint::from_segment(segment, &probe_chars));
+            let all = batched_response
+                .as_deref()
+                .map(joined_reflected_segments)
+                .unwrap_or_default();
+            param.filter = Some(FilterFingerprint::from_segment(&all, &probe_chars));
             for &c in &probe_chars {
                 if char_reflected_in_segment(segment, c) {
                     valid.push(c);

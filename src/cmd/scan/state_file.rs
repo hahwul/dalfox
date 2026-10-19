@@ -315,6 +315,8 @@ pub(crate) fn config_hash(args: &ScanArgs) -> String {
     // That is the direction this function deliberately errs in (see the
     // denylist rationale above) — a needless re-scan, never a silent skip.
     a.explicit = d.explicit.clone();
+    // Job-only (REST/MCP never write a state file); always the default here.
+    a.discard_below_min_confidence = d.discard_below_min_confidence;
 
     // `ScanArgs: Debug` is the whole struct by construction, which is what
     // makes the denylist above self-maintaining.

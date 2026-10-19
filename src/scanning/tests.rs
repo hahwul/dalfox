@@ -2695,7 +2695,7 @@ async fn test_accumulate_findings_empty_batch_is_noop() {
     let results: tokio::sync::Mutex<Vec<crate::scanning::result::Result>> =
         tokio::sync::Mutex::new(Vec::new());
     let counter = std::sync::atomic::AtomicUsize::new(0);
-    accumulate_findings(&results, &counter, vec![], "ALL", None).await;
+    accumulate_findings(&results, &counter, vec![], "ALL", None, false).await;
     assert_eq!(
         counter.load(std::sync::atomic::Ordering::Relaxed),
         0,
@@ -2720,7 +2720,7 @@ async fn test_accumulate_findings_counts_only_matching_result_type() {
         make_result(FindingType::Reflected),
         make_result(FindingType::Reflected),
     ];
-    accumulate_findings(&results, &counter, batch, "V", None).await;
+    accumulate_findings(&results, &counter, batch, "V", None, false).await;
     assert_eq!(
         counter.load(std::sync::atomic::Ordering::Relaxed),
         1,
@@ -2731,6 +2731,28 @@ async fn test_accumulate_findings_counts_only_matching_result_type() {
         3,
         "all findings are still stored regardless of the limit filter"
     );
+}
+
+/// A REST/MCP job discards `--min-confidence` rejects as they arrive: the
+/// job findings cap counts only surviving findings, so a stored-but-uncounted
+/// `R` let `min_confidence: "high"` grow results past the cap.
+#[tokio::test]
+async fn accumulate_findings_discards_below_min_confidence_for_jobs() {
+    use crate::scanning::result::Confidence;
+    let batch = || {
+        let mut low = make_result(FindingType::Reflected);
+        low.confidence = Some(Confidence::Low);
+        let mut high = make_result(FindingType::Verified);
+        high.confidence = Some(Confidence::High);
+        vec![low, high]
+    };
+    for (discard, stored) in [(true, 1), (false, 2)] {
+        let results = tokio::sync::Mutex::new(Vec::new());
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        accumulate_findings(&results, &counter, batch(), "ALL", Some("high"), discard).await;
+        assert_eq!(results.lock().await.len(), stored, "discard={discard}");
+        assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
 }
 
 /// An AST finding (`message_id == 0`) counts toward `--limit` only when no

@@ -862,8 +862,14 @@ fn normalize_blind_oob_validates_and_cleans_servers() {
         let err = normalize_blind_oob(&mut r).expect_err(&format!("{bad} must be rejected"));
         assert!(err.contains("blind_oob"), "field must be named: {err}");
     }
-    // An IP literal and host:port are valid even without a dotted-name FQDN.
-    for ok in ["127.0.0.1:8080", "https://[::1]:9000"] {
+    // An IP literal, a port or a scheme makes a dotless host deliberate (a
+    // local or docker-compose interactsh), not a typo.
+    for ok in [
+        "127.0.0.1:8080",
+        "https://[::1]:9000",
+        "localhost:8080",
+        "http://interactsh",
+    ] {
         let mut r = Some(BlindOobRequest::Servers(vec![ok.to_string()]));
         normalize_blind_oob(&mut r).unwrap_or_else(|e| panic!("{ok} must pass: {e}"));
     }
@@ -1321,6 +1327,14 @@ fn async_jobs_cap_findings_and_say_so() {
         Some(super::MAX_FINDINGS_PER_JOB)
     );
     assert_eq!(ScanRequestSpec::default().into_scan_args().limit, None);
+    // Only stored findings are bounded by the cap, so jobs drop what
+    // `min_confidence` rejects instead of storing it uncounted.
+    assert!(
+        ScanRequestSpec::default()
+            .into_scan_args()
+            .discard_below_min_confidence
+    );
+    assert!(!crate::cmd::scan::ScanArgs::default().discard_below_min_confidence);
 
     let run = runner::ScanRun {
         results: Default::default(),
@@ -1828,6 +1842,36 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         assert_eq!(job.error_message.as_deref(), Some(want.as_str()));
         assert!(job.finished_at_ms.is_some() && job.results.is_some());
     }
+}
+
+/// A session found dead before a cancel / `scan_timeout` keeps the
+/// `cancelled` status but must not vanish: it was the reason nothing reflected.
+#[test]
+fn settle_keeps_session_lost_on_a_cancelled_job() {
+    let run = runner::ScanRun {
+        results: Default::default(),
+        reachability_failed: false,
+        timed_out: true,
+        was_cancelled: true,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: Some("login form".to_string()),
+        findings_capped: false,
+        warnings: Vec::new(),
+        min_confidence: None,
+    };
+    let mut job = Job::new_queued("http://t/".into());
+    assert_eq!(
+        run.settle(&mut job, Arc::new(Vec::new()), 5, false),
+        JobStatus::Cancelled
+    );
+    assert!(
+        job.warnings
+            .iter()
+            .any(|w| w == &format!("{}: login form", crate::cmd::error_codes::SESSION_LOST)),
+        "{:?}",
+        job.warnings
+    );
 }
 
 /// One DOM sink is found by the preflight pass and again per parameter. The

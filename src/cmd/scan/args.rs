@@ -868,6 +868,14 @@ pub struct ScanArgs {
     /// [`ExplicitArgs`].
     #[arg(skip)]
     pub explicit: ExplicitArgs,
+
+    /// Drop `--min-confidence` rejects when they are collected instead of
+    /// only when the report is rendered. Not a flag: REST/MCP jobs set it,
+    /// since they never read the dropped findings and the job findings cap
+    /// must bound what is stored. The CLI keeps them for
+    /// `meta.min_confidence.dropped`.
+    #[arg(skip)]
+    pub discard_below_min_confidence: bool,
 }
 
 impl ScanArgs {
@@ -986,6 +994,7 @@ impl Default for ScanArgs {
             waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
             targets: vec![],
             explicit: ExplicitArgs::default(),
+            discard_below_min_confidence: false,
         }
     }
 }

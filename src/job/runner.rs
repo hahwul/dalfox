@@ -168,6 +168,16 @@ impl ScanRun {
         for w in &self.warnings {
             super::push_job_warning(&mut job.warnings, w);
         }
+        // `cancelled` wins the status, but a session already found dead must
+        // still be reported (the CLI ranks it above an interrupted target).
+        if self.was_cancelled
+            && let Some(signal) = &self.session_lost
+        {
+            super::push_job_warning(
+                &mut job.warnings,
+                &format!("{}: {signal}", crate::cmd::error_codes::SESSION_LOST),
+            );
+        }
         if job.status != JobStatus::Cancelled {
             job.status = if self.was_cancelled {
                 JobStatus::Cancelled
@@ -463,7 +473,8 @@ pub(crate) async fn execute_scan(
                     // fails soft, so a registration outage warns and the scan
                     // proceeds without it. The poller is bound to THIS job's
                     // results/findings/cancel (nothing process-global), spawned
-                    // below just before the scan and drained right after, so it
+                    // below once the payloads are out and drained after the
+                    // scan, so it
                     // can never outlive the job or leak across concurrent jobs.
                     if args.blind_oob_enabled() {
                         // Registration walks up to N servers × `timeout`; a
@@ -528,6 +539,28 @@ pub(crate) async fn execute_scan(
                             _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => return,
                         }
                         oob_injected = oob_session.is_some();
+                    }
+
+                    // Spawn the job's OOB poller as soon as payloads are out,
+                    // so callbacks that fire mid-scan land in `results` as they
+                    // arrive, and a `scan_timeout` during preflight / analysis
+                    // still drains them below instead of only deregistering.
+                    // Only when OOB payloads were actually injected (not a
+                    // callback-only run, not a run cancelled during
+                    // registration). Silenced (server/MCP never write the CLI's
+                    // live stderr line), and tied to this job's cancel flag —
+                    // set by cancel/delete or by `scan_timeout` — so it stops
+                    // when the job does. The poller drains *after* the budget
+                    // (below), not here.
+                    if oob_injected && let Some(session) = &oob_session {
+                        oob_poller = Some(crate::oob::spawn_poller(
+                            session.clone(),
+                            results.clone(),
+                            findings_count.clone(),
+                            &args.limit_count_filter(),
+                            cancel_flag.clone(),
+                            true,
+                        ));
                     }
 
                     // Session-loss detection (issue #1273), the server half.
@@ -669,6 +702,7 @@ pub(crate) async fn execute_scan(
                                     ast_batch,
                                     &args.limit_count_filter(),
                                     args.min_confidence.as_deref(),
+                                    args.discard_below_min_confidence,
                                 )
                                 .await;
                                 if crate::utils::response_has_markup_document(
@@ -689,6 +723,7 @@ pub(crate) async fn execute_scan(
                                         ext_batch,
                                         &args.limit_count_filter(),
                                         args.min_confidence.as_deref(),
+                                    args.discard_below_min_confidence,
                                     )
                                     .await;
                                 }
@@ -781,25 +816,6 @@ pub(crate) async fn execute_scan(
                         crate::scanning::http_scannable_param_count(target) as u32,
                         std::sync::atomic::Ordering::Relaxed,
                     );
-
-                    // Spawn the job's OOB poller now, so callbacks that fire
-                    // mid-scan land in `results` as they arrive. Only when OOB
-                    // payloads were actually injected (not a callback-only run,
-                    // not a run cancelled during registration). Silenced
-                    // (server/MCP never write the CLI's live stderr line), and
-                    // tied to this job's cancel flag — set by cancel/delete or
-                    // by `scan_timeout` — so it stops when the job does. The
-                    // poller drains *after* the budget (below), not here.
-                    if oob_injected && let Some(session) = &oob_session {
-                        oob_poller = Some(crate::oob::spawn_poller(
-                            session.clone(),
-                            results.clone(),
-                            findings_count.clone(),
-                            &args.limit_count_filter(),
-                            cancel_flag.clone(),
-                            true,
-                        ));
-                    }
 
                     scan_report = crate::scanning::run_scanning(
                         target,

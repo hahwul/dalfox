@@ -296,6 +296,7 @@ async fn poll_once(p: &Poller) {
         batch,
         &p.limit_result_type,
         None,
+        false,
     )
     .await;
 }

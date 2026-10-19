@@ -688,6 +688,7 @@ impl ScanWorkerCtx {
             batch,
             &self.limit_result_type,
             self.args.min_confidence.as_deref(),
+            self.args.discard_below_min_confidence,
         )
         .await;
     }
