@@ -481,23 +481,9 @@ pub(crate) async fn execute_scan(
                         // the drain grace and free the job's capacity slot
                         // while this worker still runs).
                         let oob_config = args.oob_config();
-                        let mut start = tokio::spawn(async move {
-                            crate::oob::OobSession::start(&oob_config).await
-                        });
                         let started = tokio::select! {
-                            r = &mut start => r.unwrap_or_else(|e| Err(e.to_string().into())),
-                            _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => {
-                                // Dropping the start mid-flight could leave a
-                                // registration the server already accepted
-                                // armed; let it finish (bounded by its own
-                                // timeouts) and release it.
-                                tokio::spawn(async move {
-                                    if let Ok(Ok(session)) = start.await {
-                                        session.deregister().await;
-                                    }
-                                });
-                                return;
-                            }
+                            r = crate::oob::OobSession::start(&oob_config) => r,
+                            _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => return,
                         };
                         match started {
                             Ok(session) => {
