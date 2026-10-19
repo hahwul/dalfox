@@ -1828,9 +1828,10 @@ async fn test_a_short_scan_that_lost_nearly_everything_is_still_incomplete() {
 
 #[tokio::test]
 async fn test_render_results_stopped_early_targets_are_not_clean() {
-    // `--limit 1` over three targets: `a` found one, `b` found one past the
-    // display cut, `c` was cut short. Neither `b` nor `c` is clean. `b` and
-    // `c` hit `--scan-timeout` and say so; `d` was never dispatched.
+    // `--limit 1` over four targets: `a` found one, `b` found one past the
+    // display cut, `c` and `d` found nothing and were cut short. None of
+    // `b`-`d` is clean. `b` and `c` hit `--scan-timeout` and carry its code
+    // (even `b`, which has findings); `d` (Ctrl-C / never dispatched) has none.
     let mut args = default_scan_args();
     args.format = "json".to_string();
     args.limit = Some(1);
@@ -3744,6 +3745,81 @@ async fn a_worker_panic_fails_the_target_instead_of_reading_clean() {
         recorded.contains("\"error\"") && !recorded.contains("\"completed\""),
         "the target must be retried on resume: {recorded}"
     );
+}
+
+/// The `--scan-timeout` cap must reach `target_summary` as `SCAN_TIMEOUT`
+/// (#1497), not just as an anonymous `incomplete`.
+#[tokio::test]
+async fn a_scan_timeout_cut_reports_scan_timeout() {
+    let _serial = RUN_SCAN_LOCK.lock().await;
+    // Escaped echo after a delay: every payload reflects, none verifies, so
+    // the target keeps going until the 1s cap fires.
+    let app = Router::new().route(
+        "/",
+        get(
+            |axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>| async move {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                let echo: String = q
+                    .values()
+                    .flat_map(|v| v.chars())
+                    .map(|c| match c {
+                        '<' => "&lt;".to_string(),
+                        '>' => "&gt;".to_string(),
+                        '"' => "&quot;".to_string(),
+                        '\'' => "&#39;".to_string(),
+                        '&' => "&amp;".to_string(),
+                        c => c.to_string(),
+                    })
+                    .collect();
+                (
+                    [("content-type", "text/html")],
+                    format!("<html><body>{echo}</body></html>"),
+                )
+            },
+        ),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let out = std::env::temp_dir().join(format!(
+        "dalfox-scan-timeout-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let args = ScanArgs {
+        input_type: "url".to_string(),
+        format: "json".to_string(),
+        output: Some(out.to_string_lossy().to_string()),
+        silence: true,
+        targets: vec![format!("http://{addr}/?q=1")],
+        scan_timeout: 1,
+        skip_mining: true,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        skip_waf_probe: true,
+        skip_ast_analysis: true,
+        ..ScanArgs::default()
+    };
+    let _ = super::run_scan(&args).await;
+    server.abort();
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).expect("report written"))
+            .expect("valid JSON");
+    let _ = std::fs::remove_file(&out);
+    let summary = &report["meta"]["target_summary"][0];
+    assert_eq!(summary["status"], "incomplete", "{summary}");
+    assert_eq!(
+        summary["error_code"],
+        crate::cmd::error_codes::SCAN_TIMEOUT,
+        "{summary}"
+    );
+    assert_eq!(report["meta"]["incomplete"], true);
 }
 
 /// Blind payloads are stored attack traffic. A target the

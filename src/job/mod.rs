@@ -1327,7 +1327,7 @@ pub(crate) fn effective_scan_timeout(requested: Option<u64>, server_cap: Option<
 /// time when `budget_secs > 0`. On expiry the shared `cancel` flag is set — so
 /// any scan workers still in flight wind down at their next cancellation
 /// checkpoint, exactly as a user-initiated cancel would — and `true` is
-/// returned. `budget_secs == 0` disables the cap and always returns `false`.
+/// returned, unless the flag was already set (a user cancel still draining). `budget_secs == 0` disables the cap and always returns `false`.
 ///
 /// Used by the REST server and MCP runners to bound a single scan's total
 /// runtime; the CLI enforces the same `--scan-timeout` budget in its scan loop.
@@ -1345,10 +1345,9 @@ where
     let budget = std::time::Duration::from_secs(budget_secs);
     match tokio::time::timeout(budget, fut).await {
         Ok(()) => false,
-        Err(_elapsed) => {
-            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-            true
-        }
+        // A job the user already cancelled is still draining when the budget
+        // expires: that is a cancel, not a timeout.
+        Err(_elapsed) => !cancel.swap(true, std::sync::atomic::Ordering::Relaxed),
     }
 }
 

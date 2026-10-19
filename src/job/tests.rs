@@ -316,6 +316,17 @@ async fn run_within_scan_budget_trips_and_sets_cancel_on_expiry() {
 }
 
 #[tokio::test]
+async fn run_within_scan_budget_does_not_relabel_a_user_cancel_as_timeout() {
+    // Cancelled before the budget, still draining when it expires.
+    let cancel = Arc::new(AtomicBool::new(true));
+    let timed_out = run_within_scan_budget(1, &cancel, async {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    })
+    .await;
+    assert!(!timed_out, "a user cancel must not settle as SCAN_TIMEOUT");
+}
+
+#[tokio::test]
 async fn run_within_scan_budget_passes_through_when_under_budget() {
     let cancel = Arc::new(AtomicBool::new(false));
     // Completes well inside the budget → no timeout, cancel flag untouched.

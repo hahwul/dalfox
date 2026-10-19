@@ -50,7 +50,7 @@ pub mod error_codes {
     /// The `--scan-timeout` cap cut this target short, so not every payload
     /// was sent. Carried on `target_summary` entries (`status: "incomplete"`,
     /// or `"findings"` when something was found before the cap fired) and
-    /// prefixed to a REST / MCP job's `error_message`.
+    /// in a REST / MCP job's `error_message` (`SCAN_TIMEOUT: …`).
     pub(crate) const SCAN_TIMEOUT: &str = "SCAN_TIMEOUT";
 }
 

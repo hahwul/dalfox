@@ -92,7 +92,8 @@ async fn run_target_capped<T>(
                 target_cancel.store(true, Ordering::Relaxed);
             }
             _ = tokio::time::sleep_until(deadline), if !target_cancel.load(Ordering::Relaxed) => {
-                timed_out = true;
+                // A Ctrl-C inside `poll_cancel`'s sleep window is a Ctrl-C.
+                timed_out = !sigint.load(Ordering::Relaxed);
                 target_cancel.store(true, Ordering::Relaxed);
             }
         }
@@ -396,9 +397,10 @@ async fn mark_interrupted(
     set: &Mutex<HashMap<String, Option<&'static str>>>,
     targets: impl IntoIterator<Item = Target>,
 ) {
-    set.lock()
-        .await
-        .extend(targets.into_iter().map(|t| (t.state_key(), None)));
+    let mut set = set.lock().await;
+    for t in targets {
+        set.entry(t.state_key()).or_insert(None);
+    }
 }
 
 /// Scan every target in one host group, under the global concurrency permit.
@@ -702,10 +704,12 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     let cut_short =
                         timed_out || cancelled_during_scan || scan_report.limit_stopped;
                     if cut_short {
-                        interrupted_targets_target.lock().await.insert(
-                            target.state_key(),
-                            timed_out.then_some(crate::cmd::error_codes::SCAN_TIMEOUT),
-                        );
+                        // `--dedup-urls off` can list a target twice; a
+                        // later copy's `None` must not erase SCAN_TIMEOUT.
+                        let code = timed_out.then_some(crate::cmd::error_codes::SCAN_TIMEOUT);
+                        let mut interrupted = interrupted_targets_target.lock().await;
+                        let entry = interrupted.entry(target.state_key()).or_insert(code);
+                        *entry = entry.or(code);
                     }
                     if let Some(sf) = &state_file_target {
                         let outcome = if worker_panicked {

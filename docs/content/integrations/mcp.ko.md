@@ -130,7 +130,7 @@ WAF 임계값 아래로 유지할 때 쓰세요.
 
 `scan_timeout`은 스캔 전체에 허용되는 실제 경과 시간(초)입니다(기본값 `0` =
 무제한). 요청별 `timeout`과는 구별됩니다. 시간이 초과되면 스캔이 중단되고
-부분 탐지 결과를 유지하며 `scan_timeout`을 언급하는 `error_message`와 함께
+부분 탐지 결과를 유지하며 `SCAN_TIMEOUT:`이 담긴 `error_message`와 함께
 `cancelled` 상태로 정리됩니다. 오래 걸리는 스캔이나 `deep_scan`에 이 값을
 두면 에이전트의 폴링 루프가 반드시 끝납니다.
 

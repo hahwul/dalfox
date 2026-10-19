@@ -131,7 +131,7 @@ fragile target or to stay under a WAF threshold.
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When it trips, the scan
 stops, keeps any partial findings, and settles as `cancelled` with an
-`error_message` mentioning `scan_timeout`. Set it to bound long or `deep_scan`
+`error_message` containing `SCAN_TIMEOUT:`. Set it to bound long or `deep_scan`
 runs so an agent's poll loop is guaranteed to terminate.
 
 The block above is an excerpt. Here is every field the tool accepts, with its
