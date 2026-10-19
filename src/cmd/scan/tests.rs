@@ -965,7 +965,7 @@ fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
         target_mutation_stats: Arc::new(Mutex::new(HashMap::new())),
         session_baselines: Arc::new(Mutex::new(HashMap::new())),
         session_lost: Arc::new(Mutex::new(HashMap::new())),
-        interrupted_targets: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        interrupted_targets: Arc::new(Mutex::new(HashMap::new())),
         multi_pb: None,
         preflight_idx: Arc::new(AtomicUsize::new(0)),
         analyze_idx: Arc::new(AtomicUsize::new(0)),
@@ -1829,7 +1829,8 @@ async fn test_a_short_scan_that_lost_nearly_everything_is_still_incomplete() {
 #[tokio::test]
 async fn test_render_results_stopped_early_targets_are_not_clean() {
     // `--limit 1` over three targets: `a` found one, `b` found one past the
-    // display cut, `c` was cut short. Neither `b` nor `c` is clean.
+    // display cut, `c` was cut short. Neither `b` nor `c` is clean. `b` and
+    // `c` hit `--scan-timeout` and say so; `d` was never dispatched.
     let mut args = default_scan_args();
     args.format = "json".to_string();
     args.limit = Some(1);
@@ -1839,6 +1840,7 @@ async fn test_render_results_stopped_early_targets_are_not_clean() {
         "https://a.example/",
         "https://b.example/",
         "https://c.example/",
+        "https://d.example/",
     ]
     .map(String::from)
     .to_vec();
@@ -1848,11 +1850,17 @@ async fn test_render_results_stopped_early_targets_are_not_clean() {
         r
     });
     let state = make_scan_state(results.to_vec());
-    state
-        .interrupted_targets
-        .lock()
-        .await
-        .extend(["https://b.example/", "https://c.example/"].map(String::from));
+    state.interrupted_targets.lock().await.extend([
+        (
+            "https://b.example/".to_string(),
+            Some(crate::cmd::error_codes::SCAN_TIMEOUT),
+        ),
+        (
+            "https://c.example/".to_string(),
+            Some(crate::cmd::error_codes::SCAN_TIMEOUT),
+        ),
+        ("https://d.example/".to_string(), None),
+    ]);
     let _ = render_results(
         &args,
         &state,
@@ -1877,7 +1885,19 @@ async fn test_render_results_stopped_early_targets_are_not_clean() {
         .collect();
     assert_eq!(
         statuses,
-        ["findings", "findings", "incomplete"],
+        ["findings", "findings", "incomplete", "incomplete"],
+        "{}",
+        v["meta"]
+    );
+    let codes: Vec<Option<&str>> = v["meta"]["target_summary"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["error_code"].as_str())
+        .collect();
+    assert_eq!(
+        codes,
+        [None, Some("SCAN_TIMEOUT"), Some("SCAN_TIMEOUT"), None],
         "{}",
         v["meta"]
     );

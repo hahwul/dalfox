@@ -47,6 +47,11 @@ pub mod error_codes {
     /// `"clean"` is the whole point: a crash inside the scanner must never be
     /// indistinguishable from "we looked and found nothing".
     pub(crate) const INTERNAL_ERROR: &str = "INTERNAL_ERROR";
+    /// The `--scan-timeout` cap cut this target short, so not every payload
+    /// was sent. Carried on `target_summary` entries (`status: "incomplete"`,
+    /// or `"findings"` when something was found before the cap fired) and
+    /// prefixed to a REST / MCP job's `error_message`.
+    pub(crate) const SCAN_TIMEOUT: &str = "SCAN_TIMEOUT";
 }
 
 #[cfg(test)]
@@ -78,5 +83,6 @@ mod tests {
         );
         assert_eq!(error_codes::SESSION_LOST, "SESSION_LOST");
         assert_eq!(error_codes::INTERNAL_ERROR, "INTERNAL_ERROR");
+        assert_eq!(error_codes::SCAN_TIMEOUT, "SCAN_TIMEOUT");
     }
 }

@@ -138,8 +138,10 @@ pub(crate) struct ScanState {
     pub(crate) session_lost: Arc<Mutex<HashMap<String, String>>>,
     /// Targets whose injection stage was cut short — Ctrl-C, `--limit`,
     /// `--scan-timeout` — or never dispatched because the run stopped first.
-    /// Reported `incomplete` rather than `clean` when they found nothing.
-    pub(crate) interrupted_targets: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Reported `incomplete` rather than `clean` when they found nothing. The
+    /// value is the `error_code` to report: `SCAN_TIMEOUT` for a target the
+    /// `--scan-timeout` cap cut short, `None` for the other causes.
+    pub(crate) interrupted_targets: Arc<Mutex<HashMap<String, Option<&'static str>>>>,
     pub(crate) multi_pb: Option<Arc<MultiProgress>>,
     pub(crate) preflight_idx: Arc<AtomicUsize>,
     pub(crate) analyze_idx: Arc<AtomicUsize>,
@@ -543,7 +545,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         target_mutation_stats,
         session_baselines,
         session_lost,
-        interrupted_targets: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        interrupted_targets: Arc::new(Mutex::new(HashMap::new())),
         multi_pb,
         preflight_idx,
         analyze_idx,

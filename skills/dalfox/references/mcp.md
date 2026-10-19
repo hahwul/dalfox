@@ -83,7 +83,7 @@ Terminal jobs auto-purge after 1 hour.
   "user_agent": "Mozilla/5.0...",
   "encoders": ["url", "html", "base64"],           // "none" means raw only
   "timeout": 10,                                   // 1-299 (hard validated), per-request
-  "scan_timeout": 0,                               // whole-scan wall-clock budget (sec); 0 = disabled
+  "scan_timeout": 0,                               // whole-scan wall-clock budget (sec); 0 = disabled; expiry → status "cancelled", error_message "SCAN_TIMEOUT: …"
   "delay": 0,                                      // 0-9999 ms (hard validated)
   "rate_limit": 0,                                 // global req/sec across all workers; 0 = unlimited
   "follow_redirects": false,

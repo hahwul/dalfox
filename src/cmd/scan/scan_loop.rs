@@ -383,7 +383,7 @@ pub(crate) struct HostGroupCtx {
     pub(crate) cancel_flag_group: Arc<AtomicBool>,
     pub(crate) session_monitor_group: Option<Arc<SessionMonitor>>,
     pub(crate) skipped_targets_group: Arc<Mutex<HashMap<String, &'static str>>>,
-    pub(crate) interrupted_targets_group: Arc<Mutex<std::collections::HashSet<String>>>,
+    pub(crate) interrupted_targets_group: Arc<Mutex<HashMap<String, Option<&'static str>>>>,
     pub(crate) state_file_group: Option<Arc<super::state_file::StateFile>>,
     pub(crate) session_lost_group: Arc<AtomicBool>,
     pub(crate) total_targets: usize,
@@ -393,12 +393,12 @@ pub(crate) struct HostGroupCtx {
 /// Record targets the run stopped before dispatching (`--limit`, Ctrl-C), so
 /// `target_summary` reports them `incomplete` instead of `clean`.
 async fn mark_interrupted(
-    set: &Mutex<std::collections::HashSet<String>>,
+    set: &Mutex<HashMap<String, Option<&'static str>>>,
     targets: impl IntoIterator<Item = Target>,
 ) {
     set.lock()
         .await
-        .extend(targets.into_iter().map(|t| t.state_key()));
+        .extend(targets.into_iter().map(|t| (t.state_key(), None)));
 }
 
 /// Scan every target in one host group, under the global concurrency permit.
@@ -702,10 +702,10 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     let cut_short =
                         timed_out || cancelled_during_scan || scan_report.limit_stopped;
                     if cut_short {
-                        interrupted_targets_target
-                            .lock()
-                            .await
-                            .insert(target.state_key());
+                        interrupted_targets_target.lock().await.insert(
+                            target.state_key(),
+                            timed_out.then_some(crate::cmd::error_codes::SCAN_TIMEOUT),
+                        );
                     }
                     if let Some(sf) = &state_file_target {
                         let outcome = if worker_panicked {

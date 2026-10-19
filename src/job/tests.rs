@@ -1829,7 +1829,7 @@ fn settle_note_fills_empty_message_and_appends_only_when_asked() {
         warnings: Vec::new(),
         min_confidence: None,
     };
-    let note = "scan exceeded scan_timeout (5s); returning partial results";
+    let note = "SCAN_TIMEOUT: scan exceeded scan_timeout (5s); returning partial results";
     for (prior, append, want) in [
         (None, false, note.to_string()),
         (Some("client gone"), false, "client gone".to_string()),
