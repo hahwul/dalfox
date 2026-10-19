@@ -389,7 +389,8 @@ call carries credentials (`cookies`, or a `Cookie` / `Authorization` entry in
 Dalfox fingerprints the authenticated response before scanning and re-checks it
 at the end; if the session expired in between, the scan settles
 `status: "error"` with an `error_message` beginning `SESSION_LOST:` instead of
-`done` with an empty `results`. Do not summarize such a scan as "no XSS found":
+`done` with an empty `results` (a scan cancelled or timed out after the loss
+was found stays `cancelled` and lists it in `warnings`). Do not summarize such a scan as "no XSS found":
 nothing was really tested. Monitoring costs nothing when no credentials and no
 `session_check` are passed.
 

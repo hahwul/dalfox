@@ -564,7 +564,9 @@ response before scanning and re-checks it when the scan ends.
 If the session expired in between (every later request answered by a login page,
 nothing reflecting), the scan ends as `error` with an `error_message` beginning
 `SESSION_LOST:` and the signal that fired, rather than `done` with zero
-findings. Partial results stay attached. For a scan with no credentials and no
+findings. Partial results stay attached. A scan cancelled or stopped by
+`scan_timeout` after the loss was found stays `cancelled` and lists the
+`SESSION_LOST:` line in `warnings`. For a scan with no credentials and no
 `session_check` the monitoring is off and costs nothing.
 
 Softer problems that don't fail the scan still reach you: `GET /scan/{id}` adds

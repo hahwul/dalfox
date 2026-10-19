@@ -383,7 +383,8 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 `session_check_url`을 명시하면, Dalfox는 스캔 전에
 인증된 응답의 지문을 잡아 두고 스캔이 끝날 때 다시 확인합니다. 그 사이에 세션이
 만료됐다면 빈 `results`와 함께 `done`으로 끝나는 대신 `SESSION_LOST:`로 시작하는
-`error_message`와 함께 `status: "error"`로 종료됩니다. 이런 스캔을 "XSS 없음"으로
+`error_message`와 함께 `status: "error"`로 종료됩니다(세션 손실을 감지한 뒤
+취소되거나 시간 초과된 스캔은 `cancelled`로 남고 `warnings`에 이를 적습니다). 이런 스캔을 "XSS 없음"으로
 요약하지 마세요. 실제로 테스트된 것이 없습니다. 자격증명도 `session_check`도 넘기지
 않으면 모니터링은 비용이 들지 않습니다.
 

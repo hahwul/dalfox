@@ -538,6 +538,8 @@ queued → cancelled
 확인합니다. 그 사이에 세션이 만료됐다면(이후 모든 요청이 로그인 페이지를 받고 아무것도
 반사되지 않는 상태) 탐지 결과 0건의 `done`이 아니라 `SESSION_LOST:`로 시작하고 감지 신호를
 담은 `error_message`와 함께 `error`로 종료됩니다. 부분 탐지 결과는 그대로 유지됩니다.
+세션 손실을 감지한 뒤 취소되거나 `scan_timeout`으로 멈춘 스캔은 `cancelled`로 남고,
+`SESSION_LOST:` 줄은 `warnings`에 들어갑니다.
 자격증명도 `session_check`도 없는 스캔에서는 모니터링이 꺼져 있으며 비용도 들지 않습니다.
 
 스캔을 실패시키지는 않는 문제도 전달됩니다. `GET /scan/{id}`는 `blind_oob`가 어떤
