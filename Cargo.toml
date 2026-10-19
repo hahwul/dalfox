@@ -21,7 +21,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 # etc. — see #1061), whereas ring's prebuilt assembly is portable. reqwest's
 # `rustls-no-provider` feature leaves the crypto provider unset, so we install
 # ring's as the process default (see `dalfox::ensure_crypto_provider`).
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 # `default-features = false` drops scraper's `errors` and `main` features.
 #
 # `errors` makes every `Html` retain a `Vec<Cow<str>>` holding ONE heap-allocated
