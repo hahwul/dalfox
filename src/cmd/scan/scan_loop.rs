@@ -92,7 +92,8 @@ async fn run_target_capped<T>(
                 target_cancel.store(true, Ordering::Relaxed);
             }
             _ = tokio::time::sleep_until(deadline), if !target_cancel.load(Ordering::Relaxed) => {
-                timed_out = true;
+                // A Ctrl-C inside `poll_cancel`'s sleep window is a Ctrl-C.
+                timed_out = !sigint.load(Ordering::Relaxed);
                 target_cancel.store(true, Ordering::Relaxed);
             }
         }
@@ -383,7 +384,7 @@ pub(crate) struct HostGroupCtx {
     pub(crate) cancel_flag_group: Arc<AtomicBool>,
     pub(crate) session_monitor_group: Option<Arc<SessionMonitor>>,
     pub(crate) skipped_targets_group: Arc<Mutex<HashMap<String, &'static str>>>,
-    pub(crate) interrupted_targets_group: Arc<Mutex<std::collections::HashSet<String>>>,
+    pub(crate) interrupted_targets_group: Arc<Mutex<HashMap<String, Option<&'static str>>>>,
     pub(crate) state_file_group: Option<Arc<super::state_file::StateFile>>,
     pub(crate) session_lost_group: Arc<AtomicBool>,
     pub(crate) total_targets: usize,
@@ -393,12 +394,13 @@ pub(crate) struct HostGroupCtx {
 /// Record targets the run stopped before dispatching (`--limit`, Ctrl-C), so
 /// `target_summary` reports them `incomplete` instead of `clean`.
 async fn mark_interrupted(
-    set: &Mutex<std::collections::HashSet<String>>,
+    set: &Mutex<HashMap<String, Option<&'static str>>>,
     targets: impl IntoIterator<Item = Target>,
 ) {
-    set.lock()
-        .await
-        .extend(targets.into_iter().map(|t| t.state_key()));
+    let mut set = set.lock().await;
+    for t in targets {
+        set.entry(t.state_key()).or_insert(None);
+    }
 }
 
 /// Scan every target in one host group, under the global concurrency permit.
@@ -702,10 +704,12 @@ pub(crate) async fn scan_host_group(ctx: HostGroupCtx) {
                     let cut_short =
                         timed_out || cancelled_during_scan || scan_report.limit_stopped;
                     if cut_short {
-                        interrupted_targets_target
-                            .lock()
-                            .await
-                            .insert(target.state_key());
+                        // `--dedup-urls off` can list a target twice; a
+                        // later copy's `None` must not erase SCAN_TIMEOUT.
+                        let code = timed_out.then_some(crate::cmd::error_codes::SCAN_TIMEOUT);
+                        let mut interrupted = interrupted_targets_target.lock().await;
+                        let entry = interrupted.entry(target.state_key()).or_insert(code);
+                        *entry = entry.or(code);
                     }
                     if let Some(sf) = &state_file_target {
                         let outcome = if worker_panicked {
@@ -802,6 +806,25 @@ mod tests {
         while !target_cancel.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
+    }
+
+    // `--dedup-urls off` can list a target twice: marking the never-dispatched
+    // copy must not erase the SCAN_TIMEOUT its sibling already recorded.
+    #[tokio::test]
+    async fn mark_interrupted_keeps_a_recorded_reason() {
+        let a = crate::target_parser::parse_target("http://a.example/?q=1").unwrap();
+        let b = crate::target_parser::parse_target("http://b.example/?q=1").unwrap();
+        let set = tokio::sync::Mutex::new(std::collections::HashMap::from([(
+            a.state_key(),
+            Some(crate::cmd::error_codes::SCAN_TIMEOUT),
+        )]));
+        super::mark_interrupted(&set, [a.clone(), b.clone()]).await;
+        let set = set.lock().await;
+        assert_eq!(
+            set[&a.state_key()],
+            Some(crate::cmd::error_codes::SCAN_TIMEOUT)
+        );
+        assert_eq!(set[&b.state_key()], None);
     }
 
     // Regression for the multi-target `--scan-timeout` abort: a per-target

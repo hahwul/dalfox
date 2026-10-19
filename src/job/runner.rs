@@ -202,7 +202,8 @@ impl ScanRun {
             ))
         } else if self.timed_out {
             Some(format!(
-                "scan exceeded scan_timeout ({}s); returning partial results",
+                "{}: scan exceeded scan_timeout ({}s); returning partial results",
+                crate::cmd::error_codes::SCAN_TIMEOUT,
                 scan_timeout
             ))
         } else if self.findings_capped {

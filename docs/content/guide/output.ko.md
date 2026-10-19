@@ -140,7 +140,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 같은 스캔 수준 메타�
 - `total_requests`
 - `failed_requests`: 재시도를 다 쓰고도 응답을 받지 못한 요청 수(리셋, 거부, 타임아웃, 본문이 도중에 끊긴 경우)와 HTTP 429로 거절된 탐색·마이닝 프로브 수. 대상에 닿지 못한 페이로드는 테스트되지 않은 것입니다.
 - `findings_count`
-- `target_summary[]`: 대상마다 항목 하나. 대상은 URL + 메서드 + 요청 본문으로 구분하므로 같은 URL의 `GET`과 `POST`는 항목이 따로 생깁니다. 각 항목에는 `target`, `method`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`가 있습니다. 건너뛰었거나 세션이 끊긴 대상에는 `error_code`가, 세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`가 더 붙습니다. Ctrl-C, `--limit`, `--scan-timeout`으로 도중에 끊긴 대상은 `error_code` 없이 `incomplete`입니다. WAF가 탐지되면 `waf` 객체도 붙습니다. `type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록으로 구성됩니다.
+- `target_summary[]`: 대상마다 항목 하나. 대상은 URL + 메서드 + 요청 본문으로 구분하므로 같은 URL의 `GET`과 `POST`는 항목이 따로 생깁니다. 각 항목에는 `target`, `method`, `status`(`findings`, `clean`, `skipped`, `incomplete`), `findings_count`가 있습니다. 건너뛰었거나 세션이 끊겼거나 `--scan-timeout`으로 끊긴(`SCAN_TIMEOUT`) 대상에는 `error_code`가, 세션이 끊긴 경우에는 감지된 신호를 담은 `error_message`가 더 붙습니다. Ctrl-C, `--limit`, `--scan-timeout`으로 도중에 끊긴 대상은 `incomplete`이고, `--scan-timeout`으로 끊긴 경우에만 `error_code: SCAN_TIMEOUT`이 붙습니다. WAF가 탐지되면 `waf` 객체도 붙습니다. `type` / `confidence` / `evidence`를 담은 `detected[]`와, 추가 인코더·변형 수·우회 중 보낸/차단된 요청 수를 담은 `bypass` 블록으로 구성됩니다.
 - `dedup_mode` / `targets_deduplicated`: 적용된 [`--dedup-urls`](../scanning-modes/#거의-같은-url-묶기) 모드와 그 모드가 병합한 대상 수. 입력 목록이 줄어든 사실이 리포트에 드러납니다. Markdown은 실제로 병합이 있었을 때만 이 행을 표시합니다.
 - `targets_unparsable`: 대상 목록의 줄을 파싱하지 못했거나 OpenAPI / Postman 오퍼레이션을 만들지 못해 건너뛴 경우에만 포함됩니다. [File 모드](../scanning-modes/#file-모드), [OpenAPI / Postman 모드](../scanning-modes/#openapi-postman-모드) 참고.
 - `baseline`: `--baseline`을 쓴 경우에만 포함됩니다. [베이스라인](#베이스라인-새로-생긴-것만-보고하기) 참고.
@@ -148,7 +148,7 @@ JSON, JSONL, SARIF, TOML, Markdown 출력은 모두 같은 스캔 수준 메타�
 - `min_confidence`: `--min-confidence`를 준 경우에만 포함됩니다. [필터링](#필터링) 참고.
 - `incomplete`: 실행이 완전히 테스트되지 않았을 때 `true`입니다. 스캔 도중 대상의 인증 세션이 끊어졌거나([세션 모니터링](../scanning-modes/#세션-모니터링) 참고), 전체 요청의 10% 이상(최소 3건)이 응답을 받지 못했거나, Ctrl-C / `--limit` / `--scan-timeout`으로 모든 대상이 끝나기 전에 실행이 멈춘 경우입니다. `target_summary` 항목을 전부 훑는 대신 이 필드 하나만 보면 됩니다. `"findings_count": 0`과 `"incomplete": true`가 함께 있다면 안전하다는 뜻이 *아닙니다*.
 
-세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)와 `"error_code": "SESSION_LOST"`로 보고되고, 감지된 신호는 `"error_message"`에 담깁니다. `"clean"`으로 표시되는 일은 없습니다. Ctrl-C, `--limit`, `--scan-timeout`으로 도중에 끊긴(또는 실행이 그 전에 멈춰 도달하지 못한) 대상도 탐지 결과가 없으면 `error_code` 없이 `"incomplete"`로 표시됩니다.
+세션이 끊어진 대상은 `"status": "incomplete"`(아예 실행되지 않았다면 `"skipped"`)와 `"error_code": "SESSION_LOST"`로 보고되고, 감지된 신호는 `"error_message"`에 담깁니다. `"clean"`으로 표시되는 일은 없습니다. Ctrl-C, `--limit`, `--scan-timeout`으로 도중에 끊긴(또는 실행이 그 전에 멈춰 도달하지 못한) 대상도 탐지 결과가 없으면 `"incomplete"`로 표시됩니다. `--scan-timeout`으로 끊긴 대상에는 탐지 결과가 있어도 `"error_code": "SCAN_TIMEOUT"`이 붙으므로, 배치 실행에서 어떤 대상을 다시 돌려야 하는지 알 수 있습니다. 나머지 경우에는 `error_code`가 없습니다.
 
 SARIF에서는 엔벨로프가 `runs[0].properties`와 `runs[0].tool.driver.properties` 두 곳에 실려, GitHub 코드 스캐닝 같은 소비 도구도 컨텍스트를 그대로 받습니다. 각 결과의 `ruleId`는 `dalfox/cwe-<n>`(XSS는 `dalfox/cwe-79`, 오래된 라이브러리는 `dalfox/cwe-1104`)입니다. `level`은 `severity`를 따르고(High → `error`, Medium → `warning`, Low / Info → `note`), PoC URL은 location의 `uri`에 들어갑니다. `partialFingerprints["vulnIdentity/v1"]`은 코드 스캐닝이 실행 간에 같은 건을 맞춰 볼 수 있게 하는 안정적인 해시입니다. 탐지 결과 필드(`type`, `inject_type`, `param`, `payload`, `severity`, `detection_method`, `confidence` 등)는 결과의 `properties` 아래에 있고, `message.text`에는 `message_str`과 근거가 함께 담깁니다.
 

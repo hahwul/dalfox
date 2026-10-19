@@ -185,7 +185,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
   - `skills/dalfox/references/results.md` carries a curated "common ones" list
     that points back to `src/cmd/mod.rs` as the canonical list; add the new code
     there only if consumers will commonly surface it, not mechanically for every code.
-  - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `STDIN_NOT_PIPED`, `INPUT_TOO_LARGE`, `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, `CONTENT_TYPE_MISMATCH`, `TRUNCATED_PER_HOST_CAP`, `SESSION_LOST`, `INTERNAL_ERROR`
+  - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `STDIN_NOT_PIPED`, `INPUT_TOO_LARGE`, `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, `CONTENT_TYPE_MISMATCH`, `TRUNCATED_PER_HOST_CAP`, `SESSION_LOST`, `INTERNAL_ERROR`, `SCAN_TIMEOUT`
 
 ---
 

@@ -460,7 +460,7 @@ further down). A regex that does not compile or a non-`http(s)` probe URL is a
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached
 the scan stops, keeps whatever partial findings it gathered, and settles as
-`cancelled` with an `error_message` that mentions `scan_timeout` (so you can tell
+`cancelled` with an `error_message` containing `SCAN_TIMEOUT:` (so you can tell
 a timeout apart from a client-issued cancel). The server-wide `--scan-timeout`
 flag caps every submitted scan the same way `--rate-limit` does.
 

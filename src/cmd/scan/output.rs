@@ -710,11 +710,13 @@ pub(crate) async fn render_results(
             } else if session_lost.contains_key(key) {
                 ("incomplete", Some(crate::cmd::error_codes::SESSION_LOST))
             } else if finding_count > 0 {
-                ("findings", None)
-            } else if interrupted.contains(key) {
+                // A timed-out target keeps `findings` but still says it was
+                // cut short, so a batch can tell which targets to re-run.
+                ("findings", interrupted.get(key).copied().flatten())
+            } else if let Some(code) = interrupted.get(key) {
                 // Cut short by Ctrl-C / `--limit` / `--scan-timeout`, or never
                 // dispatched: "nothing found" is not "clean".
-                ("incomplete", None)
+                ("incomplete", *code)
             } else {
                 ("clean", None)
             };

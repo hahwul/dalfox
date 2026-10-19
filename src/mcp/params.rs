@@ -194,7 +194,7 @@ pub(crate) struct ScanWithDalfoxParams {
 
     /// Whole-scan wall-clock budget in seconds (0-86400). When the budget is
     /// reached the scan stops, returns whatever partial results it gathered, and
-    /// settles as `cancelled` with an error_message noting the timeout. 0 = no
+    /// settles as `cancelled` with an error_message containing `SCAN_TIMEOUT:`. 0 = no
     /// budget (unbounded). Use this to bound long/deep scans. Default: 0
     #[serde(default)]
     #[schemars(range(max = 86400))]

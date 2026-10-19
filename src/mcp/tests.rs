@@ -4448,9 +4448,13 @@ async fn a_cancelled_call_does_not_hide_a_worker_panic() {
         message.starts_with("the client cancelled the tool call"),
         "the first reason is kept: {message}"
     );
+    // The budget expires while the cancelled scan drains: that is still the
+    // client's cancel, not a timeout, so no SCAN_TIMEOUT note is appended
+    // (#1497). The append path itself is covered by
+    // `settle_note_fills_empty_message_and_appends_only_when_asked`.
     assert!(
-        message.contains("scan_timeout"),
-        "and the outcome the worker recorded is appended, not dropped: {message}"
+        !message.contains(crate::cmd::error_codes::SCAN_TIMEOUT),
+        "a client cancel must not read as a timeout: {message}"
     );
     assert_eq!(
         job.status,
