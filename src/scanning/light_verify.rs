@@ -69,10 +69,17 @@ pub async fn verify_dom_xss_light_with_client(
             .and_then(|v| v.to_str().ok())
             .map(ToString::to_string);
         if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
-            let marker_evidence =
+            let evidence =
                 crate::scanning::check_dom_verification::classify_dom_evidence_for_response(
                     payload, &text, &ct,
-                ) == Some(crate::scanning::check_dom_verification::DomEvidenceKind::Marker);
+                );
+            let marker_evidence = matches!(
+                evidence,
+                Some(
+                    crate::scanning::check_dom_verification::DomEvidenceKind::Marker
+                        | crate::scanning::check_dom_verification::DomEvidenceKind::JsContext
+                )
+            );
             // 1) Payload reflection present after normalization
             if crate::scanning::check_reflection::classify_reflection(&text, payload).is_some() {
                 if marker_evidence {

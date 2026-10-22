@@ -464,11 +464,14 @@ pub(crate) fn get_dom_payloads_for_context(
             // saw the quote JS-escaped, no raw-quote breakout can work, so the
             // tag breakouts go first outright.
             let tail = expression.split_off(expression.len().min(JS_EXPRESSION_JOINERS));
-            let out: Vec<String> = if js_string_needs_tag_breakout(param, delim.as_ref()) {
+            let mut out: Vec<String> = if js_string_needs_tag_breakout(param, delim.as_ref()) {
                 tags.into_iter().chain(expression).chain(tail).collect()
             } else {
                 expression.into_iter().chain(tags).chain(tail).collect()
             };
+            if param.in_js_exec_sink {
+                out.splice(0..0, ["alert(1)".to_string(), "confirm(1)".to_string()]);
+            }
             Ok(out)
         }
         // Known non-JS contexts: use locally generated payloads only (exclude remote) to avoid large cross-product
@@ -486,7 +489,11 @@ pub(crate) fn get_dom_payloads_for_context(
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
             let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
             // Expand with shared encoder policy helper
-            let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
+            let mut out =
+                crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
+            if param.in_js_exec_sink {
+                out.splice(0..0, ["alert(1)".to_string(), "confirm(1)".to_string()]);
+            }
             Ok(out)
         }
         // Unknown context: use local (non-remote) built-in payloads (+ custom
@@ -518,7 +525,11 @@ pub(crate) fn get_dom_payloads_for_context(
             }
 
             // Expand with shared encoder policy helper
-            let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
+            let mut out =
+                crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
+            if param.in_js_exec_sink {
+                out.splice(0..0, ["alert(1)".to_string(), "confirm(1)".to_string()]);
+            }
             Ok(out)
         }
     }
