@@ -1191,7 +1191,8 @@ impl ScanWorkerCtx {
         // payload total or ticked on the progress bar — the same treatment the
         // shared CSP/tech payloads get (see `generate_param_jobs`), so the bar
         // still reaches 100% from the planned set and never overshoots.
-        let (_, reflection_body, status, _xml) = self.fetch_reflection(param, probe, waf_streak).await;
+        let (_, reflection_body, status, _xml) =
+            self.fetch_reflection(param, probe, waf_streak).await;
         // A 4xx/5xx body is a WAF block / error interstitial, not the page the
         // framework compiles — `tech_info` was fingerprinted from the preflight
         // response, not from this one. (3xx is the non-renderable `Location:`
@@ -1260,7 +1261,9 @@ impl ScanWorkerCtx {
         result.set_injection_point(&self.target, param);
         result.filter = param.filter.clone();
         result.request = Some(build_request_text(&self.target, param, probe));
-        result.response = Some(crate::scanning::result::bound_evidence_body(body.text, probe));
+        result.response = Some(crate::scanning::result::bound_evidence_body(
+            body.text, probe,
+        ));
 
         self.stream_finding(&result);
         state.local_results.push(result);

@@ -82,7 +82,13 @@ fn unique_temp_path(prefix: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    path.push(format!("dalfox-{}-{}-{}-{}", prefix, std::process::id(), nanos, seq));
+    path.push(format!(
+        "dalfox-{}-{}-{}-{}",
+        prefix,
+        std::process::id(),
+        nanos,
+        seq
+    ));
     path
 }
 
@@ -162,7 +168,10 @@ async fn vue_escaped_reflection_reports_csti() {
         "Vue escaped-reflection page must report CSTI; findings: {findings:#?}"
     );
     assert!(
-        csti[0]["message_str"].as_str().unwrap_or("").contains("$emit.constructor"),
+        csti[0]["message_str"]
+            .as_str()
+            .unwrap_or("")
+            .contains("$emit.constructor"),
         "message should carry the Vue sandbox-escape PoC: {:#?}",
         csti[0]
     );

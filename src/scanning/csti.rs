@@ -189,7 +189,10 @@ mod tests {
     fn server_template_scope() {
         // In-DOM root attributes → in scope.
         assert_eq!(
-            server_template_framework(&target_with(vec![det(TechType::Angular, "ng-app attribute")])),
+            server_template_framework(&target_with(vec![det(
+                TechType::Angular,
+                "ng-app attribute"
+            )])),
             Some(TechType::Angular)
         );
         assert_eq!(
@@ -242,7 +245,10 @@ mod tests {
             &format!("<body><div ng-app>app</div><footer>{p}</footer></body>")
         ));
         // No root attribute anywhere → not confirmed.
-        assert!(!probe_confirms_csti(&ng, &format!("<body><div>{p}</div></body>")));
+        assert!(!probe_confirms_csti(
+            &ng,
+            &format!("<body><div>{p}</div></body>")
+        ));
 
         // Inside the root but in a region the compiler skips.
         assert!(!probe_confirms_csti(
@@ -263,7 +269,10 @@ mod tests {
         ));
 
         // Probe absent.
-        assert!(!probe_confirms_csti(&ng, "<html ng-app><div>nothing</div></html>"));
+        assert!(!probe_confirms_csti(
+            &ng,
+            "<html ng-app><div>nothing</div></html>"
+        ));
 
         // Vue roots on v-app.
         assert!(probe_confirms_csti(
