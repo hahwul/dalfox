@@ -159,6 +159,11 @@ pub struct Param {
     /// case synthesis falls back to the fixed catalog exactly as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub js_breakout: Option<String>,
+    /// True when the reflection is inside a string literal that directly reaches
+    /// a JavaScript code-execution sink (e.g. `setTimeout("...", ...)` or
+    /// `location = "javascript:..."`) without requiring a quote breakout.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_js_exec_sink: bool,
     /// A pre-scan probe already saw this parameter's markers come back.
     ///
     /// Set by [`active_probe_param`], the last stage before scanning, which
@@ -341,6 +346,7 @@ impl Param {
             framework_sink: None,
             escaped_specials: None,
             js_breakout: None,
+            in_js_exec_sink: false,
             marker_echoed: false,
             reflected_markup: None,
             xml_namespace_candidate: None,
@@ -389,6 +395,7 @@ impl Param {
         self.valid_specials = Some(analysis.valid_specials.clone());
         self.invalid_specials = Some(analysis.invalid_specials.clone());
         self.js_breakout = analysis.js_breakout.clone();
+        self.in_js_exec_sink = analysis.in_js_exec_sink;
         self
     }
 
@@ -403,6 +410,7 @@ impl Param {
     pub(crate) fn with_reflection_context(mut self, body: &str) -> Self {
         self.injection_context = Some(detect_injection_context(body));
         self.js_breakout = detect_js_breakout(body);
+        self.in_js_exec_sink = crate::scanning::js_context_verify::detect_js_exec_sink(body);
         self
     }
 
@@ -436,6 +444,7 @@ pub(crate) struct ReflectionAnalysis {
     valid_specials: Vec<char>,
     invalid_specials: Vec<char>,
     js_breakout: Option<String>,
+    in_js_exec_sink: bool,
 }
 
 impl ReflectionAnalysis {
@@ -465,6 +474,9 @@ impl ReflectionAnalysis {
             valid_specials,
             invalid_specials,
             js_breakout: detect_js_breakout_with_marker(body, marker),
+            in_js_exec_sink: crate::scanning::js_context_verify::detect_js_exec_sink_with_marker(
+                body, marker,
+            ),
         }
     }
 }
@@ -1021,6 +1033,11 @@ pub async fn active_probe_param(
         && batched.text.as_deref().is_some_and(body_has_probe_marker))
     .then_some(batched.content_type);
     let batched_response = batched.text;
+    if !param.in_js_exec_sink
+        && let Some(ref text) = batched_response
+    {
+        param.in_js_exec_sink = crate::scanning::js_context_verify::detect_js_exec_sink(text);
+    }
 
     let mut valid: Vec<char> = Vec::new();
     let mut invalid: Vec<char> = Vec::new();

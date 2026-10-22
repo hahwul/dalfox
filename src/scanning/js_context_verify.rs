@@ -286,7 +286,7 @@ fn collect_spans_on_stack(script_src: &str, source_type: SourceType) -> ParsedSp
     let mut sinks: Vec<(u32, u32)> = Vec::new();
     let mut strings: Vec<(u32, u32)> = Vec::new();
     for stmt in &ret.program.body {
-        gather_sink_spans_in_statement(stmt, &mut sinks, &mut strings);
+        gather_sink_spans_in_statement(stmt, script_src, &mut sinks, &mut strings);
     }
     Some(Arc::new(SpanIndex::new(sinks, strings)))
 }
@@ -421,36 +421,239 @@ fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
     }
 }
 
+fn callee_matches_name(callee: &Expression<'_>, name: &str) -> bool {
+    match callee {
+        Expression::Identifier(id) => id.name.as_str() == name,
+        Expression::StaticMemberExpression(m) => m.property.name.as_str() == name,
+        Expression::ComputedMemberExpression(m) => {
+            if let Expression::StringLiteral(lit) = &m.expression {
+                lit.value.as_str() == name
+            } else {
+                false
+            }
+        }
+        Expression::ParenthesizedExpression(p) => callee_matches_name(&p.expression, name),
+        _ => false,
+    }
+}
+
+fn expr_is_location_object(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Identifier(id) => id.name.as_str() == "location",
+        Expression::StaticMemberExpression(m) => m.property.name.as_str() == "location",
+        Expression::ComputedMemberExpression(m) => {
+            if let Expression::StringLiteral(lit) = &m.expression {
+                lit.value.as_str() == "location"
+            } else {
+                false
+            }
+        }
+        Expression::ParenthesizedExpression(p) => expr_is_location_object(&p.expression),
+        _ => false,
+    }
+}
+
+fn callee_is_location_nav_call(callee: &Expression<'_>) -> bool {
+    let method = match callee {
+        Expression::StaticMemberExpression(m) => m.property.name.as_str(),
+        Expression::ComputedMemberExpression(m) => {
+            if let Expression::StringLiteral(lit) = &m.expression {
+                lit.value.as_str()
+            } else {
+                return false;
+            }
+        }
+        _ => return false,
+    };
+    if method != "replace" && method != "assign" {
+        return false;
+    }
+    match callee {
+        Expression::StaticMemberExpression(m) => expr_is_location_object(&m.object),
+        Expression::ComputedMemberExpression(m) => expr_is_location_object(&m.object),
+        _ => false,
+    }
+}
+
+fn assign_target_is_location_or_href(target: &AssignmentTarget<'_>) -> bool {
+    match target {
+        AssignmentTarget::AssignmentTargetIdentifier(id) => id.name.as_str() == "location",
+        AssignmentTarget::StaticMemberExpression(m) => {
+            let name = m.property.name.as_str();
+            name == "location" || name == "href"
+        }
+        AssignmentTarget::ComputedMemberExpression(m) => {
+            if let Expression::StringLiteral(lit) = &m.expression {
+                let name = lit.value.as_str();
+                name == "location" || name == "href"
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn collect_addition_leaves<'a>(expr: &'a Expression<'a>, leaves: &mut Vec<&'a Expression<'a>>) {
+    match expr {
+        Expression::BinaryExpression(b) if b.operator == BinaryOperator::Addition => {
+            collect_addition_leaves(&b.left, leaves);
+            collect_addition_leaves(&b.right, leaves);
+        }
+        Expression::ParenthesizedExpression(p) => {
+            collect_addition_leaves(&p.expression, leaves);
+        }
+        other => leaves.push(other),
+    }
+}
+
+fn try_parse_exec_sink_code(
+    inner_src: &str,
+    code_offset: u32,
+    out: &mut Vec<(u32, u32)>,
+    strings: &mut Vec<(u32, u32)>,
+) -> bool {
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, inner_src, SourceType::script()).parse();
+    if !ret.errors.is_empty() {
+        return false;
+    }
+    let mut inner_sinks = Vec::new();
+    let mut inner_strings = Vec::new();
+    for stmt in &ret.program.body {
+        gather_sink_spans_in_statement(stmt, inner_src, &mut inner_sinks, &mut inner_strings);
+    }
+    for (s, e) in inner_sinks {
+        out.push((code_offset + s, code_offset + e));
+    }
+    for (s, e) in inner_strings {
+        strings.push((code_offset + s, code_offset + e));
+    }
+    true
+}
+
+fn process_exec_sink_expression(
+    expr: &Expression<'_>,
+    script_src: &str,
+    is_javascript_url: bool,
+    out: &mut Vec<(u32, u32)>,
+    strings: &mut Vec<(u32, u32)>,
+) {
+    let mut leaves = Vec::new();
+    collect_addition_leaves(expr, &mut leaves);
+
+    let mut accumulated = String::new();
+    let mut saw_js_protocol = !is_javascript_url;
+
+    for leaf in leaves {
+        match leaf {
+            Expression::StringLiteral(lit) => {
+                let lit_start = lit.span.start;
+                let lit_end = lit.span.end;
+                if lit_end <= lit_start + 1 {
+                    accumulated.push_str(&lit.value);
+                    continue;
+                }
+
+                let lit_val = &lit.value;
+                let mut parsed_as_code = false;
+
+                if is_javascript_url {
+                    if !saw_js_protocol {
+                        let trimmed = lit_val.trim_start();
+                        if trimmed.len() >= 11
+                            && trimmed.as_bytes()[..11].eq_ignore_ascii_case(b"javascript:")
+                        {
+                            saw_js_protocol = true;
+                            if let Some(colon_pos) = lit_val.find(':') {
+                                let code_offset = lit_start + 1 + (colon_pos as u32) + 1;
+                                let inner_code_end = lit_end - 1;
+                                if inner_code_end > code_offset {
+                                    let inner_src =
+                                        &script_src[code_offset as usize..inner_code_end as usize];
+                                    parsed_as_code = try_parse_exec_sink_code(
+                                        inner_src,
+                                        code_offset,
+                                        out,
+                                        strings,
+                                    );
+                                }
+                                accumulated.push_str(&lit_val[colon_pos + 1..]);
+                            } else {
+                                accumulated.push_str(lit_val);
+                            }
+                        } else {
+                            accumulated.push_str(lit_val);
+                        }
+                    } else {
+                        if crate::payload::js_breakout::enclosing_js_quote(&accumulated).is_none() {
+                            let code_offset = lit_start + 1;
+                            let inner_code_end = lit_end - 1;
+                            if inner_code_end > code_offset {
+                                let inner_src =
+                                    &script_src[code_offset as usize..inner_code_end as usize];
+                                parsed_as_code =
+                                    try_parse_exec_sink_code(inner_src, code_offset, out, strings);
+                            }
+                        }
+                        accumulated.push_str(lit_val);
+                    }
+                } else {
+                    if crate::payload::js_breakout::enclosing_js_quote(&accumulated).is_none() {
+                        let code_offset = lit_start + 1;
+                        let inner_code_end = lit_end - 1;
+                        if inner_code_end > code_offset {
+                            let inner_src =
+                                &script_src[code_offset as usize..inner_code_end as usize];
+                            parsed_as_code =
+                                try_parse_exec_sink_code(inner_src, code_offset, out, strings);
+                        }
+                    }
+                    accumulated.push_str(lit_val);
+                }
+
+                if !parsed_as_code {
+                    strings.push((lit_start, lit_end));
+                }
+            }
+            other => {
+                gather_sink_spans_in_expression(other, script_src, out, strings);
+            }
+        }
+    }
+}
+
 /// Walk the AST once and accumulate every sink CallExpression / NewExpression
 /// / TaggedTemplateExpression span and every StringLiteral span. Range filtering
 /// happens at lookup time against the cached span list, so the heavy parse runs
 /// at most once per distinct script body.
 fn gather_sink_spans_in_statement(
     stmt: &Statement<'_>,
+    script_src: &str,
     out: &mut Vec<(u32, u32)>,
     strings: &mut Vec<(u32, u32)>,
 ) {
     match stmt {
         Statement::ExpressionStatement(es) => {
-            gather_sink_spans_in_expression(&es.expression, out, strings)
+            gather_sink_spans_in_expression(&es.expression, script_src, out, strings)
         }
         Statement::VariableDeclaration(decl) => {
             for d in &decl.declarations {
                 if let Some(init) = &d.init {
-                    gather_sink_spans_in_expression(init, out, strings);
+                    gather_sink_spans_in_expression(init, script_src, out, strings);
                 }
             }
         }
         Statement::BlockStatement(b) => {
             for s in &b.body {
-                gather_sink_spans_in_statement(s, out, strings);
+                gather_sink_spans_in_statement(s, script_src, out, strings);
             }
         }
         Statement::IfStatement(s) => {
-            gather_sink_spans_in_expression(&s.test, out, strings);
-            gather_sink_spans_in_statement(&s.consequent, out, strings);
+            gather_sink_spans_in_expression(&s.test, script_src, out, strings);
+            gather_sink_spans_in_statement(&s.consequent, script_src, out, strings);
             if let Some(alt) = &s.alternate {
-                gather_sink_spans_in_statement(alt, out, strings);
+                gather_sink_spans_in_statement(alt, script_src, out, strings);
             }
         }
         Statement::ForStatement(s) => {
@@ -459,100 +662,105 @@ fn gather_sink_spans_in_statement(
                     ForStatementInit::VariableDeclaration(decl) => {
                         for d in &decl.declarations {
                             if let Some(e) = &d.init {
-                                gather_sink_spans_in_expression(e, out, strings);
+                                gather_sink_spans_in_expression(e, script_src, out, strings);
                             }
                         }
                     }
                     expr => {
                         if let Some(e) = expr.as_expression() {
-                            gather_sink_spans_in_expression(e, out, strings);
+                            gather_sink_spans_in_expression(e, script_src, out, strings);
                         }
                     }
                 }
             }
             if let Some(t) = &s.test {
-                gather_sink_spans_in_expression(t, out, strings);
+                gather_sink_spans_in_expression(t, script_src, out, strings);
             }
             if let Some(u) = &s.update {
-                gather_sink_spans_in_expression(u, out, strings);
+                gather_sink_spans_in_expression(u, script_src, out, strings);
             }
-            gather_sink_spans_in_statement(&s.body, out, strings);
+            gather_sink_spans_in_statement(&s.body, script_src, out, strings);
         }
         Statement::WhileStatement(s) => {
-            gather_sink_spans_in_expression(&s.test, out, strings);
-            gather_sink_spans_in_statement(&s.body, out, strings);
+            gather_sink_spans_in_expression(&s.test, script_src, out, strings);
+            gather_sink_spans_in_statement(&s.body, script_src, out, strings);
         }
         Statement::DoWhileStatement(s) => {
-            gather_sink_spans_in_statement(&s.body, out, strings);
-            gather_sink_spans_in_expression(&s.test, out, strings);
+            gather_sink_spans_in_statement(&s.body, script_src, out, strings);
+            gather_sink_spans_in_expression(&s.test, script_src, out, strings);
         }
         Statement::ReturnStatement(s) => {
             if let Some(arg) = &s.argument {
-                gather_sink_spans_in_expression(arg, out, strings);
+                gather_sink_spans_in_expression(arg, script_src, out, strings);
             }
         }
         Statement::FunctionDeclaration(f) => {
             if let Some(body) = &f.body {
                 for s in &body.statements {
-                    gather_sink_spans_in_statement(s, out, strings);
+                    gather_sink_spans_in_statement(s, script_src, out, strings);
                 }
             }
         }
         Statement::TryStatement(t) => {
             for s in &t.block.body {
-                gather_sink_spans_in_statement(s, out, strings);
+                gather_sink_spans_in_statement(s, script_src, out, strings);
             }
             if let Some(handler) = &t.handler {
                 for s in &handler.body.body {
-                    gather_sink_spans_in_statement(s, out, strings);
+                    gather_sink_spans_in_statement(s, script_src, out, strings);
                 }
             }
             if let Some(finalizer) = &t.finalizer {
                 for s in &finalizer.body {
-                    gather_sink_spans_in_statement(s, out, strings);
+                    gather_sink_spans_in_statement(s, script_src, out, strings);
                 }
             }
         }
         Statement::SwitchStatement(s) => {
-            gather_sink_spans_in_expression(&s.discriminant, out, strings);
+            gather_sink_spans_in_expression(&s.discriminant, script_src, out, strings);
             for case in &s.cases {
                 if let Some(t) = &case.test {
-                    gather_sink_spans_in_expression(t, out, strings);
+                    gather_sink_spans_in_expression(t, script_src, out, strings);
                 }
                 for s in &case.consequent {
-                    gather_sink_spans_in_statement(s, out, strings);
+                    gather_sink_spans_in_statement(s, script_src, out, strings);
                 }
             }
         }
         Statement::ForOfStatement(s) => {
-            gather_for_left(&s.left, out, strings);
-            gather_sink_spans_in_expression(&s.right, out, strings);
-            gather_sink_spans_in_statement(&s.body, out, strings);
+            gather_for_left(&s.left, script_src, out, strings);
+            gather_sink_spans_in_expression(&s.right, script_src, out, strings);
+            gather_sink_spans_in_statement(&s.body, script_src, out, strings);
         }
         Statement::ForInStatement(s) => {
-            gather_for_left(&s.left, out, strings);
-            gather_sink_spans_in_expression(&s.right, out, strings);
-            gather_sink_spans_in_statement(&s.body, out, strings);
+            gather_for_left(&s.left, script_src, out, strings);
+            gather_sink_spans_in_expression(&s.right, script_src, out, strings);
+            gather_sink_spans_in_statement(&s.body, script_src, out, strings);
         }
         Statement::WithStatement(s) => {
-            gather_sink_spans_in_expression(&s.object, out, strings);
-            gather_sink_spans_in_statement(&s.body, out, strings);
+            gather_sink_spans_in_expression(&s.object, script_src, out, strings);
+            gather_sink_spans_in_statement(&s.body, script_src, out, strings);
         }
-        Statement::LabeledStatement(s) => gather_sink_spans_in_statement(&s.body, out, strings),
-        Statement::ThrowStatement(s) => gather_sink_spans_in_expression(&s.argument, out, strings),
+        Statement::LabeledStatement(s) => {
+            gather_sink_spans_in_statement(&s.body, script_src, out, strings)
+        }
+        Statement::ThrowStatement(s) => {
+            gather_sink_spans_in_expression(&s.argument, script_src, out, strings)
+        }
         _ => {}
     }
 }
 
 fn gather_for_left(
     left: &ForStatementLeft<'_>,
+    script_src: &str,
     out: &mut Vec<(u32, u32)>,
     strings: &mut Vec<(u32, u32)>,
 ) {
     if let ForStatementLeft::VariableDeclaration(decl) = left {
         for d in &decl.declarations {
             if let Some(e) = &d.init {
-                gather_sink_spans_in_expression(e, out, strings);
+                gather_sink_spans_in_expression(e, script_src, out, strings);
             }
         }
     }
@@ -562,17 +770,18 @@ fn gather_for_left(
 /// `Argument::as_expression` does not yield).
 fn gather_arguments(
     args: &[Argument<'_>],
+    script_src: &str,
     out: &mut Vec<(u32, u32)>,
     strings: &mut Vec<(u32, u32)>,
 ) {
     for arg in args {
         match arg {
             Argument::SpreadElement(s) => {
-                gather_sink_spans_in_expression(&s.argument, out, strings)
+                gather_sink_spans_in_expression(&s.argument, script_src, out, strings)
             }
             _ => {
                 if let Some(e) = arg.as_expression() {
-                    gather_sink_spans_in_expression(e, out, strings);
+                    gather_sink_spans_in_expression(e, script_src, out, strings);
                 }
             }
         }
@@ -585,6 +794,7 @@ fn push_span(out: &mut Vec<(u32, u32)>, span: oxc_span::Span) {
 
 fn gather_sink_spans_in_expression(
     expr: &Expression<'_>,
+    script_src: &str,
     out: &mut Vec<(u32, u32)>,
     strings: &mut Vec<(u32, u32)>,
 ) {
@@ -598,29 +808,132 @@ fn gather_sink_spans_in_expression(
     }
     match expr {
         Expression::CallExpression(call) => {
+            if callee_matches_name(&call.callee, "setTimeout")
+                || callee_matches_name(&call.callee, "setInterval")
+                || callee_matches_name(&call.callee, "eval")
+            {
+                if callee_is_js_sink(call) {
+                    push_span(out, call.span());
+                }
+                gather_sink_spans_in_expression(&call.callee, script_src, out, strings);
+                if let Some(first) = call.arguments.first() {
+                    match first {
+                        Argument::SpreadElement(s) => {
+                            gather_sink_spans_in_expression(&s.argument, script_src, out, strings);
+                        }
+                        _ => {
+                            if let Some(e) = first.as_expression() {
+                                process_exec_sink_expression(e, script_src, false, out, strings);
+                            }
+                        }
+                    }
+                }
+                if call.arguments.len() > 1 {
+                    gather_arguments(&call.arguments[1..], script_src, out, strings);
+                }
+                return;
+            }
+            if callee_matches_name(&call.callee, "Function") {
+                if callee_is_js_sink(call) {
+                    push_span(out, call.span());
+                }
+                gather_sink_spans_in_expression(&call.callee, script_src, out, strings);
+                for arg in &call.arguments {
+                    match arg {
+                        Argument::SpreadElement(s) => {
+                            gather_sink_spans_in_expression(&s.argument, script_src, out, strings);
+                        }
+                        _ => {
+                            if let Some(e) = arg.as_expression() {
+                                process_exec_sink_expression(e, script_src, false, out, strings);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+            if callee_is_location_nav_call(&call.callee) {
+                gather_sink_spans_in_expression(&call.callee, script_src, out, strings);
+                if let Some(first) = call.arguments.first() {
+                    match first {
+                        Argument::SpreadElement(s) => {
+                            gather_sink_spans_in_expression(&s.argument, script_src, out, strings);
+                        }
+                        _ => {
+                            if let Some(e) = first.as_expression() {
+                                if rhs_is_javascript_url(e) {
+                                    push_span(out, call.span());
+                                    process_exec_sink_expression(e, script_src, true, out, strings);
+                                } else {
+                                    gather_sink_spans_in_expression(e, script_src, out, strings);
+                                }
+                            }
+                        }
+                    }
+                }
+                if call.arguments.len() > 1 {
+                    gather_arguments(&call.arguments[1..], script_src, out, strings);
+                }
+                return;
+            }
+
             if callee_is_js_sink(call) {
                 push_span(out, call.span());
             }
-            gather_sink_spans_in_expression(&call.callee, out, strings);
-            gather_arguments(&call.arguments, out, strings);
+            gather_sink_spans_in_expression(&call.callee, script_src, out, strings);
+            gather_arguments(&call.arguments, script_src, out, strings);
         }
         Expression::TaggedTemplateExpression(t) => {
             if callee_identifier_is_sink(&t.tag) {
                 push_span(out, t.span());
             }
-            gather_sink_spans_in_expression(&t.tag, out, strings);
+            gather_sink_spans_in_expression(&t.tag, script_src, out, strings);
             for e in &t.quasi.expressions {
-                gather_sink_spans_in_expression(e, out, strings);
+                gather_sink_spans_in_expression(e, script_src, out, strings);
             }
         }
         Expression::NewExpression(ne) => {
+            if callee_matches_name(&ne.callee, "Function") {
+                if callee_identifier_is_sink(&ne.callee) {
+                    push_span(out, ne.span());
+                }
+                gather_sink_spans_in_expression(&ne.callee, script_src, out, strings);
+                for arg in &ne.arguments {
+                    match arg {
+                        Argument::SpreadElement(s) => {
+                            gather_sink_spans_in_expression(&s.argument, script_src, out, strings);
+                        }
+                        _ => {
+                            if let Some(e) = arg.as_expression() {
+                                process_exec_sink_expression(e, script_src, false, out, strings);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
             if callee_identifier_is_sink(&ne.callee) {
                 push_span(out, ne.span());
             }
-            gather_sink_spans_in_expression(&ne.callee, out, strings);
-            gather_arguments(&ne.arguments, out, strings);
+            gather_sink_spans_in_expression(&ne.callee, script_src, out, strings);
+            gather_arguments(&ne.arguments, script_src, out, strings);
         }
         Expression::AssignmentExpression(a) => {
+            if assign_target_is_location_or_href(&a.left) && rhs_is_javascript_url(&a.right) {
+                push_span(out, a.span());
+                match &a.left {
+                    AssignmentTarget::StaticMemberExpression(m) => {
+                        gather_sink_spans_in_expression(&m.object, script_src, out, strings)
+                    }
+                    AssignmentTarget::ComputedMemberExpression(m) => {
+                        gather_sink_spans_in_expression(&m.object, script_src, out, strings);
+                        gather_sink_spans_in_expression(&m.expression, script_src, out, strings);
+                    }
+                    _ => {}
+                }
+                process_exec_sink_expression(&a.right, script_src, true, out, strings);
+                return;
+            }
             if assignment_is_sink(a) {
                 push_span(out, a.span());
             }
@@ -628,58 +941,58 @@ fn gather_sink_spans_in_expression(
             // `document.getElementById(X).style.display = …`, `window[X] = …`.
             match &a.left {
                 AssignmentTarget::StaticMemberExpression(m) => {
-                    gather_sink_spans_in_expression(&m.object, out, strings)
+                    gather_sink_spans_in_expression(&m.object, script_src, out, strings)
                 }
                 AssignmentTarget::ComputedMemberExpression(m) => {
-                    gather_sink_spans_in_expression(&m.object, out, strings);
-                    gather_sink_spans_in_expression(&m.expression, out, strings);
+                    gather_sink_spans_in_expression(&m.object, script_src, out, strings);
+                    gather_sink_spans_in_expression(&m.expression, script_src, out, strings);
                 }
                 _ => {}
             }
-            gather_sink_spans_in_expression(&a.right, out, strings);
+            gather_sink_spans_in_expression(&a.right, script_src, out, strings);
         }
         Expression::AwaitExpression(a) => {
-            gather_sink_spans_in_expression(&a.argument, out, strings)
+            gather_sink_spans_in_expression(&a.argument, script_src, out, strings)
         }
         Expression::YieldExpression(y) => {
             if let Some(arg) = &y.argument {
-                gather_sink_spans_in_expression(arg, out, strings);
+                gather_sink_spans_in_expression(arg, script_src, out, strings);
             }
         }
         Expression::SequenceExpression(s) => {
             for e in &s.expressions {
-                gather_sink_spans_in_expression(e, out, strings);
+                gather_sink_spans_in_expression(e, script_src, out, strings);
             }
         }
         Expression::BinaryExpression(b) => {
-            gather_sink_spans_in_expression(&b.left, out, strings);
-            gather_sink_spans_in_expression(&b.right, out, strings);
+            gather_sink_spans_in_expression(&b.left, script_src, out, strings);
+            gather_sink_spans_in_expression(&b.right, script_src, out, strings);
         }
         Expression::LogicalExpression(l) => {
-            gather_sink_spans_in_expression(&l.left, out, strings);
-            gather_sink_spans_in_expression(&l.right, out, strings);
+            gather_sink_spans_in_expression(&l.left, script_src, out, strings);
+            gather_sink_spans_in_expression(&l.right, script_src, out, strings);
         }
         Expression::ConditionalExpression(c) => {
-            gather_sink_spans_in_expression(&c.test, out, strings);
-            gather_sink_spans_in_expression(&c.consequent, out, strings);
-            gather_sink_spans_in_expression(&c.alternate, out, strings);
+            gather_sink_spans_in_expression(&c.test, script_src, out, strings);
+            gather_sink_spans_in_expression(&c.consequent, script_src, out, strings);
+            gather_sink_spans_in_expression(&c.alternate, script_src, out, strings);
         }
         Expression::UnaryExpression(u) => {
-            gather_sink_spans_in_expression(&u.argument, out, strings)
+            gather_sink_spans_in_expression(&u.argument, script_src, out, strings)
         }
         Expression::UpdateExpression(_) => {}
         Expression::ParenthesizedExpression(p) => {
-            gather_sink_spans_in_expression(&p.expression, out, strings)
+            gather_sink_spans_in_expression(&p.expression, script_src, out, strings)
         }
         Expression::ArrayExpression(a) => {
             for el in &a.elements {
                 match el {
                     ArrayExpressionElement::SpreadElement(s) => {
-                        gather_sink_spans_in_expression(&s.argument, out, strings)
+                        gather_sink_spans_in_expression(&s.argument, script_src, out, strings)
                     }
                     _ => {
                         if let Some(e) = el.as_expression() {
-                            gather_sink_spans_in_expression(e, out, strings);
+                            gather_sink_spans_in_expression(e, script_src, out, strings);
                         }
                     }
                 }
@@ -690,47 +1003,47 @@ fn gather_sink_spans_in_expression(
                 match prop {
                     ObjectPropertyKind::ObjectProperty(p) => {
                         if let Some(k) = p.key.as_expression() {
-                            gather_sink_spans_in_expression(k, out, strings);
+                            gather_sink_spans_in_expression(k, script_src, out, strings);
                         }
-                        gather_sink_spans_in_expression(&p.value, out, strings);
+                        gather_sink_spans_in_expression(&p.value, script_src, out, strings);
                     }
                     ObjectPropertyKind::SpreadProperty(s) => {
-                        gather_sink_spans_in_expression(&s.argument, out, strings)
+                        gather_sink_spans_in_expression(&s.argument, script_src, out, strings)
                     }
                 }
             }
         }
         Expression::TemplateLiteral(t) => {
             for e in &t.expressions {
-                gather_sink_spans_in_expression(e, out, strings);
+                gather_sink_spans_in_expression(e, script_src, out, strings);
             }
         }
         Expression::ArrowFunctionExpression(f) => {
             for s in &f.body.statements {
-                gather_sink_spans_in_statement(s, out, strings);
+                gather_sink_spans_in_statement(s, script_src, out, strings);
             }
         }
         Expression::FunctionExpression(f) => {
             if let Some(body) = &f.body {
                 for s in &body.statements {
-                    gather_sink_spans_in_statement(s, out, strings);
+                    gather_sink_spans_in_statement(s, script_src, out, strings);
                 }
             }
         }
         Expression::StaticMemberExpression(m) => {
-            gather_sink_spans_in_expression(&m.object, out, strings)
+            gather_sink_spans_in_expression(&m.object, script_src, out, strings)
         }
         Expression::ComputedMemberExpression(m) => {
-            gather_sink_spans_in_expression(&m.object, out, strings);
-            gather_sink_spans_in_expression(&m.expression, out, strings);
+            gather_sink_spans_in_expression(&m.object, script_src, out, strings);
+            gather_sink_spans_in_expression(&m.expression, script_src, out, strings);
         }
         Expression::ChainExpression(c) => {
             if let ChainElement::CallExpression(call) = &c.expression {
                 if callee_is_js_sink(call) {
                     push_span(out, call.span());
                 }
-                gather_sink_spans_in_expression(&call.callee, out, strings);
-                gather_arguments(&call.arguments, out, strings);
+                gather_sink_spans_in_expression(&call.callee, script_src, out, strings);
+                gather_arguments(&call.arguments, script_src, out, strings);
             }
         }
         _ => {}
@@ -834,6 +1147,286 @@ pub(crate) fn has_inline_script_context_evidence(payload: &str, html: &str) -> b
 pub(crate) fn has_js_context_evidence(payload: &str, html: &str) -> bool {
     has_inline_script_context_evidence(payload, html)
         || (!script_block_re().is_match(html) && has_javascript_body_evidence(payload, html))
+}
+
+fn is_marker_in_exec_sink(script_src: &str, marker: &str) -> bool {
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
+    if ret.errors.is_empty() && check_marker_in_statements(&ret.program.body, script_src, marker) {
+        return true;
+    }
+    let ret_script = Parser::new(&allocator, script_src, SourceType::script()).parse();
+    if ret_script.errors.is_empty()
+        && check_marker_in_statements(&ret_script.program.body, script_src, marker)
+    {
+        return true;
+    }
+    false
+}
+
+fn check_marker_in_statements(stmts: &[Statement<'_>], script_src: &str, marker: &str) -> bool {
+    stmts
+        .iter()
+        .any(|s| check_marker_in_statement(s, script_src, marker))
+}
+
+fn check_marker_in_statement(stmt: &Statement<'_>, script_src: &str, marker: &str) -> bool {
+    match stmt {
+        Statement::ExpressionStatement(es) => {
+            check_marker_in_expression(&es.expression, script_src, marker)
+        }
+        Statement::VariableDeclaration(decl) => decl.declarations.iter().any(|d| {
+            d.init
+                .as_ref()
+                .is_some_and(|e| check_marker_in_expression(e, script_src, marker))
+        }),
+        Statement::BlockStatement(b) => check_marker_in_statements(&b.body, script_src, marker),
+        Statement::IfStatement(s) => {
+            check_marker_in_expression(&s.test, script_src, marker)
+                || check_marker_in_statement(&s.consequent, script_src, marker)
+                || s.alternate
+                    .as_ref()
+                    .is_some_and(|alt| check_marker_in_statement(alt, script_src, marker))
+        }
+        Statement::ForStatement(s) => {
+            s.init.as_ref().is_some_and(|init| match init {
+                ForStatementInit::VariableDeclaration(decl) => decl.declarations.iter().any(|d| {
+                    d.init
+                        .as_ref()
+                        .is_some_and(|e| check_marker_in_expression(e, script_src, marker))
+                }),
+                expr => expr
+                    .as_expression()
+                    .is_some_and(|e| check_marker_in_expression(e, script_src, marker)),
+            }) || s
+                .test
+                .as_ref()
+                .is_some_and(|t| check_marker_in_expression(t, script_src, marker))
+                || s.update
+                    .as_ref()
+                    .is_some_and(|u| check_marker_in_expression(u, script_src, marker))
+                || check_marker_in_statement(&s.body, script_src, marker)
+        }
+        Statement::WhileStatement(s) => {
+            check_marker_in_expression(&s.test, script_src, marker)
+                || check_marker_in_statement(&s.body, script_src, marker)
+        }
+        Statement::DoWhileStatement(s) => {
+            check_marker_in_statement(&s.body, script_src, marker)
+                || check_marker_in_expression(&s.test, script_src, marker)
+        }
+        Statement::ReturnStatement(s) => s
+            .argument
+            .as_ref()
+            .is_some_and(|arg| check_marker_in_expression(arg, script_src, marker)),
+        Statement::FunctionDeclaration(f) => f
+            .body
+            .as_ref()
+            .is_some_and(|body| check_marker_in_statements(&body.statements, script_src, marker)),
+        Statement::TryStatement(t) => {
+            check_marker_in_statements(&t.block.body, script_src, marker)
+                || t.handler
+                    .as_ref()
+                    .is_some_and(|h| check_marker_in_statements(&h.body.body, script_src, marker))
+                || t.finalizer
+                    .as_ref()
+                    .is_some_and(|f| check_marker_in_statements(&f.body, script_src, marker))
+        }
+        Statement::SwitchStatement(s) => {
+            check_marker_in_expression(&s.discriminant, script_src, marker)
+                || s.cases.iter().any(|c| {
+                    c.test
+                        .as_ref()
+                        .is_some_and(|t| check_marker_in_expression(t, script_src, marker))
+                        || check_marker_in_statements(&c.consequent, script_src, marker)
+                })
+        }
+        _ => false,
+    }
+}
+
+fn check_marker_in_expression(expr: &Expression<'_>, script_src: &str, marker: &str) -> bool {
+    match expr {
+        Expression::CallExpression(call) => {
+            if callee_matches_name(&call.callee, "setTimeout")
+                || callee_matches_name(&call.callee, "setInterval")
+                || callee_matches_name(&call.callee, "eval")
+            {
+                if let Some(first) = call.arguments.first()
+                    && let Some(e) = first.as_expression()
+                    && check_exec_sink_candidate_for_marker(e, script_src, false, marker)
+                {
+                    return true;
+                }
+            } else if callee_matches_name(&call.callee, "Function") {
+                for arg in &call.arguments {
+                    if let Some(e) = arg.as_expression()
+                        && check_exec_sink_candidate_for_marker(e, script_src, false, marker)
+                    {
+                        return true;
+                    }
+                }
+            } else if callee_is_location_nav_call(&call.callee)
+                && let Some(first) = call.arguments.first()
+                && let Some(e) = first.as_expression()
+                && rhs_is_javascript_url(e)
+                && check_exec_sink_candidate_for_marker(e, script_src, true, marker)
+            {
+                return true;
+            }
+            check_marker_in_expression(&call.callee, script_src, marker)
+                || call.arguments.iter().any(|arg| {
+                    arg.as_expression()
+                        .is_some_and(|e| check_marker_in_expression(e, script_src, marker))
+                })
+        }
+        Expression::NewExpression(ne) => {
+            if callee_matches_name(&ne.callee, "Function") {
+                for arg in &ne.arguments {
+                    if let Some(e) = arg.as_expression()
+                        && check_exec_sink_candidate_for_marker(e, script_src, false, marker)
+                    {
+                        return true;
+                    }
+                }
+            }
+            check_marker_in_expression(&ne.callee, script_src, marker)
+                || ne.arguments.iter().any(|arg| {
+                    arg.as_expression()
+                        .is_some_and(|e| check_marker_in_expression(e, script_src, marker))
+                })
+        }
+        Expression::AssignmentExpression(a) => {
+            if assign_target_is_location_or_href(&a.left)
+                && rhs_is_javascript_url(&a.right)
+                && check_exec_sink_candidate_for_marker(&a.right, script_src, true, marker)
+            {
+                return true;
+            }
+            check_marker_in_expression(&a.right, script_src, marker)
+        }
+        Expression::BinaryExpression(b) => {
+            check_marker_in_expression(&b.left, script_src, marker)
+                || check_marker_in_expression(&b.right, script_src, marker)
+        }
+        Expression::ParenthesizedExpression(p) => {
+            check_marker_in_expression(&p.expression, script_src, marker)
+        }
+        Expression::SequenceExpression(s) => s
+            .expressions
+            .iter()
+            .any(|e| check_marker_in_expression(e, script_src, marker)),
+        Expression::LogicalExpression(l) => {
+            check_marker_in_expression(&l.left, script_src, marker)
+                || check_marker_in_expression(&l.right, script_src, marker)
+        }
+        Expression::ConditionalExpression(c) => {
+            check_marker_in_expression(&c.test, script_src, marker)
+                || check_marker_in_expression(&c.consequent, script_src, marker)
+                || check_marker_in_expression(&c.alternate, script_src, marker)
+        }
+        _ => false,
+    }
+}
+
+fn check_exec_sink_candidate_for_marker(
+    expr: &Expression<'_>,
+    script_src: &str,
+    is_javascript_url: bool,
+    marker: &str,
+) -> bool {
+    let mut leaves = Vec::new();
+    collect_addition_leaves(expr, &mut leaves);
+
+    let mut accumulated = String::new();
+    let mut saw_js_protocol = !is_javascript_url;
+
+    for leaf in leaves {
+        if let Expression::StringLiteral(lit) = leaf {
+            let lit_start = lit.span.start;
+            let lit_end = lit.span.end;
+            if lit_end <= lit_start + 1 {
+                accumulated.push_str(&lit.value);
+                continue;
+            }
+            let lit_val = &lit.value;
+            let leaf_content = if (lit_start + 1) as usize <= (lit_end - 1) as usize
+                && (lit_end - 1) as usize <= script_src.len()
+            {
+                &script_src[(lit_start + 1) as usize..(lit_end - 1) as usize]
+            } else {
+                lit_val.as_str()
+            };
+
+            if is_javascript_url {
+                if !saw_js_protocol {
+                    let trimmed = lit_val.trim_start();
+                    if trimmed.len() >= 11
+                        && trimmed.as_bytes()[..11].eq_ignore_ascii_case(b"javascript:")
+                    {
+                        saw_js_protocol = true;
+                        if let Some(colon_pos) = lit_val.find(':') {
+                            let after_colon = &lit_val[colon_pos + 1..];
+                            if let Some(marker_idx) = after_colon.find(marker) {
+                                let prefix = &after_colon[..marker_idx];
+                                if crate::payload::js_breakout::enclosing_js_quote(prefix).is_none()
+                                {
+                                    return true;
+                                }
+                            }
+                            accumulated.push_str(after_colon);
+                        } else {
+                            accumulated.push_str(lit_val);
+                        }
+                    } else {
+                        accumulated.push_str(lit_val);
+                    }
+                } else {
+                    if let Some(marker_idx) = leaf_content.find(marker) {
+                        let prefix = format!("{}{}", accumulated, &leaf_content[..marker_idx]);
+                        if crate::payload::js_breakout::enclosing_js_quote(&prefix).is_none() {
+                            return true;
+                        }
+                    }
+                    accumulated.push_str(lit_val);
+                }
+            } else {
+                if let Some(marker_idx) = leaf_content.find(marker) {
+                    let prefix = format!("{}{}", accumulated, &leaf_content[..marker_idx]);
+                    if crate::payload::js_breakout::enclosing_js_quote(&prefix).is_none() {
+                        return true;
+                    }
+                }
+                accumulated.push_str(lit_val);
+            }
+        }
+    }
+    false
+}
+
+/// Detect whether `marker` reflects inside a JavaScript code-execution sink
+/// (e.g. `setTimeout("...", ...)` or `location = "javascript:..."`) in any
+/// executable inline `<script>` block in `text`.
+pub(crate) fn detect_js_exec_sink_with_marker(text: &str, marker: &str) -> bool {
+    if marker.is_empty() || !text.contains(marker) {
+        return false;
+    }
+    script_blocks(text).any(|(open_tag, block)| {
+        block.contains(marker)
+            && open_tag_is_javascript(open_tag)
+            && is_marker_in_exec_sink(block, marker)
+    })
+}
+
+/// Detect whether any default reflection marker reflects inside a JavaScript
+/// code-execution sink in `text`.
+pub(crate) fn detect_js_exec_sink(text: &str) -> bool {
+    let inner = crate::scanning::markers::inner_marker();
+    if text.contains(inner) {
+        return detect_js_exec_sink_with_marker(text, inner);
+    }
+    let open = crate::scanning::markers::open_marker();
+    detect_js_exec_sink_with_marker(text, open)
 }
 
 #[cfg(test)]

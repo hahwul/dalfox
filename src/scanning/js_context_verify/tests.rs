@@ -772,3 +772,206 @@ fn large_inline_script_scan_stays_cheap() {
         "took {elapsed:?}"
     );
 }
+
+#[test]
+fn detects_alert_in_set_timeout_string_without_breakout() {
+    let payload = "alert(1)";
+    let html = format!("<script>setTimeout(\"{}\", 100);</script>", payload);
+    assert!(
+        has_js_context_evidence(payload, &html),
+        "setTimeout with string literal containing alert(1) must be verified without breakout"
+    );
+}
+
+#[test]
+fn detects_alert_in_set_interval_string_without_breakout() {
+    let payload = "alert(1)";
+    let html = format!("<script>setInterval(\"{}\", 500);</script>", payload);
+    assert!(
+        has_js_context_evidence(payload, &html),
+        "setInterval with string literal containing alert(1) must be verified without breakout"
+    );
+}
+
+#[test]
+fn detects_alert_in_eval_string_without_breakout() {
+    let payload = "alert(1)";
+    let html = format!("<script>eval(\"{}\");</script>", payload);
+    assert!(
+        has_js_context_evidence(payload, &html),
+        "eval with string literal containing alert(1) must be verified without breakout"
+    );
+}
+
+#[test]
+fn detects_alert_in_function_constructor_without_breakout() {
+    let payload = "alert(1)";
+    let html1 = format!("<script>Function(\"{}\")();</script>", payload);
+    assert!(
+        has_js_context_evidence(payload, &html1),
+        "Function() with string literal containing alert(1) must be verified without breakout"
+    );
+
+    let html2 = format!("<script>new Function(\"a\", \"{}\")();</script>", payload);
+    assert!(
+        has_js_context_evidence(payload, &html2),
+        "new Function() with string literal containing alert(1) must be verified without breakout"
+    );
+}
+
+#[test]
+fn detects_alert_in_location_javascript_url_concatenation() {
+    let payload = "alert(1)";
+    let html1 = format!(
+        "<script>location = \"javascript:\" + \"{}\";</script>",
+        payload
+    );
+    assert!(
+        has_js_context_evidence(payload, &html1),
+        "location = 'javascript:' + 'alert(1)' must be verified without breakout"
+    );
+
+    let html2 = format!(
+        "<script>location.href = \"javascript:{}\";</script>",
+        payload
+    );
+    assert!(
+        has_js_context_evidence(payload, &html2),
+        "location.href = 'javascript:alert(1)' must be verified without breakout"
+    );
+
+    let html3 = format!(
+        "<script>window.location = \"javascript:\" + \"{}\";</script>",
+        payload
+    );
+    assert!(
+        has_js_context_evidence(payload, &html3),
+        "window.location = 'javascript:' + 'alert(1)' must be verified without breakout"
+    );
+}
+
+#[test]
+fn detects_alert_in_href_assignment_javascript_url() {
+    let payload = "alert(1)";
+    let html = format!(
+        "<script>a.href = \"javascript:\" + \"{}\";</script>",
+        payload
+    );
+    assert!(
+        has_js_context_evidence(payload, &html),
+        "a.href = 'javascript:' + 'alert(1)' must be verified without breakout"
+    );
+}
+
+#[test]
+fn detects_alert_in_location_navigation_methods_javascript_url() {
+    let payload = "alert(1)";
+    let html_assign = format!(
+        "<script>location.assign(\"javascript:\" + \"{}\");</script>",
+        payload
+    );
+    assert!(
+        has_js_context_evidence(payload, &html_assign),
+        "location.assign('javascript:' + 'alert(1)') must be verified"
+    );
+
+    let html_replace = format!(
+        "<script>location.replace(\"javascript:{}\");</script>",
+        payload
+    );
+    assert!(
+        has_js_context_evidence(payload, &html_replace),
+        "location.replace('javascript:alert(1)') must be verified"
+    );
+}
+
+#[test]
+fn rejects_alert_in_javascript_url_with_unclosed_quote_in_prefix() {
+    // If the prefix leaves an unclosed quote, e.g. javascript:foo('...'),
+    // then the reflected string is data within a call, not executable code without quote breakout!
+    let payload = "alert(1)";
+    let html = format!(
+        "<script>location = \"javascript:foo('\" + \"{}\" + \"')\";</script>",
+        payload
+    );
+    assert!(
+        !has_js_context_evidence(payload, &html),
+        "javascript: URL with unclosed quote in prefix must NOT be verified without breakout"
+    );
+}
+
+#[test]
+fn rejects_alert_in_safe_var_string() {
+    let payload = "alert(1)";
+    let html = format!("<script>var safe = \"{}\";</script>", payload);
+    assert!(
+        !has_js_context_evidence(payload, &html),
+        "alert(1) in a normal string assignment must NOT be verified"
+    );
+}
+
+#[test]
+fn rejects_alert_in_console_log_string() {
+    let payload = "alert(1)";
+    let html = format!("<script>console.log(\"{}\");</script>", payload);
+    assert!(
+        !has_js_context_evidence(payload, &html),
+        "alert(1) in console.log string argument must NOT be verified"
+    );
+}
+
+#[test]
+fn rejects_alert_in_decode_uri_component_string() {
+    let payload = "alert(1)";
+    let html = format!(
+        "<script>var x = decodeURIComponent(\"{}\");</script>",
+        payload
+    );
+    assert!(
+        !has_js_context_evidence(payload, &html),
+        "alert(1) in decodeURIComponent string argument must NOT be verified"
+    );
+}
+
+#[test]
+fn detect_js_exec_sink_identifies_marker_in_exec_sinks_and_rejects_non_sinks() {
+    let marker = crate::scanning::markers::inner_marker();
+
+    // Sinks:
+    let html_timeout = format!("<script>setTimeout(\"{}\", 100);</script>", marker);
+    assert!(detect_js_exec_sink(&html_timeout));
+
+    let html_interval = format!("<script>setInterval(\"{}\", 100);</script>", marker);
+    assert!(detect_js_exec_sink(&html_interval));
+
+    let html_eval = format!("<script>eval(\"{}\");</script>", marker);
+    assert!(detect_js_exec_sink(&html_eval));
+
+    let html_func = format!("<script>Function(\"{}\");</script>", marker);
+    assert!(detect_js_exec_sink(&html_func));
+
+    let html_loc = format!(
+        "<script>location = \"javascript:\" + \"{}\";</script>",
+        marker
+    );
+    assert!(detect_js_exec_sink(&html_loc));
+
+    let html_href = format!(
+        "<script>a.href = \"javascript:\" + \"{}\";</script>",
+        marker
+    );
+    assert!(detect_js_exec_sink(&html_href));
+
+    // Non-sinks / safe contexts:
+    let html_safe_var = format!("<script>var safe = \"{}\";</script>", marker);
+    assert!(!detect_js_exec_sink(&html_safe_var));
+
+    let html_console = format!("<script>console.log(\"{}\");</script>", marker);
+    assert!(!detect_js_exec_sink(&html_console));
+
+    let html_unclosed_quote = format!(
+        "<script>location = \"javascript:foo('\" + \"{}\" + \"')\";</script>",
+        marker
+    );
+    assert!(!detect_js_exec_sink(&html_unclosed_quote));
+}

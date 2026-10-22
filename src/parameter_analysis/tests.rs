@@ -1961,6 +1961,19 @@ fn with_reflection_analysis_preserves_caller_set_fields() {
 }
 
 #[test]
+fn with_reflection_analysis_detects_in_js_exec_sink() {
+    let body = format!(
+        r#"<html><head><script>setTimeout("{marker}", 100);</script></head></html>"#,
+        marker = crate::scanning::markers::bracketed_marker()
+    );
+    let p = Param::new("q", "v", Location::Query).with_reflection_analysis(&body);
+    assert!(
+        p.in_js_exec_sink,
+        "must detect in_js_exec_sink when marker reflects in setTimeout string"
+    );
+}
+
+#[test]
 fn with_reflection_context_leaves_the_special_split_unset() {
     // The pre-encoded query probes rely on this: a `None` split tells payload
     // synthesis to try every type instead of adaptively dropping the ones a

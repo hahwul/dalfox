@@ -276,6 +276,11 @@ pub async fn check_query_discovery(
                         &text,
                         numeric_marker,
                     ),
+                    in_js_exec_sink:
+                        crate::scanning::js_context_verify::detect_js_exec_sink_with_marker(
+                            &text,
+                            numeric_marker,
+                        ),
                     ..Param::new(
                         name.clone(),
                         value.to_string(),

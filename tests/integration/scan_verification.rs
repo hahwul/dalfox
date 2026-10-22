@@ -267,6 +267,42 @@ async fn vuln_inline_event(Query(p): Query<HashMap<String, String>>) -> impl Int
     ))
 }
 
+/// Reflection inside a setTimeout string argument with quotes stripped (breakout impossible, but bare payload works)
+async fn vuln_js_exec_sink_set_timeout(
+    Query(p): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    let stripped = q.replace(['"', '\'', '<', '>'], "");
+    Html(format!(
+        r#"<!DOCTYPE html><html><body>
+<script>setTimeout("{stripped}", 100);</script></body></html>"#
+    ))
+}
+
+/// Reflection concatenated into location = "javascript:..." without quote breakout
+async fn vuln_js_exec_sink_location_js(
+    Query(p): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    let stripped = q.replace(['"', '\'', '<', '>'], "");
+    Html(format!(
+        r#"<!DOCTYPE html><html><body>
+<script>location = "javascript:" + "{stripped}";</script></body></html>"#
+    ))
+}
+
+/// javascript: URL with unclosed quote before parameter — parameter is data inside a function call, not executable
+async fn safe_js_exec_sink_unclosed_quote(
+    Query(p): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    let stripped = q.replace(['"', '\'', '<', '>'], "");
+    Html(format!(
+        r#"<!DOCTYPE html><html><body>
+<script>location = "javascript:foo('" + "{stripped}" + "')";</script></body></html>"#
+    ))
+}
+
 // --- Reflected: CSS context ---
 
 /// Reflection inside a `<style>` tag
@@ -535,6 +571,18 @@ async fn start_test_server() -> SocketAddr {
         .route("/js/template", get(vuln_js_template))
         .route("/js/raw", get(vuln_js_raw))
         .route("/js/inline-event", get(vuln_inline_event))
+        .route(
+            "/js/exec-sink/set-timeout",
+            get(vuln_js_exec_sink_set_timeout),
+        )
+        .route(
+            "/js/exec-sink/location-js",
+            get(vuln_js_exec_sink_location_js),
+        )
+        .route(
+            "/safe/js-exec-sink/unclosed-quote",
+            get(safe_js_exec_sink_unclosed_quote),
+        )
         .route("/safe/js-apos-encoded", get(safe_js_apos_encoded))
         .route("/safe/js-string-appjs", get(safe_js_string_literal_appjs))
         .route("/safe/json-html", get(safe_json_html_echo))
@@ -936,6 +984,50 @@ async fn test_appjs_string_literal_no_false_v() {
             .iter()
             .map(|f| (f["type"].as_str(), f["evidence"].as_str()))
             .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_js_exec_sink_set_timeout_without_breakout_verified() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/js/exec-sink/set-timeout?q=test")];
+    let findings = run_scan_and_collect(args).await;
+    assert_detected(&findings, "setTimeout exec sink without breakout");
+    assert_has_type(
+        &findings,
+        "V",
+        "setTimeout exec sink should produce a Verified finding for bare alert(1)",
+    );
+}
+
+#[tokio::test]
+async fn test_js_exec_sink_location_js_without_breakout_verified() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/js/exec-sink/location-js?q=test")];
+    let findings = run_scan_and_collect(args).await;
+    assert_detected(&findings, "location javascript: URL without breakout");
+    assert_has_type(
+        &findings,
+        "V",
+        "location javascript: URL should produce a Verified finding for bare alert(1)",
+    );
+}
+
+#[tokio::test]
+async fn test_safe_js_exec_sink_unclosed_quote_no_verified_finding() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!(
+        "http://{addr}/safe/js-exec-sink/unclosed-quote?q=test"
+    )];
+    let findings = run_scan_and_collect(args).await;
+    let has_v = findings.iter().any(|f| f["type"].as_str() == Some("V"));
+    assert!(
+        !has_v,
+        "javascript: URL with unclosed quote in prefix must NOT produce a Verified (V) finding; got: {:?}",
+        findings
     );
 }
 

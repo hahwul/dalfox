@@ -200,6 +200,9 @@ pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>, target_url: &url
             if base.js_breakout.is_none() && other.js_breakout.is_some() {
                 base.js_breakout = other.js_breakout.clone();
             }
+            if other.in_js_exec_sink {
+                base.in_js_exec_sink = true;
+            }
             if base.framework_sink.is_none() && other.framework_sink.is_some() {
                 base.framework_sink = other.framework_sink.clone();
             }

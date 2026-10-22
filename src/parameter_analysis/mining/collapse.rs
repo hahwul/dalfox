@@ -173,6 +173,7 @@ pub(super) fn make_any_param(
         param.valid_specials = sample.valid_specials.clone();
         param.invalid_specials = sample.invalid_specials.clone();
         param.js_breakout = sample.js_breakout.clone();
+        param.in_js_exec_sink = sample.in_js_exec_sink;
     }
     param
 }

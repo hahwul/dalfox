@@ -158,6 +158,13 @@ pub(crate) fn generate_param_jobs(
             }
         }
 
+        if param.in_js_exec_sink && !args.only_custom_payload && !xml_namespace_probe_only {
+            for p in ["confirm(1)", "alert(1)"] {
+                reflection_payloads.retain(|x| x != p);
+                reflection_payloads.insert(0, p.to_string());
+            }
+        }
+
         // Cap the *base* reflection and DOM catalogs independently (each to
         // `cap`) BEFORE WAF-bypass expansion and the shared-payload append below.
         // An explicit --max-payloads-per-param wins; otherwise a built-in safety
