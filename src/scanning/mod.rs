@@ -75,6 +75,7 @@ pub mod ast_dom_analysis;
 pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
+pub mod csti;
 pub(crate) use check_reflection::decode_html_entities;
 /// Shared test-only fixtures modelling server-side reflection transforms.
 #[cfg(test)]
@@ -827,6 +828,11 @@ impl ScanWorkerCtx {
                     self.flush_results(&mut state.local_results).await;
                     return;
                 }
+                // Stage 5b (#1520): client-side template injection fallback —
+                // only when reflection found nothing and a server-template
+                // framework was fingerprinted. Cheap (at most one request) and
+                // never preempts a higher-signal reflection finding.
+                self.run_csti_phase(&param, &mut state, &waf_streak).await;
                 if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await
                 {
                     self.flush_results(&mut state.local_results).await;
@@ -1142,6 +1148,125 @@ impl ScanWorkerCtx {
             .await
             .reflection
             .contains(&found_param_key(param))
+    }
+
+    /// Stage 5b (#1520): client-side template injection fallback.
+    ///
+    /// Runs only when the reflection phase recorded nothing for this parameter
+    /// and a server-template framework (AngularJS 1.x / Vue) was fingerprinted.
+    /// Sends one `{{marker}}` probe: AngularJS/Vue compile `{{…}}` found in the
+    /// server-rendered markup, so if the braces survive into a compiled text
+    /// context (not rawtext / `v-pre` / `ng-non-bindable`) the framework
+    /// evaluates them in the browser *even when the server HTML-escaped the
+    /// surrounding structural characters* — the exact echo
+    /// `classify_reflection` demotes as inert. No browser ⇒ static evidence
+    /// ceiling ⇒ the finding is graded Low confidence.
+    async fn run_csti_phase(
+        &self,
+        param: &Param,
+        state: &mut ParamScanState,
+        waf_streak: &std::sync::atomic::AtomicU32,
+    ) {
+        // The probe is a dalfox-supplied payload; `--only-custom-payload` asks
+        // for the user's payloads alone (same gate the shared tech payloads use
+        // in `generate_param_jobs`).
+        if self.args.only_custom_payload {
+            return;
+        }
+        let Some(tech) = crate::scanning::csti::server_template_framework(&self.target) else {
+            return;
+        };
+        // Fallback only: an ordinary reflection finding (generic, or an
+        // un-escaped `{{…}}` exploit payload that reflected whole) already
+        // covers this parameter with higher signal.
+        if state.reflection_found_locally
+            || (!self.args.deep_scan && self.shared_reflection_found(param).await)
+            || self.cancelled()
+        {
+            return;
+        }
+
+        let probe = crate::scanning::csti::probe();
+        // One extra request, deliberately not counted in the param's planned
+        // payload total or ticked on the progress bar — the same treatment the
+        // shared CSP/tech payloads get (see `generate_param_jobs`), so the bar
+        // still reaches 100% from the planned set and never overshoots.
+        let (_, reflection_body, status, _xml) =
+            self.fetch_reflection(param, probe, waf_streak).await;
+        // A 4xx/5xx body is a WAF block / error interstitial, not the page the
+        // framework compiles — `tech_info` was fingerprinted from the preflight
+        // response, not from this one. (3xx is the non-renderable `Location:`
+        // stand-in, already dropped by `renderable_text`.)
+        if status >= 400 {
+            return;
+        }
+        let Some(body) = reflection_body else { return };
+        if !body
+            .renderable_text()
+            .is_some_and(|text| crate::scanning::csti::probe_confirms_csti(&tech, text))
+        {
+            return;
+        }
+
+        // First-hit-wins: lock the parameter's reflection slot so a sibling
+        // worker on the same slot does not double-report (deep_scan keeps all).
+        let should_add = if self.args.deep_scan {
+            true
+        } else {
+            let mut found = self.found_params.write().await;
+            let new = found.reflection.insert(found_param_key(param));
+            state.reflection_found_locally = true;
+            new
+        };
+        if !should_add {
+            return;
+        }
+
+        let base = crate::scanning::url_inject::effective_query_base(&self.target.url, param);
+        let poc_payload = crate::encoding::pre_encoding::apply_param_encoding(probe, param);
+        let result_url =
+            crate::scanning::url_inject::build_injected_url(&base, param, &poc_payload);
+        let exploit = crate::scanning::csti::sandbox_escape_payload(&tech);
+
+        let mut result = crate::scanning::result::Result::builder(FindingType::Reflected)
+            .inject_type(inject_type_for_payload_with_sink(
+                self.args.sxss,
+                probe,
+                param.framework_sink.as_deref(),
+            ))
+            .method(crate::scanning::url_inject::effective_method(
+                &self.target.method,
+                param,
+            ))
+            .detection_method(crate::scanning::result::FindingMethod::Reflection)
+            .confidence(
+                crate::scanning::result::Confidence::Low,
+                "framework template interpolation reflected into the compiled DOM region; client-side execution not browser-confirmed (no headless engine)",
+            )
+            .data(result_url)
+            .param(param.name.clone())
+            .payload(probe.to_string())
+            .evidence(format!(
+                "`{}` interpolation survived with braces intact in the {} compiled region",
+                probe, tech
+            ))
+            .cwe("CWE-79")
+            .severity("Low")
+            .message_id(606)
+            .message_str(format!(
+                "[CSTI] {} client-side template injection in param {} — the framework evaluates the reflected `{{{{…}}}}` interpolation in the browser even though the server HTML-escaped the markup. Confirm execution with: {}={}",
+                tech, param.name, param.name, exploit
+            ))
+            .build();
+        result.set_injection_point(&self.target, param);
+        result.filter = param.filter.clone();
+        result.request = Some(build_request_text(&self.target, param, probe));
+        result.response = Some(crate::scanning::result::bound_evidence_body(
+            body.text, probe,
+        ));
+
+        self.stream_finding(&result);
+        state.local_results.push(result);
     }
 
     /// Process one reflection response: run the once-per-param AST pass, then —
