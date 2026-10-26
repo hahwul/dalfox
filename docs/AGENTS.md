@@ -124,6 +124,12 @@ tokens at the top of `static/css/style.css`; the light block overrides them.
   on `.field` (the field leaves the compositor and fox.js stops its loop). Strips reveal on entry via
   `html.motion-on` + `.strip.in-view`; each `.strip-inner` carries `data-n`
   for its outlined numeral. Clicking the field drops an `<XSS>` lure.
+- Fox behaviour lives in `fox.js`: `World.prototype.stepFox` is the state
+  machine (trot, idle, sit, curl, bow, hop, mouse, chase, pounce, sniff) and
+  `nextBehavior` picks what follows a trot. Each state draws with a pose from
+  `poseFor`; poses are in `POSE_FNS` and must return every key in `POSE_KEYS`
+  so they can blend. Legs are two-bone IK from the body pivots to the pose's
+  feet, bending toward the pose's knee hints.
 - Keep the EN and KO landings in lockstep: same sections, same `class="…"`
   sets, only the copy differs. Raw HTML blocks must stay separated by blank
   lines or the markdown processor swallows them.

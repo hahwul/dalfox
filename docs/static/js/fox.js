@@ -2,15 +2,17 @@
 // monospace glyphs on a <canvas>. Loaded on the landing page only.
 //
 // How it works
-//   world    : a handful of foxes trot along the ground plane (lower = nearer
-//              = bigger), pick new lanes now and then, pause, turn at the
-//              edges, steer clear of any element marked [data-fox-avoid],
-//              and dash to a "lure" the visitor drops by clicking the field.
-//   renderer : every frame each fox is rebuilt from a few dozen circles,
-//              ellipses and capsules in fox-local coordinates, rasterised into
-//              a cell grid with 2x2 sub-samples per cell, and each cell picks
-//              a glyph from its coverage mask (edge cells get - | / \, full
-//              cells get a dense glyph). Colours come from CSS custom
+//   world    : a handful of foxes live on the ground plane (lower = nearer
+//              = bigger). Between trots they idle, sit and watch the cursor,
+//              curl up to sleep, stretch, hop, or crouch and pounce on a mouse
+//              in the grass. They turn at the edges, steer clear of any
+//              element marked [data-fox-avoid], and dash to the <XSS> the
+//              visitor drops by clicking the field.
+//   renderer : every frame each fox is painted from a blend of poses (stand,
+//              sit, bow, dive, crouch, curl) onto a tiny offscreen canvas,
+//              read back as a 2x2 coverage mask per cell, and each cell picks
+//              a glyph from its mask (edge cells get - | / \, full cells get
+//              a dense glyph). Colours come from CSS custom
 //              properties so the light/dark themes restyle the field for free.
 //
 // Respect for the reader: prefers-reduced-motion renders one still frame and
@@ -28,6 +30,7 @@
   var TAU = Math.PI * 2;
   var DT = 1 / 60;
   var LURE_LIFE = 12;
+  var HOP_REACH = 2.3;   // longest hop run: 4 hops x 0.55 body lengths, plus margin
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
   function lerp(a, b, t) { return a + (b - a) * t; }
@@ -69,7 +72,7 @@
   // ---------------------------------------------------------------------------
   function World() {
     this.w = 0; this.h = 0; this.time = 0;
-    this.foxes = []; this.lures = []; this.trails = []; this.puffs = []; this.embers = [];
+    this.foxes = []; this.lures = []; this.trails = []; this.puffs = []; this.embers = []; this.zs = [];
     this.avoid = [];
     this.pointer = { x: -1e9, y: -1e9, active: false, speed: 0 };
     this.luresDropped = 0;
@@ -103,7 +106,7 @@
       speed: 0, cruise: i === 0 ? rand(45, 80) : rand(55, 105),
       targetSpeed: 0,
       phase: Math.random() * TAU,
-      state: 'trot', timer: rand(1, 5),
+      state: 'trot', timer: 0,
       nextLane: rand(3, 9),
       avoidUntil: 0,
       air: 0, pounceT: 0, pounceFrom: 0, pounceTo: 0, pounceY: 0,
@@ -112,8 +115,77 @@
       curiosity: rand(0.45, 1),
       L: 170,
       strideAcc: 0,
-      startle: 0
+      startle: 0,
+      flying: false, airK: 0,
+      pw: { stand: 1, sit: 0, bow: 0, dive: 0, crouch: 0, curl: 0 },
+      lastNap: -100, nextZ: 0, turnAt: 0, earTwitch: -10,
+      hopsLeft: 0, hopT: 0, hopPause: 0,
+      mPhase: '', leapT: 0, leapFrom: 0, leapTo: 0, leapAngle: 0
     });
+    // Open on a mix of moods so even the still frame has character: the
+    // alpha sits, the others trot, sit, or nap.
+    var f = this.foxes[i];
+    var r = Math.random();
+    this.enter(f, i === 0 ? 'sit' : r < 0.45 ? 'trot' : r < 0.75 ? 'curl' : 'sit');
+    if (f.state === 'trot') f.timer = rand(1, 5);
+    for (var k in f.pw) f.pw[k] = 0;
+    f.pw[poseFor(f)] = 1;
+  };
+
+  // Which pose a state draws with; paintFox blends toward it.
+  function poseFor(f) {
+    switch (f.state) {
+      case 'sit': return 'sit';
+      case 'curl': return 'curl';
+      case 'bow': return 'bow';
+      case 'mouse': return f.mPhase === 'crouch' ? 'crouch' : f.mPhase === 'dive' ? 'dive' : 'stand';
+      default: return 'stand';
+    }
+  }
+
+  World.prototype.enter = function (f, s) {
+    var t = this.time;
+    f.state = s; f.nodTarget = 0; f.air = 0; f.flying = false;
+    if (s !== 'trot' && s !== 'chase') f.lane = f.y;
+    if (s === 'trot') f.timer = rand(7, 16);
+    else if (s === 'idle') f.timer = rand(1.4, 4);
+    else if (s === 'sit') f.timer = rand(4, 9);
+    else if (s === 'curl') { f.timer = rand(9, 18); f.lastNap = t; f.nextZ = t + 1.2; }
+    else if (s === 'bow') f.timer = rand(1.1, 1.6);
+    else if (s === 'sniff') f.timer = rand(1.2, 2.4);
+    else if (s === 'hop') { f.hopsLeft = 2 + Math.floor(Math.random() * 3); f.hopT = 0; f.hopPause = 0.1; }
+    else if (s === 'mouse') { f.mPhase = 'crouch'; f.timer = rand(0.9, 1.5); }
+  };
+
+  // Room to travel d px ahead (flips direction once if the way is blocked).
+  World.prototype.roomFor = function (f, d) {
+    var L = this.foxL(f, f.y);
+    for (var k = 0; k < 2; k++) {
+      var x = f.x + f.dir * d;
+      if (x > 0.9 * L && x < this.w - 0.9 * L && this.laneClear(f, x, f.y)) return true;
+      f.dir = -f.dir;
+    }
+    return false;
+  };
+
+  // What a fox does when a trot runs out. The alpha sits more; the small
+  // ones hop more; naps need a while since the last one.
+  World.prototype.nextBehavior = function (f) {
+    var L = this.foxL(f, f.y);
+    var opts = [['idle', 3], ['sit', f.big ? 3.2 : 2], ['bow', 0.7]];
+    if (this.time - f.lastNap > 25) opts.push(['curl', 1.2]);
+    if (this.roomFor(f, HOP_REACH * L)) opts.push(['hop', f.big ? 0.8 : 2.4]);
+    if (this.roomFor(f, 1.0 * L)) opts.push(['mouse', 1.5]);
+    var sum = 0, i;
+    for (i = 0; i < opts.length; i++) sum += opts[i][1];
+    var r = Math.random() * sum;
+    for (i = 0; i < opts.length - 1; i++) { r -= opts[i][1]; if (r <= 0) break; }
+    this.enter(f, opts[i][0]);
+  };
+
+  // Mid-air or mid-pounce: not interruptible by food or the cursor.
+  World.prototype.busy = function (f) {
+    return f.flying || f.state === 'pounce' || (f.state === 'mouse' && f.mPhase !== 'crouch');
   };
 
   World.prototype.foxL = function (f, y) { return this.scaleFor(y) * f.size; };
@@ -155,20 +227,26 @@
     var nearest = null, nd = Infinity;
     for (var i = 0; i < this.foxes.length; i++) {
       var f = this.foxes[i];
-      if (f.state === 'pounce') continue;
+      if (this.busy(f)) continue;
       var d = Math.hypot(f.x - x, f.y - y);
       if (d < nd) { nd = d; nearest = f; }
       if (d < 900 && Math.random() < f.curiosity * 0.7) this.chase(f, lure);
     }
-    if (nearest && nearest.state !== 'chase') this.chase(nearest, lure);
+    if (nearest && nearest.state !== 'chase' && !this.busy(nearest)) this.chase(nearest, lure);
+  };
+
+  // A lure is gone once eaten or once it has faded; foxes must not keep
+  // chasing (or passing around) one that is no longer on screen.
+  World.prototype.lureLive = function (l) {
+    return !!l && !l.taken && this.time - l.born < LURE_LIFE;
   };
 
   World.prototype.handOff = function (lure, except) {
-    if (!lure || lure.taken) return;
+    if (!this.lureLive(lure)) return;
     var best = null, bd = Infinity;
     for (var i = 0; i < this.foxes.length; i++) {
       var o = this.foxes[i];
-      if (o === except || o.state === 'pounce' || o.state === 'chase') continue;
+      if (o === except || this.busy(o) || o.state === 'chase') continue;
       var d = Math.hypot(o.x - lure.x, o.y - lure.y);
       if (d < bd) { bd = d; best = o; }
     }
@@ -176,7 +254,7 @@
   };
 
   World.prototype.chase = function (f, lure) {
-    f.state = 'chase'; f.lure = lure; f.nodTarget = 0; f.timer = 12;
+    this.enter(f, 'chase'); f.lure = lure; f.timer = 12;
   };
 
   World.prototype.step = function (dt) {
@@ -191,8 +269,8 @@
         var dx = fb.x - fa.x, dy = fb.y - fa.y;
         if (Math.abs(dx) < 1.5 * Lm && Math.abs(dy) < 0.45 * Lm) {
           var push = (dy >= 0 ? 1 : -1) * 0.4 * Lm;
-          if (t > fa.avoidUntil) fa.lane = clamp(fa.y - push, this.groundMin(), this.groundMax());
-          if (t > fb.avoidUntil) fb.lane = clamp(fb.y + push, this.groundMin(), this.groundMax());
+          if (t > fa.avoidUntil && fa.state === 'trot') fa.lane = clamp(fa.y - push, this.groundMin(), this.groundMax());
+          if (t > fb.avoidUntil && fb.state === 'trot') fb.lane = clamp(fb.y + push, this.groundMin(), this.groundMax());
           var trailing = (fa.dir === fb.dir) ? ((fa.dir > 0) === (fa.x < fb.x) ? fa : fb) : null;
           if (trailing && trailing.state === 'trot') trailing.speed *= 0.985;
         }
@@ -205,9 +283,16 @@
       em.y += em.vy * dt;
     }
     this.embers = this.embers.filter(function (p) { return t - p.born < p.life; });
+    for (var z = 0; z < this.zs.length; z++) {
+      var zz = this.zs[z];
+      zz.y -= 15 * dt;
+      zz.x += (zz.vx + Math.sin(t * 2 + zz.seed) * 6) * dt;
+    }
+    this.zs = this.zs.filter(function (p) { return t - p.born < 2.6; });
     this.trails = this.trails.filter(function (p) { return t - p.born < 2.6; });
     this.puffs = this.puffs.filter(function (p) { return t - p.born < 0.6; });
-    this.lures = this.lures.filter(function (l) { return !l.taken && t - l.born < LURE_LIFE; });
+    var self = this;
+    this.lures = this.lures.filter(function (l) { return self.lureLive(l); });
     if (this.pointer.active) this.pointer.speed *= Math.pow(0.02, dt);
   };
 
@@ -217,6 +302,7 @@
     f.timer -= dt;
 
     // --- state machine ----------------------------------------------------
+    f.flying = false;
     if (f.state === 'trot') {
       f.targetSpeed = f.cruise * (L / 170);
       f.nodTarget = 0;
@@ -225,19 +311,83 @@
         f.lane = this.pickLane(f);
         f.nextLane = rand(4, 10);
       }
-      if (f.timer <= 0) {
-        f.state = 'idle'; f.timer = rand(1.4, 4);
-      }
+      if (f.timer <= 0) this.nextBehavior(f);
     } else if (f.state === 'idle') {
       f.targetSpeed = 0;
       f.nodTarget = Math.sin(t * 0.7 + f.seed) > 0.55 ? 0.5 : 0;
       if (f.timer <= 0) {
-        f.state = 'trot'; f.timer = rand(7, 18);
-        if (Math.random() < 0.4) f.dir = -f.dir;
+        if (Math.random() < 0.4) this.enter(f, 'sit');
+        else { this.enter(f, 'trot'); if (Math.random() < 0.4) f.dir = -f.dir; }
+      }
+    } else if (f.state === 'sit') {
+      // sits tall, now and then dips its head to sniff the grass
+      f.targetSpeed = 0;
+      f.nodTarget = Math.sin(t * 0.45 + f.seed) > 0.82 ? 0.45 : 0;
+      if (f.timer <= 0) {
+        var rs = Math.random();
+        if (rs < 0.35 && t - f.lastNap > 20) this.enter(f, 'curl');
+        else if (rs < 0.55) this.enter(f, 'bow');
+        else this.enter(f, 'trot');
+      }
+    } else if (f.state === 'curl') {
+      // asleep: breathes (in paintFox) and lets out a z now and then
+      f.targetSpeed = 0;
+      if (f.pw.curl > 0.8 && t > f.nextZ) {
+        this.zs.push({ x: f.x + f.dir * 0.42 * L, y: f.y - 0.32 * L, vx: f.dir * rand(4, 9), born: t, seed: Math.random() * 10 });
+        if (this.zs.length > 12) this.zs.shift();
+        f.nextZ = t + rand(1.4, 2.2);
+      }
+      if (f.timer <= 0) this.enter(f, 'bow');   // wake with a stretch
+    } else if (f.state === 'bow') {
+      f.targetSpeed = 0;
+      if (f.timer <= 0) {
+        if (Math.random() < 0.35 && this.roomFor(f, HOP_REACH * L)) this.enter(f, 'hop');
+        else this.enter(f, 'trot');
+      }
+    } else if (f.state === 'hop') {
+      // a run of springy hops, each one a little arc forward
+      f.targetSpeed = 0; f.speed = 0;
+      if (f.hopPause > 0) f.hopPause -= dt;
+      else {
+        var HT = 0.44;
+        f.hopT += dt;
+        var kh = clamp(f.hopT / HT, 0, 1);
+        f.flying = true; f.airK = kh;
+        f.air = Math.sin(kh * Math.PI) * 0.26 * L;
+        f.x += f.dir * (0.55 * L / HT) * dt;
+        if (kh >= 1) {
+          f.air = 0; f.hopT = 0; f.hopPause = 0.12; f.flying = false;
+          if (--f.hopsLeft <= 0) this.enter(f, 'trot');
+        }
+      }
+    } else if (f.state === 'mouse') {
+      // the fox "mousing" pounce: crouch and wiggle, leap high, dive nose-first
+      f.targetSpeed = 0; f.speed = 0;
+      if (f.mPhase === 'crouch') {
+        if (f.timer <= 0) {
+          f.mPhase = 'leap'; f.leapT = 0; f.leapFrom = f.x; f.leapTo = f.x + f.dir * 0.85 * L;
+        }
+      } else if (f.mPhase === 'leap') {
+        var LT = 0.78;
+        f.leapT += dt;
+        var kl = clamp(f.leapT / LT, 0, 1);
+        f.flying = true; f.airK = kl;
+        f.x = lerp(f.leapFrom, f.leapTo, kl);
+        f.air = Math.sin(kl * Math.PI) * 0.7 * L;
+        f.leapAngle = lerp(0.55, -0.8, smooth(kl));
+        if (kl >= 1) {
+          f.air = 0; f.flying = false; f.mPhase = 'dive'; f.timer = 0.65;
+          var hx = f.x + f.dir * 0.55 * L;
+          for (var gp = 0; gp < 8; gp++) {
+            this.puffs.push({ x: hx, y: f.y - 4, a: Math.PI + (gp / 7) * Math.PI + rand(-0.15, 0.15), born: t, r: rand(0.6, 1.1), g: ",'`\"".charAt(gp % 4), col: C_GRASS2 });
+          }
+        }
+      } else if (f.timer <= 0) {
+        this.enter(f, 'sniff');
       }
     } else if (f.state === 'chase') {
       var l = f.lure;
-      if (!l || l.taken) { f.state = 'trot'; f.timer = rand(5, 12); f.lure = null; }
+      if (!this.lureLive(l)) { this.enter(f, 'trot'); f.timer = rand(5, 12); f.lure = null; }
       else {
         var dx = l.x - f.x;
         if (Math.abs(dx) > 0.2 * L) f.dir = dx > 0 ? 1 : -1;
@@ -249,17 +399,18 @@
           f.state = 'pounce'; f.pounceT = 0; f.pounceFrom = f.x; f.pounceTo = l.x - f.dir * 0.25 * L;
           f.pounceY = f.y;
         }
-        if (f.timer <= 0) { var give = f.lure; f.state = 'trot'; f.timer = rand(5, 12); f.lure = null; this.handOff(give, f); }
+        if (f.state === 'chase' && f.timer <= 0) { var give = f.lure; this.enter(f, 'trot'); f.timer = rand(5, 12); f.lure = null; this.handOff(give, f); }
       }
     } else if (f.state === 'pounce') {
       var T = 0.62;
       f.pounceT += dt;
       var k = clamp(f.pounceT / T, 0, 1);
+      f.flying = true; f.airK = k;
       f.x = lerp(f.pounceFrom, f.pounceTo, smooth(k));
       f.air = Math.sin(k * Math.PI) * 0.42 * L;
       f.targetSpeed = 0; f.speed = 0;
       if (k >= 1) {
-        f.air = 0;
+        f.air = 0; f.flying = false;
         if (f.lure) {
           f.lure.taken = true;
           for (var p = 0; p < 10; p++) {
@@ -268,31 +419,36 @@
           }
           f.lure = null;
         }
-        f.state = 'sniff'; f.timer = rand(1.2, 2.4);
+        this.enter(f, 'sniff');
       }
     } else if (f.state === 'sniff') {
       f.targetSpeed = 0; f.nodTarget = 1;
-      if (f.timer <= 0) { f.state = 'trot'; f.timer = rand(6, 14); f.nodTarget = 0; if (Math.random() < 0.5) f.dir = -f.dir; }
+      if (f.timer <= 0) { this.enter(f, 'trot'); f.timer = rand(6, 14); if (Math.random() < 0.5) f.dir = -f.dir; }
     }
 
-    // --- pointer: slow down when it hovers close; bolt when it rushes in ----
+    // --- pointer: a rush startles anyone awake (or asleep) into a bolt; a
+    // slow hover makes trotters ease off; sitting foxes turn to watch it;
+    // a sleeper only twitches an ear. ------------------------------------
     var ptr = this.pointer;
-    if (ptr.active && f.state !== 'pounce') {
+    if (ptr.active && !this.busy(f)) {
       var pd = Math.hypot(ptr.x - f.x, ptr.y - (f.y - 0.4 * L));
-      if (pd < 1.1 * L) {
-        if (ptr.speed > 1400 && f.startle <= 0) {
-          f.startle = 1.1; f.dir = ptr.x < f.x ? 1 : -1;
-          if (f.state === 'idle' || f.state === 'sniff') { f.state = 'trot'; f.timer = rand(6, 14); }
-        } else if (f.state === 'trot') {
-          f.targetSpeed *= 0.35;
-          f.nodTarget = 0.3;
-        }
+      if (pd < 1.1 * L && ptr.speed > 1400 && f.startle <= 0 && f.state !== 'chase') {
+        this.enter(f, 'trot');
+        f.startle = 1.1; f.dir = ptr.x < f.x ? 1 : -1;
+      } else if (pd < 1.1 * L && f.state === 'trot') {
+        f.targetSpeed *= 0.35;
+        f.nodTarget = 0.3;
+      } else if ((f.state === 'sit' || f.state === 'idle' || f.state === 'sniff') && pd < 2.4 * L && t > f.turnAt) {
+        var want = ptr.x > f.x ? 1 : -1;
+        if (want !== f.dir) { f.dir = want; f.turnAt = t + 0.8; }
+      } else if (f.state === 'curl' && pd < 1.3 * L && t - f.earTwitch > 1.2) {
+        f.earTwitch = t;
       }
     }
     if (f.startle > 0) { f.startle -= dt; f.targetSpeed = Math.max(f.targetSpeed, 240 * (L / 170)); }
 
     // --- edges: turn before leaving the frame -----------------------------
-    if (f.state !== 'pounce') {
+    if (!f.flying && f.state !== 'pounce') {
       if (f.dir > 0 && f.x > w - 0.9 * L) f.dir = -1;
       if (f.dir < 0 && f.x < 0.9 * L) f.dir = 1;
       if (f.x < -0.3 * L) f.x = -0.3 * L;
@@ -300,10 +456,12 @@
     }
 
     // --- content avoidance: steer the lane around marked boxes ------------
+    // (only foxes on the move; a fox at rest stays put)
+    var moving = f.state === 'trot' || f.state === 'chase';
     var ahead = f.x + f.dir * f.speed * 0.7;
     var left = Math.min(f.x, ahead) - 0.55 * L, right = Math.max(f.x, ahead) + 0.9 * L;
     var top = f.y - 0.95 * L, bottom = f.y + 0.04 * L;
-    for (var b = 0; b < this.avoid.length; b++) {
+    for (var b = 0; moving && b < this.avoid.length; b++) {
       var r = this.avoid[b];
       if (right < r.left || left > r.right || bottom < r.top || top > r.bottom) continue;
       var below = r.bottom + 0.98 * L;
@@ -329,13 +487,18 @@
     // --- motion -----------------------------------------------------------
     var accel = f.targetSpeed > f.speed ? 220 : 320;
     f.speed += clamp(f.targetSpeed - f.speed, -accel * dt, accel * dt);
-    if (f.state !== 'pounce') {
+    if (!f.flying && f.state !== 'pounce') {
       f.x += f.dir * f.speed * dt;
       var dy = f.lane - f.y;
       var rate = (t < f.avoidUntil ? 70 : 26) + f.speed * 0.15;
       f.y += clamp(dy, -rate * dt, rate * dt);
     }
     f.nod += (f.nodTarget - f.nod) * Math.min(1, 4 * dt);
+
+    // pose weights glide toward the state's pose (lying down is slower)
+    var want = poseFor(f), rate = (want === 'curl' || f.pw.curl > 0.05) ? 3 : 7, sum = 0;
+    for (var pk in f.pw) { f.pw[pk] += ((pk === want ? 1 : 0) - f.pw[pk]) * Math.min(1, rate * dt); sum += f.pw[pk]; }
+    for (pk in f.pw) f.pw[pk] /= sum;
 
     // gait: stride length ~0.75 body lengths
     var cyc = f.speed / (0.75 * L);
@@ -371,103 +534,227 @@
   var octx = off.getContext('2d', { willReadFrequently: true });
   var COL_BODY = '#ff0000', COL_TIP = '#00ff00', COL_SOCK = '#0000ff', COL_EYE = '#000000';
 
-  function paintFox(g, f, t) {
-    var amp = clamp(f.speed / (120 * (f.L / 170)), 0, 1.3);
-    var run = Math.min(1, amp);
-    var phi = f.phase;
-    var airborne = f.state === 'pounce';
-    var pk = airborne ? clamp(f.pounceT / 0.62, 0, 1) : 0;
-    var bob = 0.045 * amp * Math.max(0, Math.sin(phi));
-    var pitch = airborne ? -0.3 * Math.sin(pk * Math.PI) : 0.1 * amp * Math.sin(phi - 0.5);
-    var nod = f.nod;
-    var by = 0.47 + bob;
-    g.lineCap = 'round'; g.lineJoin = 'round';
+  // Pose library. Every pose yields the same set of numbers so any mix of
+  // them can be blended: body (centre, angle with + = nose up, x/y scale,
+  // back arch), head (position, tilt with + = nose down, ear lean, eye open),
+  // tail (control-point offsets from the rump), feet (near/far fore, near/far
+  // hind) and knee hints (which side each joint bends toward).
+  var POSE_KEYS = ['bx', 'by', 'ba', 'bsx', 'bsy', 'arch', 'hx', 'hy', 'ht', 'eb', 'eye',
+    't1x', 't1y', 't2x', 't2y', 't3x', 't3y', 'tw',
+    'f0x', 'f0y', 'f1x', 'f1y', 'f2x', 'f2y', 'f3x', 'f3y',
+    'k0x', 'k0y', 'k1x', 'k1y', 'k2x', 'k2y', 'k3x', 'k3y'];
+  // pivots in the body frame: near fore, far fore, near hind, far hind
+  var PIVOTS = [[0.25, -0.04], [0.22, -0.05], [-0.22, -0.03], [-0.2, -0.04]];
+  var LU = 0.21, LL = 0.21;
+  var FX = ['f0x', 'f1x', 'f2x', 'f3x'], FY = ['f0y', 'f1y', 'f2y', 'f3y'];
+  var KX = ['k0x', 'k1x', 'k2x', 'k3x'], KY = ['k0y', 'k1y', 'k2y', 'k3y'];
 
-    // --- tail: a bushy S-curve. At rest it drops from the rump and curls up
-    // at the tip; at a run it streams back. Fluff circles along the curve give
-    // it volume, the last third is the cream brush. -------------------------
+  function bodyPt(P, u, v) {
+    var c = Math.cos(P.ba), s = Math.sin(P.ba);
+    u *= P.bsx; v *= P.bsy;
+    return [P.bx + u * c - v * s, P.by + u * s + v * c];
+  }
+
+  // Two-bone IK: knee for a leg from pivot to foot, on the side of hint.
+  function ik(px, py, fx, fy, hx, hy) {
+    var dx = fx - px, dy = fy - py, d = Math.hypot(dx, dy) || 1e-4, max = LU + LL - 1e-4;
+    if (d > max) { fx = px + dx / d * max; fy = py + dy / d * max; dx = fx - px; dy = fy - py; d = max; }
+    var a = (LU * LU - LL * LL + d * d) / (2 * d), h = Math.sqrt(Math.max(0, LU * LU - a * a));
+    var nx = -dy / d, ny = dx / d;
+    if (nx * hx + ny * hy < 0) { nx = -nx; ny = -ny; }
+    return [px + dx * a / d + nx * h, py + dy * a / d + ny * h, fx, fy];
+  }
+
+  function standPose(f, t, amp, run, airborne, ang) {
+    var phi = f.phase, nod = f.nod;
+    var bob = 0.045 * amp * Math.max(0, Math.sin(phi));
+    var P = { bx: 0, by: 0.47 + bob, ba: ang, bsx: 1, bsy: 1, arch: 0.1 + 0.05 * Math.max(0, Math.sin(phi + 0.6)) * amp,
+      ht: 0.5 * nod - ang, eb: nod, eye: 1, tw: 1 };
+    var head = bodyPt(P, 0.52 + 0.1 * nod, 0.21 - 0.27 * nod);
+    P.hx = head[0]; P.hy = head[1];
+    // tail: drops from the rump and curls up at rest, streams back at a run
     var rest = 1 - run;
     var sway = 0.08 * Math.sin(t * (f.speed < 10 ? 2.2 : 3.6) + f.seed) * (f.speed < 10 ? 1 : 0.5);
     var lift = airborne ? 0.3 : 0;
-    var p0x = -0.27, p0y = by + 0.06;
-    var c1x = -0.55, c1y = by - 0.2 * rest + 0.04 * run + sway + lift;
-    var c2x = -0.9, c2y = by - 0.1 * rest + 0.12 * run + sway * 1.5 + lift;
-    var p3x = -0.92 + 0.08 * rest, p3y = by + 0.3 * rest + 0.2 * run + sway * 2 + lift - pitch * 0.3;
-    function cp(tt) {
-      var u = 1 - tt, a = u * u * u, b = 3 * u * u * tt, c = 3 * u * tt * tt, d = tt * tt * tt;
-      return [a * p0x + b * c1x + c * c2x + d * p3x, a * p0y + b * c1y + c * c2y + d * p3y];
-    }
-    g.strokeStyle = COL_BODY;
-    g.lineWidth = 0.24; g.beginPath(); g.moveTo(p0x, p0y); g.bezierCurveTo(c1x, c1y, c2x, c2y, p3x, p3y); g.stroke();
-    g.fillStyle = COL_BODY;
-    var fluff = [[0.18, 0.14], [0.36, 0.165], [0.54, 0.165], [0.7, 0.15]];
-    for (var fi = 0; fi < fluff.length; fi++) {
-      var fp = cp(fluff[fi][0]);
-      g.beginPath(); g.ellipse(fp[0], fp[1], fluff[fi][1], fluff[fi][1] * 0.9, 0, 0, TAU); g.fill();
-    }
-    g.strokeStyle = COL_TIP; g.lineWidth = 0.2;
-    var n = cp(0.72), n2 = cp(0.86);
-    g.beginPath(); g.moveTo(n[0], n[1]); g.quadraticCurveTo(n2[0], n2[1], p3x, p3y); g.stroke();
-    g.fillStyle = COL_TIP; g.beginPath(); g.ellipse(n2[0], n2[1], 0.12, 0.11, 0, 0, TAU); g.fill();
-
-    // --- legs: shoulder/hip -> knee -> paw ------------------------------------
+    var c = Math.cos(ang), s = Math.sin(ang);
+    var T = [-0.28, -0.2 * rest + 0.04 * run + sway + lift - 0.06,
+      -0.63, -0.1 * rest + 0.12 * run + sway * 1.5 + lift - 0.06,
+      -0.65 + 0.08 * rest, 0.3 * rest + 0.2 * run + sway * 2 + lift - 0.06];
+    P.t1x = T[0] * c - T[1] * s; P.t1y = T[0] * s + T[1] * c;
+    P.t2x = T[2] * c - T[3] * s; P.t2y = T[2] * s + T[3] * c;
+    P.t3x = T[4] * c - T[5] * s; P.t3y = T[4] * s + T[5] * c;
+    // legs: swing from the gait phase (or tuck in the air); the FK knee
+    // becomes the IK hint so the blend reproduces it exactly
     var A = 0.8 * amp, K = 1.15 * amp;
-    function leg(px, py, ph, rear, tuck) {
-      var up = tuck ? (rear ? 0.9 : -0.6) : A * Math.sin(ph);
-      var bend = tuck ? 1.5 : K * Math.max(0, -Math.sin(ph + 0.3));
-      var low = tuck ? up + (rear ? 1.3 : -1.6) : up - bend * (rear ? -0.9 : 1);
-      var lu = 0.21, ll = 0.21;
-      var kx = px + Math.sin(up) * lu, ky = py - Math.cos(up) * lu;
-      var fx = kx + Math.sin(low) * ll, fy = ky - Math.cos(low) * ll;
-      g.strokeStyle = COL_BODY; g.lineWidth = 0.12;
-      g.beginPath(); g.moveTo(px, py); g.lineTo(kx, ky); g.stroke();
-      g.strokeStyle = COL_SOCK; g.lineWidth = 0.085;
-      g.beginPath(); g.moveTo(kx, ky); g.lineTo(fx, fy); g.stroke();
-      g.fillStyle = COL_SOCK; g.beginPath(); g.ellipse(fx + 0.015, fy + 0.012, 0.055, 0.04, 0, 0, TAU); g.fill();
+    var phases = [phi, phi + 0.5, phi + Math.PI + 0.45, phi + Math.PI];
+    for (var i = 0; i < 4; i++) {
+      var rear = i >= 2, pv = bodyPt(P, PIVOTS[i][0], PIVOTS[i][1]);
+      var up = airborne ? (rear ? 0.9 : -0.6) : A * Math.sin(phases[i]);
+      var bend = airborne ? 1.5 : K * Math.max(0, -Math.sin(phases[i] + 0.3));
+      var low = airborne ? up + (rear ? 1.3 : -1.6) : up - bend * (rear ? -0.9 : 1);
+      var kx = pv[0] + Math.sin(up) * LU, ky = pv[1] - Math.cos(up) * LU;
+      var fx = kx + Math.sin(low) * LL, fy = ky - Math.cos(low) * LL;
+      P[FX[i]] = fx; P[FY[i]] = fy;
+      P[KX[i]] = kx - (pv[0] + fx) / 2; P[KY[i]] = ky - (pv[1] + fy) / 2;
     }
-    leg(-0.2, by - 0.04, phi + Math.PI, true, airborne);
-    leg(0.22, by - 0.05, phi + 0.5, false, airborne);
+    return P;
+  }
 
-    // --- body --------------------------------------------------------------
+  function staticPose(o) {
+    var P = { tw: 1, eye: 1, eb: 0 };
+    for (var k in o) P[k] = o[k];
+    return P;
+  }
+
+  function sitPose(f, t) {
+    var swish = Math.sin(t * 2.2 + f.seed);
+    return staticPose({ bx: 0.04, by: 0.24, ba: 0.75, bsx: 0.9, bsy: 1.05, arch: 0.06,
+      hx: 0.42, hy: 0.72 + 0.015 * Math.sin(t * 1.3 + f.seed), ht: -0.1 + 0.6 * f.nod, eb: 0.3 * f.nod,
+      t1x: -0.2, t1y: -0.1, t2x: 0.35, t2y: -0.12, t3x: 0.68 + 0.04 * swish, t3y: -0.06 + 0.03 * swish,
+      f0x: 0.29, f0y: 0.03, f1x: 0.24, f1y: 0.03, f2x: 0.06, f2y: 0.03, f3x: 0.02, f3y: 0.03,
+      k0x: 1, k0y: 0, k1x: 1, k1y: 0, k2x: 0.5, k2y: 1, k3x: 0.5, k3y: 1 });
+  }
+
+  function bowPose(f, t) {
+    var wag = Math.sin(t * 10 + f.seed);
+    return staticPose({ bx: 0.02, by: 0.34, ba: -0.55, bsx: 1, bsy: 1, arch: 0.04,
+      hx: 0.62, hy: 0.3, ht: -0.05,
+      t1x: -0.15, t1y: 0.22, t2x: -0.35, t2y: 0.42, t3x: -0.42 + 0.12 * wag, t3y: 0.42,
+      f0x: 0.6, f0y: 0.03, f1x: 0.54, f1y: 0.03, f2x: -0.18, f2y: 0.03, f3x: -0.22, f3y: 0.03,
+      k0x: 0.2, k0y: 1, k1x: 0.2, k1y: 1, k2x: -1, k2y: 0, k3x: -1, k3y: 0 });
+  }
+
+  function divePose(f, t) {
+    var wag = Math.sin(t * 16 + f.seed);
+    return staticPose({ bx: 0.02, by: 0.36, ba: -0.6, bsx: 1, bsy: 1, arch: 0.05,
+      hx: 0.56, hy: 0.06, ht: 0.9,
+      t1x: -0.1, t1y: 0.3, t2x: -0.2, t2y: 0.5, t3x: -0.18 + 0.08 * wag, t3y: 0.55,
+      f0x: 0.5, f0y: 0.03, f1x: 0.45, f1y: 0.03, f2x: -0.18, f2y: 0.03, f3x: -0.22, f3y: 0.03,
+      k0x: 0.2, k0y: 1, k1x: 0.2, k1y: 1, k2x: -1, k2y: 0, k3x: -1, k3y: 0 });
+  }
+
+  function crouchPose(f, t) {
+    var wig = Math.sin(t * 18 + f.seed);
+    return staticPose({ bx: 0.02, by: 0.31, ba: -0.18 + 0.05 * wig, bsx: 0.92, bsy: 1, arch: 0.12,
+      hx: 0.56, hy: 0.37, ht: 0.35, eb: -0.5,
+      t1x: -0.25, t1y: -0.03, t2x: -0.5, t2y: -0.05, t3x: -0.72, t3y: -0.04 + 0.05 * Math.sin(t * 15),
+      f0x: 0.31, f0y: 0.03, f1x: 0.26, f1y: 0.03, f2x: -0.1, f2y: 0.03, f3x: -0.14, f3y: 0.03,
+      k0x: -1, k0y: 0.4, k1x: -1, k1y: 0.4, k2x: 0.6, k2y: 1, k3x: 0.6, k3y: 1 });
+  }
+
+  function curlPose(f, t) {
+    var breath = 1 + 0.035 * Math.sin(t * 1.7 + f.seed);
+    return staticPose({ bx: 0.02, by: 0.2, ba: 0, bsx: 0.8, bsy: 1.32 * breath, arch: 0.2,
+      hx: 0.3, hy: 0.17, ht: 0.45, eb: 0.5, eye: 0, tw: 0.92,
+      t1x: -0.12, t1y: -0.28, t2x: 0.6, t2y: -0.3, t3x: 0.78, t3y: -0.16,
+      f0x: 0.34, f0y: 0.05, f1x: 0.3, f1y: 0.05, f2x: 0.02, f2y: 0.05, f3x: -0.02, f3y: 0.05,
+      k0x: 1, k0y: 0.2, k1x: 1, k1y: 0.2, k2x: 0.6, k2y: 1, k3x: 0.6, k3y: 1 });
+  }
+
+  var POSE_FNS = { sit: sitPose, bow: bowPose, dive: divePose, crouch: crouchPose, curl: curlPose };
+
+  function paintFox(g, f, t) {
+    var W = f.pw;
+    var airborne = f.air > 0.02 * f.L;
+    var amp = clamp(f.speed / (120 * (f.L / 170)), 0, 1.3) * W.stand;
+    var run = Math.min(1, amp);
+    var ang;
+    if (f.state === 'mouse' && f.mPhase === 'leap') ang = f.leapAngle;
+    else if (airborne) ang = 0.3 * Math.sin(clamp(f.airK, 0, 1) * Math.PI);
+    else ang = -0.1 * amp * Math.sin(f.phase - 0.5);
+
+    // blend the poses by weight
+    var P = {}, i, k;
+    for (i = 0; i < POSE_KEYS.length; i++) P[POSE_KEYS[i]] = 0;
+    for (var name in W) {
+      var w = W[name];
+      if (w < 1e-3) continue;
+      var Q = name === 'stand' ? standPose(f, t, amp, run, airborne, ang) : POSE_FNS[name](f, t);
+      for (i = 0; i < POSE_KEYS.length; i++) { k = POSE_KEYS[i]; P[k] += w * Q[k]; }
+    }
+    var dt2 = t - f.earTwitch;
+    if (dt2 < 0.45) P.eb -= 0.9 * Math.sin(dt2 / 0.45 * Math.PI) * W.curl;   // a sleeper's ear flick
+
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    var tailFront = W.curl > 0.5;
+
+    function tail() {
+      var root = bodyPt(P, -0.27, 0.06);
+      var p0x = root[0], p0y = root[1];
+      var c1x = p0x + P.t1x, c1y = p0y + P.t1y, c2x = p0x + P.t2x, c2y = p0y + P.t2y, p3x = p0x + P.t3x, p3y = p0y + P.t3y;
+      function cp(tt) {
+        var u = 1 - tt, a = u * u * u, b = 3 * u * u * tt, c = 3 * u * tt * tt, d = tt * tt * tt;
+        return [a * p0x + b * c1x + c * c2x + d * p3x, a * p0y + b * c1y + c * c2y + d * p3y];
+      }
+      var tw = P.tw;
+      g.strokeStyle = COL_BODY;
+      g.lineWidth = 0.24 * tw; g.beginPath(); g.moveTo(p0x, p0y); g.bezierCurveTo(c1x, c1y, c2x, c2y, p3x, p3y); g.stroke();
+      g.fillStyle = COL_BODY;
+      var fluff = [[0.18, 0.14], [0.36, 0.165], [0.54, 0.165], [0.7, 0.15]];
+      for (var fi = 0; fi < fluff.length; fi++) {
+        var fp = cp(fluff[fi][0]), fr = fluff[fi][1] * tw;
+        g.beginPath(); g.ellipse(fp[0], fp[1], fr, fr * 0.9, 0, 0, TAU); g.fill();
+      }
+      var n = cp(0.72), n2 = cp(0.86);
+      g.strokeStyle = COL_TIP; g.lineWidth = 0.2 * tw;
+      g.beginPath(); g.moveTo(n[0], n[1]); g.quadraticCurveTo(n2[0], n2[1], p3x, p3y); g.stroke();
+      g.fillStyle = COL_TIP; g.beginPath(); g.ellipse(n2[0], n2[1], 0.12 * tw, 0.11 * tw, 0, 0, TAU); g.fill();
+    }
+
+    function leg(i) {
+      var pv = bodyPt(P, PIVOTS[i][0], PIVOTS[i][1]);
+      var j = ik(pv[0], pv[1], P[FX[i]], P[FY[i]], P[KX[i]], P[KY[i]]);
+      g.strokeStyle = COL_BODY; g.lineWidth = 0.12;
+      g.beginPath(); g.moveTo(pv[0], pv[1]); g.lineTo(j[0], j[1]); g.stroke();
+      g.strokeStyle = COL_SOCK; g.lineWidth = 0.085;
+      g.beginPath(); g.moveTo(j[0], j[1]); g.lineTo(j[2], j[3]); g.stroke();
+      g.fillStyle = COL_SOCK; g.beginPath(); g.ellipse(j[2] + 0.015, j[3] + 0.012, 0.055, 0.04, 0, 0, TAU); g.fill();
+    }
+
+    if (!tailFront) tail();
+    leg(1); leg(3);   // far legs, behind the body
+
+    // body: an arched spine over a tucked waist, chest and rump in front
+    g.save();
+    g.translate(P.bx, P.by); g.rotate(P.ba); g.scale(P.bsx, P.bsy);
     g.fillStyle = COL_BODY;
-    // spine arches over the middle, belly tucks up toward the hips (the waist)
-    var arch = 0.1 + 0.05 * Math.max(0, Math.sin(phi + 0.6)) * amp;
     g.beginPath();
-    g.moveTo(0.3, by + 0.13);
-    g.quadraticCurveTo(0.0, by + 0.17 + arch, -0.3, by + 0.1);
-    g.lineTo(-0.3, by - 0.02);
-    g.quadraticCurveTo(-0.05, by - 0.13, 0.3, by - 0.15);
+    g.moveTo(0.3, 0.13);
+    g.quadraticCurveTo(0.0, 0.17 + P.arch, -0.3, 0.1);
+    g.lineTo(-0.3, -0.02);
+    g.quadraticCurveTo(-0.05, -0.13, 0.3, -0.15);
     g.closePath(); g.fill();
-    g.beginPath(); g.ellipse(0.25, by - 0.01, 0.165, 0.16, 0, 0, TAU); g.fill();   // chest
-    g.beginPath(); g.ellipse(-0.24, by + 0.03, 0.14, 0.135, 0, 0, TAU); g.fill();  // rump
+    g.beginPath(); g.ellipse(0.25, -0.01, 0.165, 0.16, 0, 0, TAU); g.fill();   // chest
+    g.beginPath(); g.ellipse(-0.24, 0.03, 0.14, 0.135, 0, 0, TAU); g.fill();  // rump
+    g.restore();
 
-    leg(-0.22, by - 0.03, phi + Math.PI + 0.45, true, airborne);
-    leg(0.25, by - 0.04, phi, false, airborne);
+    leg(2); leg(0);   // near legs
 
-    // chest bib
-    g.fillStyle = COL_TIP; g.beginPath(); g.ellipse(0.31, by - 0.07, 0.075, 0.065, 0, 0, TAU); g.fill();
+    var bib = bodyPt(P, 0.31, -0.07);
+    g.fillStyle = COL_TIP; g.beginPath(); g.ellipse(bib[0], bib[1], 0.075, 0.065, 0, 0, TAU); g.fill();
 
-    // --- neck + head (nod lowers and extends the head) ----------------------
-    var hx = 0.52 + 0.1 * nod, hy = by + 0.21 - 0.27 * nod;
+    // neck + head (tilt + = nose down; eb leans the ears back)
+    var nb = bodyPt(P, 0.27, 0.05), hx = P.hx, hy = P.hy;
     g.strokeStyle = COL_BODY; g.lineWidth = 0.21;
-    g.beginPath(); g.moveTo(0.27, by + 0.05); g.lineTo(hx - 0.07, hy - 0.04); g.stroke();
+    g.beginPath(); g.moveTo(nb[0], nb[1]); g.lineTo(hx - 0.07, hy - 0.04); g.stroke();
+    g.save();
+    g.translate(hx, hy); g.rotate(-P.ht);
     g.fillStyle = COL_BODY;
-    g.beginPath(); g.ellipse(hx, hy, 0.145, 0.115, 0.15 + 0.5 * nod, 0, TAU); g.fill();
-    g.fillStyle = COL_TIP; g.beginPath(); g.ellipse(hx - 0.02, hy - 0.08, 0.075, 0.05, 0.2, 0, TAU); g.fill(); // cheek ruff
-    g.fillStyle = COL_BODY;
-    // muzzle: tapering stroke
-    g.lineWidth = 0.1; g.beginPath(); g.moveTo(hx + 0.06, hy - 0.01); g.lineTo(hx + 0.18, hy - 0.06 - 0.06 * nod); g.stroke();
-    g.lineWidth = 0.055; g.beginPath(); g.moveTo(hx + 0.17, hy - 0.06 - 0.06 * nod); g.lineTo(hx + 0.25, hy - 0.085 - 0.08 * nod); g.stroke();
-    // cream jaw
+    g.beginPath(); g.ellipse(0, 0, 0.145, 0.115, 0.15, 0, TAU); g.fill();
+    g.fillStyle = COL_TIP; g.beginPath(); g.ellipse(-0.02, -0.08, 0.075, 0.05, 0.2, 0, TAU); g.fill(); // cheek ruff
+    g.strokeStyle = COL_BODY;
+    g.lineWidth = 0.1; g.beginPath(); g.moveTo(0.06, -0.01); g.lineTo(0.18, -0.06); g.stroke();       // muzzle
+    g.lineWidth = 0.055; g.beginPath(); g.moveTo(0.17, -0.06); g.lineTo(0.25, -0.085); g.stroke();
     g.strokeStyle = COL_TIP; g.lineWidth = 0.045;
-    g.beginPath(); g.moveTo(hx + 0.08, hy - 0.07); g.lineTo(hx + 0.2, hy - 0.1 - 0.06 * nod); g.stroke();
-    // ears: two triangles, the fox tell
+    g.beginPath(); g.moveTo(0.08, -0.07); g.lineTo(0.2, -0.1); g.stroke();                              // jaw
     g.fillStyle = COL_BODY;
-    var ea = -0.25 * nod;
-    g.beginPath(); g.moveTo(hx - 0.12, hy + 0.05); g.lineTo(hx - 0.13 + ea, hy + 0.34); g.lineTo(hx + 0.0, hy + 0.09); g.closePath(); g.fill();
-    g.beginPath(); g.moveTo(hx + 0.0, hy + 0.06); g.lineTo(hx + 0.03 + ea, hy + 0.35); g.lineTo(hx + 0.13, hy + 0.07); g.closePath(); g.fill();
-    // eye
-    g.fillStyle = COL_EYE; g.beginPath(); g.ellipse(hx + 0.05, hy + 0.03, 0.034, 0.034, 0, 0, TAU); g.fill();
+    var ea = -0.25 * P.eb;
+    g.beginPath(); g.moveTo(-0.12, 0.05); g.lineTo(-0.13 + ea, 0.34); g.lineTo(0.0, 0.09); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(0.0, 0.06); g.lineTo(0.03 + ea, 0.35); g.lineTo(0.13, 0.07); g.closePath(); g.fill();
+    if (P.eye > 0.5) { g.fillStyle = COL_EYE; g.beginPath(); g.ellipse(0.05, 0.03, 0.034, 0.034, 0, 0, TAU); g.fill(); }
+    g.restore();
+
+    if (tailFront) tail();
   }
 
   // ---------------------------------------------------------------------------
@@ -547,6 +834,7 @@
     for (var j = 0; j < foxes.length; j++) this.drawFox(world, foxes[j]);
     this.drawPuffs(world);
     this.drawEmbers(world);
+    this.drawZs(world);
 
     var c = ctx, dpr = this.dpr, cw = this.cw, ch = this.ch;
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -649,6 +937,14 @@
     }
   };
 
+  Renderer.prototype.drawZs = function (world) {
+    for (var i = 0; i < world.zs.length; i++) {
+      var p = world.zs[i];
+      var age = (world.time - p.born) / 2.6;
+      this.put(Math.floor(p.x / this.cw), Math.floor(p.y / this.ch), age < 0.35 ? 'z' : 'Z', C_MOON, 0.9 * (1 - age * age));
+    }
+  };
+
   Renderer.prototype.drawEmbers = function (world) {
     for (var i = 0; i < world.embers.length; i++) {
       var p = world.embers[i];
@@ -664,7 +960,7 @@
       var age = (world.time - p.born) / 0.6;
       var d = (0.5 + age * 2.2) * this.ch * p.r;
       var x = p.x + Math.cos(p.a) * d * 1.4, y = p.y + Math.sin(p.a) * d * 0.6;
-      this.put(Math.floor(x / this.cw), Math.floor(y / this.ch), age < 0.7 ? p.g : '.', C_PREY, 1 - age);
+      this.put(Math.floor(x / this.cw), Math.floor(y / this.ch), age < 0.7 ? p.g : '.', p.col !== undefined ? p.col : C_PREY, 1 - age);
     }
   };
 
@@ -688,7 +984,7 @@
 
     // fox bbox in cells (clamped to the grid)
     var c0 = Math.max(0, Math.floor((ox - 1.15 * L) / cw)), c1 = Math.min(cols - 1, Math.floor((ox + 1.15 * L) / cw));
-    var r0 = Math.max(0, Math.floor((oy - 1.15 * L) / ch)), r1 = Math.min(rows - 1, Math.floor((oy + 0.08 * L) / ch));
+    var r0 = Math.max(0, Math.floor((oy - 1.25 * L) / ch)), r1 = Math.min(rows - 1, Math.floor((oy + 0.2 * L) / ch));
     if (c1 < c0 || r1 < r0) return;
     var gw = c1 - c0 + 1, gh = r1 - r0 + 1;
     var pw = gw * 2, ph = gh * 2;
@@ -741,21 +1037,6 @@
   var rect = { left: 0, top: 0, width: 0, height: 0 };
   var countEl = document.getElementById('fox-count');
 
-  function mergeBoxes(boxes) {
-    var out = [];
-    boxes.sort(function (a, b) { return a.top - b.top; });
-    for (var i = 0; i < boxes.length; i++) {
-      var b = boxes[i], hit = null;
-      for (var j = 0; j < out.length; j++) {
-        var o = out[j];
-        if (b.top - o.bottom < 120 && b.left - o.right < 120 && o.left - b.right < 120) { hit = o; break; }
-      }
-      if (!hit) out.push({ left: b.left, top: b.top, right: b.right, bottom: b.bottom });
-      else { hit.left = Math.min(hit.left, b.left); hit.right = Math.max(hit.right, b.right); hit.bottom = Math.max(hit.bottom, b.bottom); hit.top = Math.min(hit.top, b.top); }
-    }
-    return out;
-  }
-
   function settle() {
     for (var i = 0; i < world.foxes.length; i++) {
       var f = world.foxes[i];
@@ -784,9 +1065,10 @@
       var r = el.getBoundingClientRect();
       return { left: r.left - cr.left, top: r.top - cr.top, right: r.right - cr.left, bottom: r.bottom - cr.top };
     }).filter(function (b) { return b.right > b.left && b.bottom > b.top; });
-    var merged = mergeBoxes(boxes);
-    renderer.setDimBoxes(merged);
-    world.avoid = merged;
+    // Boxes are used as-is. Merging nearby boxes once fused the full-width
+    // header with the hero on short viewports and dimmed the whole sky.
+    renderer.setDimBoxes(boxes);
+    world.avoid = boxes;
   }
 
   function report() {
