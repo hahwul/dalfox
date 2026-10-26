@@ -65,49 +65,46 @@
   }
 })();
 
-// Scroll-reveal — fade the landing sections up as they enter the viewport.
-// The hidden state lives behind a `.reveal-on` class that this script adds, so
-// a visitor with JS disabled, no IntersectionObserver, or a reduced-motion
-// preference always sees fully-rendered content (never a blank page).
+// The field sinks as the strips slide over it, and each strip reveals as it
+// enters the viewport. Both are skipped under prefers-reduced-motion, and the
+// hidden state lives behind html.motion-on so no-JS visitors see everything.
 (function () {
-  var landing = document.querySelector('.landing');
-  if (!landing) return;
+  var field = document.querySelector('.field');
+  if (!field) return;
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) return;
+  // is-sinking gates the costly blur filter to the transition itself;
+  // is-covered hides the field entirely (no paint, no compositing) and tells
+  // fox.js to stop its loop. Writes are skipped when nothing changed, since
+  // scroll keeps firing long after the field is gone.
+  var ticking = false, lastP = '';
+  function update() {
+    ticking = false;
+    var h = field.offsetHeight || 1;
+    var p = Math.min(1, Math.max(0, window.scrollY / (h * 0.85)));
+    var ps = p.toFixed(3);
+    if (ps === lastP) return;
+    lastP = ps;
+    field.style.setProperty('--field-p', ps);
+    field.classList.toggle('is-sinking', p > 0);
+    field.classList.toggle('is-covered', p >= 1);
+  }
+  window.addEventListener('scroll', function () {
+    if (!ticking) { ticking = true; requestAnimationFrame(update); }
+  }, { passive: true });
+  window.addEventListener('resize', update);
+  update();
+
   if (!('IntersectionObserver' in window)) return;
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-  var SELECTOR = [
-    '.hero-eyebrow', '.hero-title', '.hero-desc', '.hero-actions', '.hero-install', '.hero-visual',
-    '.stat-item',
-    '.section-eyebrow', '.section-title', '.section-desc',
-    '.feature-cell', '.mode-tab', '.how-step',
-    '.community-links', '.contributors-label', '.contributors',
-    '.cta-title', '.cta-desc', '.cta-buttons'
-  ].join(', ');
-
-  var targets = Array.prototype.slice.call(landing.querySelectorAll(SELECTOR));
-  if (!targets.length) return;
-
-  landing.classList.add('reveal-on');
-  targets.forEach(function (el) { el.setAttribute('data-reveal', ''); });
-
+  var strips = document.querySelectorAll('.strip');
+  if (!strips.length) return;
+  document.documentElement.classList.add('motion-on');
   var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (entry) {
-      if (!entry.isIntersecting) return;
-      io.unobserve(entry.target);
-      entry.target.classList.add('in-view');
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      e.target.classList.add('in-view');
+      io.unobserve(e.target);
     });
-  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
-
-  // Stagger siblings that reveal together (grid cells, stat columns, buttons)
-  // so a row cascades in rather than snapping as one block.
-  targets.forEach(function (el) {
-    var siblings = Array.prototype.filter.call(el.parentElement.children, function (c) {
-      return c.hasAttribute && c.hasAttribute('data-reveal');
-    });
-    var index = siblings.indexOf(el);
-    if (index > 0) {
-      el.style.setProperty('--reveal-delay', Math.min(index, 6) * 55 + 'ms');
-    }
-    io.observe(el);
-  });
+  }, { rootMargin: '0px 0px -18% 0px', threshold: 0.12 });
+  strips.forEach(function (el) { io.observe(el); });
 })();

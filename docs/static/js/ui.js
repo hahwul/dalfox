@@ -9,15 +9,44 @@
 
   // --- Active nav/sidebar link highlighting ---
   var path = location.pathname.replace(/\/$/, '') || '/';
-  document.querySelectorAll('.sidebar-links a, .header-nav a').forEach(function (a) {
+  document.querySelectorAll('.sidebar-links a, .site-nav a').forEach(function (a) {
     var href = (a.getAttribute('href') || '')
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/\/$/, '') || '/';
     if (href === path) {
       a.classList.add('active');
       a.setAttribute('aria-current', 'page');
+    } else if (a.closest('.site-nav') && href !== '/' && href !== '/ko' && path.indexOf(href + '/') === 0) {
+      a.classList.add('active');
     }
   });
+
+  // --- Landing header: transparent over the field, solid once scrolled ---
+  var header = document.querySelector('.site-header');
+  if (header && document.body.classList.contains('is-landing')) {
+    var onScroll = function () { header.classList.toggle('is-scrolled', window.scrollY > 24); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+
+  // --- Theme toggle (night by default; the choice persists) ---
+  var themeBtn = document.querySelector('.theme-toggle');
+  var themeMeta = document.querySelector('meta[name="theme-color"]');
+  function applyTheme(light) {
+    if (light) document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    if (themeBtn) themeBtn.setAttribute('aria-label', themeBtn.getAttribute(light ? 'data-label-dark' : 'data-label-light'));
+    if (themeMeta) themeMeta.setAttribute('content', light ? '#f4f1ea' : '#0b0d16');
+    try { localStorage.setItem('dalfox-theme', light ? 'light' : 'dark'); } catch (e) {}
+  }
+  if (themeBtn) {
+    var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    themeBtn.setAttribute('aria-label', themeBtn.getAttribute(isLight ? 'data-label-dark' : 'data-label-light'));
+    if (themeMeta && isLight) themeMeta.setAttribute('content', '#f4f1ea');
+    themeBtn.addEventListener('click', function () {
+      applyTheme(document.documentElement.getAttribute('data-theme') !== 'light');
+    });
+  }
 
   // --- Search overlay wiring (handlers live in search.js) ---
   var overlay = document.getElementById('searchOverlay');
@@ -40,7 +69,7 @@
   }
 
   // --- Sidebar collapse / expand (desktop docs layout) ---
-  // The initial state is applied pre-paint by js/sidebar-init.js; here we just
+  // The initial state is applied pre-paint by js/boot.js; here we just
   // wire the toggle buttons and persist the choice.
   var collapseBtn = document.getElementById('sidebar-collapse');
   var expandBtn = document.getElementById('sidebar-expand');

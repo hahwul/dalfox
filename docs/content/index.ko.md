@@ -4,81 +4,32 @@ description = "Dalfox는 반사형, 저장형, DOM 기반 XSS를 탐지하고 AS
 template = "landing"
 +++
 
-<section class="hero">
-  <div class="hero-illustration" aria-hidden="true"></div>
-  <div class="hero-inner">
-    <h1 class="hero-title">
-      <span class="strike">모든</span> <span class="accent">XSS</span>를 사냥하세요,<br>
-      당하기 전에.
-    </h1>
-    <p class="hero-desc">
-      파라미터마다 반사형, 저장형, DOM 기반 XSS를 찾고, 적중한 결과를 파싱한 HTML과 JavaScript에서 다시 확인합니다.
-    </p>
-    <div class="hero-actions">
-      <a href="./getting-started/" class="btn btn-primary">
-        시작하기
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-      </a>
-      <a href="https://github.com/hahwul/dalfox" class="btn btn-secondary" target="_blank" rel="noopener">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-        GitHub에서 스타
-      </a>
+<section class="field">
+  <canvas id="field" class="field-canvas" aria-hidden="true"></canvas>
+  <div class="hero" data-fox-avoid>
+    <blockquote class="hero-quote">메아리 가득한 들판에서,<br>달아나는 하나만 쫓는다.</blockquote>
+    <h1 class="hero-title">Dalfox는 <span class="ember">XSS</span>를 사냥합니다.</h1>
+    <div class="hero-prose">
+      <p>Rust로 작성한 <strong>반사형, 저장형, DOM 기반 XSS</strong> 오픈소스 스캐너입니다. 파라미터를 찾아내고, 컨텍스트마다 탐침을 보내고, 파싱한 HTML과 JavaScript에서 실행을 확인한 뒤에야 결과로 보고합니다.</p>
+      <p><a href="./getting-started/quick-start/">명령줄</a>, <a href="./integrations/server/">REST 서버</a>, <a href="./integrations/mcp/">MCP 도구</a> 어느 쪽으로 실행해도 같은 엔진이 돌고, 모든 결과에는 근거 등급이 붙습니다.</p>
     </div>
+    <p class="hero-links">
+      <a href="./getting-started/">시작하기</a><span class="sep">/</span>
+      <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">github</a><span class="sep">/</span>
+      <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스</a><span class="sep">/</span>
+      <a href="./reference/cli/">cli 레퍼런스</a>
+    </p>
   </div>
+  <p class="field-stat" data-fox-avoid aria-hidden="true"><span>여우</span><b id="fox-count">0</b><span>마리가 들판에</span><span class="hint">· 클릭해서 XSS를 떨어뜨려 보세요</span></p>
+  <span class="field-scroll" aria-hidden="true">scroll</span>
 </section>
 
-<div class="stats-bar">
-  <div class="stats-inner">
-    <div class="stat-item">
-      <span class="stat-value">6</span>
-      <span class="stat-label">스캔 모드</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value">AST</span>
-      <span class="stat-label">DOM 검증</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value">MCP</span>
-      <span class="stat-label">AI 지원</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value">OSS</span>
-      <span class="stat-label">MIT 라이선스</span>
-    </div>
-  </div>
-</div>
-
-<section class="section section--terminal">
-  <div class="section-inner">
-    <h2 class="section-title">명령 하나로, 검증된 결과까지</h2>
-    <p class="section-desc">대상을 넘기면 Dalfox가 파라미터를 찾고, 컨텍스트를 확인하고, 페이로드를 주입합니다. 보고하기 전에 파싱한 DOM에서 적중 여부를 확인합니다.</p>
-    <div class="terminal-demo">
-      <div class="hero-visual">
-        <div class="terminal">
-          <div class="terminal-bar">
-            <div class="terminal-dots">
-              <span class="terminal-dot red"></span>
-              <span class="terminal-dot amber"></span>
-              <span class="terminal-dot green"></span>
-            </div>
-            <div class="terminal-title">dalfox · scan</div>
-          </div>
-          <div class="terminal-body">
-            <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
-            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
-            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
-            <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
-            <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
-            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx444fc070%3E</div>
-            <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
-            <div class="t-line t-dim">  ├── Payload: &lt;svg onload=alert(1) class=dlx444fc070&gt;</div>
-            <div class="t-line t-dim">  └── L13: …results were found for &lt;b&gt;&lt;svg onload=alert(1) class=dlx444fc070&gt;&lt;/b&gt;</div>
-            <div class="t-line"></div>
-            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
-            <div class="t-line t-cursor"></div>
-          </div>
-        </div>
-      </div>
+<section class="strip">
+  <div class="strip-inner" data-n="01">
+    <p class="strip-label">install</p>
+    <div class="strip-body">
+      <h2 class="strip-title">바이너리 하나. 따로 준비할 것은 없습니다.</h2>
+      <div class="install-row">
       <div class="hero-install" data-install>
         <div class="hero-install-pm">
           <button class="hero-install-pm-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="설치 방법 선택">
@@ -92,6 +43,7 @@ template = "landing"
             <li role="option" aria-selected="false" data-label="choco" data-cmd="choco install dalfox">Chocolatey</li>
             <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
             <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
+            <li role="option" aria-selected="false" data-label="docker" data-cmd="docker run -it hahwul/dalfox:latest">Docker</li>
           </ul>
         </div>
         <span class="hero-install-sep" aria-hidden="true"></span>
@@ -99,174 +51,141 @@ template = "landing"
         <code>brew install dalfox</code>
         <button class="hero-install-copy" type="button">복사</button>
       </div>
-    </div>
-  </div>
-</section>
-
-<section class="section">
-  <div class="section-inner">
-    <p class="section-eyebrow">// 기능</p>
-    <h2 class="section-title">스캐너 하나로 XSS 작업 전체를</h2>
-    <p class="section-desc">URL 하나든 파이프라인 전체든 그대로 돌릴 수 있습니다. CLI, 파일 배치, 파이프, 서버, MCP 어디서든 같은 엔진이 동작하고, 모든 결과에는 증거가 얼마나 강한지에 따라 등급이 붙습니다.</p>
-    <div class="features-grid">
-      <div class="feature-cell wide">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        </div>
-        <h3>깊이 있는 XSS 탐색</h3>
-        <p>반사형, 저장형, DOM 기반 XSS를 페이로드 최적화와 함께 찾습니다. HTML 파서와 JavaScript AST로 DOM을 검증해, 실제로 실행되는 반사와 단순히 되돌아오기만 하는 반사를 구분합니다.</p>
-        <div class="feature-tags">
-          <span class="feature-tag">reflected</span>
-          <span class="feature-tag">stored</span>
-          <span class="feature-tag">dom</span>
-          <span class="feature-tag">ast-verify</span>
-        </div>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-        </div>
-        <h3>파라미터 인텔리전스</h3>
-        <p>마이닝, 정적 분석, 사전 인코딩 탐지, 문자별 프로브로 파라미터가 어디에 반사되는지, 어떤 문자가 살아남는지 파악합니다.</p>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
-        </div>
-        <h3>WAF 인식</h3>
-        <p>주요 WAF를 핑거프린팅하고 인코딩, 대소문자 변형, 공백·엔티티 기법으로 페이로드를 바꿔 우회합니다.</p>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        </div>
-        <h3>파이프라인을 위한 설계</h3>
-        <p>파이프, 파일 배치, 서버 모드를 CI/CD에 그대로 쓸 수 있습니다. 프록시, 크롤러, 정찰 도구 뒤에 Dalfox를 연결하세요.</p>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-        </div>
-        <h3>REST API &amp; MCP</h3>
-        <p>Dalfox를 REST로 제어하는 상시 서버로 실행하거나, 에이전트와 IDE에 MCP 도구로 노출합니다.</p>
-      </div>
-      <div class="feature-cell full">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        </div>
-        <h3>바로 제출할 수 있는 리포트</h3>
-        <p>터미널용 간결한 출력부터 GitHub 코드 스캐닝용 SARIF까지, 작업 흐름에 맞는 형식을 고르세요.</p>
-        <div class="feature-tags">
-          <span class="feature-tag">JSON</span>
-          <span class="feature-tag">JSONL</span>
-          <span class="feature-tag">Markdown</span>
-          <span class="feature-tag">SARIF</span>
-          <span class="feature-tag">TOML</span>
-          <span class="feature-tag">Plain</span>
-        </div>
+      <p class="strip-prose">macOS, Linux, Windows용 빌드 바이너리는 <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">릴리스 페이지</a>에 있습니다. Docker와 소스 빌드를 포함한 모든 설치 경로는 <a href="./getting-started/installation/">설치 가이드</a>에서 다룹니다.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="section section--modes">
-  <div class="modes-illustration" aria-hidden="true"></div>
-  <div class="section-inner">
-    <p class="section-eyebrow">// 모드</p>
-    <h2 class="section-title">Dalfox를 실행하는 여섯 가지 방법</h2>
-    <p class="section-desc">대상에 맞는 형태를 고르세요. 모든 모드가 같은 탐색·검증 엔진을 공유합니다.</p>
-    <div class="modes" data-modes>
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-url" checked>
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-file">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-pipe">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-sxss">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-server">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-mcp">
-      <div class="mode-tabs" role="tablist" aria-label="Dalfox 실행 모드">
-        <label class="mode-tab" for="m-url"><span class="mode-tab-name">URL</span><span class="mode-tab-sub">단일 대상</span></label>
-        <label class="mode-tab" for="m-file"><span class="mode-tab-name">FILE</span><span class="mode-tab-sub">목록 일괄 처리</span></label>
-        <label class="mode-tab" for="m-pipe"><span class="mode-tab-name">PIPE</span><span class="mode-tab-sub">stdin 파이프라인</span></label>
-        <label class="mode-tab" for="m-sxss"><span class="mode-tab-name">SXSS</span><span class="mode-tab-sub">저장형 XSS</span></label>
-        <label class="mode-tab" for="m-server"><span class="mode-tab-name">SERVER</span><span class="mode-tab-sub">REST 데몬</span></label>
-        <label class="mode-tab" for="m-mcp"><span class="mode-tab-name">MCP</span><span class="mode-tab-sub">에이전트 네이티브</span></label>
+<section class="strip">
+  <div class="strip-inner" data-n="02">
+    <p class="strip-label">run</p>
+    <div class="strip-body">
+      <h2 class="strip-title">명령 하나로, 검증된 결과까지.</h2>
+      <p class="strip-prose">대상만 지정하세요. 파라미터를 찾고, 컨텍스트마다 살아남는 문자를 탐침하고, 페이로드를 주입한 뒤 파싱한 DOM에서 실행을 확인하고 나서야 보고합니다.</p>
+      <div class="terminal">
+        <div class="terminal-bar"><span>dalfox · scan</span><span>zsh</span></div>
+        <div class="terminal-body">
+          <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
+          <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
+          <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
+          <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx444fc070%3E</div>
+          <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
+          <div class="t-line t-dim">  ├── Payload: &lt;svg onload=alert(1) class=dlx444fc070&gt;</div>
+          <div class="t-line t-dim">  └── L13: …results were found for &lt;b&gt;&lt;svg onload=alert(1) class=dlx444fc070&gt;&lt;/b&gt;</div>
+          <div class="t-line"></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
+          <div class="t-line t-cursor"></div>
+        </div>
       </div>
-      <div class="mode-panels">
-        <div class="mode-panel" data-mode="url">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
-          <p>URL 하나를 스캔합니다. 파라미터를 마이닝하고, 컨텍스트마다 프로빙하고, 적중한 결과를 파싱한 응답에서 확인합니다.</p>
+      <p class="strip-prose"><code>[V]</code>는 페이로드가 단순히 되돌아온 것이 아니라 파싱된 응답 안에서 실행 위치에 놓였다는 뜻입니다. 등급별 의미는 <a href="./guide/detection-model/">탐지 모델</a>에서 설명합니다.</p>
+    </div>
+  </div>
+</section>
+
+<section class="strip">
+  <div class="strip-inner" data-n="03">
+    <p class="strip-label">what it does</p>
+    <div class="strip-body">
+      <h2 class="strip-title">XSS 워크플로 전체를 스캐너 하나로.</h2>
+      <dl class="facts">
+        <div>
+          <dt>discover</dt>
+          <dd>쿼리, 본문, 경로, 헤더, 쿠키, 폼, 프래그먼트에서 파라미터를 찾고, DOM과 워드리스트, JSON 키에서 더 캐냅니다.</dd>
         </div>
-        <div class="mode-panel" data-mode="file">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
-          <p>파일에 한 줄에 하나씩 적힌 대상 목록을 스캔해 리포트 하나로 모읍니다.</p>
+        <div>
+          <dt>probe</dt>
+          <dd>문자 단위 탐침으로 파라미터가 어디에 놓이는지, 어떤 문자가 살아남는지 알아내고, 그 자리에서 통할 수 있는 페이로드만 보냅니다.</dd>
         </div>
-        <div class="mode-panel" data-mode="pipe">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
-          <p>stdin으로 대상을 읽으므로 크롤러나 정찰 파이프라인 끝에 바로 붙일 수 있습니다.</p>
+        <div>
+          <dt>verify</dt>
+          <dd>HTML 파서와 JavaScript AST로 실행되는 반사와 단순히 되돌아오는 반사를 구분합니다. 모든 결과에 근거가 붙습니다.</dd>
         </div>
-        <div class="mode-panel" data-mode="sxss">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
-          <p>한 엔드포인트에 주입하고, 저장된 페이로드가 나타나는 다른 페이지를 확인합니다.</p>
+        <div>
+          <dt>evade</dt>
+          <dd>주요 WAF를 식별하고 인코딩, 대소문자, 공백, 엔티티 변형으로 페이로드를 바꿔 우회를 시도합니다.</dd>
         </div>
-        <div class="mode-panel" data-mode="server">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
-          <p>비동기 스캔 작업, 연동, 대시보드를 위한 상시 REST API로 Dalfox를 실행합니다.</p>
+        <div>
+          <dt>pipeline</dt>
+          <dd>URL, 파일, stdin, 원시 HTTP 요청, HAR, OpenAPI를 읽습니다. CI에서 크롤러, 프록시, 정찰 도구 뒤에 바로 이어 붙일 수 있습니다.</dd>
         </div>
-        <div class="mode-panel" data-mode="mcp">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
-          <p>Dalfox를 MCP 도구로 노출해 에이전트와 IDE가 스캔을 대신 돌리게 합니다.</p>
+        <div>
+          <dt>report</dt>
+          <dd>Plain, JSON, JSONL, Markdown, TOML, 그리고 GitHub 코드 스캐닝용 SARIF. 요청과 응답 본문은 요청했을 때만 포함합니다.</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section class="strip">
+  <div class="strip-inner" data-n="04">
+    <p class="strip-label">modes</p>
+    <div class="strip-body">
+      <h2 class="strip-title">여섯 가지 실행 방식.</h2>
+      <p class="strip-prose">대상에 맞는 형태를 고르세요. 어떤 모드든 같은 탐색·검증 엔진을 공유합니다.</p>
+      <div class="modes" data-modes>
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-url" checked>
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-file">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-pipe">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-sxss">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-server">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-mcp">
+        <div class="mode-tabs" role="tablist" aria-label="Dalfox 실행 모드">
+          <label class="mode-tab" for="m-url"><span class="mode-tab-name">url</span><span class="mode-tab-sub">단일 대상</span></label>
+          <label class="mode-tab" for="m-file"><span class="mode-tab-name">file</span><span class="mode-tab-sub">목록 일괄 스캔</span></label>
+          <label class="mode-tab" for="m-pipe"><span class="mode-tab-name">pipe</span><span class="mode-tab-sub">stdin 파이프라인</span></label>
+          <label class="mode-tab" for="m-sxss"><span class="mode-tab-name">sxss</span><span class="mode-tab-sub">저장형 XSS</span></label>
+          <label class="mode-tab" for="m-server"><span class="mode-tab-name">server</span><span class="mode-tab-sub">REST 데몬</span></label>
+          <label class="mode-tab" for="m-mcp"><span class="mode-tab-name">mcp</span><span class="mode-tab-sub">에이전트 네이티브</span></label>
+        </div>
+        <div class="mode-panels">
+          <div class="mode-panel" data-mode="url">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
+            <p>URL 하나를 스캔합니다. 파라미터를 캐내고, 컨텍스트마다 탐침하고, 모든 적중을 파싱한 응답에서 확인합니다.</p>
+          </div>
+          <div class="mode-panel" data-mode="file">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
+            <p>한 줄에 URL 하나씩 적힌 파일을 읽어 대상 목록을 리포트 하나로 스캔합니다.</p>
+          </div>
+          <div class="mode-panel" data-mode="pipe">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
+            <p>stdin에서 대상을 읽어 크롤러나 정찰 파이프라인의 맨 끝에 놓을 수 있습니다.</p>
+          </div>
+          <div class="mode-panel" data-mode="sxss">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
+            <p>한 엔드포인트에 주입하고, 저장된 페이로드가 나타나는 페이지에서 확인합니다.</p>
+          </div>
+          <div class="mode-panel" data-mode="server">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
+            <p>비동기 스캔 작업, 연동, 대시보드를 위한 장기 실행 REST API로 띄웁니다.</p>
+          </div>
+          <div class="mode-panel" data-mode="mcp">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
+            <p>에이전트와 IDE가 대신 스캔을 돌릴 수 있도록 MCP 도구로 노출합니다.</p>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="section">
-  <div class="section-inner">
-    <h2 class="section-title">설치부터 검증된 결과까지, 세 단계로</h2>
-    <p class="section-desc">Dalfox는 실행 파일 하나입니다. 설치하고 바로 실행하면 되고, 미리 준비할 것이 없습니다.</p>
-    <div class="how-steps">
-      <div class="how-step">
-        <h3>설치</h3>
-        <p>Homebrew, Snap, AUR, Chocolatey, Nix, Docker, cargo, 사전 빌드된 바이너리 중 편한 방법으로 설치하세요. 따로 관리할 런타임은 없습니다.</p>
-        <code>brew install dalfox</code>
+<section class="strip">
+  <div class="strip-inner" data-n="05">
+    <p class="strip-label">community</p>
+    <div class="strip-body">
+      <h2 class="strip-title">공개된 곳에서, 세계의 헌터들과 함께.</h2>
+      <p class="strip-prose">Dalfox는 직접 쓰는 사람들이 만들어 갑니다. 이슈를 열고, 풀 리퀘스트를 보내고, 페이로드를 커뮤니티와 나눠 주세요.</p>
+      <div class="community-links">
+        <a href="./getting-started/" class="btn btn-primary">문서 읽기</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">기여 가이드</a>
+        <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">열린 이슈</a>
       </div>
-      <div class="how-step">
-        <h3>대상 지정</h3>
-        <p>URL이나 파일을 주거나 크롤링 결과를 파이프로 넘기세요. Dalfox가 파라미터를 마이닝하고 컨텍스트마다 프로빙합니다.</p>
-        <code>dalfox scan https://target.app</code>
+      <div class="contributors" role="img" aria-label="Dalfox 기여자">
+        <img src="/images/CONTRIBUTORS.svg" alt="Dalfox 기여자" loading="lazy">
       </div>
-      <div class="how-step">
-        <h3>결과 전달</h3>
-        <p>CI, 티켓, 코드 스캐닝에 맞춰 SARIF, JSON, Markdown으로 내보내세요. 결과마다 증거가 얼마나 강한지 표시됩니다.</p>
-        <code>dalfox scan urls.txt -f sarif -o report.sarif</code>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="section section--community">
-  <div class="section-inner">
-    <h2 class="section-title">곳곳의 헌터들과 함께, 오픈소스로</h2>
-    <p class="section-desc">Dalfox는 직접 쓰는 사람들이 함께 다듬습니다. 이슈를 열고, 풀 리퀘스트를 보내고, 커뮤니티와 페이로드를 나눠 보세요.</p>
-    <div class="community-links">
-      <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">기여 가이드</a>
-      <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">열린 이슈 보기 →</a>
-    </div>
-    <p class="contributors-label">기여자 여러분 감사합니다</p>
-    <div class="contributors" role="img" aria-label="Dalfox 기여자">
-      <img src="/images/CONTRIBUTORS.svg" alt="Dalfox 기여자" loading="lazy">
-    </div>
-  </div>
-</section>
-
-<section class="cta-section">
-  <div class="cta-illustration" aria-hidden="true"></div>
-  <div class="cta-inner">
-    <h2 class="cta-title">사냥을 시작할까요?</h2>
-    <p class="cta-desc">문서를 읽고, 저장소에 스타를 남기고, 다음 정찰 루프에 Dalfox를 넣어 보세요.</p>
-    <div class="cta-buttons">
-      <a href="./getting-started/" class="btn btn-primary">시작하기</a>
-      <a href="./reference/cli/" class="btn btn-secondary">CLI 레퍼런스</a>
     </div>
   </div>
 </section>

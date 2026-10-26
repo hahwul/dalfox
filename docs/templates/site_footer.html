@@ -1,0 +1,24 @@
+  {# One quiet tier: outbound links over a meta line with the hahwul signature,
+     the licence and the generator credit. "Built with Love" stays untranslated
+     on purpose — it is a signature. #}
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <nav class="footer-links" aria-label="{% if page_language == "ko" %}푸터 링크{% else %}Footer links{% endif %}">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">github</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">{% if page_language == "ko" %}릴리스{% else %}releases{% endif %}</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">{% if page_language == "ko" %}이슈{% else %}issues{% endif %}</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" target="_blank" rel="noopener">{% if page_language == "ko" %}기여하기{% else %}contribute{% endif %}</a>
+        <a href="https://github.com/hahwul/dalfox/security/policy" target="_blank" rel="noopener">{% if page_language == "ko" %}보안{% else %}security{% endif %}</a>
+      </nav>
+      <p class="footer-meta">
+        <a class="footer-sig" href="https://www.hahwul.com" target="_blank" rel="noopener" aria-label="hahwul, Built with Love">
+          <span class="hahwul-img" aria-hidden="true"></span>
+          <span class="footer-love">Built with Love</span>
+        </a>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span>MIT &middot; &copy; 2026 <a href="https://github.com/hahwul" target="_blank" rel="noopener">hahwul</a></span>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <span>{% if page_language == "ko" %}<a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>로 제작{% else %}built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a>{% endif %}</span>
+      </p>
+    </div>
+  </footer>

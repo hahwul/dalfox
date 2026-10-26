@@ -4,81 +4,32 @@ description = "Dalfox is an open-source XSS scanner and automation tool for refl
 template = "landing"
 +++
 
-<section class="hero">
-  <div class="hero-illustration" aria-hidden="true"></div>
-  <div class="hero-inner">
-    <h1 class="hero-title">
-      Hunt <span class="strike">every</span> <span class="accent">XSS</span><br>
-      before it hunts you.
-    </h1>
-    <p class="hero-desc">
-      Finds reflected, stored, and DOM-based XSS in every parameter, then checks each hit in the parsed HTML and JavaScript.
-    </p>
-    <div class="hero-actions">
-      <a href="./getting-started/" class="btn btn-primary">
-        Get started
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-      </a>
-      <a href="https://github.com/hahwul/dalfox" class="btn btn-secondary" target="_blank" rel="noopener">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-        Star on GitHub
-      </a>
+<section class="field">
+  <canvas id="field" class="field-canvas" aria-hidden="true"></canvas>
+  <div class="hero" data-fox-avoid>
+    <blockquote class="hero-quote">in a field of echoes,<br>follow the one that runs.</blockquote>
+    <h1 class="hero-title">Dalfox hunts <span class="ember">XSS</span>.</h1>
+    <div class="hero-prose">
+      <p>An open-source scanner for <strong>reflected, stored, and DOM-based XSS</strong>, written in Rust. It finds the parameters, probes each context, and proves every hit in the parsed HTML and JavaScript before it reports it.</p>
+      <p>Run it as a <a href="./getting-started/quick-start/">command</a>, a <a href="./integrations/server/">REST server</a>, or an <a href="./integrations/mcp/">MCP tool</a>. One engine underneath, and every finding graded by the evidence behind it.</p>
     </div>
+    <p class="hero-links">
+      <a href="./getting-started/">get started</a><span class="sep">/</span>
+      <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">github</a><span class="sep">/</span>
+      <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">releases</a><span class="sep">/</span>
+      <a href="./reference/cli/">cli reference</a>
+    </p>
   </div>
+  <p class="field-stat" data-fox-avoid aria-hidden="true"><b id="fox-count">0</b><span>foxes in the field</span><span class="hint">· click the field to drop an XSS</span></p>
+  <span class="field-scroll" aria-hidden="true">scroll</span>
 </section>
 
-<div class="stats-bar">
-  <div class="stats-inner">
-    <div class="stat-item">
-      <span class="stat-value">6</span>
-      <span class="stat-label">Scan Modes</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value">AST</span>
-      <span class="stat-label">DOM Verification</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value">MCP</span>
-      <span class="stat-label">AI Ready</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value">OSS</span>
-      <span class="stat-label">MIT Licensed</span>
-    </div>
-  </div>
-</div>
-
-<section class="section section--terminal">
-  <div class="section-inner">
-    <h2 class="section-title">One command, a verified finding</h2>
-    <p class="section-desc">Point Dalfox at a target. It finds the parameters, probes each context, injects payloads, and checks the hit in the parsed DOM before it reports it.</p>
-    <div class="terminal-demo">
-      <div class="hero-visual">
-        <div class="terminal">
-          <div class="terminal-bar">
-            <div class="terminal-dots">
-              <span class="terminal-dot red"></span>
-              <span class="terminal-dot amber"></span>
-              <span class="terminal-dot green"></span>
-            </div>
-            <div class="terminal-title">dalfox · scan</div>
-          </div>
-          <div class="terminal-body">
-            <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
-            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
-            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
-            <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
-            <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
-            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx444fc070%3E</div>
-            <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
-            <div class="t-line t-dim">  ├── Payload: &lt;svg onload=alert(1) class=dlx444fc070&gt;</div>
-            <div class="t-line t-dim">  └── L13: …results were found for &lt;b&gt;&lt;svg onload=alert(1) class=dlx444fc070&gt;&lt;/b&gt;</div>
-            <div class="t-line"></div>
-            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
-            <div class="t-line t-cursor"></div>
-          </div>
-        </div>
-      </div>
+<section class="strip">
+  <div class="strip-inner" data-n="01">
+    <p class="strip-label">install</p>
+    <div class="strip-body">
+      <h2 class="strip-title">One binary. Nothing else to set up.</h2>
+      <div class="install-row">
       <div class="hero-install" data-install>
         <div class="hero-install-pm">
           <button class="hero-install-pm-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose install method">
@@ -92,6 +43,7 @@ template = "landing"
             <li role="option" aria-selected="false" data-label="choco" data-cmd="choco install dalfox">Chocolatey</li>
             <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
             <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
+            <li role="option" aria-selected="false" data-label="docker" data-cmd="docker run -it hahwul/dalfox:latest">Docker</li>
           </ul>
         </div>
         <span class="hero-install-sep" aria-hidden="true"></span>
@@ -99,174 +51,141 @@ template = "landing"
         <code>brew install dalfox</code>
         <button class="hero-install-copy" type="button">copy</button>
       </div>
-    </div>
-  </div>
-</section>
-
-<section class="section">
-  <div class="section-inner">
-    <p class="section-eyebrow">// Capabilities</p>
-    <h2 class="section-title">One scanner, the whole XSS workflow</h2>
-    <p class="section-desc">Run it against one URL or a whole pipeline: CLI, file batch, pipe, server, or MCP. The same engine runs underneath each one, and every finding is graded by the evidence behind it.</p>
-    <div class="features-grid">
-      <div class="feature-cell wide">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        </div>
-        <h3>Deep XSS discovery</h3>
-        <p>Reflected, Stored, and DOM-based XSS with payload optimization. DOM verification (HTML parser plus a JavaScript AST) separates a reflection that executes from one that only echoes back.</p>
-        <div class="feature-tags">
-          <span class="feature-tag">reflected</span>
-          <span class="feature-tag">stored</span>
-          <span class="feature-tag">dom</span>
-          <span class="feature-tag">ast-verify</span>
-        </div>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-        </div>
-        <h3>Parameter intelligence</h3>
-        <p>Mining, static analysis, pre-encoding detection, and per-character probes tell Dalfox where each parameter lands and which characters survive.</p>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
-        </div>
-        <h3>WAF aware</h3>
-        <p>Fingerprints common WAFs and mutates payloads with encoding, case changes, and whitespace and entity tricks to get past them.</p>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        </div>
-        <h3>Built for pipelines</h3>
-        <p>Pipe, file-batch, and server modes fit into CI/CD. Chain Dalfox after your proxy, crawler, or recon tools.</p>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-        </div>
-        <h3>REST API &amp; MCP</h3>
-        <p>Run Dalfox as a long-lived server with REST control, or expose it as an MCP tool to agents and IDEs.</p>
-      </div>
-      <div class="feature-cell full">
-        <div class="feature-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        </div>
-        <h3>Reports you can ship</h3>
-        <p>Pick the output your workflow reads, from terse CLI lines to SARIF for GitHub code scanning.</p>
-        <div class="feature-tags">
-          <span class="feature-tag">JSON</span>
-          <span class="feature-tag">JSONL</span>
-          <span class="feature-tag">Markdown</span>
-          <span class="feature-tag">SARIF</span>
-          <span class="feature-tag">TOML</span>
-          <span class="feature-tag">Plain</span>
-        </div>
+      <p class="strip-prose">Prebuilt binaries for macOS, Linux, and Windows are on the <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">releases page</a>. The <a href="./getting-started/installation/">installation guide</a> covers every channel, including Docker and building from source.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="section section--modes">
-  <div class="modes-illustration" aria-hidden="true"></div>
-  <div class="section-inner">
-    <p class="section-eyebrow">// Modes</p>
-    <h2 class="section-title">Six ways to run Dalfox</h2>
-    <p class="section-desc">Pick the shape that fits your target. Every mode shares the same discovery and verification engine.</p>
-    <div class="modes" data-modes>
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-url" checked>
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-file">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-pipe">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-sxss">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-server">
-      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-mcp">
-      <div class="mode-tabs" role="tablist" aria-label="Dalfox run modes">
-        <label class="mode-tab" for="m-url"><span class="mode-tab-name">URL</span><span class="mode-tab-sub">single target</span></label>
-        <label class="mode-tab" for="m-file"><span class="mode-tab-name">FILE</span><span class="mode-tab-sub">batch from a list</span></label>
-        <label class="mode-tab" for="m-pipe"><span class="mode-tab-name">PIPE</span><span class="mode-tab-sub">stdin pipeline</span></label>
-        <label class="mode-tab" for="m-sxss"><span class="mode-tab-name">SXSS</span><span class="mode-tab-sub">stored XSS</span></label>
-        <label class="mode-tab" for="m-server"><span class="mode-tab-name">SERVER</span><span class="mode-tab-sub">REST daemon</span></label>
-        <label class="mode-tab" for="m-mcp"><span class="mode-tab-name">MCP</span><span class="mode-tab-sub">agent-native</span></label>
+<section class="strip">
+  <div class="strip-inner" data-n="02">
+    <p class="strip-label">run</p>
+    <div class="strip-body">
+      <h2 class="strip-title">One command, a verified finding.</h2>
+      <p class="strip-prose">Point Dalfox at a target. It discovers the parameters, probes which characters survive in each context, injects payloads, and checks the hit in the parsed DOM before it reports it.</p>
+      <div class="terminal">
+        <div class="terminal-bar"><span>dalfox · scan</span><span>zsh</span></div>
+        <div class="terminal-body">
+          <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
+          <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
+          <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
+          <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%20onload%3Dalert%281%29%20class%3Ddlx444fc070%3E</div>
+          <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
+          <div class="t-line t-dim">  ├── Payload: &lt;svg onload=alert(1) class=dlx444fc070&gt;</div>
+          <div class="t-line t-dim">  └── L13: …results were found for &lt;b&gt;&lt;svg onload=alert(1) class=dlx444fc070&gt;&lt;/b&gt;</div>
+          <div class="t-line"></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
+          <div class="t-line t-cursor"></div>
+        </div>
       </div>
-      <div class="mode-panels">
-        <div class="mode-panel" data-mode="url">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
-          <p>Scan a single URL. Dalfox mines parameters, probes each context, and checks every hit in the parsed response.</p>
+      <p class="strip-prose">The <code>[V]</code> means the payload was found executing in the parsed response, not merely echoed back. The <a href="./guide/detection-model/">detection model</a> explains every grade.</p>
+    </div>
+  </div>
+</section>
+
+<section class="strip">
+  <div class="strip-inner" data-n="03">
+    <p class="strip-label">what it does</p>
+    <div class="strip-body">
+      <h2 class="strip-title">The whole XSS workflow, in one scanner.</h2>
+      <dl class="facts">
+        <div>
+          <dt>discover</dt>
+          <dd>Finds parameters in the query, body, path, headers, cookies, forms, and fragments, then mines more from the DOM, a wordlist, and JSON keys.</dd>
         </div>
-        <div class="mode-panel" data-mode="file">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
-          <p>Scan a list of targets from a file, one URL per line, into one report.</p>
+        <div>
+          <dt>probe</dt>
+          <dd>Per-character probes tell Dalfox where each parameter lands and which characters survive, so it only sends payloads that can work there.</dd>
         </div>
-        <div class="mode-panel" data-mode="pipe">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
-          <p>Read targets from stdin, so Dalfox sits at the end of your crawler or recon pipeline.</p>
+        <div>
+          <dt>verify</dt>
+          <dd>An HTML parser plus a JavaScript AST separate a reflection that executes from one that only echoes back. Findings carry their evidence.</dd>
         </div>
-        <div class="mode-panel" data-mode="sxss">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
-          <p>Inject on one endpoint, then check the page where the stored payload shows up.</p>
+        <div>
+          <dt>evade</dt>
+          <dd>Fingerprints common WAFs and mutates payloads with encoding, case, whitespace, and entity tricks to get past them.</dd>
         </div>
-        <div class="mode-panel" data-mode="server">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
-          <p>Run Dalfox as a long-lived REST API for async scan jobs, integrations, and dashboards.</p>
+        <div>
+          <dt>pipeline</dt>
+          <dd>Reads URLs, files, stdin, raw HTTP requests, HAR, and OpenAPI. Chains after your crawler, proxy, or recon tools in CI.</dd>
         </div>
-        <div class="mode-panel" data-mode="mcp">
-          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
-          <p>Expose Dalfox as MCP tools so agents and IDEs can run scans for you.</p>
+        <div>
+          <dt>report</dt>
+          <dd>Plain, JSON, JSONL, Markdown, TOML, or SARIF for GitHub code scanning. Request and response bodies only when you ask.</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section class="strip">
+  <div class="strip-inner" data-n="04">
+    <p class="strip-label">modes</p>
+    <div class="strip-body">
+      <h2 class="strip-title">Six ways to run it.</h2>
+      <p class="strip-prose">Pick the shape that fits your target. Every mode shares the same discovery and verification engine.</p>
+      <div class="modes" data-modes>
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-url" checked>
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-file">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-pipe">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-sxss">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-server">
+        <input class="mode-radio" type="radio" name="dalfox-mode" id="m-mcp">
+        <div class="mode-tabs" role="tablist" aria-label="Dalfox run modes">
+          <label class="mode-tab" for="m-url"><span class="mode-tab-name">url</span><span class="mode-tab-sub">single target</span></label>
+          <label class="mode-tab" for="m-file"><span class="mode-tab-name">file</span><span class="mode-tab-sub">batch from a list</span></label>
+          <label class="mode-tab" for="m-pipe"><span class="mode-tab-name">pipe</span><span class="mode-tab-sub">stdin pipeline</span></label>
+          <label class="mode-tab" for="m-sxss"><span class="mode-tab-name">sxss</span><span class="mode-tab-sub">stored XSS</span></label>
+          <label class="mode-tab" for="m-server"><span class="mode-tab-name">server</span><span class="mode-tab-sub">REST daemon</span></label>
+          <label class="mode-tab" for="m-mcp"><span class="mode-tab-name">mcp</span><span class="mode-tab-sub">agent-native</span></label>
+        </div>
+        <div class="mode-panels">
+          <div class="mode-panel" data-mode="url">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
+            <p>Scan a single URL. Dalfox mines parameters, probes each context, and checks every hit in the parsed response.</p>
+          </div>
+          <div class="mode-panel" data-mode="file">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
+            <p>Scan a list of targets from a file, one URL per line, into one report.</p>
+          </div>
+          <div class="mode-panel" data-mode="pipe">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
+            <p>Read targets from stdin, so Dalfox sits at the end of your crawler or recon pipeline.</p>
+          </div>
+          <div class="mode-panel" data-mode="sxss">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss --sxss-url https://app/feed</code></div>
+            <p>Inject on one endpoint, then check the page where the stored payload shows up.</p>
+          </div>
+          <div class="mode-panel" data-mode="server">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
+            <p>Run Dalfox as a long-lived REST API for async scan jobs, integrations, and dashboards.</p>
+          </div>
+          <div class="mode-panel" data-mode="mcp">
+            <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
+            <p>Expose Dalfox as MCP tools so agents and IDEs can run scans for you.</p>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="section">
-  <div class="section-inner">
-    <h2 class="section-title">From install to verified finding in three steps</h2>
-    <p class="section-desc">Dalfox is a single binary. Install it and run it, with nothing else to set up first.</p>
-    <div class="how-steps">
-      <div class="how-step">
-        <h3>Install</h3>
-        <p>Install with Homebrew, Snap, the AUR, Chocolatey, Nix, Docker, cargo, or a prebuilt binary. There is no runtime to manage.</p>
-        <code>brew install dalfox</code>
+<section class="strip">
+  <div class="strip-inner" data-n="05">
+    <p class="strip-label">community</p>
+    <div class="strip-body">
+      <h2 class="strip-title">Built in the open, by hunters everywhere.</h2>
+      <p class="strip-prose">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or share payloads with the community.</p>
+      <div class="community-links">
+        <a href="./getting-started/" class="btn btn-primary">Read the docs</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">Contributing guide</a>
+        <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">Open issues</a>
       </div>
-      <div class="how-step">
-        <h3>Point at a target</h3>
-        <p>Give it a URL or a file, or pipe in a crawl. Dalfox mines parameters and probes each context.</p>
-        <code>dalfox scan https://target.app</code>
+      <div class="contributors" role="img" aria-label="Dalfox contributors">
+        <img src="/images/CONTRIBUTORS.svg" alt="Dalfox contributors" loading="lazy">
       </div>
-      <div class="how-step">
-        <h3>Ship the findings</h3>
-        <p>Export to SARIF, JSON, or Markdown for CI, tickets, or code scanning. Each finding says how strong its evidence is.</p>
-        <code>dalfox scan urls.txt -f sarif -o report.sarif</code>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="section section--community">
-  <div class="section-inner">
-    <h2 class="section-title">Built in the open, by hunters everywhere</h2>
-    <p class="section-desc">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or share payloads with the community.</p>
-    <div class="community-links">
-      <a href="https://github.com/hahwul/dalfox/blob/main/.github/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">Contributing guide</a>
-      <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">Browse open issues →</a>
-    </div>
-    <p class="contributors-label">Thanks to our contributors</p>
-    <div class="contributors" role="img" aria-label="Dalfox contributors">
-      <img src="/images/CONTRIBUTORS.svg" alt="Dalfox contributors" loading="lazy">
-    </div>
-  </div>
-</section>
-
-<section class="cta-section">
-  <div class="cta-illustration" aria-hidden="true"></div>
-  <div class="cta-inner">
-    <h2 class="cta-title">Ready to hunt?</h2>
-    <p class="cta-desc">Read the docs, star the repo, or drop Dalfox into your next recon loop.</p>
-    <div class="cta-buttons">
-      <a href="./getting-started/" class="btn btn-primary">Get started</a>
-      <a href="./reference/cli/" class="btn btn-secondary">CLI reference</a>
     </div>
   </div>
 </section>
