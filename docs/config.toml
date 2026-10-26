@@ -299,9 +299,9 @@ emoji = false         # If true, convert emoji shortcodes (e.g. :smile:) to emoj
 
 [og.auto_image]
 enabled = true
-background = "#070811"                          # site dark navy — overlaid over the illustration
-text_color = "#e6edf7"                          # site primary text
-accent_color = "#7c87ea"                        # site accent (moonlit indigo)
+background = "#0b0d16"                          # site night ground — overlaid over the illustration
+text_color = "#e9ecf4"                          # site primary text
+accent_color = "#8f99ef"                        # site accent (brand navy lifted to moonlight)
 font_size = 52
 logo = "static/images/logo_solo.png"
 logo_position = "bottom-left"                   # bottom-left, bottom-right, top-left, top-right

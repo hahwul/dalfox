@@ -104,6 +104,35 @@ cargo run -- payload --help            # payload selectors
 
 If `--help` and the docs disagree, the code wins; update the docs.
 
+### Site design (templates + static)
+
+The look is "the field": a quiet typographic site in two moods (night by default,
+paper via the header toggle; `html[data-theme="light"]`, persisted as
+`dalfox-theme` and restored pre-paint by `static/js/boot.js`). All colours are
+tokens at the top of `static/css/style.css`; the light block overrides them.
+
+- Landing (`content/index.md` + `index.ko.md`, `template = "landing"`): a
+  full-viewport `<canvas id="field">` where foxes run, drawn as a monospace
+  glyph grid by `static/js/fox.js`. Any element that must stay legible over the
+  field carries `data-fox-avoid` (foxes steer around it and the glyphs behind
+  it dim); `data-fox-ignore` on a control stops a click from dropping a lure.
+  The canvas reads its palette from the `--fox-*` / `--field-*` tokens, so a
+  theme change needs no JS edit. Reduced motion renders one still frame.
+  The field is `position: sticky`; the strips below slide over it while
+  `landing.js` writes `--field-p` (0→1) so the canvas blurs and sinks. It
+  toggles `.is-sinking` (the blur filter exists only then) and `.is-covered`
+  on `.field` (the field leaves the compositor and fox.js stops its loop). Strips reveal on entry via
+  `html.motion-on` + `.strip.in-view`; each `.strip-inner` carries `data-n`
+  for its outlined numeral. Clicking the field drops an `<XSS>` lure.
+- Keep the EN and KO landings in lockstep: same sections, same `class="…"`
+  sets, only the copy differs. Raw HTML blocks must stay separated by blank
+  lines or the markdown processor swallows them.
+- CSP is `script-src 'self'`: no inline scripts, no CDNs. Shared chrome lives
+  in `templates/search_modal.html` and `templates/site_footer.html`.
+- Verify visually with headless Chrome (`--force-prefers-reduced-motion`
+  makes the field deterministic) against a `HWARO_DEV=1 hwaro build` served on
+  the same port as `--base-url`.
+
 ### Avoid
 
 - Speculative documentation. If a feature doesn't exist in code yet, don't pre-announce it here.
