@@ -419,8 +419,35 @@ fn deeply_nested_script_is_inert_and_does_not_crash() {
 }
 
 #[test]
+fn deeply_nested_script_does_not_crash_exec_sink_marker_detection() {
+    // Same hostile shapes as above, through the parameter-analysis entry point
+    // (`detect_js_exec_sink*`), which runs its own parse. A regression aborts
+    // the run rather than failing an assert. Bracket nests trip the pre-parse
+    // guard and are inert; the bracket-free chains pass it, parse on the
+    // big-stack thread, and must still find the real `setTimeout` sink.
+    let marker = "dalfoxmarker";
+    let depth = 50_000;
+    for (open, close, detected) in [
+        ("(", ")", false),
+        ("[", "]", false),
+        ("c?", ":0", true),
+        ("x=", "", true),
+    ] {
+        let nested = format!("{}s{}", open.repeat(depth), close.repeat(depth));
+        let html = format!(
+            "<script>var s = \"{marker}\"; var sink = {nested}; setTimeout(\"{marker}\");</script>"
+        );
+        assert_eq!(
+            detect_js_exec_sink_with_marker(&html, marker),
+            detected,
+            "shape {open:?}"
+        );
+    }
+}
+
+#[test]
 fn large_script_above_inline_cap_runs_on_large_stack_without_crashing() {
-    // A guard-approved but large script (above SAFE_INLINE_PARSE_BYTES) must
+    // A guard-approved but large script (above the inline parse cap) must
     // parse on the dedicated big-stack thread and still verify a genuine sink.
     let payload = "\"-alert(1)-\"";
     let filler = "var pad = 1;\n".repeat(400); // ~5 KiB, over the 2 KiB inline cap
