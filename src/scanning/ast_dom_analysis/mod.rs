@@ -204,37 +204,47 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
     false
 }
 
-/// True when `source` must NOT be handed to oxc's `Parser::parse` on a normal
-/// worker stack — either it exceeds [`MAX_ANALYZE_SOURCE_BYTES`] or its
-/// structural nesting could overflow the recursive-descent parser (see
-/// [`source_nesting_exceeds_limit`]). Shared by every oxc parse site so a
-/// hostile `<script>` body can't SIGABRT the process from one of them.
-pub(crate) fn source_exceeds_parse_guards(source: &str) -> bool {
-    source.len() > MAX_ANALYZE_SOURCE_BYTES || source_nesting_exceeds_limit(source)
-}
-
-/// Inputs at or below this size parse safely on a normal worker stack (see
-/// [`INLINE_PARSE_BYTES`]); larger inputs that pass [`source_exceeds_parse_guards`]
-/// should run through [`run_parse_on_large_stack`].
-pub(crate) const SAFE_INLINE_PARSE_BYTES: usize = INLINE_PARSE_BYTES;
-
-/// Run `f` (an oxc parse + collect) on a dedicated thread with a large,
-/// mostly-virtual stack ([`ANALYZE_STACK_BYTES`]) so a deep — but
-/// guard-approved — statement/assignment chain can't overflow the caller's
-/// worker stack. Returns `None` if the thread can't be spawned (rare; the
-/// caller treats that as "skip / inert", never parsing inline, since such an
-/// input could need tens of MiB of stack). `f` must return an owned value.
-pub(crate) fn run_parse_on_large_stack<T, F>(f: F) -> Option<T>
-where
-    T: Send,
-    F: FnOnce() -> T + Send,
-{
+/// Run `parse` (an oxc parse + walk of `source`, which comes from the scanned,
+/// attacker-controlled page) without letting hostile input stack-overflow the
+/// process. oxc's recursive-descent parser has no depth guard, so this is the
+/// single entry point every oxc parse site must go through. Three layers, in
+/// order of cost:
+///
+/// 1. **Length cap** ([`MAX_ANALYZE_SOURCE_BYTES`]): every nesting level
+///    costs ≥1 source byte, so bounding length bounds the achievable parser
+///    depth. Oversized blocks are skipped (best-effort).
+/// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): rejects the
+///    1-byte-per-level vectors (`((((…`, `!!!!…`) that would otherwise blow
+///    the budget the length cap alone allows.
+/// 3. **Large parse stack** ([`ANALYZE_STACK_BYTES`]): the surviving
+///    multi-byte chains (`if(a)if(b)…`, `x=y=z=…`) still recurse in the
+///    parser, so input above [`INLINE_PARSE_BYTES`] runs `parse` on a
+///    dedicated big-stack thread. `scope` keeps it synchronous and lets the
+///    closure borrow.
+///
+/// Returns `None` when the input was skipped, the thread could not be spawned,
+/// or `parse` panicked. A spawn failure must NOT fall back to an inline parse:
+/// a guard-approved ~512 KiB chain can need tens of MiB of stack.
+pub(crate) fn guarded_parse<T: Send>(source: &str, parse: impl FnOnce() -> T + Send) -> Option<T> {
+    if source.len() > MAX_ANALYZE_SOURCE_BYTES || source_nesting_exceeds_limit(source) {
+        crate::dbg_log!(
+            "[ast] skipping parse of a {}-byte script (over length cap {} or nesting guard)",
+            source.len(),
+            MAX_ANALYZE_SOURCE_BYTES
+        );
+        return None;
+    }
+    // Fast path: the common small inline `<script>` skips the thread spawn.
+    if source.len() <= INLINE_PARSE_BYTES {
+        return Some(parse());
+    }
     std::thread::scope(|scope| {
         match std::thread::Builder::new()
             .stack_size(ANALYZE_STACK_BYTES)
-            .spawn_scoped(scope, f)
+            .spawn_scoped(scope, parse)
         {
-            // A panic inside the parse degrades to None rather than aborting.
+            // A panic inside the parse (not a stack overflow, which would abort
+            // the process) degrades to None rather than taking down the scan.
             Ok(h) => h.join().ok(),
             Err(_) => None,
         }
@@ -877,67 +887,12 @@ impl AstDomAnalyzer {
         self
     }
 
-    /// Analyze JavaScript source code for DOM XSS vulnerabilities.
-    ///
-    /// The input comes from the scanned (attacker-controlled) page, and oxc's
-    /// recursive-descent parser has no depth guard — so hostile nesting could
-    /// stack-overflow the parser (an uncatchable SIGABRT) before any of the
-    /// visitor's own [`MAX_AST_VISIT_DEPTH`] guards run. Three layers prevent
-    /// that, in order of cost:
-    ///
-    /// 1. **Length cap** ([`MAX_ANALYZE_SOURCE_BYTES`]): every nesting level
-    ///    costs ≥1 source byte, so bounding length bounds the achievable parser
-    ///    depth. Oversized blocks skip analysis (best-effort).
-    /// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): rejects the
-    ///    1-byte-per-level vectors (`((((…`, `!!!!…`) that would otherwise blow
-    ///    the budget the length cap alone allows.
-    /// 3. **Large parse stack** ([`ANALYZE_STACK_BYTES`]): the surviving
-    ///    multi-byte chains (`if(a)if(b)…`, `x=y=z=…`) still recurse in the
-    ///    parser, so the parse + walk run on a dedicated big-stack thread sized
-    ///    to absorb the depth the length cap permits.
+    /// Analyze JavaScript source code for DOM XSS vulnerabilities. The input
+    /// comes from the scanned page, so the parse runs behind [`guarded_parse`];
+    /// a skipped or failed parse yields no findings.
     pub fn analyze(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
-        if source_code.len() > MAX_ANALYZE_SOURCE_BYTES || source_nesting_exceeds_limit(source_code)
-        {
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!(
-                    "[ast] skipping DOM-XSS analysis of a {}-byte script (over length cap {} or nesting guard)",
-                    source_code.len(),
-                    MAX_ANALYZE_SOURCE_BYTES
-                );
-            }
-            return Ok(Vec::new());
-        }
-
-        // Fast path: a script this small can't nest a parser-recursion vector
-        // deep enough to overflow a normal worker stack (see [`INLINE_PARSE_BYTES`]),
-        // so parse it inline and skip the thread-spawn cost the common small
-        // inline `<script>` block would otherwise pay on every call.
-        if source_code.len() <= INLINE_PARSE_BYTES {
-            return self.analyze_on_stack(source_code);
-        }
-
-        // Larger input may carry a deep multi-byte statement/assignment chain
-        // (`if(a)if(b)…`, `x=y=z=…`) the parser would overflow on a normal stack,
-        // so run the parse + walk on a thread with a large (mostly-virtual,
-        // lazily-committed) stack. `scope` keeps it synchronous and lets the
-        // closure borrow `source_code`.
-        std::thread::scope(|scope| {
-            let handle = std::thread::Builder::new()
-                .stack_size(ANALYZE_STACK_BYTES)
-                .spawn_scoped(scope, || self.analyze_on_stack(source_code));
-            match handle {
-                // A panic inside the parse/walk (not a stack overflow, which
-                // would abort the process) degrades to "no findings" rather than
-                // taking down the scan.
-                Ok(h) => h.join().unwrap_or_else(|_| Ok(Vec::new())),
-                // Thread spawn failed (e.g. resource limits). We must NOT parse
-                // inline: an input that passed the guards (e.g. a ~512 KiB
-                // statement chain) can need tens of MiB of stack and would
-                // overflow the caller's worker stack. Skip analysis instead —
-                // best-effort, and spawn failure is rare.
-                Err(_) => Ok(Vec::new()),
-            }
-        })
+        guarded_parse(source_code, || self.analyze_on_stack(source_code))
+            .unwrap_or_else(|| Ok(Vec::new()))
     }
 
     /// Parse `source_code` and run the DOM-XSS walk, returning the findings.

@@ -12,6 +12,7 @@
 //! Strict overlap on the call's `Span` keeps this from firing on script blocks
 //! whose original (un-injected) source already calls `alert(...)`.
 
+use crate::scanning::ast_dom_analysis::guarded_parse;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_parser::Parser;
@@ -251,32 +252,19 @@ fn hash_block(script_src: &str) -> u64 {
 
 /// Parse `script_src` once and collect every sink-call span and every
 /// string-literal span. Returns `None` when the source has parser errors
-/// (treated as inert — injected JS that breaks parsing won't execute).
+/// (treated as inert — injected JS that breaks parsing won't execute), or when
+/// [`guarded_parse`] skipped it as too large or too deeply nested to parse
+/// safely.
 fn collect_parsed_spans(script_src: &str, source_type: SourceType) -> ParsedSpans {
-    // Guard the oxc parse exactly like `ast_dom_analysis::analyze`: a single
-    // malicious/compromised target can serve a `<script>` body with thousands
-    // of nested brackets or a multi-byte right-leaning chain that overflows
-    // oxc's recursive-descent parser *inside* `.parse()` — a stack overflow
-    // SIGABRTs the whole process (all in-flight scans, server/MCP jobs). Skip
-    // pathological bodies (treated as inert) and run larger-but-approved ones
-    // on a dedicated big-stack thread.
-    if crate::scanning::ast_dom_analysis::source_exceeds_parse_guards(script_src) {
-        return None;
-    }
-    if script_src.len() <= crate::scanning::ast_dom_analysis::SAFE_INLINE_PARSE_BYTES {
-        return collect_spans_on_stack(script_src, source_type);
-    }
-    // A spawn failure (`None`) is also treated as inert — we must NOT fall back
-    // to an inline parse, which could overflow the caller's worker stack.
-    crate::scanning::ast_dom_analysis::run_parse_on_large_stack(|| {
+    guarded_parse(script_src, || {
         collect_spans_on_stack(script_src, source_type)
     })
     .flatten()
 }
 
 /// Parse `script_src` and collect every sink-call span and every string-literal
-/// span. Factored out of [`collect_parsed_spans`] so it can run on a dedicated
-/// large-stack thread for inputs above [`SAFE_INLINE_PARSE_BYTES`].
+/// span. Factored out of [`collect_parsed_spans`] so it can run behind
+/// [`guarded_parse`].
 fn collect_spans_on_stack(script_src: &str, source_type: SourceType) -> ParsedSpans {
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, script_src, source_type).parse();
@@ -507,6 +495,10 @@ fn collect_addition_leaves<'a>(expr: &'a Expression<'a>, leaves: &mut Vec<&'a Ex
     }
 }
 
+/// Parses a string literal's contents found during a walk. Not routed through
+/// [`guarded_parse`]: it only runs inside a walk that is already guarded, and
+/// `inner_src` is a substring of that walked source, so it inherits its length
+/// and nesting bounds and its stack.
 fn try_parse_exec_sink_code(
     inner_src: &str,
     code_offset: u32,
@@ -1150,6 +1142,13 @@ pub(crate) fn has_js_context_evidence(payload: &str, html: &str) -> bool {
 }
 
 fn is_marker_in_exec_sink(script_src: &str, marker: &str) -> bool {
+    guarded_parse(script_src, || {
+        marker_in_exec_sink_on_stack(script_src, marker)
+    })
+    .unwrap_or(false)
+}
+
+fn marker_in_exec_sink_on_stack(script_src: &str, marker: &str) -> bool {
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
     if ret.errors.is_empty() && check_marker_in_statements(&ret.program.body, script_src, marker) {
