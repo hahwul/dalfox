@@ -28,18 +28,12 @@ Biggest lever for request count is usually `--skip-mining` (or the more granular
 
 Remote wordlists (`--remote-wordlists burp,assetnote`) are cached with OnceLock for the lifetime of the process.
 
-Dictionary and DOM query mining use bounded canary buckets (normally 64 names,
-with an approximately 8 KiB URL budget) rather than one request per candidate.
-Reflected canaries identify names directly; a response change without a canary
-reflection is checked with a same-width control and four-way splitting to find
-metric-only parameters. Metric-only hits need a stable page (two identical
-clean requests match; otherwise only a status change counts) and a repeat of
-the single name; names sharing a bucket with a reflected one are re-probed
-without it; a failed or size-refused bucket is split and retried, not dropped;
-several canaries in one redirect `Location` are confirmed in smaller groups.
-Duplicate/already-known query slots are removed before bucket construction. A negative arbitrary-name sentinel keeps the individual
-confirmed names even when the EWMA reflection ratio is high, so a larger
-wordlist is not cut off merely because its first bucket reflects.
+Dictionary and DOM query mining pack candidates into bounded canary buckets
+(normally 64 names, ~8 KiB URL budget) rather than one request per name, and
+drop duplicates and already-known query slots first. A page that reflects
+*every* name is folded into one `any` parameter only after an arbitrary-name
+sentinel confirms it; otherwise the individually confirmed names are kept, so a
+large wordlist is not cut off because its first bucket reflects.
 
 When no custom or remote list is selected, the built-in seed preserves the
 historical GF/XSS names and adds an attributed gori-derived set covering common
@@ -109,6 +103,6 @@ Most scan flags have direct equivalents in `scan_with_dalfox` (including `max_pa
 - Managed `--blind-oob` lifecycle and `--session-check` are now on MCP/server too (`blind_oob` / `blind_oob_wait`, `session_check` / `session_check_url`); the poller is bound to the job. Only `--blind-oob-secret` (self-hosted auth) stays CLI/config-only.
 - Multi-target / HAR / raw-http fan-out — CLI-only (call MCP once per URL)
 - `preflight_dalfox.param` is accepted but **not applied** (full discovery impact estimate); pass `param` on `scan_with_dalfox`
-- Some of the more exotic mining/scope filters (they exist in the engine but are not yet exposed on the MCP surface)
+- CLI-only (no MCP or REST key): scope filters (`--include-url`, `--exclude-url`, `--ignore-param`, `--out-of-scope*`), custom payloads (`--custom-payload`, `--only-custom-payload`, `--custom-blind-xss-payload`, `--inject-marker`, `--custom-alert-*`), `--sxss*`, `--hpp`, mining granularity (`--skip-mining-dom`/`-dict`, `-W`, `--skip-reflection-*`), `--retries`, `--ignore-return`, and every output/report control (`--poc-type`, `--only-poc`, `--limit`, `--baseline`, `--state-file`, `--dedup-urls`)
 
-When you need the full power, fall back to spawning the CLI with carefully constructed arguments.
+When you need one of these, run the CLI with `-f json` and parse the envelope (see `results.md`).

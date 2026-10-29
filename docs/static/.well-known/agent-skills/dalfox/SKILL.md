@@ -135,7 +135,16 @@ dalfox scan https://target/submit --sxss --sxss-url https://target/view --sxss-r
 dalfox server --port 6664 --api-key "$TEAM_KEY" --allowed-origins "https://team.example.com"
 ```
 
-See `references/server-and-payload.md` for endpoints, CORS/JSONP details, and when to choose server vs MCP.
+See `references/server-and-payload.md` for endpoints, the REST `options` keys (a few are spelled differently from MCP), CORS/JSONP details, and when to choose server vs MCP.
+
+### H. CI Gate (fail only on new, asserted vulns)
+
+```bash
+dalfox scan targets.txt -f json -o current.json --only-poc v --baseline last.json
+# exit 0 = nothing new, 1 = new V findings, 2 = error; check meta.incomplete before trusting 0
+```
+
+Without `--only-poc v`, a lone `R` or `I` also exits `1`. Drop `--limit` when gating. Refresh the baseline by re-running without `--baseline`. CLI only.
 
 ## 4. Result Interpretation (read this every time)
 
@@ -160,6 +169,10 @@ Key points for agents:
 - `filter` (`allowed` / `encoded` / `blocked` / `escaped` chars) explains why an
   `R` didn't verify; absent = no probe verdict, not "nothing allowed".
 - `include_request` / `include_response` are opt-in only — never enable them by default.
+- **Zero findings is not "clean" until you check coverage.** CLI: every
+  `meta.target_summary[].status` is `clean` and `meta.incomplete` is `false`.
+  MCP/server: `status` is `done` and `warnings` is absent. Otherwise say the
+  scan was partial and why.
 
 ## 5. Performance & Scope Recipes
 
