@@ -1173,6 +1173,13 @@ html[data-theme="light"] .contributors img {
     border-top: 1px solid var(--line);
     padding: 2.5rem var(--gutter) 3rem;
 }
+/* Docs pages: the sidebar is fixed and var(--sidebar-w) wide, so offset the
+   footer to match .docs-main. The landing page has no sidebar, so it keeps
+   full width. */
+body:has(.docs-sidebar) .site-footer {
+    margin-left: var(--sidebar-w);
+    transition: margin-left 0.25s ease;
+}
 .footer-inner {
     display: flex;
     flex-direction: column;
@@ -1404,7 +1411,8 @@ html[data-theme="light"] .contributors img {
 html.sidebar-collapsed .docs-sidebar {
     transform: translateX(-100%);
 }
-html.sidebar-collapsed .docs-main {
+html.sidebar-collapsed .docs-main,
+html.sidebar-collapsed body:has(.docs-sidebar) .site-footer {
     margin-left: 0;
 }
 html.sidebar-collapsed .sidebar-expand-btn {
@@ -1885,8 +1893,11 @@ html[data-theme="light"] .search-results mark {
     .sidebar-collapse-btn {
         display: none;
     }
-    .docs-main {
+    .docs-main,
+    body:has(.docs-sidebar) .site-footer {
         margin-left: 0;
+    }
+    .docs-main {
         padding-top: 1.75rem;
     }
     .strip-inner {
