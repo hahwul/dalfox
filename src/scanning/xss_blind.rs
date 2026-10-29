@@ -125,6 +125,7 @@ fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
             "custom blind XSS template",
         ) {
             Ok(content) => {
+                let content = content.trim_start_matches('\u{feff}');
                 let mut templates: Vec<String> = Vec::new();
                 let mut bad_lines = 0u32;
                 for (lineno, line) in content.lines().enumerate() {

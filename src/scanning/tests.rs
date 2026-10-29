@@ -758,6 +758,49 @@ fn test_get_fallback_reflection_payloads_include_encoder_outputs() {
     );
 }
 
+#[test]
+fn test_get_fallback_reflection_payloads_custom_alert_value() {
+    let mut args = default_scan_args();
+    args.custom_alert_value = "7777".to_string();
+    let payloads = get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.contains("alert(7777)") || p.contains("alert%287777%29")),
+        "fallback reflection payloads must respect custom_alert_value"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|p| p.contains("alert(1)") || p.contains("alert%281%29")),
+        "fallback reflection payloads must not contain original alert(1)"
+    );
+}
+
+#[test]
+fn test_get_dom_payloads_custom_alert_value() {
+    let mut args = default_scan_args();
+    args.custom_alert_value = "8888".to_string();
+    let param = Param::new(
+        "q".to_string(),
+        "".to_string(),
+        crate::parameter_analysis::Location::Query,
+    );
+    let payloads = get_dom_payloads(&param, &args).expect("dom payloads");
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.contains("alert(8888)") || p.contains("alert%288888%29")),
+        "dom payloads must respect custom_alert_value"
+    );
+    assert!(
+        !payloads
+            .iter()
+            .any(|p| p.contains("alert(1)") || p.contains("alert%281%29")),
+        "dom payloads must not contain original alert(1)"
+    );
+}
+
 /// The reflection catalog (unknown context) must interleave its families like
 /// the DOM catalog does, so the reflection phase's transformed-inert-echo
 /// budget samples every family in an early prefix. Before the interleave the

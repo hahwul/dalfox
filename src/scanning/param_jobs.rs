@@ -274,6 +274,13 @@ pub(crate) fn generate_param_jobs(
             dom_payloads.extend(shared_dom);
         }
 
+        // Apply custom alert value substitution (--custom-alert-value / --custom-alert-type)
+        // across all finalized reflection and DOM payloads.
+        reflection_payloads =
+            crate::scanning::xss_common::apply_custom_alert_substitution(reflection_payloads, args);
+        dom_payloads =
+            crate::scanning::xss_common::apply_custom_alert_substitution(dom_payloads, args);
+
         // One pb.inc(1) per reflection payload plus one per DOM payload.
         // The previous `len * (1 + len)` formula overcounted by orders of
         // magnitude, which made `{eta}` meaningless (it would project hours

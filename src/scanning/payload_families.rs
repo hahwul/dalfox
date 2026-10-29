@@ -239,6 +239,9 @@ pub(crate) fn get_fallback_reflection_payloads(
         base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
     }
 
+    let base_payloads =
+        crate::scanning::xss_common::apply_custom_alert_substitution(base_payloads, args);
+
     // Apply encoder policy to unique base payloads
     let payloads = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
 
@@ -402,7 +405,7 @@ pub(crate) fn get_dom_payloads(
     if !args.only_custom_payload {
         payloads.splice(0..0, get_jsonp_callback_payloads());
     }
-    Ok(payloads)
+    Ok(crate::scanning::xss_common::apply_custom_alert_substitution(payloads, args))
 }
 
 /// Minimal well-formed XML payloads that activate an explicit browser
@@ -452,11 +455,13 @@ pub(crate) fn get_dom_payloads_for_context(
             // sink. Sent raw only: they verify through the AST checks, which
             // look for the as-sent payload, so encoded variants are wasted
             // requests.
-            let mut expression = get_js_expression_breakout_payloads(delim.as_ref());
-            let tags = crate::encoding::apply_encoders_to_payloads(
-                &get_js_breakout_payloads(),
-                &args.encoders,
-            );
+            let raw_expression = get_js_expression_breakout_payloads(delim.as_ref());
+            let mut expression =
+                crate::scanning::xss_common::apply_custom_alert_substitution(raw_expression, args);
+            let raw_tags = get_js_breakout_payloads();
+            let sub_tags =
+                crate::scanning::xss_common::apply_custom_alert_substitution(raw_tags, args);
+            let tags = crate::encoding::apply_encoders_to_payloads(&sub_tags, &args.encoders);
             // Only the first primitive's form of each joiner leads (that is
             // what verifies a handler breakout); the primitive variants follow
             // the tag breakouts, so a `</script>`-exploitable string pays a
@@ -484,10 +489,14 @@ pub(crate) fn get_dom_payloads_for_context(
                 let payloads = crate::scanning::xss_common::generate_adaptive_payloads(
                     ctx, invalid, valid, raw_only,
                 );
-                return Ok(payloads);
+                return Ok(
+                    crate::scanning::xss_common::apply_custom_alert_substitution(payloads, args),
+                );
             }
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
             let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+            let base_payloads =
+                crate::scanning::xss_common::apply_custom_alert_substitution(base_payloads, args);
             // Expand with shared encoder policy helper
             let mut out =
                 crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
@@ -523,6 +532,9 @@ pub(crate) fn get_dom_payloads_for_context(
                         .unwrap_or_else(|_| vec![]),
                 );
             }
+
+            let base_payloads =
+                crate::scanning::xss_common::apply_custom_alert_substitution(base_payloads, args);
 
             // Expand with shared encoder policy helper
             let mut out =
