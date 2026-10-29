@@ -501,12 +501,16 @@ pub(crate) fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn st
             path, e
         )
     })?;
+    let content = content.trim_start_matches('\u{feff}');
     // Industry-standard list shape: skip blank and `#`-comment lines so
     // users don't accidentally send `# comment` as a payload literal.
+    // Leading whitespace is preserved so payloads with deliberate leading
+    // spaces (e.g. attribute breakouts) are not mangled, while whitespace-only
+    // lines and indented comments are cleanly skipped.
     let payloads: Vec<String> = content
         .lines()
         .map(|l| l.trim_end_matches('\r')) // strip CR for CRLF files
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
         .map(ToString::to_string)
         .collect();
 
@@ -556,38 +560,45 @@ pub(crate) fn get_dynamic_payloads(
     }
 
     // Apply custom alert value substitution (--custom-alert-value / --custom-alert-type)
-    let base_payloads = if args.custom_alert_value != "1" || args.custom_alert_type == "str" {
-        let val = if args.custom_alert_type == "str" {
-            format!("'{}'", args.custom_alert_value)
-        } else {
-            args.custom_alert_value.clone()
-        };
-        base_payloads
-            .into_iter()
-            .map(|p| {
-                p.replace("alert(1)", &format!("alert({})", val))
-                    .replace("confirm(1)", &format!("confirm({})", val))
-                    .replace("prompt(1)", &format!("prompt({})", val))
-                    .replace("alert`1`", &format!("alert`{}`", val))
-                    .replace("prompt`1`", &format!("prompt`{}`", val))
-                    .replace("confirm`1`", &format!("confirm`{}`", val))
-                    // Comma operator / indirect call patterns: (0,alert)(1)
-                    .replace(",alert)(1)", &format!(",alert)({})", val))
-                    .replace(",confirm)(1)", &format!(",confirm)({})", val))
-                    // Optional chaining: alert?.(1)
-                    .replace("alert?.(1)", &format!("alert?.({})", val))
-                    // Reflect.apply(alert,null,[1])
-                    .replace("alert,null,[1])", &format!("alert,null,[{}])", val))
-            })
-            .collect()
-    } else {
-        base_payloads
-    };
+    let base_payloads = apply_custom_alert_substitution(base_payloads, args);
 
     // Expand with shared encoder policy helper; handles "none" and deduplication
     let payloads = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
 
     Ok(payloads)
+}
+
+/// Apply custom alert value substitution (`--custom-alert-value` / `--custom-alert-type`).
+pub(crate) fn apply_custom_alert_substitution(
+    payloads: Vec<String>,
+    args: &ScanArgs,
+) -> Vec<String> {
+    if args.custom_alert_value == "1" && args.custom_alert_type != "str" {
+        return payloads;
+    }
+    let val = if args.custom_alert_type == "str" {
+        format!("'{}'", args.custom_alert_value)
+    } else {
+        args.custom_alert_value.clone()
+    };
+    payloads
+        .into_iter()
+        .map(|p| {
+            p.replace("alert(1)", &format!("alert({})", val))
+                .replace("confirm(1)", &format!("confirm({})", val))
+                .replace("prompt(1)", &format!("prompt({})", val))
+                .replace("alert`1`", &format!("alert`{}`", val))
+                .replace("prompt`1`", &format!("prompt`{}`", val))
+                .replace("confirm`1`", &format!("confirm`{}`", val))
+                // Comma operator / indirect call patterns: (0,alert)(1)
+                .replace(",alert)(1)", &format!(",alert)({})", val))
+                .replace(",confirm)(1)", &format!(",confirm)({})", val))
+                // Optional chaining: alert?.(1)
+                .replace("alert?.(1)", &format!("alert?.({})", val))
+                // Reflect.apply(alert,null,[1])
+                .replace("alert,null,[1])", &format!("alert,null,[{}])", val))
+        })
+        .collect()
 }
 
 #[cfg(test)]

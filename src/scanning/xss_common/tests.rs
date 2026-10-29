@@ -409,6 +409,30 @@ fn test_load_custom_payloads_empty_after_strip_errors() {
 }
 
 #[test]
+fn test_load_custom_payloads_skips_whitespace_only_lines() {
+    let p = tmp_payload_file("whitespace", "   \n\t\n  \t  \n");
+    let err = load_custom_payloads(p.to_str().unwrap()).unwrap_err();
+    assert!(err.to_string().contains("no usable lines"), "got: {}", err);
+    let _ = std::fs::remove_file(&p);
+}
+
+#[test]
+fn test_load_custom_payloads_with_utf8_bom() {
+    let content =
+        "\u{feff}  # indented comment after bom\npayload-one\n   \n autofocus onfocus=alert(1)\n";
+    let p = tmp_payload_file("bom", content);
+    let result = load_custom_payloads(p.to_str().unwrap()).unwrap();
+    assert_eq!(
+        result,
+        vec![
+            "payload-one".to_string(),
+            " autofocus onfocus=alert(1)".to_string()
+        ]
+    );
+    let _ = std::fs::remove_file(&p);
+}
+
+#[test]
 fn test_load_custom_payloads_caches_by_path() {
     let p = tmp_payload_file("cache", "only-one\n");
     let path = p.to_str().unwrap().to_string();
@@ -476,5 +500,34 @@ fn generate_dynamic_payloads_is_memoized_and_stable() {
     assert_eq!(
         first, third,
         "mutating a returned clone must not corrupt the cache"
+    );
+}
+
+#[test]
+fn test_apply_custom_alert_substitution_all_patterns() {
+    let args = ScanArgs {
+        custom_alert_value: "test()".to_string(),
+        custom_alert_type: "none".to_string(),
+        ..base_args()
+    };
+    let input = vec![
+        "alert(1)".to_string(),
+        "confirm(1)".to_string(),
+        "prompt(1)".to_string(),
+        "alert`1`".to_string(),
+        "(0,alert)(1)".to_string(),
+        "alert?.(1)".to_string(),
+    ];
+    let output = apply_custom_alert_substitution(input, &args);
+    assert_eq!(
+        output,
+        vec![
+            "alert(test())".to_string(),
+            "confirm(test())".to_string(),
+            "prompt(test())".to_string(),
+            "alert`test()`".to_string(),
+            "(0,alert)(test())".to_string(),
+            "alert?.(test())".to_string(),
+        ]
     );
 }
