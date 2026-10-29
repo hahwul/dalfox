@@ -79,18 +79,7 @@ Every format except `plain` auto-silences the banner.
 | `-W, --mining-dict-word` | Path to custom wordlist for dictionary mining |
 | `--remote-wordlists` | `burp,assetnote` (comma-separated) |
 
-Dictionary and DOM mining drop duplicate names and already-discovered query
-slots before probing, so a repeated entry costs no request and cannot inflate
-the reflection ratio. Remaining names are packed into bounded canary buckets
-(normally 64 names, with an approximately 8 KiB URL budget), so a large list is
-not one request per entry. Reflected canaries identify their own names; an
-ambiguous response is compared with a same-width control and split four ways
-only when needed for metric-only parameters. Eligibility for the arbitrary-name
-sentinel check is still measured on the wordlist as loaded, so a heavily
-filtered list keeps that check. EWMA collapse is evaluated after bucket
-processing: only sentinel-confirmed arbitrary reflection is folded into `any`,
-while a negative sentinel keeps the individual confirmed names. Same-named
-body/header parameters remain separate injection points.
+Mining packs candidate names into bounded canary buckets (~64 names per request), so a large wordlist is not one request per entry; details in `advanced.md`.
 
 **Common fast-mode combo**: `--skip-mining` (or `--skip-mining-dom`) + explicit `-p` for the params you care about. With `--skip-discovery`, always pass `-p` (bare name is OK for query; use `name:location` for body/header/cookie/json).
 
@@ -112,14 +101,7 @@ body/header parameters remain separate injection points.
 | `--max-concurrent-targets` | 50 | For file/pipe input |
 | `--max-targets-per-host` | 100 | Safety cap per host |
 
-Reflection and DOM payload batches start small and grow toward the worker limit.
-An early hit therefore avoids a full batch of speculative requests. Already-fetched
-responses are still checked for verified evidence after a reflection or DOM
-early-exit signal. Payload order and catalogs are unchanged; `--sxss`,
-`--waf-evasion`, and positive `--delay` retain serial payload requests. Targets
-that need the full catalog reach it in the same number of requests but a few
-more round trips, so a tight `--scan-timeout` can now cut a deep payload the
-full-window batching would have reached.
+Payload batches start small and grow toward `--workers`, so an early hit avoids a full batch of speculative requests. A target that needs the whole catalog takes a few more round trips, so a tight `--scan-timeout` can cut a deep payload.
 
 ## XSS Engine
 

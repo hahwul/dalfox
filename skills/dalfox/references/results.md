@@ -148,6 +148,27 @@ There is no `inJS` / `inATTR` / `inURL`: the reflection context is not encoded h
 
 Every format except `plain` (so `markdown` too) suppresses the banner, so stdout stays parseable.
 
+### JSON envelope (CLI `-f json`)
+
+```json
+{
+  "meta": {
+    "dalfox_version": "3.x", "targets": ["…"], "scan_duration_ms": 0,
+    "total_requests": 0, "failed_requests": 0, "findings_count": 0,
+    "incomplete": false,
+    "target_summary": [
+      {"target": "https://…", "method": "GET", "status": "clean", "findings_count": 0}
+    ],
+    "dedup_mode": "exact", "targets_deduplicated": 0
+  },
+  "findings": [ /* finding objects, shape below */ ]
+}
+```
+
+`target_summary[].status` is `clean`, `findings`, `incomplete` (ran but cut short or lost its session) or `skipped` (never analyzed), with `error_code` / `error_message` when there is a reason. Optional `meta` keys (`baseline`, `resumed`, `min_confidence`, `targets_unparsable`) appear only when they apply; `--dry-run` / `--only-discovery` use a different `meta` (`warnings`, `skipped`). `jsonl` is the same `{"meta": …}` object on line one, then one finding per line.
+
+**Before calling a target clean**: its row says `clean` (not `incomplete` / `skipped`), `meta.incomplete` is `false`, and `failed_requests` is small next to `total_requests`.
+
 ## POC Output (`--poc-type`)
 
 - `plain` — the default one-line `[POC][V][GET][inHTML] https://…` style

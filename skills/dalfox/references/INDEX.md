@@ -8,9 +8,9 @@ This directory holds detailed, lookup-oriented reference material so the main `S
 |------|---------|--------------|
 | `cli.md` | Complete CLI flag reference, grouped by concern, with defaults and agent notes | You need the exact spelling, default value, or safe combination for a flag |
 | `mcp.md` | The 6 MCP tools (`scan_with_dalfox` etc.) with full parameter schemas, validation rules, and security notes | Working via MCP tools (preferred for long/async scans) |
-| `results.md` | Finding shape (V/A/R + `type_description`), `inject_type`, output formats, `--poc-type`, `include_request/response` contract | Interpreting scan output or choosing `--format` / POC style |
+| `results.md` | Finding shape (V/A/R/I + `type_description`), JSON envelope + `target_summary`, `inject_type`, output formats, `--poc-type`, `include_request/response` contract | Interpreting scan output or choosing `--format` / POC style |
 | `config.md` | Config file search paths, precedence (`apply_to_scan_args_if_default`), example, banner/silence interaction | User has (or should have) a `config.toml`; or you see unexpected defaults |
-| `server-and-payload.md` | `dalfox server` API (auth, CORS, JSONP, endpoints) **and** `dalfox payload <selector>` output | User wants a persistent API, or to list/enumerate payloads |
+| `server-and-payload.md` | `dalfox server` API (flags, REST `options` keys, auth, CORS, JSONP, endpoints) **and** `dalfox payload <selector>` output | User wants a persistent API, or to list/enumerate payloads |
 | `advanced.md` | WAF bypass, mining/discovery controls, scope filters, custom payloads, HPP, concurrency caps, `raw-http` / HAR, `--max-payloads-per-param`, bare vs `name:location` `-p` | WAF, huge param surfaces, custom payloads, captured-request testing, or agent fast-mode recipes |
 
 ## Design Principles for This Skill
@@ -35,12 +35,8 @@ When you change behavior in:
 
 ...update the corresponding reference file **and** any workflow examples in the main `SKILL.md` in the same change.
 
-## Quick Agent Usage
-
-```markdown
-See references/mcp.md for the exact shape of scan_with_dalfox parameters.
-See references/results.md: "Interpreting V / A / R" when presenting findings.
-See references/advanced.md: "WAF present" recipe when you see Cloudflare / Akamai signatures.
-```
-
-Last updated: 2026 (reflects current Rust v3 codebase).
+`SKILL.md` is also served by the docs site. After editing it, copy it to
+`docs/static/.well-known/agent-skills/dalfox/SKILL.md` and refresh the
+`digest` in `docs/static/.well-known/agent-skills/index.json`
+(`shasum -a 256` of the copy); `tests/agent_skills_sync_test.rs` fails otherwise.
+If the frontmatter `description` changes, update it in `index.json` too.
