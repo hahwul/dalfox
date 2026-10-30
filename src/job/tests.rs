@@ -2147,3 +2147,28 @@ async fn cancel_stops_blind_injection_mid_pass() {
         hits.load(Ordering::Relaxed)
     );
 }
+
+#[test]
+fn test_parse_status_filter_empty_means_no_filter() {
+    assert_eq!(parse_status_filter(None), Ok(None));
+    assert_eq!(parse_status_filter(Some("")), Ok(None));
+    assert_eq!(parse_status_filter(Some("   ")), Ok(None));
+}
+
+#[test]
+fn test_parse_status_filter_is_trimmed_and_case_insensitive() {
+    assert_eq!(
+        parse_status_filter(Some(" DONE ")),
+        Ok(Some(JobStatus::Done))
+    );
+    assert_eq!(
+        parse_status_filter(Some("Cancelled")),
+        Ok(Some(JobStatus::Cancelled))
+    );
+}
+
+#[test]
+fn test_parse_status_filter_rejects_unknown_with_normalized_value() {
+    let err = parse_status_filter(Some(" BoGus ")).unwrap_err();
+    assert!(err.contains("'bogus'"), "got: {err}");
+}
