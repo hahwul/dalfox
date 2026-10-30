@@ -1,7 +1,7 @@
 use super::{
     KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_print_remote,
     functions_payloads, print_summary, render_lines, run_payload, special_chars_payloads,
-    static_selector_counts, static_selector_groups, summary_block, uri_scheme_payloads,
+    static_selector_counts, static_selector_groups, summary_block, tips_block, uri_scheme_payloads,
 };
 use crate::cmd::scan::ScanOutcome;
 
@@ -298,5 +298,37 @@ fn test_all_selector_groups_cover_every_static_selector_in_order() {
             .iter()
             .all(|(_, lines)| !lines.is_empty()),
         "an empty group would print a header with nothing under it"
+    );
+}
+
+/// Each help surface lists the selectors by hand. Pin every one of them to
+/// `KNOWN_SELECTORS` so adding or removing a selector cannot leave a stale list.
+#[test]
+fn test_help_lists_every_known_selector() {
+    use clap::Args;
+    let mut cmd = PayloadArgs::augment_args(clap::Command::new("payload"));
+    let short_help = cmd.render_help().to_string();
+    let long_help = cmd.render_long_help().to_string();
+    for selector in KNOWN_SELECTORS {
+        // Match the list bullet, not the bare word: "all" appears in prose too.
+        let bullet = format!("- {selector}");
+        assert!(
+            short_help.contains(&bullet),
+            "selector {selector} missing from help"
+        );
+        assert!(
+            long_help.contains(&bullet),
+            "selector {selector} missing from long help"
+        );
+    }
+}
+
+#[test]
+fn test_tips_block_lists_every_encoder() {
+    let tips = tips_block();
+    let encoders = crate::cmd::scan::ENCODER_VALUES.join(",");
+    assert!(
+        tips.contains(&format!("-e {encoders}")),
+        "encoder tip drifted from ENCODER_VALUES: {tips}"
     );
 }
