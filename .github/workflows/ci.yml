@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    paths: ["**/*.rs", Cargo.toml, packaging/docker/Dockerfile]
+    paths: ["**/*.rs", Cargo.toml, Cargo.lock, "src/**/*.toml", "src/**/*.txt", packaging/docker/Dockerfile, .github/workflows/ci.yml]
   workflow_dispatch:
 env:
   CARGO_TERM_COLOR: always
