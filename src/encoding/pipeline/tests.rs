@@ -588,3 +588,62 @@ fn fp_control_variables_not_object_is_ignored() {
     let data = r#"{"query":"query{a}","variables":"oops"}"#;
     assert!(infer_graphql_variable_fields(data).is_empty());
 }
+
+// --- Direct coverage for private helpers -----------------------------------
+// looks_like_graphql_operation, parse_json_object_or_array and build_pointer
+// decide how a parameter value is re-encoded but had no direct tests.
+
+#[test]
+fn looks_like_graphql_operation_accepts_operations() {
+    assert!(looks_like_graphql_operation("query { a }"));
+    assert!(looks_like_graphql_operation("  {a}"));
+    assert!(looks_like_graphql_operation("mutation("));
+    assert!(looks_like_graphql_operation("subscription\n{"));
+}
+
+#[test]
+fn looks_like_graphql_operation_rejects_non_operations() {
+    // Keyword followed by more word characters is a plain value, not an op.
+    assert!(!looks_like_graphql_operation("queryable"));
+    // Keyword with nothing after it is not an operation.
+    assert!(!looks_like_graphql_operation("query"));
+    // Matching is case-sensitive.
+    assert!(!looks_like_graphql_operation("Query {a}"));
+    // Empty input.
+    assert!(!looks_like_graphql_operation(""));
+}
+
+#[test]
+fn parse_json_object_or_array_parses_objects_and_arrays() {
+    assert_eq!(
+        parse_json_object_or_array("  {\"a\":1}"),
+        Some(serde_json::json!({"a": 1}))
+    );
+    assert_eq!(
+        parse_json_object_or_array("[1,2]"),
+        Some(serde_json::json!([1, 2]))
+    );
+}
+
+#[test]
+fn parse_json_object_or_array_rejects_scalars_and_invalid() {
+    // Scalars are valid JSON but not an object or array.
+    assert_eq!(parse_json_object_or_array("1"), None);
+    assert_eq!(parse_json_object_or_array("\"x\""), None);
+    // Looks like an object/array but does not parse.
+    assert_eq!(parse_json_object_or_array("{bad"), None);
+    assert_eq!(parse_json_object_or_array(""), None);
+}
+
+#[test]
+fn build_pointer_joins_and_escapes_segments() {
+    // Plain segments are joined with a leading slash each.
+    assert_eq!(build_pointer(&["a".to_string(), "b".to_string()]), "/a/b");
+    // Empty path yields an empty pointer (whole document).
+    assert_eq!(build_pointer(&[]), "");
+    // RFC 6901 escaping: `~` -> `~0`, `/` -> `~1`.
+    assert_eq!(build_pointer(&["a/b".to_string()]), "/a~1b");
+    assert_eq!(build_pointer(&["m~n".to_string()]), "/m~0n");
+    // `~1` in the input must round-trip as literal `~` then `1`, i.e. `~01`.
+    assert_eq!(build_pointer(&["~1".to_string()]), "/~01");
+}
