@@ -1481,6 +1481,14 @@ fn test_param_type_label_covers_every_location() {
         param_type_label(&param_at("f", Location::Fragment), &target),
         "fragment"
     );
+    assert_eq!(
+        param_type_label(&param_at("g", Location::GraphqlBody), &target),
+        "graphql"
+    );
+    assert_eq!(
+        param_type_label(&param_at("x", Location::XmlBody), &target),
+        "xml"
+    );
     // A Header-located param whose name matches a configured cookie is a
     // cookie; any other Header param is a plain header.
     assert_eq!(
@@ -1491,6 +1499,27 @@ fn test_param_type_label_covers_every_location() {
         param_type_label(&param_at("X-Forwarded-For", Location::Header), &target),
         "header"
     );
+
+    // PARAM_TYPE_VALUES in cmd::scan must match every label returned by param_type_label
+    let labels = [
+        param_type_label(&param_at("q", Location::Query), &target),
+        param_type_label(&param_at("b", Location::Body), &target),
+        param_type_label(&param_at("j", Location::JsonBody), &target),
+        param_type_label(&param_at("m", Location::MultipartBody), &target),
+        param_type_label(&param_at("g", Location::GraphqlBody), &target),
+        param_type_label(&param_at("x", Location::XmlBody), &target),
+        param_type_label(&param_at("p", Location::Path), &target),
+        param_type_label(&param_at("f", Location::Fragment), &target),
+        param_type_label(&param_at("X-Forwarded-For", Location::Header), &target),
+        param_type_label(&param_at("session", Location::Header), &target),
+    ];
+    for label in crate::cmd::scan::PARAM_TYPE_VALUES {
+        assert!(
+            labels.contains(label),
+            "PARAM_TYPE_VALUES contains '{label}' which has no corresponding param_type_label"
+        );
+    }
+    assert_eq!(crate::cmd::scan::PARAM_TYPE_VALUES.len(), labels.len());
 }
 
 #[test]

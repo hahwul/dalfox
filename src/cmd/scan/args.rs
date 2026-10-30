@@ -85,6 +85,18 @@ pub const POC_TYPE_VALUES: &[&str] = &["plain", "curl", "httpie", "http-request"
 // nothing could ask for it on its own.
 pub const LIMIT_RESULT_TYPE_VALUES: &[&str] = &["all", "v", "r", "a", "i", "V", "R", "A", "I"];
 pub const ONLY_POC_VALUES: &[&str] = &["v", "r", "a", "i", "V", "R", "A", "I"];
+pub const PARAM_TYPE_VALUES: &[&str] = &[
+    "query",
+    "body",
+    "json",
+    "multipart",
+    "graphql",
+    "xml",
+    "path",
+    "fragment",
+    "header",
+    "cookie",
+];
 /// `--baseline-mode filter`: drop findings already in the baseline, so the
 /// counts, the exit code, and `--limit` all describe only what is new. The
 /// CI-gate default.
@@ -444,7 +456,7 @@ pub struct ScanArgs {
     pub min_confidence: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, multipart, cookie, header, graphql, xml.
+    /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, multipart, cookie, header, graphql, xml, path, fragment.
     #[arg(short = 'p', long)]
     pub param: Vec<String>,
 
