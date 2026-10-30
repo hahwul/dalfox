@@ -7,7 +7,7 @@
 
 use std::fs;
 
-use super::args::ScanArgs;
+use super::args::{PARAM_TYPE_VALUES, ScanArgs};
 use super::logging::log_warn;
 use super::validation::{
     validate_http_url, validate_numeric_args, validate_proxy_url, validate_scope_regex,
@@ -66,6 +66,27 @@ fn validate_header_inputs(args: &ScanArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Refuse parameter specs with an unknown type (`-p name:type`).
+///
+/// An unknown type (e.g. `-p id:qurey` typo for `query`) causes `filter_params`
+/// to match nothing and `ensure_explicit_params` to synthesize nothing,
+/// silently testing zero params and falsely exiting clean (0).
+fn validate_param_inputs(args: &ScanArgs) -> Result<(), String> {
+    for spec in &args.param {
+        let parts: Vec<&str> = spec.split(':').collect();
+        if let Some(&ty) = parts.get(1)
+            && !ty.is_empty()
+            && !PARAM_TYPE_VALUES.contains(&ty)
+        {
+            return Err(format!(
+                "invalid param type in '{spec}': '{ty}' (valid types: {})",
+                PARAM_TYPE_VALUES.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOutcome> {
     // Validate numeric args up front so misconfigurations (workers: 0,
     // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
@@ -82,6 +103,17 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // Header-shaped inputs, refused before the first request rather than
     // discovered as a scan result. See [`validate_header_inputs`].
     if let Err(msg) = validate_header_inputs(args) {
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            &msg,
+        );
+        return Err(ScanOutcome::Error);
+    }
+
+    // Parameter specs with an unknown type, refused before sending requests.
+    // See [`validate_param_inputs`].
+    if let Err(msg) = validate_param_inputs(args) {
         emit_error(
             &args.format,
             crate::cmd::error_codes::INVALID_INPUT_TYPE,
@@ -320,5 +352,62 @@ pub(crate) async fn init_remote_providers(args: &ScanArgs) {
         && !args.silence
     {
         eprintln!("Error initializing remote resources: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_param_inputs() {
+        let check = |param: &str| {
+            let args = ScanArgs {
+                param: vec![param.to_string()],
+                ..Default::default()
+            };
+            validate_param_inputs(&args)
+        };
+
+        // Unknown param type returns Err naming the spec and listing valid types
+        let err = check("id:qurey").unwrap_err();
+        assert!(
+            err.contains("id:qurey"),
+            "error should contain the invalid spec: {err}"
+        );
+        assert!(
+            err.contains("qurey"),
+            "error should contain the unknown type: {err}"
+        );
+        for valid in PARAM_TYPE_VALUES {
+            assert!(
+                err.contains(valid),
+                "error should list valid type '{valid}': {err}"
+            );
+        }
+
+        // Valid specifications
+        assert!(check("id").is_ok());
+        assert!(check("id:query").is_ok());
+        assert!(check("seg:path").is_ok());
+        assert!(check("a:query:extra").is_ok());
+        assert!(check("id:").is_ok());
+
+        // Every defined type in PARAM_TYPE_VALUES must be accepted
+        for valid in PARAM_TYPE_VALUES {
+            assert!(
+                check(&format!("x:{valid}")).is_ok(),
+                "type '{valid}' should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_prepare_and_validate_rejects_unknown_param_type() {
+        let args = ScanArgs {
+            param: vec!["id:qurey".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
     }
 }
