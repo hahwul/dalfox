@@ -55,12 +55,13 @@ fn closest_selector(input: &str) -> Option<&'static str> {
         .map(|(selector, _)| selector)
 }
 
-/// Manage or inspect payloads (no local flags).
+/// Manage or inspect payloads.
 ///
-/// Note:
-/// - The legacy enum-* flags have been removed.
-/// - This subcommand currently provides a brief summary only.
-/// - Payload selection and application is handled by the scanning engine.
+/// With a selector, prints that payload set one item per line (or as a JSON
+/// array with `--json`); `all` prints every local set under a `# name`
+/// header. Without a selector, prints the selector list, per-selector counts,
+/// and usage tips. Payload selection and application during a scan is handled
+/// by the scanning engine.
 #[derive(Args, Debug, Clone)]
 #[command(
     about = "Manage or inspect payloads",
@@ -292,14 +293,20 @@ fn print_summary() {
     println!();
 
     print!("{}", summary_block());
+    print!("\n{}", tips_block());
+}
 
-    println!("\nTips:");
-    println!("- Use scanning to apply payloads: dalfox scan <target>");
-    println!("- Add your own payloads with: --custom-payload <file>");
-    println!("- Only test custom payloads with: --only-custom-payload");
-    println!(
-        "- Control encoder variants with: -e none,url,2url,3url,4url,html,htmlpad,base64,unicode,zwsp"
-    );
+/// The `Tips:` block, built as text so the encoder list is assertable and
+/// follows `ENCODER_VALUES` instead of a hand-copied string.
+fn tips_block() -> String {
+    format!(
+        "Tips:\n\
+         - Use scanning to apply payloads: dalfox scan <target>\n\
+         - Add your own payloads with: --custom-payload <file>\n\
+         - Only test custom payloads with: --only-custom-payload\n\
+         - Control encoder variants with: -e {}\n",
+        crate::cmd::scan::ENCODER_VALUES.join(",")
+    )
 }
 
 /// Fetch payloads from a remote provider and print one per line.
