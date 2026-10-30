@@ -442,3 +442,108 @@ fn lodash_banner_crediting_underscore_is_not_underscore() {
         libs(body)
     );
 }
+
+/// npm-style (`name@<ver>`, jsDelivr / unpkg) and path-style
+/// (`/name(.js)?/<ver>/`, cdnjs / Google / StackPath) CDN URLs, including the
+/// cdnjs aliases that differ from the npm name.
+#[test]
+fn detects_libraries_from_cdn_url_shapes() {
+    for (url, library, version) in [
+        (
+            "https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js",
+            "jQuery",
+            "3.3.1",
+        ),
+        (
+            "https://unpkg.com/lodash@4.17.15/lodash.min.js",
+            "Lodash",
+            "4.17.15",
+        ),
+        (
+            "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.15/lodash.min.js",
+            "Lodash",
+            "4.17.15",
+        ),
+        (
+            "https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.5.8/angular.min.js",
+            "AngularJS",
+            "1.5.8",
+        ),
+        (
+            "https://ajax.googleapis.com/ajax/libs/angularjs/1.5.8/angular.min.js",
+            "AngularJS",
+            "1.5.8",
+        ),
+        (
+            "https://cdn.jsdelivr.net/npm/angular@1.5.8/angular.min.js",
+            "AngularJS",
+            "1.5.8",
+        ),
+        (
+            "https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/js/bootstrap.min.js",
+            "Bootstrap",
+            "3.3.7",
+        ),
+        (
+            "https://stackpath.bootstrapcdn.com/bootstrap/4.3.0/js/bootstrap.min.js",
+            "Bootstrap",
+            "4.3.0",
+        ),
+        (
+            "https://cdn.jsdelivr.net/npm/bootstrap@4.3.0/dist/js/bootstrap.min.js",
+            "Bootstrap",
+            "4.3.0",
+        ),
+        (
+            "https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js",
+            "jQuery UI",
+            "1.12.1",
+        ),
+        (
+            "https://cdn.jsdelivr.net/npm/jquery-ui@1.12.1/ui/widget.js",
+            "jQuery UI",
+            "1.12.1",
+        ),
+        (
+            "https://cdnjs.cloudflare.com/ajax/libs/handlebars.js/4.0.5/handlebars.min.js",
+            "Handlebars",
+            "4.0.5",
+        ),
+        (
+            "https://unpkg.com/handlebars@4.0.5/dist/handlebars.min.js",
+            "Handlebars",
+            "4.0.5",
+        ),
+        (
+            "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.1/moment.min.js",
+            "Moment.js",
+            "2.18.1",
+        ),
+        ("https://unpkg.com/moment@2.18.1", "Moment.js", "2.18.1"),
+    ] {
+        let body = format!(r#"<script src="{url}"></script>"#);
+        let found = libs(&body);
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == library && v.version == version),
+            "expected {library} {version} from {url}, got {found:?}"
+        );
+    }
+}
+
+/// The CDN patterns are anchored on `/`, so a package whose name merely
+/// contains a library name is not read as that library.
+#[test]
+fn cdn_patterns_ignore_packages_that_contain_a_library_name() {
+    for url in [
+        "https://cdn.jsdelivr.net/npm/my-lodash-fork@1.0.0/index.js",
+        "https://unpkg.com/lodash-es@4.17.15/lodash.js",
+        "https://cdn.jsdelivr.net/npm/moment-timezone@0.5.0/index.js",
+        "https://cdn.jsdelivr.net/npm/bootstrap-select@1.13.0/dist/js/bootstrap-select.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/js/bootstrap-datepicker.min.js",
+    ] {
+        let body = format!(r#"<script src="{url}"></script>"#);
+        assert!(libs(&body).is_empty(), "{url} flagged: {:?}", libs(&body));
+    }
+}
