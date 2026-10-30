@@ -177,6 +177,104 @@ static LIB_SPECS: &[LibSpec] = &[
             severity: SEV_MEDIUM,
         }],
     },
+    // An outdated sanitizer is a direct XSS signal. Only advisories that
+    // bypass the default configuration are listed; ones that need an opt-in
+    // option (IN_PLACE, hooks, SAFE_FOR_TEMPLATES, CUSTOM_ELEMENT_HANDLING)
+    // are left out. Ranges follow GHSA, including the 2.x/3.x split.
+    LibSpec {
+        name: "DOMPurify",
+        url_patterns: &[
+            r"(?i)dompurify@(\d+\.\d+(?:\.\d+)?)",
+            r"(?i)/dompurify/(\d+\.\d+(?:\.\d+)?)/",
+        ],
+        inline_patterns: &[r"(?i)@license DOMPurify (\d+\.\d+(?:\.\d+)?)"],
+        ranges: &[
+            VulnRange {
+                introduced: None,
+                fixed: "2.4.2",
+                advisories: &["CVE-2024-48910"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "2.5.0",
+                advisories: &["CVE-2024-47875"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "2.5.4",
+                advisories: &["CVE-2024-45801"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: Some("3.0.0"),
+                fixed: "3.1.3",
+                advisories: &["CVE-2024-45801", "CVE-2024-47875"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "3.2.4",
+                advisories: &["CVE-2025-26791"],
+                severity: SEV_MEDIUM,
+            },
+            VulnRange {
+                introduced: Some("2.5.3"),
+                fixed: "2.5.9",
+                advisories: &["CVE-2026-0540"],
+                severity: SEV_MEDIUM,
+            },
+            VulnRange {
+                introduced: Some("3.1.3"),
+                fixed: "3.3.2",
+                advisories: &["CVE-2026-0540"],
+                severity: SEV_MEDIUM,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "3.3.2",
+                advisories: &["CVE-2026-65914"],
+                severity: SEV_MEDIUM,
+            },
+            VulnRange {
+                introduced: Some("3.4.4"),
+                fixed: "3.4.5",
+                advisories: &["CVE-2026-47423"],
+                severity: SEV_HIGH,
+            },
+        ],
+    },
+    LibSpec {
+        name: "Underscore",
+        url_patterns: &[
+            r"(?i)underscore[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min)?\.js",
+            r"(?i)/underscore(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
+        ],
+        // Anchored to the `//` banner line: Lo-Dash 2.x credits "Based on
+        // Underscore.js 1.5.2" inside its own `/** */` banner.
+        inline_patterns: &[r"(?i)//\s*Underscore\.js (\d+\.\d+(?:\.\d+)?)"],
+        ranges: &[VulnRange {
+            introduced: Some("1.3.2"),
+            fixed: "1.12.1",
+            advisories: &["CVE-2021-23358"],
+            severity: SEV_HIGH,
+        }],
+    },
+    LibSpec {
+        name: "Knockout",
+        url_patterns: &[
+            r"(?i)knockout[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min|\.debug)?\.js",
+            r"(?i)/knockout/(\d+\.\d+(?:\.\d+)?)/",
+        ],
+        inline_patterns: &[r"(?i)Knockout JavaScript library v(\d+\.\d+(?:\.\d+)?)"],
+        ranges: &[VulnRange {
+            introduced: None,
+            fixed: "3.5.0",
+            advisories: &["CVE-2019-14862"],
+            severity: SEV_MEDIUM,
+        }],
+    },
 ];
 
 /// Compiled form of a [`LibSpec`] (regexes built once).

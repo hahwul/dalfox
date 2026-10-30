@@ -325,6 +325,9 @@ fn current_libraries_across_dataset_are_safe() {
         <script src="/moment-2.29.4.min.js"></script>
         <script src="/lodash-4.17.21.min.js"></script>
         <script src="/bootstrap-5.3.0.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js"></script>
+        <script src="/underscore-1.13.8.min.js"></script>
+        <script src="/knockout-3.5.3.js"></script>
     "#;
     assert!(
         libs(body).is_empty(),
@@ -338,4 +341,104 @@ fn current_libraries_across_dataset_are_safe() {
 fn detects_script_src_after_quoted_gt_attribute() {
     let body = r#"<script data-x="a>b" src="/assets/js/jquery-1.7.2.min.js"></script>"#;
     assert!(libs(body).iter().any(|v| v.library == "jQuery"));
+}
+
+#[test]
+fn detects_dompurify_from_src_and_inline() {
+    let from_src = libs(
+        r#"<script src="https://cdn.jsdelivr.net/npm/dompurify@2.3.3/dist/purify.min.js"></script>"#,
+    );
+    let dp = from_src
+        .iter()
+        .find(|v| v.library == "DOMPurify" && v.version == "2.3.3")
+        .unwrap_or_else(|| panic!("old DOMPurify should be flagged, got {from_src:?}"));
+    assert_eq!(dp.severity, "High");
+    assert!(dp.advisories.iter().any(|a| a == "CVE-2024-45801"));
+
+    let from_inline = libs(
+        "<script>/*! @license DOMPurify 3.0.6 | (c) Cure53 and other contributors */</script>",
+    );
+    assert!(
+        from_inline
+            .iter()
+            .any(|v| v.library == "DOMPurify" && v.version == "3.0.6"),
+        "inline DOMPurify banner should be detected, got {from_inline:?}"
+    );
+}
+
+#[test]
+fn detects_dompurify_from_cdnjs_path() {
+    let found = libs(
+        r#"<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>"#,
+    );
+    assert!(
+        found
+            .iter()
+            .any(|v| v.library == "DOMPurify" && v.version == "3.0.6"),
+        "got {found:?}"
+    );
+}
+
+#[test]
+fn dompurify_major_line_introduced_bounds_respected() {
+    // 3.2.0 is past the 3.x fix (3.1.3) for CVE-2024-45801, but still before
+    // the CVE-2025-26791 fix (3.2.4).
+    let found = libs(r#"<script src="/ajax/libs/dompurify/3.2.0/purify.min.js"></script>"#);
+    let dp = found
+        .iter()
+        .find(|v| v.library == "DOMPurify")
+        .unwrap_or_else(|| panic!("DOMPurify 3.2.0 should be flagged, got {found:?}"));
+    assert!(dp.advisories.iter().any(|a| a == "CVE-2025-26791"));
+    assert!(!dp.advisories.iter().any(|a| a == "CVE-2024-45801"));
+}
+
+#[test]
+fn detects_underscore_from_src_and_inline() {
+    let from_src = libs(r#"<script src="/vendor/underscore-1.9.1.min.js"></script>"#);
+    assert!(
+        from_src
+            .iter()
+            .any(|v| v.library == "Underscore" && v.version == "1.9.1" && v.severity == "High"),
+        "got {from_src:?}"
+    );
+    let from_inline =
+        libs("<script>//     Underscore.js 1.9.1\n//     https://underscorejs.org</script>");
+    assert!(
+        from_inline
+            .iter()
+            .any(|v| v.library == "Underscore" && v.version == "1.9.1"),
+        "inline Underscore banner should be detected, got {from_inline:?}"
+    );
+}
+
+#[test]
+fn detects_knockout_from_src_and_inline() {
+    let from_src = libs(r#"<script src="/ajax/libs/knockout/3.4.2/knockout-min.js"></script>"#);
+    assert!(
+        from_src
+            .iter()
+            .any(|v| v.library == "Knockout" && v.version == "3.4.2"),
+        "got {from_src:?}"
+    );
+    let from_inline = libs(
+        "<script>/*!\n * Knockout JavaScript library v3.4.2\n * (c) The Knockout.js team */</script>",
+    );
+    assert!(
+        from_inline
+            .iter()
+            .any(|v| v.library == "Knockout" && v.version == "3.4.2"),
+        "inline Knockout banner should be detected, got {from_inline:?}"
+    );
+}
+
+/// Lo-Dash 2.x banners credit Underscore ("Based on Underscore.js 1.5.2");
+/// that is not a loaded Underscore.
+#[test]
+fn lodash_banner_crediting_underscore_is_not_underscore() {
+    let body = "<script>/**\n * @license\n * Lo-Dash 2.4.1 (Custom Build) <http://lodash.com/>\n * Based on Underscore.js 1.5.2 <http://underscorejs.org/LICENSE>\n */</script>";
+    assert!(
+        libs(body).iter().all(|v| v.library != "Underscore"),
+        "got {:?}",
+        libs(body)
+    );
 }
