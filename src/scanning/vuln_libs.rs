@@ -66,6 +66,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)jquery[._-](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
             r"(?i)/jquery/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/jquery@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
         ],
         inline_patterns: &[r"(?i)jQuery(?: JavaScript Library)? v(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[
@@ -97,7 +98,11 @@ static LIB_SPECS: &[LibSpec] = &[
     },
     LibSpec {
         name: "jQuery UI",
-        url_patterns: &[r"(?i)jquery[-.]ui[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js"],
+        url_patterns: &[
+            r"(?i)jquery[-.]ui[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?im)/jquery-ui@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?i)/(?:jqueryui|jquery-ui)/(\d+\.\d+(?:\.\d+)?)/",
+        ],
         inline_patterns: &[r"(?i)jQuery UI(?: -)? v(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[VulnRange {
             introduced: None,
@@ -113,7 +118,11 @@ static LIB_SPECS: &[LibSpec] = &[
     },
     LibSpec {
         name: "AngularJS",
-        url_patterns: &[r"(?i)angular[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js"],
+        url_patterns: &[
+            r"(?i)angular[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?im)/angular@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?i)/(?:angular(?:\.js)?|angularjs)/(\d+\.\d+(?:\.\d+)?)/",
+        ],
         inline_patterns: &[r#"(?i)angular.*?\bversion\b.*?["'](\d+\.\d+\.\d+)["']"#],
         ranges: &[VulnRange {
             // AngularJS 1.x reached end-of-life with multiple sandbox/XSS issues.
@@ -125,7 +134,11 @@ static LIB_SPECS: &[LibSpec] = &[
     },
     LibSpec {
         name: "Bootstrap",
-        url_patterns: &[r"(?i)bootstrap[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js"],
+        url_patterns: &[
+            r"(?i)bootstrap[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?im)/bootstrap@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?i)/(?:twitter-)?bootstrap/(\d+\.\d+(?:\.\d+)?)/",
+        ],
         inline_patterns: &[r"(?i)Bootstrap(?: v)?\s*v?(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[
             VulnRange {
@@ -144,7 +157,11 @@ static LIB_SPECS: &[LibSpec] = &[
     },
     LibSpec {
         name: "Lodash",
-        url_patterns: &[r"(?i)lodash[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js"],
+        url_patterns: &[
+            r"(?i)lodash[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?im)/lodash@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?i)/lodash(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
+        ],
         inline_patterns: &[
             r"(?i)lodash(?: modern build)? <(\d+\.\d+\.\d+)>|@license lodash (\d+\.\d+\.\d+)",
         ],
@@ -157,7 +174,11 @@ static LIB_SPECS: &[LibSpec] = &[
     },
     LibSpec {
         name: "Handlebars",
-        url_patterns: &[r"(?i)handlebars[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js"],
+        url_patterns: &[
+            r"(?i)handlebars[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?im)/handlebars@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?i)/handlebars(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
+        ],
         inline_patterns: &[r"(?i)Handlebars(?:\.js)?(?: v| version )(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[VulnRange {
             introduced: None,
@@ -168,7 +189,11 @@ static LIB_SPECS: &[LibSpec] = &[
     },
     LibSpec {
         name: "Moment.js",
-        url_patterns: &[r"(?i)moment[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js"],
+        url_patterns: &[
+            r"(?i)moment[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?im)/moment@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?i)/moment(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
+        ],
         inline_patterns: &[r"(?i)//! moment\.js\s*\n//! version : (\d+\.\d+(?:\.\d+)?)"],
         ranges: &[VulnRange {
             introduced: None,
