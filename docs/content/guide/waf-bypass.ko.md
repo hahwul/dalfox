@@ -61,7 +61,7 @@ dalfox scan https://target.app \
 
 WAF가 자신의 헤더를 감추거나 CDN 뒤에 있을 때 유용합니다. WAF를 고르는 것은 `--force-waf`입니다. `auto`에서도 적용되며, `--force-waf` 없이 `--waf-bypass force`만 주면 `auto`와 똑같이 동작합니다. `--skip-waf-probe`를 함께 주지 않으면 자극 프로브는 여전히 전송됩니다.
 
-허용되는 이름(대소문자 무시): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`. 그 밖의 값은 거부됩니다.
+허용되는 이름(대소문자 무시): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`. 그 밖의 값은 거부됩니다.
 
 ### WAF 로직 비활성화
 

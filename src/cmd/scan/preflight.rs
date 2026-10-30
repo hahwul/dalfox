@@ -445,6 +445,9 @@ pub(super) fn parse_waf_type(s: &str) -> crate::waf::WafType {
         "fastly" => crate::waf::WafType::Fastly,
         "wordfence" => crate::waf::WafType::Wordfence,
         "citrix" | "netscaler" => crate::waf::WafType::Citrix,
+        "wallarm" => crate::waf::WafType::Wallarm,
+        "naxsi" => crate::waf::WafType::Naxsi,
+        "safeline" | "safe-line" | "chaitin" => crate::waf::WafType::SafeLine,
         other => crate::waf::WafType::Unknown(other.to_string()),
     }
 }
@@ -468,6 +471,11 @@ mod waf_type_tests {
         assert_eq!(parse_waf_type("wordfence"), WafType::Wordfence);
         assert_eq!(parse_waf_type("netscaler"), WafType::Citrix);
         assert_eq!(parse_waf_type("Citrix"), WafType::Citrix);
+        assert_eq!(parse_waf_type("Wallarm"), WafType::Wallarm);
+        assert_eq!(parse_waf_type("NAXSI"), WafType::Naxsi);
+        assert_eq!(parse_waf_type("SafeLine"), WafType::SafeLine);
+        assert_eq!(parse_waf_type("safe-line"), WafType::SafeLine);
+        assert_eq!(parse_waf_type("chaitin"), WafType::SafeLine);
     }
 
     #[test]
