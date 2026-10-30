@@ -61,7 +61,7 @@ dalfox scan https://target.app \
 
 Handy when the WAF masks its headers or sits behind a CDN. `--force-waf` is what selects the WAF; it takes effect under `auto` too, and `--waf-bypass force` without it behaves like `auto`. The provocation probe is still sent unless you add `--skip-waf-probe`.
 
-Accepted names (case-insensitive): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`. Any other value is rejected.
+Accepted names (case-insensitive): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`. Any other value is rejected.
 
 ### Disable WAF logic
 
