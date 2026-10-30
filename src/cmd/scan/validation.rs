@@ -140,6 +140,20 @@ pub(crate) fn validate_numeric_args(args: &ScanArgs) -> std::result::Result<(), 
             args.waf_min_confidence
         ));
     }
+    // `--ignore-return` is an exact match against the response status, so a
+    // value outside the HTTP status range (a typo like `4040`, or `0`) is
+    // accepted and silently never matches. Runs after the config merge, so
+    // this also covers the `ignore_return` config key.
+    if let Some(code) = args
+        .ignore_return
+        .iter()
+        .find(|c| !(100..=599).contains(*c))
+    {
+        return Err(format!(
+            "--ignore-return {} is not an HTTP status code (100-599)",
+            code
+        ));
+    }
     Ok(())
 }
 
