@@ -259,6 +259,13 @@ waf_type = "AzureWaf"
 confidence = 0.85
 evidence_label = "x-ms-forbidden-ip header"
 
+[[header]]
+header = "server"
+value_contains = "microsoft-azure-application-gateway"
+waf_type = "AzureWaf"
+confidence = 0.85
+evidence_label = "Server: Microsoft-Azure-Application-Gateway"
+
 # Google Cloud Armor
 # NOTE: `Server: Google Frontend` is sent by every Google-hosted property
 # (App Engine, Cloud Run, Google APIs, even Search) regardless of whether
