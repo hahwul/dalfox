@@ -1403,7 +1403,9 @@ fn is_location_object_path(path: &str) -> bool {
     )
 }
 
-/// `window.parseInt` → `parseInt`; other names unchanged.
+/// Strips one leading `window.`, `globalThis.`, `self.` or `top.` prefix
+/// (`window.parseInt` → `parseInt`). Other names, including `parent.`, are
+/// returned unchanged.
 fn strip_global_object(name: &str) -> &str {
     ["window.", "globalThis.", "self.", "top."]
         .iter()
@@ -1430,6 +1432,53 @@ impl<'a> DomXssVisitor<'a> {
                 })
             }
             _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_global_object_strips_one_global_prefix() {
+        for (input, expected) in [
+            ("window.parseInt", "parseInt"),
+            ("globalThis.Number", "Number"),
+            ("self.parseFloat", "parseFloat"),
+            ("top.parseInt", "parseInt"),
+            // Only one prefix is stripped per call.
+            ("window.window.parseInt", "window.parseInt"),
+            // `parent.` is not a global alias here, and the match is case-sensitive.
+            ("parent.parseInt", "parent.parseInt"),
+            ("Window.parseInt", "Window.parseInt"),
+            ("parseInt", "parseInt"),
+        ] {
+            assert_eq!(strip_global_object(input), expected, "input: {input}");
+        }
+    }
+
+    #[test]
+    fn is_location_object_path_matches_global_spellings_only() {
+        for path in [
+            "location",
+            "window.location",
+            "document.location",
+            "self.location",
+            "top.location",
+            "parent.location",
+            "globalThis.location",
+        ] {
+            assert!(is_location_object_path(path), "{path} should match");
+        }
+        for path in [
+            "location.href",
+            "Location",
+            "window.top.location",
+            "window.location.hash",
+            "",
+        ] {
+            assert!(!is_location_object_path(path), "{path} should not match");
         }
     }
 }
