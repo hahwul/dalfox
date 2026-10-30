@@ -194,9 +194,9 @@ impl Result {
     }
 }
 
-/// SARIF `ruleId` / `driver.rules[].id` for a finding's CWE. Empty or unknown
-/// CWEs fall back to the XSS rule so the id is always a well-formed
-/// `dalfox/cwe-<n>` rather than a bare `dalfox/`.
+/// SARIF `ruleId` / `driver.rules[].id` for a finding's CWE. Empty CWEs fall
+/// back to the XSS rule so the id is always a well-formed `dalfox/cwe-<n>`
+/// rather than a bare `dalfox/`; any other CWE is trimmed and lowercased.
 fn sarif_rule_id(cwe: &str) -> String {
     let trimmed = cwe.trim();
     if trimmed.is_empty() {
@@ -255,5 +255,22 @@ fn sarif_rule_for_id(id: &str) -> serde_json::Value {
             "defaultConfiguration": { "level": "warning" },
             "properties": { "tags": ["security"] }
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sarif_rule_id;
+
+    #[test]
+    fn sarif_rule_id_empty_falls_back_to_xss() {
+        assert_eq!(sarif_rule_id(""), "dalfox/cwe-79");
+        assert_eq!(sarif_rule_id("   "), "dalfox/cwe-79");
+    }
+
+    #[test]
+    fn sarif_rule_id_trims_and_lowercases() {
+        assert_eq!(sarif_rule_id(" CWE-79 "), "dalfox/cwe-79");
+        assert_eq!(sarif_rule_id("CWE-1104"), "dalfox/cwe-1104");
     }
 }
