@@ -1528,3 +1528,23 @@ fn parse_errors_name_an_inline_document_instead_of_echoing_it() {
     assert_eq!(source_name(&"x".repeat(600)), "<inline document>");
     assert_eq!(source_name("capture.har"), "capture.har");
 }
+
+#[test]
+fn looks_like_form_urlencoded_accepts_name_value_pairs() {
+    for data in ["a=1&b=2", "a="] {
+        assert!(
+            looks_like_form_urlencoded(data),
+            "{data:?} should look like a form"
+        );
+    }
+}
+
+#[test]
+fn looks_like_form_urlencoded_rejects_other_shapes() {
+    for data in ["", "a=1&", "a=1&&b=2", "=1", "a", "a=1 b=2", "{\"a\":1}"] {
+        assert!(
+            !looks_like_form_urlencoded(data),
+            "{data:?} should not look like a form"
+        );
+    }
+}
