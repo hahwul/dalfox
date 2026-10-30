@@ -11,7 +11,7 @@ Responsibilities:
 Notes:
 - Search order for config base dir:
   1) $XDG_CONFIG_HOME/dalfox
-  2) $HOME/.config/dalfox
+  2) $HOME/.config/dalfox ($USERPROFILE/.config/dalfox when $HOME is unset)
 - File preference in a base dir: config.toml first, then config.json
 - Auto-create directory and a TOML template if no config exists.
 */
@@ -647,11 +647,6 @@ impl ScanConfig {
     }
 }
 
-// Load configuration with the following behavior:
-// - If $XDG_CONFIG_HOME is set and non-empty, use "$XDG_CONFIG_HOME/dalfox"
-// - Otherwise, use "$HOME/.config/dalfox"
-// - Within the selected base directory, prefer "config.toml" over "config.json"
-// - If neither file exists, create "config.toml" with a commented template and return it as created
 /// Upper bound on the size of a config file we will read into memory. Config
 /// files are tiny in practice; the cap exists so a config path that resolves to
 /// a huge / unbounded file (e.g. a symlink to `/dev/zero`) fails fast instead of
@@ -677,6 +672,12 @@ impl std::fmt::Display for ConfigFileError {
 
 impl std::error::Error for ConfigFileError {}
 
+/// Load configuration with the following behavior:
+/// - If $XDG_CONFIG_HOME is set and non-empty, use "$XDG_CONFIG_HOME/dalfox"
+/// - Otherwise, use "$HOME/.config/dalfox" (falling back to $USERPROFILE when
+///   $HOME is unset)
+/// - Within the selected base directory, prefer "config.toml" over "config.json"
+/// - If neither file exists, create "config.toml" with a commented template and return it as created
 pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     let base_dir = resolve_config_dir()?;
     fs::create_dir_all(&base_dir)?;
@@ -895,7 +896,7 @@ pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 # WAF
 # waf_bypass = "auto"         # auto, force, off
 # skip_waf_probe = false
-# force_waf = "cloudflare"    # skip detection and target a specific WAF's bypasses
+# force_waf = "cloudflare"    # treat the target as this WAF (replaces the detection result)
 # waf_evasion = false
 # waf_min_confidence = 0.3    # 0.0..=1.0 floor for WAF fingerprint confidence
 "#;
