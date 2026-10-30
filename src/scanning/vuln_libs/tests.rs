@@ -520,6 +520,16 @@ fn detects_libraries_from_cdn_url_shapes() {
             "2.18.1",
         ),
         ("https://unpkg.com/moment@2.18.1", "Moment.js", "2.18.1"),
+        (
+            "https://cdn.jsdelivr.net/npm/underscore@1.9.1/underscore-min.js",
+            "Underscore",
+            "1.9.1",
+        ),
+        (
+            "https://unpkg.com/knockout@3.4.2/build/output/knockout-latest.js",
+            "Knockout",
+            "3.4.2",
+        ),
     ] {
         let body = format!(r#"<script src="{url}"></script>"#);
         let found = libs(&body);
@@ -542,6 +552,8 @@ fn cdn_patterns_ignore_packages_that_contain_a_library_name() {
         "https://cdn.jsdelivr.net/npm/moment-timezone@0.5.0/index.js",
         "https://cdn.jsdelivr.net/npm/bootstrap-select@1.13.0/dist/js/bootstrap-select.min.js",
         "https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/js/bootstrap-datepicker.min.js",
+        "https://cdn.jsdelivr.net/npm/underscore.string@3.3.4/dist/underscore.string.min.js",
+        "https://unpkg.com/knockout-mapping@2.6.0/dist/knockout.mapping.min.js",
     ] {
         let body = format!(r#"<script src="{url}"></script>"#);
         assert!(libs(&body).is_empty(), "{url} flagged: {:?}", libs(&body));
