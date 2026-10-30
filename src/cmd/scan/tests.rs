@@ -159,6 +159,27 @@ fn validate_numeric_args_accepts_ignore_return_status_codes() {
     args.ignore_return = vec![100, 404, 599];
     assert!(validate_numeric_args(&args).is_ok());
     args.ignore_return = vec![];
+fn validate_numeric_args_rejects_blind_oob_wait_over_cap() {
+    // An unbounded `--blind-oob-wait` (e.g. a typo like 99999999) finishes the
+    // scan and then keeps polling for OOB callbacks until Ctrl-C.
+    let mut args = default_scan_args();
+    args.oob.blind_oob_wait = Some(crate::cmd::scan::CLI_MAX_BLIND_OOB_WAIT_SECS + 1);
+    let err = validate_numeric_args(&args).unwrap_err();
+    assert!(
+        err.contains("blind-oob-wait"),
+        "message must name the flag, got: {}",
+        err
+    );
+}
+
+#[test]
+fn validate_numeric_args_accepts_blind_oob_wait_at_cap_or_unset() {
+    let mut args = default_scan_args();
+    args.oob.blind_oob_wait = Some(crate::cmd::scan::CLI_MAX_BLIND_OOB_WAIT_SECS);
+    assert!(validate_numeric_args(&args).is_ok());
+    args.oob.blind_oob_wait = Some(0);
+    assert!(validate_numeric_args(&args).is_ok());
+    args.oob.blind_oob_wait = None;
     assert!(validate_numeric_args(&args).is_ok());
 }
 

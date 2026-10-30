@@ -227,6 +227,11 @@ pub const CLI_MAX_SXSS_RETRIES: u32 = 20;
 pub const MAX_SXSS_BACKOFF_MS: u64 = 5_000;
 /// Sanity cap for `--retry-delay` (ms), matching `--delay`'s ceiling.
 pub const CLI_MAX_RETRY_DELAY_MS: u64 = 60_000;
+/// Sanity cap for `--blind-oob-wait` (seconds). Looser than the server / MCP
+/// cap (`crate::job::MAX_BLIND_OOB_WAIT_SECS`, 10 minutes), like the other CLI
+/// caps, but a value past an hour almost always means a typo: the scan would
+/// finish and then sit polling for OOB callbacks until Ctrl-C.
+pub const CLI_MAX_BLIND_OOB_WAIT_SECS: u64 = 3600;
 /// Sanity cap for `--scan-timeout` (seconds). Kept in lockstep with the async
 /// front-ends' `crate::job::MAX_SCAN_TIMEOUT_SECS` (24h) so the whole-scan
 /// budget bound is identical across CLI / server / MCP. Beyond a ceiling, the

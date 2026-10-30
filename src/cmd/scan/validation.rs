@@ -113,6 +113,15 @@ pub(crate) fn validate_numeric_args(args: &ScanArgs) -> std::result::Result<(), 
             args.sxss_retries
         ));
     }
+    if let Some(wait) = args.oob.blind_oob_wait
+        && wait > crate::cmd::scan::CLI_MAX_BLIND_OOB_WAIT_SECS
+    {
+        return Err(format!(
+            "--blind-oob-wait must be at most {} seconds (got {}); use 0 for no end-of-scan wait",
+            crate::cmd::scan::CLI_MAX_BLIND_OOB_WAIT_SECS,
+            wait
+        ));
+    }
     if args.retry_delay > CLI_MAX_RETRY_DELAY_MS {
         return Err(format!(
             "--retry-delay must be at most {} ms (got {})",
