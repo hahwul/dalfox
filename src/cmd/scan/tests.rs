@@ -159,6 +159,10 @@ fn validate_numeric_args_accepts_ignore_return_status_codes() {
     args.ignore_return = vec![100, 404, 599];
     assert!(validate_numeric_args(&args).is_ok());
     args.ignore_return = vec![];
+    assert!(validate_numeric_args(&args).is_ok());
+}
+
+#[test]
 fn validate_numeric_args_rejects_blind_oob_wait_over_cap() {
     // An unbounded `--blind-oob-wait` (e.g. a typo like 99999999) finishes the
     // scan and then keeps polling for OOB callbacks until Ctrl-C.
