@@ -138,6 +138,31 @@ fn validate_numeric_args_accepts_sxss_retries_at_cap() {
 }
 
 #[test]
+fn validate_numeric_args_rejects_ignore_return_outside_status_range() {
+    // `--ignore-return` is compared by exact match against the response
+    // status, so `4040` or `0` would be accepted and never filter anything.
+    for bad in [4040u16, 0, 99, 600] {
+        let mut args = default_scan_args();
+        args.ignore_return = vec![404, bad];
+        let err = validate_numeric_args(&args).unwrap_err();
+        assert!(
+            err.contains("--ignore-return") && err.contains(&bad.to_string()),
+            "message must name the flag and the bad code, got: {}",
+            err
+        );
+    }
+}
+
+#[test]
+fn validate_numeric_args_accepts_ignore_return_status_codes() {
+    let mut args = default_scan_args();
+    args.ignore_return = vec![100, 404, 599];
+    assert!(validate_numeric_args(&args).is_ok());
+    args.ignore_return = vec![];
+    assert!(validate_numeric_args(&args).is_ok());
+}
+
+#[test]
 fn sxss_method_uses_the_same_parser_as_method() {
     // `--sxss-method` had no value parser, so `post` went on the wire as the
     // literal extension verb (reqwest's Method is case-sensitive) and
