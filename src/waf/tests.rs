@@ -204,6 +204,32 @@ fn rules_toml_loads_and_covers_all_waf_families() {
     }
 }
 
+/// The reverse of the coverage check above: every `waf_type` in
+/// `rules.toml` must name a real `WafType` variant. A typo such as
+/// `"Cloudfare"` would otherwise load fine and silently report
+/// `Unknown`, dropping the vendor-specific bypass strategy.
+#[test]
+fn rules_toml_waf_types_are_all_known() {
+    let r = super::rules();
+    let rule_types = r
+        .headers
+        .iter()
+        .map(|h| (h.waf_type.as_str(), h.evidence_label.as_str()))
+        .chain(
+            r.bodies
+                .iter()
+                .map(|b| (b.waf_type.as_str(), b.evidence_label.as_str())),
+        );
+    for (waf_type, evidence) in rule_types {
+        assert!(
+            !matches!(parse_waf_type_from_rule(waf_type), WafType::Unknown(_)),
+            "rules.toml rule {:?} uses unknown waf_type {:?}",
+            evidence,
+            waf_type
+        );
+    }
+}
+
 fn make_headers(pairs: &[(&str, &str)]) -> HeaderMap {
     let mut map = HeaderMap::new();
     for (k, v) in pairs {
@@ -320,6 +346,14 @@ fn test_aws_waf_header_detection() {
     let result = fingerprint_from_response(&headers, None, 403);
     assert!(result.waf_types().contains(&&WafType::AwsWaf));
     assert!(result.primary().unwrap().confidence >= 0.9);
+}
+
+#[test]
+fn test_azure_application_gateway_server_header_detection() {
+    let headers = make_headers(&[("server", "Microsoft-Azure-Application-Gateway/v2")]);
+    let result = fingerprint_from_response(&headers, None, 403);
+    assert!(result.waf_types().contains(&&WafType::AzureWaf));
+    assert!(result.primary().unwrap().confidence >= 0.85);
 }
 
 /// `barra_counter_session` is a cookie name, so it can only arrive in
