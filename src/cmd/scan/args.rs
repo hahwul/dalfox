@@ -74,8 +74,9 @@ impl ExplicitArgs {
 pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
 
 /// Every accepted `--input-type`. `input.rs` keeps its runtime branch on
-/// purpose: the REST server and the MCP schema bypass clap, so that rejection
-/// message is built from this const instead of a second hand-written copy.
+/// purpose: a `ScanArgs` built in code skips clap (REST and MCP pin `"url"`
+/// in `job::spec`), so that rejection message is built from this const
+/// instead of a second hand-written copy.
 pub const INPUT_TYPE_VALUES: &[&str] = &[
     "auto", "url", "file", "pipe", "raw-http", "har", "openapi", "postman",
 ];
