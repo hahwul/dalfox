@@ -275,6 +275,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)underscore[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min)?\.js",
             r"(?i)/underscore(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/underscore@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
         ],
         // Anchored to the `//` banner line: Lo-Dash 2.x credits "Based on
         // Underscore.js 1.5.2" inside its own `/** */` banner.
@@ -291,6 +292,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)knockout[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min|\.debug)?\.js",
             r"(?i)/knockout/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/knockout@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
         ],
         inline_patterns: &[r"(?i)Knockout JavaScript library v(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[VulnRange {
