@@ -18,6 +18,35 @@ fn matches_for(argv: &[&str]) -> clap::ArgMatches {
         .expect("parse should succeed")
 }
 
+#[test]
+fn input_type_rejects_unknown_value() {
+    use clap::{CommandFactory, Parser};
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        scan: ScanArgs,
+    }
+    let err = TestCli::command()
+        .try_get_matches_from(["dalfox", "-i", "bogus", "https://example.com/"])
+        .expect_err("clap must reject an input type that is not in INPUT_TYPE_VALUES");
+    let text = err.to_string();
+    assert!(text.contains("invalid value 'bogus'"), "got: {text}");
+    assert!(text.contains("--input-type"), "got: {text}");
+}
+
+#[test]
+fn input_type_accepts_every_const_value() {
+    for value in INPUT_TYPE_VALUES {
+        let m = matches_for(&["dalfox", "-i", value, "https://example.com/"]);
+        assert_eq!(
+            m.get_one::<String>("input_type").map(String::as_str),
+            Some(*value),
+            "`-i {value}` must parse to the same value"
+        );
+    }
+}
+
 /// The load-bearing property: a flag typed with its *default* value is
 /// still recorded as explicit. Comparing `args.timeout` against
 /// `DEFAULT_TIMEOUT_SECS` cannot tell these apart — that is the whole bug

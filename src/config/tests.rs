@@ -538,6 +538,34 @@ fn test_normalize_and_validate_rejects_invalid_method() {
 }
 
 #[test]
+fn test_normalize_and_validate_rejects_invalid_input_type() {
+    let mut scan = ScanConfig {
+        input_type: Some("bogus".to_string()),
+        ..Default::default()
+    };
+    let warnings = scan.normalize_and_validate();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "one warning per invalid field: {warnings:?}"
+    );
+    assert!(warnings[0].contains("scan.input_type"), "got: {warnings:?}");
+    assert_eq!(
+        scan.input_type, None,
+        "an invalid input type must fall back to `auto`, not reach ScanArgs"
+    );
+
+    // Every value the flag accepts must survive the config path unchanged.
+    let mut accepted = ScanConfig {
+        input_type: Some("raw-http".to_string()),
+        ..Default::default()
+    };
+    let warnings = accepted.normalize_and_validate();
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    assert_eq!(accepted.input_type.as_deref(), Some("raw-http"));
+}
+
+#[test]
 fn test_normalize_and_validate_rejects_invalid_enums() {
     let mut scan = ScanConfig {
         format: Some("xml".to_string()),
