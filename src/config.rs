@@ -540,6 +540,11 @@ impl ScanConfig {
 
         // Single-value enum fields validated against clap's possible values.
         for (field, allowed, name) in [
+            (
+                &mut self.input_type,
+                scan::INPUT_TYPE_VALUES,
+                "scan.input_type",
+            ),
             (&mut self.format, scan::FORMAT_VALUES, "scan.format"),
             (&mut self.poc_type, scan::POC_TYPE_VALUES, "scan.poc_type"),
             (

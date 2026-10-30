@@ -98,7 +98,10 @@ async fn url_mode_applies_method_and_header_overrides() {
 
 #[tokio::test]
 async fn invalid_input_type_is_an_error() {
-    let args = args_from(&["-i", "bogus", "-S", "https://example.com/"]);
+    // clap rejects this at the CLI now, but a `ScanArgs` built in code skips
+    // clap, so the runtime branch must still refuse it.
+    let mut args = args_from(&["-S", "https://example.com/"]);
+    args.input_type = "bogus".to_string();
     assert!(resolve(&args).await.is_err());
 }
 
