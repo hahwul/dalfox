@@ -3,10 +3,10 @@ name: Extended CI
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
   pull_request:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
+    paths: [Cargo.toml, Cargo.lock, "**/*.rs", "src/**/*.toml", "src/**/*.txt", "scripts/**", "docs/data/**", .github/workflows/ci-extended.yml]
   schedule:
     # Weekly: exercise the slower, normally-#[ignore]d functional suite so it
     # can't silently rot between releases.
