@@ -496,13 +496,15 @@ pub(crate) async fn resolve_targets(
             }
 
             _ => {
+                let allowed = crate::cmd::scan::INPUT_TYPE_VALUES
+                    .iter()
+                    .map(|value| format!("'{value}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 emit_error(
                     &args.format,
                     crate::cmd::error_codes::INVALID_INPUT_TYPE,
-                    &format!(
-                        "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', 'har', 'openapi', or 'postman'",
-                        input_type
-                    ),
+                    &format!("Invalid input-type '{input_type}'. Use one of: {allowed}"),
                 );
                 return Err(ScanOutcome::Error);
             }

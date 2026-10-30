@@ -73,6 +73,14 @@ impl ExplicitArgs {
 /// Centralizing this allows config.rs to reference the same canonical defaults.
 pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
 
+/// Every accepted `--input-type`. `input.rs` keeps its runtime branch on
+/// purpose: a `ScanArgs` built in code skips clap (REST and MCP pin `"url"`
+/// in `job::spec`), so that rejection message is built from this const
+/// instead of a second hand-written copy.
+pub const INPUT_TYPE_VALUES: &[&str] = &[
+    "auto", "url", "file", "pipe", "raw-http", "har", "openapi", "postman",
+];
+
 // Allowed value sets for the enum-like string flags. Kept as the single source
 // of truth so both the clap `PossibleValuesParser` below and the config-file
 // validator (`config::ScanConfig::normalize_and_validate`) agree — a config
@@ -321,7 +329,7 @@ pub(crate) fn parse_http_method_arg(s: &str) -> std::result::Result<String, Stri
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
     /// Input type: auto, url, file, pipe, raw-http, har, openapi, postman
-    #[arg(short = 'i', long, default_value = "auto")]
+    #[arg(short = 'i', long, default_value = "auto", value_parser = clap::builder::PossibleValuesParser::new(INPUT_TYPE_VALUES.iter().copied()))]
     pub input_type: String,
 
     #[clap(help_heading = "INPUT")]
