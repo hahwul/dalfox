@@ -138,6 +138,31 @@ fn validate_numeric_args_accepts_sxss_retries_at_cap() {
 }
 
 #[test]
+fn validate_numeric_args_rejects_blind_oob_wait_over_cap() {
+    // An unbounded `--blind-oob-wait` (e.g. a typo like 99999999) finishes the
+    // scan and then keeps polling for OOB callbacks until Ctrl-C.
+    let mut args = default_scan_args();
+    args.oob.blind_oob_wait = Some(crate::cmd::scan::CLI_MAX_BLIND_OOB_WAIT_SECS + 1);
+    let err = validate_numeric_args(&args).unwrap_err();
+    assert!(
+        err.contains("blind-oob-wait"),
+        "message must name the flag, got: {}",
+        err
+    );
+}
+
+#[test]
+fn validate_numeric_args_accepts_blind_oob_wait_at_cap_or_unset() {
+    let mut args = default_scan_args();
+    args.oob.blind_oob_wait = Some(crate::cmd::scan::CLI_MAX_BLIND_OOB_WAIT_SECS);
+    assert!(validate_numeric_args(&args).is_ok());
+    args.oob.blind_oob_wait = Some(0);
+    assert!(validate_numeric_args(&args).is_ok());
+    args.oob.blind_oob_wait = None;
+    assert!(validate_numeric_args(&args).is_ok());
+}
+
+#[test]
 fn sxss_method_uses_the_same_parser_as_method() {
     // `--sxss-method` had no value parser, so `post` went on the wire as the
     // literal extension verb (reqwest's Method is case-sensitive) and
