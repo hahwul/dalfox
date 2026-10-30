@@ -377,3 +377,52 @@ impl Result {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn md_code_cell_empty_renders_a_dash() {
+        assert_eq!(md_code_cell(""), "-");
+    }
+
+    #[test]
+    fn md_code_cell_fence_outgrows_backticks_in_the_body() {
+        assert_eq!(md_code_cell("q"), "`q`");
+        assert_eq!(md_code_cell("a`b"), "``a`b``");
+    }
+
+    #[test]
+    fn md_code_cell_pads_a_space_or_backtick_edge() {
+        assert_eq!(md_code_cell("`x"), "`` `x ``");
+        assert_eq!(md_code_cell(" x"), "`  x `");
+        // All spaces: CommonMark keeps the body as is, so no padding.
+        assert_eq!(md_code_cell("  "), "`  `");
+    }
+
+    #[test]
+    fn md_code_cell_escapes_table_pipes() {
+        assert_eq!(md_code_cell("a|b"), "`a\\|b`");
+    }
+
+    #[test]
+    fn longest_backtick_run_counts_the_longest_run() {
+        assert_eq!(longest_backtick_run(""), 0);
+        assert_eq!(longest_backtick_run("a``b```c"), 3);
+    }
+
+    #[test]
+    fn code_fence_for_is_never_shorter_than_three() {
+        assert_eq!(code_fence_for(""), "```");
+        assert_eq!(code_fence_for("`"), "```");
+        assert_eq!(code_fence_for("x```y"), "````");
+    }
+
+    #[test]
+    fn md_cell_escapes_markdown_syntax() {
+        assert_eq!(md_cell("a|b"), "a\\|b");
+        assert_eq!(md_cell("a*b_c"), "a\\*b\\_c");
+        assert_eq!(md_cell("plain-text.ok"), "plain-text.ok");
+    }
+}
