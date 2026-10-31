@@ -202,7 +202,7 @@ pub(crate) fn split_header_query_param(raw: &str) -> Vec<String> {
 
 /// Split a comma-separated `GET /scan` list value, trimming each item and
 /// dropping empty ones.
-fn split_csv(raw: &str) -> Vec<String> {
+pub(super) fn split_csv(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(|x| x.trim().to_string())
         .filter(|x| !x.is_empty())
@@ -212,7 +212,7 @@ fn split_csv(raw: &str) -> Vec<String> {
 /// `?blind_oob=` takes a boolean or a comma-separated server list, mirroring
 /// the JSON body's `true` / `[...]` forms. Empty and the false spellings mean
 /// off; the true spellings mean the public mesh.
-fn blind_oob_query(raw: &str) -> Option<crate::job::spec::BlindOobRequest> {
+pub(super) fn blind_oob_query(raw: &str) -> Option<crate::job::spec::BlindOobRequest> {
     use crate::job::spec::BlindOobRequest;
     match raw.trim().to_ascii_lowercase().as_str() {
         "" | "0" | "false" | "no" | "off" => None,
