@@ -588,3 +588,52 @@ fn fp_control_variables_not_object_is_ignored() {
     let data = r#"{"query":"query{a}","variables":"oops"}"#;
     assert!(infer_graphql_variable_fields(data).is_empty());
 }
+
+#[test]
+fn looks_like_graphql_operation_accepts_operation_starts() {
+    assert!(looks_like_graphql_operation("query { a }"));
+    assert!(looks_like_graphql_operation("  {a}"));
+    assert!(looks_like_graphql_operation("mutation("));
+    assert!(looks_like_graphql_operation("subscription\n{"));
+}
+
+#[test]
+fn looks_like_graphql_operation_rejects_non_operations() {
+    assert!(!looks_like_graphql_operation("queryable"));
+    // The keyword alone, with nothing after it.
+    assert!(!looks_like_graphql_operation("query"));
+    // Keywords are case-sensitive.
+    assert!(!looks_like_graphql_operation("Query {a}"));
+    assert!(!looks_like_graphql_operation(""));
+}
+
+#[test]
+fn parse_json_object_or_array_parses_objects_and_arrays() {
+    assert_eq!(
+        parse_json_object_or_array("  {\"a\":1}"),
+        Some(serde_json::json!({"a": 1}))
+    );
+    assert_eq!(
+        parse_json_object_or_array("[1,2]"),
+        Some(serde_json::json!([1, 2]))
+    );
+}
+
+#[test]
+fn parse_json_object_or_array_rejects_scalars_and_bad_json() {
+    assert_eq!(parse_json_object_or_array("1"), None);
+    assert_eq!(parse_json_object_or_array("\"x\""), None);
+    assert_eq!(parse_json_object_or_array("{bad"), None);
+    // Trailing text after a valid object.
+    assert_eq!(parse_json_object_or_array("{} x"), None);
+}
+
+#[test]
+fn build_pointer_escapes_per_rfc_6901() {
+    let p = |segs: &[&str]| build_pointer(&segs.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    assert_eq!(p(&[]), "");
+    assert_eq!(p(&["a", "b"]), "/a/b");
+    assert_eq!(p(&["a/b"]), "/a~1b");
+    assert_eq!(p(&["~1"]), "/~01");
+    assert_eq!(p(&[""]), "/");
+}
