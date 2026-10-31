@@ -699,3 +699,26 @@ fn wide_all_of_stops_at_the_node_budget() {
     s.sample(&schema, 0);
     assert!(s.nodes <= MAX_SCHEMA_NODES + 1, "visited {}", s.nodes);
 }
+
+#[test]
+fn split_server_separates_origin_from_path() {
+    let cases: &[(&str, (Option<&str>, &str))] = &[
+        (
+            "https://api.example.com/v1",
+            (Some("https://api.example.com"), "/v1"),
+        ),
+        ("  https://x  ", (Some("https://x"), "")),
+        ("https://x?q=1", (Some("https://x"), "?q=1")),
+        ("//cdn.example.com/a", (Some("//cdn.example.com"), "/a")),
+        ("/\\evil.com/x", (Some("/\\evil.com"), "/x")),
+        ("\\\\evil.com\\x", (Some("\\\\evil.com"), "\\x")),
+        // The `://` comes after the first separator, so it is not a scheme.
+        ("/path?u=http://x", (None, "/path?u=http://x")),
+        ("/api/v3", (None, "/api/v3")),
+        ("api", (None, "api")),
+        ("", (None, "")),
+    ];
+    for (input, want) in cases {
+        assert_eq!(split_server(input), *want, "{input:?}");
+    }
+}
