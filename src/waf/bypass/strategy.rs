@@ -216,6 +216,7 @@ pub(crate) fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
         WafType::Wallarm => unknown_strategy_for("Wallarm"),
         WafType::Naxsi => unknown_strategy_for("NAXSI"),
         WafType::SafeLine => unknown_strategy_for("SafeLine"),
+        WafType::DdosGuard => unknown_strategy_for("DDoS-Guard"),
         WafType::Unknown(hint) => unknown_strategy_for(hint),
     }
 }
