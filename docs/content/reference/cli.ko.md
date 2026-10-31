@@ -91,7 +91,7 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | 플래그 | 기본값 | 설명 |
 |------|---------|-------------|
-| `-p`, `--param` |  | 분석할 파라미터; `name:location` 형식 지원 (위치: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`) |
+| `-p`, `--param` |  | 분석할 파라미터; `name:location` 형식 지원 (위치: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`, `path`, `fragment`. `path`와 `fragment`는 이미 발견된 파라미터를 필터링하는 용도로만 동작) |
 | `-d`, `--data` |  | 요청 본문 |
 | `-H`, `--headers` |  | 추가 HTTP 헤더 (반복 지정 가능) |
 | `--cookies` |  | 쿠키 (반복 지정 가능) |

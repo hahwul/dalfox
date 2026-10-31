@@ -59,7 +59,7 @@ dalfox scan [TARGETS]... [FLAGS]
 |------|---------|-------------|
 | `-i`, `--input-type` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi` (OpenAPI 3.x / Swagger 2.0, JSON or YAML), `postman` (Postman Collection v2.1) |
 | `--base-url` |  | For `openapi` / `postman`: supplies scheme, host and port for every request and is a path prefix; the spec server's path (`/api/v3`, from a relative or absolute server) or each Postman request's path is appended. Must be an absolute `http(s)` URL |
-| `--dedup-urls` | `exact` | Target deduplication: `exact` (drop identical URL+method), `signature` (also collapse URLs differing only in parameter *values*), `off` (scan every input line) |
+| `--dedup-urls` | `exact` | Target deduplication: `exact` (drop identical URL+method+request content), `signature` (also collapse URLs differing only in parameter *values*), `off` (scan every input line) |
 | `--state-file` |  | Record completed targets to a file and skip them when the scan is re-run; raw HTTP/HAR request data is fingerprinted so changed captures are scanned again; run-wide credential values from `-H` / `--cookies` / `--cookie-from-raw` are excluded so a refreshed session resumes, while credentials inside a capture still count |
 
 See [Resuming an interrupted scan](../../guide/scanning-modes/#resuming-an-interrupted-scan) for what is skipped and what is retried.
@@ -91,7 +91,7 @@ See [Baselines](../../guide/output/#baselines-reporting-only-what-is-new) for th
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-p`, `--param` |  | Parameter to analyse; supports `name:location` (locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`) |
+| `-p`, `--param` |  | Parameter to analyse; supports `name:location` (locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`, `graphql`, `xml`, `path`, `fragment`; `path` and `fragment` only filter parameters discovery found) |
 | `-d`, `--data` |  | Request body |
 | `-H`, `--headers` |  | Extra HTTP header (repeatable) |
 | `--cookies` |  | Cookie (repeatable) |
