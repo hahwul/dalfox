@@ -626,6 +626,7 @@ fn parse_json_object_or_array_rejects_scalars_and_bad_json() {
     assert_eq!(parse_json_object_or_array("{bad"), None);
     // Trailing text after a valid object.
     assert_eq!(parse_json_object_or_array("{} x"), None);
+    assert_eq!(parse_json_object_or_array(""), None);
 }
 
 #[test]
@@ -634,6 +635,7 @@ fn build_pointer_escapes_per_rfc_6901() {
     assert_eq!(p(&[]), "");
     assert_eq!(p(&["a", "b"]), "/a/b");
     assert_eq!(p(&["a/b"]), "/a~1b");
+    assert_eq!(p(&["m~n"]), "/m~0n");
     assert_eq!(p(&["~1"]), "/~01");
     assert_eq!(p(&[""]), "/");
 }
