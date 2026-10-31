@@ -67,6 +67,12 @@ verified XSS by default, so library reporting stays off unless you pass
 `--detect-outdated-libs`. It adds no requests; it inspects the `<script>` tags
 of the preflight response. Filter it out with `--only-poc v,a,r`.
 
+The check covers a fixed set of libraries: jQuery, jQuery UI, AngularJS,
+Bootstrap, Lodash, Handlebars, Moment.js, DOMPurify, Underscore and Knockout.
+A library not on this list is never reported, whatever its version. The
+version is read from `<script src>` file names and CDN paths, and from version
+banners in inline `<script>` bodies.
+
 To include the full request and response:
 
 ```bash
