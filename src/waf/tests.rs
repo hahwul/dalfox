@@ -195,6 +195,7 @@ fn rules_toml_loads_and_covers_all_waf_families() {
         "Wallarm",
         "Naxsi",
         "SafeLine",
+        "DdosGuard",
     ] {
         assert!(
             waf_names.contains(expected),
@@ -730,6 +731,41 @@ fn test_safeline_detection_by_cookie() {
     let headers = make_headers(&[("set-cookie", "sl-session=abc123; Path=/; Secure")]);
     let result = fingerprint_from_response(&headers, None, 200);
     assert!(result.waf_types().contains(&&WafType::SafeLine));
+}
+
+#[test]
+fn test_ddos_guard_detection_by_server_header() {
+    let headers = make_headers(&[("server", "ddos-guard")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::DdosGuard));
+    assert!(result.primary().unwrap().confidence >= 0.9);
+}
+
+#[test]
+fn test_ddos_guard_detection_by_cookie() {
+    for cookie in [
+        "__ddg1_=abc123; Domain=.example.com; HttpOnly; Path=/",
+        "__ddg2_=abc123; Path=/",
+        "__ddgid_=abc123; Path=/",
+        "__ddgmark_=abc123; Path=/",
+    ] {
+        let headers = make_headers(&[("set-cookie", cookie)]);
+        let result = fingerprint_from_response(&headers, None, 200);
+        assert!(
+            result.waf_types().contains(&&WafType::DdosGuard),
+            "{cookie}"
+        );
+    }
+}
+
+#[test]
+fn test_ddos_guard_not_detected_from_unrelated_headers() {
+    let headers = make_headers(&[
+        ("server", "nginx"),
+        ("set-cookie", "session=abc123; Path=/"),
+    ]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(!result.waf_types().contains(&&WafType::DdosGuard));
 }
 
 /// The status-only inference still fires when the block is the probe's doing

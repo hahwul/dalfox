@@ -44,6 +44,8 @@ pub enum WafType {
     Naxsi,
     /// SafeLine. Fingerprinted by its `sl-session` cookie.
     SafeLine,
+    /// DDoS-Guard. Fingerprinted by `Server: ddos-guard` or its `__ddg*` cookies.
+    DdosGuard,
     Unknown(String),
 }
 
@@ -68,6 +70,7 @@ impl std::fmt::Display for WafType {
             WafType::Wallarm => write!(f, "Wallarm"),
             WafType::Naxsi => write!(f, "NAXSI"),
             WafType::SafeLine => write!(f, "SafeLine"),
+            WafType::DdosGuard => write!(f, "DDoS-Guard"),
             WafType::Unknown(hint) => write!(f, "Unknown ({})", hint),
         }
     }
@@ -158,6 +161,7 @@ fn parse_waf_type_from_rule(name: &str) -> WafType {
         "Wallarm" => WafType::Wallarm,
         "Naxsi" => WafType::Naxsi,
         "SafeLine" => WafType::SafeLine,
+        "DdosGuard" => WafType::DdosGuard,
         other => WafType::Unknown(other.to_string()),
     }
 }
