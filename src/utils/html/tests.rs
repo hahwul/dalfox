@@ -498,3 +498,44 @@ fn legitimate_tokenizer_shapes_are_not_truncated() {
         assert_not_truncated(name, &html);
     }
 }
+
+#[test]
+fn tag_name_at_reads_a_lowercased_name() {
+    assert_eq!(
+        tag_name_at("<My-Tag x>".as_bytes(), 1),
+        ("my-tag".to_string(), 7)
+    );
+    assert_eq!(tag_name_at("<h1>".as_bytes(), 1), ("h1".to_string(), 3));
+    assert_eq!(tag_name_at("< div>".as_bytes(), 1), (String::new(), 1));
+}
+
+#[test]
+fn tag_is_self_closing_checks_the_bytes_before_gt_end() {
+    assert!(tag_is_self_closing("<br/>".as_bytes(), 5));
+    assert!(!tag_is_self_closing("<br>".as_bytes(), 4));
+    assert!(!tag_is_self_closing("<br/>".as_bytes(), 0));
+    assert!(!tag_is_self_closing("<br/>".as_bytes(), 1));
+}
+
+#[test]
+fn find_ascii_case_insensitive_folds_ascii_only() {
+    assert_eq!(
+        find_ascii_case_insensitive("x<SCRIPT>".as_bytes(), 0, b"<script"),
+        Some(1)
+    );
+    let two = "<Script><SCRIPT>".as_bytes();
+    assert_eq!(find_ascii_case_insensitive(two, 1, b"<script"), Some(8));
+    assert_eq!(
+        find_ascii_case_insensitive(two, two.len(), b"<script"),
+        None
+    );
+    assert_eq!(find_ascii_case_insensitive(two, 0, b""), None);
+    assert_eq!(
+        find_ascii_case_insensitive("<scr".as_bytes(), 0, b"<script"),
+        None
+    );
+    assert_eq!(
+        find_ascii_case_insensitive("É".as_bytes(), 0, "é".as_bytes()),
+        None
+    );
+}
