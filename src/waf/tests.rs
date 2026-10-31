@@ -195,6 +195,7 @@ fn rules_toml_loads_and_covers_all_waf_families() {
         "Wallarm",
         "Naxsi",
         "SafeLine",
+        "Reblaze",
     ] {
         assert!(
             waf_names.contains(expected),
@@ -730,6 +731,36 @@ fn test_safeline_detection_by_cookie() {
     let headers = make_headers(&[("set-cookie", "sl-session=abc123; Path=/; Secure")]);
     let result = fingerprint_from_response(&headers, None, 200);
     assert!(result.waf_types().contains(&&WafType::SafeLine));
+}
+
+#[test]
+fn test_reblaze_detection_by_server_header() {
+    let headers = make_headers(&[("server", "Reblaze Secure Web Gateway")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Reblaze));
+    assert!(result.primary().unwrap().confidence >= 0.9);
+}
+
+#[test]
+fn test_reblaze_detection_by_cookie() {
+    let headers = make_headers(&[("set-cookie", "rbzid=abc123; Path=/; HttpOnly")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Reblaze));
+}
+
+#[test]
+fn test_reblaze_detection_by_body() {
+    let headers = make_headers(&[]);
+    let body = "Access Denied (403). Current session has been terminated.";
+    let result = fingerprint_from_response(&headers, Some(body), 403);
+    assert!(result.waf_types().contains(&&WafType::Reblaze));
+}
+
+#[test]
+fn test_reblaze_not_detected_from_unrelated_headers() {
+    let headers = make_headers(&[("server", "nginx"), ("set-cookie", "sessionid=abc123")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(!result.waf_types().contains(&&WafType::Reblaze));
 }
 
 /// The status-only inference still fires when the block is the probe's doing
