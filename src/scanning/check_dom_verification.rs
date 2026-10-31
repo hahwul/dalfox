@@ -1218,9 +1218,7 @@ async fn verify_sxss_dom(
 
 /// Richer result of a single DOM-verification injection (issue #1156).
 ///
-/// The historical `(bool, Option<String>)` tuple returned by
-/// [`check_dom_verification_with_client`] is just the `(verified,
-/// response_text)` projection of this. The extra `reflected` and `status`
+/// Besides `verified` and `response_text`, the `reflected` and `status`
 /// fields are threaded out so [`crate::scanning`]'s DOM phase can take a
 /// recall-preserving early exit on endpoints that clearly will never verify
 /// (a self-/canonical-link echo that reflects every payload inertly, or a

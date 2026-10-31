@@ -379,7 +379,6 @@ pub(crate) async fn preflight_content_type(
     }
 }
 
-/// Parse a WAF type string (from --force-waf) into a WafType enum.
 /// Complete WAF detection from the passive fingerprints of the landing page:
 /// the provocation probe, `--force-waf`, and `--waf-min-confidence`.
 ///
@@ -428,6 +427,7 @@ pub(crate) async fn finish_waf_detection(
     waf_result
 }
 
+/// Parse a WAF type string (from --force-waf) into a WafType enum.
 pub(super) fn parse_waf_type(s: &str) -> crate::waf::WafType {
     match s.to_ascii_lowercase().as_str() {
         "cloudflare" | "cf" => crate::waf::WafType::Cloudflare,
