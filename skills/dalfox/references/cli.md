@@ -8,7 +8,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 |------|---------|-------|
 | `-i, --input-type` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har`, `openapi`, `postman` |
 | `--base-url` | — | `openapi` / `postman` only: one rule for every server shape — supplies scheme+host+port and is a path prefix; the spec server's path (absolute, relative, or scheme-relative `//host/v1`) / Swagger `basePath` / each Postman request's path is appended. A spec server can never change the host. Absolute `http(s)` URL, validated by clap and by the config loader. Ignored (with a warning) for other input types. |
-| `--dedup-urls` | `exact` | `exact` (drop identical URL+method), `signature` (also collapse URLs differing only in parameter *values* — keys on method+host+path+param names), `off` (no dedup). Use `signature` for `gau`/`katana` dumps; not value-safe when an `action=`-style value picks the handler. Collapsed count is logged and lands in `meta.dedup_mode` / `meta.targets_deduplicated`. |
+| `--dedup-urls` | `exact` | `exact` (drop identical URL+method+request content), `signature` (also collapse URLs differing only in parameter *values* — keys on method+host+path+param names), `off` (no dedup). Use `signature` for `gau`/`katana` dumps; not value-safe when an `action=`-style value picks the handler. Collapsed count is logged and lands in `meta.dedup_mode` / `meta.targets_deduplicated`. |
 | `--state-file` | — | Resume support for mass scans: records each target's terminal state (`completed` / `cancelled` / `error`) and skips the `completed` ones on a re-run. Only `completed` is skipped, and a target with findings is recorded `completed` only after the report is written (a kill or failed `-o` write leaves it to be re-scanned) — Ctrl-C, `--scan-timeout`, severe transport loss, and preflight drops are retried. Resume identity is URL, method, and a hash of the request's body, header names/values, cookie names, and user-agent (from raw HTTP/HAR captures and from `-H` / `--cookies` / `--user-agent`); only the hash is written to the state file. Run-wide credential values are excluded — every `--cookies` / `--cookie-from-raw` value and the `-H` values of `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key` / `*-Api-Key`, `X-Auth-Token` / `*-Token`, `X-CSRF-Token` / `X-XSRF-Token`, `*-Session-Id` / `X-Session-Token`, `X-Access-Key`, `X-JWT-Assertion` — so refreshing a session resumes instead of rescanning. Credentials inside a raw-HTTP/HAR capture still count (tenant A vs tenant B captures are distinct targets). Use a separate state file per account. The file's header holds a hash of the scan-affecting config (credential values neutralized the same way); a mismatch moves the file to `<path>.bak` and starts over. Skipped count lands in `meta.resumed`. CLI only. |
 | `TARGET` (positional) | — | URL, file path, raw HTTP (`-i raw-http`), or HAR file (`-i har` / auto-detected) |
 
@@ -113,8 +113,8 @@ Payload batches start small and grow toward `--workers`, so an early hit avoids 
 | `--only-custom-payload` | false | Use the custom file as the local base set; skip built-in families, adaptive synthesis, and shared CSP/technology payloads. Explicit remote providers and encoder/WAF variants remain active. |
 | `--custom-blind-xss-payload` | — | Blind XSS template file; each line must contain `{callback}` (others skipped with a warning) |
 | `-b, --blind` | — | Callback URL (interact.sh, Burp Collab, etc.) — you run the listener |
-| `--blind-oob[=servers]` | — | OOB/OAST blind XSS: Dalfox manages an interactsh session, correlates callbacks per-payload, and polls. Bare `--blind-oob` uses the public mesh; name servers with the `=` form (`--blind-oob=oast.fun`). CLI-only |
-| `--blind-oob-secret` | — | Auth token for a self-hosted interactsh server |
+| `--blind-oob[=servers]` | — | OOB/OAST blind XSS: Dalfox manages an interactsh session, correlates callbacks per-payload, and polls. Bare `--blind-oob` uses the public mesh; name servers with the `=` form (`--blind-oob=oast.fun`). REST and MCP take it as a `blind_oob` field |
+| `--blind-oob-secret` | — | Auth token for a self-hosted interactsh server. CLI/config-only |
 | `--blind-oob-wait` | 30 | Seconds to keep polling for callbacks after payloads are sent |
 | `--custom-alert-value` | `1` | Value used inside `alert(...)` etc. |
 | `--custom-alert-type` | `none` | `none` or `str` (wraps the value in single quotes → string literal) |
@@ -143,7 +143,7 @@ Payload batches start small and grow toward `--workers`, so an early hit avoids 
 | `--waf-bypass` | `auto` | `auto` (probe then bypass), `force` (same as `auto` today), `off` (detect only: no probe, mutations, or per-WAF pacing) |
 | `--force-waf` | — | Pin a specific engine (`cloudflare`, `akamai`, `modsecurity`, `aws`, ...) in any `--waf-bypass` mode |
 | `--skip-waf-probe` | false | Skip the active provocation request |
-| `--waf-evasion` | false | Adaptive throttling on WAF detection: randomized inter-request jitter (unfingerprintable cadence) + escalating cooldown on clusters of blocked responses, paced by the per-WAF delay hint. Pairs with `--rate-limit` |
+| `--waf-evasion` | false | Cautious pacing whether or not a WAF is detected: one payload at a time per parameter, randomized inter-request jitter (unfingerprintable cadence), and an escalating cooldown on clusters of blocked responses. The per-WAF delay hint applies on detection even without this flag. Pairs with `--rate-limit` |
 | `--waf-min-confidence` | 0.3 | Discard weak fingerprints (Google Frontend, generic "blocked" messages) |
 
 See `references/advanced.md` for recommended WAF combinations.
