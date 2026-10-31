@@ -259,6 +259,103 @@ fn detects_jquery_ui_from_src() {
 }
 
 #[test]
+fn detects_jquery_validation_from_src_and_inline() {
+    let from_src = libs(r#"<script src="/js/jquery.validate-1.19.0.min.js"></script>"#);
+    let jv = from_src
+        .iter()
+        .find(|v| v.library == "jQuery Validation" && v.version == "1.19.0")
+        .unwrap_or_else(|| panic!("old jQuery Validation should be flagged, got {from_src:?}"));
+    assert_eq!(jv.severity, "High");
+    assert_eq!(jv.fixed_in, "1.20.0");
+    for cve in [
+        "CVE-2021-21252",
+        "CVE-2021-43306",
+        "CVE-2022-31147",
+        "CVE-2025-3573",
+    ] {
+        assert!(jv.advisories.iter().any(|a| a == cve), "missing {cve}");
+    }
+
+    for banner in [
+        "<script>/*!\n * jQuery Validation Plugin v1.19.0\n *\n * https://jqueryvalidation.org/ */</script>",
+        "<script>/*! jQuery Validation Plugin - v1.19.0 - 11/28/2018\n * https://jqueryvalidation.org/ */</script>",
+    ] {
+        let found = libs(banner);
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == "jQuery Validation" && v.version == "1.19.0"),
+            "inline jQuery Validation banner should be detected, got {found:?}"
+        );
+    }
+}
+
+#[test]
+fn jquery_validation_from_cdn_paths() {
+    for url in [
+        "https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.0/jquery.validate.min.js",
+        "https://ajax.aspnetcdn.com/ajax/jquery.validate/1.19.0/jquery.validate.min.js",
+        "https://cdn.jsdelivr.net/npm/jquery-validation@1.19.0/dist/jquery.validate.min.js",
+        "https://unpkg.com/jquery-validation@1.19.0/dist/jquery.validate.js",
+    ] {
+        let body = format!(r#"<script src="{url}"></script>"#);
+        let found = libs(&body);
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == "jQuery Validation" && v.version == "1.19.0"),
+            "expected jQuery Validation 1.19.0 from {url}, got {found:?}"
+        );
+    }
+    for url in [
+        "https://cdn.jsdelivr.net/npm/jquery-validation-unobtrusive@3.2.12/dist/jquery.validate.unobtrusive.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/jquery-validation-unobtrusive/3.2.12/jquery.validate.unobtrusive.min.js",
+    ] {
+        let body = format!(r#"<script src="{url}"></script>"#);
+        assert!(libs(&body).is_empty(), "{url} flagged: {:?}", libs(&body));
+    }
+}
+
+/// 1.19.5 fixes the three ReDoS advisories but not CVE-2025-3573 (< 1.20.0).
+#[test]
+fn jquery_validation_fix_boundaries() {
+    let found = libs(r#"<script src="/js/jquery.validate-1.19.5.min.js"></script>"#);
+    let jv = found
+        .iter()
+        .find(|v| v.library == "jQuery Validation")
+        .unwrap_or_else(|| panic!("1.19.5 should still be flagged, got {found:?}"));
+    assert_eq!(jv.advisories, vec!["CVE-2025-3573".to_string()]);
+    assert_eq!(jv.severity, "Medium");
+
+    let fixed = libs(r#"<script src="/js/jquery.validate-1.20.0.min.js"></script>"#);
+    assert!(fixed.is_empty(), "1.20.0 flagged: {fixed:?}");
+}
+
+/// The jQuery patterns must not read the plugin's version, from its URL or
+/// its banner.
+#[test]
+fn jquery_validation_is_not_read_as_jquery() {
+    let body = r#"
+        <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+        <script src="/js/jquery.validate.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.19.0/dist/jquery.validate.min.js"></script>
+        <script src="/js/jquery.validate-1.19.0.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-validate/1.19.0/jquery.validate.min.js"></script>
+        <script>/*! jQuery Validation Plugin - v1.19.0 - 11/28/2018 */</script>
+        <script>/*!\n * jQuery Validation Plugin v1.19.0\n */</script>
+    "#;
+    let found = libs(body);
+    assert!(
+        found.iter().all(|v| v.library != "jQuery"),
+        "jQuery read from the plugin: {found:?}"
+    );
+    assert!(
+        found.iter().any(|v| v.library == "jQuery Validation"),
+        "got {found:?}"
+    );
+}
+
+#[test]
 fn detects_handlebars_from_src_and_inline() {
     let from_src = libs(r#"<script src="/vendor/handlebars-4.0.5.min.js"></script>"#);
     assert!(
@@ -321,6 +418,7 @@ fn current_libraries_across_dataset_are_safe() {
     // A modern stack must produce zero findings (guards against over-broad ranges).
     let body = r#"
         <script src="/jquery-ui-1.13.2.min.js"></script>
+        <script src="/jquery.validate-1.22.1.min.js"></script>
         <script src="/handlebars-4.7.8.min.js"></script>
         <script src="/moment-2.29.4.min.js"></script>
         <script src="/lodash-4.17.21.min.js"></script>
