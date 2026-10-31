@@ -2143,6 +2143,42 @@ fn html_structural_evidence_matches_entity_encoded_payload() {
     );
 }
 
+#[test]
+fn test_payload_opens_tag_fixtures() {
+    for (payload, expected) in [
+        ("<svg onload=x>", true),
+        ("</a>", true),
+        ("<!--", true),
+        ("\"><img src=x>", true),
+        ("&lt;img src=x&gt;", true),
+        ("", false),
+        ("a < b", false),
+        ("<1", false),
+        ("\" onmouseover=alert(1) x=\"", false),
+    ] {
+        assert_eq!(payload_opens_tag(payload), expected, "payload: {payload:?}");
+    }
+}
+
+#[test]
+fn test_is_hidden_input_fixtures() {
+    let selector = scraper::Selector::parse("input, div").expect("valid selector");
+    for (snippet, expected) in [
+        (r#"<input type="hidden">"#, true),
+        (r#"<input type=" HIDDEN ">"#, true),
+        (r#"<input type="text">"#, false),
+        ("<input>", false),
+        (r#"<div type="hidden"></div>"#, false),
+    ] {
+        let fragment = scraper::Html::parse_fragment(snippet);
+        let node = fragment
+            .select(&selector)
+            .next()
+            .expect("snippet contains an input or div");
+        assert_eq!(is_hidden_input(node), expected, "snippet: {snippet}");
+    }
+}
+
 // ── Issue #1183: on* handlers never fire on <input type="hidden"> ──────────
 //
 // A hidden input has no rendered box: it cannot be hovered, focused, or
