@@ -328,6 +328,7 @@ fn current_libraries_across_dataset_are_safe() {
         <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js"></script>
         <script src="/underscore-1.13.8.min.js"></script>
         <script src="/knockout-3.5.3.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/mustache@4.2.0/mustache.min.js"></script>
     "#;
     assert!(
         libs(body).is_empty(),
@@ -554,8 +555,102 @@ fn cdn_patterns_ignore_packages_that_contain_a_library_name() {
         "https://cdnjs.cloudflare.com/ajax/libs/bootstrap-datepicker/1.9.0/js/bootstrap-datepicker.min.js",
         "https://cdn.jsdelivr.net/npm/underscore.string@3.3.4/dist/underscore.string.min.js",
         "https://unpkg.com/knockout-mapping@2.6.0/dist/knockout.mapping.min.js",
+        "https://cdn.jsdelivr.net/gh/jonnyreeves/jquery-Mustache@0.2.8/jquery.mustache.js",
+        "/vendor/jquery-mustache-0.2.8.js",
     ] {
         let body = format!(r#"<script src="{url}"></script>"#);
         assert!(libs(&body).is_empty(), "{url} flagged: {:?}", libs(&body));
+    }
+}
+
+#[test]
+fn detects_mustache_from_src_and_inline() {
+    for url in [
+        "/vendor/mustache-2.2.0.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/mustache.js/2.2.0/mustache.min.js",
+        "https://cdn.jsdelivr.net/npm/mustache@2.2.0/mustache.min.js",
+        "https://unpkg.com/mustache@2.2.0/mustache.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        let m = found
+            .iter()
+            .find(|v| v.library == "Mustache.js" && v.version == "2.2.0")
+            .unwrap_or_else(|| {
+                panic!("Mustache.js 2.2.0 should be flagged from {url}, got {found:?}")
+            });
+        assert_eq!(m.severity, "High");
+        assert_eq!(m.advisories, ["CVE-2015-8862"]);
+        assert_eq!(m.fixed_in, "2.2.1");
+    }
+    // Unminified 2.x, minified 2.x, and the 4.x object-literal shape.
+    for inline in [
+        "mustache.name = 'mustache.js';\n  mustache.version = '2.2.0';",
+        r#"mustache.name="mustache.js";mustache.version="2.2.0";"#,
+        "var mustache = {\n    name: 'mustache.js',\n    version: '2.2.0',",
+    ] {
+        let found = libs(&format!("<script>{inline}</script>"));
+        assert!(
+            found
+                .iter()
+                .any(|v| v.library == "Mustache.js" && v.version == "2.2.0"),
+            "inline Mustache.js version should be detected from {inline:?}, got {found:?}"
+        );
+    }
+}
+
+#[test]
+fn mustache_fixed_release_is_safe() {
+    let body = r#"<script src="/vendor/mustache-2.2.0.min.js"></script>
+        <script src="/vendor/mustache-2.2.1.min.js"></script>
+        <script>var mustache = { name: 'mustache.js', version: '2.2.1' };</script>"#;
+    let versions: Vec<_> = libs(body)
+        .into_iter()
+        .filter(|v| v.library == "Mustache.js")
+        .map(|v| v.version)
+        .collect();
+    assert_eq!(versions, ["2.2.0"]);
+}
+
+/// Only a `version` declared next to `name: 'mustache.js'` is Mustache's.
+#[test]
+fn unrelated_inline_version_is_not_mustache() {
+    let unrelated = "<script>var widget = { name: 'widget.js', version: '1.0.0' };</script>";
+    assert!(libs(unrelated).is_empty(), "got {:?}", libs(unrelated));
+    let mustache = "<script>var mustache = { name: 'mustache.js', version: '1.0.0' };</script>";
+    assert!(
+        libs(mustache)
+            .iter()
+            .any(|v| v.library == "Mustache.js" && v.version == "1.0.0"),
+        "got {:?}",
+        libs(mustache)
+    );
+}
+
+/// Handlebars builds on Mustache but has its own entry; neither library's URLs
+/// are read as the other.
+#[test]
+fn handlebars_and_mustache_urls_stay_separate() {
+    for url in [
+        "/vendor/handlebars-4.0.5.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/handlebars.js/4.0.5/handlebars.min.js",
+        "https://unpkg.com/handlebars@4.0.5/dist/handlebars.min.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        assert!(
+            found.iter().all(|v| v.library != "Mustache.js"),
+            "{url} read as Mustache.js: {found:?}"
+        );
+    }
+    for url in [
+        "/vendor/mustache-2.2.0.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/mustache.js/2.2.0/mustache.min.js",
+        "https://cdn.jsdelivr.net/npm/mustache@2.2.0/mustache.min.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        assert!(
+            found.iter().any(|v| v.library == "Mustache.js")
+                && found.iter().all(|v| v.library != "Handlebars"),
+            "{url} should be Mustache.js only, got {found:?}"
+        );
     }
 }
