@@ -36,8 +36,9 @@ This is all on by default. You only touch flags if you want to disable or steer 
 - Wallarm
 - NAXSI
 - SafeLine
+- Reblaze
 
-Wallarm, NAXSI, and SafeLine are fingerprinted but have no dedicated strategy; like unrecognised WAFs, they get a generic fallback strategy.
+Wallarm, NAXSI, SafeLine, and Reblaze are fingerprinted but have no dedicated strategy; like unrecognised WAFs, they get a generic fallback strategy.
 
 ## Tuning the behaviour
 
@@ -61,7 +62,7 @@ dalfox scan https://target.app \
 
 Handy when the WAF masks its headers or sits behind a CDN. `--force-waf` is what selects the WAF; it takes effect under `auto` too, and `--waf-bypass force` without it behaves like `auto`. The provocation probe is still sent unless you add `--skip-waf-probe`.
 
-Accepted names (case-insensitive): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`. Any other value is rejected.
+Accepted names (case-insensitive): `cloudflare`/`cf`, `aws`/`awswaf`/`aws-waf`, `akamai`, `imperva`/`incapsula`, `modsecurity`/`modsec`, `owasp-crs`/`owaspcrs`/`crs`, `sucuri`, `f5`/`bigip`/`f5-bigip`, `barracuda`, `fortiweb`/`forti`, `azure`/`azurewaf`/`azure-waf`, `cloudarmor`/`cloud-armor`/`gcp`, `fastly`, `wordfence`, `citrix`/`netscaler`, `wallarm`, `naxsi`, `safeline`/`safe-line`/`chaitin`, `reblaze`. Any other value is rejected.
 
 ### Disable WAF logic
 

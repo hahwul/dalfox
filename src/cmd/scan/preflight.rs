@@ -448,6 +448,7 @@ pub(super) fn parse_waf_type(s: &str) -> crate::waf::WafType {
         "wallarm" => crate::waf::WafType::Wallarm,
         "naxsi" => crate::waf::WafType::Naxsi,
         "safeline" | "safe-line" | "chaitin" => crate::waf::WafType::SafeLine,
+        "reblaze" => crate::waf::WafType::Reblaze,
         other => crate::waf::WafType::Unknown(other.to_string()),
     }
 }
@@ -476,6 +477,7 @@ mod waf_type_tests {
         assert_eq!(parse_waf_type("SafeLine"), WafType::SafeLine);
         assert_eq!(parse_waf_type("safe-line"), WafType::SafeLine);
         assert_eq!(parse_waf_type("chaitin"), WafType::SafeLine);
+        assert_eq!(parse_waf_type("Reblaze"), WafType::Reblaze);
     }
 
     #[test]

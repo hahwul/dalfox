@@ -357,6 +357,21 @@ waf_type = "SafeLine"
 confidence = 0.85
 evidence_label = "sl-session cookie (SafeLine)"
 
+# Reblaze
+[[header]]
+header = "server"
+value_contains = "reblaze secure web gateway"
+waf_type = "Reblaze"
+confidence = 0.9
+evidence_label = "Server: Reblaze Secure Web Gateway"
+
+[[header]]
+header = "set-cookie"
+value_contains = "rbzid="
+waf_type = "Reblaze"
+confidence = 0.85
+evidence_label = "rbzid cookie (Reblaze)"
+
 
 # ── Body rules ──────────────────────────────────────────────────────────
 
@@ -540,3 +555,12 @@ pattern = "blocked by naxsi"
 waf_type = "Naxsi"
 confidence = 0.85
 evidence_label = "NAXSI block message in body"
+
+# Reblaze
+# Generic wording without the vendor name, so it stays low; wafw00f only
+# trusts it alongside other block-page phrases.
+[[body]]
+pattern = "current session has been terminated"
+waf_type = "Reblaze"
+confidence = 0.5
+evidence_label = "Reblaze session-terminated block page"
