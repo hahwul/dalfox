@@ -310,3 +310,52 @@ fn skip_reasons_are_capped_but_counted() {
     assert_eq!(out.skipped_total, 1000);
     assert!(!out.skipped.is_empty() && out.skipped.len() <= super::super::MAX_SKIP_REASONS);
 }
+
+fn vars(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+#[test]
+fn substitute_expands_known_names_and_keeps_or_fills_unknown_ones() {
+    let v = vars(&[("a", "v")]);
+    assert_eq!(substitute("{{a}}/x", &v, false).unwrap(), "v/x");
+    assert_eq!(substitute("{{ a }}", &v, false).unwrap(), "v");
+    assert_eq!(substitute("{{b}}/x", &v, false).unwrap(), "{{b}}/x");
+    assert_eq!(substitute("{{b}}/x", &v, true).unwrap(), "1/x");
+    assert_eq!(substitute("x {{a", &v, true).unwrap(), "x {{a");
+}
+
+#[test]
+fn substitute_resolves_nested_variables() {
+    let v = vars(&[("a", "{{b}}"), ("b", "z")]);
+    assert_eq!(substitute("{{a}}", &v, false).unwrap(), "z");
+}
+
+#[test]
+fn substitute_self_reference_terminates() {
+    let v = vars(&[("a", "{{a}}")]);
+    assert_eq!(substitute("{{a}}", &v, false).unwrap(), "{{a}}");
+}
+
+#[test]
+fn substitute_rejects_more_than_1_mib_of_growth() {
+    let v = vars(&[("a", &"x".repeat(600 << 10))]);
+    assert_eq!(substitute("{{a}}", &v, false).unwrap().len(), 600 << 10);
+    let err = substitute("{{a}}{{a}}", &v, false).unwrap_err();
+    assert!(err.contains("1 MiB"), "{err}");
+}
+
+#[test]
+fn fill_path_vars_encodes_path_segments_only() {
+    let v = vars(&[("id", "a b"), ("empty", "")]);
+    assert_eq!(fill_path_vars("/users/:id?q=1", &v), "/users/a%20b?q=1");
+    assert_eq!(fill_path_vars("/users/:missing", &v), "/users/1");
+    assert_eq!(fill_path_vars("/users/:empty", &v), "/users/1");
+    assert_eq!(fill_path_vars("/a/:/b", &v), "/a/:/b");
+    assert_eq!(fill_path_vars("/x?next=:id", &v), "/x?next=:id");
+    assert_eq!(fill_path_vars("/x?next=/:id", &v), "/x?next=/:id");
+    assert_eq!(fill_path_vars("/x#/:id", &v), "/x#/:id");
+}
