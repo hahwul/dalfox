@@ -67,7 +67,7 @@ dalfox scan https://target.app -f jsonl -o findings.jsonl
 추가 요청은 없고, 프리플라이트 응답의 `<script>` 태그만 검사합니다. `--only-poc v,a,r`로 걸러낼 수 있습니다.
 
 검사 대상 라이브러리는 jQuery, jQuery UI, AngularJS, Bootstrap, Lodash, Handlebars,
-Moment.js, DOMPurify, Underscore, Knockout입니다. 이 목록에 없는 라이브러리는 버전과
+Moment.js, DOMPurify, Underscore, Knockout, jQuery Validation, Mustache.js입니다. 이 목록에 없는 라이브러리는 버전과
 관계없이 보고되지 않습니다. 버전은 `<script src>`의 파일 이름과 CDN 경로, 그리고 인라인
 `<script>` 본문의 버전 배너에서 읽습니다.
 

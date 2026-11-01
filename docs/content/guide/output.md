@@ -68,7 +68,8 @@ verified XSS by default, so library reporting stays off unless you pass
 of the preflight response. Filter it out with `--only-poc v,a,r`.
 
 The check covers a fixed set of libraries: jQuery, jQuery UI, AngularJS,
-Bootstrap, Lodash, Handlebars, Moment.js, DOMPurify, Underscore and Knockout.
+Bootstrap, Lodash, Handlebars, Moment.js, DOMPurify, Underscore, Knockout,
+jQuery Validation and Mustache.js.
 A library not on this list is never reported, whatever its version. The
 version is read from `<script src>` file names and CDN paths, and from version
 banners in inline `<script>` bodies.
