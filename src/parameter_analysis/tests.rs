@@ -134,7 +134,7 @@ fn test_cookie_from_raw() {
         insecure: Some(true),
         format: "json".to_string(),
         targets: vec!["https://example.com".to_string()],
-        cookie_from_raw: Some("examples/sample_request.txt".to_string()),
+        cookie_from_raw: Some("tests/fixtures/sample_request.txt".to_string()),
         workers: 10,
         max_concurrent_targets: 10,
         waf_min_confidence: 0.0,
