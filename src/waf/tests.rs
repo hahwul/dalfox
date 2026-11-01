@@ -739,6 +739,7 @@ fn test_ddos_guard_detection_by_server_header() {
     let result = fingerprint_from_response(&headers, None, 200);
     assert!(result.waf_types().contains(&&WafType::DdosGuard));
     assert!(result.primary().unwrap().confidence >= 0.9);
+    assert_eq!(WafType::DdosGuard.to_string(), "DDoS-Guard");
 }
 
 #[test]
