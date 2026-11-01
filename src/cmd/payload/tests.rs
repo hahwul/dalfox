@@ -1,7 +1,8 @@
 use super::{
     KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_print_remote,
-    functions_payloads, print_summary, render_lines, run_payload, special_chars_payloads,
-    static_selector_counts, static_selector_groups, summary_block, tips_block, uri_scheme_payloads,
+    functions_payloads, levenshtein_distance, print_summary, render_lines, run_payload,
+    special_chars_payloads, static_selector_counts, static_selector_groups, summary_block,
+    tips_block, uri_scheme_payloads,
 };
 use crate::cmd::scan::ScanOutcome;
 
@@ -96,6 +97,53 @@ async fn test_run_payload_unknown_selector_returns_error() {
 fn test_closest_selector_suggests_only_near_matches() {
     assert_eq!(closest_selector("event-handler"), Some("event-handlers"));
     assert_eq!(closest_selector("not-a-selector"), None);
+}
+
+#[test]
+fn test_levenshtein_distance_empty_and_classic() {
+    assert_eq!(levenshtein_distance("", ""), 0);
+    assert_eq!(levenshtein_distance("", "abc"), 3);
+    assert_eq!(levenshtein_distance("abc", ""), 3);
+    assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+}
+
+#[test]
+fn test_levenshtein_distance_is_symmetric() {
+    for (a, b) in [
+        ("kitten", "sitting"),
+        ("", "abc"),
+        ("event-handler", "event-handlers"),
+        ("mxss", "blind"),
+    ] {
+        assert_eq!(
+            levenshtein_distance(a, b),
+            levenshtein_distance(b, a),
+            "{a:?} vs {b:?}"
+        );
+    }
+}
+
+#[test]
+fn test_levenshtein_distance_counts_chars_not_bytes() {
+    assert_eq!(levenshtein_distance("é", "e"), 1);
+    assert_eq!(levenshtein_distance("한글", "한국"), 1);
+}
+
+#[test]
+fn test_closest_selector_one_edit_away() {
+    assert_eq!(closest_selector("javascrip"), Some("javascript"));
+    assert_eq!(closest_selector("uri-schme"), Some("uri-scheme"));
+}
+
+#[test]
+fn test_closest_selector_cutoff_is_two_edits() {
+    assert_eq!(closest_selector("javascri"), Some("javascript"));
+    assert_eq!(closest_selector("javascr"), None);
+}
+
+#[test]
+fn test_closest_selector_is_case_sensitive() {
+    assert_eq!(closest_selector("JAVASCRIPT"), None);
 }
 
 #[tokio::test]
