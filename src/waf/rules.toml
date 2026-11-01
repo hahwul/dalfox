@@ -357,6 +357,22 @@ waf_type = "SafeLine"
 confidence = 0.85
 evidence_label = "sl-session cookie (SafeLine)"
 
+# DDoS-Guard
+[[header]]
+header = "server"
+value_contains = "ddos-guard"
+waf_type = "DdosGuard"
+confidence = 0.9
+evidence_label = "Server: ddos-guard"
+
+# Covers the `__ddg1_`, `__ddg2_`, `__ddgid_` and `__ddgmark_` cookie family.
+[[header]]
+header = "set-cookie"
+value_contains = "__ddg"
+waf_type = "DdosGuard"
+confidence = 0.85
+evidence_label = "__ddg* cookie (DDoS-Guard)"
+
 
 # ── Body rules ──────────────────────────────────────────────────────────
 

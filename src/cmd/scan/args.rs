@@ -272,7 +272,7 @@ pub(crate) fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String
         crate::waf::WafType::Unknown(_)
     ) {
         Err(format!(
-            "unknown WAF '{}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence, citrix, wallarm, naxsi, safeline)",
+            "unknown WAF '{}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence, citrix, wallarm, naxsi, safeline, ddos-guard)",
             s
         ))
     } else {

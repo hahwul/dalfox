@@ -267,6 +267,7 @@ fn test_every_waf_has_strategy() {
         WafType::Fastly,
         WafType::Wordfence,
         WafType::Citrix,
+        WafType::DdosGuard,
         WafType::Unknown("test".to_string()),
     ];
     for waf in &waf_types {
