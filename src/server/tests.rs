@@ -3752,6 +3752,53 @@ fn test_parse_opt_bool_query_preserves_absent() {
 }
 
 #[test]
+fn test_split_csv_trims_and_drops_empty_items() {
+    assert_eq!(split_csv("a, b,,c "), vec!["a", "b", "c"]);
+    assert!(split_csv("").is_empty());
+    assert!(split_csv(" , ").is_empty());
+}
+
+#[test]
+fn test_blind_oob_query_bool_and_server_list_forms() {
+    use crate::job::spec::BlindOobRequest;
+    for v in ["", "0", "false", "No", " off "] {
+        assert_eq!(blind_oob_query(v), None, "{v:?}");
+    }
+    for v in ["1", "TRUE", "yes", "on"] {
+        assert_eq!(
+            blind_oob_query(v),
+            Some(BlindOobRequest::Enabled(true)),
+            "{v:?}"
+        );
+    }
+    assert_eq!(
+        blind_oob_query("oast.fun, oast.pro"),
+        Some(BlindOobRequest::Servers(vec![
+            "oast.fun".to_string(),
+            "oast.pro".to_string(),
+        ]))
+    );
+    assert_eq!(blind_oob_query(","), None);
+}
+
+#[test]
+fn test_parse_num_query_absent_trimmed_and_malformed() {
+    let mut p = Map::new();
+    assert_eq!(parse_num_query::<u64>(&p, "timeout"), Ok(None));
+    p.insert("timeout".to_string(), " 42 ".to_string());
+    assert_eq!(parse_num_query::<u64>(&p, "timeout"), Ok(Some(42)));
+    p.insert("timeout".to_string(), "4x".to_string());
+    let err = parse_num_query::<u64>(&p, "timeout").unwrap_err();
+    assert!(err.contains("timeout"), "{err}");
+    assert!(err.contains("'4x'"), "{err}");
+    p.insert("waf_min_confidence".to_string(), "0.5".to_string());
+    assert_eq!(
+        parse_num_query::<f32>(&p, "waf_min_confidence"),
+        Ok(Some(0.5))
+    );
+}
+
+#[test]
 fn test_hydrate_preflight_target_insecure_default_and_override() {
     // Absent insecure -> scanner default (true). Explicit false -> validate.
     let mut opts = ScanOptions::default();
