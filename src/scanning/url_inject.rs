@@ -608,25 +608,81 @@ pub(crate) fn json_body(data: Option<&str>, name: &str, param_value: &str, value
     }
 }
 
-/// The ordered form fields a multipart injection puts on the wire: the target's
-/// captured `data` parsed as `key=value` pairs (percent-decoded), with `name`'s
-/// value replaced by `value`, or a fresh `name=value` field appended when the
-/// param isn't already present. Single source of field selection for both the
-/// wire form ([`multipart_form`]) and the rendered PoC ([`multipart_poc_body`]),
-/// so the request that is sent and the request that is displayed cannot disagree
-/// on which fields exist.
-fn multipart_fields(data: Option<&str>, name: &str, value: &str) -> Vec<(String, String)> {
+/// Param-name suffix that targets a file part's `filename` instead of its
+/// content: `avatar[filename]` injects into `avatar`'s upload filename, the
+/// value most upload listings echo back.
+pub(crate) const MULTIPART_FILENAME_SUFFIX: &str = "[filename]";
+
+/// The base field a multipart injection slot targets: `<field>` for a
+/// `<field>[filename]` slot, the name unchanged otherwise. Lets
+/// `--ignore-param <field>` and the `-p` name filter cover the filename slot
+/// as well as the content slot, since both upload into the same field.
+pub(crate) fn multipart_slot_base(name: &str) -> &str {
+    name.strip_suffix(MULTIPART_FILENAME_SUFFIX).unwrap_or(name)
+}
+
+/// The `<field>[filename]` upload-filename slot name for `field`. Single
+/// constructor so the three discovery sites (mining, stored-XSS seeding,
+/// `--inject-marker`) cannot drift on how the slot is spelled.
+pub(crate) fn multipart_filename_slot(field: &str) -> String {
+    format!("{field}{MULTIPART_FILENAME_SUFFIX}")
+}
+
+/// The file part `name` points at, and whether it targets the filename
+/// (`<field>[filename]`) rather than the content. `None` when `name` is not a
+/// file part of the captured body. An exact part name wins over the suffix, so
+/// a real field literally named `x[filename]` stays a content injection.
+pub(crate) fn multipart_file_target(
+    data: Option<&str>,
+    name: &str,
+) -> Option<(crate::target_parser::MultipartPart, bool)> {
+    let parts = data.and_then(crate::target_parser::raw_multipart_parts)?;
+    if let Some(p) = parts.iter().find(|p| p.name == name) {
+        return p.filename.is_some().then(|| (p.clone(), false));
+    }
+    let base = name.strip_suffix(MULTIPART_FILENAME_SUFFIX)?;
+    parts
+        .into_iter()
+        .find(|p| p.name == base && p.filename.is_some())
+        .map(|p| (p, true))
+}
+
+/// The ordered form parts a multipart injection puts on the wire: the target's
+/// captured `data` parsed as parts (raw multipart, file parts keep their
+/// `filename` / `Content-Type`) or `key=value` pairs (percent-decoded), with
+/// `name`'s value replaced by `value`, or a fresh `name=value` field appended
+/// when the param isn't already present. `<file>[filename]` replaces that file
+/// part's filename instead (see [`multipart_file_target`]). Single source of
+/// part selection for both the wire form ([`multipart_form`]) and the rendered
+/// PoC ([`multipart_poc_body`]), so the request that is sent and the request
+/// that is displayed cannot disagree on which parts exist.
+fn multipart_fields(
+    data: Option<&str>,
+    name: &str,
+    value: &str,
+) -> Vec<crate::target_parser::MultipartPart> {
+    let text = |k: String, v: String| crate::target_parser::MultipartPart {
+        name: k,
+        value: v,
+        filename: None,
+        content_type: None,
+    };
     let mut fields = Vec::new();
     let mut found = false;
     // A captured multipart body (raw HTTP / HAR / `-d`) keeps its own framing.
-    if let Some(raw) = data.and_then(crate::target_parser::raw_multipart_fields) {
-        for (k, v) in raw {
-            if k == name {
-                fields.push((k, value.to_string()));
+    if let Some(raw) = data.and_then(crate::target_parser::raw_multipart_parts) {
+        let filename_of = multipart_file_target(data, name)
+            .filter(|(_, is_filename)| *is_filename)
+            .map(|(p, _)| p.name);
+        for mut part in raw {
+            if filename_of.as_deref() == Some(part.name.as_str()) {
+                part.filename = Some(value.to_string());
                 found = true;
-            } else {
-                fields.push((k, v));
+            } else if part.name == name {
+                part.value = value.to_string();
+                found = true;
             }
+            fields.push(part);
         }
     } else if let Some(data) = data {
         for pair in data.split('&') {
@@ -638,18 +694,38 @@ fn multipart_fields(data: Option<&str>, name: &str, value: &str) -> Vec<(String,
                     .unwrap_or(Cow::Borrowed(v))
                     .to_string();
                 if k == name {
-                    fields.push((k, value.to_string()));
+                    fields.push(text(k, value.to_string()));
                     found = true;
                 } else {
-                    fields.push((k, v));
+                    fields.push(text(k, v));
                 }
             }
         }
     }
     if !found {
-        fields.push((name.to_string(), value.to_string()));
+        fields.push(text(name.to_string(), value.to_string()));
+    }
+    // Normalize the Content-Type to exactly what the wire will carry, so the
+    // rendered PoC (`multipart_poc_body`) cannot show a type the sent form
+    // (`multipart_form`) drops: only a file part carries one, and only when
+    // reqwest can parse it.
+    for part in &mut fields {
+        if part.filename.is_none()
+            || part
+                .content_type
+                .as_deref()
+                .is_some_and(|ct| !valid_multipart_mime(ct))
+        {
+            part.content_type = None;
+        }
     }
     fields
+}
+
+/// Whether reqwest will accept `ct` as a multipart part's `Content-Type`.
+/// A captured type that won't parse is sent untyped, so it must render untyped.
+fn valid_multipart_mime(ct: &str) -> bool {
+    reqwest::multipart::Part::text("").mime_str(ct).is_ok()
 }
 
 /// Build a `multipart/form-data` form that carries `value` for `name`,
@@ -665,8 +741,20 @@ pub(crate) fn multipart_form(
     value: &str,
 ) -> reqwest::multipart::Form {
     let mut form = reqwest::multipart::Form::new();
-    for (k, v) in multipart_fields(data, name, value) {
-        form = form.text(k, v);
+    for part in multipart_fields(data, name, value) {
+        let Some(filename) = part.filename else {
+            form = form.text(part.name, part.value);
+            continue;
+        };
+        let untyped =
+            || reqwest::multipart::Part::text(part.value.clone()).file_name(filename.clone());
+        // An unparseable captured type is sent untyped rather than dropping the part.
+        let file = part
+            .content_type
+            .as_deref()
+            .and_then(|ct| untyped().mime_str(ct).ok())
+            .unwrap_or_else(untyped);
+        form = form.part(part.name, file);
     }
     form
 }
@@ -683,13 +771,30 @@ const MULTIPART_POC_BOUNDARY: &str = "----DalfoxBoundary7MA4YWxkTrZu0gW";
 /// framed here with a fixed boundary the displayed `Content-Type` declares.
 pub(crate) fn multipart_poc_body(data: Option<&str>, name: &str, value: &str) -> (String, String) {
     let mut body = String::new();
-    for (k, v) in multipart_fields(data, name, value) {
+    for part in multipart_fields(data, name, value) {
         body.push_str("--");
         body.push_str(MULTIPART_POC_BOUNDARY);
         body.push_str("\r\nContent-Disposition: form-data; name=\"");
-        body.push_str(&k);
-        body.push_str("\"\r\n\r\n");
-        body.push_str(&v);
+        body.push_str(&part.name);
+        body.push('"');
+        if let Some(filename) = &part.filename {
+            // Escaped exactly as reqwest frames it on the wire.
+            body.push_str("; filename=\"");
+            body.push_str(
+                &filename
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\r', "\\\r")
+                    .replace('\n', "\\\n"),
+            );
+            body.push('"');
+        }
+        if let Some(ct) = &part.content_type {
+            body.push_str("\r\nContent-Type: ");
+            body.push_str(ct);
+        }
+        body.push_str("\r\n\r\n");
+        body.push_str(&part.value);
         body.push_str("\r\n");
     }
     body.push_str("--");

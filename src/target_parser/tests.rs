@@ -609,3 +609,25 @@ fn test_client_cache_bounds_distinct_proxy_strings() {
         "the latest proxy client must still be cached"
     );
 }
+
+#[test]
+fn raw_multipart_parts_keep_file_name_and_type() {
+    let body = "--b\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhi\r\n\
+                --b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.svg\"\r\n\
+                Content-Type: image/svg+xml\r\n\r\n<svg/>\r\n\
+                --b\r\nContent-Disposition: form-data; name=\"doc\"; filename*=UTF-8''x.txt\r\n\r\nz\r\n--b--\r\n";
+    let parts = raw_multipart_parts(body).unwrap();
+    assert_eq!(parts[0].filename, None);
+    assert_eq!(parts[0].content_type, None);
+    assert_eq!(parts[1].name, "file");
+    assert_eq!(parts[1].filename.as_deref(), Some("a.svg"));
+    assert_eq!(parts[1].content_type.as_deref(), Some("image/svg+xml"));
+    assert_eq!(parts[1].value, "<svg/>");
+    // `filename*=` is its own attribute, not `filename`.
+    assert_eq!(parts[2].filename, None);
+    // The pair view is unchanged.
+    assert_eq!(
+        raw_multipart_fields(body).unwrap()[1],
+        ("file".to_string(), "<svg/>".to_string())
+    );
+}

@@ -186,7 +186,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--skip-xss-scanning` | false | 페이로드 주입을 건너뜁니다 |
 | `--deep-scan` | false | 첫 탐지 결과 이후에도 계속 테스트합니다 |
 | `--sxss` | false | Stored XSS 모드를 활성화합니다 |
-| `--sxss-url` |  | SXSS용 조회 URL (절대 `http(s)://`); `--sxss`와 함께일 때만 사용됨. 생략하면 `--sxss`가 폼 탐색 결과에서 조회 페이지를 자동으로 찾습니다 |
+| `--sxss-url` |  | SXSS용 조회 URL (절대 `http(s)://`); `--sxss`와 함께일 때만 사용됨. 여러 번 지정하면 여러 페이지를 조회합니다. 폼 탐색으로 찾은 페이지도 함께 조회합니다 |
 | `--sxss-method` | `GET` | 조회 메서드 |
 | `--sxss-retries` | `3` | 저장된 출력을 가져올 때 조회 URL에 대한 재시도 횟수 (최대 `20`; 재시도마다 500 ms × 시도 횟수만큼 대기, 최대 5초) |
 | `--max-payloads-per-param` | `0` | 파라미터별로 테스트하는 기본 페이로드 수 제한 (`0`은 `--deep-scan`이 없으면 세트당 3000개의 내장 안전 상한을 적용). WAF 우회 변형과 일부 공용 페이로드는 상한 적용 뒤에 추가되므로 실제 개수는 더 많을 수 있습니다 |

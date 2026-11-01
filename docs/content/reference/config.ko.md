@@ -114,7 +114,7 @@ custom_alert_type = "none"
 skip_xss_scanning = false
 deep_scan = false
 sxss = false
-# sxss_url = "https://target.app/retrieval"
+# sxss_url = ["https://target.app/retrieval"]
 sxss_method = "GET"
 sxss_retries = 3
 max_payloads_per_param = 0
@@ -255,7 +255,7 @@ debug = false
 | `skip_xss_scanning` | bool | `false` | 공격 없이 탐색만 수행 |
 | `deep_scan` | bool | `false` | 첫 탐지 결과 이후에도 계속 진행 |
 | `sxss` | bool | `false` | Stored XSS 모드 활성화 |
-| `sxss_url` | string |  | 조회 URL |
+| `sxss_url` | string or array |  | 조회 URL 또는 URL 목록 |
 | `sxss_method` | string | `"GET"` | 조회 메서드 (`method`와 같은 값 집합) |
 | `sxss_retries` | int | `3` | 조회 URL을 가져올 때의 재시도 횟수 (최대 `20`) |
 | `max_payloads_per_param` | int | `0` | 파라미터당 테스트하는 기본 페이로드 상한 (`0`은 `deep_scan`이 켜져 있지 않으면 세트당 3000개 안전 상한을 적용) |

@@ -195,7 +195,9 @@ pub struct ScanConfig {
     pub max_payloads_per_param: Option<usize>,
     pub deep_scan: Option<bool>,
     pub sxss: Option<bool>,
-    pub sxss_url: Option<String>,
+    /// One URL or a list (`--sxss-url` repeats).
+    #[serde(default, deserialize_with = "string_or_list")]
+    pub sxss_url: Option<Vec<String>>,
     pub sxss_method: Option<String>,
     pub sxss_retries: Option<u32>,
     pub skip_ast_analysis: Option<bool>,
@@ -407,7 +409,7 @@ impl Config {
             apply_cfg!(explicit scan.max_payloads_per_param => args.max_payloads_per_param);
             apply_cfg!(flag scan.deep_scan => args.deep_scan);
             apply_cfg!(flag scan.sxss => args.sxss);
-            apply_cfg!(opt_clone scan.sxss_url => args.sxss_url);
+            apply_cfg!(vec scan.sxss_url => args.sxss_url);
             apply_cfg!(explicit_clone scan.sxss_method => args.sxss_method);
             apply_cfg!(explicit scan.sxss_retries => args.sxss_retries);
             apply_cfg!(flag scan.skip_ast_analysis => args.skip_ast_analysis);
@@ -433,6 +435,20 @@ impl Config {
             None => Vec::new(),
         }
     }
+}
+
+/// A config value written as one string or as a list of strings.
+fn string_or_list<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(Option::<OneOrMany>::deserialize(d)?.map(|v| match v {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+    }))
 }
 
 /// Reset `field` to `None` (falling back to the built-in default) and record a
@@ -883,7 +899,7 @@ pub const DEFAULT_TOML_TEMPLATE: &str = r#"# Dalfox configuration (TOML)
 # max_payloads_per_param = 0  # cap payloads per param (0 = built-in safety cap of 3000 per set, unless deep_scan)
 # deep_scan = false
 # sxss = false
-# sxss_url = "https://target/echo"
+# sxss_url = ["https://target/echo"]  # one URL, or a list of pages to check
 # sxss_method = "GET"
 # sxss_retries = 3
 # skip_ast_analysis = false

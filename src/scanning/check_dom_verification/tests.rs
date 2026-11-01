@@ -579,7 +579,7 @@ async fn test_dom_verification_sxss_honors_ignore_return() {
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{}:{}/sxss/blocked", addr.ip(), addr.port()));
+    args.sxss_url = vec![format!("http://{}:{}/sxss/blocked", addr.ip(), addr.port())];
 
     let (verified, _) = dom_verify(&target, &param, &payload, &args).await;
     assert!(
@@ -807,7 +807,7 @@ async fn test_check_dom_verification_sxss_uses_secondary_url() {
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{}:{}/sxss/html", addr.ip(), addr.port()));
+    args.sxss_url = vec![format!("http://{}:{}/sxss/html", addr.ip(), addr.port())];
 
     let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(found, "sxss should verify stored payload at secondary URL");
@@ -829,7 +829,7 @@ async fn test_dom_outcome_sxss_never_drives_early_exit() {
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{}:{}/sxss/html", addr.ip(), addr.port()));
+    args.sxss_url = vec![format!("http://{}:{}/sxss/html", addr.ip(), addr.port())];
     let client = target.build_client_or_default();
 
     let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
@@ -860,7 +860,7 @@ async fn test_check_dom_verification_sxss_rejects_non_html_secondary_content() {
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{}:{}/sxss/json", addr.ip(), addr.port()));
+    args.sxss_url = vec![format!("http://{}:{}/sxss/json", addr.ip(), addr.port())];
 
     let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(!found);
@@ -878,7 +878,7 @@ async fn test_check_dom_verification_sxss_without_url_returns_false() {
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = None;
+    args.sxss_url = vec![];
 
     let (found, body) = dom_verify(&target, &param, &payload, &args).await;
     assert!(!found);

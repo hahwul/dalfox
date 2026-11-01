@@ -41,12 +41,24 @@ pub async fn probe_multipart_params(
     if target.multipart {
         // An imported spec/collection declared this body multipart: every
         // field of it is a multipart field, named or not.
-        for (k, _) in pairs.iter() {
+        // A file part is two injection points: its content, and its upload
+        // filename (`<field>[filename]`), which upload listings echo back.
+        let filename_slots = crate::target_parser::raw_multipart_parts(data)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.filename.is_some())
+            .map(|p| crate::scanning::url_inject::multipart_filename_slot(&p.name));
+        let names: Vec<String> = pairs
+            .iter()
+            .map(|(k, _)| k.clone())
+            .chain(filename_slots)
+            .collect();
+        for k in names {
             if seen.len() >= MAX_IMPORTED_MULTIPART_FIELDS {
                 break;
             }
             if seen.insert(k.clone()) {
-                wanted.push(k.clone());
+                wanted.push(k);
             }
         }
     }
@@ -86,6 +98,11 @@ pub async fn probe_multipart_params(
         let client_clone = client.clone();
         let url = target.url.clone();
         let target_clone = shared_target.clone();
+        // Only a captured (raw) multipart body has file parts, so only it needs
+        // the file-aware builder. A non-raw `-d` body keeps the plain text-field
+        // form built from `pairs` (form_urlencoded semantics: `+`→space, bare
+        // keys), so a sibling field is sent exactly as the old probe sent it.
+        let raw_data = target.multipart.then(|| data.clone());
         let pairs_clone = pairs.clone();
         let field_name = field.clone();
 
@@ -95,19 +112,27 @@ pub async fn probe_multipart_params(
             delay,
             None,
             move || {
-                let mut form = reqwest::multipart::Form::new();
-                let mut placed = false;
-                for (k, v) in pairs_clone.iter() {
-                    if *k == field {
-                        form = form.text(k.clone(), marker.to_string());
-                        placed = true;
-                    } else {
-                        form = form.text(k.clone(), v.clone());
+                // Captured multipart: the shared builder the injection uses, so a
+                // file part goes out as a file (an upload endpoint rejects a
+                // text-only body) and `<field>[filename]` lands in the filename.
+                let form = if let Some(data) = raw_data.as_deref() {
+                    crate::scanning::url_inject::multipart_form(Some(data), &field, marker)
+                } else {
+                    let mut form = reqwest::multipart::Form::new();
+                    let mut placed = false;
+                    for (k, v) in pairs_clone.iter() {
+                        if *k == field {
+                            form = form.text(k.clone(), marker.to_string());
+                            placed = true;
+                        } else {
+                            form = form.text(k.clone(), v.clone());
+                        }
                     }
-                }
-                if !placed {
-                    form = form.text(field, marker.to_string());
-                }
+                    if !placed {
+                        form = form.text(field.clone(), marker.to_string());
+                    }
+                    form
+                };
 
                 let method =
                     crate::scanning::url_inject::body_location_method(&target_clone.method);

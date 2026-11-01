@@ -5308,7 +5308,7 @@ async fn sxss_credits_only_the_fields_that_actually_store() {
         }
         let mut args = integration_scan_args(false);
         args.sxss = true;
-        args.sxss_url = Some(format!("http://{addr}/view"));
+        args.sxss_url = vec![format!("http://{addr}/view")];
         args.max_payloads_per_param = 40;
         let results = Arc::new(Mutex::new(Vec::new()));
         run_scanning(
@@ -5414,7 +5414,7 @@ async fn sxss_credit_gate_always_sees_a_baseline_during_the_phases() {
     });
     let mut args = integration_scan_args(false);
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.sxss_url = vec![format!("http://{addr}/view")];
     args.max_payloads_per_param = 20;
     let results = Arc::new(Mutex::new(Vec::new()));
     run_scanning(
@@ -5521,7 +5521,7 @@ async fn sxss_store_probe_bounds_a_non_storing_siblings_request_budget() {
     }
     let mut args = integration_scan_args(false);
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.sxss_url = vec![format!("http://{addr}/view")];
     // A full catalog: if `name` were to run it, the hit count would be orders
     // of magnitude over the budget below.
     args.max_payloads_per_param = 120;
@@ -5630,7 +5630,7 @@ async fn sxss_store_probe_uses_the_numeric_marker_fallback_for_length_capped_sin
     });
     let mut args = integration_scan_args(false);
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.sxss_url = vec![format!("http://{addr}/view")];
     args.max_payloads_per_param = 40;
     let results = Arc::new(Mutex::new(Vec::new()));
     run_scanning(
@@ -5723,7 +5723,7 @@ async fn sxss_finds_a_write_behind_store() {
     });
     let mut args = integration_scan_args(false);
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{addr}/view"));
+    args.sxss_url = vec![format!("http://{addr}/view")];
     // Default retry ramp (backoff 500 ms) covers the 350 ms write-behind delay.
     args.sxss_retries = 3;
     args.max_payloads_per_param = 40;
@@ -5950,5 +5950,168 @@ async fn test_run_scanning_limit_ignores_findings_only_poc_hides() {
     assert!(
         !report.limit_stopped,
         "an R that --only-poc v hides must not stop the scan"
+    );
+}
+
+/// Mock upload app for the `--sxss` upload tests. `POST /upload` needs a real
+/// file part named `file` (a text-only field is rejected, as real upload
+/// handlers do). It stores the content under its filename, serves it back as
+/// HTML at `/files/<name>`, records the filename for `/list`, and answers
+/// with a JSON ack naming the file's URL.
+async fn spawn_upload_app() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    use axum::{
+        Router,
+        extract::Path,
+        http::{StatusCode, header},
+        response::{Html, IntoResponse},
+        routing::get,
+    };
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use std::sync::Mutex as StdMutex;
+
+    let files: Arc<StdMutex<HashMap<String, String>>> = Arc::default();
+    let (w, r, l) = (files.clone(), files.clone(), files.clone());
+    let app = Router::new()
+        .route(
+            "/upload",
+            get(|| async { Html("<form>upload</form>") }).post(move |body: String| {
+                let files = w.clone();
+                async move {
+                    let part = crate::target_parser::raw_multipart_parts(&body)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .find(|p| p.name == "file");
+                    let Some((name, value)) = part.and_then(|p| Some((p.filename?, p.value)))
+                    else {
+                        return (StatusCode::BAD_REQUEST, "no file").into_response();
+                    };
+                    files.lock().unwrap().insert(name.clone(), value);
+                    let ack = serde_json::json!({ "ok": true, "url": format!("/files/{name}") });
+                    (
+                        [(header::CONTENT_TYPE, "application/json")],
+                        ack.to_string(),
+                    )
+                        .into_response()
+                }
+            }),
+        )
+        .route(
+            "/files/{name}",
+            get(move |Path(name): Path<String>| {
+                let files = r.clone();
+                async move {
+                    let body = files
+                        .lock()
+                        .unwrap()
+                        .get(&name)
+                        .cloned()
+                        .unwrap_or_default();
+                    Html(format!("<html><body>{body}</body></html>"))
+                }
+            }),
+        )
+        .route(
+            "/empty",
+            get(|| async { Html("<html><body>nothing</body></html>") }),
+        )
+        .route(
+            "/list",
+            get(move || {
+                let files = l.clone();
+                async move {
+                    let names: Vec<String> = files.lock().unwrap().keys().cloned().collect();
+                    Html(format!(
+                        "<html><body><ul><li>{}</li></ul></body></html>",
+                        names.join("</li><li>")
+                    ))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    (addr, server)
+}
+
+/// A captured upload request: a text field and an HTML file part.
+fn upload_target(addr: std::net::SocketAddr) -> Target {
+    let mut target = parse_target(&format!("http://{addr}/upload")).unwrap();
+    target.method = "POST".to_string();
+    target.data = Some(
+        "--b\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhi\r\n\
+         --b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"note.html\"\r\n\
+         Content-Type: text/html\r\n\r\nhello\r\n--b--\r\n"
+            .to_string(),
+    );
+    target.multipart = true;
+    target.workers = 1;
+    target
+}
+
+async fn run_upload_scan(
+    target: &Target,
+    param: &str,
+    args: crate::cmd::scan::ScanArgs,
+) -> Vec<crate::scanning::result::Result> {
+    let mut target = target.clone();
+    target.reflection_params.push(Param {
+        injection_context: Some(InjectionContext::Html(None)),
+        ..Param::new(param.to_string(), String::new(), Location::MultipartBody)
+    });
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(args),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+    results.lock().await.clone()
+}
+
+/// File content stored by an upload is found at the URL the upload's JSON ack
+/// names (`/files/note.html`), with no `--sxss-url` at all. Before, the file
+/// part went out as a text field (the endpoint rejected every injection) and
+/// the served file was never fetched.
+#[tokio::test]
+async fn sxss_upload_content_is_found_at_the_acked_file_url() {
+    let (addr, server) = spawn_upload_app().await;
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.max_payloads_per_param = 20;
+    let results = run_upload_scan(&upload_target(addr), "file", args).await;
+    server.abort();
+    assert!(
+        results
+            .iter()
+            .any(|r| r.param == "file" && r.result_type == FindingType::Verified),
+        "stored upload content must verify at /files/note.html: {results:?}"
+    );
+}
+
+/// `file[filename]` injects into the upload's filename; the listing page that
+/// echoes it is the second of two `--sxss-url`s, so both are consulted.
+#[tokio::test]
+async fn sxss_upload_filename_is_found_on_a_later_sxss_url() {
+    let (addr, server) = spawn_upload_app().await;
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.sxss_url = vec![
+        format!("http://{addr}/empty"),
+        format!("http://{addr}/list"),
+    ];
+    args.max_payloads_per_param = 20;
+    let results = run_upload_scan(&upload_target(addr), "file[filename]", args).await;
+    server.abort();
+    assert!(
+        results
+            .iter()
+            .any(|r| r.param == "file[filename]" && r.result_type == FindingType::Verified),
+        "stored upload filename must verify on /list: {results:?}"
     );
 }

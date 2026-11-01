@@ -44,7 +44,35 @@ Pick the page the stored value **reads** from. Examples:
 | `PATCH /profile` | `GET /u/myself` |
 | `POST /support/ticket` | `GET /admin/tickets` (if you have admin access) |
 
-Dalfox reads every candidate retrieval page, in this order: `--sxss-url` (when set), the page the form was found on, the form's `action` endpoint (only when it is on the target's origin, or the same host upgraded to HTTPS), and the injection target itself. Duplicates are fetched once. Without `--sxss-url` the last three are all it has, so set it whenever the stored value is rendered somewhere they don't cover. `--sxss-url` does nothing without `--sxss`; Dalfox warns when you pass it alone.
+Dalfox reads every candidate retrieval page, in this order: each `--sxss-url` (when set), the page the form was found on, the form's `action` endpoint (only when it is on the target's origin, or the same host upgraded to HTTPS), and the injection target itself. Duplicates are fetched once. Without `--sxss-url` the last three are all it has, so set it whenever the stored value is rendered somewhere they don't cover. `--sxss-url` does nothing without `--sxss`; Dalfox warns when you pass it alone.
+
+Repeat `--sxss-url` when the value shows up in more than one place, such as a list view and a detail view:
+
+```bash
+dalfox scan https://target.app/post-comment --sxss \
+  --sxss-url https://target.app/comments \
+  --sxss-url https://target.app/post/123
+```
+
+In a config file, `sxss_url` takes one URL or a list.
+
+## File uploads
+
+Give Dalfox a captured upload request (`-i raw-http`, a HAR, or a multipart `-d` body) and each file part becomes two injection points:
+
+- `<field>`: the file's content. The part is still sent as a file, with its captured filename and `Content-Type`.
+- `<field>[filename]`: the upload filename, which file listings often print without escaping.
+
+```bash
+dalfox scan -i raw-http upload.req --sxss \
+  --sxss-url https://target.app/files
+```
+
+Under `--sxss`, Dalfox also follows the upload's own response to the stored file: a `Location` header, or a same-origin URL ending in the uploaded filename (an HTML link or a JSON field such as `"url": "/uploads/a.html"`). That page is checked like any other retrieval page. A file served as an image or other non-HTML type is never reported, so content injection only pays off when the captured upload is HTML or SVG, or when the server trusts the extension you send.
+
+If the server renames uploads (a hash or ID instead of your filename), Dalfox cannot find the file from the response; pass its URL with `--sxss-url` if it is predictable.
+
+The curl PoC for an upload pipes the file content through stdin (`printf '%s' … | curl -F 'field=@-;filename=…'`), since `--form-string` cannot send a file. httpie names an upload after its local path, so an httpie PoC prints the curl command instead.
 
 ## Retrieval method
 

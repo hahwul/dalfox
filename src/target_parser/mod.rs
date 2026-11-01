@@ -893,12 +893,28 @@ pub(crate) fn is_raw_multipart(data: &str) -> bool {
     raw_multipart_fields(data).is_some()
 }
 
+/// One part of a captured `multipart/form-data` body. `filename` and
+/// `content_type` are set for a file part (`<input type=file>`), so a replay
+/// still uploads a file rather than a plain text field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MultipartPart {
+    pub name: String,
+    pub value: String,
+    pub filename: Option<String>,
+    pub content_type: Option<String>,
+}
+
 /// The fields of a `multipart/form-data` body kept as captured on the wire
 /// (raw HTTP, HAR, `-d`): each part's `name` with its content, in order. The
 /// boundary is read off the body's own first line, so no `Content-Type` is
 /// needed. `None` when `data` is not such a body, which callers read as
 /// urlencoded.
 pub(crate) fn raw_multipart_fields(data: &str) -> Option<Vec<(String, String)>> {
+    raw_multipart_parts(data).map(|parts| parts.into_iter().map(|p| (p.name, p.value)).collect())
+}
+
+/// [`raw_multipart_fields`] with each part's `filename` / `Content-Type` kept.
+pub(crate) fn raw_multipart_parts(data: &str) -> Option<Vec<MultipartPart>> {
     let boundary = data
         .lines()
         .next()?
@@ -906,7 +922,7 @@ pub(crate) fn raw_multipart_fields(data: &str) -> Option<Vec<(String, String)>> 
         .strip_prefix("--")
         .filter(|b| !b.is_empty() && !b.contains(char::is_whitespace))?;
     let delimiter = format!("--{boundary}");
-    let mut fields = Vec::new();
+    let mut parts = Vec::new();
     for part in data.split(delimiter.as_str()).skip(1) {
         if part.starts_with("--") {
             break; // close delimiter
@@ -924,19 +940,48 @@ pub(crate) fn raw_multipart_fields(data: &str) -> Option<Vec<(String, String)>> 
         let Some(name) = head.lines().find_map(content_disposition_name) else {
             continue;
         };
+        let filename = head
+            .lines()
+            .find_map(|l| content_disposition_attr(l, "filename"));
+        let content_type = head.lines().find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim()
+                .eq_ignore_ascii_case("content-type")
+                .then(|| v.trim().to_string())
+        });
         let value = body
             .strip_suffix("\r\n")
             .or_else(|| body.strip_suffix('\n'))
             .unwrap_or(body);
-        fields.push((name, value.to_string()));
+        parts.push(MultipartPart {
+            name,
+            value: value.to_string(),
+            filename,
+            content_type,
+        });
     }
-    (!fields.is_empty()).then_some(fields)
+    (!parts.is_empty()).then_some(parts)
 }
 
 /// The field `name` of a `Content-Disposition: form-data` header line.
 /// Attributes are split on `;` before matching so a `filename="…"` — which
 /// contains `name="` as a substring — can't be mistaken for the field name.
 pub(crate) fn content_disposition_name(line: &str) -> Option<String> {
+    content_disposition_attr(line, "name")
+}
+
+/// One attribute (`name`, `filename`) of a `Content-Disposition` header line,
+/// unquoted. A quoted value is read as a quoted-string — `\"` and `\\` are
+/// escapes and a `;` inside the quotes does not end it — which is how reqwest
+/// and curl frame an upload filename. `filename*=` (RFC 5987) is a different
+/// attribute and never matches `filename`.
+///
+/// ponytail: RFC 6266 quoted-pair, which matches our own producer (reqwest).
+/// A browser that emits a *raw* backslash or CR/LF inside the quotes (rare,
+/// non-conformant, and unusual in a filename) is read with that byte removed;
+/// the two encodings are indistinguishable from the bytes alone. Reach for a
+/// smarter heuristic only if a real capture is seen to break on it.
+fn content_disposition_attr(line: &str, attr_name: &str) -> Option<String> {
     let line = line.trim();
     if !line
         .get(..20)
@@ -944,16 +989,35 @@ pub(crate) fn content_disposition_name(line: &str) -> Option<String> {
     {
         return None;
     }
-    line.split(';').skip(1).find_map(|attr| {
-        let value = attr.trim().strip_prefix("name=")?.trim();
-        Some(
-            value
-                .strip_prefix('"')
-                .and_then(|v| v.split_once('"').map(|(n, _)| n))
-                .unwrap_or(value)
-                .to_string(),
-        )
-    })
+    let mut chars = line[20..].chars().peekable();
+    while chars.next_if(|&c| c != ';').is_some() {} // the disposition type
+    while chars.next().is_some() {
+        // at `;`
+        let key: String = std::iter::from_fn(|| chars.next_if(|&c| c != '=' && c != ';')).collect();
+        if chars.next_if_eq(&'=').is_none() {
+            continue;
+        }
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        let value = if chars.next_if_eq(&'"').is_some() {
+            let mut v = String::new();
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => v.extend(chars.next()),
+                    '"' => break,
+                    _ => v.push(c),
+                }
+            }
+            while chars.next_if(|&c| c != ';').is_some() {}
+            v
+        } else {
+            let v: String = std::iter::from_fn(|| chars.next_if(|&c| c != ';')).collect();
+            v.trim().to_string()
+        };
+        if key.trim().eq_ignore_ascii_case(attr_name) {
+            return Some(value);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

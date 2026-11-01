@@ -107,7 +107,7 @@ fn make_args(addr: SocketAddr, deep_scan: bool, out: &std::path::Path) -> ScanAr
         skip_xss_scanning: true, // isolate the AST pass from the payload loop
         deep_scan,
         sxss: false,
-        sxss_url: None,
+        sxss_url: vec![],
         sxss_method: "GET".to_string(),
         sxss_retries: 1,
         skip_ast_analysis: false, // the AST pass must be allowed to run

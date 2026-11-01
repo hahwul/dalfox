@@ -187,7 +187,7 @@ Monitoring turns itself on whenever credentials are present (`--cookies`,
 | `--skip-xss-scanning` | false | Skip payload injection |
 | `--deep-scan` | false | Keep testing after first finding |
 | `--sxss` | false | Enable Stored XSS mode |
-| `--sxss-url` |  | Retrieval URL for SXSS (absolute `http(s)://`); only used with `--sxss`. When omitted, `--sxss` auto-detects the retrieval page from form discovery |
+| `--sxss-url` |  | Retrieval URL for SXSS (absolute `http(s)://`); only used with `--sxss`. Repeat it to check several pages. Pages found by form discovery are checked as well |
 | `--sxss-method` | `GET` | Retrieval method |
 | `--sxss-retries` | `3` | Retries on the retrieval URL when fetching stored output (max `20`; each retry waits 500 ms × attempt, capped at 5 s) |
 | `--max-payloads-per-param` | `0` | Cap base payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `--deep-scan` is set). WAF-bypass variants and a few shared payloads are added after the cap, so the real per-parameter count can be higher |

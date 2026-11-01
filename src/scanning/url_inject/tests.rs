@@ -1046,7 +1046,7 @@ fn xml_content_type_defaults_when_non_xml_or_absent() {
 #[test]
 fn multipart_fields_replace_preserve_append() {
     // Named field's value replaced, siblings kept in order.
-    let f = multipart_fields(Some("a=1&q=seed&b=2"), "q", "PAY");
+    let f = field_pairs(Some("a=1&q=seed&b=2"), "q", "PAY");
     assert_eq!(
         f,
         vec![
@@ -1056,7 +1056,7 @@ fn multipart_fields_replace_preserve_append() {
         ]
     );
     // Absent field appended after the existing ones.
-    let f = multipart_fields(Some("a=1"), "q", "PAY");
+    let f = field_pairs(Some("a=1"), "q", "PAY");
     assert_eq!(
         f,
         vec![
@@ -1066,7 +1066,7 @@ fn multipart_fields_replace_preserve_append() {
     );
     // No data at all: just the injected field.
     assert_eq!(
-        multipart_fields(None, "q", "PAY"),
+        field_pairs(None, "q", "PAY"),
         vec![("q".to_string(), "PAY".to_string())]
     );
 }
@@ -1082,7 +1082,7 @@ fn multipart_poc_body_serializes_exactly_the_shared_fields() {
     let boundary = content_type
         .strip_prefix("multipart/form-data; boundary=")
         .expect("content-type carries a boundary");
-    for (k, v) in multipart_fields(data, "q", "<svg/onload=alert(1)>") {
+    for (k, v) in field_pairs(data, "q", "<svg/onload=alert(1)>") {
         assert!(
             body.contains(&format!(
                 "--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n"
@@ -1231,4 +1231,71 @@ fn hpp_on_nested_field_param_pollutes_the_wire_key_with_the_wire_decoy() {
         pairs(HppPosition::Both),
         vec![kv("a", "1"), kv("qs", "PAY"), kv("qs", "PAY")]
     );
+}
+
+/// `multipart_fields` as `(name, value)` pairs, for the text-field tests.
+fn field_pairs(data: Option<&str>, name: &str, value: &str) -> Vec<(String, String)> {
+    multipart_fields(data, name, value)
+        .into_iter()
+        .map(|p| (p.name, p.value))
+        .collect()
+}
+
+const UPLOAD_BODY: &str = "--b\r\nContent-Disposition: form-data; name=\"t\"\r\n\r\nhi\r\n\
+    --b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\n\
+    Content-Type: image/png\r\n\r\nPNG\r\n--b--\r\n";
+
+#[test]
+fn multipart_file_part_injection_slots() {
+    // Content slot: value replaced, filename and type kept.
+    let f = multipart_fields(Some(UPLOAD_BODY), "file", "PAY");
+    assert_eq!(f[1].value, "PAY");
+    assert_eq!(f[1].filename.as_deref(), Some("a.png"));
+    assert_eq!(f[1].content_type.as_deref(), Some("image/png"));
+    // Filename slot: filename replaced, content kept, nothing appended.
+    let f = multipart_fields(Some(UPLOAD_BODY), "file[filename]", "PAY");
+    assert_eq!(f.len(), 2);
+    assert_eq!(f[1].value, "PNG");
+    assert_eq!(f[1].filename.as_deref(), Some("PAY"));
+    // `[filename]` on a text field is just an (appended) field name.
+    assert_eq!(
+        multipart_file_target(Some(UPLOAD_BODY), "t[filename]"),
+        None
+    );
+    assert!(multipart_file_target(Some(UPLOAD_BODY), "t").is_none());
+    assert_eq!(
+        multipart_file_target(Some(UPLOAD_BODY), "file[filename]").map(|(_, f)| f),
+        Some(true)
+    );
+}
+
+#[test]
+fn multipart_poc_body_renders_the_file_part() {
+    let (body, _) = multipart_poc_body(
+        Some(UPLOAD_BODY),
+        "file[filename]",
+        "<img src=x onerror=alert(1)>.png",
+    );
+    assert!(
+        body.contains(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"<img src=x onerror=alert(1)>.png\"\r\nContent-Type: image/png\r\n\r\nPNG\r\n"
+        ),
+        "{body}"
+    );
+}
+
+#[test]
+fn multipart_poc_type_matches_the_wire() {
+    // A text part's captured Content-Type is dropped (form.text sends none),
+    // and an unparseable file-part type is dropped (the part goes out untyped),
+    // so the rendered PoC never shows a type the wire omits.
+    let body = "--b\r\nContent-Disposition: form-data; name=\"meta\"\r\n\
+        Content-Type: application/json\r\n\r\n{}\r\n\
+        --b\r\nContent-Disposition: form-data; name=\"f\"; filename=\"a.bin\"\r\n\
+        Content-Type: not a mime\r\n\r\nX\r\n--b--\r\n";
+    let f = multipart_fields(Some(body), "meta", "PAY");
+    assert_eq!(f[0].content_type, None, "text part type dropped");
+    assert_eq!(f[1].content_type, None, "unparseable file type dropped");
+    let (poc, _) = multipart_poc_body(Some(body), "meta", "PAY");
+    assert_eq!(poc.matches("Content-Type:").count(), 0, "{poc}");
 }

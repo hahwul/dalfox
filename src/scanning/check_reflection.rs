@@ -2094,7 +2094,7 @@ fn ascii_ci_contains(haystack: &str, needle: &str) -> bool {
 }
 
 /// Resolve SXSS check URLs with priority:
-/// 1. --sxss-url (explicit) -> single URL
+/// 1. --sxss-url (explicit, repeatable) -> each URL in order
 /// 2. param.form_origin_url -> page where form was discovered
 /// 3. param.form_action_url -> form action (GET to check stored output)
 /// 4. target.url -> fallback
@@ -2109,11 +2109,8 @@ pub(crate) fn resolve_sxss_check_urls(
     let mut urls = Vec::new();
 
     // 1. Explicit --sxss-url takes highest priority
-    if let Some(ref sxss_url_str) = args.sxss_url
-        && let Ok(u) = url::Url::parse(sxss_url_str)
-    {
-        let s = u.to_string();
-        if seen.insert(s) {
+    for u in args.sxss_url.iter().filter_map(|s| url::Url::parse(s).ok()) {
+        if seen.insert(u.to_string()) {
             urls.push(u);
         }
     }
@@ -2156,6 +2153,108 @@ pub(crate) fn resolve_sxss_check_urls(
     }
 
     urls
+}
+
+/// Most uploaded-file URLs taken from one injection response.
+const MAX_UPLOADED_FILE_URLS: usize = 4;
+
+/// Under `--sxss`, where an upload's injection response says the stored file
+/// now lives: its `Location` header, or a same-origin URL in the body that
+/// ends in the uploaded filename (an HTML link, a JSON `"url"`). Empty unless
+/// `param` targets a file part (see [`url_inject::multipart_file_target`]).
+/// Same destination gate as `form_action_url`: these come from the target's
+/// response and are fetched with the operator's credentials.
+///
+/// ponytail: only the captured filename is matched; a server that renames
+/// uploads (hash names) is reached through `--sxss-url` instead.
+pub(crate) fn uploaded_file_urls(
+    target: &Target,
+    param: &Param,
+    response_url: &url::Url,
+    headers: &reqwest::header::HeaderMap,
+    body: &str,
+) -> Vec<url::Url> {
+    if param.location != crate::parameter_analysis::Location::MultipartBody {
+        return Vec::new();
+    }
+    let Some((part, is_filename_slot)) =
+        crate::scanning::url_inject::multipart_file_target(target.data.as_deref(), &param.name)
+    else {
+        return Vec::new();
+    };
+    let mut refs: Vec<String> = headers
+        .get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .into_iter()
+        .collect();
+    // A filename-slot injection uploads under the payload's name, so the body
+    // holds no stable name to look for.
+    if let Some(filename) = part.filename.filter(|f| !is_filename_slot && !f.is_empty()) {
+        // A URL reference is at most this long; the backward scan for a token's
+        // start is bounded by it, so a hostile body of run-together matches
+        // can't make this O(n²).
+        const MAX_REF_LEN: usize = 2048;
+        let body = body.replace("\\/", "/"); // JSON-escaped slashes
+        for (idx, _) in body.match_indices(filename.as_str()).take(4096) {
+            let end = idx + filename.len();
+            if body[end..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+            {
+                continue; // `a.png` inside `a.png.bak`
+            }
+            let mut window = idx.saturating_sub(MAX_REF_LEN);
+            while window < idx && !body.is_char_boundary(window) {
+                window += 1;
+            }
+            let start = body[window..idx]
+                .char_indices()
+                .rev()
+                .find(|(_, c)| c.is_whitespace() || "\"'`<>()=,".contains(*c))
+                .map_or(window, |(i, c)| window + i + c.len_utf8());
+            let token = &body[start..end];
+            // The filename must be a whole last segment: `/u/a.png`, not `/u/xa.png`.
+            if token.len() == filename.len() || token[..token.len() - filename.len()].ends_with('/')
+            {
+                refs.push(token.to_string());
+            }
+            if refs.len() > MAX_UPLOADED_FILE_URLS {
+                break;
+            }
+        }
+    }
+    let mut urls: Vec<url::Url> = Vec::new();
+    for r in refs {
+        let Ok(u) = response_url.join(&r) else {
+            continue;
+        };
+        if u != *response_url
+            && u != target.url
+            && crate::utils::http::same_origin_or_tls_upgrade(&target.url, &u)
+            && !urls.contains(&u)
+        {
+            urls.push(u);
+        }
+        if urls.len() >= MAX_UPLOADED_FILE_URLS {
+            break;
+        }
+    }
+    urls
+}
+
+/// `check_urls` plus `extra`, without duplicates.
+pub(crate) fn with_extra_urls(
+    mut check_urls: Vec<url::Url>,
+    extra: Vec<url::Url>,
+) -> Vec<url::Url> {
+    for u in extra {
+        if !check_urls.contains(&u) {
+            check_urls.push(u);
+        }
+    }
+    check_urls
 }
 
 /// Text handed back by the reflection check, tagged with whether a browser
@@ -2559,16 +2658,23 @@ pub(crate) async fn sxss_store_probe(
         // response itself. Check it before the retrieval fan-out, mirroring the
         // inline fallback in the reflection path — otherwise a reflecting-but-
         // not-separately-stored sink would be judged non-storing and skipped.
-        if let Ok(resp) = inject_resp
-            && let Ok(text) = crate::utils::http::read_body_counted(resp).await
-            && classify_reflection(&text, marker).is_some()
-            && sxss_injection_credited(&text, marker)
-        {
-            return StoreProbeOutcome {
-                stored: true,
-                synchronous: true,
-            };
+        let mut upload_urls = Vec::new();
+        if let Ok(resp) = inject_resp {
+            let headers = resp.headers().clone();
+            let response_url = resp.url().clone();
+            if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
+                if classify_reflection(&text, marker).is_some()
+                    && sxss_injection_credited(&text, marker)
+                {
+                    return StoreProbeOutcome {
+                        stored: true,
+                        synchronous: true,
+                    };
+                }
+                upload_urls = uploaded_file_urls(target, param, &response_url, &headers, &text);
+            }
         }
+        let check_urls = with_extra_urls(check_urls.clone(), upload_urls);
 
         for attempt in 0u64..attempts {
             if attempt > 0 {
@@ -2688,15 +2794,34 @@ async fn fetch_injection_response(
             if injection_response_suppressed(status_code, resp.headers(), param, args) {
                 return None;
             }
-            let content_type = resp
-                .headers()
+            let headers = resp.headers().clone();
+            let followed_redirect = is_followed_redirect(&resp);
+            let text = crate::utils::http::read_body_counted(resp).await.ok()?;
+            gate_text(
+                &headers,
+                followed_redirect,
+                text,
+                param,
+                payload,
+                status_code,
+            )
+        }
+
+        // The body-level half of `gated_body`, for a response already read.
+        fn gate_text(
+            headers: &reqwest::header::HeaderMap,
+            followed_redirect: bool,
+            text: String,
+            param: &Param,
+            payload: &str,
+            status_code: u16,
+        ) -> Option<(ReflectionBody, bool)> {
+            let content_type = headers
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("")
                 .to_string();
             let is_js_content_type = crate::utils::is_javascript_content_type(&content_type);
-            let followed_redirect = is_followed_redirect(&resp);
-            let text = crate::utils::http::read_body_counted(resp).await.ok()?;
             if text.is_empty() || !response_body_supports_xss(&content_type, &text) {
                 return None;
             }
@@ -2718,6 +2843,7 @@ async fn fetch_injection_response(
             Some((body, crate::utils::is_xml_content_type(&content_type)))
         }
 
+        let mut upload_urls = Vec::new();
         let inject_body: Option<(ReflectionBody, bool)> = match inject_resp {
             Ok(resp) => {
                 // Mirror the normal path's WAF accounting on the stored-write
@@ -2728,12 +2854,35 @@ async fn fetch_injection_response(
                 // target_summary.waf.bypass is always empty.
                 let status_code = resp.status().as_u16();
                 apply_injection_waf_accounting(status_code, target, args, streak).await;
-                gated_body(resp, param, payload, args).await
+                // Read once: the raw text names an uploaded file's URL even
+                // when the gate drops it as a JSON ack.
+                let headers = resp.headers().clone();
+                let response_url = resp.url().clone();
+                let followed_redirect = is_followed_redirect(&resp);
+                match crate::utils::http::read_body_counted(resp).await {
+                    Ok(text) => {
+                        upload_urls =
+                            uploaded_file_urls(target, param, &response_url, &headers, &text);
+                        if injection_response_suppressed(status_code, &headers, param, args) {
+                            None
+                        } else {
+                            gate_text(
+                                &headers,
+                                followed_redirect,
+                                text,
+                                param,
+                                payload,
+                                status_code,
+                            )
+                        }
+                    }
+                    Err(_) => None,
+                }
             }
             Err(_) => None,
         };
 
-        let check_urls = resolve_sxss_check_urls(target, param, args);
+        let check_urls = with_extra_urls(resolve_sxss_check_urls(target, param, args), upload_urls);
         let retries = args.sxss_retries.max(1) as u64;
         let skip_payload_retries = sxss_payload_retries_skipped();
         let mut fallback_body: Option<(ReflectionBody, bool)> = None;

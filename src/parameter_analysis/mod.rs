@@ -1401,7 +1401,18 @@ pub async fn analyze_parameters(
     }
     let mut params = reflection_params.lock().await.clone();
     if !args.ignore_param.is_empty() {
-        params.retain(|p| !args.ignore_param.iter().any(|ignored| ignored == &p.name));
+        params.retain(|p| {
+            // A `<field>[filename]` upload slot is ignored by its base field.
+            let base = if p.location == Location::MultipartBody {
+                crate::scanning::url_inject::multipart_slot_base(&p.name)
+            } else {
+                p.name.as_str()
+            };
+            !args
+                .ignore_param
+                .iter()
+                .any(|ignored| ignored == &p.name || ignored == base)
+        });
     }
     if !args.param.is_empty() {
         params = filter_params(params, &args.param, target);
@@ -1645,7 +1656,18 @@ fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: 
 
     if let Some(data) = args.data.as_deref() {
         let trimmed = data.trim_start();
-        if trimmed.starts_with('{') {
+        if let Some(parts) = crate::target_parser::raw_multipart_parts(data) {
+            // An upload stores both the file and its name; each is a candidate.
+            for part in parts {
+                if part.filename.is_some() {
+                    candidates.push((
+                        crate::scanning::url_inject::multipart_filename_slot(&part.name),
+                        Location::MultipartBody,
+                    ));
+                }
+                candidates.push((part.name, Location::MultipartBody));
+            }
+        } else if trimmed.starts_with('{') {
             if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed) {
                 for key in map.keys() {
                     candidates.push((key.clone(), Location::JsonBody));
@@ -1666,7 +1688,17 @@ fn ensure_sxss_candidate_params(params: &mut Vec<Param>, target: &Target, args: 
         .map(|p| (p.name.clone(), p.location.clone()))
         .collect();
     for (name, location) in candidates {
-        if name.is_empty() || args.ignore_param.iter().any(|ignored| ignored == &name) {
+        let ignore_base = if location == Location::MultipartBody {
+            crate::scanning::url_inject::multipart_slot_base(&name)
+        } else {
+            name.as_str()
+        };
+        if name.is_empty()
+            || args
+                .ignore_param
+                .iter()
+                .any(|ignored| ignored == &name || ignored == ignore_base)
+        {
             continue;
         }
         if !present.insert((name.clone(), location.clone())) {

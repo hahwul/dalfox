@@ -641,3 +641,71 @@ fn body_pocs_replay_the_recorded_body_with_sibling_fields() {
         );
     }
 }
+
+#[test]
+fn multipart_upload_poc_pipes_the_file_part_through_stdin() {
+    // An upload finding replays the whole recorded form: text fields as
+    // `--form-string`, the file part from stdin with its filename and type,
+    // because `--form-string` cannot send a file at all.
+    let mut r = Result::builder(FindingType::Verified)
+        .inject_type("sxss-inHTML")
+        .method("POST")
+        .param("file[filename]")
+        .payload("<img src=x onerror=alert(1)>\".png")
+        .message_str("x")
+        .build();
+    r.location = "MultipartBody".to_string();
+    r.request = Some(
+        "POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n\
+         --B\r\nContent-Disposition: form-data; name=\"t\"\r\n\r\nhi\r\n\
+         --B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"<img src=x onerror=alert(1)>\\\".png\"\r\n\
+         Content-Type: image/png; q=1\r\n\r\nPNG\r\n--B--\r\n"
+            .to_string(),
+    );
+    let out = render_curl_poc(&r, "http://h/u");
+    assert_eq!(
+        out,
+        "printf '%s' 'PNG' | curl -X 'POST' --form-string 't=hi' \
+         -F 'file=@-;filename=\"<img src=x onerror=alert(1)>'\\\\'\".png\";type=image/png' 'http://h/u'\n",
+    );
+    let httpie = render_httpie_poc(&r, "http://h/u");
+    assert!(
+        httpie.starts_with("# httpie cannot set an upload filename"),
+        "{httpie}"
+    );
+}
+
+#[test]
+fn multipart_upload_poc_sends_other_file_parts_empty() {
+    // Two file parts: only the injected one is piped through stdin; the other
+    // goes out empty (`/dev/null`) so the request still has both parts.
+    let mut r = Result::builder(FindingType::Verified)
+        .inject_type("sxss-inHTML")
+        .method("POST")
+        .param("avatar")
+        .payload("<svg onload=alert(1)>")
+        .message_str("x")
+        .build();
+    r.location = "MultipartBody".to_string();
+    r.request = Some(
+        "POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n\
+         --B\r\nContent-Disposition: form-data; name=\"avatar\"; filename=\"a.png\"\r\n\
+         Content-Type: image/png\r\n\r\n<svg onload=alert(1)>\r\n\
+         --B\r\nContent-Disposition: form-data; name=\"doc\"; filename=\"b.pdf\"\r\n\
+         Content-Type: application/pdf\r\n\r\nPDF\r\n--B--\r\n"
+            .to_string(),
+    );
+    let out = render_curl_poc(&r, "http://h/u");
+    assert!(
+        out.starts_with("printf '%s' '<svg onload=alert(1)>' | curl -X 'POST'"),
+        "{out}"
+    );
+    assert!(
+        out.contains("-F 'avatar=@-;filename=\"a.png\";type=image/png'"),
+        "{out}"
+    );
+    assert!(
+        out.contains("-F 'doc=@/dev/null;filename=\"b.pdf\";type=application/pdf'"),
+        "{out}"
+    );
+}

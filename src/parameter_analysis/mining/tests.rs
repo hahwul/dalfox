@@ -1667,7 +1667,9 @@ async fn test_mine_parameters_raw_http_multipart_capture_mines_its_fields() {
         got,
         vec![
             ("note".to_string(), Location::MultipartBody),
-            ("up".to_string(), Location::MultipartBody)
+            ("up".to_string(), Location::MultipartBody),
+            // The file part's upload filename is its own injection point.
+            ("up[filename]".to_string(), Location::MultipartBody)
         ]
     );
 }

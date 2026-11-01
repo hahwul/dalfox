@@ -205,7 +205,7 @@ fn make_scan_args(
         skip_xss_scanning: true, // skip payload probing — we only care about AST findings
         deep_scan: false,        // must be false so the preflight captures the page body
         sxss: false,
-        sxss_url: None,
+        sxss_url: vec![],
         sxss_method: "GET".to_string(),
         sxss_retries: 1,
         skip_ast_analysis: false, // must be false for AST/external-JS path to run
