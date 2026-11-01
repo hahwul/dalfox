@@ -117,6 +117,41 @@ static LIB_SPECS: &[LibSpec] = &[
         }],
     },
     LibSpec {
+        name: "jQuery Validation",
+        url_patterns: &[
+            r"(?i)jquery[.-]validate[.-](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?im)/jquery-validation@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?i)/jquery[.-]validate/(\d+\.\d+(?:\.\d+)?)/",
+        ],
+        inline_patterns: &[r"(?i)jQuery Validation Plugin(?: -)? v(\d+\.\d+(?:\.\d+)?)"],
+        ranges: &[
+            VulnRange {
+                introduced: None,
+                fixed: "1.19.3",
+                advisories: &["CVE-2021-21252"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "1.19.4",
+                advisories: &["CVE-2021-43306"],
+                severity: SEV_LOW,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "1.19.5",
+                advisories: &["CVE-2022-31147"],
+                severity: SEV_HIGH,
+            },
+            VulnRange {
+                introduced: None,
+                fixed: "1.20.0",
+                advisories: &["CVE-2025-3573"],
+                severity: SEV_MEDIUM,
+            },
+        ],
+    },
+    LibSpec {
         name: "AngularJS",
         url_patterns: &[
             r"(?i)angular[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
@@ -300,6 +335,25 @@ static LIB_SPECS: &[LibSpec] = &[
             fixed: "3.5.0",
             advisories: &["CVE-2019-14862"],
             severity: SEV_MEDIUM,
+        }],
+    },
+    LibSpec {
+        name: "Mustache.js",
+        url_patterns: &[
+            r"(?im)(?:^|/)mustache[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
+            r"(?i)/mustache(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
+            r"(?im)/mustache(?:\.js)?@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+        ],
+        // Anchored to `name: 'mustache.js'`, which every release declares just
+        // before its version, so another library's `version: '…'` is ignored.
+        inline_patterns: &[
+            r#"(?i)\bname\s*[:=]\s*["']mustache\.js["']\s*[,;]\s*(?:\w+\.)?version\s*[:=]\s*["'](\d+\.\d+(?:\.\d+)?)["']"#,
+        ],
+        ranges: &[VulnRange {
+            introduced: None,
+            fixed: "2.2.1",
+            advisories: &["CVE-2015-8862"],
+            severity: SEV_HIGH,
         }],
     },
 ];
