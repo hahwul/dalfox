@@ -87,7 +87,7 @@ fn make_args() -> ScanArgs {
         skip_xss_scanning: false,
         deep_scan: false,
         sxss: false,
-        sxss_url: None,
+        sxss_url: vec![],
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: true,

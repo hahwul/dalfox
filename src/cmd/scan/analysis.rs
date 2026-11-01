@@ -509,10 +509,18 @@ fn inject_marker_params(target: &Target, marker: &str) -> Vec<crate::parameter_a
             // An imported multipart body keeps its wire format, so its fields
             // are the parts, not `&`/`=` pairs of the framing.
             let (pairs, location) = if target.multipart {
-                (
-                    crate::target_parser::raw_multipart_fields(data).unwrap_or_default(),
-                    Location::MultipartBody,
-                )
+                let parts = crate::target_parser::raw_multipart_parts(data).unwrap_or_default();
+                // A marker in an upload's filename names `<field>[filename]`.
+                let filename_slots = parts.iter().filter_map(|p| {
+                    let filename = p.filename.clone()?;
+                    Some((
+                        crate::scanning::url_inject::multipart_filename_slot(&p.name),
+                        filename,
+                    ))
+                });
+                let mut pairs: Vec<(String, String)> = filename_slots.collect();
+                pairs.extend(parts.into_iter().map(|p| (p.name, p.value)));
+                (pairs, Location::MultipartBody)
             } else {
                 (
                     data.split('&')

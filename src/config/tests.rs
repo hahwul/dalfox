@@ -87,7 +87,7 @@ fn full_scan_config() -> ScanConfig {
         max_payloads_per_param: Some(0),
         deep_scan: Some(true),
         sxss: Some(true),
-        sxss_url: Some("https://example.com/sxss".to_string()),
+        sxss_url: Some(vec!["https://example.com/sxss".to_string()]),
         sxss_method: Some("POST".to_string()),
         sxss_retries: Some(12),
         skip_ast_analysis: Some(true),
@@ -362,7 +362,7 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert!(args.skip_xss_scanning);
     assert!(args.deep_scan);
     assert!(args.sxss);
-    assert_eq!(args.sxss_url.as_deref(), Some("https://example.com/sxss"));
+    assert_eq!(args.sxss_url, vec!["https://example.com/sxss".to_string()]);
     assert_eq!(args.sxss_method, "POST");
     assert_eq!(args.sxss_retries, 12);
     assert!(args.skip_ast_analysis);
@@ -1032,4 +1032,19 @@ fn parse_config_error_names_the_bad_value() {
     // The value itself is never echoed — it may be a credential.
     let err = parse_config("[scan]\nproxy = [\"http://u:s3cret@p\"]\n", false).unwrap_err();
     assert!(!err.contains("s3cret"), "{err}");
+}
+
+#[test]
+fn sxss_url_accepts_a_string_or_a_list() {
+    let (one, _) = parse_config("[scan]\nsxss_url = \"https://a.test/x\"\n", false).unwrap();
+    assert_eq!(
+        one.scan.unwrap().sxss_url,
+        Some(vec!["https://a.test/x".to_string()])
+    );
+    let (many, _) = parse_config(
+        r#"{"scan":{"sxss_url":["https://a.test/x","https://a.test/y"]}}"#,
+        true,
+    )
+    .unwrap();
+    assert_eq!(many.scan.unwrap().sxss_url.map(|v| v.len()), Some(2));
 }

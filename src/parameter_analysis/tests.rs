@@ -2214,7 +2214,7 @@ async fn sxss_discards_the_no_echo_special_char_verdict() {
 
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{addr}/save"));
+    args.sxss_url = vec![format!("http://{addr}/save")];
 
     analyze_parameters(&mut target, &args, None).await;
 
@@ -2427,5 +2427,50 @@ async fn active_probe_honors_target_delay() {
     assert!(
         gap >= std::time::Duration::from_millis(300),
         "probes must be spaced by --delay, gap was {gap:?}"
+    );
+}
+
+#[test]
+fn sxss_seeds_multipart_parts_and_upload_filenames() {
+    let target = parse_target("https://example.com/upload").unwrap();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.data = Some(
+        "--b\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhi\r\n\
+         --b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\n\r\nX\r\n--b--\r\n"
+            .to_string(),
+    );
+    let mut params: Vec<Param> = vec![];
+    ensure_sxss_candidate_params(&mut params, &target, &args);
+    let got: Vec<(&str, &Location)> = params
+        .iter()
+        .map(|p| (p.name.as_str(), &p.location))
+        .collect();
+    for name in ["title", "file", "file[filename]"] {
+        assert!(
+            got.contains(&(name, &Location::MultipartBody)),
+            "{name} missing: {got:?}"
+        );
+    }
+}
+
+#[test]
+fn sxss_filename_slot_respects_ignore_param_on_base_field() {
+    let target = parse_target("https://example.com/upload").unwrap();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.ignore_param = vec!["file".to_string()];
+    args.data = Some(
+        "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\n\r\nX\r\n--b--\r\n"
+            .to_string(),
+    );
+    let mut params: Vec<Param> = vec![];
+    ensure_sxss_candidate_params(&mut params, &target, &args);
+    assert!(
+        !params
+            .iter()
+            .any(|p| p.name == "file" || p.name == "file[filename]"),
+        "ignoring `file` must drop both its content and filename slots: {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
 }

@@ -916,7 +916,7 @@ async fn test_check_reflection_sxss_uses_secondary_url() {
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = Some(format!("http://{}:{}/sxss/stored", addr.ip(), addr.port()));
+    args.sxss_url = vec![format!("http://{}:{}/sxss/stored", addr.ip(), addr.port())];
 
     let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(found, "sxss mode should verify reflection via sxss_url");
@@ -942,7 +942,7 @@ async fn test_check_reflection_sxss_skips_junk_url_and_finds_later_candidate() {
     param.form_action_url = Some(format!("http://{}:{}/sxss/stored", addr.ip(), addr.port()));
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = None;
+    args.sxss_url = vec![];
     // Single retry per candidate keeps the test fast.
     args.sxss_retries = 1;
 
@@ -971,7 +971,7 @@ async fn test_check_reflection_sxss_falls_back_to_inject_response_body() {
     param.form_origin_url = Some(format!("http://{}:{}/reflect/none", addr.ip(), addr.port()));
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = None;
+    args.sxss_url = vec![];
     args.sxss_retries = 1;
 
     let found = reflect(&target, &param, payload, &args).await.0.is_some();
@@ -994,7 +994,7 @@ async fn test_check_reflection_sxss_without_url_returns_false() {
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;
-    args.sxss_url = None;
+    args.sxss_url = vec![];
 
     let found = reflect(&target, &param, payload, &args).await.0.is_some();
     assert!(!found, "sxss mode without sxss_url should return false");
@@ -1115,7 +1115,7 @@ async fn test_sxss_redirect_body_echo_is_not_renderable() {
     args.sxss_retries = 1;
     let mut url = reqwest::Url::parse(&format!("http://{addr}/redirect/body-echo")).unwrap();
     url.query_pairs_mut().append_pair("q", payload);
-    args.sxss_url = Some(url.to_string());
+    args.sxss_url = vec![url.to_string()];
     let streak = std::sync::atomic::AtomicU32::new(0);
     let (kind, body, ..) = check_reflection_with_response(
         &target.build_client_or_default(),
@@ -3421,4 +3421,88 @@ fn test_script_block_ranges_skip_quoted_gt_in_open_tag() {
     let ranges = script_block_ranges(html);
     assert_eq!(ranges.len(), 1);
     assert_eq!(&html[ranges[0].0..ranges[0].1], "var x=1;");
+}
+
+fn upload_target_for_urls() -> Target {
+    let mut t = parse_target("http://app.test/upload").unwrap();
+    t.data = Some(
+        "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\n\r\nX\r\n--b--\r\n"
+            .to_string(),
+    );
+    t
+}
+
+#[test]
+fn uploaded_file_urls_gates() {
+    let t = upload_target_for_urls();
+    let file = Param::new("file".to_string(), String::new(), Location::MultipartBody);
+    let resp_url = url::Url::parse("http://app.test/upload").unwrap();
+    let mut headers = reqwest::header::HeaderMap::new();
+    let body = r#"{"url":"\/u\/a.png"} <a href="https://evil.test/a.png">x</a> /u/xa.png /u/a.png.bak <img src='../m/a.png'>"#;
+    let urls: Vec<String> = uploaded_file_urls(&t, &file, &resp_url, &headers, body)
+        .iter()
+        .map(|u| u.to_string())
+        .collect();
+    // JSON-escaped and relative refs kept; cross-origin, `xa.png`, `a.png.bak` dropped.
+    assert_eq!(urls, ["http://app.test/u/a.png", "http://app.test/m/a.png"]);
+
+    // Filename slot: only the Location header counts.
+    headers.insert(reqwest::header::LOCATION, "/files/9".parse().unwrap());
+    let slot = Param::new(
+        "file[filename]".to_string(),
+        String::new(),
+        Location::MultipartBody,
+    );
+    let urls = uploaded_file_urls(&t, &slot, &resp_url, &headers, body);
+    assert_eq!(
+        urls.iter().map(|u| u.as_str()).collect::<Vec<_>>(),
+        ["http://app.test/files/9"]
+    );
+
+    // Not a file part: nothing.
+    let text = Param::new("file".to_string(), String::new(), Location::Body);
+    assert!(uploaded_file_urls(&t, &text, &resp_url, &headers, body).is_empty());
+}
+
+#[test]
+fn resolve_sxss_check_urls_keeps_every_sxss_url_in_order() {
+    let t = parse_target("http://app.test/post").unwrap();
+    let p = Param::new("c".to_string(), String::new(), Location::Body);
+    let args = crate::cmd::scan::ScanArgs {
+        sxss_url: [
+            "http://app.test/b",
+            "http://app.test/a",
+            "http://app.test/b",
+        ]
+        .map(String::from)
+        .to_vec(),
+        ..Default::default()
+    };
+    let urls: Vec<String> = resolve_sxss_check_urls(&t, &p, &args)
+        .iter()
+        .map(|u| u.to_string())
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            "http://app.test/b",
+            "http://app.test/a",
+            "http://app.test/post"
+        ]
+    );
+}
+
+#[test]
+fn uploaded_file_urls_bounded_on_hostile_body() {
+    // A body of run-together matches with no path delimiter must not cost
+    // O(n²): the backward scan is windowed and the match count is capped.
+    let t = upload_target_for_urls();
+    let file = Param::new("file".to_string(), String::new(), Location::MultipartBody);
+    let resp_url = url::Url::parse("http://app.test/upload").unwrap();
+    let headers = reqwest::header::HeaderMap::new();
+    let body = "xa.png;".repeat(300_000); // ~2.1 MiB, ~300k matches, no `/`
+    let start = std::time::Instant::now();
+    let urls = uploaded_file_urls(&t, &file, &resp_url, &headers, &body);
+    assert!(urls.is_empty(), "no `/`-terminated segment, so no URL");
+    assert!(start.elapsed().as_secs() < 5, "scan must stay bounded");
 }

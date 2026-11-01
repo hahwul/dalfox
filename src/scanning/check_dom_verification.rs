@@ -1146,9 +1146,12 @@ async fn verify_sxss_dom(
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
+    upload_urls: Vec<url::Url>,
 ) -> (bool, Option<String>, Option<DomEvidenceKind>) {
-    let check_urls =
-        crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args);
+    let check_urls = crate::scanning::check_reflection::with_extra_urls(
+        crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args),
+        upload_urls,
+    );
     let retries = args.sxss_retries.max(1) as u64;
     let skip_payload_retries = crate::scanning::check_reflection::sxss_payload_retries_skipped();
     // Attempt-major, mirroring the reflection retrieval loop, so the retry-skip
@@ -1431,8 +1434,28 @@ pub(crate) async fn check_dom_verification_with_evidence(
         // reflected/status signals are not meaningfully observable from the
         // single injection above, so leave them at their conservative defaults
         // (the DOM-phase early exit therefore never engages under --sxss).
+        let mut upload_urls = Vec::new();
+        if let Ok(resp) = inject_resp
+            && crate::scanning::url_inject::multipart_file_target(
+                target.data.as_deref(),
+                &param.name,
+            )
+            .is_some()
+        {
+            let headers = resp.headers().clone();
+            let response_url = resp.url().clone();
+            if let Ok(text) = crate::utils::http::read_body_counted(resp).await {
+                upload_urls = crate::scanning::check_reflection::uploaded_file_urls(
+                    target,
+                    param,
+                    &response_url,
+                    &headers,
+                    &text,
+                );
+            }
+        }
         let (verified, response_text, evidence_kind) =
-            verify_sxss_dom(client, target, param, payload, args).await;
+            verify_sxss_dom(client, target, param, payload, args, upload_urls).await;
         DomVerifyEvidenceOutcome {
             outcome: DomVerifyOutcome {
                 verified,

@@ -132,9 +132,11 @@ Payload batches start small and grow toward `--workers`, so an early hit avoids 
 | Flag | Notes |
 |------|-------|
 | `--sxss` | Enable stored XSS mode |
-| `--sxss-url` | Where to look for the stored reflection, absolute `http(s)://` (auto-detect if omitted); only used with `--sxss` |
+| `--sxss-url` | Where to look for the stored reflection, absolute `http(s)://`; repeatable, checked before the auto-detected pages; only used with `--sxss` |
 | `--sxss-method` | GET/POST for the check |
 | `--sxss-retries` | 3 (increase for slow propagation) |
+
+Uploads: a captured multipart file part is two injection points, `<field>` (content, still sent as a file) and `<field>[filename]`. Under `--sxss` Dalfox also fetches the stored file the upload response points to (`Location` header, or a same-origin URL ending in the filename).
 
 ## WAF
 

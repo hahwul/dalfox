@@ -114,7 +114,7 @@ custom_alert_type = "none"
 skip_xss_scanning = false
 deep_scan = false
 sxss = false
-# sxss_url = "https://target.app/retrieval"
+# sxss_url = ["https://target.app/retrieval"]
 sxss_method = "GET"
 sxss_retries = 3
 max_payloads_per_param = 0
@@ -255,7 +255,7 @@ These keys control session-loss detection during a scan. See [Session monitoring
 | `skip_xss_scanning` | bool | `false` | Discovery without attack |
 | `deep_scan` | bool | `false` | Continue after first finding |
 | `sxss` | bool | `false` | Enable Stored XSS mode |
-| `sxss_url` | string |  | Retrieval URL |
+| `sxss_url` | string or array |  | Retrieval URL, or a list of them |
 | `sxss_method` | string | `"GET"` | Retrieval method (same set as `method`) |
 | `sxss_retries` | int | `3` | Retries when fetching the retrieval URL (max `20`) |
 | `max_payloads_per_param` | int | `0` | Cap base payloads tested per parameter (`0` applies a built-in safety cap of 3000 per set unless `deep_scan` is set) |

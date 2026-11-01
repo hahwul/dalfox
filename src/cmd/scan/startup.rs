@@ -193,11 +193,14 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
         args.session_check_url
             .as_deref()
             .map(|u| validate_http_url(u, "--session-check-url")),
-        args.sxss_url
-            .as_deref()
-            .map(|u| validate_http_url(u, "--sxss-url")),
         args.proxy.as_deref().map(validate_proxy_url),
-    ] {
+    ]
+    .into_iter()
+    .chain(
+        args.sxss_url
+            .iter()
+            .map(|u| Some(validate_http_url(u, "--sxss-url"))),
+    ) {
         if let Some(Err(msg)) = checked {
             emit_error(&args.format, crate::cmd::error_codes::PARSE_ERROR, &msg);
             return Err(ScanOutcome::Error);
@@ -227,7 +230,7 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // does nothing at all and reports a clean scan. Warn rather than error: it
     // may be a config template that toggles `--sxss` separately, but the
     // operator should hear that the URL is inert.
-    if args.sxss_url.is_some() && !args.sxss {
+    if !args.sxss_url.is_empty() && !args.sxss {
         log_warn(
             args,
             "--sxss-url has no effect without --sxss (stored-XSS mode is off); add --sxss to use it",

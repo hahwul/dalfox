@@ -238,6 +238,9 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
             url
         );
     }
+    if let Some(cmd) = curl_upload_poc(result, &method, &url) {
+        return cmd;
+    }
     match result.location.as_str() {
         // A cookie param travels as `Cookie: name=value` (see
         // `url_inject::build_header_request`). A header param that merely
@@ -293,6 +296,69 @@ fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -
         ),
         _ => format!("curl -X {} {}\n", method, url),
     }
+}
+
+/// curl POC for a multipart finding whose recorded request carries a file part
+/// (an upload). `--form-string` cannot send a file, and `-F` takes a file
+/// part's content only from a file, so the injected part's content is piped
+/// through stdin (`@-`) with its filename and type set explicitly. Sibling
+/// fields are replayed from the recorded request. `None` when there is no
+/// file part, leaving the single-field `--form-string` form.
+///
+/// ponytail: one file part goes through stdin; any other file part is sent
+/// empty (`/dev/null`). Multi-file uploads are rare enough not to need more.
+fn curl_upload_poc(
+    result: &crate::scanning::result::Result,
+    method: &str,
+    url: &str,
+) -> Option<String> {
+    if result.location != "MultipartBody" {
+        return None;
+    }
+    let (_, body) = request_content_type_and_body(result.request.as_deref())?;
+    let parts = crate::target_parser::raw_multipart_parts(body)?;
+    let base = result
+        .param
+        .strip_suffix(crate::scanning::url_inject::MULTIPART_FILENAME_SUFFIX)
+        .unwrap_or(&result.param);
+    let stdin_part = parts
+        .iter()
+        .position(|p| p.name == base && p.filename.is_some())
+        .or_else(|| parts.iter().position(|p| p.filename.is_some()))?;
+    let mut cmd = format!(
+        "printf '%s' {} | curl -X {}",
+        shell_single_quote(&parts[stdin_part].value),
+        method
+    );
+    for (i, part) in parts.iter().enumerate() {
+        let Some(filename) = &part.filename else {
+            cmd.push_str(" --form-string ");
+            cmd.push_str(&shell_single_quote(&format!(
+                "{}={}",
+                part.name, part.value
+            )));
+            continue;
+        };
+        let source = if i == stdin_part { "-" } else { "/dev/null" };
+        // curl reads `\` / `\"` as escapes inside a quoted filename.
+        let quoted = filename.replace('\\', "\\\\").replace('"', "\\\"");
+        let mut spec = format!("{}=@{source};filename=\"{quoted}\"", part.name);
+        // A `;` would start another curl modifier, so drop MIME parameters.
+        if let Some(mime) = part
+            .content_type
+            .as_deref()
+            .and_then(|c| c.split(';').next())
+        {
+            spec.push_str(";type=");
+            spec.push_str(mime.trim());
+        }
+        cmd.push_str(" -F ");
+        cmd.push_str(&shell_single_quote(&spec));
+    }
+    cmd.push(' ');
+    cmd.push_str(url);
+    cmd.push('\n');
+    Some(cmd)
 }
 
 /// Build a one-field JSON object body (`{"param":"payload"}`) with
@@ -368,6 +434,15 @@ fn httpie_escape_name(name: &str) -> String {
 /// `httpie` mirror of [`render_curl_poc`]. Same quoting rule: every
 /// interpolated value is single-quoted.
 fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str) -> String {
+    // httpie names an uploaded file after its local path, so it cannot replay
+    // an upload's filename: fall back to the curl form, which can.
+    if let Some(cmd) = curl_upload_poc(
+        result,
+        &shell_single_quote(&result.method.to_uppercase()),
+        &shell_single_quote(attack_url),
+    ) {
+        return format!("# httpie cannot set an upload filename; curl equivalent:\n{cmd}");
+    }
     let method = shell_single_quote(&result.method.to_lowercase());
     let url = shell_single_quote(attack_url);
     let value = poc_wire_value(result);

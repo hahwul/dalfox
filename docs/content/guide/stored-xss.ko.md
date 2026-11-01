@@ -44,7 +44,35 @@ Dalfox는 다음을 수행합니다.
 | `PATCH /profile` | `GET /u/myself` |
 | `POST /support/ticket` | `GET /admin/tickets` (관리자 권한이 있는 경우) |
 
-Dalfox는 후보 조회 페이지를 모두 읽으며, 순서는 `--sxss-url`(지정한 경우), 폼이 발견된 페이지, 폼의 `action` 엔드포인트(대상과 같은 오리진이거나 같은 호스트를 HTTPS로 올린 경우에만), 주입 대상 자신입니다. 중복된 URL은 한 번만 가져옵니다. `--sxss-url`이 없으면 뒤의 세 곳이 전부이므로, 저장된 값이 그 밖의 곳에 렌더링된다면 `--sxss-url`을 직접 지정하세요. `--sxss-url`은 `--sxss` 없이는 아무 효과가 없으며, 단독으로 주면 Dalfox가 경고합니다.
+Dalfox는 후보 조회 페이지를 모두 읽으며, 순서는 각 `--sxss-url`(지정한 경우), 폼이 발견된 페이지, 폼의 `action` 엔드포인트(대상과 같은 오리진이거나 같은 호스트를 HTTPS로 올린 경우에만), 주입 대상 자신입니다. 중복된 URL은 한 번만 가져옵니다. `--sxss-url`이 없으면 뒤의 세 곳이 전부이므로, 저장된 값이 그 밖의 곳에 렌더링된다면 `--sxss-url`을 직접 지정하세요. `--sxss-url`은 `--sxss` 없이는 아무 효과가 없으며, 단독으로 주면 Dalfox가 경고합니다.
+
+목록 화면과 상세 화면처럼 값이 여러 곳에 나타난다면 `--sxss-url`을 여러 번 지정하세요.
+
+```bash
+dalfox scan https://target.app/post-comment --sxss \
+  --sxss-url https://target.app/comments \
+  --sxss-url https://target.app/post/123
+```
+
+설정 파일의 `sxss_url`에는 URL 하나 또는 목록을 쓸 수 있습니다.
+
+## 파일 업로드
+
+캡처한 업로드 요청(`-i raw-http`, HAR, multipart `-d` 본문)을 주면 파일 파트 하나가 주입 지점 두 개가 됩니다.
+
+- `<field>`: 파일 내용. 캡처한 파일명과 `Content-Type`을 유지한 채 파일로 전송됩니다.
+- `<field>[filename]`: 업로드 파일명. 파일 목록 화면이 이스케이프 없이 출력하는 경우가 많습니다.
+
+```bash
+dalfox scan -i raw-http upload.req --sxss \
+  --sxss-url https://target.app/files
+```
+
+`--sxss`에서는 업로드 응답이 가리키는 저장 파일도 따라갑니다. `Location` 헤더나, 업로드한 파일명으로 끝나는 같은 오리진 URL(HTML 링크, `"url": "/uploads/a.html"` 같은 JSON 필드)이 대상입니다. 이 페이지도 다른 조회 페이지와 똑같이 검사합니다. 이미지 등 HTML이 아닌 타입으로 서빙되는 파일은 보고하지 않으므로, 내용 주입은 캡처한 업로드가 HTML/SVG이거나 서버가 보낸 확장자를 그대로 믿을 때만 의미가 있습니다.
+
+서버가 파일명을 바꿔 저장하면(해시나 ID) 응답에서 파일을 찾을 수 없습니다. 경로를 예측할 수 있다면 `--sxss-url`로 지정하세요.
+
+업로드의 curl PoC는 파일 내용을 stdin으로 넘깁니다(`printf '%s' … | curl -F 'field=@-;filename=…'`). `--form-string`으로는 파일을 보낼 수 없기 때문입니다. httpie는 업로드 파일명을 로컬 경로에서만 정하므로, httpie PoC에는 curl 명령이 대신 출력됩니다.
 
 ## 조회 메서드
 

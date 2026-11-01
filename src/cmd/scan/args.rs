@@ -802,10 +802,11 @@ pub struct ScanArgs {
     pub sxss: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// URL to check for Stored XSS reflection.
-    /// When omitted with --sxss, auto-detects from form discovery context.
+    /// URL to check for Stored XSS reflection. Repeat to check several pages
+    /// (a list view and a detail view, say). Checked in addition to the
+    /// pages auto-detected from form discovery context
     #[arg(long)]
-    pub sxss_url: Option<String>,
+    pub sxss_url: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
     /// HTTP method for checking Stored XSS (default "GET")
@@ -1005,7 +1006,7 @@ impl Default for ScanArgs {
             max_payloads_per_param: 0,
             deep_scan: false,
             sxss: false,
-            sxss_url: None,
+            sxss_url: Vec::new(),
             sxss_method: "GET".to_string(),
             sxss_retries: 3,
             skip_ast_analysis: false,
