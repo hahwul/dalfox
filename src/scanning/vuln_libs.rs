@@ -60,6 +60,8 @@ const SEV_HIGH: &str = "High";
 
 /// Curated dataset. Each library lists how to read its version and the ranges
 /// with known advisories. Kept small and high-signal; extend as needed.
+/// When adding a library, also add it to the list in `docs/content/guide/output.md`
+/// and `output.ko.md`.
 static LIB_SPECS: &[LibSpec] = &[
     LibSpec {
         name: "jQuery",
