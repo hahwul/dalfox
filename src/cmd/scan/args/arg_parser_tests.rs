@@ -399,6 +399,7 @@ fn force_waf_arg_accepts_exactly_the_waf_alias_set() {
         "chaitin",
         "ddos-guard",
         "ddosguard",
+        "reblaze",
     ];
     for a in aliases {
         assert_eq!(parse_force_waf_arg(a).unwrap(), a);
@@ -419,7 +420,7 @@ fn force_waf_arg_accepts_exactly_the_waf_alias_set() {
         assert_eq!(
             parse_force_waf_arg(bad).unwrap_err(),
             format!(
-                "unknown WAF '{bad}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence, citrix, wallarm, naxsi, safeline, ddos-guard)"
+                "unknown WAF '{bad}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence, citrix, wallarm, naxsi, safeline, ddos-guard, reblaze)"
             )
         );
     }
