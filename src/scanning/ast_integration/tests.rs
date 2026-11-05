@@ -364,12 +364,37 @@ fn test_generate_dom_xss_poc_hash_to_eval_sink_uses_bare_js() {
 }
 
 #[test]
-fn test_generate_dom_xss_poc_search_to_href_sink_uses_data_uri() {
-    let (payload, _) = generate_dom_xss_poc("location.search", "href");
+fn test_generate_dom_xss_poc_navigation_sinks_use_javascript_url() {
+    // A top-level `data:` navigation is blocked and an HTML payload is just a
+    // relative path, so every navigation sink needs a `javascript:` URL.
+    for (source, sink, prefix) in [
+        ("location.search", "href", "xss=javascript:alert(1)"),
+        ("location.hash", "location.href", "#javascript:alert(1)"),
+        (
+            "URLSearchParams.get(u)",
+            "window.open",
+            "u=javascript:alert(1)",
+        ),
+        (
+            "URLSearchParams.get(u)",
+            "setAttribute:href",
+            "u=javascript:alert(1)",
+        ),
+        ("location.hash", "attr:href", "#javascript:alert(1)"),
+    ] {
+        let (payload, _) = generate_dom_xss_poc(source, sink);
+        assert!(payload.starts_with(prefix), "{sink}: got {payload:?}");
+    }
+}
+
+#[test]
+fn test_generate_dom_xss_poc_attribute_sinks_follow_the_attribute() {
+    let (payload, _) = generate_dom_xss_poc("location.hash", "setAttribute:onclick");
+    assert!(payload.starts_with("#alert(1)"), "got {payload:?}");
+    let (payload, _) = generate_dom_xss_poc("location.hash", "setAttribute:src");
     assert!(
-        payload.starts_with("xss=data:text/javascript,alert(1)"),
-        "expected search query data: URL payload, got {:?}",
-        payload
+        payload.starts_with("#data:text/javascript,"),
+        "got {payload:?}"
     );
 }
 

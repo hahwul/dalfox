@@ -17,9 +17,19 @@ impl<'a> DomXssVisitor<'a> {
     /// Collect function declarations before statement traversal so hoisted calls are recognized.
     pub(super) fn collect_function_declarations(&mut self, stmts: &[Statement<'a>]) {
         for stmt in stmts {
-            if let Statement::FunctionDeclaration(func_decl) = stmt {
-                self.register_function_declaration(func_decl.as_ref());
-            }
+            let func_decl = match stmt {
+                Statement::FunctionDeclaration(func_decl) => func_decl,
+                Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                    Some(Declaration::FunctionDeclaration(func_decl)) => func_decl,
+                    _ => continue,
+                },
+                Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                    ExportDefaultDeclarationKind::FunctionDeclaration(func_decl) => func_decl,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            self.register_function_declaration(func_decl);
         }
     }
     /// Parameter names by position. A destructured parameter keeps its slot

@@ -116,27 +116,38 @@ impl<'a> DomXssVisitor<'a> {
             Statement::LabeledStatement(labeled) => {
                 self.walk_statement(&labeled.body);
             }
-            Statement::FunctionDeclaration(func_decl) => {
-                // Parameter *flows* belong to the summary registered for this
-                // declaration and are reported at each call site. What the
-                // summary cannot represent is a free variable the body reads
-                // on its own (`function render(el) { el.innerHTML =
-                // location.hash; }`), so the body is walked here too — with
-                // its parameters shadowed, which is what keeps the two from
-                // reporting the same flow twice.
-                if let Some(body) = &func_decl.body {
-                    self.walk_function_literal_body(&func_decl.params, &body.statements);
+            Statement::FunctionDeclaration(func_decl) => self.walk_function_declaration(func_decl),
+            Statement::ClassDeclaration(class_decl) => self.walk_class_declaration(class_decl),
+            // `export function f(){…}` / `export const q = …` / `export class
+            // C {…}` wrap an ordinary declaration; without these arms a module
+            // script's exported code was never walked at all.
+            Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                Some(Declaration::VariableDeclaration(var_decl)) => {
+                    for decl in &var_decl.declarations {
+                        self.walk_variable_declarator(decl);
+                    }
                 }
-            }
-            Statement::ClassDeclaration(class_decl) => {
-                if let Some(class_id) = &class_decl.id {
-                    self.register_class_method_summaries_for_name(
-                        class_id.name.as_str(),
-                        class_decl,
-                    );
+                Some(Declaration::FunctionDeclaration(func_decl)) => {
+                    self.walk_function_declaration(func_decl);
                 }
-                self.walk_class_body(class_decl);
-            }
+                Some(Declaration::ClassDeclaration(class_decl)) => {
+                    self.walk_class_declaration(class_decl);
+                }
+                _ => {}
+            },
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::FunctionDeclaration(func_decl) => {
+                    self.walk_function_declaration(func_decl);
+                }
+                ExportDefaultDeclarationKind::ClassDeclaration(class_decl) => {
+                    self.walk_class_declaration(class_decl);
+                }
+                kind => {
+                    if let Some(expr) = kind.as_expression() {
+                        self.walk_expression(expr);
+                    }
+                }
+            },
             Statement::ReturnStatement(return_stmt) => {
                 if let Some(argument) = &return_stmt.argument {
                     if self.collecting_tainted_returns && self.is_tainted(argument) {
@@ -175,11 +186,65 @@ impl<'a> DomXssVisitor<'a> {
             _ => {}
         }
     }
+    /// Parameter *flows* belong to the summary registered for this
+    /// declaration and are reported at each call site. What the summary cannot
+    /// represent is a free variable the body reads on its own (`function
+    /// render(el) { el.innerHTML = location.hash; }`), so the body is walked
+    /// here too — with its parameters shadowed, which is what keeps the two
+    /// from reporting the same flow twice.
+    fn walk_function_declaration(&mut self, func_decl: &Function<'a>) {
+        if let Some(body) = &func_decl.body {
+            self.walk_function_literal_body(&func_decl.params, &body.statements);
+        }
+    }
+
+    fn walk_class_declaration(&mut self, class_decl: &Class<'a>) {
+        if let Some(class_id) = &class_decl.id {
+            self.register_class_method_summaries_for_name(class_id.name.as_str(), class_decl);
+        }
+        self.walk_class_body(class_decl);
+    }
+
+    /// React's `dangerouslySetInnerHTML: { __html: x }` (JSX compiles to this
+    /// props object): `x` is written to `innerHTML` unescaped.
+    pub(super) fn report_dangerously_set_inner_html(&mut self, property: &ObjectProperty<'a>) {
+        if property.computed
+            || property.key.static_name().as_deref() != Some("dangerouslySetInnerHTML")
+        {
+            return;
+        }
+        let Expression::ObjectExpression(inner) = property.value.without_parentheses() else {
+            return;
+        };
+        for inner_prop in &inner.properties {
+            if let ObjectPropertyKind::ObjectProperty(html) = inner_prop
+                && !html.computed
+                && html.key.static_name().as_deref() == Some("__html")
+                && self.is_tainted(&html.value)
+            {
+                let source = self.find_source_in_expr(&html.value);
+                self.report_vulnerability_with_source(html.span, "dangerouslySetInnerHTML", source);
+                return;
+            }
+        }
+    }
+
     /// Walk through a variable declarator, dispatching on the binding form:
     /// a plain identifier, object destructuring, or array destructuring.
     pub(super) fn walk_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         if let Some(init) = &decl.init {
             if let BindingPattern::BindingIdentifier(id) = &decl.id {
+                // `var q = 'static'` rebinds an earlier `var q` exactly like
+                // `q = 'static'` does (see the assignment path). Not `let` /
+                // `const`: in a nested block those shadow the outer binding
+                // only until the block ends.
+                if decl.kind == VariableDeclarationKind::Var
+                    && self.branch_depth == 0
+                    && !self.is_tainted(init)
+                {
+                    self.tainted_vars.remove(id.name.as_str());
+                    self.var_aliases.remove(id.name.as_str());
+                }
                 self.bind_declarator_identifier(id, init);
             }
 
@@ -280,6 +345,7 @@ impl<'a> DomXssVisitor<'a> {
                             {
                                 self.walk_expression(key);
                             }
+                            self.report_dangerously_set_inner_html(property);
                             self.walk_expression(&property.value);
                         }
                         ObjectPropertyKind::SpreadProperty(spread) => {

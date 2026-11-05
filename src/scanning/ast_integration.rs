@@ -659,6 +659,7 @@ fn extract_search_param_value<'a>(payload: &'a str, key: &str) -> &'a str {
 
 pub(crate) fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
     let marker = crate::scanning::markers::class_marker();
+    let target = crate::scanning::ast_dom_analysis::attribute_sink_target(sink);
     // Sink-aware payload shape:
     //   * URL-attribute sinks (`src`, `href`, `xlink:href`, …) receive an
     //     executable URL scheme (`data:text/javascript,…`) so they fire
@@ -673,96 +674,56 @@ pub(crate) fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String)
     // `data:text/javascript,…` payload as a URL-attribute sink loads and runs
     // an attacker module — group it with the URL-attribute shape.
     let is_url_attr_sink = matches!(
-        sink,
-        "src"
-            | "href"
-            | "xlink:href"
-            | "action"
-            | "formaction"
-            | "poster"
-            | "background"
-            | "import"
+        target,
+        "src" | "poster" | "background" | "import" | "$.getScript" | "jQuery.getScript"
     );
     // Sinks whose value is fed directly to a JS evaluator. `script.text` /
     // `script.textContent` / `script.innerText` are listed alongside the
     // classic eval family because once the created script element is
     // appended to the DOM the browser parses the assigned value as JS
     // source verbatim — same effective shape as `eval(payload)`.
-    let is_js_eval_sink = matches!(
-        sink,
-        "eval"
-            | "Function"
-            | "setTimeout"
-            | "setInterval"
-            | "execScript"
-            | "execCommand"
-            | "script.text"
-            | "script.textContent"
-            | "script.innerText"
-            | "script.innerHTML"
-    );
-    let attr_url_payload = format!("data:text/javascript,alert(1)/*{}*/", marker);
-    let js_eval_payload = format!("alert(1)/*{}*/", marker);
-    // A form action navigates on submit: only a `javascript:` URL runs there
-    // (a top-level `data:` navigation is blocked).
-    if sink == "form.action" {
-        let js_url = format!("javascript:alert(1)//{marker}");
-        let payload = if source.contains("location.hash") {
-            format!("#{js_url}")
-        } else if let Some(param_name) = extract_search_param_key(source) {
-            format!("{param_name}={js_url}")
-        } else if source.contains("location.search") {
-            format!("xss={js_url}")
-        } else {
-            js_url
-        };
-        return (payload, format!("DOM-based XSS via {} to {}", source, sink));
-    }
-    let html_payload = format!("<img src=x onerror=alert(1) class={}>", marker);
+    // An `on*` attribute set through `setAttribute` / jQuery `attr` runs as JS.
+    let is_js_eval_sink = (target != sink && target.starts_with("on"))
+        || matches!(
+            target,
+            "eval"
+                | "Function"
+                | "setTimeout"
+                | "setInterval"
+                | "execScript"
+                | "execCommand"
+                | "script.text"
+                | "script.textContent"
+                | "script.innerText"
+                | "script.innerHTML"
+                | "$.globalEval"
+                | "jQuery.globalEval"
+        );
+    // Navigation sinks (`location.href`, `a.href`, `window.open`, a form
+    // action, …): only a `javascript:` URL runs there — a top-level `data:`
+    // navigation is blocked, and an HTML payload is just a relative path.
+    let shape = if crate::scanning::ast_dom_analysis::is_navigation_sink(sink) {
+        format!("javascript:alert(1)//{marker}")
+    } else if is_url_attr_sink {
+        format!("data:text/javascript,alert(1)/*{marker}*/")
+    } else if is_js_eval_sink {
+        format!("alert(1)/*{marker}*/")
+    } else {
+        format!("<img src=x onerror=alert(1) class={marker}>")
+    };
 
-    // Generate payload based on the source type
+    // Where the source reads it from decides where the payload goes.
     let payload = if source.contains("location.hash") {
-        // Hash-based XSS - use fragment identifier
-        if is_url_attr_sink {
-            format!("#{}", attr_url_payload)
-        } else if is_js_eval_sink {
-            format!("#{}", js_eval_payload)
-        } else {
-            format!("#{}", html_payload)
-        }
+        format!("#{shape}")
     } else if let Some(param_name) = extract_search_param_key(source) {
-        if is_url_attr_sink {
-            format!("{param_name}={}", attr_url_payload)
-        } else if is_js_eval_sink {
-            format!("{param_name}={}", js_eval_payload)
-        } else {
-            format!("{param_name}={}", html_payload)
-        }
+        format!("{param_name}={shape}")
     } else if source.contains("location.search") {
-        // Query-based XSS
-        if is_url_attr_sink {
-            format!("xss={}", attr_url_payload)
-        } else if is_js_eval_sink {
-            format!("xss={}", js_eval_payload)
-        } else {
-            format!("xss={}", html_payload)
-        }
+        format!("xss={shape}")
     } else if source.contains("location.href") || source.contains("document.URL") {
         // URL-based - could be anywhere
-        if is_url_attr_sink {
-            format!("#{}", attr_url_payload)
-        } else if is_js_eval_sink {
-            format!("#{}", js_eval_payload)
-        } else {
-            format!("#{}", html_payload)
-        }
-    } else if is_url_attr_sink {
-        attr_url_payload.clone()
-    } else if is_js_eval_sink {
-        js_eval_payload.clone()
+        format!("#{shape}")
     } else {
-        // Generic payload for other sources
-        html_payload.clone()
+        shape
     };
 
     let description = format!("DOM-based XSS via {} to {}", source, sink);
