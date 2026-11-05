@@ -122,9 +122,7 @@ impl<'a> DomXssVisitor<'a> {
                         prop_name.to_string()
                     };
 
-                    if !(Self::is_navigation_sink(&sink_name)
-                        && self.url_scheme_is_pinned(&assign.right))
-                    {
+                    if !self.url_sink_is_pinned(&sink_name, &assign.right) {
                         self.report_vulnerability_with_source(
                             assign.span(),
                             &sink_name,
@@ -299,8 +297,104 @@ impl<'a> DomXssVisitor<'a> {
                 "href" | "xlink:href" | "srcdoc" | "src" | "formaction"
             )
     }
+    /// jQuery methods with no same-named native sink: `.wrap*` /
+    /// `.replaceWith` parse an HTML string (native `replaceWith` inserts text),
+    /// and `.attr` / `.prop` set the attribute named by their first argument.
+    /// Gated on a `$(…)` / `jQuery(…)` receiver chain, like `append`.
+    fn handle_jquery_only_method_sink(&mut self, call: &CallExpression<'a>) -> bool {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        let value = match method.as_str() {
+            "wrap" | "wrapAll" | "wrapInner" | "replaceWith" => call.arguments.first(),
+            "attr" | "prop" if call.arguments.len() >= 2 => {
+                let dangerous = call
+                    .arguments
+                    .first()
+                    .and_then(|arg0| self.eval_static_string_arg(arg0))
+                    .is_some_and(|name| {
+                        if method == "prop" {
+                            // A *property* write: `on*` properties ignore a
+                            // string, while `innerHTML` & co. parse it.
+                            matches!(name.as_str(), "href" | "srcdoc" | "innerHTML" | "outerHTML")
+                        } else {
+                            // `src` is left out: on a jQuery chain the element
+                            // is usually an `<img>`, where no URL runs script.
+                            let name = name.to_ascii_lowercase();
+                            name != "src" && Self::is_dangerous_attr_name(&name)
+                        }
+                    });
+                if !dangerous {
+                    return false;
+                }
+                call.arguments.get(1)
+            }
+            _ => return false,
+        };
+        let Some(value) = value else {
+            return false;
+        };
+        if !Self::callee_receiver_is_jquery_chain(&call.callee) {
+            return false;
+        }
+        let (tainted, source_hint) = self.argument_taint_and_source(value);
+        let sink = match call
+            .arguments
+            .first()
+            .and_then(|a| self.eval_static_string_arg(a))
+        {
+            Some(name) if method == "attr" => format!("attr:{}", name.to_ascii_lowercase()),
+            Some(name) if method == "prop" => format!("prop:{name}"),
+            _ => method,
+        };
+        let pinned = value
+            .as_expression()
+            .is_some_and(|e| self.url_sink_is_pinned(&sink, e));
+        if !tainted || pinned {
+            return false;
+        }
+        self.report_vulnerability_with_source(call.span(), &sink, source_hint);
+        true
+    }
+    /// `write` / `writeln` on a document other than the page's own: a popup
+    /// (`w.document.write`) or a frame (`frame.contentDocument.write`). The
+    /// bare `document.write` is a direct sink already.
+    fn handle_foreign_document_write(&mut self, call: &CallExpression<'a>) -> bool {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        if method != "write" && method != "writeln" {
+            return false;
+        }
+        let foreign_document = match self.get_callee_object_expr(&call.callee) {
+            Some(Expression::StaticMemberExpression(recv)) => {
+                matches!(recv.property.name.as_str(), "document" | "contentDocument")
+            }
+            _ => false,
+        };
+        if !foreign_document {
+            return false;
+        }
+        let Some((_, source_hint)) = call
+            .arguments
+            .iter()
+            .map(|arg| self.argument_taint_and_source(arg))
+            .find(|(tainted, _)| *tainted)
+        else {
+            return false;
+        };
+        self.report_vulnerability_with_source(
+            call.span(),
+            &format!("document.{method}"),
+            source_hint,
+        );
+        true
+    }
     /// A call whose *member method* names a sink (`el.insertAdjacentHTML(...)`, `document['write'](...)`), including the computed-property spelling.
     pub(super) fn handle_member_method_sink(&mut self, call: &CallExpression<'a>) -> bool {
+        if self.handle_jquery_only_method_sink(call) || self.handle_foreign_document_write(call) {
+            return true;
+        }
         // Also treat member method name itself as sink
         // (e.g., el.insertAdjacentHTML, document['write'](...))
         let member_method_name = self.get_callee_property_name(&call.callee);
@@ -325,10 +419,9 @@ impl<'a> DomXssVisitor<'a> {
                             && receiver.is_some_and(|recv| self.expr_resolves_to_form(recv)));
                     if dangerous && let Some(arg1) = call.arguments.get(1) {
                         let (tainted, source_hint) = self.argument_taint_and_source(arg1);
-                        let pinned = Self::is_navigation_sink(&name)
-                            && arg1
-                                .as_expression()
-                                .is_some_and(|e| self.url_scheme_is_pinned(e));
+                        let pinned = arg1
+                            .as_expression()
+                            .is_some_and(|e| self.url_sink_is_pinned(&name, e));
                         if tainted && !pinned {
                             self.report_vulnerability_with_source(
                                 call.span(),
@@ -579,10 +672,9 @@ impl<'a> DomXssVisitor<'a> {
                     continue;
                 }
                 let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
-                let pinned = Self::is_navigation_sink(&func_name)
-                    && arg
-                        .as_expression()
-                        .is_some_and(|e| self.url_scheme_is_pinned(e));
+                let pinned = arg
+                    .as_expression()
+                    .is_some_and(|e| self.url_sink_is_pinned(&func_name, e));
 
                 if is_arg_tainted && !pinned {
                     self.report_vulnerability_with_source(call.span(), &func_name, source_hint);
@@ -1363,6 +1455,7 @@ impl<'a> DomXssVisitor<'a> {
             Expression::ObjectExpression(object) => {
                 for property in &object.properties {
                     if let ObjectPropertyKind::ObjectProperty(property) = property {
+                        self.report_dangerously_set_inner_html(property);
                         self.walk_callback_argument_expression(&property.value, &[]);
                     }
                 }

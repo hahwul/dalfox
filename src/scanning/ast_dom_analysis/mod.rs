@@ -36,6 +36,7 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 pub use reflected_markup::PageMarkup;
+pub(crate) use resolve::{attribute_sink_target, is_navigation_sink};
 use scoped_state::{ScopedMap, ScopedSet};
 
 mod async_flow;
@@ -703,6 +704,12 @@ const DOM_SINKS: &[&str] = &[
     // are caught. The safe sibling `Document.parseHTML(...)` runs the built-in
     // Sanitizer and is deliberately not modeled.
     "parseHTMLUnsafe",
+    // jQuery's script runners: `globalEval` evaluates its argument, and
+    // `getScript` loads and runs the script at the URL it is given.
+    "$.globalEval",
+    "jQuery.globalEval",
+    "$.getScript",
+    "jQuery.getScript",
 ];
 
 const DOM_SANITIZERS: &[&str] = &[

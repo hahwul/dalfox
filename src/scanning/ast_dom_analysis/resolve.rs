@@ -304,27 +304,10 @@ impl<'a> DomXssVisitor<'a> {
             _ => None,
         }
     }
-    /// Sinks where a tainted value is only script when it supplies the URL's
-    /// *scheme* (`javascript:`): navigation and link targets. `src` is not one
-    /// — a script `src` is dangerous through its host, which a fixed scheme
-    /// does not pin.
-    pub(super) fn is_navigation_sink(sink: &str) -> bool {
-        let sink = sink
-            .strip_prefix("setAttribute:")
-            .or_else(|| sink.strip_prefix("setAttributeNS:"))
-            .unwrap_or(sink);
-        matches!(
-            sink,
-            "href"
-                | "xlink:href"
-                | "formaction"
-                | "form.action"
-                | "window.open"
-                | "self.open"
-                | "globalThis.open"
-        ) || ["location.href", "location.assign", "location.replace"]
-            .iter()
-            .any(|s| sink.ends_with(s))
+    /// A tainted URL on a navigation sink whose scheme is fixed
+    /// (`'/search?q=' + q`) cannot become `javascript:`.
+    pub(super) fn url_sink_is_pinned(&self, sink: &str, expr: &Expression<'a>) -> bool {
+        is_navigation_sink(sink) && self.url_scheme_is_pinned(expr)
     }
     /// True when the URL `expr` evaluates to starts with text that fixes its
     /// scheme to a non-script one, so no tainted tail can make it
@@ -439,4 +422,34 @@ fn literal_pins_url_scheme(prefix: &str) -> bool {
         }
     }
     false
+}
+
+/// Sinks where a tainted value is only script when it supplies the URL's
+/// *scheme* (`javascript:`): navigation and link targets. `src` is not one — a
+/// script `src` is dangerous through its host, which a fixed scheme does not
+/// pin.
+pub(crate) fn is_navigation_sink(sink: &str) -> bool {
+    let sink = attribute_sink_target(sink);
+    matches!(
+        sink,
+        "href"
+            | "xlink:href"
+            | "action"
+            | "formaction"
+            | "form.action"
+            | "window.open"
+            | "self.open"
+            | "globalThis.open"
+    ) || ["location.href", "location.assign", "location.replace"]
+        .iter()
+        .any(|s| sink.ends_with(s))
+}
+
+/// The attribute an attribute-setting sink names (`setAttribute:href` →
+/// `href`, jQuery `attr:onclick` → `onclick`); any other sink unchanged.
+pub(crate) fn attribute_sink_target(sink: &str) -> &str {
+    ["setAttribute:", "setAttributeNS:", "attr:", "prop:"]
+        .iter()
+        .find_map(|prefix| sink.strip_prefix(prefix))
+        .unwrap_or(sink)
 }

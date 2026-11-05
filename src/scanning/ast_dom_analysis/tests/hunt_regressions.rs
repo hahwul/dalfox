@@ -140,3 +140,150 @@ fn length_of_a_location_string_is_not_tainted() {
         assert!(!found(js).is_empty(), "{js}");
     }
 }
+
+fn sinks(js: &str) -> Vec<String> {
+    found(js).into_iter().map(|v| v.sink).collect()
+}
+
+/// `export` wraps an ordinary declaration; module scripts were never walked.
+#[test]
+fn exported_declarations_are_walked() {
+    for js in [
+        "export function render(){ out.innerHTML = location.hash.slice(1); }",
+        "export default function(){ out.innerHTML = location.hash.slice(1); }",
+        "export const r = () => { out.innerHTML = location.hash.slice(1); };",
+        "export class A { r(){ out.innerHTML = location.hash.slice(1); } }",
+        "export const q = location.hash.slice(1); out.innerHTML = q;",
+        // The summary pre-pass sees exported helpers too.
+        "export function getP(n){ return new URLSearchParams(location.search).get(n); } out.innerHTML = getP('q');",
+        "export function show(h){ out.innerHTML = h; } show(location.hash.slice(1));",
+    ] {
+        assert_eq!(sinks(js), ["innerHTML"], "{js}");
+    }
+    assert!(
+        found("export function show(h){ out.textContent = h; } show(location.hash);").is_empty()
+    );
+}
+
+#[test]
+fn jquery_only_methods_are_sinks_on_a_jquery_chain() {
+    for (js, sink) in [
+        (
+            "$('#a').replaceWith(location.hash.slice(1));",
+            "replaceWith",
+        ),
+        ("$('#a').wrap(location.hash.slice(1));", "wrap"),
+        (
+            "$('#a').find('b').wrapInner(location.hash.slice(1));",
+            "wrapInner",
+        ),
+        ("$('a').attr('href', location.hash.slice(1));", "attr:href"),
+        ("$('a').prop('href', location.hash.slice(1));", "prop:href"),
+        (
+            "$('b').attr('onclick', location.hash.slice(1));",
+            "attr:onclick",
+        ),
+        ("$.globalEval(location.hash.slice(1));", "$.globalEval"),
+        (
+            "jQuery.getScript(new URLSearchParams(location.search).get('cb'));",
+            "jQuery.getScript",
+        ),
+    ] {
+        assert_eq!(sinks(js), [sink], "{js}");
+    }
+    for js in [
+        // Native `replaceWith` inserts text.
+        "document.getElementById('o').replaceWith(location.hash.slice(1));",
+        "$('#a').attr('title', location.hash.slice(1));",
+        "$('#a').attr('href', '/search?q=' + location.hash.slice(1));",
+        "$('#a').prop('checked', location.hash.slice(1));",
+    ] {
+        assert!(found(js).is_empty(), "{js}");
+    }
+}
+
+#[test]
+fn popup_and_frame_documents_write_html() {
+    for js in [
+        "var w = window.open('', '_blank'); w.document.write(location.hash.slice(1));",
+        "document.getElementById('f').contentDocument.writeln(location.hash.slice(1));",
+    ] {
+        assert!(sinks(js)[0].starts_with("document.write"), "{js}");
+    }
+    assert!(found("w.document.write('<p>hi</p>');").is_empty());
+    assert!(found("logger.write(location.hash);").is_empty());
+}
+
+#[test]
+fn react_dangerously_set_inner_html_is_a_sink() {
+    for js in [
+        "React.createElement('div', { dangerouslySetInnerHTML: { __html: new URLSearchParams(location.search).get('m') } });",
+        "function App(){ const m = location.hash.slice(1); return _jsx('div', { dangerouslySetInnerHTML: { __html: m } }); }",
+        // A props object built before the call.
+        "const props = { dangerouslySetInnerHTML: { __html: location.hash } };",
+    ] {
+        assert_eq!(sinks(js), ["dangerouslySetInnerHTML"], "{js}");
+    }
+    assert!(
+        found("_jsx('div', { dangerouslySetInnerHTML: { __html: '<b>static</b>' } });").is_empty()
+    );
+    assert!(found("_jsx('div', { title: location.hash, children: location.hash });").is_empty());
+}
+
+#[test]
+fn clean_var_redeclaration_clears_taint() {
+    assert!(found("var q = location.hash; var q = 'static'; out.innerHTML = q;").is_empty());
+    for js in [
+        // Self-referencing redeclaration keeps the taint.
+        "var q = location.hash; var q = q + '!'; out.innerHTML = q;",
+        // A conditional redeclaration does not clear the other path.
+        "var q = location.hash; if (x) { var q = 'static'; } out.innerHTML = q;",
+        // A block-scoped `let` only shadows inside its block.
+        "var q = location.hash; { let q = 'static'; } out.innerHTML = q;",
+    ] {
+        assert_eq!(sinks(js), ["innerHTML"], "{js}");
+    }
+}
+
+/// A same-origin or CDN prefix does not make a script URL safe: the tail can
+/// still reach a JSONP callback, `../` an upload, or pick a CDN package.
+#[test]
+fn script_url_sinks_are_not_host_pinned() {
+    let load = |url: &str| {
+        format!(
+            "var s = document.createElement('script'); s.src = {url}; document.head.appendChild(s);"
+        )
+    };
+    for url in [
+        "'/api/jsonp?callback=' + location.hash.slice(1)",
+        "'/js/' + location.hash.slice(1) + '.js'",
+        "'https://cdn.jsdelivr.net/npm/' + location.hash.slice(1)",
+        "'https:' + location.hash.slice(1)",
+    ] {
+        assert_eq!(sinks(&load(url)), ["src"], "{url}");
+    }
+    assert_eq!(
+        sinks("$.getScript('/js/' + location.hash.slice(1));"),
+        ["$.getScript"]
+    );
+    assert_eq!(
+        sinks("$('#b').attr('onclick', 'go(' + location.hash.slice(1) + ')');"),
+        ["attr:onclick"]
+    );
+    assert!(found("$('#avatar').attr('src', location.hash.slice(1));").is_empty());
+}
+
+#[test]
+fn jquery_prop_follows_property_semantics() {
+    assert_eq!(
+        sinks("$('#o').prop('innerHTML', location.hash.slice(1));"),
+        ["prop:innerHTML"]
+    );
+    // An `on*` property ignores a string; attribute casing does not apply.
+    for js in [
+        "$('#b').prop('onclick', location.hash.slice(1));",
+        "$('#o').prop('INNERHTML', location.hash.slice(1));",
+    ] {
+        assert!(found(js).is_empty(), "{js}");
+    }
+}
