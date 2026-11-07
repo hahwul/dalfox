@@ -73,9 +73,11 @@ pub async fn register_first(
     // RSA-2048 keygen is a 50-300ms CPU burst. Run it on the blocking pool so it
     // does not stall an async runtime worker (and any other tasks scheduled on
     // it) for the duration.
+    // `biased`, cancel first: an already-tripped cancel never starts a session.
     let keys = tokio::select! {
-        k = tokio::task::spawn_blocking(SessionKeys::generate) => k,
+        biased;
         _ = &mut cancel => return Err("OOB registration cancelled".into()),
+        k = tokio::task::spawn_blocking(SessionKeys::generate) => k,
     }
     .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
         format!("OOB keygen task panicked: {e}").into()

@@ -393,6 +393,33 @@ async fn oob_form_callback_is_attributed_to_the_scanned_target() {
     );
 }
 
+/// A cancel that is already tripped when `start` runs (cancel during keygen)
+/// errors out before any `/register`, so there is nothing to deregister.
+#[tokio::test]
+async fn oob_session_start_cancelled_before_register_sends_nothing() {
+    let state: Shared = Arc::new(StdMutex::new(MockState::default()));
+    let addr = serve_mock_oob(state.clone()).await;
+    let config = OobConfig {
+        servers: vec![format!("http://{addr}")],
+        secret: None,
+        wait_secs: 1,
+        timeout: 5,
+        proxy: None,
+        insecure: true,
+    };
+    let err = OobSession::start(&config, std::future::ready(()))
+        .await
+        .err()
+        .expect("a tripped cancel must not start a session");
+    assert!(err.to_string().contains("cancelled"), "{err}");
+    let st = state.lock().unwrap();
+    assert!(st.correlation_id.is_none(), "no /register may be sent");
+    assert!(
+        !st.deregistered && st.deregistered_ids.is_empty(),
+        "nothing registered, so nothing to deregister"
+    );
+}
+
 #[tokio::test]
 async fn oob_session_start_fails_soft_when_no_server_registers() {
     // Unroutable / closed port → registration fails → start() errors (caller
