@@ -87,6 +87,30 @@ fn validate_param_inputs(args: &ScanArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Refuse an `-o/--output` path whose parent directory is missing or is not a
+/// directory. The file is only written after the whole scan, and with `-o` the
+/// results are not printed to stdout either, so this would otherwise lose them.
+/// An empty parent (`out.json`) is the current directory. Permission and
+/// disk-full errors are still left to the write itself.
+fn validate_output_dir(path: &str) -> Result<(), String> {
+    let Some(dir) = std::path::Path::new(path)
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+    if dir.is_dir() {
+        Ok(())
+    } else if dir.exists() {
+        Err(format!("--output: '{}' is not a directory", dir.display()))
+    } else {
+        Err(format!(
+            "--output: directory '{}' does not exist",
+            dir.display()
+        ))
+    }
+}
+
 pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOutcome> {
     // Validate numeric args up front so misconfigurations (workers: 0,
     // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
@@ -119,6 +143,11 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
             crate::cmd::error_codes::INVALID_INPUT_TYPE,
             &msg,
         );
+        return Err(ScanOutcome::Error);
+    }
+
+    if let Some(Err(msg)) = args.output.as_deref().map(validate_output_dir) {
+        emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &msg);
         return Err(ScanOutcome::Error);
     }
 
@@ -412,5 +441,30 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
+    }
+
+    #[test]
+    fn test_validate_output_dir() {
+        let dir = std::env::temp_dir().join(format!("dalfox-output-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("not-a-dir");
+        std::fs::write(&file, "").unwrap();
+        let path = |p: &std::path::Path| p.to_string_lossy().to_string();
+
+        let err = validate_output_dir(&path(&dir.join("missing").join("out.json"))).unwrap_err();
+        assert!(err.contains("does not exist"), "{err}");
+        let err = validate_output_dir(&path(&file.join("out.json"))).unwrap_err();
+        assert!(err.contains("is not a directory"), "{err}");
+        assert!(validate_output_dir("out.json").is_ok());
+        assert!(validate_output_dir(&path(&dir.join("out.json"))).is_ok());
+
+        let args = ScanArgs {
+            output: Some(path(&dir.join("missing").join("out.json"))),
+            silence: true,
+            ..Default::default()
+        };
+        assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
