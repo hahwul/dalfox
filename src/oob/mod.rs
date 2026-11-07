@@ -102,12 +102,16 @@ pub struct OobSession {
 impl OobSession {
     /// Build a session, trying each configured server until one registers.
     /// Returns an error only if *every* candidate fails — callers fail soft and
-    /// fall back to the static `-b` path (if any).
+    /// fall back to the static `-b` path (if any) — or if `cancel` resolves
+    /// first, in which case an in-flight registration is deregistered before
+    /// returning (see [`interactsh::register_first`]). Race cancellation through
+    /// `cancel`, never by dropping this future.
     pub async fn start(
         config: &OobConfig,
+        cancel: impl std::future::Future<Output = ()>,
     ) -> Result<OobSession, Box<dyn std::error::Error + Send + Sync>> {
         Ok(OobSession {
-            client: interactsh::register_first(config).await?,
+            client: interactsh::register_first(config, cancel).await?,
             registry: Arc::new(CorrelationRegistry::new()),
         })
     }
