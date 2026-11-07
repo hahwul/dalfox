@@ -425,7 +425,7 @@ pub struct ScanArgs {
     pub limit: Option<usize>,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Filter which finding types count toward --limit: all (default), v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --limit-result-type v
+    /// Filter which finding types count toward --limit: all, v (vulnerable), r (reflected), a (AST DOM XSS), i (informational). Example: --limit-result-type v
     #[arg(long, default_value = "all", value_parser = clap::builder::PossibleValuesParser::new(LIMIT_RESULT_TYPE_VALUES.iter().copied()))]
     pub limit_result_type: String,
 
@@ -489,7 +489,7 @@ pub struct ScanArgs {
     pub cookies: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
-    /// Override the HTTP method. Example: -X 'PUT' (default "GET")
+    /// Override the HTTP method. Example: -X 'PUT'
     #[arg(short = 'X', long, default_value = DEFAULT_METHOD, value_parser = parse_http_method_arg)]
     pub method: String,
 
@@ -622,7 +622,7 @@ pub struct ScanArgs {
     /// endpoint. Scope note: this caps ONLY the injection stage. The earlier
     /// preflight and parameter-analysis (discovery + mining) phases are bounded
     /// separately by `--timeout` × request-count, NOT by this wall-clock cap, so
-    /// a slow target can overshoot this budget during analysis. 0 disables (default).
+    /// a slow target can overshoot this budget during analysis. 0 disables.
     #[arg(long, default_value_t = 0)]
     pub scan_timeout: u64,
 
@@ -713,8 +713,8 @@ pub struct ScanArgs {
     pub max_targets_per_host: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, htmlpad, base64, unicode, zwsp. Default: url,html
-    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"], value_parser = clap::builder::PossibleValuesParser::new(ENCODER_VALUES.iter().copied()))]
+    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, htmlpad, base64, unicode, zwsp
+    #[arg(short = 'e', long, value_delimiter = ',', default_values = DEFAULT_ENCODERS, value_parser = clap::builder::PossibleValuesParser::new(ENCODER_VALUES.iter().copied()))]
     pub encoders: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
@@ -758,12 +758,12 @@ pub struct ScanArgs {
     pub only_custom_payload: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Custom value for alert/prompt/confirm in payloads. Default: "1". Example: --custom-alert-value 'document.domain'
+    /// Custom value for alert/prompt/confirm in payloads. Example: --custom-alert-value 'document.domain'
     #[arg(long, default_value = "1")]
     pub custom_alert_value: String,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Custom alert function type. Options: none (keep original), str (wrap value in quotes). Default: "none"
+    /// Custom alert function type. Options: none (keep original), str (wrap value in quotes)
     #[arg(long, default_value = "none", value_parser = clap::builder::PossibleValuesParser::new(CUSTOM_ALERT_TYPE_VALUES.iter().copied()))]
     pub custom_alert_type: String,
 
@@ -809,7 +809,7 @@ pub struct ScanArgs {
     pub sxss_url: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// HTTP method for checking Stored XSS (default "GET")
+    /// HTTP method for checking Stored XSS
     // Same parser as `--method`. Without it `--sxss-method post` went on the
     // wire as the literal extension verb `post` (`reqwest::Method` is
     // case-sensitive) and `--sxss-method "GET junk"` failed to parse and
@@ -849,7 +849,7 @@ pub struct ScanArgs {
     pub detect_outdated_libs: bool,
 
     #[clap(help_heading = "WAF")]
-    /// WAF bypass mode: auto (detect+bypass), force (same as auto; pin a WAF with --force-waf), off (detect-only; no payload mutations). Default: auto
+    /// WAF bypass mode: auto (detect+bypass), force (same as auto; pin a WAF with --force-waf), off (detect-only; no payload mutations)
     #[arg(long, default_value = DEFAULT_WAF_BYPASS, value_parser = clap::builder::PossibleValuesParser::new(WAF_BYPASS_VALUES.iter().copied()))]
     pub waf_bypass: String,
 
