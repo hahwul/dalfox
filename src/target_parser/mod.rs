@@ -544,18 +544,16 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
 /// Returns (method, url, optional_body).
 /// If the string doesn't start with a known HTTP method, it returns ("GET", original_string, None).
 pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
-    // Use splitn(3, ' ') to preserve spaces in the body portion (e.g., "POST url name=John Doe")
-    let parts: Vec<&str> = s.splitn(3, ' ').collect();
-
-    if parts.len() >= 2 {
-        let potential_method = parts[0].to_uppercase();
+    if let Some((method, rest)) = s.split_once(char::is_whitespace) {
+        let potential_method = method.to_uppercase();
         if KNOWN_HTTP_METHODS.contains(&potential_method.as_str()) {
-            let url = parts[1].to_string();
-            let body = parts
-                .get(2)
-                .filter(|s| !s.is_empty())
+            // Split only the field separators, preserving whitespace inside the body.
+            let rest = rest.trim_start();
+            let (url, body) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            let body = Some(body.trim_start())
+                .filter(|body| !body.is_empty())
                 .map(ToString::to_string);
-            return (potential_method, url, body);
+            return (potential_method, url.to_string(), body);
         }
     }
 

@@ -795,6 +795,101 @@ const UNREACHABLE_TARGET: &str = "http://127.0.0.1:1/?q=1";
 /// Flags that keep a run to target resolution + one reachability probe.
 const NO_SCAN_FLAGS: [&str; 3] = ["--skip-xss-scanning", "--skip-discovery", "--skip-mining"];
 
+fn assert_method_target_whitespace(input_type: &str) {
+    let dir = std::env::temp_dir().join(format!(
+        "dalfox-method-whitespace-{input_type}-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create fixture directory");
+    let config = dir.join("config.json");
+    std::fs::write(&config, "{}").expect("write empty config");
+    let targets = [
+        "POST\thttp://127.0.0.1:9/tab-method?c=1 name=John Doe",
+        "POST  http://127.0.0.1:9/spaces?c=1  name=John Doe",
+        "POST http://127.0.0.1:9/tab-body?c=1\tname=John Doe",
+    ];
+    let list = dir.join("targets.txt");
+    std::fs::write(&list, targets.join("\n")).expect("write target list");
+
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_dalfox"));
+    cmd.arg("--config")
+        .arg(&config)
+        .args(["scan", "-i", input_type])
+        .args(NO_SCAN_FLAGS)
+        // Even the buggy parser's invented hostname must never reach DNS or
+        // an external host. Every preflight request uses this loopback proxy.
+        .args([
+            "--proxy",
+            "http://127.0.0.1:1",
+            "--dry-run",
+            "--format",
+            "json",
+            "-S",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    match input_type {
+        "url" => {
+            cmd.args(targets).stdin(Stdio::null());
+        }
+        "file" => {
+            cmd.arg(&list).stdin(Stdio::null());
+        }
+        "pipe" => {
+            cmd.stdin(Stdio::piped());
+        }
+        _ => unreachable!(),
+    }
+    let mut child = cmd.spawn().expect("run dalfox");
+    if input_type == "pipe" {
+        child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .write_all(targets.join("\n").as_bytes())
+            .expect("write target list to stdin");
+    }
+    let output = child.wait_with_output().expect("wait for dalfox");
+    let _ = std::fs::remove_dir_all(&dir);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    let doc: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("expected JSON ({e}):\n{stdout}\nstderr: {stderr}"));
+    assert_eq!(doc["dry_run"], true);
+    assert_eq!(doc["meta"]["targets_input"], 3);
+    assert!(doc["meta"].get("targets_unparsable").is_none());
+    let skipped = doc["meta"]["skipped"].as_array().expect("skipped targets");
+    let actual: Vec<_> = skipped
+        .iter()
+        .map(|t| (t["method"].as_str(), t["target"].as_str()))
+        .collect();
+    assert_eq!(
+        actual,
+        vec![
+            (Some("POST"), Some("http://127.0.0.1:9/spaces?c=1")),
+            (Some("POST"), Some("http://127.0.0.1:9/tab-body?c=1")),
+            (Some("POST"), Some("http://127.0.0.1:9/tab-method?c=1")),
+        ],
+        "whitespace must not change target methods or URLs; stdout:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_cli_method_target_whitespace_url() {
+    assert_method_target_whitespace("url");
+}
+
+#[test]
+fn test_cli_method_target_whitespace_file() {
+    assert_method_target_whitespace("file");
+}
+
+#[test]
+fn test_cli_method_target_whitespace_pipe() {
+    assert_method_target_whitespace("pipe");
+}
+
 /// Every scan-bearing subcommand flattens a `ScanArgs`, so `--format` has to be
 /// read from *its* parsed args. Only `scan` was consulted; `url` / `file` /
 /// `pipe` fell back to a raw-argv scan for the literal two-token
