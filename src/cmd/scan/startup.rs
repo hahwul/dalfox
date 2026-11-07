@@ -62,6 +62,11 @@ fn validate_header_inputs(args: &ScanArgs) -> Result<(), String> {
     }
     for cookie in args.cookies.iter().filter(|c| !c.is_empty()) {
         crate::job::validate_header_value("--cookies", cookie)?;
+        // Pairs without `=` are dropped by `split_cookie_pairs`, so a value with
+        // none would run the scan without the cookie. The value is not echoed.
+        if crate::job::split_cookie_pairs(cookie).is_empty() {
+            return Err("--cookies: expected 'name=value[; name2=value2]'".to_string());
+        }
     }
     Ok(())
 }
@@ -412,5 +417,25 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
+    }
+
+    #[test]
+    fn test_validate_header_inputs_cookies_need_a_pair() {
+        let check = |cookie: &str| {
+            let args = ScanArgs {
+                cookies: vec![cookie.to_string()],
+                ..Default::default()
+            };
+            validate_header_inputs(&args)
+        };
+        for bad in ["sid", ";", "=orphan"] {
+            let err = check(bad).expect_err(bad);
+            assert!(err.starts_with("--cookies: expected"), "{err}");
+        }
+        let err = check("supersecrettoken").unwrap_err();
+        assert!(!err.contains("supersecrettoken"), "value echoed: {err}");
+        for ok in ["sid=abc", "a=1; b=2", ""] {
+            assert!(check(ok).is_ok(), "{ok:?} must be accepted");
+        }
     }
 }
