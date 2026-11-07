@@ -92,6 +92,46 @@
     });
   }
 
+  // --- Code blocks: language bar + copy (docs articles only) ---
+  var ko = document.documentElement.lang === 'ko';
+  document.querySelectorAll('.docs-article pre > code').forEach(function (code) {
+    var pre = code.parentNode;
+    var m = /language-([\w+-]+)/.exec(code.className);
+    pre.setAttribute('data-lang', m ? m[1] : 'text');
+    if (!navigator.clipboard) return;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy';
+    btn.textContent = ko ? '복사' : 'copy';
+    btn.addEventListener('click', function () {
+      navigator.clipboard.writeText(code.textContent.replace(/\n$/, '')).then(function () {
+        btn.classList.add('copied');
+        btn.textContent = ko ? '복사됨' : 'copied';
+        setTimeout(function () {
+          btn.classList.remove('copied');
+          btn.textContent = ko ? '복사' : 'copy';
+        }, 1500);
+      });
+    });
+    pre.appendChild(btn);
+  });
+
+  // --- Prev / next pager, derived from the sidebar order ---
+  var pager = document.querySelector('.docs-pager');
+  var sideLinks = Array.prototype.slice.call(document.querySelectorAll('.sidebar-links a'));
+  var cur = sideLinks.findIndex(function (a) { return a.classList.contains('active'); });
+  if (pager && cur !== -1) {
+    function cell(a, cls, label) {
+      if (!a) return '<span class="docs-pager-empty"></span>';
+      return '<a class="' + cls + '" href="' + a.getAttribute('href') + '">' +
+        '<span class="docs-pager-label">' + label + '</span>' +
+        '<span class="docs-pager-title">' + a.textContent.trim() + '</span></a>';
+    }
+    pager.innerHTML = cell(sideLinks[cur - 1], 'is-prev', pager.getAttribute('data-prev')) +
+      cell(sideLinks[cur + 1], 'is-next', pager.getAttribute('data-next'));
+    pager.hidden = false;
+  }
+
   // --- Mobile hamburger menu (docs layout only) ---
   var hamburger = document.querySelector('.hamburger');
   var sidebar = document.querySelector('.docs-sidebar');
