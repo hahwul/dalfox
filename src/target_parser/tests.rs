@@ -236,6 +236,63 @@ fn test_parse_method_url_body_post_with_body() {
 }
 
 #[test]
+fn test_parse_method_url_body_whitespace_separators() {
+    for input in [
+        "POST\thttps://example.com/test a=b",
+        "POST  https://example.com/test a=b",
+        "POST https://example.com/test\ta=b",
+        "post \t https://example.com/test \t a=b",
+        "POST\u{2003}https://example.com/test\u{00a0}a=b",
+    ] {
+        let (method, url, body) = parse_method_url_body(input);
+        assert_eq!(method, "POST", "{input:?}");
+        assert_eq!(url, "https://example.com/test", "{input:?}");
+        assert_eq!(body.as_deref(), Some("a=b"), "{input:?}");
+    }
+}
+
+#[test]
+fn test_parse_method_url_body_preserves_body_whitespace() {
+    let (method, url, body) =
+        parse_method_url_body("POST\thttps://example.com/test\t name=John  Doe\t&city=New York  ");
+    assert_eq!(method, "POST");
+    assert_eq!(url, "https://example.com/test");
+    assert_eq!(body.as_deref(), Some("name=John  Doe\t&city=New York  "));
+}
+
+#[test]
+fn test_parse_method_url_body_whitespace_without_body() {
+    for input in [
+        "POST  https://example.com/test",
+        "POST\thttps://example.com/test",
+        "POST https://example.com/test ",
+        "POST https://example.com/test \t  ",
+    ] {
+        let (method, url, body) = parse_method_url_body(input);
+        assert_eq!(method, "POST", "{input:?}");
+        assert_eq!(url, "https://example.com/test", "{input:?}");
+        assert_eq!(body, None, "{input:?}");
+    }
+}
+
+#[test]
+fn test_parse_method_url_body_fallback_preserves_input() {
+    for input in ["", "POST", "https://example.com/a b", "CUSTOM\turl body"] {
+        let (method, url, body) = parse_method_url_body(input);
+        assert_eq!(method, "GET", "{input:?}");
+        assert_eq!(url, input);
+        assert_eq!(body, None, "{input:?}");
+    }
+}
+
+#[test]
+fn test_parse_target_with_method_missing_url() {
+    for input in ["POST ", "POST\t", "POST \t "] {
+        assert!(parse_target_with_method(input).is_err(), "{input:?}");
+    }
+}
+
+#[test]
 fn test_parse_method_url_body_get_without_body() {
     let (method, url, body) = parse_method_url_body("GET https://example.com/path");
     assert_eq!(method, "GET");
