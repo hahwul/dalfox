@@ -4,10 +4,10 @@
   <div class="docs-layout">
 {% include "sidebar.html" %}
     <main class="docs-main" id="main">
+      <div class="docs-content-container">
       <article class="docs-article">
-        {% include "breadcrumbs.html" %}
         <header class="article-head" data-n="{{ nn }}">
-          <p class="article-eyebrow">{% if ko %}섹션{% else %}section{% endif %} <span class="sep">/</span> {{ nn }}</p>
+          <p class="article-eyebrow"><a href="{{ base_url }}{% if ko %}/ko{% endif %}/">dalfox</a> <span class="sep">/</span> <span class="here">{{ page.title | e | lower }}</span></p>
           <h1>{{ page.title | e }}</h1>
         </header>
         {{ content }}
@@ -25,5 +25,6 @@
         </ul>
         {{ pagination }}
       </article>
+      </div>
 {% set has_source = true %}
 {% include "footer.html" %}

@@ -11,10 +11,12 @@
       {% set src = "/index" ~ suffix %}
       {% if nslash == 2 %}{% set src = rel ~ "_index" ~ suffix %}{% elif nslash > 2 %}{% set src = (rel ~ "EOP") | replace("/EOP", suffix) %}{% endif %}
       {% if has_source %}
+      <div class="docs-content-container docs-tail">
       <nav class="docs-pager" aria-label="{% if page_language == "ko" %}이전/다음 문서{% else %}Previous / next page{% endif %}" data-prev="{% if page_language == "ko" %}이전{% else %}previous{% endif %}" data-next="{% if page_language == "ko" %}다음{% else %}next{% endif %}" hidden></nav>
       <footer class="docs-footer">
         <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content{{ src }}" target="_blank" rel="noopener">{% if page_language == "ko" %}GitHub에서 이 문서 편집{% else %}Edit this page on GitHub{% endif %}</a></span>
       </footer>
+      </div>
       {% endif %}
     </main>
   </div>

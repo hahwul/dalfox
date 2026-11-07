@@ -116,6 +116,14 @@
     pre.appendChild(btn);
   });
 
+  // --- Tables scroll inside a wrapper instead of shrinking the table box ---
+  document.querySelectorAll('.docs-article table').forEach(function (table) {
+    var wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
+    table.parentNode.insertBefore(wrap, table);
+    wrap.appendChild(table);
+  });
+
   // --- Prev / next pager, derived from the sidebar order ---
   var pager = document.querySelector('.docs-pager');
   var sideLinks = Array.prototype.slice.call(document.querySelectorAll('.sidebar-links a'));

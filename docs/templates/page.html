@@ -6,9 +6,8 @@
     <main class="docs-main" id="main">
       <div class="docs-content-container">
         <article class="docs-article">
-          {% include "breadcrumbs.html" %}
           <header class="article-head" data-n="{{ nn }}">
-            <p class="article-eyebrow">{% for a in page.ancestors %}{{ a.title | e | lower }}{% endfor %} <span class="sep">/</span> {{ nn }}</p>
+            <p class="article-eyebrow"><a href="{{ base_url }}{% if ko %}/ko{% endif %}/">dalfox</a>{% for a in page.ancestors %} <span class="sep">/</span> <a href="{{ base_url }}{{ a.url }}">{{ a.title | e | lower }}</a>{% endfor %}</p>
             <h1>{{ page.title | e }}</h1>
           </header>
           {{ content }}

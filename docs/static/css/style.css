@@ -55,6 +55,10 @@
     --measure: 72ch;
     --gutter: clamp(16px, 4vw, 40px);
 
+    /* Two mono label sizes, nothing in between. */
+    --mono-s: 0.78rem;
+    --mono-xs: 0.72rem;
+
     /* Type */
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
         "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", Roboto, sans-serif;
@@ -202,11 +206,10 @@ kbd {
 .sidebar-title,
 .article-eyebrow,
 .docs-pager,
-.breadcrumbs,
 .footer-links,
 .footer-meta {
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: var(--mono-s);
     letter-spacing: 0.01em;
 }
 
@@ -304,7 +307,7 @@ html[data-theme="light"] .header-logo img {
     border-radius: 8px;
     color: var(--fg-3);
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: var(--mono-s);
     background: color-mix(in srgb, var(--bg-2) 60%, transparent);
     transition: border-color 0.15s, color 0.15s;
 }
@@ -359,7 +362,7 @@ html[data-theme="light"] .theme-toggle .icon-moon {
     padding: 0 0.3rem;
     border-radius: 8px;
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: var(--mono-xs);
 }
 .lang-switch-item {
     padding: 0.2rem 0.4rem;
@@ -581,7 +584,7 @@ a.lang-switch-item:hover {
     z-index: 1;
     color: var(--fg-3);
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: var(--mono-xs);
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
@@ -785,7 +788,7 @@ html.motion-on .strip.in-view .strip-inner::before {
     padding: 0.3rem 0.6rem;
     border-radius: 6px;
     color: var(--fg-3);
-    font-size: 0.74rem;
+    font-size: var(--mono-xs);
     transition: color 0.15s, background-color 0.15s;
 }
 .hero-install-copy:hover {
@@ -805,7 +808,7 @@ html.motion-on .strip.in-view .strip-inner::before {
     padding: 0.3rem 0.5rem;
     border-radius: 6px;
     color: var(--fg-2);
-    font-size: 0.78rem;
+    font-size: var(--mono-s);
 }
 .hero-install-pm-btn:hover {
     background: var(--accent-soft);
@@ -1270,9 +1273,6 @@ body:has(.docs-sidebar) .site-footer {
     margin-bottom: 0.35rem;
     text-transform: lowercase;
 }
-.sidebar-title svg {
-    display: none;
-}
 .sidebar-title::before {
     content: "//";
     color: var(--accent);
@@ -1310,7 +1310,7 @@ body:has(.docs-sidebar) .site-footer {
 }
 .sidebar-version {
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: var(--mono-xs);
     color: var(--fg-3);
 }
 .sidebar-version:hover {
@@ -1351,23 +1351,7 @@ body:has(.docs-sidebar) .site-footer {
     position: relative;
     isolation: isolate;
 }
-/* The field, remembered: one soft moon in the upper air of every reading
-   page, so the docs sit under the same sky as the landing. Paint only. */
-.docs-main::before {
-    content: "";
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 42rem;
-    z-index: -1;
-    pointer-events: none;
-    background:
-        radial-gradient(38rem 24rem at 78% -6rem, var(--accent-soft), transparent 70%),
-        radial-gradient(22rem 16rem at 22% -4rem, var(--ember-soft), transparent 70%);
-    opacity: 0.8;
-}
-html[data-theme="light"] .docs-main::before {
-    opacity: 0.55;
-}
+
 .docs-content-container {
     display: flex;
     gap: 3rem;
@@ -1393,10 +1377,6 @@ html[data-theme="light"] .docs-main::before {
     color: var(--fg-3);
     margin-bottom: 0.6rem;
     text-transform: lowercase;
-}
-.toc-title::before {
-    content: "// ";
-    color: var(--accent);
 }
 .toc-content {
     overflow-y: auto;
@@ -1425,7 +1405,7 @@ html[data-theme="light"] .docs-main::before {
 }
 .toc-content ul ul a {
     padding-left: 1.5rem;
-    font-size: 0.76rem;
+    font-size: var(--mono-s);
 }
 
 /* Collapsed sidebar */
@@ -1440,23 +1420,6 @@ html.sidebar-collapsed .sidebar-expand-btn {
     display: inline-flex;
 }
 
-/* Breadcrumbs */
-.breadcrumbs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    color: var(--fg-3);
-    margin-bottom: 1.25rem;
-}
-.breadcrumbs a:hover {
-    color: var(--fg);
-}
-.breadcrumbs-separator {
-    opacity: 0.6;
-}
-.breadcrumbs-current {
-    color: var(--fg-2);
-}
 
 /* --------------------------------------------------------------------------
    Article typography
@@ -1496,6 +1459,12 @@ html.sidebar-collapsed .sidebar-expand-btn {
     opacity: 0.5;
     margin: 0 0.15em;
 }
+.article-eyebrow a:hover {
+    color: var(--fg);
+}
+.article-eyebrow .here {
+    color: var(--fg-2);
+}
 .article-eyebrow::after {
     content: "";
     display: block;
@@ -1533,16 +1502,7 @@ html.sidebar-collapsed .sidebar-expand-btn {
     width: 2.5rem;
     height: 1px;
     margin-bottom: 1.1rem;
-    background: var(--accent);
-    opacity: 0.7;
-}
-.docs-article h3::before {
-    content: "// ";
-    color: var(--accent);
-    font-family: var(--font-mono);
-    font-weight: 500;
-    font-size: 0.8em;
-    opacity: 0.8;
+    background: var(--line-2);
 }
 .docs-article h3 {
     font-size: 1.08rem;
@@ -1648,40 +1608,28 @@ html.sidebar-collapsed .sidebar-expand-btn {
     overflow-x: auto;
     line-height: 1.6;
     font-size: 0.82rem;
-    box-shadow: var(--shadow);
 }
-/* ui.js sets data-lang and adds the copy button; the bar matches the
-   landing's .terminal-bar. Without JS the block is a plain pre. */
-.docs-article pre[data-lang] {
-    padding-top: 2.6rem;
-}
+/* ui.js sets data-lang and adds the copy button: one quiet mono row in the
+   top-right corner. Without JS the block is a plain pre. */
 .docs-article pre[data-lang]::before {
     content: attr(data-lang);
     position: absolute;
-    left: 0;
-    right: 0;
-    top: 0;
-    height: 1.9rem;
-    padding: 0 0.9rem;
-    display: flex;
-    align-items: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    top: 0.55rem;
+    right: 3.4rem;
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: var(--mono-xs);
     letter-spacing: 0.04em;
-    color: #6e7791;
-}
-.docs-article pre[data-lang]::before {
-    content: "// " attr(data-lang);
+    color: #4f5873;
+    pointer-events: none;
 }
 .code-copy {
     position: absolute;
-    top: 0.28rem;
-    right: 0.5rem;
-    padding: 0.2rem 0.55rem;
-    border-radius: 6px;
+    top: 0.3rem;
+    right: 0.45rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: var(--mono-xs);
     color: #6e7791;
     transition: color 0.15s, background-color 0.15s;
 }
@@ -1704,13 +1652,20 @@ html.sidebar-collapsed .sidebar-expand-btn {
 }
 
 /* Tables */
+.table-wrap {
+    margin: 1.25rem 0;
+    overflow-x: auto;
+}
 .docs-article table {
     width: 100%;
     border-collapse: collapse;
-    margin: 1.25rem 0;
+    margin: 0;
     font-size: 0.88rem;
-    display: block;
-    overflow-x: auto;
+}
+/* Never split a flag or enum value mid-word; a space or hyphen may still
+   break so wide flag tables keep their prose column. */
+.docs-article td code {
+    overflow-wrap: normal;
 }
 .docs-article th,
 .docs-article td {
@@ -1722,13 +1677,10 @@ html.sidebar-collapsed .sidebar-expand-btn {
 .docs-article th {
     font-family: var(--font-mono);
     font-weight: 500;
-    font-size: 0.74rem;
+    font-size: var(--mono-xs);
     color: var(--fg-3);
     border-bottom-color: var(--line-2);
     white-space: nowrap;
-}
-.docs-article tbody tr:hover {
-    background: color-mix(in srgb, var(--accent-soft) 50%, transparent);
 }
 
 /* Alerts (shortcode) */
@@ -1783,14 +1735,7 @@ html.sidebar-collapsed .sidebar-expand-btn {
     letter-spacing: 0.01em;
 }
 .docs-article .section-children-heading::before {
-    content: "// ";
-    display: inline;
-    width: auto;
-    height: auto;
-    margin: 0;
-    background: none;
-    opacity: 1;
-    color: var(--accent);
+    display: none;
 }
 /* Same hairline grid as the landing's .facts: 1px gaps, a numbered mono
    term, one plain sentence. */
@@ -1802,7 +1747,7 @@ html.sidebar-collapsed .sidebar-expand-btn {
     gap: 1px;
     background: var(--line);
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: 6px;
     overflow: hidden;
 }
 .section-list li {
@@ -1828,23 +1773,11 @@ html.sidebar-collapsed .sidebar-expand-btn {
 }
 .section-list-n {
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: var(--mono-xs);
     color: var(--fg-3);
     display: flex;
     align-items: center;
     gap: 0.6rem;
-}
-.section-list-n::before {
-    content: "";
-    width: 0.45rem;
-    height: 0.45rem;
-    border-radius: 50%;
-    background: var(--ember);
-    box-shadow: 0 0 0 3px var(--ember-soft);
-}
-.section-list li:nth-child(3n) .section-list-n::before {
-    background: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .section-list a:hover .section-list-n {
     color: var(--fg-2);
@@ -1866,6 +1799,15 @@ html.sidebar-collapsed .sidebar-expand-btn {
     font-family: var(--font-mono);
     font-size: 0.8rem;
 }
+/* Pager + edit link sit in the same centred column as the article. */
+.docs-tail {
+    flex-direction: column;
+    gap: 0;
+}
+.docs-tail > * {
+    max-width: var(--measure);
+    width: 100%;
+}
 .docs-pager {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1873,7 +1815,7 @@ html.sidebar-collapsed .sidebar-expand-btn {
     margin-top: 3.5rem;
     background: var(--line);
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: 6px;
     overflow: hidden;
     color: var(--fg-3);
 }
@@ -1899,10 +1841,6 @@ html.sidebar-collapsed .sidebar-expand-btn {
     text-align: right;
     align-items: flex-end;
 }
-.docs-pager-label::before {
-    content: "// ";
-    color: var(--accent);
-}
 .docs-pager-title {
     font-family: var(--font-sans);
     font-size: 0.95rem;
@@ -1923,12 +1861,8 @@ html[data-theme="light"] .docs-pager a:hover .docs-pager-title {
     margin-top: 1.25rem;
     padding-top: 1rem;
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: var(--mono-s);
     color: var(--fg-3);
-}
-.docs-footer a::before {
-    content: "// ";
-    color: var(--accent);
 }
 .docs-footer a:hover {
     color: var(--fg);
