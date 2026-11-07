@@ -1,11 +1,15 @@
+{% set ko = page_language == "ko" %}
+{% set nn = page.weight %}{% if page.weight < 10 %}{% set nn = "0" ~ page.weight %}{% endif %}
 {% include "header.html" %}
   <div class="docs-layout">
 {% include "sidebar.html" %}
     <main class="docs-main" id="main">
       <div class="docs-content-container">
         <article class="docs-article">
-          {% include "breadcrumbs.html" %}
-          <h1>{{ page.title | e }}</h1>
+          <header class="article-head" data-n="{{ nn }}">
+            <p class="article-eyebrow"><a href="{{ base_url }}{% if ko %}/ko{% endif %}/">dalfox</a>{% for a in page.ancestors %} <span class="sep">/</span> <a href="{{ base_url }}{{ a.url }}">{{ a.title | e | lower }}</a>{% endfor %}</p>
+            <h1>{{ page.title | e }}</h1>
+          </header>
           {{ content }}
         </article>
         {% if page.toc and toc %}
