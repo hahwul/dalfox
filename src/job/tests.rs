@@ -2148,6 +2148,99 @@ async fn cancel_stops_blind_injection_mid_pass() {
     );
 }
 
+/// #1664: a cancel during the pre-scan phases (preflight GET, discovery,
+/// mining) used to wait out every in-flight and queued probe — nothing there
+/// polled the flag, and with `scan_timeout = 0` the budget is a plain `.await`.
+/// Runs the job on its own current-thread runtime, like `spawn_scan_task`, so
+/// "the runner returned" is "the worker lease dropped", and dropping that
+/// runtime is what kills the probes discovery had already spawned.
+#[test]
+fn execute_scan_cancel_during_analysis_stops_the_worker() {
+    use axum::{Router, http::Method, routing::any};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    const LATENCY: Duration = Duration::from_secs(3);
+    let hits = Arc::new(AtomicU64::new(0));
+    let (addr_tx, addr_rx) = std::sync::mpsc::channel();
+    let server_hits = hits.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("mock runtime");
+        rt.block_on(async move {
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .expect("bind");
+            addr_tx.send(listener.local_addr().expect("addr")).unwrap();
+            // HEAD (reachability) answers at once; every GET is slow.
+            let app = Router::new().fallback(any(move |method: Method| {
+                let hits = server_hits.clone();
+                async move {
+                    if method != Method::HEAD {
+                        hits.fetch_add(1, Ordering::Relaxed);
+                        tokio::time::sleep(LATENCY).await;
+                    }
+                    "<html><body>ok</body></html>"
+                }
+            }));
+            let _ = axum::serve(listener, app).await;
+        });
+    });
+    let addr = addr_rx.recv().expect("mock addr");
+
+    let query: Vec<String> = (0..20).map(|i| format!("p{i}=v")).collect();
+    let mut target =
+        crate::target_parser::parse_target(&format!("http://{addr}/?{}", query.join("&")))
+            .expect("valid target");
+    let args = Arc::new(crate::cmd::scan::ScanArgs {
+        skip_waf_probe: true,
+        timeout: 30,
+        silence: true,
+        ..Default::default()
+    });
+    let progress = JobProgress::default();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("job runtime");
+    // Preflight GET ends at ~LATENCY, so this lands mid-discovery.
+    let cancel_at = LATENCY + Duration::from_millis(500);
+    let trip = cancel.clone();
+    let tripped_at = Arc::new(std::sync::Mutex::new(None::<Instant>));
+    let tripped_at_w = tripped_at.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(cancel_at);
+        *tripped_at_w.lock().unwrap() = Some(Instant::now());
+        trip.store(true, Ordering::Relaxed);
+    });
+    let run = rt.block_on(async {
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}),
+        )
+        .await
+    });
+    let returned_at = Instant::now();
+    drop(rt);
+
+    let run = run.expect("cancelled job must not run on through discovery/mining");
+    assert!(run.was_cancelled);
+    let tripped_at = tripped_at.lock().unwrap().expect("cancel was tripped");
+    let settle = returned_at.saturating_duration_since(tripped_at);
+    assert!(
+        settle < Duration::from_millis(1500),
+        "worker must settle well inside one request latency after cancel (took {settle:?})"
+    );
+    let after = hits.load(Ordering::Relaxed);
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(
+        hits.load(Ordering::Relaxed),
+        after,
+        "no request may reach the target once the worker is gone"
+    );
+}
+
 #[test]
 fn test_parse_status_filter_empty_means_no_filter() {
     assert_eq!(parse_status_filter(None), Ok(None));
