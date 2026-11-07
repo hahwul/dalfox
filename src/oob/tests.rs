@@ -768,10 +768,15 @@ async fn execute_scan_cancel_interrupts_oob_registration() {
     // rather than during keygen (slow in a debug build under load).
     // The bound is measured from the cancel, not from job start, so keygen
     // time is not counted against it.
+    // Bounded: if `/register` is never sent, still trip so the test reaches
+    // `expect("/register arrived")` instead of hanging on `tripped_at`.
     let tripped_at = tokio::spawn(async move {
-        while seen.lock().unwrap().correlation_id.is_none() {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        let _ = tokio::time::timeout(Duration::from_secs(30), async {
+            while seen.lock().unwrap().correlation_id.is_none() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
         tokio::time::sleep(Duration::from_millis(200)).await;
         trip.store(true, Ordering::Relaxed);
         std::time::Instant::now()
