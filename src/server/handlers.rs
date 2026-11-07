@@ -566,6 +566,13 @@ pub(crate) async fn preflight_handler(
         }
     };
 
+    // The analysis runs on its own runtime on a blocking thread. When the
+    // client disconnects, axum drops this handler future and `cancel_tx` with
+    // it; racing the analysis against `cancel_rx` tears down the inner runtime
+    // (and any in-flight probes) and returns `_preflight_permit` to the pool
+    // instead of holding a slot until the target finishes or times out.
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+
     // Run the analysis on tokio's blocking pool (reused across calls) with a
     // current_thread runtime inside because analyze_parameters and scraper-
     // backed HTML inspection are !Send.
@@ -618,19 +625,33 @@ pub(crate) async fn preflight_handler(
                 )
                 .await)
             });
-            // Dropping `work` on expiry aborts the in-flight probes; the
-            // runtime (and any task they spawned) goes with it.
+            // Dropping `work` on expiry or client disconnect aborts the
+            // in-flight probes; the runtime (and any task they spawned) goes
+            // with it.
             rt.block_on(async {
-                if preflight_budget == 0 {
-                    return work.await;
+                let budgeted = async {
+                    if preflight_budget == 0 {
+                        return work.await;
+                    }
+                    tokio::time::timeout(Duration::from_secs(preflight_budget), work)
+                        .await
+                        .unwrap_or(Err(PreflightError::TimedOut(preflight_budget)))
+                };
+                tokio::select! {
+                    biased;
+                    // `cancel_tx` stays alive until `spawn_blocking` resolves,
+                    // so this arm only fires when the handler future was
+                    // dropped and nobody is left to read the outcome.
+                    _ = cancel_rx.wait_for(|cancelled| *cancelled) => {
+                        Ok(serde_json::Value::Null)
+                    }
+                    res = budgeted => res,
                 }
-                tokio::time::timeout(Duration::from_secs(preflight_budget), work)
-                    .await
-                    .unwrap_or(Err(PreflightError::TimedOut(preflight_budget)))
             })
         })
         .await
         .unwrap_or(Err(PreflightError::TaskPanicked));
+    drop(cancel_tx);
 
     match outcome {
         Ok(body) => r.ok(body),

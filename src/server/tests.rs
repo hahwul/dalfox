@@ -2429,6 +2429,79 @@ async fn test_preflight_handler_504_when_target_outlives_scan_timeout() {
 }
 
 #[tokio::test]
+async fn test_preflight_handler_returns_permit_when_client_disconnects() {
+    // A stalling target with no `scan_timeout` set (`preflight_budget == 0`):
+    // when the client disconnects and axum drops the handler future mid-probe,
+    // the blocking task must notice the dropped cancel sender, abort its
+    // in-flight work, and return its `preflight_sem` permit instead of holding
+    // the slot for the full per-request timeout.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (connected_tx, connected_rx) = tokio::sync::oneshot::channel::<()>();
+    let hold = tokio::spawn(async move {
+        let mut connected_tx = Some(connected_tx);
+        let mut socks = Vec::new();
+        while let Ok((sock, _)) = listener.accept().await {
+            if let Some(tx) = connected_tx.take() {
+                let _ = tx.send(());
+            }
+            socks.push(sock);
+        }
+    });
+
+    let state = make_state(None, None, false, false, "cb");
+    assert_eq!(
+        state.preflight_sem.available_permits(),
+        MAX_CONCURRENT_PREFLIGHT
+    );
+
+    let state_for_req = state.clone();
+    let req_task = tokio::spawn(async move {
+        let _ = preflight_handler(
+            State(state_for_req),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Ok(Json(ScanRequest {
+                target: format!("http://{addr}/?q=1"),
+                options: Some(ScanOptions {
+                    timeout: Some(30),
+                    ..ScanOptions::default()
+                }),
+            })),
+        )
+        .await;
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), connected_rx)
+        .await
+        .expect("preflight should connect to target")
+        .expect("connected signal");
+    assert_eq!(
+        state.preflight_sem.available_permits(),
+        MAX_CONCURRENT_PREFLIGHT - 1,
+        "in-flight preflight must hold one permit"
+    );
+
+    // Simulate the client disconnecting: axum drops the handler future.
+    req_task.abort();
+    let _ = req_task.await;
+
+    let returned = tokio::time::timeout(Duration::from_secs(1), async {
+        while state.preflight_sem.available_permits() != MAX_CONCURRENT_PREFLIGHT {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    hold.abort();
+
+    assert!(
+        returned.is_ok(),
+        "dropping an in-flight /preflight handler must abort its blocking task and return the permit promptly (available: {})",
+        state.preflight_sem.available_permits()
+    );
+}
+
+#[tokio::test]
 async fn test_serve_with_drain_deadline_gives_up_after_grace() {
     // A drain that never finishes must not hold the process once the signal
     // has fired and the grace has elapsed.
