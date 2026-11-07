@@ -50,19 +50,36 @@ pub(crate) struct InteractshClient {
     http: Client,
 }
 
+/// How long a cancelled registration waits for its best-effort `/deregister`.
+/// Short: the job is winding down, and an id the server never stored is
+/// harmless to deregister, so this only has to cover a responsive server.
+const CANCEL_DEREGISTER_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Generate one keypair, then try each configured server in order until one
 /// registers. Returns the first live client, or the last error if all fail
 /// (the caller turns that into a soft warning). The RSA-2048 keypair is
 /// generated once and reused across attempts rather than per server.
-pub async fn register_first(config: &OobConfig) -> ClientResult<InteractshClient> {
+///
+/// `cancel` resolving aborts with an error. A `/register` already in flight
+/// may have been stored by the server, so the client (which holds the only
+/// copy of the correlation id and secret) sends a bounded `/deregister` before
+/// returning — dropping this future mid-register instead would leave the
+/// registration armed on the OAST server with nothing left to release it.
+pub async fn register_first(
+    config: &OobConfig,
+    cancel: impl std::future::Future<Output = ()>,
+) -> ClientResult<InteractshClient> {
+    let mut cancel = std::pin::pin!(cancel);
     // RSA-2048 keygen is a 50-300ms CPU burst. Run it on the blocking pool so it
     // does not stall an async runtime worker (and any other tasks scheduled on
     // it) for the duration.
-    let keys = tokio::task::spawn_blocking(SessionKeys::generate)
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            format!("OOB keygen task panicked: {e}").into()
-        })??;
+    let keys = tokio::select! {
+        k = tokio::task::spawn_blocking(SessionKeys::generate) => k,
+        _ = &mut cancel => return Err("OOB registration cancelled".into()),
+    }
+    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+        format!("OOB keygen task panicked: {e}").into()
+    })??;
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
     for server in &config.servers {
         let client = match InteractshClient::new(server, config, keys.clone()) {
@@ -72,7 +89,14 @@ pub async fn register_first(config: &OobConfig) -> ClientResult<InteractshClient
                 continue;
             }
         };
-        match client.register().await {
+        let registered = tokio::select! {
+            r = client.register() => r,
+            _ = &mut cancel => {
+                let _ = tokio::time::timeout(CANCEL_DEREGISTER_TIMEOUT, client.deregister()).await;
+                return Err("OOB registration cancelled".into());
+            }
+        };
+        match registered {
             Ok(()) => return Ok(client),
             Err(e) => last_err = Some(format!("register {server}: {e}").into()),
         }

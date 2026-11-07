@@ -28,6 +28,8 @@ struct MockState {
     /// Bare host[:port] the client embeds in callback hosts.
     host: String,
     deregistered: bool,
+    /// Correlation id of every `/deregister` received, in order.
+    deregistered_ids: Vec<String>,
     /// Make `/poll` answer HTTP 500.
     poll_fails: bool,
     /// Make the next poll return this many callbacks with distinct, unregistered nonces.
@@ -41,23 +43,32 @@ struct MockState {
 type Shared = Arc<StdMutex<MockState>>;
 
 async fn register(State(s): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
-    if s.lock().unwrap().register_hangs {
+    // Recorded on arrival, before any hang: a real server may store the
+    // registration while its reply is still in flight.
+    let hangs = {
+        let mut st = s.lock().unwrap();
+        st.public_key_b64 = body
+            .get("public-key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        st.correlation_id = body
+            .get("correlation-id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        st.register_hangs
+    };
+    if hangs {
         tokio::time::sleep(Duration::from_secs(120)).await;
     }
-    let mut st = s.lock().unwrap();
-    st.public_key_b64 = body
-        .get("public-key")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    st.correlation_id = body
-        .get("correlation-id")
-        .and_then(Value::as_str)
-        .map(str::to_string);
     Json(json!({ "message": "registration successful" }))
 }
 
-async fn deregister(State(s): State<Shared>, Json(_body): Json<Value>) -> Json<Value> {
-    s.lock().unwrap().deregistered = true;
+async fn deregister(State(s): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
+    let mut st = s.lock().unwrap();
+    st.deregistered = true;
+    if let Some(id) = body.get("correlation-id").and_then(Value::as_str) {
+        st.deregistered_ids.push(id.to_string());
+    }
     Json(json!({ "message": "deregistration successful" }))
 }
 
@@ -206,7 +217,7 @@ async fn oob_end_to_end_register_poll_correlate_deregister() {
         proxy: None,
         insecure: true,
     };
-    let session = OobSession::start(&config)
+    let session = OobSession::start(&config, std::future::pending())
         .await
         .expect("register with mock");
 
@@ -394,7 +405,11 @@ async fn oob_session_start_fails_soft_when_no_server_registers() {
         proxy: None,
         insecure: true,
     };
-    assert!(OobSession::start(&config).await.is_err());
+    assert!(
+        OobSession::start(&config, std::future::pending())
+            .await
+            .is_err()
+    );
 }
 
 #[test]
@@ -424,14 +439,17 @@ async fn mock_session() -> (Shared, OobSession) {
     });
     state.lock().unwrap().host = addr.to_string();
     crate::ensure_crypto_provider();
-    let session = OobSession::start(&OobConfig {
-        servers: vec![format!("http://{addr}")],
-        secret: None,
-        wait_secs: 1,
-        timeout: 5,
-        proxy: None,
-        insecure: true,
-    })
+    let session = OobSession::start(
+        &OobConfig {
+            servers: vec![format!("http://{addr}")],
+            secret: None,
+            wait_secs: 1,
+            timeout: 5,
+            proxy: None,
+            insecure: true,
+        },
+        std::future::pending(),
+    )
     .await
     .expect("register with mock");
     (state, session)
@@ -592,7 +610,9 @@ async fn poller_finish_under_cancel_still_deregisters() {
         proxy: None,
         insecure: true,
     };
-    let session = OobSession::start(&config).await.expect("register");
+    let session = OobSession::start(&config, std::future::pending())
+        .await
+        .expect("register");
 
     let results = Arc::new(TokioMutex::new(Vec::new()));
     let findings_count = Arc::new(AtomicUsize::new(0));
@@ -731,7 +751,9 @@ async fn execute_scan_oob_drain_is_bounded_by_scan_timeout() {
 }
 
 /// A cancel that lands while OOB registration is stalled on an unresponsive
-/// server must not wait out `servers × timeout` before the job winds down.
+/// server must not wait out `servers × timeout` before the job winds down —
+/// and must still deregister the id the server may already have stored, or
+/// the registration is orphaned on the OAST server (#1666).
 #[tokio::test]
 async fn execute_scan_cancel_interrupts_oob_registration() {
     let state: Shared = Arc::new(StdMutex::new(MockState::default()));
@@ -741,17 +763,32 @@ async fn execute_scan_cancel_interrupts_oob_registration() {
     let progress = crate::job::JobProgress::default();
     let cancel = Arc::new(AtomicBool::new(false));
     let trip = cancel.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+    let seen = state.clone();
+    // Trip only once `/register` has arrived, so the cancel lands mid-register
+    // rather than during keygen (slow in a debug build under load).
+    // The bound is measured from the cancel, not from job start, so keygen
+    // time is not counted against it.
+    let tripped_at = tokio::spawn(async move {
+        while seen.lock().unwrap().correlation_id.is_none() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
         trip.store(true, Ordering::Relaxed);
+        std::time::Instant::now()
     });
-    let start = std::time::Instant::now();
     let run =
         crate::job::runner::execute_scan(&mut target, &args, &progress, &cancel, &|_| {}).await;
+    let since_cancel = tripped_at.await.expect("trip task").elapsed();
     assert!(run.was_cancelled);
     assert!(
-        start.elapsed() < Duration::from_secs(10),
-        "cancel must interrupt OOB registration (took {:?})",
-        start.elapsed()
+        since_cancel < Duration::from_secs(10),
+        "cancel must interrupt OOB registration (took {since_cancel:?})"
+    );
+    let st = state.lock().unwrap();
+    let registered = st.correlation_id.clone().expect("/register arrived");
+    assert_eq!(
+        st.deregistered_ids,
+        vec![registered],
+        "a cancel mid-register must deregister that correlation id exactly once"
     );
 }

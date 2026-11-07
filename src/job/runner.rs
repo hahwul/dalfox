@@ -483,11 +483,19 @@ pub(crate) async fn execute_scan(
                         // the drain grace and free the job's capacity slot
                         // while this worker still runs).
                         let oob_config = args.oob_config();
-                        let started = tokio::select! {
-                            r = crate::oob::OobSession::start(&oob_config) => r,
-                            _ = super::wait_for_cancellation(Some(cancel_flag.as_ref())) => return,
-                        };
+                        // Cancel goes *into* `start` rather than racing it in a
+                        // `select!`: dropping `start` mid-`/register` loses the
+                        // correlation id, leaving the registration armed on the
+                        // server (#1666). `start` deregisters before erroring.
+                        let started = crate::oob::OobSession::start(
+                            &oob_config,
+                            super::wait_for_cancellation(Some(cancel_flag.as_ref())),
+                        )
+                        .await;
                         match started {
+                            Err(_) if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) => {
+                                return;
+                            }
                             Ok(session) => {
                                 // Successful arming is diagnostic, not a
                                 // warning; the OOB finding is the real signal.

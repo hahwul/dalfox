@@ -47,7 +47,7 @@ pub(crate) async fn arm_and_dispatch(
     }
     let oob_session: Option<Arc<crate::oob::OobSession>> =
         if blind_active && args.blind_oob_enabled() {
-            match crate::oob::OobSession::start(&args.oob_config()).await {
+            match crate::oob::OobSession::start(&args.oob_config(), std::future::pending()).await {
                 Ok(session) => {
                     log_info(
                         args,
