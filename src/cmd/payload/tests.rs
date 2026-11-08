@@ -2,7 +2,7 @@ use super::{
     KNOWN_SELECTORS, PayloadArgs, awesome_alert_payloads, closest_selector, fetch_and_print_remote,
     functions_payloads, levenshtein_distance, print_summary, render_lines, run_payload,
     special_chars_payloads, static_selector_counts, static_selector_groups, summary_block,
-    tips_block, uri_scheme_payloads,
+    summary_json, tips_block, uri_scheme_payloads,
 };
 use crate::cmd::scan::ScanOutcome;
 
@@ -204,6 +204,24 @@ async fn test_fetch_and_print_remote_unknown_provider_no_network_path() {
 #[test]
 fn test_print_summary_executes() {
     print_summary();
+}
+
+#[test]
+fn test_summary_json_lists_every_selector_in_declared_order() {
+    let doc = summary_json();
+    let selectors: Vec<&str> = doc["selectors"]
+        .as_array()
+        .expect("selectors array")
+        .iter()
+        .map(|s| s.as_str().expect("selector string"))
+        .collect();
+    assert_eq!(selectors, KNOWN_SELECTORS);
+    for remote in NETWORK_SELECTORS.iter().chain(&AGGREGATE_SELECTORS) {
+        assert!(
+            doc["counts"].get(*remote).is_none(),
+            "{remote} has no static count"
+        );
+    }
 }
 
 #[test]
