@@ -411,9 +411,22 @@ fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
 
 /// `window.eval(…)` is the global; `calc.eval(…)` / `timer.setTimeout(…)` are
 /// some library's method and do not run their string argument as JavaScript.
+/// Chains of globals count too (`window.top.eval`, `document.defaultView`).
+// ponytail: an alias (`var w = window; w.eval(…)`) is a miss; tracking it
+// needs binding resolution, and guessing reopens the `calc.eval` FP.
 fn is_global_object(expr: &Expression<'_>) -> bool {
-    matches!(expr, Expression::Identifier(id)
-        if matches!(id.name.as_str(), "window" | "self" | "globalThis" | "top" | "parent" | "frames"))
+    const GLOBALS: &[&str] = &["window", "self", "globalThis", "top", "parent", "frames"];
+    match expr {
+        Expression::Identifier(id) => GLOBALS.contains(&id.name.as_str()),
+        Expression::StaticMemberExpression(m) => {
+            let prop = m.property.name.as_str();
+            (GLOBALS.contains(&prop) && is_global_object(&m.object))
+                || (prop == "defaultView"
+                    && matches!(&m.object, Expression::Identifier(id) if id.name == "document"))
+        }
+        Expression::ParenthesizedExpression(p) => is_global_object(&p.expression),
+        _ => false,
+    }
 }
 
 fn callee_matches_name(callee: &Expression<'_>, name: &str) -> bool {

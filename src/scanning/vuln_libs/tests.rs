@@ -763,7 +763,9 @@ fn npm_range_tags_and_lookalike_packages_are_not_versions() {
     for url in [
         "https://cdn.jsdelivr.net/npm/lodash@4.17/lodash.min.js",
         "https://unpkg.com/lodash@4.17",
-        "https://cdn.jsdelivr.net/npm/dompurify@3.2/dist/purify.min.js",
+        // 3.3.x's newest release is past every fix, so the tag is clean.
+        "https://cdn.jsdelivr.net/npm/dompurify@3.3/dist/purify.min.js",
+        "https://cdn.jsdelivr.net/npm/@types/dompurify@2.0.0/index.d.ts",
         "https://cdn.jsdelivr.net/npm/isomorphic-dompurify@2.16.0/dist/browser.js",
         "https://cdn.jsdelivr.net/npm/my-dompurify@1.0.0/x.js",
     ] {
@@ -785,6 +787,34 @@ fn detects_dompurify_in_jsdelivr_combine_url() {
         found
             .iter()
             .any(|v| v.library == "DOMPurify" && v.version == "2.0.0"),
+        "got {found:?}"
+    );
+}
+
+#[test]
+fn npm_range_tag_flags_a_line_with_no_fixed_release() {
+    // Every 1.12.x jQuery is below the 3.5.0 fix, so `@1.12` is vulnerable
+    // whichever patch it resolves to.
+    let found = libs(
+        r#"<script src="https://cdn.jsdelivr.net/npm/jquery@1.12/dist/jquery.min.js"></script>"#,
+    );
+    assert!(
+        found
+            .iter()
+            .any(|v| v.library == "jQuery" && v.version == "1.12"),
+        "got {found:?}"
+    );
+}
+
+#[test]
+fn combine_url_reads_every_library() {
+    let found = libs(
+        r#"<script src="https://cdn.jsdelivr.net/combine/npm/jquery@3.4.1,npm/bootstrap@4.3.1/dist/js/bootstrap.min.js"></script>"#,
+    );
+    assert!(
+        found
+            .iter()
+            .any(|v| v.library == "jQuery" && v.version == "3.4.1"),
         "got {found:?}"
     );
 }

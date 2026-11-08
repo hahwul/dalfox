@@ -630,9 +630,7 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
         }
         for cookie in self.cookies {
             validate_header_value("cookie", cookie)?;
-            if !cookie.trim().is_empty() {
-                validate_cookie_pairs("cookie", cookie)?;
-            }
+            validate_cookie_pairs("cookie", cookie)?;
         }
         validate_param_specs(self.params)?;
         if let Some(p) = self.proxy {
@@ -666,8 +664,9 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
 
 /// Refuse a cookie value with no `name=value` pair: `split_cookie_pairs` would
 /// drop it and the scan would run without the cookie. The value is not echoed.
+/// A blank value means "no cookie" on every surface and is allowed.
 pub(crate) fn validate_cookie_pairs(field: &str, cookie: &str) -> Result<(), String> {
-    if split_cookie_pairs(cookie).is_empty() {
+    if !cookie.trim().is_empty() && split_cookie_pairs(cookie).is_empty() {
         return Err(format!("{field}: expected 'name=value[; name2=value2]'"));
     }
     Ok(())

@@ -2354,6 +2354,11 @@ fn injection_response_suppressed(
     if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
         return true;
     }
+    // `Content-Disposition: attachment`: the browser saves the body instead of
+    // rendering it (an export endpoint, an uploaded file served as a download).
+    if crate::utils::http::is_attachment(headers) {
+        return true;
+    }
     let content_type = headers
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -2699,6 +2704,8 @@ pub(crate) async fn sxss_store_probe(
                     continue;
                 }
                 if let Ok(resp) = sent
+                    // A download never renders: not a stored sink.
+                    && !crate::utils::http::is_attachment(resp.headers())
                     && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                     && classify_reflection(&text, marker).is_some()
                     && sxss_injection_credited(&text, marker)
@@ -2920,11 +2927,20 @@ async fn fetch_injection_response(
                 if sent.is_err() {
                     crate::tick_request_failure();
                 }
-                if let Ok(resp) = sent
-                    // A download (an uploaded file served as attachment) never renders.
-                    && !crate::utils::http::is_attachment(resp.headers())
-                    && let Some(body) = gated_body(resp, param, payload, args).await
-                {
+                let Ok(resp) = sent else { continue };
+                // A header-gated answer (`--ignore-return`, attachment, inert
+                // type) is final, like a body without the payload: retrying
+                // cannot change it, so it counts for the early exit below.
+                if injection_response_suppressed(
+                    resp.status().as_u16(),
+                    resp.headers(),
+                    param,
+                    args,
+                ) {
+                    saw_any_body = true;
+                    continue;
+                }
+                if let Some(body) = gated_body(resp, param, payload, args).await {
                     saw_any_body = true;
                     if classify_reflection(&body.0.text, payload).is_some()
                         && sxss_injection_credited(&body.0.text, payload)

@@ -2745,6 +2745,31 @@ mod injection_response_gates {
     }
 
     #[test]
+    fn attachment_is_suppressed_on_every_path() {
+        let args = default_scan_args();
+        let download = headers(&[
+            ("content-type", "text/html"),
+            ("content-disposition", "attachment; filename=\"x.html\""),
+        ]);
+        assert!(injection_response_suppressed(
+            200,
+            &download,
+            &param(Location::Query),
+            &args
+        ));
+        let inline = headers(&[
+            ("content-type", "text/html"),
+            ("content-disposition", "inline"),
+        ]);
+        assert!(!injection_response_suppressed(
+            200,
+            &inline,
+            &param(Location::Query),
+            &args
+        ));
+    }
+
+    #[test]
     fn inert_data_content_types_are_suppressed_for_non_path_locations() {
         let args = default_scan_args();
         for location in [Location::Query, Location::Body, Location::Header] {

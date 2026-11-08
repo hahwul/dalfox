@@ -80,6 +80,13 @@ fn is_directive(attr: &str, directive: &str) -> bool {
 }
 
 fn has_directive(el: &scraper::node::Element, directive: &str) -> bool {
+    if directive == "ng-app" {
+        // Auto-bootstrap (`angularInit`) scans only these four spellings, not
+        // `$compile`'s full normalization (`ng_app` never bootstraps).
+        return ["ng-app", "data-ng-app", "ng:app", "x-ng-app"]
+            .iter()
+            .any(|a| el.attr(a).is_some());
+    }
     el.attrs().any(|(name, _)| is_directive(name, directive))
 }
 
@@ -398,6 +405,15 @@ mod tests {
         assert!(probe_confirms_csti(
             &TechType::Vue,
             &format!("<div id=app><v-app><v-main>{p}</v-main></v-app></div>")
+        ));
+        // `ng_app` is a `$compile` alias but never auto-bootstraps.
+        assert!(!probe_confirms_csti(
+            &ng,
+            &format!("<div ng_app><p>{p}</p></div>")
+        ));
+        assert!(probe_confirms_csti(
+            &ng,
+            &format!("<div x-ng-app><p>{p}</p></div>")
         ));
         // Vue compiles `<template v-if>` content (in-DOM templates use outerHTML).
         assert!(probe_confirms_csti(

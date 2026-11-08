@@ -1015,6 +1015,17 @@ fn exec_sink_inner_code_requires_global_receiver_and_code_prefix() {
         p,
         "<script>eval(\"x=1;\" + \"alert(1)\");</script>"
     ));
+    // Chains of globals are the global too.
+    for src in [
+        "<script>window.top.eval(\"alert(1)\");</script>",
+        "<script>document.defaultView.setTimeout(\"alert(1)\");</script>",
+    ] {
+        assert!(has_js_context_evidence(p, src), "{src}");
+    }
+    assert!(!has_js_context_evidence(
+        p,
+        "<script>calc.top.eval(\"alert(1)\");</script>"
+    ));
     // A library method that happens to be named `eval` does not.
     assert!(!has_js_context_evidence(
         p,

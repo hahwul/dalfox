@@ -30,15 +30,20 @@ fn normalize_host(s: &str) -> String {
         .strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
         .unwrap_or(s);
-    // `Url` serializes IPv6 canonically (`::1`, IPv4-mapped in hex:
-    // `::ffff:7f00:1`), so compare through the same serializer:
-    // `0:0:0:0:0:0:0:1` or `::FFFF:127.0.0.1` would otherwise exclude nothing.
-    // (`Ipv6Addr`'s Display prints mapped addresses dotted, which differs.)
-    if s.parse::<std::net::Ipv6Addr>().is_ok()
-        && let Ok(host) = url::Host::parse(&format!("[{s}]"))
-    {
-        let h = host.to_string();
-        return h.trim_start_matches('[').trim_end_matches(']').to_string();
+    // Compare through `Url`'s own host serializer, so every spelling of one
+    // host meets: IPv6 (`0:0:0:0:0:0:0:1` → `::1`, mapped `::ffff:7f00:1` in
+    // hex), IPv4 shorthand (`127.1`, `0x7f.0.0.1`) and IDNA (`bücher` →
+    // `xn--bcher-kva`). A glob is not a host, so it is only lowercased.
+    if !s.contains('*') {
+        let bracketed = if s.contains(':') {
+            format!("[{s}]")
+        } else {
+            s.to_string()
+        };
+        if let Ok(host) = url::Host::parse(&bracketed) {
+            let h = host.to_string();
+            return h.trim_start_matches('[').trim_end_matches(']').to_string();
+        }
     }
     s.to_lowercase()
 }
@@ -403,6 +408,13 @@ mod input_shape_tests {
         assert!(domain_matches_pattern(
             "[::ffff:7f00:1]",
             "::FFFF:127.0.0.1"
+        ));
+        // IPv4 shorthand and IDNA spellings name the canonical host.
+        assert!(domain_matches_pattern("127.0.0.1", "127.1"));
+        assert!(domain_matches_pattern("127.0.0.1", "0x7f.0.0.1"));
+        assert!(domain_matches_pattern(
+            "xn--bcher-kva.example",
+            "bücher.example"
         ));
         // Globs over the hex form `Url` prints still match a mapped host.
         assert!(domain_matches_pattern("[::ffff:7f00:1]", "::ffff:7f00:*"));

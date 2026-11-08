@@ -1183,6 +1183,8 @@ async fn verify_sxss_dom(
                 if args.ignore_return.contains(&resp.status().as_u16())
                     || crate::utils::http::is_attachment(resp.headers())
                 {
+                    // Final answer, not a transport miss: counts for the early exit.
+                    saw_any_body = true;
                     continue;
                 }
                 let headers = resp.headers().clone();

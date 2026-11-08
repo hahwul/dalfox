@@ -361,9 +361,8 @@ fn curl_upload_poc(
             continue;
         };
         let source = if i == stdin_part { "-" } else { "/dev/null" };
-        // curl reads `\` / `\"` as escapes inside a quoted filename.
-        let quoted = filename.replace('\\', "\\\\").replace('"', "\\\"");
-        let mut spec = format!("{}=@{source};filename=\"{quoted}\"", part.name);
+        // Quote- and backslash-free here (those take the replay path above).
+        let mut spec = format!("{}=@{source};filename=\"{filename}\"", part.name);
         // A `;` would start another curl modifier, so drop MIME parameters.
         if let Some(mime) = part
             .content_type
