@@ -24,11 +24,9 @@ fn test_sarif_output_basic_structure() {
 
     // Verify SARIF version and schema
     assert_eq!(json["version"], "2.1.0");
-    assert!(
-        json["$schema"]
-            .as_str()
-            .unwrap()
-            .contains("sarif-schema-2.1.0.json")
+    assert_eq!(
+        json["$schema"],
+        "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
     );
 
     // Verify runs array

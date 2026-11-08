@@ -16,8 +16,8 @@ use super::{ScanOutcome, emit_error, session};
 
 /// Everything that must hold — and be installed — before the first request
 /// goes out: numeric ranges, the session-check inputs, the `--session-check-url`
-/// / `--sxss-url` / `--proxy` URL shapes, and the custom-payload file, plus the
-/// process-wide rate limiter.
+/// / `--sxss-url` / `--proxy` / `--blind` URL shapes, and the custom-payload
+/// file, plus the process-wide rate limiter.
 ///
 /// These are grouped because they share one property: each failure they catch
 /// is otherwise discovered *mid-scan*, where it reads as a result rather than a
@@ -92,6 +92,30 @@ fn validate_param_inputs(args: &ScanArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Refuse an `-o/--output` path whose parent directory is missing or is not a
+/// directory. The file is only written after the whole scan, and with `-o` the
+/// results are not printed to stdout either, so this would otherwise lose them.
+/// An empty parent (`out.json`) is the current directory. Permission and
+/// disk-full errors are still left to the write itself.
+fn validate_output_dir(path: &str) -> Result<(), String> {
+    let Some(dir) = std::path::Path::new(path)
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+    else {
+        return Ok(());
+    };
+    if dir.is_dir() {
+        Ok(())
+    } else if dir.exists() {
+        Err(format!("--output: '{}' is not a directory", dir.display()))
+    } else {
+        Err(format!(
+            "--output: directory '{}' does not exist",
+            dir.display()
+        ))
+    }
+}
+
 pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOutcome> {
     // Validate numeric args up front so misconfigurations (workers: 0,
     // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
@@ -124,6 +148,11 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
             crate::cmd::error_codes::INVALID_INPUT_TYPE,
             &msg,
         );
+        return Err(ScanOutcome::Error);
+    }
+
+    if let Some(Err(msg)) = args.output.as_deref().map(validate_output_dir) {
+        emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &msg);
         return Err(ScanOutcome::Error);
     }
 
@@ -194,11 +223,20 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // The validators return self-contained messages (the operator-supplied
     // value is never echoed), so a proxy password can't leak and a value with
     // an embedded newline can't forge a log line.
+    //
+    // `--blind` goes through the same check REST and MCP use: a value that is
+    // not an absolute http(s) URL still plants stored `<script src=…>` payloads
+    // in every parameter, and they can never call back. Empty means no blind XSS.
+    // Unlike the others, its message does echo the value, passed through
+    // `sanitize_log_message` first, the same message REST and MCP return.
     for checked in [
         args.session_check_url
             .as_deref()
             .map(|u| validate_http_url(u, "--session-check-url")),
         args.proxy.as_deref().map(validate_proxy_url),
+        args.blind_callback_url
+            .as_deref()
+            .map(|u| crate::job::normalize_blind_callback(u, "--blind").map(|_| ())),
     ]
     .into_iter()
     .chain(
@@ -436,6 +474,53 @@ mod tests {
         assert!(!err.contains("supersecrettoken"), "value echoed: {err}");
         for ok in ["sid=abc", "a=1; b=2", ""] {
             assert!(check(ok).is_ok(), "{ok:?} must be accepted");
+        }
+    }
+
+    #[test]
+    fn test_validate_output_dir() {
+        let dir = std::env::temp_dir().join(format!("dalfox-output-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("not-a-dir");
+        std::fs::write(&file, "").unwrap();
+        let path = |p: &std::path::Path| p.to_string_lossy().to_string();
+
+        let err = validate_output_dir(&path(&dir.join("missing").join("out.json"))).unwrap_err();
+        assert!(err.contains("does not exist"), "{err}");
+        let err = validate_output_dir(&path(&file.join("out.json"))).unwrap_err();
+        assert!(err.contains("is not a directory"), "{err}");
+        assert!(validate_output_dir("out.json").is_ok());
+        assert!(validate_output_dir(&path(&dir.join("out.json"))).is_ok());
+
+        let args = ScanArgs {
+            output: Some(path(&dir.join("missing").join("out.json"))),
+            silence: true,
+            ..Default::default()
+        };
+        assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_prepare_and_validate_checks_blind_callback() {
+        let check = |blind: &str| {
+            let args = ScanArgs {
+                blind_callback_url: Some(blind.to_string()),
+                silence: true,
+                ..Default::default()
+            };
+            prepare_and_validate(&args)
+        };
+        for bad in ["notaurl", "http://", "ftp://x", "xss.ht"] {
+            assert_eq!(
+                check(bad),
+                Err(ScanOutcome::Error),
+                "{bad} must be rejected"
+            );
+        }
+        for ok in ["https://cb.example/x", "http://cb.example", ""] {
+            assert_eq!(check(ok), Ok(()), "{ok:?} must be accepted");
         }
     }
 }
