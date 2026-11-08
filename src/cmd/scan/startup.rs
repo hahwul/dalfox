@@ -193,6 +193,8 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // `--blind` goes through the same check REST and MCP use: a value that is
     // not an absolute http(s) URL still plants stored `<script src=…>` payloads
     // in every parameter, and they can never call back. Empty means no blind XSS.
+    // Unlike the others, its message does echo the value, passed through
+    // `sanitize_log_message` first, the same message REST and MCP return.
     for checked in [
         args.session_check_url
             .as_deref()
