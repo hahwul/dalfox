@@ -269,8 +269,10 @@ async fn a_failed_report_write_does_not_complete_targets_with_findings() {
     let state = unique_temp_path("resume-unreported", "jsonl");
     let targets = vec![format!("{}/a?q=1", base)];
 
-    // A path whose parent does not exist: the report cannot be written.
-    let bad_out = unique_temp_path("resume-no-such-dir", "d").join("report.json");
+    // A path that is an existing directory: it passes the startup check on the
+    // parent, and the report write at the end still fails.
+    let bad_out = unique_temp_path("resume-out-is-dir", "d");
+    std::fs::create_dir_all(&bad_out).expect("create dir");
     let vulnerable = |out: &Path| ScanArgs {
         // Discovery on, so the reflected `q` is actually tested.
         skip_discovery: false,
@@ -311,6 +313,7 @@ async fn a_failed_report_write_does_not_complete_targets_with_findings() {
 
     let _ = std::fs::remove_file(&state);
     let _ = std::fs::remove_file(&out2);
+    let _ = std::fs::remove_dir(&bad_out);
 }
 
 // Only `completed` may be skipped. A target dropped in preflight was never
