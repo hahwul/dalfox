@@ -16,8 +16,8 @@ use super::{ScanOutcome, emit_error, session};
 
 /// Everything that must hold — and be installed — before the first request
 /// goes out: numeric ranges, the session-check inputs, the `--session-check-url`
-/// / `--sxss-url` / `--proxy` URL shapes, and the custom-payload file, plus the
-/// process-wide rate limiter.
+/// / `--sxss-url` / `--proxy` / `--blind` URL shapes, and the custom-payload
+/// file, plus the process-wide rate limiter.
 ///
 /// These are grouped because they share one property: each failure they catch
 /// is otherwise discovered *mid-scan*, where it reads as a result rather than a
@@ -189,11 +189,20 @@ pub(crate) fn prepare_and_validate(args: &ScanArgs) -> Result<(), super::ScanOut
     // The validators return self-contained messages (the operator-supplied
     // value is never echoed), so a proxy password can't leak and a value with
     // an embedded newline can't forge a log line.
+    //
+    // `--blind` goes through the same check REST and MCP use: a value that is
+    // not an absolute http(s) URL still plants stored `<script src=…>` payloads
+    // in every parameter, and they can never call back. Empty means no blind XSS.
+    // Unlike the others, its message does echo the value, passed through
+    // `sanitize_log_message` first, the same message REST and MCP return.
     for checked in [
         args.session_check_url
             .as_deref()
             .map(|u| validate_http_url(u, "--session-check-url")),
         args.proxy.as_deref().map(validate_proxy_url),
+        args.blind_callback_url
+            .as_deref()
+            .map(|u| crate::job::normalize_blind_callback(u, "--blind").map(|_| ())),
     ]
     .into_iter()
     .chain(
@@ -412,5 +421,27 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(prepare_and_validate(&args), Err(ScanOutcome::Error));
+    }
+
+    #[test]
+    fn test_prepare_and_validate_checks_blind_callback() {
+        let check = |blind: &str| {
+            let args = ScanArgs {
+                blind_callback_url: Some(blind.to_string()),
+                silence: true,
+                ..Default::default()
+            };
+            prepare_and_validate(&args)
+        };
+        for bad in ["notaurl", "http://", "ftp://x", "xss.ht"] {
+            assert_eq!(
+                check(bad),
+                Err(ScanOutcome::Error),
+                "{bad} must be rejected"
+            );
+        }
+        for ok in ["https://cb.example/x", "http://cb.example", ""] {
+            assert_eq!(check(ok), Ok(()), "{ok:?} must be accepted");
+        }
     }
 }
