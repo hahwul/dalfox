@@ -98,13 +98,7 @@ pub fn parse_postman(
         match build_request(req, &vars, base_url) {
             Ok(t) if super::is_unscanned_spec_method(&t.method) => out.unscanned_methods += 1,
             Ok(t) => {
-                let size = t.url.as_str().len()
-                    + t.data.as_ref().map_or(0, String::len)
-                    + t.headers
-                        .iter()
-                        .map(|(k, v)| k.len() + v.len())
-                        .sum::<usize>();
-                budget = budget.saturating_sub(size);
+                budget = budget.saturating_sub(super::imported_size(&t));
                 out.targets.push(t);
             }
             Err(e) => out.skip(format!("{label}: {e}")),
@@ -386,19 +380,12 @@ fn build_request(
     }
     // Every body kind (raw and graphql included) and the URL count toward
     // the per-request cap, not just the key/value lists.
-    let size = target.url.as_str().len()
-        + target.data.as_ref().map_or(0, String::len)
-        + imported
-            .headers
-            .iter()
-            .map(|(k, v)| k.len() + v.len())
-            .sum::<usize>();
-    if size > MAX_IMPORT_REQUEST_BYTES {
-        return Err(too_large());
-    }
     target.headers = imported.headers;
     target.cookies = imported.cookies;
     target.user_agent = imported.user_agent;
+    if super::imported_size(&target) > MAX_IMPORT_REQUEST_BYTES {
+        return Err(too_large());
+    }
     Ok(target)
 }
 

@@ -722,3 +722,21 @@ fn split_server_separates_origin_from_path() {
         assert_eq!(split_server(input), *want, "{input:?}");
     }
 }
+
+#[test]
+fn cookie_params_are_charged_to_the_import_budget() {
+    // A shared `$ref` path item carrying cookie params must cost what its
+    // cookies hold, or it amplifies past the byte budget unbounded.
+    let spec = r##"{"openapi":"3.0.0","info":{"title":"t","version":"1"},
+      "servers":[{"url":"http://a.test"}],
+      "paths":{"/x":{"get":{"parameters":[{"name":"sess","in":"cookie","example":"0123456789"}]}}}}"##;
+    let t = &parse(spec).targets[0];
+    assert_eq!(
+        t.cookies,
+        vec![("sess".to_string(), "0123456789".to_string())]
+    );
+    assert_eq!(
+        crate::target_parser::imported_size(t),
+        t.url.as_str().len() + "sess".len() + "0123456789".len()
+    );
+}

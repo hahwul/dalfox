@@ -31,6 +31,17 @@ pub(crate) fn too_large(noun: &str) -> String {
     format!("{noun} expands past {} MiB", MAX_IMPORT_REQUEST_BYTES >> 20)
 }
 
+/// Bytes one imported target holds (URL, body, headers and cookies), charged
+/// against the import budget. Cookies count like headers: a shared `$ref`
+/// path item or a `{{var}}` Cookie header otherwise amplifies unbounded.
+pub(crate) fn imported_size(t: &Target) -> usize {
+    let pairs = |v: &[(String, String)]| v.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>();
+    t.url.as_str().len()
+        + t.data.as_ref().map_or(0, String::len)
+        + pairs(&t.headers)
+        + pairs(&t.cookies)
+}
+
 /// Methods a spec import does not scan. HEAD and OPTIONS responses carry no
 /// body to reflect into; DELETE with placeholder ids would have discovery,
 /// mining and every payload hit a destructive endpoint. Counted, not silent.

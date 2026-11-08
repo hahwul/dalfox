@@ -409,13 +409,35 @@ fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
     }
 }
 
+/// `window.eval(…)` is the global; `calc.eval(…)` / `timer.setTimeout(…)` are
+/// some library's method and do not run their string argument as JavaScript.
+/// Chains of globals count too (`window.top.eval`, `document.defaultView`).
+// ponytail: an alias (`var w = window; w.eval(…)`) is a miss; tracking it
+// needs binding resolution, and guessing reopens the `calc.eval` FP.
+fn is_global_object(expr: &Expression<'_>) -> bool {
+    const GLOBALS: &[&str] = &["window", "self", "globalThis", "top", "parent", "frames"];
+    match expr {
+        Expression::Identifier(id) => GLOBALS.contains(&id.name.as_str()),
+        Expression::StaticMemberExpression(m) => {
+            let prop = m.property.name.as_str();
+            (GLOBALS.contains(&prop) && is_global_object(&m.object))
+                || (prop == "defaultView"
+                    && matches!(&m.object, Expression::Identifier(id) if id.name == "document"))
+        }
+        Expression::ParenthesizedExpression(p) => is_global_object(&p.expression),
+        _ => false,
+    }
+}
+
 fn callee_matches_name(callee: &Expression<'_>, name: &str) -> bool {
     match callee {
         Expression::Identifier(id) => id.name.as_str() == name,
-        Expression::StaticMemberExpression(m) => m.property.name.as_str() == name,
+        Expression::StaticMemberExpression(m) => {
+            m.property.name.as_str() == name && is_global_object(&m.object)
+        }
         Expression::ComputedMemberExpression(m) => {
             if let Expression::StringLiteral(lit) = &m.expression {
-                lit.value.as_str() == name
+                lit.value.as_str() == name && is_global_object(&m.object)
             } else {
                 false
             }
@@ -524,6 +546,13 @@ fn try_parse_exec_sink_code(
     true
 }
 
+/// The concatenated literals before this one leave the code at a position
+/// where the next literal is parsed as code: not inside a string, and not
+/// inside a comment (`eval("/*" + "…" + "*/")`).
+fn prefix_is_code(accumulated: &str) -> bool {
+    crate::payload::js_breakout::ends_in_js_code(accumulated)
+}
+
 fn process_exec_sink_expression(
     expr: &Expression<'_>,
     script_src: &str,
@@ -578,7 +607,7 @@ fn process_exec_sink_expression(
                             accumulated.push_str(lit_val);
                         }
                     } else {
-                        if crate::payload::js_breakout::enclosing_js_quote(&accumulated).is_none() {
+                        if prefix_is_code(&accumulated) {
                             let code_offset = lit_start + 1;
                             let inner_code_end = lit_end - 1;
                             if inner_code_end > code_offset {
@@ -591,7 +620,7 @@ fn process_exec_sink_expression(
                         accumulated.push_str(lit_val);
                     }
                 } else {
-                    if crate::payload::js_breakout::enclosing_js_quote(&accumulated).is_none() {
+                    if prefix_is_code(&accumulated) {
                         let code_offset = lit_start + 1;
                         let inner_code_end = lit_end - 1;
                         if inner_code_end > code_offset {
@@ -1324,6 +1353,14 @@ fn check_marker_in_expression(expr: &Expression<'_>, script_src: &str, marker: &
                 || check_marker_in_expression(&c.consequent, script_src, marker)
                 || check_marker_in_expression(&c.alternate, script_src, marker)
         }
+        // `$(function(){ setTimeout("…") })`, `addEventListener("load", () => …)`.
+        Expression::FunctionExpression(f) => f
+            .body
+            .as_ref()
+            .is_some_and(|b| check_marker_in_statements(&b.statements, script_src, marker)),
+        Expression::ArrowFunctionExpression(f) => {
+            check_marker_in_statements(&f.body.statements, script_src, marker)
+        }
         _ => false,
     }
 }
@@ -1368,8 +1405,7 @@ fn check_exec_sink_candidate_for_marker(
                             let after_colon = &lit_val[colon_pos + 1..];
                             if let Some(marker_idx) = after_colon.find(marker) {
                                 let prefix = &after_colon[..marker_idx];
-                                if crate::payload::js_breakout::enclosing_js_quote(prefix).is_none()
-                                {
+                                if prefix_is_code(prefix) {
                                     return true;
                                 }
                             }
@@ -1383,7 +1419,7 @@ fn check_exec_sink_candidate_for_marker(
                 } else {
                     if let Some(marker_idx) = leaf_content.find(marker) {
                         let prefix = format!("{}{}", accumulated, &leaf_content[..marker_idx]);
-                        if crate::payload::js_breakout::enclosing_js_quote(&prefix).is_none() {
+                        if prefix_is_code(&prefix) {
                             return true;
                         }
                     }
@@ -1392,7 +1428,7 @@ fn check_exec_sink_candidate_for_marker(
             } else {
                 if let Some(marker_idx) = leaf_content.find(marker) {
                     let prefix = format!("{}{}", accumulated, &leaf_content[..marker_idx]);
-                    if crate::payload::js_breakout::enclosing_js_quote(&prefix).is_none() {
+                    if prefix_is_code(&prefix) {
                         return true;
                     }
                 }

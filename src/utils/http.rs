@@ -341,6 +341,17 @@ pub(crate) fn parse_header_line(line: &str) -> Option<(String, String)> {
     Some((name.to_string(), value.to_string()))
 }
 
+/// Whether the response is served as a download (`Content-Disposition:
+/// attachment`): a browser saves it instead of rendering it, so markup in it
+/// never runs. The standard way upload endpoints serve stored files.
+pub(crate) fn is_attachment(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get(reqwest::header::CONTENT_DISPOSITION)
+        // Bytes, not `to_str`: a raw UTF-8 `filename="메모.html"` is common.
+        .and_then(|v| v.as_bytes().split(|&b| b == b';').next())
+        .is_some_and(|t| t.trim_ascii().eq_ignore_ascii_case(b"attachment"))
+}
+
 /// Extract primary type/subtype (lowercased) from a Content-Type header.
 /// Returns None for invalid formats.
 #[inline]

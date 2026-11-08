@@ -25,6 +25,7 @@ pub(crate) fn validate_scan_options(opts: &mut ScanOptions) -> Result<(), String
         headers: opts.header.as_deref().unwrap_or_default(),
         user_agent: opts.user_agent.as_deref(),
         cookies: opts.cookie.as_slice(),
+        params: opts.param.as_deref().unwrap_or_default(),
         proxy: Some(&mut opts.proxy),
         blind: Some((&mut opts.blind, "blind")),
         blind_oob: Some(&mut opts.blind_oob),

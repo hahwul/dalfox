@@ -113,13 +113,7 @@ pub fn parse_openapi(
             };
             match op_ctx.build(base_url) {
                 Ok(t) => {
-                    let size = t.url.as_str().len()
-                        + t.data.as_ref().map_or(0, String::len)
-                        + t.headers
-                            .iter()
-                            .map(|(k, v)| k.len() + v.len())
-                            .sum::<usize>();
-                    budget = budget.saturating_sub(size);
+                    budget = budget.saturating_sub(super::imported_size(&t));
                     out.targets.push(t);
                 }
                 Err(e) => {

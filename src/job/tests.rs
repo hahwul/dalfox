@@ -2028,6 +2028,37 @@ async fn sanitized_results_filter_min_confidence_before_ast_dedup() {
 }
 
 #[test]
+fn scan_option_checks_reject_unknown_param_type_and_pairless_cookie() {
+    let params = ["q:qurey".to_string()];
+    let err = ScanOptionChecks::<f32> {
+        params: &params,
+        ..Default::default()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(err.contains("qurey"), "{err}");
+    let cookies = ["sid".to_string()];
+    let err = ScanOptionChecks::<f32> {
+        cookies: &cookies,
+        ..Default::default()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(err.starts_with("cookie: expected"), "{err}");
+    let params = ["q:query".to_string(), "id".to_string()];
+    let cookies = ["a=1; b=2".to_string(), String::new(), " ".to_string()];
+    assert!(
+        ScanOptionChecks::<f32> {
+            params: &params,
+            cookies: &cookies,
+            ..Default::default()
+        }
+        .validate()
+        .is_ok()
+    );
+}
+
+#[test]
 fn scan_option_checks_reject_an_unknown_min_confidence() {
     for ok in ["low", "high"] {
         assert!(
@@ -2264,4 +2295,11 @@ fn test_parse_status_filter_is_trimmed_and_case_insensitive() {
 fn test_parse_status_filter_rejects_unknown_with_normalized_value() {
     let err = parse_status_filter(Some(" BoGus ")).unwrap_err();
     assert!(err.contains("'bogus'"), "got: {err}");
+}
+
+#[test]
+fn validate_cookie_pairs_allows_blank_on_every_surface() {
+    // The CLI calls this directly; REST/MCP through ScanOptionChecks.
+    assert!(validate_cookie_pairs("--cookies", " ").is_ok());
+    assert!(validate_cookie_pairs("--cookies", "sid").is_err());
 }

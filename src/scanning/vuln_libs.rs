@@ -68,7 +68,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)jquery[._-](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
             r"(?i)/jquery/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/jquery@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/jquery@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
         ],
         inline_patterns: &[r"(?i)jQuery(?: JavaScript Library)? v(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[
@@ -102,7 +102,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "jQuery UI",
         url_patterns: &[
             r"(?i)jquery[-.]ui[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/jquery-ui@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/jquery-ui@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/(?:jqueryui|jquery-ui)/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)jQuery UI(?: -)? v(\d+\.\d+(?:\.\d+)?)"],
@@ -122,7 +122,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "jQuery Validation",
         url_patterns: &[
             r"(?i)jquery[.-]validate[.-](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/jquery-validation@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/jquery-validation@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/jquery[.-]validate/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)jQuery Validation Plugin(?: -)? v(\d+\.\d+(?:\.\d+)?)"],
@@ -157,7 +157,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "AngularJS",
         url_patterns: &[
             r"(?i)angular[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/angular@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/angular@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/(?:angular(?:\.js)?|angularjs)/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r#"(?i)angular.*?\bversion\b.*?["'](\d+\.\d+\.\d+)["']"#],
@@ -173,7 +173,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Bootstrap",
         url_patterns: &[
             r"(?i)bootstrap[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/bootstrap@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/bootstrap@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/(?:twitter-)?bootstrap/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)Bootstrap(?: v)?\s*v?(\d+\.\d+(?:\.\d+)?)"],
@@ -196,7 +196,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Lodash",
         url_patterns: &[
             r"(?i)lodash[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/lodash@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/lodash@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/lodash(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[
@@ -213,7 +213,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Handlebars",
         url_patterns: &[
             r"(?i)handlebars[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/handlebars@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/handlebars@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/handlebars(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)Handlebars(?:\.js)?(?: v| version )(\d+\.\d+(?:\.\d+)?)"],
@@ -228,7 +228,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Moment.js",
         url_patterns: &[
             r"(?i)moment[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/moment@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/moment@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/moment(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)//! moment\.js\s*\n//! version : (\d+\.\d+(?:\.\d+)?)"],
@@ -246,7 +246,7 @@ static LIB_SPECS: &[LibSpec] = &[
     LibSpec {
         name: "DOMPurify",
         url_patterns: &[
-            r"(?i)dompurify@(\d+\.\d+(?:\.\d+)?)",
+            r"(?im)/dompurify@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
             r"(?i)/dompurify/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)@license DOMPurify (\d+\.\d+(?:\.\d+)?)"],
@@ -274,12 +274,6 @@ static LIB_SPECS: &[LibSpec] = &[
                 fixed: "3.1.3",
                 advisories: &["CVE-2024-45801", "CVE-2024-47875"],
                 severity: SEV_HIGH,
-            },
-            VulnRange {
-                introduced: None,
-                fixed: "3.2.4",
-                advisories: &["CVE-2025-26791"],
-                severity: SEV_MEDIUM,
             },
             VulnRange {
                 introduced: Some("2.5.3"),
@@ -312,7 +306,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)underscore[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min)?\.js",
             r"(?i)/underscore(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/underscore@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/underscore@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
         ],
         // Anchored to the `//` banner line: Lo-Dash 2.x credits "Based on
         // Underscore.js 1.5.2" inside its own `/** */` banner.
@@ -329,7 +323,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)knockout[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min|\.debug)?\.js",
             r"(?i)/knockout/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/knockout@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/knockout@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
         ],
         inline_patterns: &[r"(?i)Knockout JavaScript library v(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[VulnRange {
@@ -344,7 +338,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?im)(?:^|/)mustache[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
             r"(?i)/mustache(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/mustache(?:\.js)?@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/mustache(?:\.js)?@(\d+\.\d+(?:\.\d+)?)(?:[/,]|$)",
         ],
         // Anchored to `name: 'mustache.js'`, which every release declares just
         // before its version, so another library's `version: '…'` is ignored.
@@ -465,13 +459,22 @@ fn severity_rank(s: &str) -> u8 {
 /// Judge a single `(library, version)`: returns the aggregated advisories,
 /// worst severity, and earliest fixing release across all ranges the version
 /// falls into, or `None` if the version is not known-vulnerable.
-fn judge(lib: &CompiledLib, version: &str) -> Option<VulnLib> {
+///
+/// `is_range` is an npm two-part tag (`@4.17`), which jsDelivr/unpkg resolve
+/// to the newest `4.17.x`: it is vulnerable only when *every* release on that
+/// line is, so the lower bound is checked at `x.y.0` and the fix at `x.y.∞`.
+fn judge(lib: &CompiledLib, version: &str, is_range: bool) -> Option<VulnLib> {
+    let upper = if is_range {
+        format!("{version}.{}", u32::MAX)
+    } else {
+        version.to_string()
+    };
     let mut advisories: Vec<String> = Vec::new();
     let mut severity = SEV_LOW;
     let mut fixed_in: Option<&'static str> = None;
     for range in lib.ranges {
         let in_range = range.introduced.is_none_or(|lo| version_ge(version, lo))
-            && version_lt(version, range.fixed);
+            && version_lt(&upper, range.fixed);
         if in_range {
             for a in range.advisories {
                 if !advisories.iter().any(|x| x == a) {
@@ -511,21 +514,37 @@ pub(crate) fn detect_vulnerable_libraries(body: &str) -> Vec<VulnLib> {
     let (url_hay, inline_hay) = script_haystacks(body);
 
     for lib in COMPILED.iter() {
-        let mut versions: Vec<String> = Vec::new();
+        let mut versions: Vec<(String, bool)> = Vec::new();
         // url-patterns over <script src> URLs; inline-patterns over inline bodies.
-        for (res, hay) in [(&lib.url_res, &url_hay), (&lib.inline_res, &inline_hay)] {
+        for (res, hay, is_url) in [
+            (&lib.url_res, &url_hay, true),
+            (&lib.inline_res, &inline_hay, false),
+        ] {
             for re in res {
                 for cap in re.captures_iter(hay) {
+                    let whole = cap.get(0).map_or("", |m| m.as_str());
+                    // A scoped package (`npm/@types/dompurify@…`) is a different
+                    // package that happens to share the name.
+                    let start = cap.get(0).map_or(0, |m| m.start());
+                    if hay[..start]
+                        .rsplit(['/', '\n'])
+                        .next()
+                        .is_some_and(|seg| seg.starts_with('@'))
+                    {
+                        continue;
+                    }
                     // First non-empty capture group is the version (inline patterns
                     // may use alternation with two groups).
                     if let Some(v) = (1..cap.len()).find_map(|i| cap.get(i)).map(|m| m.as_str()) {
-                        versions.push(v.to_string());
+                        // `@x.y` only in a CDN URL; an inline `@license` banner is exact.
+                        let is_range = is_url && whole.contains('@') && v.matches('.').count() == 1;
+                        versions.push((v.to_string(), is_range));
                     }
                 }
             }
         }
-        for version in versions {
-            if let Some(found) = judge(lib, &version)
+        for (version, is_range) in versions {
+            if let Some(found) = judge(lib, &version, is_range)
                 && seen.insert((lib.name.to_string(), version.clone()))
             {
                 out.push(found);

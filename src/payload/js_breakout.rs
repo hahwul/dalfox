@@ -211,6 +211,22 @@ pub(crate) fn compute_js_breakout(prefix: &str) -> String {
 /// `s.replace(/"/g, '&quot;')` are common in the code before a reflection and
 /// would otherwise leave the scan inside a phantom string.
 pub(crate) fn enclosing_js_quote(prefix: &str) -> Option<char> {
+    match js_end_state(prefix) {
+        State::Single => Some('\''),
+        State::Double => Some('"'),
+        State::Template => Some('`'),
+        _ => None,
+    }
+}
+
+/// `prefix` ends in plain code: not inside a string, template or comment
+/// (an open `//` line or `/* */` block). A closed comment or a `//` inside an
+/// earlier string literal does not count.
+pub(crate) fn ends_in_js_code(prefix: &str) -> bool {
+    js_end_state(prefix) == State::Code
+}
+
+fn js_end_state(prefix: &str) -> State {
     const KEYWORDS_BEFORE_REGEX: &[&str] = &[
         "return",
         "typeof",
@@ -351,12 +367,7 @@ pub(crate) fn enclosing_js_quote(prefix: &str) -> Option<char> {
         }
         i += 1;
     }
-    match state {
-        State::Single => Some('\''),
-        State::Double => Some('"'),
-        State::Template => Some('`'),
-        _ => None,
-    }
+    state
 }
 
 /// Representative structural shells (openers preceding the reflected string),

@@ -792,6 +792,12 @@ fn test_reblaze_detection_by_body() {
     let body = "Access Denied (403). Current session has been terminated.";
     let result = fingerprint_from_response(&headers, Some(body), 403);
     assert!(result.waf_types().contains(&&WafType::Reblaze));
+    let floor = crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE;
+    assert!(result.detected[0].confidence >= floor);
+    // The same wording on an ordinary 200 session-expiry page stays below it.
+    let logout = "<p>Your current session has been terminated due to inactivity.</p>";
+    let result = fingerprint_from_response(&headers, Some(logout), 200);
+    assert!(result.detected.iter().all(|fp| fp.confidence < floor));
 }
 
 #[test]

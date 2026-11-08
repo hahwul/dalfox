@@ -2354,6 +2354,11 @@ fn injection_response_suppressed(
     if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
         return true;
     }
+    // `Content-Disposition: attachment`: the browser saves the body instead of
+    // rendering it (an export endpoint, an uploaded file served as a download).
+    if crate::utils::http::is_attachment(headers) {
+        return true;
+    }
     let content_type = headers
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -2615,9 +2620,14 @@ pub(crate) struct StoreProbeOutcome {
 /// the old window by scaling attempts with the URL count; a store visible within
 /// the window the plain path used to tolerate is still caught now that the probe
 /// gates the whole catalog.
+///
+/// The extra attempts stop at 3, the most the old path could have (one
+/// `--sxss-url`, form origin, form action, target): each attempt fetches every
+/// URL, so with a repeatable `--sxss-url` an uncapped count grows with the
+/// square of the URL count on every non-storing parameter.
 fn store_probe_attempts(args: &crate::cmd::scan::ScanArgs, url_count: usize) -> u64 {
     let base = args.sxss_retries.max(1) as u64;
-    base + url_count.saturating_sub(1) as u64
+    base + url_count.saturating_sub(1).min(3) as u64
 }
 
 /// Per-parameter store-probe (baseline-gated). Injects the reflection markers
@@ -2694,6 +2704,8 @@ pub(crate) async fn sxss_store_probe(
                     continue;
                 }
                 if let Ok(resp) = sent
+                    // A download never renders: not a stored sink.
+                    && !crate::utils::http::is_attachment(resp.headers())
                     && let Ok(text) = crate::utils::http::read_body_counted(resp).await
                     && classify_reflection(&text, marker).is_some()
                     && sxss_injection_credited(&text, marker)
@@ -2915,9 +2927,20 @@ async fn fetch_injection_response(
                 if sent.is_err() {
                     crate::tick_request_failure();
                 }
-                if let Ok(resp) = sent
-                    && let Some(body) = gated_body(resp, param, payload, args).await
-                {
+                let Ok(resp) = sent else { continue };
+                // A header-gated answer (`--ignore-return`, attachment, inert
+                // type) is final, like a body without the payload: retrying
+                // cannot change it, so it counts for the early exit below.
+                if injection_response_suppressed(
+                    resp.status().as_u16(),
+                    resp.headers(),
+                    param,
+                    args,
+                ) {
+                    saw_any_body = true;
+                    continue;
+                }
+                if let Some(body) = gated_body(resp, param, payload, args).await {
                     saw_any_body = true;
                     if classify_reflection(&body.0.text, payload).is_some()
                         && sxss_injection_credited(&body.0.text, payload)

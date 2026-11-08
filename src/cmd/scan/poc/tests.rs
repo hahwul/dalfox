@@ -651,14 +651,14 @@ fn multipart_upload_poc_pipes_the_file_part_through_stdin() {
         .inject_type("sxss-inHTML")
         .method("POST")
         .param("file[filename]")
-        .payload("<img src=x onerror=alert(1)>\".png")
+        .payload("<img src=x onerror=alert(1)>.png")
         .message_str("x")
         .build();
     r.location = "MultipartBody".to_string();
     r.request = Some(
         "POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n\
          --B\r\nContent-Disposition: form-data; name=\"t\"\r\n\r\nhi\r\n\
-         --B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"<img src=x onerror=alert(1)>\\\".png\"\r\n\
+         --B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"<img src=x onerror=alert(1)>.png\"\r\n\
          Content-Type: image/png; q=1\r\n\r\nPNG\r\n--B--\r\n"
             .to_string(),
     );
@@ -666,7 +666,7 @@ fn multipart_upload_poc_pipes_the_file_part_through_stdin() {
     assert_eq!(
         out,
         "printf '%s' 'PNG' | curl -X 'POST' --form-string 't=hi' \
-         -F 'file=@-;filename=\"<img src=x onerror=alert(1)>'\\\\'\".png\";type=image/png' 'http://h/u'\n",
+         -F 'file=@-;filename=\"<img src=x onerror=alert(1)>.png\";type=image/png' 'http://h/u'\n",
     );
     let httpie = render_httpie_poc(&r, "http://h/u");
     assert!(
@@ -708,4 +708,33 @@ fn multipart_upload_poc_sends_other_file_parts_empty() {
         out.contains("-F 'doc=@/dev/null;filename=\"b.pdf\";type=application/pdf'"),
         "{out}"
     );
+}
+
+#[test]
+fn multipart_upload_poc_replays_a_quoted_filename_byte_for_byte() {
+    // curl -F would send `"` as `%22` (and `\\` raw), not the `\\"` the scan
+    // sent, so a quote-breakout filename replays the recorded body instead.
+    let mut r = Result::builder(FindingType::Verified)
+        .inject_type("sxss-inHTML")
+        .method("POST")
+        .param("file[filename]")
+        .payload("\"><svg onload=alert(1)>")
+        .message_str("x")
+        .build();
+    r.location = "MultipartBody".to_string();
+    r.request = Some(
+        "POST /u HTTP/1.1\r\nHost: h\r\nContent-Type: multipart/form-data; boundary=B\r\n\r\n\
+         --B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\\\"><svg onload=alert(1)>\"\r\n\
+         \r\nPNG\r\n--B--\r\n"
+            .to_string(),
+    );
+    let out = render_curl_poc(&r, "http://h/u");
+    assert!(out.starts_with("printf '%b' '--B'"), "{out}");
+    assert!(
+        out.ends_with(
+            "| curl -X 'POST' -H 'Content-Type: multipart/form-data; boundary=B' --data-binary @- 'http://h/u'\n"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains(" -F "), "{out}");
 }
