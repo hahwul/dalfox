@@ -12,13 +12,25 @@ use super::args::{
 /// bare apex, so `*.example.com` covers `example.com` and every subdomain but
 /// not `notexample.com`. Matching a `*` literally would make such a pattern
 /// exclude nothing, and the scan would hit the hosts it names.
+///
+/// Both sides drop one trailing `.` and IPv6 brackets first, since
+/// `Url::host_str()` keeps them (`localhost.`, `[::1]`).
 pub(crate) fn domain_matches_pattern(host: &str, pattern: &str) -> bool {
-    let host = host.to_lowercase();
-    let pattern = pattern.to_lowercase();
+    let host = normalize_host(host);
+    let pattern = normalize_host(pattern);
     glob_match(&host, &pattern)
         || pattern
             .strip_prefix("*.")
             .is_some_and(|apex| glob_match(&host, apex))
+}
+
+fn normalize_host(s: &str) -> String {
+    let s = s.strip_suffix('.').unwrap_or(s);
+    let s = s
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(s);
+    s.to_lowercase()
 }
 
 /// `*`-only glob: `*` matches any run of characters, everything else itself.
@@ -365,6 +377,18 @@ mod input_shape_tests {
         assert!(domain_matches_pattern("ab", "a*b"));
         assert!(!domain_matches_pattern("aXbX", "a*b"));
         assert!(domain_matches_pattern("anything", "*"));
+    }
+
+    #[test]
+    fn domain_matches_trailing_dot_and_ipv6_brackets() {
+        assert!(domain_matches_pattern("localhost.", "localhost"));
+        assert!(domain_matches_pattern("localhost", "localhost."));
+        assert!(domain_matches_pattern("[::1]", "::1"));
+        assert!(domain_matches_pattern("[::1]", "[::1]"));
+        assert!(domain_matches_pattern("example.com.", "*.example.com"));
+        assert!(domain_matches_pattern("sub.example.com.", "*.example.com"));
+        assert!(!domain_matches_pattern("notexample.com.", "*.example.com"));
+        assert!(!domain_matches_pattern("[::2]", "::1"));
     }
 
     #[test]

@@ -70,8 +70,15 @@ pub(crate) async fn arm_and_dispatch(
             None
         };
 
-    if blind_active && (args.blind_callback_url.is_some() || oob_session.is_some()) {
-        if let Some(callback_url) = &args.blind_callback_url {
+    // Trimmed, and empty means off, as `job::normalize_blind_callback` stores it
+    // for REST and MCP: the string is interpolated into the payload as is.
+    let callback_url = args
+        .blind_callback_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty());
+    if blind_active && (callback_url.is_some() || oob_session.is_some()) {
+        if let Some(callback_url) = callback_url {
             log_info(
                 args,
                 &format!(
@@ -89,12 +96,12 @@ pub(crate) async fn arm_and_dispatch(
                 if cancel_flag.load(Ordering::Relaxed) {
                     break 'dispatch;
                 }
-                let source = match (&args.blind_callback_url, &oob_session) {
+                let source = match (callback_url, &oob_session) {
                     (Some(url), Some(session)) => crate::scanning::CallbackSource::Both {
-                        url: url.as_str(),
+                        url,
                         session: session.as_ref(),
                     },
-                    (Some(url), None) => crate::scanning::CallbackSource::Static(url.as_str()),
+                    (Some(url), None) => crate::scanning::CallbackSource::Static(url),
                     (None, Some(session)) => crate::scanning::CallbackSource::Oob(session.as_ref()),
                     // Guarded by the enclosing `if`: at least one is Some.
                     (None, None) => continue,
@@ -168,6 +175,16 @@ mod tests {
         hits.store(0, Ordering::SeqCst);
         arm_and_dispatch(&args, &groups, &AtomicBool::new(true)).await;
         assert_eq!(hits.load(Ordering::SeqCst), 0, "cancelled before dispatch");
+    }
+
+    #[tokio::test]
+    async fn empty_blind_callback_sends_nothing() {
+        let _serial = crate::REQUEST_COUNTER_TEST_LOCK.lock().await;
+        let (url, hits) = spawn_counting_server(Duration::ZERO).await;
+        let (mut args, groups) = setup(&url);
+        args.blind_callback_url = Some("  ".to_string());
+        arm_and_dispatch(&args, &groups, &AtomicBool::new(false)).await;
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

@@ -95,7 +95,7 @@ pub struct ServerArgs {
     #[arg(long = "jsonp")]
     pub jsonp: bool,
 
-    /// JSONP callback parameter name (default: callback)
+    /// JSONP callback parameter name
     #[clap(help_heading = "JSONP")]
     #[arg(long = "callback-param-name", default_value = "callback")]
     pub callback_param_name: String,

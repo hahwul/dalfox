@@ -260,18 +260,22 @@ fn summary_block() -> String {
     out
 }
 
-/// `--json` form of [`print_summary`]: the same per-selector counts the prose
-/// block reports, as a document a caller can parse.
-fn print_summary_json() -> bool {
+/// `--json` form of [`print_summary`]: every selector in `KNOWN_SELECTORS`
+/// order, as the prose summary lists them, plus the same per-selector counts.
+/// Remote selectors and `all` have no static count.
+fn summary_json() -> serde_json::Value {
     let counts: serde_json::Map<String, serde_json::Value> = static_selector_counts()
         .into_iter()
         .map(|(selector, count)| (selector.to_string(), serde_json::json!(count)))
         .collect();
-    let doc = serde_json::json!({
-        "selectors": counts.keys().cloned().collect::<Vec<_>>(),
+    serde_json::json!({
+        "selectors": KNOWN_SELECTORS,
         "counts": counts,
-    });
-    match serde_json::to_string_pretty(&doc) {
+    })
+}
+
+fn print_summary_json() -> bool {
+    match serde_json::to_string_pretty(&summary_json()) {
         Ok(text) => {
             println!("{text}");
             true
