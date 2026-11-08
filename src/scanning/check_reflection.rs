@@ -2615,9 +2615,14 @@ pub(crate) struct StoreProbeOutcome {
 /// the old window by scaling attempts with the URL count; a store visible within
 /// the window the plain path used to tolerate is still caught now that the probe
 /// gates the whole catalog.
+///
+/// The extra attempts stop at 3, the most the old path could have (one
+/// `--sxss-url`, form origin, form action, target): each attempt fetches every
+/// URL, so with a repeatable `--sxss-url` an uncapped count grows with the
+/// square of the URL count on every non-storing parameter.
 fn store_probe_attempts(args: &crate::cmd::scan::ScanArgs, url_count: usize) -> u64 {
     let base = args.sxss_retries.max(1) as u64;
-    base + url_count.saturating_sub(1) as u64
+    base + url_count.saturating_sub(1).min(3) as u64
 }
 
 /// Per-parameter store-probe (baseline-gated). Injects the reflection markers
@@ -2916,6 +2921,8 @@ async fn fetch_injection_response(
                     crate::tick_request_failure();
                 }
                 if let Ok(resp) = sent
+                    // A download (an uploaded file served as attachment) never renders.
+                    && !crate::utils::http::is_attachment(resp.headers())
                     && let Some(body) = gated_body(resp, param, payload, args).await
                 {
                     saw_any_body = true;

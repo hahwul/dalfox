@@ -1180,7 +1180,9 @@ async fn verify_sxss_dom(
             }
             if let Ok(resp) = sent {
                 // `--ignore-return`: same gate as the reflection retrieval loop.
-                if args.ignore_return.contains(&resp.status().as_u16()) {
+                if args.ignore_return.contains(&resp.status().as_u16())
+                    || crate::utils::http::is_attachment(resp.headers())
+                {
                     continue;
                 }
                 let headers = resp.headers().clone();

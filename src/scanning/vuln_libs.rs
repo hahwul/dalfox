@@ -68,7 +68,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)jquery[._-](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
             r"(?i)/jquery/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/jquery@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/jquery@(\d+\.\d+\.\d+)(?:/|$)",
         ],
         inline_patterns: &[r"(?i)jQuery(?: JavaScript Library)? v(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[
@@ -102,7 +102,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "jQuery UI",
         url_patterns: &[
             r"(?i)jquery[-.]ui[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/jquery-ui@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/jquery-ui@(\d+\.\d+\.\d+)(?:/|$)",
             r"(?i)/(?:jqueryui|jquery-ui)/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)jQuery UI(?: -)? v(\d+\.\d+(?:\.\d+)?)"],
@@ -122,7 +122,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "jQuery Validation",
         url_patterns: &[
             r"(?i)jquery[.-]validate[.-](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/jquery-validation@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/jquery-validation@(\d+\.\d+\.\d+)(?:/|$)",
             r"(?i)/jquery[.-]validate/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)jQuery Validation Plugin(?: -)? v(\d+\.\d+(?:\.\d+)?)"],
@@ -157,7 +157,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "AngularJS",
         url_patterns: &[
             r"(?i)angular[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/angular@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/angular@(\d+\.\d+\.\d+)(?:/|$)",
             r"(?i)/(?:angular(?:\.js)?|angularjs)/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r#"(?i)angular.*?\bversion\b.*?["'](\d+\.\d+\.\d+)["']"#],
@@ -173,7 +173,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Bootstrap",
         url_patterns: &[
             r"(?i)bootstrap[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/bootstrap@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/bootstrap@(\d+\.\d+\.\d+)(?:/|$)",
             r"(?i)/(?:twitter-)?bootstrap/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)Bootstrap(?: v)?\s*v?(\d+\.\d+(?:\.\d+)?)"],
@@ -196,7 +196,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Lodash",
         url_patterns: &[
             r"(?i)lodash[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/lodash@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/lodash@(\d+\.\d+\.\d+)(?:/|$)",
             r"(?i)/lodash(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[
@@ -213,7 +213,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Handlebars",
         url_patterns: &[
             r"(?i)handlebars[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/handlebars@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/handlebars@(\d+\.\d+\.\d+)(?:/|$)",
             r"(?i)/handlebars(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)Handlebars(?:\.js)?(?: v| version )(\d+\.\d+(?:\.\d+)?)"],
@@ -228,7 +228,7 @@ static LIB_SPECS: &[LibSpec] = &[
         name: "Moment.js",
         url_patterns: &[
             r"(?i)moment[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
-            r"(?im)/moment@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/moment@(\d+\.\d+\.\d+)(?:/|$)",
             r"(?i)/moment(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)//! moment\.js\s*\n//! version : (\d+\.\d+(?:\.\d+)?)"],
@@ -246,7 +246,8 @@ static LIB_SPECS: &[LibSpec] = &[
     LibSpec {
         name: "DOMPurify",
         url_patterns: &[
-            r"(?i)dompurify@(\d+\.\d+(?:\.\d+)?)",
+            // `[/,]`: jsDelivr `combine/npm/dompurify@x,npm/…` URLs.
+            r"(?im)/dompurify@(\d+\.\d+\.\d+)(?:[/,]|$)",
             r"(?i)/dompurify/(\d+\.\d+(?:\.\d+)?)/",
         ],
         inline_patterns: &[r"(?i)@license DOMPurify (\d+\.\d+(?:\.\d+)?)"],
@@ -274,12 +275,6 @@ static LIB_SPECS: &[LibSpec] = &[
                 fixed: "3.1.3",
                 advisories: &["CVE-2024-45801", "CVE-2024-47875"],
                 severity: SEV_HIGH,
-            },
-            VulnRange {
-                introduced: None,
-                fixed: "3.2.4",
-                advisories: &["CVE-2025-26791"],
-                severity: SEV_MEDIUM,
             },
             VulnRange {
                 introduced: Some("2.5.3"),
@@ -312,7 +307,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)underscore[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min)?\.js",
             r"(?i)/underscore(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/underscore@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/underscore@(\d+\.\d+\.\d+)(?:/|$)",
         ],
         // Anchored to the `//` banner line: Lo-Dash 2.x credits "Based on
         // Underscore.js 1.5.2" inside its own `/** */` banner.
@@ -329,7 +324,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?i)knockout[-.](\d+\.\d+(?:\.\d+)?)(?:[.-]min|\.debug)?\.js",
             r"(?i)/knockout/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/knockout@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/knockout@(\d+\.\d+\.\d+)(?:/|$)",
         ],
         inline_patterns: &[r"(?i)Knockout JavaScript library v(\d+\.\d+(?:\.\d+)?)"],
         ranges: &[VulnRange {
@@ -344,7 +339,7 @@ static LIB_SPECS: &[LibSpec] = &[
         url_patterns: &[
             r"(?im)(?:^|/)mustache[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js",
             r"(?i)/mustache(?:\.js)?/(\d+\.\d+(?:\.\d+)?)/",
-            r"(?im)/mustache(?:\.js)?@(\d+\.\d+(?:\.\d+)?)(?:/|$)",
+            r"(?im)/mustache(?:\.js)?@(\d+\.\d+\.\d+)(?:/|$)",
         ],
         // Anchored to `name: 'mustache.js'`, which every release declares just
         // before its version, so another library's `version: '…'` is ignored.

@@ -480,15 +480,17 @@ fn detects_dompurify_from_cdnjs_path() {
 
 #[test]
 fn dompurify_major_line_introduced_bounds_respected() {
-    // 3.2.0 is past the 3.x fix (3.1.3) for CVE-2024-45801, but still before
-    // the CVE-2025-26791 fix (3.2.4).
+    // 3.2.0 is past the 3.x fix (3.1.3) for CVE-2024-45801, but inside the
+    // CVE-2026-0540 3.x range (3.1.3..3.3.2). CVE-2025-26791 needs
+    // SAFE_FOR_TEMPLATES, so it is deliberately not in the dataset.
     let found = libs(r#"<script src="/ajax/libs/dompurify/3.2.0/purify.min.js"></script>"#);
     let dp = found
         .iter()
         .find(|v| v.library == "DOMPurify")
         .unwrap_or_else(|| panic!("DOMPurify 3.2.0 should be flagged, got {found:?}"));
-    assert!(dp.advisories.iter().any(|a| a == "CVE-2025-26791"));
+    assert!(dp.advisories.iter().any(|a| a == "CVE-2026-0540"));
     assert!(!dp.advisories.iter().any(|a| a == "CVE-2024-45801"));
+    assert!(!dp.advisories.iter().any(|a| a == "CVE-2025-26791"));
 }
 
 #[test]
@@ -751,4 +753,38 @@ fn handlebars_and_mustache_urls_stay_separate() {
             "{url} should be Mustache.js only, got {found:?}"
         );
     }
+}
+
+#[test]
+fn npm_range_tags_and_lookalike_packages_are_not_versions() {
+    // `@4.17` is a range jsDelivr/unpkg resolve to the latest 4.17.x, so it
+    // says nothing about the loaded version; other packages ending in the
+    // library's name (`isomorphic-dompurify`) have their own version line.
+    for url in [
+        "https://cdn.jsdelivr.net/npm/lodash@4.17/lodash.min.js",
+        "https://unpkg.com/lodash@4.17",
+        "https://cdn.jsdelivr.net/npm/dompurify@3.2/dist/purify.min.js",
+        "https://cdn.jsdelivr.net/npm/isomorphic-dompurify@2.16.0/dist/browser.js",
+        "https://cdn.jsdelivr.net/npm/my-dompurify@1.0.0/x.js",
+    ] {
+        let found = libs(&format!(r#"<script src="{url}"></script>"#));
+        assert!(found.is_empty(), "{url}: {found:?}");
+    }
+    let found = libs(
+        r#"<script src="https://cdn.jsdelivr.net/npm/dompurify@2.5.3/dist/purify.min.js"></script>"#,
+    );
+    assert_eq!(found[0].library, "DOMPurify");
+}
+
+#[test]
+fn detects_dompurify_in_jsdelivr_combine_url() {
+    let found = libs(
+        r#"<script src="https://cdn.jsdelivr.net/combine/npm/dompurify@2.0.0,npm/marked@4.0.0"></script>"#,
+    );
+    assert!(
+        found
+            .iter()
+            .any(|v| v.library == "DOMPurify" && v.version == "2.0.0"),
+        "got {found:?}"
+    );
 }

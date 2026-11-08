@@ -1271,3 +1271,16 @@ fn resolve_probeable_form_action_gates_the_destination() {
         None
     );
 }
+
+#[test]
+fn is_attachment_reads_raw_utf8_filenames() {
+    use reqwest::header::{CONTENT_DISPOSITION, HeaderMap, HeaderValue};
+    let mut h = HeaderMap::new();
+    h.insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_bytes("attachment; filename=\"메모.html\"".as_bytes()).unwrap(),
+    );
+    assert!(is_attachment(&h));
+    h.insert(CONTENT_DISPOSITION, HeaderValue::from_static("inline"));
+    assert!(!is_attachment(&h));
+}

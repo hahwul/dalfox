@@ -42,6 +42,14 @@ pub(crate) fn probe() -> &'static str {
 /// (rawtext / escapable-rawtext). A `{{…}}` here is literal text.
 const NON_COMPILED_ELEMENTS: &[&str] = &["script", "style", "textarea", "title"];
 
+/// `<template>` content is an inert fragment (`.content`, not `childNodes`)
+/// that AngularJS never walks. Vue compiles in-DOM templates from `outerHTML`,
+/// so its `<template v-if|v-for|v-slot>` wrappers *are* compiled.
+fn is_non_compiled(tech: &TechType, el: &scraper::node::Element) -> bool {
+    NON_COMPILED_ELEMENTS.contains(&el.name())
+        || (el.name() == "template" && !matches!(tech, TechType::Vue))
+}
+
 /// In-DOM compile-root attributes, per framework. An element carrying one marks
 /// the subtree the framework compiles: AngularJS bootstraps on `ng-app` /
 /// `ng-controller`; Vuetify roots a Vue app on `v-app`. A reflected `{{…}}` is
@@ -50,6 +58,60 @@ fn root_attrs(tech: &TechType) -> &'static [&'static str] {
     match tech {
         TechType::Vue => &["v-app"],
         _ => &["ng-app", "ng-controller"],
+    }
+}
+
+/// AngularJS directive-name normalization: `data-` / `x-` prefixes and `:` /
+/// `_` delimiters name the same directive (`data-ng-app`, `ng:non-bindable`).
+/// Vue has no such aliasing (`data-v-app` is Vue 3's mounted-container mark,
+/// `data-v-pre` is compiled), so `v-*` names match exactly.
+fn is_directive(attr: &str, directive: &str) -> bool {
+    if !directive.starts_with("ng-") {
+        return attr == directive;
+    }
+    let a = attr
+        .strip_prefix("data-")
+        .or_else(|| attr.strip_prefix("x-"))
+        .unwrap_or(attr);
+    a.len() == directive.len()
+        && a.bytes()
+            .zip(directive.bytes())
+            .all(|(x, y)| x == y || (y == b'-' && (x == b':' || x == b'_')))
+}
+
+fn has_directive(el: &scraper::node::Element, directive: &str) -> bool {
+    el.attrs().any(|(name, _)| is_directive(name, directive))
+}
+
+fn is_compile_root(tech: &TechType, el: &scraper::node::Element) -> bool {
+    // Vuetify's root is the `<v-app>` component element, not an attribute.
+    (matches!(tech, TechType::Vue) && el.name() == "v-app")
+        || root_attrs(tech).iter().any(|d| has_directive(el, d))
+}
+
+fn suppresses_compile(el: &scraper::node::Element) -> bool {
+    has_directive(el, "v-pre") || has_directive(el, "ng-non-bindable")
+}
+
+/// The page swaps the interpolation symbols (common when a Jinja/Twig/Django
+/// template also owns `{{…}}`), so a reflected `{{…}}` is literal text.
+fn custom_delimiters(tech: &TechType, body: &str) -> bool {
+    match tech {
+        // Vue's option is an array literal (`delimiters: ['${', '}']`); a bare
+        // `delimiters:` (CSV/tokenizer configs) must not mute the finding.
+        TechType::Vue => body.match_indices("delimiters").any(|(i, m)| {
+            body[i + m.len()..]
+                .trim_start()
+                .strip_prefix(':')
+                .is_some_and(|rest| rest.trim_start().starts_with('['))
+        }),
+        // The setter takes a string (`startSymbol('[[')`); the getter
+        // `$interpolate.startSymbol()` appears in ordinary directive code.
+        _ => body.match_indices("startSymbol(").any(|(i, m)| {
+            body[i + m.len()..]
+                .trim_start()
+                .starts_with(['\'', '"', '`'])
+        }),
     }
 }
 
@@ -101,36 +163,43 @@ pub(crate) fn server_template_framework(target: &Target) -> Option<TechType> {
 /// path runs `server_template_framework` once.
 pub(crate) fn probe_confirms_csti(tech: &TechType, body: &str) -> bool {
     let probe = probe();
-    // Cheap reject before parsing (the HTML parse is depth-quadratic, bounded):
-    // braces + marker are escape-transparent, so byte-exact survival is a
-    // precondition.
-    if !body.contains(probe) {
+    // Cheap reject before parsing (the HTML parse is depth-quadratic, bounded).
+    // Only the alnum marker is a byte-exact precondition: the braces may come
+    // back entity-encoded (`&#123;`), which the compiler sees decoded.
+    if !body.contains(crate::scanning::markers::class_marker()) || custom_delimiters(tech, body) {
         return false;
     }
-    let roots = root_attrs(tech);
     let document = crate::utils::html::parse_document_bounded(body);
     'occurrence: for node in document.tree.nodes() {
-        let Node::Text(text) = node.value() else {
-            continue;
+        // Text interpolation (both frameworks), or — AngularJS only; Vue 2+
+        // dropped it — attribute-value interpolation on the element itself.
+        let mut under_root = match node.value() {
+            Node::Text(text) if text.contains(probe) => false,
+            Node::Element(el)
+                if !matches!(tech, TechType::Vue)
+                    // AngularJS refuses (`$compile:nodomevents`) to interpolate
+                    // `EVENT_HANDLER_ATTR_REGEXP` = `/^(on[a-z]+|formaction)$/`.
+                    && el.attrs().any(|(n, v)| {
+                        v.contains(probe) && !n.starts_with("on") && n != "formaction"
+                    }) =>
+            {
+                if suppresses_compile(el) {
+                    continue;
+                }
+                is_compile_root(tech, el)
+            }
+            _ => continue,
         };
-        if !text.contains(probe) {
-            continue;
-        }
-        // Walk ancestors (text nodes carry no attributes of their own). The
-        // occurrence is CSTI only if it is under a compile-root element and no
-        // ancestor suppresses compilation.
-        let mut under_root = false;
+        // The occurrence is CSTI only if it is under a compile-root element and
+        // no ancestor suppresses compilation.
         for anc in node.ancestors() {
             let Node::Element(el) = anc.value() else {
                 continue;
             };
-            if NON_COMPILED_ELEMENTS.contains(&el.name())
-                || el.attr("v-pre").is_some()
-                || el.attr("ng-non-bindable").is_some()
-            {
+            if is_non_compiled(tech, el) || suppresses_compile(el) {
                 continue 'occurrence;
             }
-            if roots.iter().any(|a| el.attr(a).is_some()) {
+            if is_compile_root(tech, el) {
                 under_root = true;
             }
         }
@@ -278,6 +347,95 @@ mod tests {
         assert!(probe_confirms_csti(
             &TechType::Vue,
             &format!("<div v-app><p>{p}</p></div>")
+        ));
+    }
+
+    #[test]
+    fn directive_aliases_attrs_and_delimiters() {
+        let p = probe();
+        let m = crate::scanning::markers::class_marker();
+        let ng = TechType::Angular;
+        // Normalized directive names: `data-ng-app` root, `data-ng-non-bindable` skip.
+        assert!(probe_confirms_csti(
+            &ng,
+            &format!("<html data-ng-app><h1>{p}</h1></html>")
+        ));
+        assert!(!probe_confirms_csti(
+            &ng,
+            &format!("<html ng-app><div data-ng-non-bindable>{p}</div></html>")
+        ));
+        // Entity-encoded braces decode to `{{…}}` in the DOM the compiler reads.
+        assert!(probe_confirms_csti(
+            &ng,
+            &format!("<html ng-app><h1>&#123;&#123;{m}&#125;&#125;</h1></html>")
+        ));
+        // AngularJS interpolates attribute values; not `on*`, not Vue.
+        assert!(probe_confirms_csti(
+            &ng,
+            &format!("<html ng-app><input value=\"{p}\"></html>")
+        ));
+        assert!(!probe_confirms_csti(
+            &ng,
+            &format!("<html ng-app><a onclick=\"{p}\">x</a></html>")
+        ));
+        assert!(!probe_confirms_csti(
+            &TechType::Vue,
+            &format!("<div v-app><input value=\"{p}\"></div>")
+        ));
+        // `<template>` content is never compiled.
+        assert!(!probe_confirms_csti(
+            &ng,
+            &format!("<html ng-app><template><p>{p}</p></template></html>")
+        ));
+        // Custom interpolation symbols make `{{…}}` literal.
+        assert!(!probe_confirms_csti(
+            &ng,
+            &format!(
+                "<html ng-app><script>$interpolateProvider.startSymbol('[[');</script><h1>{p}</h1></html>"
+            )
+        ));
+        // Vuetify's root is the `<v-app>` element.
+        assert!(probe_confirms_csti(
+            &TechType::Vue,
+            &format!("<div id=app><v-app><v-main>{p}</v-main></v-app></div>")
+        ));
+        // Vue compiles `<template v-if>` content (in-DOM templates use outerHTML).
+        assert!(probe_confirms_csti(
+            &TechType::Vue,
+            &format!("<div v-app><template v-if=\"ok\"><p>{p}</p></template></div>")
+        ));
+        // Vue names are exact: `data-v-app` is Vue 3's runtime mount mark, not
+        // a compile root; `data-v-pre` is not `v-pre`.
+        assert!(!probe_confirms_csti(
+            &TechType::Vue,
+            &format!("<div id=app data-v-app><p>{p}</p></div>")
+        ));
+        assert!(probe_confirms_csti(
+            &TechType::Vue,
+            &format!("<div v-app><p data-v-pre>{p}</p></div>")
+        ));
+        // The `startSymbol()` getter does not mean custom symbols.
+        assert!(probe_confirms_csti(
+            &ng,
+            &format!(
+                "<html ng-app><script>var s=$interpolate.startSymbol();</script><h1>{p}</h1></html>"
+            )
+        ));
+        // `formaction` is in AngularJS's no-interpolation set, like `on*`.
+        assert!(!probe_confirms_csti(
+            &ng,
+            &format!("<html ng-app><form><button formaction=\"{p}\">x</button></form></html>")
+        ));
+        // Vue `delimiters: [...]` mutes; an unrelated `delimiters:` key does not.
+        assert!(!probe_confirms_csti(
+            &TechType::Vue,
+            &format!(
+                "<script>new Vue({{delimiters : ['${{', '}}']}})</script><div v-app><p>{p}</p></div>"
+            )
+        ));
+        assert!(probe_confirms_csti(
+            &TechType::Vue,
+            &format!("<script>csv({{delimiters: ',;'}})</script><div v-app><p>{p}</p></div>")
         ));
     }
 }

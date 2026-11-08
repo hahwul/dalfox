@@ -2028,6 +2028,37 @@ async fn sanitized_results_filter_min_confidence_before_ast_dedup() {
 }
 
 #[test]
+fn scan_option_checks_reject_unknown_param_type_and_pairless_cookie() {
+    let params = ["q:qurey".to_string()];
+    let err = ScanOptionChecks::<f32> {
+        params: &params,
+        ..Default::default()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(err.contains("qurey"), "{err}");
+    let cookies = ["sid".to_string()];
+    let err = ScanOptionChecks::<f32> {
+        cookies: &cookies,
+        ..Default::default()
+    }
+    .validate()
+    .unwrap_err();
+    assert!(err.starts_with("cookie: expected"), "{err}");
+    let params = ["q:query".to_string(), "id".to_string()];
+    let cookies = ["a=1; b=2".to_string(), String::new()];
+    assert!(
+        ScanOptionChecks::<f32> {
+            params: &params,
+            cookies: &cookies,
+            ..Default::default()
+        }
+        .validate()
+        .is_ok()
+    );
+}
+
+#[test]
 fn scan_option_checks_reject_an_unknown_min_confidence() {
     for ok in ["low", "high"] {
         assert!(

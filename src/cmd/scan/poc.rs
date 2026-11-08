@@ -315,8 +315,29 @@ fn curl_upload_poc(
     if result.location != "MultipartBody" {
         return None;
     }
-    let (_, body) = request_content_type_and_body(result.request.as_deref())?;
+    let (content_type, body) = request_content_type_and_body(result.request.as_deref())?;
     let parts = crate::target_parser::raw_multipart_parts(body)?;
+    // curl -F percent-encodes `"`/CR/LF in a filename (`%22`) and sends `\` raw,
+    // where the scan sent `\"` / `\\`: a breakout filename would not reproduce.
+    // Replay the recorded body byte for byte instead (`%b` decodes only the
+    // `\\`, `\r`, `\n` written here).
+    if parts
+        .iter()
+        .filter_map(|p| p.filename.as_deref())
+        .any(|f| f.contains(['"', '\\', '\r', '\n']))
+    {
+        let escaped = body
+            .replace('\\', "\\\\")
+            .replace('\r', "\\r")
+            .replace('\n', "\\n");
+        return Some(format!(
+            "printf '%b' {} | curl -X {} -H {} --data-binary @- {}\n",
+            shell_single_quote(&escaped),
+            method,
+            shell_single_quote(&format!("Content-Type: {content_type}")),
+            url
+        ));
+    }
     let base = result
         .param
         .strip_suffix(crate::scanning::url_inject::MULTIPART_FILENAME_SUFFIX)

@@ -68,11 +68,11 @@ dalfox scan -i raw-http upload.req --sxss \
   --sxss-url https://target.app/files
 ```
 
-`--sxss`에서는 업로드 응답이 가리키는 저장 파일도 따라갑니다. `Location` 헤더나, 업로드한 파일명으로 끝나는 같은 오리진 URL(HTML 링크, `"url": "/uploads/a.html"` 같은 JSON 필드)이 대상입니다. 이 페이지도 다른 조회 페이지와 똑같이 검사합니다. 이미지 등 HTML이 아닌 타입으로 서빙되는 파일은 보고하지 않으므로, 내용 주입은 캡처한 업로드가 HTML/SVG이거나 서버가 보낸 확장자를 그대로 믿을 때만 의미가 있습니다.
+`--sxss`에서는 업로드 응답이 가리키는 저장 파일도 따라갑니다. `Location` 헤더나, 업로드한 파일명으로 끝나는 같은 오리진 URL(HTML 링크, `"url": "/uploads/a.html"` 같은 JSON 필드)이 대상입니다. 이 페이지도 다른 조회 페이지와 똑같이 검사합니다. 이미지 등 HTML이 아닌 타입이나 다운로드(`Content-Disposition: attachment`)로 서빙되는 파일은 보고하지 않으므로, 내용 주입은 캡처한 업로드가 HTML/SVG이거나 서버가 보낸 확장자를 그대로 믿을 때만 의미가 있습니다.
 
 서버가 파일명을 바꿔 저장하면(해시나 ID) 응답에서 파일을 찾을 수 없습니다. 경로를 예측할 수 있다면 `--sxss-url`로 지정하세요.
 
-업로드의 curl PoC는 파일 내용을 stdin으로 넘깁니다(`printf '%s' … | curl -F 'field=@-;filename=…'`). `--form-string`으로는 파일을 보낼 수 없기 때문입니다. httpie는 업로드 파일명을 로컬 경로에서만 정하므로, httpie PoC에는 curl 명령이 대신 출력됩니다.
+업로드의 curl PoC는 파일 내용을 stdin으로 넘깁니다(`printf '%s' … | curl -F 'field=@-;filename=…'`). `--form-string`으로는 파일을 보낼 수 없기 때문입니다. 파일명에 `"`나 `\`가 있으면 curl `-F`가 이를 바꿔 보내므로(`"`는 `%22`), PoC는 기록된 본문을 `--data-binary`로 그대로 보냅니다. httpie는 업로드 파일명을 로컬 경로에서만 정하므로, httpie PoC에는 curl 명령이 대신 출력됩니다.
 
 ## 조회 메서드
 

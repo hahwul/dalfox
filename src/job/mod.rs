@@ -532,6 +532,8 @@ pub(crate) struct ScanOptionChecks<'a, F = f32> {
     pub headers: &'a [String],
     pub user_agent: Option<&'a str>,
     pub cookies: &'a [String],
+    /// `name[:type]` param specs.
+    pub params: &'a [String],
     pub proxy: Option<&'a mut Option<String>>,
     /// REST spells it `blind`, MCP `blind_callback_url`.
     pub blind: Option<(&'a mut Option<String>, &'static str)>,
@@ -628,7 +630,11 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
         }
         for cookie in self.cookies {
             validate_header_value("cookie", cookie)?;
+            if !cookie.trim().is_empty() {
+                validate_cookie_pairs("cookie", cookie)?;
+            }
         }
+        validate_param_specs(self.params)?;
         if let Some(p) = self.proxy {
             *p = p.as_deref().map(normalize_proxy).transpose()?.flatten();
         }
@@ -656,6 +662,35 @@ impl<F: Copy + Into<f64> + fmt::Display> ScanOptionChecks<'_, F> {
         )?;
         Ok(())
     }
+}
+
+/// Refuse a cookie value with no `name=value` pair: `split_cookie_pairs` would
+/// drop it and the scan would run without the cookie. The value is not echoed.
+pub(crate) fn validate_cookie_pairs(field: &str, cookie: &str) -> Result<(), String> {
+    if split_cookie_pairs(cookie).is_empty() {
+        return Err(format!("{field}: expected 'name=value[; name2=value2]'"));
+    }
+    Ok(())
+}
+
+/// Refuse a `name:type` param spec with an unknown type: `filter_params` would
+/// match nothing and `ensure_explicit_params` synthesize nothing, so the scan
+/// would test zero params and settle clean. Shared by CLI, REST and MCP.
+pub(crate) fn validate_param_specs(specs: &[String]) -> Result<(), String> {
+    use crate::cmd::scan::PARAM_TYPE_VALUES;
+    for spec in specs {
+        if let Some(ty) = spec.split(':').nth(1)
+            && !ty.is_empty()
+            && !PARAM_TYPE_VALUES.contains(&ty)
+        {
+            return Err(format!(
+                "invalid param type in '{}': '{ty}' (valid types: {})",
+                crate::utils::log::sanitize_log_message(spec),
+                PARAM_TYPE_VALUES.join(", ")
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],

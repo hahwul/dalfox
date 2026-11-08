@@ -1002,3 +1002,47 @@ fn detect_js_exec_sink_identifies_marker_in_exec_sinks_and_rejects_non_sinks() {
     );
     assert!(!detect_js_exec_sink(&html_unclosed_quote));
 }
+
+#[test]
+fn exec_sink_inner_code_requires_global_receiver_and_code_prefix() {
+    let p = "alert(1)";
+    // The global, bare or via a global object, runs its string argument.
+    assert!(has_js_context_evidence(
+        p,
+        "<script>window.setTimeout(\"alert(1)\");</script>"
+    ));
+    assert!(has_js_context_evidence(
+        p,
+        "<script>eval(\"x=1;\" + \"alert(1)\");</script>"
+    ));
+    // A library method that happens to be named `eval` does not.
+    assert!(!has_js_context_evidence(
+        p,
+        "<script>var r = calc.eval(\"alert(1)\");</script>"
+    ));
+    // A preceding literal that opens a comment leaves the payload commented out.
+    assert!(!has_js_context_evidence(
+        p,
+        "<script>eval(\"/*\" + \"alert(1)\" + \"*/\");</script>"
+    ));
+    // A closed comment, or `//` inside an earlier string, leaves code.
+    assert!(has_js_context_evidence(
+        p,
+        "<script>eval(\"var u='http://x';\" + \"alert(1)\");</script>"
+    ));
+    assert!(has_js_context_evidence(
+        p,
+        "<script>eval(\"/* c */ x=1;\" + \"alert(1)\");</script>"
+    ));
+}
+
+#[test]
+fn detect_js_exec_sink_descends_into_function_bodies() {
+    let m = "dlxfnbody01";
+    for src in [
+        format!("<script>$(function(){{ setTimeout(\"x={m}\") }})</script>"),
+        format!("<script>addEventListener('load', () => {{ eval(\"x={m}\") }})</script>"),
+    ] {
+        assert!(detect_js_exec_sink_with_marker(&src, m), "{src}");
+    }
+}

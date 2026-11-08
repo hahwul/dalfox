@@ -68,11 +68,11 @@ dalfox scan -i raw-http upload.req --sxss \
   --sxss-url https://target.app/files
 ```
 
-Under `--sxss`, Dalfox also follows the upload's own response to the stored file: a `Location` header, or a same-origin URL ending in the uploaded filename (an HTML link or a JSON field such as `"url": "/uploads/a.html"`). That page is checked like any other retrieval page. A file served as an image or other non-HTML type is never reported, so content injection only pays off when the captured upload is HTML or SVG, or when the server trusts the extension you send.
+Under `--sxss`, Dalfox also follows the upload's own response to the stored file: a `Location` header, or a same-origin URL ending in the uploaded filename (an HTML link or a JSON field such as `"url": "/uploads/a.html"`). That page is checked like any other retrieval page. A file served as an image or other non-HTML type, or as a download (`Content-Disposition: attachment`), is never reported, so content injection only pays off when the captured upload is HTML or SVG, or when the server trusts the extension you send.
 
 If the server renames uploads (a hash or ID instead of your filename), Dalfox cannot find the file from the response; pass its URL with `--sxss-url` if it is predictable.
 
-The curl PoC for an upload pipes the file content through stdin (`printf '%s' … | curl -F 'field=@-;filename=…'`), since `--form-string` cannot send a file. httpie names an upload after its local path, so an httpie PoC prints the curl command instead.
+The curl PoC for an upload pipes the file content through stdin (`printf '%s' … | curl -F 'field=@-;filename=…'`), since `--form-string` cannot send a file. When the filename holds a `"` or `\`, which curl `-F` would rewrite (`"` becomes `%22`), the PoC sends the recorded body as is with `--data-binary` instead. httpie names an upload after its local path, so an httpie PoC prints the curl command instead.
 
 ## Retrieval method
 

@@ -7,7 +7,9 @@
 
 use std::fs;
 
-use super::args::{PARAM_TYPE_VALUES, ScanArgs};
+#[cfg(test)]
+use super::args::PARAM_TYPE_VALUES;
+use super::args::ScanArgs;
 use super::logging::log_warn;
 use super::validation::{
     validate_http_url, validate_numeric_args, validate_proxy_url, validate_scope_regex,
@@ -64,9 +66,7 @@ fn validate_header_inputs(args: &ScanArgs) -> Result<(), String> {
         crate::job::validate_header_value("--cookies", cookie)?;
         // Pairs without `=` are dropped by `split_cookie_pairs`, so a value with
         // none would run the scan without the cookie. The value is not echoed.
-        if crate::job::split_cookie_pairs(cookie).is_empty() {
-            return Err("--cookies: expected 'name=value[; name2=value2]'".to_string());
-        }
+        crate::job::validate_cookie_pairs("--cookies", cookie)?;
     }
     Ok(())
 }
@@ -77,19 +77,7 @@ fn validate_header_inputs(args: &ScanArgs) -> Result<(), String> {
 /// to match nothing and `ensure_explicit_params` to synthesize nothing,
 /// silently testing zero params and falsely exiting clean (0).
 fn validate_param_inputs(args: &ScanArgs) -> Result<(), String> {
-    for spec in &args.param {
-        let parts: Vec<&str> = spec.split(':').collect();
-        if let Some(&ty) = parts.get(1)
-            && !ty.is_empty()
-            && !PARAM_TYPE_VALUES.contains(&ty)
-        {
-            return Err(format!(
-                "invalid param type in '{spec}': '{ty}' (valid types: {})",
-                PARAM_TYPE_VALUES.join(", ")
-            ));
-        }
-    }
-    Ok(())
+    crate::job::validate_param_specs(&args.param)
 }
 
 /// Refuse an `-o/--output` path whose parent directory is missing or is not a

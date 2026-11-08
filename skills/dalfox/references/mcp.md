@@ -126,6 +126,8 @@ Terminal jobs auto-purge after 1 hour.
 - `method` must be a method the CLI `-X` accepts (lowercase is uppercased)
 - `encoders` must name known encoders
 - `headers` / `cookies` / `user_agent` must be valid header values
+- each non-empty `cookies` entry must contain at least one `name=value` pair (a bare `sid` would be dropped and the scan would run logged out)
+- `param` types in `name:type` must be known (`query`, `body`, `json`, `multipart`, `graphql`, `xml`, `path`, `fragment`, `header`, `cookie` — same set as CLI `-p`)
 - `proxy` must be `http(s)://` or `socks4/5(h)://`
 - `max_payloads_per_param` ∈ [0, 100000]
 - `wait_timeout_sec` ∈ [1, 86400] when `wait=true`

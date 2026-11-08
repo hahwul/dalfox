@@ -6007,7 +6007,17 @@ async fn spawn_upload_app() -> (std::net::SocketAddr, tokio::task::JoinHandle<()
                         .get(&name)
                         .cloned()
                         .unwrap_or_default();
-                    Html(format!("<html><body>{body}</body></html>"))
+                    // `dl-*` files are served as downloads, which never render.
+                    let disposition = if name.starts_with("dl-") {
+                        "attachment"
+                    } else {
+                        "inline"
+                    };
+                    (
+                        [(header::CONTENT_DISPOSITION, disposition)],
+                        Html(format!("<html><body>{body}</body></html>")),
+                    )
+                        .into_response()
                 }
             }),
         )
@@ -6091,6 +6101,26 @@ async fn sxss_upload_content_is_found_at_the_acked_file_url() {
             .iter()
             .any(|r| r.param == "file" && r.result_type == FindingType::Verified),
         "stored upload content must verify at /files/note.html: {results:?}"
+    );
+}
+
+/// The same stored file served as `Content-Disposition: attachment` is a
+/// download: the browser saves it and its markup never runs, so no finding.
+#[tokio::test]
+async fn sxss_upload_served_as_attachment_is_not_reported() {
+    let (addr, server) = spawn_upload_app().await;
+    let mut args = integration_scan_args(false);
+    args.sxss = true;
+    args.max_payloads_per_param = 20;
+    let mut target = upload_target(addr);
+    target.data = target
+        .data
+        .map(|d| d.replace("filename=\"note.html\"", "filename=\"dl-note.html\""));
+    let results = run_upload_scan(&target, "file", args).await;
+    server.abort();
+    assert!(
+        !results.iter().any(|r| r.param == "file"),
+        "an attachment-served upload must not be reported: {results:?}"
     );
 }
 

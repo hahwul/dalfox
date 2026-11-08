@@ -3506,3 +3506,14 @@ fn uploaded_file_urls_bounded_on_hostile_body() {
     assert!(urls.is_empty(), "no `/`-terminated segment, so no URL");
     assert!(start.elapsed().as_secs() < 5, "scan must stay bounded");
 }
+
+#[test]
+fn store_probe_attempts_stop_growing_past_the_old_url_count() {
+    // sxss_retries 3: one extra attempt per URL up to the old maximum of four
+    // URLs, then flat, so twenty `--sxss-url`s do not cost 22 passes of 22 GETs.
+    let mut args = default_scan_args();
+    args.sxss_retries = 3;
+    assert_eq!(store_probe_attempts(&args, 1), 3);
+    assert_eq!(store_probe_attempts(&args, 4), 6);
+    assert_eq!(store_probe_attempts(&args, 20), 6);
+}

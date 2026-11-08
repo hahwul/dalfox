@@ -573,10 +573,11 @@ confidence = 0.85
 evidence_label = "NAXSI block message in body"
 
 # Reblaze
-# Generic wording without the vendor name, so it stays low; wafw00f only
-# trusts it alongside other block-page phrases.
+# Generic wording without the vendor name (session-expiry pages say it too),
+# so it sits below the default 0.3 floor and survives only with the +0.05
+# blocking-status boost (403/406/429/503).
 [[body]]
 pattern = "current session has been terminated"
 waf_type = "Reblaze"
-confidence = 0.5
+confidence = 0.26
 evidence_label = "Reblaze session-terminated block page"

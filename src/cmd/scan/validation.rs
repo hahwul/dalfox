@@ -30,6 +30,16 @@ fn normalize_host(s: &str) -> String {
         .strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
         .unwrap_or(s);
+    // `Url` serializes IPv6 canonically (`::1`, IPv4-mapped in hex:
+    // `::ffff:7f00:1`), so compare through the same serializer:
+    // `0:0:0:0:0:0:0:1` or `::FFFF:127.0.0.1` would otherwise exclude nothing.
+    // (`Ipv6Addr`'s Display prints mapped addresses dotted, which differs.)
+    if s.parse::<std::net::Ipv6Addr>().is_ok()
+        && let Ok(host) = url::Host::parse(&format!("[{s}]"))
+    {
+        let h = host.to_string();
+        return h.trim_start_matches('[').trim_end_matches(']').to_string();
+    }
     s.to_lowercase()
 }
 
@@ -389,6 +399,13 @@ mod input_shape_tests {
         assert!(domain_matches_pattern("sub.example.com.", "*.example.com"));
         assert!(!domain_matches_pattern("notexample.com.", "*.example.com"));
         assert!(!domain_matches_pattern("[::2]", "::1"));
+        assert!(domain_matches_pattern("[::1]", "0:0:0:0:0:0:0:1"));
+        assert!(domain_matches_pattern(
+            "[::ffff:7f00:1]",
+            "::FFFF:127.0.0.1"
+        ));
+        // Globs over the hex form `Url` prints still match a mapped host.
+        assert!(domain_matches_pattern("[::ffff:7f00:1]", "::ffff:7f00:*"));
     }
 
     #[test]
