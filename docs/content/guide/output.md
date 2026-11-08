@@ -120,7 +120,7 @@ goes next.
     }
   ],
   "meta": {
-    "dalfox_version": "3.2.4",
+    "dalfox_version": "3.3.0",
     "dedup_mode": "exact",
     "failed_requests": 0,
     "findings_count": 1,
@@ -320,7 +320,7 @@ The same data as JSON, written as TOML. The envelope is the top-level `[meta]` t
 
 ```toml
 [meta]
-dalfox_version = "3.2.4"
+dalfox_version = "3.3.0"
 dedup_mode = "exact"
 failed_requests = 0
 findings_count = 1

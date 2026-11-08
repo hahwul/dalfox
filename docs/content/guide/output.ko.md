@@ -117,7 +117,7 @@ dalfox scan https://target.app --include-response
     }
   ],
   "meta": {
-    "dalfox_version": "3.2.4",
+    "dalfox_version": "3.3.0",
     "dedup_mode": "exact",
     "failed_requests": 0,
     "findings_count": 1,
@@ -315,7 +315,7 @@ JSON과 같은 데이터를 TOML로 씁니다. 엔벨로프는 최상위 `[meta]
 
 ```toml
 [meta]
-dalfox_version = "3.2.4"
+dalfox_version = "3.3.0"
 dedup_mode = "exact"
 failed_requests = 0
 findings_count = 1
