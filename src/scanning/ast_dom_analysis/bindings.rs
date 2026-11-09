@@ -54,7 +54,11 @@ impl<'a> DomXssVisitor<'a> {
         }
         // Track class instance variables (`inst = new Renderer()`).
         let mut assigned_instance_class = false;
-        if let Expression::NewExpression(new_expr) = init
+        if let Expression::RegExpLiteral(_) = init {
+            self.instance_classes
+                .insert(var_name.to_string(), "RegExp".to_string());
+            assigned_instance_class = true;
+        } else if let Expression::NewExpression(new_expr) = init
             && let Expression::Identifier(class_id) = &new_expr.callee
         {
             self.instance_classes
@@ -392,8 +396,10 @@ impl<'a> DomXssVisitor<'a> {
                 .find_source_in_expr(&cond.consequent)
                 .or_else(|| self.find_source_in_expr(&cond.alternate)),
             Expression::CallExpression(call) => {
-                if let (_, Some(source)) = self.call_taint_and_source(call) {
-                    return Some(source);
+                // An untainted call (`location.hash.includes('x')`) names no source.
+                let (tainted, source) = self.call_taint_and_source(call);
+                if source.is_some() || !tainted {
+                    return source;
                 }
 
                 // Check callee first (e.g., location.hash.slice())

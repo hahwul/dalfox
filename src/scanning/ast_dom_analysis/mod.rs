@@ -401,6 +401,9 @@ struct DomXssVisitor<'a> {
     tainted_return_sources: Vec<String>,
     /// Source code for line/column calculation
     source_code: &'a str,
+    /// Built-in method names the script defines itself (see
+    /// [`taint::page_defined_methods`]), which #1663's inert-result rule skips.
+    page_defined_methods: HashSet<&'static str>,
     /// Precomputed byte offsets of line starts for O(log n) span → line/column lookup
     line_starts: Vec<usize>,
     /// Field-level taint tracking: "obj.field" -> source
@@ -794,6 +797,7 @@ impl<'a> DomXssVisitor<'a> {
             bound_function_aliases: Default::default(),
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),
+            page_defined_methods: taint::page_defined_methods(source_code),
             source_code,
             line_starts,
             field_taints: Default::default(),

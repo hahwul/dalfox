@@ -210,6 +210,12 @@ impl<'a> DomXssVisitor<'a> {
             return (true, Some(bound_target));
         }
 
+        // `location.search.indexOf('x')`, `/re/.test(location.hash)`: the
+        // result is a number or a boolean, which cannot carry markup (#1663).
+        if self.returns_inert_builtin_result(call) {
+            return (false, None);
+        }
+
         // Direct source calls (e.g., localStorage.getItem(...))
         if let Expression::StaticMemberExpression(member) = &call.callee {
             if member.property.name.as_str() == "get"
@@ -272,6 +278,12 @@ impl<'a> DomXssVisitor<'a> {
         // never receives the tainted value as an argument at all.
         if let Some(source) = self.callback_result_source(call) {
             return (true, Some(source));
+        }
+
+        // `map.get(tainted)` returns one of the map's values, not the key. A
+        // tainted map was already caught by the receiver check above.
+        if self.is_builtin_map_get(call) {
+            return (false, None);
         }
 
         // Conservative fallback: tainted argument taints call result.
@@ -645,19 +657,7 @@ impl<'a> DomXssVisitor<'a> {
         // string in its `length` field, so those stay tainted.
         if member.property.name == "length"
             && let Expression::StaticMemberExpression(inner) = &member.object
-            && self.get_member_string(inner).is_some_and(|path| {
-                matches!(
-                    path.trim_start_matches("window.")
-                        .trim_start_matches("self."),
-                    "location.hash"
-                        | "location.search"
-                        | "location.href"
-                        | "location.pathname"
-                        | "document.URL"
-                        | "document.referrer"
-                        | "document.cookie"
-                )
-            })
+            && self.is_string_dom_source(inner)
         {
             return false;
         }
@@ -847,6 +847,197 @@ impl<'a> DomXssVisitor<'a> {
         });
     }
 }
+
+impl<'a> DomXssVisitor<'a> {
+    /// The call reaches a built-in method that returns a number or a boolean:
+    /// data from `location`, JSON or a structured clone cannot carry its own
+    /// methods. A name the script defines itself is followed instead.
+    fn returns_inert_builtin_result(&self, call: &CallExpression<'a>) -> bool {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        if self.page_defined_methods.contains(method.as_str()) {
+            return false;
+        }
+        match method.as_str() {
+            // Common names on library objects too, so the receiver must be
+            // known to be the built-in.
+            "test" => self.builtin_receiver_class(call, &["RegExp"]),
+            "has" => self.builtin_receiver_class(
+                call,
+                &[
+                    "Set",
+                    "Map",
+                    "WeakSet",
+                    "WeakMap",
+                    "URLSearchParams",
+                    "Headers",
+                    "FormData",
+                ],
+            ),
+            "search" => self
+                .get_callee_object_expr(&call.callee)
+                .is_some_and(|recv| self.is_builtin_string(recv)),
+            m => INERT_RESULT_METHODS.contains(&m),
+        }
+    }
+
+    /// `map.get(tainted)` on a known `Map`/`WeakMap`: the result is one of the
+    /// map's values, not the key. A map the script `.set()`s anywhere is
+    /// left to the old rule: a hoisted reader is walked before the write that
+    /// taints the map, so "the map is clean" is not known yet.
+    fn is_builtin_map_get(&self, call: &CallExpression<'a>) -> bool {
+        if self.get_callee_property_name(&call.callee).as_deref() != Some("get")
+            || self.page_defined_methods.contains("get")
+            || !self.builtin_receiver_class(call, &["Map", "WeakMap"])
+        {
+            return false;
+        }
+        match self
+            .get_callee_object_expr(&call.callee)
+            .map(Expression::without_parentheses)
+        {
+            Some(Expression::Identifier(id)) => {
+                !self.source_code.contains(&format!("{}.set(", id.name))
+            }
+            _ => true,
+        }
+    }
+
+    /// The call's receiver is one of the built-in `classes`: a `new C(…)`
+    /// expression, a variable bound to one, or (for `RegExp`) a regex literal.
+    fn builtin_receiver_class(&self, call: &CallExpression<'a>, classes: &[&str]) -> bool {
+        let class = match self
+            .get_callee_object_expr(&call.callee)
+            .map(Expression::without_parentheses)
+        {
+            Some(Expression::RegExpLiteral(_)) => Some("RegExp"),
+            Some(Expression::NewExpression(new_expr)) => match &new_expr.callee {
+                Expression::Identifier(id) => Some(id.name.as_str()),
+                _ => None,
+            },
+            Some(Expression::Identifier(id)) => self
+                .instance_classes
+                .get(id.name.as_str())
+                .map(String::as_str),
+            _ => None,
+        };
+        class.is_some_and(|c| classes.contains(&c))
+    }
+
+    /// `expr` is a string: a URL/cookie string source, or what a built-in
+    /// string method returned from one.
+    fn is_builtin_string(&self, expr: &Expression<'a>) -> bool {
+        match expr.without_parentheses() {
+            Expression::StaticMemberExpression(member) => self.is_string_dom_source(member),
+            Expression::CallExpression(call) => {
+                self.get_callee_property_name(&call.callee)
+                    .is_some_and(|m| {
+                        BUILTIN_STRING_ARRAY_METHODS.contains(&m.as_str()) && m != "split"
+                    })
+                    && self
+                        .get_callee_object_expr(&call.callee)
+                        .is_some_and(|recv| self.is_builtin_string(recv))
+            }
+            _ => false,
+        }
+    }
+
+    /// `location.hash` and friends, which are always strings.
+    pub(super) fn is_string_dom_source(&self, member: &StaticMemberExpression<'a>) -> bool {
+        self.get_member_string(member).is_some_and(|path| {
+            matches!(
+                path.trim_start_matches("window.")
+                    .trim_start_matches("self."),
+                "location.hash"
+                    | "location.search"
+                    | "location.href"
+                    | "location.pathname"
+                    | "document.URL"
+                    | "document.referrer"
+                    | "document.cookie"
+            )
+        })
+    }
+}
+
+/// Names of [`INERT_RESULT_METHODS`] (plus `test`/`has`/`search`/`get`) that
+/// the script itself defines, so a call to one is not assumed built-in.
+/// Text-based, so it does not depend on walk order or on how the method was
+/// attached: `name:` / `.name = ` / class field `name = ` / `name(…) {` /
+/// `['name']`. Per script: a definition in another `<script>` is not seen.
+/// ponytail: a false match only turns the rule off for that name; an AST pass
+/// over definitions if the text scan proves too eager on big bundles.
+pub(super) fn page_defined_methods(src: &str) -> HashSet<&'static str> {
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    INERT_RESULT_METHODS
+        .iter()
+        .chain(&["test", "has", "search", "get"])
+        .copied()
+        .filter(|name| {
+            src.match_indices(name).any(|(i, _)| {
+                let before = src[..i].chars().next_back();
+                let rest = &src[i + name.len()..];
+                if before.is_some_and(is_ident) || rest.starts_with(is_ident) {
+                    return false;
+                }
+                // `['name']`: a computed key or member assignment.
+                if matches!(before, Some('\'' | '"' | '`')) {
+                    return src[..i - 1].ends_with('[');
+                }
+                let head = src[..i].trim_end();
+                let rest = rest.trim_start();
+                (rest.starts_with(':') && !rest.starts_with("::"))
+                    // `.name = fn`, a class field; not `const name = …`.
+                    || (rest.starts_with('=')
+                        && !rest.starts_with("==")
+                        && !["const", "let", "var"].iter().any(|k| head.ends_with(k)))
+                    || paren_group_then_brace(rest)
+            })
+        })
+        .collect()
+}
+
+/// `rest` opens a balanced `(…)` followed by `{` — a method or function
+/// definition rather than a call. Parameter lists are short; the scan stops
+/// after 256 bytes so nested calls cannot make it quadratic.
+fn paren_group_then_brace(rest: &str) -> bool {
+    if !rest.starts_with('(') {
+        return false;
+    }
+    let mut depth = 0usize;
+    for (i, c) in rest.char_indices().take_while(|(i, _)| *i < 256) {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return rest[i + 1..].trim_start().starts_with('{');
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Built-in methods whose result is always a number or a boolean (#1663).
+/// `test`, `has` and `search` are receiver-gated in
+/// `returns_inert_builtin_result` instead.
+const INERT_RESULT_METHODS: &[&str] = &[
+    "indexOf",
+    "lastIndexOf",
+    "includes",
+    "startsWith",
+    "endsWith",
+    // not `charCodeAt`/`codePointAt`: `String.fromCharCode` rebuilds the
+    // string from those numbers.
+    "localeCompare",
+    "findIndex",
+    "findLastIndex",
+    "some",
+    "every",
+];
 
 /// Built-in string/array methods whose result's `.length` is a plain number.
 const BUILTIN_STRING_ARRAY_METHODS: &[&str] = &[
