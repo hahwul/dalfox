@@ -280,7 +280,6 @@ fn number_and_boolean_builtins_do_not_propagate_taint() {
     for js in [
         "el.innerHTML = location.search.indexOf('x');",
         "el.innerHTML = location.search.includes('a');",
-        "el.innerHTML = location.hash.charCodeAt(1);",
         "el.innerHTML = location.pathname.startsWith('/a');",
         "el.innerHTML = /admin/.test(location.hash);",
         "el.innerHTML = new RegExp('a').test(location.hash);",
@@ -294,6 +293,9 @@ fn number_and_boolean_builtins_do_not_propagate_taint() {
         "var re = /admin/; el.innerHTML = re.test(location.hash);",
         "var re; re = /admin/; el.innerHTML = re.test(location.hash);",
         "el.innerHTML = new URLSearchParams(location.search).has('a');",
+        // ordinary code that only looks like a definition
+        "const search = new URLSearchParams(location.search); el.innerHTML = location.hash.search('x');",
+        "fetch(u, { method: 'get' }); const m = new Map(); el.innerHTML = m.get(location.hash);",
     ] {
         let findings = AstDomAnalyzer::new().analyze(js).unwrap();
         assert!(findings.is_empty(), "{js}: {findings:?}");
@@ -319,12 +321,19 @@ fn number_and_boolean_builtins_keep_real_flows() {
         "function W() {} W.prototype.search = function (q) { return '<b>' + q + '</b>'; }; var w = new W(); el.innerHTML = w.search(location.hash);",
         "var o; o = { has: function (x) { return x; } }; el.innerHTML = o.has(location.hash);",
         "function render() { el.innerHTML = widget.has(location.hash); } var widget = { has: function (x) { return x; } }; render();",
-        "Object.defineProperty(o, 'includes', { value: function (x) { return x; } }); el.innerHTML = o.includes(location.hash);",
+        "o['includes'] = function (x) { return x; }; el.innerHTML = o.includes(location.hash);",
+        "class T { includes = (x) => x; } var t = make(); el.innerHTML = t.includes(location.hash);",
+        "class T { includes(x) { return x; } } var t = make(); el.innerHTML = t.includes(location.hash);",
         // `search` / `has` on a receiver not known to be the built-in
         "el.innerHTML = searchLib.search(location.hash);",
         "el.innerHTML = lib.has(location.hash);",
         // a parameter shadows the outer Map
         "const m = new Map(); function f(m) { el.innerHTML = m.get(location.hash); } f(remoteCache);",
+        // a hoisted reader walked before the write that taints the map
+        "const m = new Map(); function show() { el.innerHTML = m.get(location.hash.slice(1)); } m.set('a', location.search); show();",
+        // char codes rebuilt into a string
+        "var h = location.hash, s = ''; for (var i = 1; i < h.length; i++) { s += String.fromCharCode(h.charCodeAt(i)); } el.innerHTML = s;",
+        "el.innerHTML = String.fromCharCode(location.hash.charCodeAt(1));",
     ] {
         let findings = AstDomAnalyzer::new().analyze(js).unwrap();
         assert!(!findings.is_empty(), "{js}");

@@ -883,11 +883,25 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     /// `map.get(tainted)` on a known `Map`/`WeakMap`: the result is one of the
-    /// map's values, not the key.
+    /// map's values, not the key. A map the script `.set()`s anywhere is
+    /// left to the old rule: a hoisted reader is walked before the write that
+    /// taints the map, so "the map is clean" is not known yet.
     fn is_builtin_map_get(&self, call: &CallExpression<'a>) -> bool {
-        self.get_callee_property_name(&call.callee).as_deref() == Some("get")
-            && !self.page_defined_methods.contains("get")
-            && self.builtin_receiver_class(call, &["Map", "WeakMap"])
+        if self.get_callee_property_name(&call.callee).as_deref() != Some("get")
+            || self.page_defined_methods.contains("get")
+            || !self.builtin_receiver_class(call, &["Map", "WeakMap"])
+        {
+            return false;
+        }
+        match self
+            .get_callee_object_expr(&call.callee)
+            .map(Expression::without_parentheses)
+        {
+            Some(Expression::Identifier(id)) => {
+                !self.source_code.contains(&format!("{}.set(", id.name))
+            }
+            _ => true,
+        }
     }
 
     /// The call's receiver is one of the built-in `classes`: a `new C(…)`
@@ -950,7 +964,8 @@ impl<'a> DomXssVisitor<'a> {
 /// Names of [`INERT_RESULT_METHODS`] (plus `test`/`has`/`search`/`get`) that
 /// the script itself defines, so a call to one is not assumed built-in.
 /// Text-based, so it does not depend on walk order or on how the method was
-/// attached: `name:` / `name = ` / `.name = ` / `name(…) {` / `'name'`.
+/// attached: `name:` / `.name = ` / class field `name = ` / `name(…) {` /
+/// `['name']`. Per script: a definition in another `<script>` is not seen.
 /// ponytail: a false match only turns the rule off for that name; an AST pass
 /// over definitions if the text scan proves too eager on big bundles.
 pub(super) fn page_defined_methods(src: &str) -> HashSet<&'static str> {
@@ -966,12 +981,17 @@ pub(super) fn page_defined_methods(src: &str) -> HashSet<&'static str> {
                 if before.is_some_and(is_ident) || rest.starts_with(is_ident) {
                     return false;
                 }
+                // `['name']`: a computed key or member assignment.
                 if matches!(before, Some('\'' | '"' | '`')) {
-                    return true;
+                    return src[..i - 1].ends_with('[');
                 }
+                let head = src[..i].trim_end();
                 let rest = rest.trim_start();
                 (rest.starts_with(':') && !rest.starts_with("::"))
-                    || (rest.starts_with('=') && !rest.starts_with("=="))
+                    // `.name = fn`, a class field; not `const name = …`.
+                    || (rest.starts_with('=')
+                        && !rest.starts_with("==")
+                        && !["const", "let", "var"].iter().any(|k| head.ends_with(k)))
                     || paren_group_then_brace(rest)
             })
         })
@@ -979,13 +999,14 @@ pub(super) fn page_defined_methods(src: &str) -> HashSet<&'static str> {
 }
 
 /// `rest` opens a balanced `(…)` followed by `{` — a method or function
-/// definition rather than a call.
+/// definition rather than a call. Parameter lists are short; the scan stops
+/// after 256 bytes so nested calls cannot make it quadratic.
 fn paren_group_then_brace(rest: &str) -> bool {
     if !rest.starts_with('(') {
         return false;
     }
     let mut depth = 0usize;
-    for (i, c) in rest.char_indices() {
+    for (i, c) in rest.char_indices().take_while(|(i, _)| *i < 256) {
         match c {
             '(' => depth += 1,
             ')' => {
@@ -1009,8 +1030,8 @@ const INERT_RESULT_METHODS: &[&str] = &[
     "includes",
     "startsWith",
     "endsWith",
-    "charCodeAt",
-    "codePointAt",
+    // not `charCodeAt`/`codePointAt`: `String.fromCharCode` rebuilds the
+    // string from those numbers.
     "localeCompare",
     "findIndex",
     "findLastIndex",
