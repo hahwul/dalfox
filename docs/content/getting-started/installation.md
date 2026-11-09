@@ -1,6 +1,6 @@
 +++
 title = "Installation"
-description = "Install Dalfox, an open-source XSS scanner, on macOS, Linux, Windows, NixOS, Arch Linux, or from source."
+description = "Install Dalfox, an open-source XSS scanner, on macOS, Linux, Windows, Kali Linux, NixOS, Arch Linux, or from source."
 weight = 2
 toc = true
 +++
@@ -26,6 +26,14 @@ brew install hahwul/dalfox/dalfox
 ```bash
 sudo snap install dalfox
 ```
+
+## Kali Linux
+
+```bash
+sudo apt install dalfox
+```
+
+Dalfox is packaged in the Kali repositories. Kali packages new releases on its own schedule, so the version can trail the latest release. See [kali.org/tools/dalfox](https://www.kali.org/tools/dalfox) and the [package tracker](https://pkg.kali.org/pkg/dalfox).
 
 ## Arch Linux (AUR)
 
