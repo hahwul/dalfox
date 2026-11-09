@@ -17,10 +17,11 @@
 //! **Side effects:** One batched probe request per parameter that carries
 //! every `SPECIAL_PROBE_CHARS` entry between the open/close markers; the
 //! reflected segment is scanned to classify each char. Falls back to a
-//! per-char fan-out (one request per char) only when the batched probe
-//! reflects the markers but strips every special char — a likely WAF
-//! tripwire on the dense payload that per-char probes can sidestep. All
-//! work runs under `target.workers` semaphore gating.
+//! per-char fan-out (one request per char) when the batched probe reflects
+//! the markers but strips every special char, when it misses on a Path param,
+//! or when it hits a block page while a bare-marker probe still echoes — a
+//! likely WAF tripwire on the dense payload that per-char probes can sidestep.
+//! All work runs under `target.workers` semaphore gating.
 
 pub mod discovery;
 pub mod mining;
@@ -936,6 +937,29 @@ async fn window_overflow_probe(
     Some((valid, invalid))
 }
 
+/// Whether `OPEN + CLOSE` with no special char between them reflects. Tells a
+/// block page that tripped on the dense probe (it echoes) apart from a param
+/// that never reflects in this response (it does not), for one request.
+async fn marker_echoes_without_specials(
+    client: &reqwest::Client,
+    target: &Target,
+    param: &Param,
+    semaphore: &Arc<Semaphore>,
+) -> bool {
+    let probe = format!(
+        "{}{}",
+        crate::scanning::markers::open_marker(),
+        crate::scanning::markers::close_marker()
+    );
+    let payload = crate::encoding::pre_encoding::apply_param_encoding(&probe, param);
+    let permit = semaphore.acquire().await.expect("acquire semaphore permit");
+    let resp = send_probe_request_for_param(client, target, param, &payload).await;
+    drop(permit);
+    resp.as_deref()
+        .and_then(extract_reflected_segment)
+        .is_some()
+}
+
 /// Coverage safety net: if the batched probe is reflected but **no** char
 /// survives in the reflected segment (likely the server's WAF tripped on the
 /// dense special-char payload, while individual chars would pass), the
@@ -1094,9 +1118,9 @@ pub async fn active_probe_param(
             // fixed prefix/suffix (partial reflection) so only part of a marker
             // survives.
             //
-            // Only the *block* case is a window-overflow candidate. Gate on a
-            // genuine block: the batched probe reflected NOTHING, i.e. neither
-            // marker survived. A prefix/suffix-stripping server leaves one
+            // Only the *block* case is a window-overflow (and, failing that, a
+            // per-char) candidate. Gate on a genuine block: the batched probe
+            // reflected NOTHING, i.e. neither marker survived. A prefix/suffix-stripping server leaves one
             // marker intact (discovery already handles those as partial
             // reflection), and a block page that echoes the payload (e.g. a
             // reflected-block-page WAF) carries the markers too — neither is a
@@ -1133,7 +1157,21 @@ pub async fn active_probe_param(
                             .to_string(),
                     );
                 }
-                // Genuine filtering / partial strip — keep the legacy
+                // A block page says only that *some* char in the dense probe
+                // tripped a rule, not which one. A blanket "all invalid" would
+                // prune the quote breakouts a `<`-only (or `'`-only) block
+                // still lets through (#1662), so classify per char — but only
+                // once a bare-marker probe proves the param echoes at all.
+                // Without that check a param that never reflects (`-p`, a
+                // `--sxss` seed whose write page says "saved", an empty 5xx)
+                // would pay ~22 probes, or stored writes, for the same verdict.
+                None if genuine_block
+                    && marker_echoes_without_specials(&client, target, &param, &semaphore)
+                        .await =>
+                {
+                    need_per_char_fallback = true;
+                }
+                // Never echoes, or a partial strip — keep the legacy
                 // "all invalid" classification.
                 None => invalid.extend_from_slice(&probe_chars),
             }

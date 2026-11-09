@@ -1069,6 +1069,92 @@ async fn active_probe_does_not_record_an_echo_when_only_the_window_probe_answere
     );
 }
 
+/// #1662: a block page on `<` (no marker in the response) used to mark every
+/// probe char invalid, pruning the quote breakout the endpoint accepts. The
+/// per-char fallback must keep `"` valid and only `<` invalid.
+#[tokio::test]
+async fn active_probe_block_page_classifies_per_char() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn block_lt(Query(p): Query<HashMap<String, String>>) -> Html<String> {
+        let v = p.get("x").cloned().unwrap_or_default();
+        if v.contains('<') {
+            return Html("<html><body>bad input</body></html>".to_string());
+        }
+        Html(format!("<html><body><input value=\"{v}\"></body></html>"))
+    }
+
+    let app = Router::new().route("/b", get(block_lt));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/b?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    let valid = res.valid_specials.expect("valid set");
+    let invalid = res.invalid_specials.expect("invalid set");
+    assert!(valid.contains(&'"'), "valid={valid:?}");
+    assert!(valid.contains(&'>'), "valid={valid:?}");
+    assert!(invalid.contains(&'<'), "invalid={invalid:?}");
+    assert!(!invalid.contains(&'"'), "invalid={invalid:?}");
+}
+
+/// The #1662 per-char fallback is for a param that echoes but blocked the
+/// dense probe. One that never echoes (`-p`, a `--sxss` write page) must keep
+/// the all-invalid verdict without a ~22-request fan-out.
+#[tokio::test]
+async fn active_probe_never_echoing_param_skips_per_char_fallback() {
+    use axum::{Router, response::Html, routing::get};
+    use std::net::Ipv4Addr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    let seen = Arc::new(AtomicUsize::new(0));
+    let seen_h = seen.clone();
+    let app = Router::new().route(
+        "/s",
+        get(move || {
+            seen_h.fetch_add(1, Ordering::SeqCst);
+            async { Html("<html><body>saved</body></html>") }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/s?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+    let invalid = res.invalid_specials.expect("invalid set");
+    assert!(invalid.len() >= SPECIAL_PROBE_CHARS.len(), "{invalid:?}");
+    // batched + window-overflow + bare-marker; the `<`-invalid multi-decode
+    // probes may add a few more, but never one per probe char.
+    let n = seen.load(Ordering::SeqCst);
+    assert!(n < SPECIAL_PROBE_CHARS.len(), "sent {n} requests");
+}
+
 /// `Param::marker_echoed` is what lets the scan worker's Stage-0 probe skip its
 /// own request, so it may only be set when this probe saw the markers come back
 /// in a response the scan phases would act on.
