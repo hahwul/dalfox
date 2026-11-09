@@ -798,7 +798,8 @@ with offset/limit. Returns {total, scans, pagination}, where pagination is \
 {offset, limit, returned, has_more} and each scan has: scan_id, target \
 (original URL), status, result_count, queued_at_ms, started_at_ms, \
 finished_at_ms, duration_ms and settled — plus error_message on a scan that \
-failed, so a failed scan is distinguishable from one that finished with no findings. \
+failed and warnings when any were raised (e.g. SESSION_LOST on a cancelled scan), \
+so a failed or weakened scan is distinguishable from one that finished with no findings. \
 `settled` is the worker-drain signal: only a terminal scan with settled=true \
 is safe to delete."
     )]
@@ -833,13 +834,14 @@ is safe to delete."
             limit,
             true,
         );
-        // Same rule as a findings page: a row's `error_message` can quote the
+        // Same rule as a findings page: a row's `error_message` or `warnings` can quote the
         // origin (a session-loss reason carries the `Location` it landed on),
         // and this listing is read by a model with no tool description
         // anywhere near it.
-        let carries_target_content = out["scans"]
-            .as_array()
-            .is_some_and(|rows| rows.iter().any(|r| r.get("error_message").is_some()));
+        let carries_target_content = out["scans"].as_array().is_some_and(|rows| {
+            rows.iter()
+                .any(|r| r.get("error_message").is_some() || r.get("warnings").is_some())
+        });
         if carries_target_content {
             out[UNTRUSTED_CONTENT_KEY] = serde_json::json!(UNTRUSTED_CONTENT_NOTICE);
         }

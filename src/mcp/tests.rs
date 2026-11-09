@@ -3928,6 +3928,12 @@ fn both_prompts_render_with_their_argument() {
         triage.contains("detection_method"),
         "triage must teach the axis that decides what a finding means"
     );
+    // A cancelled zero-finding scan whose session died must not be summarized
+    // as clean: both prompts have to send the agent to the fields that say so.
+    for text in [&scan, &triage] {
+        assert!(text.contains("error_message") && text.contains("warnings"));
+        assert!(text.contains(crate::cmd::error_codes::SESSION_LOST));
+    }
 
     // A missing required argument is refused rather than rendered with a hole
     // in it — a scan prompt with no target would otherwise invite the model to

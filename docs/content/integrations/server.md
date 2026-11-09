@@ -277,7 +277,9 @@ default, returns everything from `offset` on). Scans come back newest first:
 
 A row also carries `error_message` whenever the scan has one (a failure, a
 `scan_timeout` expiry, a capped `deep_scan`), so a failed scan can't be
-mistaken for a clean one with `result_count: 0`.
+mistaken for a clean one with `result_count: 0`. It carries `warnings` too when
+the job has any (absent otherwise), so a cancelled scan whose session had already
+died still shows its `SESSION_LOST:` line in the list.
 
 ### Cancel a scan
 

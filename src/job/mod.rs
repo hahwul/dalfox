@@ -1222,8 +1222,9 @@ pub(crate) fn jobs_newest_first<'a>(
 /// The scan-listing body shared by REST `/scans` and MCP `list_scans_dalfox`:
 /// `{total, scans, pagination}`, newest first, optionally filtered by status,
 /// paged by `offset` / `limit` (0 = all). Each row carries `error_message` on a
-/// failed scan — otherwise `status: "error", result_count: 0` reads exactly
-/// like a clean scan. `with_settled` adds MCP's per-row worker-drain flag.
+/// failed scan and `warnings` when there are any — otherwise `status: "error",
+/// result_count: 0`, or a cancelled scan whose session died, reads exactly like
+/// a clean scan. `with_settled` adds MCP's per-row worker-drain flag.
 pub(crate) fn scan_list_json(
     jobs: &HashMap<String, Job>,
     filter: Option<&JobStatus>,
@@ -1260,6 +1261,9 @@ pub(crate) fn scan_list_json(
             }
             if let Some(msg) = &job.error_message {
                 row["error_message"] = serde_json::json!(msg);
+            }
+            if !job.warnings.is_empty() {
+                row["warnings"] = serde_json::json!(job.warnings);
             }
             row
         })
