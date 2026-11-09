@@ -296,10 +296,17 @@ fn number_and_boolean_builtins_do_not_propagate_taint() {
         // ordinary code that only looks like a definition
         "const search = new URLSearchParams(location.search); el.innerHTML = location.hash.search('x');",
         "fetch(u, { method: 'get' }); const m = new Map(); el.innerHTML = m.get(location.hash);",
+        "el.innerHTML = location.hash.slice(1).toLowerCase().search('x');",
     ] {
         let findings = AstDomAnalyzer::new().analyze(js).unwrap();
         assert!(findings.is_empty(), "{js}: {findings:?}");
     }
+    // A call whose argument list outruns the definition scan is still a call.
+    let js = format!(
+        "el.innerHTML = location.hash.includes('{}');",
+        "a".repeat(300)
+    );
+    assert!(AstDomAnalyzer::new().analyze(&js).unwrap().is_empty());
 }
 
 #[test]
@@ -327,6 +334,8 @@ fn number_and_boolean_builtins_keep_real_flows() {
         // `search` / `has` on a receiver not known to be the built-in
         "el.innerHTML = searchLib.search(location.hash);",
         "el.innerHTML = lib.has(location.hash);",
+        "el.innerHTML = getLib().search(location.hash);",
+        "el.innerHTML = new (pick())().has(location.hash);",
         // a parameter shadows the outer Map
         "const m = new Map(); function f(m) { el.innerHTML = m.get(location.hash); } f(remoteCache);",
         // a hoisted reader walked before the write that taints the map

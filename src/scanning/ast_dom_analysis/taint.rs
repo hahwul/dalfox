@@ -907,16 +907,16 @@ impl<'a> DomXssVisitor<'a> {
     /// The call's receiver is one of the built-in `classes`: a `new C(…)`
     /// expression, a variable bound to one, or (for `RegExp`) a regex literal.
     fn builtin_receiver_class(&self, call: &CallExpression<'a>, classes: &[&str]) -> bool {
-        let Some(receiver) = self.get_callee_object_expr(&call.callee) else {
-            return false;
-        };
-        let class = match receiver.without_parentheses() {
-            Expression::RegExpLiteral(_) => Some("RegExp"),
-            Expression::NewExpression(new_expr) => match &new_expr.callee {
+        let class = match self
+            .get_callee_object_expr(&call.callee)
+            .map(Expression::without_parentheses)
+        {
+            Some(Expression::RegExpLiteral(_)) => Some("RegExp"),
+            Some(Expression::NewExpression(new_expr)) => match &new_expr.callee {
                 Expression::Identifier(id) => Some(id.name.as_str()),
                 _ => None,
             },
-            Expression::Identifier(id) => self
+            Some(Expression::Identifier(id)) => self
                 .instance_classes
                 .get(id.name.as_str())
                 .map(String::as_str),

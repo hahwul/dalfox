@@ -396,11 +396,10 @@ impl<'a> DomXssVisitor<'a> {
                 .find_source_in_expr(&cond.consequent)
                 .or_else(|| self.find_source_in_expr(&cond.alternate)),
             Expression::CallExpression(call) => {
-                match self.call_taint_and_source(call) {
-                    (_, Some(source)) => return Some(source),
-                    // `location.hash.includes('x')`: no source to name.
-                    (false, None) => return None,
-                    (true, None) => {}
+                // An untainted call (`location.hash.includes('x')`) names no source.
+                let (tainted, source) = self.call_taint_and_source(call);
+                if source.is_some() || !tainted {
+                    return source;
                 }
 
                 // Check callee first (e.g., location.hash.slice())
