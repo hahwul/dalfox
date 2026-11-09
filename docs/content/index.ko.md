@@ -39,6 +39,7 @@ template = "landing"
           <ul class="hero-install-pm-menu" role="listbox" aria-label="설치 방법">
             <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
             <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
+            <li role="option" aria-selected="false" data-label="apt" data-cmd="sudo apt install dalfox">Kali Linux</li>
             <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
             <li role="option" aria-selected="false" data-label="choco" data-cmd="choco install dalfox">Chocolatey</li>
             <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>

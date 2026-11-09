@@ -1,6 +1,6 @@
 +++
 title = "설치"
-description = "macOS, Linux, Windows, NixOS, Arch Linux에 오픈소스 XSS 스캐너 Dalfox를 설치하거나 소스에서 빌드합니다."
+description = "macOS, Linux, Windows, Kali Linux, NixOS, Arch Linux에 오픈소스 XSS 스캐너 Dalfox를 설치하거나 소스에서 빌드합니다."
 weight = 2
 toc = true
 +++
@@ -26,6 +26,14 @@ brew install hahwul/dalfox/dalfox
 ```bash
 sudo snap install dalfox
 ```
+
+## Kali Linux
+
+```bash
+sudo apt install dalfox
+```
+
+Kali 저장소에 Dalfox 패키지가 있습니다. Kali는 자체 일정에 따라 새 릴리스를 반영하므로 최신 릴리스보다 버전이 늦을 수 있습니다. 자세한 내용은 [kali.org/tools/dalfox](https://www.kali.org/tools/dalfox)와 [패키지 트래커](https://pkg.kali.org/pkg/dalfox)를 참고하세요.
 
 ## Arch Linux (AUR)
 
