@@ -165,19 +165,6 @@ impl ScanRun {
         append_note: bool,
     ) -> JobStatus {
         job.results = Some(results);
-        for w in &self.warnings {
-            super::push_job_warning(&mut job.warnings, w);
-        }
-        // `cancelled` wins the status, but a session already found dead must
-        // still be reported (the CLI ranks it above an interrupted target).
-        if self.was_cancelled
-            && let Some(signal) = &self.session_lost
-        {
-            super::push_job_warning(
-                &mut job.warnings,
-                &format!("{}: {signal}", crate::cmd::error_codes::SESSION_LOST),
-            );
-        }
         if job.status != JobStatus::Cancelled {
             job.status = if self.was_cancelled {
                 JobStatus::Cancelled
@@ -186,6 +173,23 @@ impl ScanRun {
             } else {
                 JobStatus::Done
             };
+        }
+        // `cancelled` wins the status, but a session already found dead must
+        // still be reported (the CLI ranks it above an interrupted target).
+        // Keyed on the stored status, not `was_cancelled`: a cancel landing
+        // after the run read its flag still leaves the job `cancelled`. Pushed
+        // before the run's own warnings so the MAX_JOB_WARNINGS cap can never
+        // drop the one line that explains the empty result.
+        if job.status == JobStatus::Cancelled
+            && let Some(signal) = &self.session_lost
+        {
+            super::push_job_warning(
+                &mut job.warnings,
+                &format!("{}: {signal}", crate::cmd::error_codes::SESSION_LOST),
+            );
+        }
+        for w in &self.warnings {
+            super::push_job_warning(&mut job.warnings, w);
         }
         // Session loss, a worker panic and a timeout are mutually exclusive in
         // practice (a timeout trips the cancel flag, so `panicked` is false).

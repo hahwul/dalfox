@@ -271,7 +271,9 @@ curl -H "X-API-KEY: 8f2b1c6d4a9e7053b8c1f4d2e6a09b73" 'http://127.0.0.1:6664/sca
 ```
 
 스캔에 `error_message`가 있으면(실패, `scan_timeout` 만료, 상한에 걸린 `deep_scan`) 행에도
-담기므로, 실패한 스캔을 `result_count: 0`인 깨끗한 스캔과 헷갈리지 않습니다.
+담기므로, 실패한 스캔을 `result_count: 0`인 깨끗한 스캔과 헷갈리지 않습니다. 잡에
+`warnings`가 있으면 행에도 담기므로(없으면 생략), 세션이 이미 끊긴 뒤 취소된 스캔도 목록에서
+`SESSION_LOST:` 줄이 보입니다.
 
 ### 스캔 취소
 

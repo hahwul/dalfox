@@ -415,8 +415,9 @@ List every tracked scan, newest first. All arguments are optional:
 Returns `total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms,
 started_at_ms, finished_at_ms, duration_ms}]` and `pagination: {offset, limit,
 returned, has_more}`, plus `error_message` on a scan that
-failed. Without it, a row reading `status: "error", result_count: 0` looks exactly like
-a clean one.
+failed and `warnings` when the job has any. Without them, a row reading
+`status: "error", result_count: 0`, or a cancelled scan whose session had died,
+looks exactly like a clean one.
 
 ### `cancel_scan_dalfox`
 

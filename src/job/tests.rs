@@ -1883,6 +1883,61 @@ fn settle_keeps_session_lost_on_a_cancelled_job() {
         "{:?}",
         job.warnings
     );
+    // A poller matches the stop reason by prefix; the loss does not displace it.
+    assert!(
+        job.error_message
+            .as_deref()
+            .is_some_and(|m| m.starts_with(crate::cmd::error_codes::SCAN_TIMEOUT)),
+        "{:?}",
+        job.error_message
+    );
+    // The scan list is where an agent sees the job next to the others: a
+    // cancelled zero-finding row without the warning reads as nothing found.
+    let row = &crate::job::scan_list_json(
+        &std::iter::once(("id".to_string(), job)).collect(),
+        None,
+        0,
+        10,
+        false,
+    )["scans"][0];
+    assert_eq!(row["status"], "cancelled");
+    assert_eq!(row["result_count"], 0);
+    assert_eq!(
+        row["warnings"],
+        serde_json::json!(["SESSION_LOST: login form"])
+    );
+}
+
+/// A cancel that lands after the run read its cancel flag (`was_cancelled`
+/// false) still leaves the stored job `cancelled`; the loss must still be in
+/// `warnings` — ahead of the run's own warnings, so a full list cannot cap it
+/// out. `error_message` carries it too here (the run saw no cancel).
+#[test]
+fn settle_keeps_session_lost_when_the_cancel_lands_after_the_run() {
+    let run = runner::ScanRun {
+        results: Default::default(),
+        reachability_failed: false,
+        timed_out: false,
+        was_cancelled: false,
+        panicked: false,
+        worker_panics: 0,
+        session_lost: Some("login form".to_string()),
+        findings_capped: false,
+        warnings: (0..MAX_JOB_WARNINGS + 8).map(|i| format!("w{i}")).collect(),
+        min_confidence: None,
+    };
+    let mut job = Job::new_queued("http://t/".into());
+    assert!(job.cancel());
+    assert_eq!(
+        run.settle(&mut job, Arc::new(Vec::new()), 5, false),
+        JobStatus::Cancelled
+    );
+    assert_eq!(job.warnings.len(), MAX_JOB_WARNINGS);
+    assert_eq!(job.warnings[0], "SESSION_LOST: login form");
+    assert_eq!(
+        job.error_message.as_deref(),
+        Some("SESSION_LOST: login form")
+    );
 }
 
 /// One DOM sink is found by the preflight pass and again per parameter. The

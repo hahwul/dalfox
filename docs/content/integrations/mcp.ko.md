@@ -405,8 +405,9 @@ WAF 관련 다섯 개 필드는 CLI의 WAF 플래그와 대응됩니다. `waf_by
 `limit`으로 목록을 페이지 단위로 넘깁니다(`limit: 0`이 기본값이며 `offset`부터 전부 반환).
 
 `total`, `scans: [{scan_id, target, status, settled, result_count, queued_at_ms, started_at_ms,
-finished_at_ms, duration_ms}]`, `pagination: {offset, limit, returned, has_more}`를 반환하며, 실패한 스캔에는 `error_message`가 붙습니다.
-이 값이 없으면 `status: "error", result_count: 0`인 행은 깨끗하게 끝난 스캔과 똑같아 보입니다.
+finished_at_ms, duration_ms}]`, `pagination: {offset, limit, returned, has_more}`를 반환하며, 실패한 스캔에는 `error_message`가, 경고가 있는
+잡에는 `warnings`가 붙습니다. 이 값이 없으면 `status: "error", result_count: 0`인 행이나 세션이 끊긴 뒤 취소된
+스캔은 깨끗하게 끝난 스캔과 똑같아 보입니다.
 
 ### `cancel_scan_dalfox`
 
