@@ -271,3 +271,49 @@ fn numeric_and_boolean_binary_results_do_not_carry_executable_input() {
             .is_empty()
     );
 }
+
+/// #1663: built-ins that return a number or a boolean cannot carry markup,
+/// and a lookup whose only tainted part is the key returns the container's
+/// value, not the key.
+#[test]
+fn number_and_boolean_builtins_do_not_propagate_taint() {
+    for js in [
+        "el.innerHTML = location.search.indexOf('x');",
+        "el.innerHTML = location.search.includes('a');",
+        "el.innerHTML = location.hash.charCodeAt(1);",
+        "el.innerHTML = location.pathname.startsWith('/a');",
+        "el.innerHTML = /admin/.test(location.hash);",
+        "el.innerHTML = new RegExp('a').test(location.hash);",
+        "const re = new RegExp('a'); el.innerHTML = re.test(location.hash);",
+        "var tabs = ['a', 'b']; el.innerHTML = tabs.indexOf(location.hash.slice(1));",
+        "el.innerHTML = new Set(['a']).has(location.hash);",
+        "el.innerHTML = new Map([['a', '<b>A</b>']]).get(location.hash.slice(1));",
+        "const m = new Map([['a', '<b>A</b>']]); el.innerHTML = m.get(location.hash.slice(1));",
+        "el.innerHTML = location.hash.localeCompare('a') + location.hash.search('x');",
+        "el.innerHTML = location.hash.split(',').some(function (x) { return x; });",
+    ] {
+        let findings = AstDomAnalyzer::new().analyze(js).unwrap();
+        assert!(findings.is_empty(), "{js}: {findings:?}");
+    }
+}
+
+#[test]
+fn number_and_boolean_builtins_keep_real_flows() {
+    for js in [
+        "el.innerHTML = location.hash.slice(1);",
+        // the map's *values* are tainted
+        "const m = new Map(); m.set('k', location.hash); el.innerHTML = m.get('k');",
+        "const m = new Map([['k', location.hash]]); el.innerHTML = m.get('k');",
+        // a page-local method of the same name is followed, not assumed built-in
+        "var o = { has: function (x) { return x; } }; el.innerHTML = o.has(location.hash);",
+        // …even when the receiver's class is unknown at the call
+        "class W { has(x) { return x; } } var w = make(); el.innerHTML = w.has(location.hash);",
+        // `test` on something that is not a regex
+        "el.innerHTML = lib.test(location.hash);",
+        // `get` on an unknown object (could fetch an attacker URL)
+        "el.innerHTML = cache.get(location.hash);",
+    ] {
+        let findings = AstDomAnalyzer::new().analyze(js).unwrap();
+        assert!(!findings.is_empty(), "{js}");
+    }
+}

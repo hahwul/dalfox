@@ -210,6 +210,12 @@ impl<'a> DomXssVisitor<'a> {
             return (true, Some(bound_target));
         }
 
+        // `location.search.indexOf('x')`, `/re/.test(location.hash)`: the
+        // result is a number or a boolean, which cannot carry markup (#1663).
+        if self.returns_inert_builtin_result(call) {
+            return (false, None);
+        }
+
         // Direct source calls (e.g., localStorage.getItem(...))
         if let Expression::StaticMemberExpression(member) = &call.callee {
             if member.property.name.as_str() == "get"
@@ -272,6 +278,12 @@ impl<'a> DomXssVisitor<'a> {
         // never receives the tainted value as an argument at all.
         if let Some(source) = self.callback_result_source(call) {
             return (true, Some(source));
+        }
+
+        // `map.get(tainted)` returns one of the map's values, not the key. A
+        // tainted map was already caught by the receiver check above.
+        if self.callee_is_builtin_method(call, "get", &["Map", "WeakMap"]) {
+            return (false, None);
         }
 
         // Conservative fallback: tainted argument taints call result.
@@ -847,6 +859,86 @@ impl<'a> DomXssVisitor<'a> {
         });
     }
 }
+
+impl<'a> DomXssVisitor<'a> {
+    /// The call reaches a built-in method that returns a number or a boolean,
+    /// whatever its receiver or arguments: data from `location`, JSON or a
+    /// structured clone cannot carry its own methods. A page-local function
+    /// of the same name shadows the built-in and is followed instead.
+    fn returns_inert_builtin_result(&self, call: &CallExpression<'a>) -> bool {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        let builtin = INERT_RESULT_METHODS.contains(&method.as_str())
+            || self.callee_is_builtin_method(call, "test", &["RegExp"]);
+        builtin && !self.method_name_is_page_local(&method)
+    }
+
+    /// `call` is `<receiver>.<method>(…)` on a receiver known to be one of the
+    /// built-in `classes`: a `new C(…)` expression, a variable bound to one,
+    /// or (for `RegExp`) a regex literal.
+    fn callee_is_builtin_method(
+        &self,
+        call: &CallExpression<'a>,
+        method: &str,
+        classes: &[&str],
+    ) -> bool {
+        if self.get_callee_property_name(&call.callee).as_deref() != Some(method)
+            || self.method_name_is_page_local(method)
+        {
+            return false;
+        }
+        let Some(mut receiver) = self.get_callee_object_expr(&call.callee) else {
+            return false;
+        };
+        while let Expression::ParenthesizedExpression(p) = receiver {
+            receiver = &p.expression;
+        }
+        let class = match receiver {
+            Expression::RegExpLiteral(_) => return classes.contains(&"RegExp"),
+            Expression::NewExpression(new_expr) => match &new_expr.callee {
+                Expression::Identifier(id) => Some(id.name.as_str()),
+                _ => None,
+            },
+            Expression::Identifier(id) => self
+                .instance_classes
+                .get(id.name.as_str())
+                .map(String::as_str),
+            _ => None,
+        };
+        class.is_some_and(|c| classes.contains(&c))
+    }
+
+    /// A page-local function summary named `method` (or `….method`) exists.
+    /// ponytail: linear scan over summaries per inert-method call; index the
+    /// summary keys by last segment if a huge bundle makes this show up.
+    fn method_name_is_page_local(&self, method: &str) -> bool {
+        self.function_summaries.keys().any(|key| {
+            key.strip_suffix(method)
+                .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with('.'))
+        })
+    }
+}
+
+/// Built-in methods whose result is always a number or a boolean (#1663).
+/// `test` is gated on a regex receiver separately — the name is too common
+/// on library objects to trust alone.
+const INERT_RESULT_METHODS: &[&str] = &[
+    "indexOf",
+    "lastIndexOf",
+    "includes",
+    "startsWith",
+    "endsWith",
+    "search",
+    "charCodeAt",
+    "codePointAt",
+    "localeCompare",
+    "findIndex",
+    "findLastIndex",
+    "some",
+    "every",
+    "has",
+];
 
 /// Built-in string/array methods whose result's `.length` is a plain number.
 const BUILTIN_STRING_ARRAY_METHODS: &[&str] = &[
