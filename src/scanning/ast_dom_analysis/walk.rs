@@ -564,6 +564,11 @@ impl<'a> DomXssVisitor<'a> {
         }
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
+        // A parameter or local `m` is not the outer `const m = new Map()`.
+        let shadowed_instances: Vec<(String, String)> = own_names
+            .iter()
+            .filter_map(|n| Some((n.clone(), self.instance_classes.remove(n.as_str())?)))
+            .collect();
         for name in &own_names {
             self.local_names.insert(name.clone());
             self.image_element_vars.remove(name.as_str());
@@ -619,6 +624,12 @@ impl<'a> DomXssVisitor<'a> {
         self.image_element_vars.rollback(image_vars_checkpoint);
         self.local_names.rollback(local_names_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
+        for name in &own_names {
+            self.instance_classes.remove(name.as_str());
+        }
+        for (name, class) in shadowed_instances {
+            self.instance_classes.insert(name, class);
+        }
         for name in shadowed_globals {
             self.global_taints.insert(name);
         }

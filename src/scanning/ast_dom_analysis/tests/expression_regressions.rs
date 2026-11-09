@@ -291,6 +291,9 @@ fn number_and_boolean_builtins_do_not_propagate_taint() {
         "const m = new Map([['a', '<b>A</b>']]); el.innerHTML = m.get(location.hash.slice(1));",
         "el.innerHTML = location.hash.localeCompare('a') + location.hash.search('x');",
         "el.innerHTML = location.hash.split(',').some(function (x) { return x; });",
+        "var re = /admin/; el.innerHTML = re.test(location.hash);",
+        "var re; re = /admin/; el.innerHTML = re.test(location.hash);",
+        "el.innerHTML = new URLSearchParams(location.search).has('a');",
     ] {
         let findings = AstDomAnalyzer::new().analyze(js).unwrap();
         assert!(findings.is_empty(), "{js}: {findings:?}");
@@ -312,8 +315,28 @@ fn number_and_boolean_builtins_keep_real_flows() {
         "el.innerHTML = lib.test(location.hash);",
         // `get` on an unknown object (could fetch an attacker URL)
         "el.innerHTML = cache.get(location.hash);",
+        // methods attached by assignment, or defined after the use
+        "function W() {} W.prototype.search = function (q) { return '<b>' + q + '</b>'; }; var w = new W(); el.innerHTML = w.search(location.hash);",
+        "var o; o = { has: function (x) { return x; } }; el.innerHTML = o.has(location.hash);",
+        "function render() { el.innerHTML = widget.has(location.hash); } var widget = { has: function (x) { return x; } }; render();",
+        "Object.defineProperty(o, 'includes', { value: function (x) { return x; } }); el.innerHTML = o.includes(location.hash);",
+        // `search` / `has` on a receiver not known to be the built-in
+        "el.innerHTML = searchLib.search(location.hash);",
+        "el.innerHTML = lib.has(location.hash);",
+        // a parameter shadows the outer Map
+        "const m = new Map(); function f(m) { el.innerHTML = m.get(location.hash); } f(remoteCache);",
     ] {
         let findings = AstDomAnalyzer::new().analyze(js).unwrap();
         assert!(!findings.is_empty(), "{js}");
     }
+}
+
+/// An inert call contributes no source, so the label names the operand that
+/// actually carries the taint.
+#[test]
+fn inert_builtin_does_not_label_the_source() {
+    let js = "el.innerHTML = location.hash.includes('x') + location.search;";
+    let findings = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].source, "location.search", "{findings:?}");
 }

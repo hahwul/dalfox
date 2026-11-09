@@ -215,7 +215,11 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 let mut assigned_instance_class = false;
                 self.clear_instance_field_taints(target_name);
-                if let Expression::NewExpression(new_expr) = &assign.right
+                if let Expression::RegExpLiteral(_) = &assign.right {
+                    self.instance_classes
+                        .insert(target_name.to_string(), "RegExp".to_string());
+                    assigned_instance_class = true;
+                } else if let Expression::NewExpression(new_expr) = &assign.right
                     && let Expression::Identifier(class_id) = &new_expr.callee
                 {
                     self.instance_classes
