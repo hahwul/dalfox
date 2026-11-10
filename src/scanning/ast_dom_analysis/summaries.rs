@@ -6,6 +6,9 @@
 
 use super::*;
 
+/// A reported sink, as `(line, column, sink)`.
+type Report = (u32, u32, String);
+
 impl<'a> DomXssVisitor<'a> {
     /// Walk through statements
     pub(super) fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
@@ -27,10 +30,51 @@ impl<'a> DomXssVisitor<'a> {
                     ExportDefaultDeclarationKind::FunctionDeclaration(func_decl) => func_decl,
                     _ => continue,
                 },
+                // `W.prototype.render = function () { … }` is as much a
+                // declaration: `function W() { on('message', this.render) }`
+                // above it must find the method.
+                Statement::ExpressionStatement(stmt) => {
+                    if let Expression::AssignmentExpression(assign) = &stmt.expression
+                        && let Some((ctor, method, func)) = Self::prototype_method(assign)
+                        && let Some(body) = &func.body
+                    {
+                        self.register_function_summary(
+                            format!("{ctor}.{method}"),
+                            &func.params,
+                            &body.statements,
+                            false,
+                        );
+                    }
+                    continue;
+                }
                 _ => continue,
             };
             self.register_function_declaration(func_decl);
         }
+    }
+    /// `(W, render, fn)` of `W.prototype.render = function () { … }`.
+    pub(super) fn prototype_method<'b>(
+        assign: &'b AssignmentExpression<'a>,
+    ) -> Option<(&'b str, &'b str, &'b Function<'a>)> {
+        if let AssignmentTarget::StaticMemberExpression(target) = &assign.left
+            && let Expression::StaticMemberExpression(proto) = &target.object
+            && proto.property.name == "prototype"
+            && let Expression::Identifier(ctor) = &proto.object
+            && let Expression::FunctionExpression(func) = &assign.right
+        {
+            return Some((ctor.name.as_str(), target.property.name.as_str(), func));
+        }
+        None
+    }
+    /// The first sink reported since `before` that the parameter-free pass
+    /// (`free`) did not report too.
+    fn first_param_sink(&self, before: usize, free: &HashSet<Report>) -> Option<String> {
+        self.vulnerabilities[before..]
+            .iter()
+            .filter(|vuln| vuln.sink != "__return__")
+            .map(|vuln| (vuln.line, vuln.column, vuln.sink.clone()))
+            .find(|report| !free.contains(report))
+            .map(|(_, _, sink)| sink)
     }
     /// Parameter names by position. A destructured parameter keeps its slot
     /// under an unbindable `#<index>` placeholder so the indices still line up
@@ -110,7 +154,7 @@ impl<'a> DomXssVisitor<'a> {
         let css_custom_properties_checkpoint = self.css_custom_property_sources.checkpoint();
         let idb_requests_checkpoint = self.idb_request_vars.checkpoint();
         let idb_stores_checkpoint = self.idb_object_store_vars.checkpoint();
-        let image_vars_checkpoint = self.image_element_vars.checkpoint();
+        let image_vars_checkpoint = self.element_tag_vars.checkpoint();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -126,45 +170,84 @@ impl<'a> DomXssVisitor<'a> {
         // `tainted_param_writes` instead — applied only where a call actually
         // passes a tainted argument. Writes rooted at a local or a parameter
         // die with the call.
-        let mut locals: HashSet<String> = params.iter().cloned().collect();
-        Self::collect_declared_names(body_stmts, &mut locals);
+        // Every name each parameter slot binds: `{ q }`, `[a, b]` and a rest
+        // parameter (one slot past the last) included, so `f({ q: tainted })`
+        // reaches a sink on `q`.
+        let mut param_bindings: Vec<Vec<String>> = formal_params
+            .items
+            .iter()
+            .map(|param| {
+                let mut names = Vec::new();
+                Self::collect_binding_pattern_names(&param.pattern, &mut names);
+                names
+            })
+            .collect();
+        if let Some(rest) = &formal_params.rest {
+            let mut names = Vec::new();
+            Self::collect_binding_pattern_names(&rest.rest.argument, &mut names);
+            param_bindings.push(names);
+        }
+        let mut declared = HashSet::new();
+        Self::collect_declared_names(body_stmts, &mut declared);
+        let mut locals: HashSet<String> = param_bindings.iter().flatten().cloned().collect();
+        locals.extend(declared.iter().cloned());
         let local_names_checkpoint = self.local_names.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
+        let shadow_params_checkpoint = self.shadow_params.checkpoint();
+        let url_lead_scope = self.url_leads_enter(&locals);
+        let global_aliases_checkpoint = self.global_aliases.checkpoint();
         for name in &locals {
+            self.global_aliases.remove(name.as_str());
             self.local_names.insert(name.clone());
             self.page_url_objects.remove(name.as_str());
+        }
+        // A local constructor `t` is not the outer `t` (see `named_this`).
+        let shadowed_this: Vec<(String, usize)> = locals
+            .iter()
+            .filter_map(|name| Some((name.clone(), self.named_this.remove(name)?)))
+            .collect();
+        // A body-level declaration wins over a parameter of the same name.
+        for name in param_bindings.iter().flatten() {
+            self.shadow_params.insert(name.clone());
+        }
+        for name in &declared {
+            self.shadow_params.remove(name.as_str());
         }
         let is_outer = |path: &String| {
             let root = path.split(['.', '[']).next().unwrap_or(path);
             !root.starts_with("this@") && !locals.contains(root)
         };
-        for (idx, param_name) in params.iter().enumerate() {
-            if param_name.starts_with('#') {
+        // What each per-parameter pass reported, as `(line, column, sink)`.
+        // A sink the body reaches with *no* parameter tainted (a free
+        // `location.hash`, a tainted global) is not that parameter's flow, so
+        // those are subtracted once the parameter-free pass below has run.
+        let mut param_reports: Vec<(usize, Vec<Report>)> = Vec::new();
+        for (idx, names) in param_bindings.iter().enumerate() {
+            if names.is_empty() {
                 continue;
             }
             let field_taints_checkpoint = self.field_taints.checkpoint();
             let global_taints_checkpoint = self.global_taints.checkpoint();
             self.tainted_vars.clear();
             self.var_aliases.clear();
-            self.tainted_vars.insert(param_name.clone());
-            self.var_aliases
-                .insert(param_name.clone(), format!("fn_param_{}", idx));
+            for name in names {
+                self.tainted_vars.insert(name.clone());
+                self.var_aliases
+                    .insert(name.clone(), format!("fn_param_{}", idx));
+            }
             self.collecting_tainted_returns = true;
             self.tainted_return_sources.clear();
 
             let before = self.vulnerabilities.len();
-            self.with_function_this(formal_params, |v| v.walk_statements(body_stmts));
-            if concise {
-                self.collect_concise_return(body_stmts);
-            }
-            for vuln in &self.vulnerabilities[before..] {
-                if vuln.sink != "__return__" {
-                    summary
-                        .tainted_param_sinks
-                        .entry(idx)
-                        .or_insert_with(|| vuln.sink.clone());
-                }
-            }
+            self.summary_body_walk(formal_params, body_stmts, concise);
+            param_reports.push((
+                idx,
+                self.vulnerabilities[before..]
+                    .iter()
+                    .filter(|vuln| vuln.sink != "__return__")
+                    .map(|vuln| (vuln.line, vuln.column, vuln.sink.clone()))
+                    .collect(),
+            ));
             if let Some(source) = self.tainted_return_sources.first() {
                 summary.tainted_param_returns.insert(idx, source.clone());
             }
@@ -196,17 +279,140 @@ impl<'a> DomXssVisitor<'a> {
         self.collecting_tainted_returns = true;
         self.tainted_return_sources.clear();
         let before = self.vulnerabilities.len();
-        self.with_function_this(formal_params, |v| v.walk_statements(body_stmts));
-        if concise {
-            self.collect_concise_return(body_stmts);
+        // Not a parameter named for the global it is handed: `function
+        // readCookie(document) { return document.cookie }`.
+        let is_global = |name: &&String| {
+            matches!(
+                name.as_str(),
+                "window" | "document" | "location" | "self" | "globalThis" | "top" | "parent"
+            )
+        };
+        let outer_plain_params = std::mem::replace(
+            &mut self.plain_params,
+            params
+                .iter()
+                .filter(|name| !is_global(name))
+                .cloned()
+                .collect(),
+        );
+        // A global this pass taints stays tainted (`function () { g =
+        // location.hash; }`), but its source label lives in `var_aliases`,
+        // which is put back wholesale below — so carry the labels across.
+        let global_taints_checkpoint = self.global_taints.checkpoint();
+        self.summary_body_walk(formal_params, body_stmts, concise);
+        let tainted_globals: Vec<(String, String)> = self
+            .global_taints
+            .keys_added_since(&global_taints_checkpoint)
+            .into_iter()
+            .filter_map(|name| {
+                let source = self.var_aliases.get(&name).cloned()?;
+                // An enclosing pass's assumed parameter is not a source.
+                (!source.starts_with("fn_param_")).then_some((name, source))
+            })
+            .collect();
+        self.global_taints.rollback(global_taints_checkpoint);
+        for (name, _) in &tainted_globals {
+            self.global_taints.insert(name.clone());
         }
-        if let Some(source) = self.tainted_return_sources.first() {
+        self.plain_params = outer_plain_params;
+        // An enclosing summary pass's *assumed* parameter (`fn_param_N`,
+        // reaching this body through a global it wrote) is not a source.
+        if let Some(source) = self
+            .tainted_return_sources
+            .iter()
+            .find(|source| !source.starts_with("fn_param_"))
+        {
             summary.return_without_tainted_params = Some(source.clone());
+        }
+        let free: HashSet<Report> = self.vulnerabilities[before..]
+            .iter()
+            .map(|vuln| (vuln.line, vuln.column, vuln.sink.clone()))
+            .collect();
+        for (idx, reports) in &param_reports {
+            if let Some((_, _, sink)) = reports.iter().find(|report| !free.contains(report)) {
+                summary.tainted_param_sinks.insert(*idx, sink.clone());
+            }
         }
         self.vulnerabilities.truncate(before);
 
+        // A navigation sink is harmless to an argument whose first characters
+        // the attacker does not write (see `url_lead`) — as long as the body
+        // hands the argument on as it came. One more pass with the parameter
+        // assumed to be such a value: what that still reports is what a
+        // pinned argument reaches (`location.href = u.slice(1)`, a second
+        // write to `innerHTML`).
+        for (idx, names) in param_bindings.iter().enumerate() {
+            if !summary
+                .tainted_param_sinks
+                .get(&idx)
+                .is_some_and(|sink| is_navigation_sink(sink))
+            {
+                continue;
+            }
+            let field_taints_checkpoint = self.field_taints.checkpoint();
+            let global_taints_checkpoint = self.global_taints.checkpoint();
+            self.tainted_vars.clear();
+            self.var_aliases.clear();
+            for name in names {
+                self.tainted_vars.insert(name.clone());
+                self.var_aliases
+                    .insert(name.clone(), format!("fn_param_{idx}"));
+                self.url_leads
+                    .insert(name.clone(), (UrlLead::Passive, true));
+            }
+            self.summary_body_walk(formal_params, body_stmts, concise);
+            if let Some(sink) = self.first_param_sink(before, &free) {
+                summary.pinned_param_sinks.insert(idx, sink);
+            }
+            self.vulnerabilities.truncate(before);
+            for name in names {
+                self.url_leads.remove(name.as_str());
+            }
+            self.global_taints.rollback(global_taints_checkpoint);
+            self.field_taints.rollback(field_taints_checkpoint);
+        }
+
+        // As a `message` handler, parameter 0 is an event whose `origin` the
+        // body may check (see `guards`): one more pass with that known, only
+        // for a body that mentions an origin at all.
+        if let Some(event) = params.first().filter(|name| !name.starts_with('#'))
+            && summary.tainted_param_sinks.contains_key(&0)
+            && let (Some(first), Some(last)) = (body_stmts.first(), body_stmts.last())
+            && self
+                .source_code
+                .get(first.span().start as usize..last.span().end as usize)
+                .is_some_and(|body| body.contains("origin"))
+        {
+            let field_taints_checkpoint = self.field_taints.checkpoint();
+            let global_taints_checkpoint = self.global_taints.checkpoint();
+            let origins_checkpoint = self.message_origins.checkpoint();
+            self.tainted_vars.clear();
+            self.var_aliases.clear();
+            self.tainted_vars.insert(event.clone());
+            self.var_aliases
+                .insert(event.clone(), "fn_param_0".to_string());
+            self.message_origins
+                .insert(format!("{event}.origin"), vec![event.clone()]);
+            let outer_deps = self.origin_guard_deps.take();
+            self.summary_body_walk(formal_params, body_stmts, concise);
+            summary.origin_guard_deps = self.origin_guard_deps.replace(outer_deps);
+            summary.message_param_sink = Some(self.first_param_sink(before, &free));
+            self.vulnerabilities.truncate(before);
+            self.message_origins.rollback(origins_checkpoint);
+            self.global_taints.rollback(global_taints_checkpoint);
+            self.field_taints.rollback(field_taints_checkpoint);
+        }
+
         self.tainted_vars = saved_tainted;
         self.var_aliases = saved_aliases;
+        for (name, source) in tainted_globals {
+            self.var_aliases.insert(name, source);
+        }
+        self.url_leads_exit(url_lead_scope, &locals);
+        for name in &locals {
+            self.named_this.remove(name);
+        }
+        self.named_this.extend(shadowed_this);
         self.instance_classes.rollback(instance_classes_checkpoint);
         self.bound_function_aliases
             .rollback(bound_aliases_checkpoint);
@@ -215,14 +421,30 @@ impl<'a> DomXssVisitor<'a> {
             .rollback(css_custom_properties_checkpoint);
         self.idb_request_vars.rollback(idb_requests_checkpoint);
         self.idb_object_store_vars.rollback(idb_stores_checkpoint);
-        self.image_element_vars.rollback(image_vars_checkpoint);
+        self.element_tag_vars.rollback(image_vars_checkpoint);
         self.local_names.rollback(local_names_checkpoint);
         self.page_url_objects.rollback(page_url_checkpoint);
+        self.shadow_params.rollback(shadow_params_checkpoint);
+        self.global_aliases.rollback(global_aliases_checkpoint);
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;
 
         self.function_summaries.insert(function_name, summary);
+    }
+    /// One hypothetical walk of a summarised function's body.
+    fn summary_body_walk(
+        &mut self,
+        formal_params: &FormalParameters<'a>,
+        body_stmts: &[Statement<'a>],
+        concise: bool,
+    ) {
+        let body_frame = self.enter_body();
+        self.with_function_this(formal_params, |v| v.walk_statements(body_stmts));
+        if concise {
+            self.collect_concise_return(body_stmts);
+        }
+        self.leave_body(body_frame);
     }
     /// A concise arrow (`n => expr`) has no `return` statement — its body
     /// *is* the returned expression — so record it the way the `return` walk
@@ -280,8 +502,7 @@ impl<'a> DomXssVisitor<'a> {
                     // runs the getter.
                     if p.kind == PropertyKind::Get
                         && let Some(source) = self
-                            .function_summaries
-                            .get(&summary_name)
+                            .summary(&summary_name)
                             .and_then(|summary| summary.return_without_tainted_params.clone())
                     {
                         self.field_taints.insert(summary_name, source);
@@ -306,6 +527,33 @@ impl<'a> DomXssVisitor<'a> {
     ) {
         self.register_class_accessor_fields(class_name, class_decl);
         for elem in &class_decl.body.body {
+            // `onMessage = (e) => { … }` is a method in all but spelling.
+            if let ClassElement::PropertyDefinition(property) = elem
+                && let Some(name) = self.get_property_key_name(&property.key)
+            {
+                let key = format!("{class_name}.{name}");
+                match &property.value {
+                    Some(Expression::ArrowFunctionExpression(arrow)) => self
+                        .register_function_summary(
+                            key,
+                            &arrow.params,
+                            &arrow.body.statements,
+                            arrow.expression,
+                        ),
+                    Some(Expression::FunctionExpression(func)) => {
+                        if let Some(body) = &func.body {
+                            self.register_function_summary(
+                                key,
+                                &func.params,
+                                &body.statements,
+                                false,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
             let ClassElement::MethodDefinition(method_def) = elem else {
                 continue;
             };

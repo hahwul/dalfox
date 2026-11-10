@@ -86,7 +86,7 @@ impl<'a> DomXssVisitor<'a> {
         }
         let source = self
             .get_summary_key_for_callee_expr(&call.callee)
-            .and_then(|key| self.function_summaries.get(&key))
+            .and_then(|key| self.summary(&key))
             .and_then(|summary| summary.tainted_param_defaults.get(&param_idx));
         (source.is_some(), source.cloned())
     }
@@ -262,10 +262,7 @@ impl<'a> DomXssVisitor<'a> {
             .get_summary_key_for_callee_expr(expr)
             .or_else(|| self.get_expr_string(expr));
 
-        if key
-            .as_ref()
-            .and_then(|k| self.function_summaries.get(k))
-            .is_none()
+        if key.as_ref().and_then(|k| self.summary(k)).is_none()
             && let Some(alias) = self.get_alias_for_expr(expr)
         {
             key = Some(alias.target.clone());

@@ -19,6 +19,13 @@ impl<'a> DomXssVisitor<'a> {
         let field_taints_checkpoint = self.field_taints.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         self.page_url_objects.remove(param_name);
+        let handler_locals = HashSet::from([param_name.to_string()]);
+        let url_lead_scope = self.url_leads_enter(&handler_locals);
+        let origins_checkpoint = self.message_origins.checkpoint();
+        if event_source == "event.data" {
+            self.message_origins
+                .insert(format!("{param_name}.origin"), vec![param_name.to_string()]);
+        }
 
         self.tainted_vars.insert(param_name.to_string());
         self.var_aliases
@@ -45,8 +52,12 @@ impl<'a> DomXssVisitor<'a> {
                 .insert(format!("{param_name}.target"), "e.target.value".to_string());
         }
 
+        let body_frame = self.enter_body();
         self.walk_statements(statements);
+        self.leave_body(body_frame);
 
+        self.message_origins.rollback(origins_checkpoint);
+        self.url_leads_exit(url_lead_scope, &handler_locals);
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.rollback_fields_keeping_this(field_taints_checkpoint);
@@ -74,6 +85,29 @@ impl<'a> DomXssVisitor<'a> {
         let field_taints_checkpoint = self.field_taints.checkpoint();
         let page_url_checkpoint = self.page_url_objects.checkpoint();
         let mut shadowed_globals = Vec::new();
+        let mut handler_locals = Vec::new();
+        for prop in &pattern.properties {
+            Self::collect_binding_pattern_names(&prop.value, &mut handler_locals);
+        }
+        let handler_locals: HashSet<String> = handler_locals.into_iter().collect();
+        let url_lead_scope = self.url_leads_enter(&handler_locals);
+        // `({ origin, data }) => …`: a check on `origin` vouches for `data`.
+        let origins_checkpoint = self.message_origins.checkpoint();
+        if event_source == "event.data" {
+            let bound = |key: &str| {
+                let mut names = Vec::new();
+                for prop in &pattern.properties {
+                    if self.get_property_key_name(&prop.key).as_deref() == Some(key) {
+                        Self::collect_binding_pattern_names(&prop.value, &mut names);
+                    }
+                }
+                names
+            };
+            let carriers = bound("data");
+            for origin in bound("origin") {
+                self.message_origins.insert(origin, carriers.clone());
+            }
+        }
         for prop in &pattern.properties {
             if self
                 .get_property_key_name(&prop.key)
@@ -94,7 +128,11 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
         }
+        let body_frame = self.enter_body();
         self.walk_statements(statements);
+        self.leave_body(body_frame);
+        self.message_origins.rollback(origins_checkpoint);
+        self.url_leads_exit(url_lead_scope, &handler_locals);
         self.tainted_vars.rollback(tainted_checkpoint);
         self.var_aliases.rollback(aliases_checkpoint);
         self.rollback_fields_keeping_this(field_taints_checkpoint);
@@ -216,21 +254,25 @@ impl<'a> DomXssVisitor<'a> {
             None
         }
     }
+    /// `target.onmessage = handler` / `window.onstorage = handler`; a bare
+    /// `onmessage = handler` (no `receiver`) sets the window's.
     pub(super) fn analyze_onmessage_assignment(
         &mut self,
         span: oxc_span::Span,
-        receiver: &Expression<'a>,
+        receiver: Option<&Expression<'a>>,
         property_name: &str,
         right: &Expression<'a>,
     ) {
-        if property_name != "onmessage" {
-            return;
-        }
+        let event_source = match (property_name, receiver) {
+            ("onmessage", Some(receiver)) => self.message_event_source_for_receiver(receiver),
+            ("onmessage", None) => "event.data".to_string(),
+            ("onstorage", _) => "event.newValue".to_string(),
+            _ => return,
+        };
 
         match right {
             Expression::FunctionExpression(func) => {
                 if let Some(body) = &func.body {
-                    let event_source = self.message_event_source_for_receiver(receiver);
                     self.with_own_this(|v| {
                         v.walk_event_handler_param(
                             func.params.items.first(),
@@ -241,28 +283,80 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
             Expression::ArrowFunctionExpression(arrow) => {
-                let event_source = self.message_event_source_for_receiver(receiver);
                 self.walk_event_handler_param(
                     arrow.params.items.first(),
                     &event_source,
                     &arrow.body.statements,
                 );
             }
-            Expression::Identifier(handler_id) => {
+            handler => {
                 if let Some(sink_name) = self
-                    .function_summaries
-                    .get(handler_id.name.as_str())
-                    .and_then(|summary| summary.tainted_param_sinks.get(&0))
-                    .cloned()
+                    .handler_summary_key(handler)
+                    .and_then(|key| self.summary_handler_sink(&key, &event_source))
                 {
-                    self.report_vulnerability_with_source(
-                        span,
-                        &sink_name,
-                        Some(self.message_event_source_for_receiver(receiver)),
-                    );
+                    self.report_vulnerability_with_source(span, &sink_name, Some(event_source));
                 }
             }
-            _ => {}
+        }
+    }
+
+    /// The sink the handler summarised under `key` reaches when registered
+    /// for an event from `event_source`.
+    pub(super) fn summary_handler_sink(&self, key: &str, event_source: &str) -> Option<String> {
+        let summary = self.summary(key)?;
+        // An origin check against a value the attacker supplies vouches for
+        // nothing: `if (e.origin !== allowedFromQuery) return;`.
+        let unchecked = summary.origin_guard_deps.iter().any(|path| {
+            let root = path.split('.').next().unwrap_or(path);
+            self.tainted_vars.contains(root)
+                || self.global_taints.contains(root)
+                || self.field_taints.contains_key(path)
+        });
+        summary.handler_sink(event_source == "event.data" && !unchecked)
+    }
+
+    /// `debounce(function (e) { … }, 100)` — the handler is the function the
+    /// wrapper was given. `handler.bind(this)` is left to
+    /// [`handler_summary_key`](Self::handler_summary_key).
+    pub(super) fn unwrap_handler<'b>(&self, handler: &'b Expression<'a>) -> &'b Expression<'a> {
+        if let Expression::CallExpression(call) = handler.without_parentheses()
+            && self.get_callee_property_name(&call.callee).as_deref() != Some("bind")
+            && let Some(inner) = call
+                .arguments
+                .iter()
+                .filter_map(|arg| arg.as_expression())
+                .find(|arg| {
+                    matches!(
+                        arg,
+                        Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
+                    )
+                })
+        {
+            return inner;
+        }
+        handler
+    }
+
+    /// Summary key of a handler passed by reference rather than written
+    /// inline: `handle`, `obj.handle`, `this.handle` inside a class, and any
+    /// of those behind `.bind(…)`.
+    pub(super) fn handler_summary_key(&self, handler: &Expression<'a>) -> Option<String> {
+        match handler.without_parentheses() {
+            Expression::CallExpression(call)
+                if self.get_callee_property_name(&call.callee).as_deref() == Some("bind") =>
+            {
+                self.handler_summary_key(self.get_callee_object_expr(&call.callee)?)
+            }
+            // `const h = this.onMessage.bind(this); on('message', h)`.
+            Expression::Identifier(id) if self.summary(id.name.as_str()).is_none() => Some(
+                self.bound_function_aliases
+                    .get(id.name.as_str())
+                    .map_or_else(|| id.name.to_string(), |alias| alias.target.clone()),
+            ),
+            expr @ (Expression::Identifier(_) | Expression::StaticMemberExpression(_)) => {
+                self.get_summary_key_for_callee_expr(expr)
+            }
+            _ => None,
         }
     }
 

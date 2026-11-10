@@ -62,6 +62,7 @@ impl<K: Eq + Hash + Clone, V: Clone> ScopedMap<K, V> {
         self.map.contains_key(key)
     }
 
+    #[cfg(test)]
     pub(super) fn keys(&self) -> impl Iterator<Item = &K> {
         self.map.keys()
     }
@@ -155,6 +156,7 @@ impl<K: Eq + Hash + Clone> ScopedSet<K> {
         self.0.contains_key(key)
     }
 
+    #[cfg(test)]
     pub(super) fn iter(&self) -> impl Iterator<Item = &K> {
         self.0.keys()
     }

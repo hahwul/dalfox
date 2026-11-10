@@ -30,7 +30,7 @@ use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
@@ -38,11 +38,13 @@ use std::sync::{Arc, LazyLock};
 pub use reflected_markup::PageMarkup;
 pub(crate) use resolve::{attribute_sink_target, is_navigation_sink};
 use scoped_state::{ScopedMap, ScopedSet};
+use url_lead::UrlLead;
 
 mod async_flow;
 mod bindings;
 mod bound_calls;
 mod events;
+mod guards;
 mod reflected_markup;
 mod resolve;
 mod scoped_state;
@@ -52,6 +54,7 @@ mod sources;
 mod summaries;
 mod taint;
 mod trusted_types;
+mod url_lead;
 mod walk;
 
 /// Maximum AST recursion depth for the taint-analysis visitor. The JavaScript
@@ -274,6 +277,11 @@ pub struct DomXssVulnerability {
 #[derive(Default)]
 struct FunctionSummary {
     tainted_param_sinks: BTreeMap<usize, String>,
+    /// For a parameter whose sink above is a navigation: the sink an
+    /// argument that cannot start with a script scheme (see `url_lead`)
+    /// still reaches — the body cut its head off, or wrote it to
+    /// `innerHTML` as well. No entry when there is none.
+    pinned_param_sinks: BTreeMap<usize, String>,
     tainted_param_returns: BTreeMap<usize, String>,
     /// Parameters whose default value is tainted: a call that leaves the
     /// argument out passes the default's source.
@@ -284,7 +292,27 @@ struct FunctionSummary {
     /// Outer field paths (`cfg.html`) and globals the body writes a tainted
     /// parameter into, applied at a call site that passes a tainted argument.
     tainted_param_writes: BTreeMap<usize, (Vec<String>, Vec<String>)>,
+    /// The sink parameter 0 reaches when it is a `message` event whose
+    /// origin the body checks — `Some(None)` when the check covers every
+    /// sink. `None` when the body never mentions an origin.
+    message_param_sink: Option<Option<String>>,
+    /// Outer values that origin check compared against (`e.origin !==
+    /// allowed`). The summary pass cannot know whether they are tainted;
+    /// the place the handler is registered can.
+    origin_guard_deps: Vec<String>,
     return_without_tainted_params: Option<String>,
+}
+
+impl FunctionSummary {
+    /// The sink this function reaches as the handler of an event whose
+    /// parameter is tainted; `window_message` for a `window` message event,
+    /// the one kind whose `origin` a handler can check.
+    fn handler_sink(&self, window_message: bool) -> Option<String> {
+        match &self.message_param_sink {
+            Some(guarded) if window_message => guarded.clone(),
+            _ => self.tainted_param_sinks.get(&0).cloned(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -367,6 +395,17 @@ struct DomXssVisitor<'a> {
     sanitizers: &'static HashSet<&'static str>,
     /// Function summaries used for lightweight inter-procedural taint tracking
     function_summaries: HashMap<String, FunctionSummary>,
+    /// Parameters of the function whose parameter-free summary pass is
+    /// running. `function onMessage(event) { sink(event.data) }` reads its
+    /// *parameter* there, so that pass must not see the name-based
+    /// `event.data` source and take the flow away from parameter 0.
+    plain_params: HashSet<String>,
+    /// Parameters of the function bodies being walked. A call to one
+    /// (`function (t) { t(x) }`) is a call to whatever the caller passed, not
+    /// to the function a summary happens to be registered for under the same
+    /// name — summaries are keyed by bare name, and minified code reuses
+    /// `e`/`t`/`n` in every scope. A body's own declarations take the name back.
+    shadow_params: ScopedSet<String>,
     /// Parameter lists (by span) of functions whose calls this analysis sees
     /// with their arguments — summarised functions and IIFEs — so their
     /// defaults apply per call, not to every walk of the body.
@@ -420,12 +459,25 @@ struct DomXssVisitor<'a> {
     /// have been handed out — see `with_own_this`.
     this_scope: usize,
     this_scopes: usize,
+    /// The `this` of each named constructor function, shared by its body and
+    /// the methods assigned to its `prototype`.
+    named_this: HashMap<String, usize>,
+    /// An object literal's methods are being walked once just to learn which
+    /// `this.*` fields they taint; nested literals skip their own such pass.
+    in_field_prepass: bool,
     /// Variables bound to `new URL(location)` / `new URL(document.URL)` — a
     /// copy of the page's own URL, whose scheme and host the attacker cannot
     /// pick (unlike `new URL(location.hash.slice(1))`). Scoped like
     /// `tainted_vars`, and any rebinding of the name drops it, since the
     /// entry *pins* a sink: a stale one would hide a real flow.
     page_url_objects: ScopedSet<String>,
+    /// What each variable's value starts with, for navigation sinks, and
+    /// whether the variable was tainted when that was recorded — see
+    /// [`url_lead`]. Like `page_url_objects` an entry pins a sink.
+    url_leads: ScopedMap<String, (UrlLead, bool)>,
+    /// Names whose `url_leads` entry was rewritten since the enclosing
+    /// function body began (see `url_leads_exit`).
+    url_lead_kills: Vec<String>,
     /// Track `paramsVar -> base source` for `url.searchParams` aliases.
     url_search_params_sources: HashMap<String, String>,
     /// Track variables known to hold URLSearchParams objects.
@@ -476,9 +528,11 @@ struct DomXssVisitor<'a> {
     reflected_element_vars: HashMap<String, String>,
     /// Variables bound to a `<form>` element (see `expr_resolves_to_form`).
     form_element_vars: HashSet<String>,
-    /// Variables bound to an image (`new Image()`, `createElement('img')`),
-    /// whose `src` loads a picture and never runs script.
-    image_element_vars: ScopedSet<String>,
+    /// Variables bound to an element of a known tag (`createElement('img')`,
+    /// `new Image()`, `querySelector('iframe')`), lowercased. What `src` /
+    /// `href` do depends on it: an image's `src` loads a picture, a
+    /// `<link>`'s `href` a stylesheet, and neither runs script.
+    element_tag_vars: ScopedMap<String, String>,
     /// Callback parameters currently bound to a `fetch()` `Response`
     /// object — the first `.then(resp => …)` of a fetch chain. While such
     /// a parameter is in scope, `resp.text()` / `resp.json()` read the
@@ -506,6 +560,8 @@ struct DomXssVisitor<'a> {
     /// borrowing `self` — the walkers take `&mut self`, which a `&self`-borrow
     /// held across the call would conflict with.
     recursion_depth: Rc<Cell<u32>>,
+    /// The kind of sink the expression being evaluated lands in.
+    sink_ctx: Cell<SinkCtx>,
     /// Steps taken so far by this walk, against [`work_budget`].
     /// Counted in [`DomXssVisitor::enter_recursion`], so once the budget is
     /// spent every recursive analysis fn bails with the same safe default the
@@ -515,6 +571,35 @@ struct DomXssVisitor<'a> {
     work_steps: Cell<u64>,
     /// Step budget for this walk — [`MAX_AST_WORK_STEPS`] outside tests.
     work_budget: u64,
+    /// Variables bound to a global object — `var d = document, w = window,
+    /// l = location` — mapped to its canonical name, so `d.write(l.hash)`
+    /// reads as `document.write(location.hash)`.
+    global_aliases: ScopedMap<String, &'static str>,
+    /// Aliases for the parameters of the IIFE about to be walked
+    /// (`(function (w, d) { … })(window, document)`).
+    pending_param_aliases: Vec<(String, &'static str)>,
+    /// Parameters of the IIFE about to be walked that are handed the outer
+    /// binding of the same name — `(function (App) { … })(App)` — and so do
+    /// not shadow it (see `shadow_params`).
+    iife_passthrough: Vec<String>,
+    /// What the origin checks of the summary pass under way compared
+    /// against (see `FunctionSummary::origin_guard_deps`).
+    origin_guard_deps: RefCell<Vec<String>>,
+    /// `branch_depth` at the start of the function body being walked: a
+    /// statement at this depth runs on every path through the body.
+    branch_base: u32,
+    /// Globals an early-exit guard vouched for until the body ends (see
+    /// `guards::untaint_for_rest_of_body`).
+    body_guarded_globals: Vec<String>,
+    /// `message` handlers being walked: the path of the event's origin
+    /// (`e.origin`, or a destructured `origin`) → the names carrying its data.
+    message_origins: ScopedMap<String, Vec<String>>,
+    /// Event names whose origin a guard checked, switching the name-based
+    /// `event.data` source off for them.
+    origin_checked: ScopedSet<String>,
+    /// Name of the class whose body is being walked, so `this.onMessage`
+    /// resolves to the `Class.onMessage` method summary.
+    current_class: Option<String>,
     /// Whether `require-trusted-types-for 'script'` is enforced for this page
     /// (threaded from the response CSP). Gates the program-wide default-policy
     /// suppression: without enforcement a `'default'` policy is inert, so we
@@ -534,6 +619,50 @@ struct DomXssVisitor<'a> {
     ///
     /// [`trusted_types_enforced`]: DomXssVisitor::trusted_types_enforced
     default_tt_policy: Option<TtPolicyInfo>,
+}
+
+/// What a sink does with its value, which decides the sanitizers that help.
+/// HTML escaping leaves `javascript:alert(1)` and `alert(1)` untouched, so
+/// `location.href = escapeHtml(u)` and `eval(DOMPurify.sanitize(c))` are as
+/// exploitable as the bare forms.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SinkCtx {
+    /// Parsed as markup: every recognised sanitizer applies.
+    Html,
+    /// Used as a URL: only a number or `encodeURIComponent` (which encodes
+    /// the `:` a scheme needs) is safe.
+    Url,
+    /// Run as script: only a number is safe.
+    Code,
+}
+
+impl SinkCtx {
+    fn of(sink: &str) -> Self {
+        let target = attribute_sink_target(sink);
+        if (target != sink && target.starts_with("on"))
+            || matches!(
+                target,
+                "eval"
+                    | "Function"
+                    | "setTimeout"
+                    | "setInterval"
+                    | "execScript"
+                    | "$.globalEval"
+                    | "jQuery.globalEval"
+            )
+        {
+            SinkCtx::Code
+        } else if is_navigation_sink(sink)
+            || matches!(
+                target,
+                "src" | "import" | "$.getScript" | "jQuery.getScript"
+            )
+        {
+            SinkCtx::Url
+        } else {
+            SinkCtx::Html
+        }
+    }
 }
 
 /// RAII token returned by [`DomXssVisitor::enter_recursion`]; decrements the
@@ -592,13 +721,15 @@ const DOM_SOURCES: &[&str] = &[
     "sessionStorage",
     "localStorage.getItem",
     "sessionStorage.getItem",
+    // Event properties are sources by name only under the conventional
+    // `event` spelling. A bare `e` is whatever a minifier called its first
+    // parameter (`success: function (e) { render(e.data) }`), so `e.*` reads
+    // count only where the handler's registration is seen
+    // (`addEventListener('message', …)`, `onmessage = …`), which taints the
+    // parameter itself whatever it is called.
     "event.data",
-    "e.data",
     "event.newValue",
-    "e.newValue",
     "event.oldValue",
-    "e.oldValue",
-    "e.target.value",
     "event.target.value",
     "window.opener",
     "URLSearchParams",
@@ -616,7 +747,6 @@ const DOM_SOURCES: &[&str] = &[
     // bare `clipboardData` object holds metadata (`.types`, `.files`, …) that
     // isn't user-controlled string content, so we don't mark it as a source.
     "event.clipboardData.getData",
-    "e.clipboardData.getData",
     "navigator.clipboard.readText",
     // Drag-and-drop `drop` handlers: `dataTransfer.getData(type)` returns the
     // dragged payload, which the attacker controls end-to-end when the drag
@@ -626,22 +756,16 @@ const DOM_SOURCES: &[&str] = &[
     // reads above. The bare `dataTransfer` object is not listed: `.types` /
     // `.files` / `.effectAllowed` are metadata, not attacker string content.
     "event.dataTransfer.getData",
-    "e.dataTransfer.getData",
     // Keyboard / composition events – `key` / `code` carry user input
     // verbatim and are the natural source on autocompletion-style handlers.
     "event.key",
-    "e.key",
     "event.code",
-    "e.code",
     // `event.target.innerText` / `textContent` / `innerHTML` is the common
     // contenteditable / paste-into-div shape: the user typed it, so the
     // value is tainted at read time.
     "event.target.innerText",
-    "e.target.innerText",
     "event.target.textContent",
-    "e.target.textContent",
     "event.target.innerHTML",
-    "e.target.innerHTML",
 ];
 
 const DOM_SINKS: &[&str] = &[
@@ -740,10 +864,17 @@ const DOM_SANITIZERS: &[&str] = &[
     "Number",
     "Number.parseInt",
     "Number.parseFloat",
+    "Number.isNaN",
+    "Number.isFinite",
+    "Number.isInteger",
+    "Boolean",
+    "isNaN",
+    "isFinite",
+    "btoa",
 ];
 
-/// Sanitizer entries that are built-in numeric coercions: the result is always
-/// a number (or NaN), which cannot carry markup, so
+/// Sanitizer entries that are built-ins whose result cannot carry markup: a
+/// number (or NaN), a boolean, or — for `btoa` — base64 text, so
 /// `innerHTML = 'Page ' + parseInt(p)` is inert. Unlike an `escapeHtml` helper
 /// (whose page-local definition is the normal case), a page declaring its own
 /// function under one of these names has shadowed the built-in, so the name
@@ -754,6 +885,13 @@ const NUMERIC_COERCIONS: &[&str] = &[
     "Number",
     "Number.parseInt",
     "Number.parseFloat",
+    "Number.isNaN",
+    "Number.isFinite",
+    "Number.isInteger",
+    "Boolean",
+    "isNaN",
+    "isFinite",
+    "btoa",
 ];
 
 static STATIC_SOURCES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -789,6 +927,8 @@ impl<'a> DomXssVisitor<'a> {
             sinks: &*STATIC_SINKS,
             sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
+            shadow_params: Default::default(),
+            plain_params: HashSet::new(),
             arity_known: HashSet::new(),
             overridden_coercions: HashSet::new(),
             instance_classes: Default::default(),
@@ -804,9 +944,13 @@ impl<'a> DomXssVisitor<'a> {
             global_taints: Default::default(),
             url_object_sources: HashMap::new(),
             page_url_objects: Default::default(),
+            url_leads: Default::default(),
+            url_lead_kills: Vec::new(),
             local_names: Default::default(),
             this_scope: 0,
             this_scopes: 0,
+            named_this: HashMap::new(),
+            in_field_prepass: false,
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
@@ -818,16 +962,50 @@ impl<'a> DomXssVisitor<'a> {
             reflected_markup: Arc::default(),
             reflected_element_vars: HashMap::new(),
             form_element_vars: HashSet::new(),
-            image_element_vars: Default::default(),
+            element_tag_vars: Default::default(),
             response_object_vars: Default::default(),
             branch_depth: 0,
+            global_aliases: Default::default(),
+            pending_param_aliases: Vec::new(),
+            iife_passthrough: Vec::new(),
+            origin_guard_deps: RefCell::new(Vec::new()),
+            branch_base: 0,
+            body_guarded_globals: Vec::new(),
+            message_origins: Default::default(),
+            origin_checked: Default::default(),
+            current_class: None,
             recursion_depth: Rc::new(Cell::new(0)),
+            sink_ctx: Cell::new(SinkCtx::Html),
             work_steps: Cell::new(0),
             work_budget: MAX_AST_WORK_STEPS,
             trusted_types_enforced: false,
             tt_policies: HashMap::new(),
             default_tt_policy: None,
         }
+    }
+    /// Evaluate `eval` as the value of `sink`.
+    fn for_sink<R>(&self, sink: &str, eval: impl FnOnce(&Self) -> R) -> R {
+        let outer = self.sink_ctx.replace(SinkCtx::of(sink));
+        let result = eval(self);
+        self.sink_ctx.set(outer);
+        result
+    }
+    /// `path` names a DOM source (`location.hash`, `event.data`).
+    fn is_source(&self, path: &str) -> bool {
+        let root = path.split('.').next().unwrap_or(path);
+        self.sources.contains(path)
+            && !self.plain_params.contains(root)
+            && !self.origin_checked.contains(root)
+    }
+    /// The summary registered under `key` (`render`, `helper.render`), unless
+    /// its root name is a parameter of an enclosing function (see
+    /// [`shadow_params`](Self::shadow_params)).
+    fn summary(&self, key: &str) -> Option<&FunctionSummary> {
+        let root = key.split('.').next().unwrap_or(key);
+        if self.shadow_params.contains(root) {
+            return None;
+        }
+        self.function_summaries.get(key)
     }
     /// Enter one recursive analysis step. Returns `None` — telling the caller to
     /// bail with a safe default (`false` / `None` / stop walking) — once the

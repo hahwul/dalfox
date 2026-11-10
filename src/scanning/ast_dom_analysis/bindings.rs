@@ -18,6 +18,8 @@ impl<'a> DomXssVisitor<'a> {
         init: &Expression<'a>,
     ) {
         let var_name = id.name.as_str();
+        let (old_url_lead, url_lead) = (self.identifier_url_lead(var_name), self.url_lead(init));
+        self.bind_global_alias(var_name, init);
         self.clear_url_search_params_field_sources(var_name);
         // Rebinding the name drops whatever the *previous* instance's accessors
         // read back, or a stale `m.body` would stay tainted after
@@ -57,6 +59,16 @@ impl<'a> DomXssVisitor<'a> {
         if let Expression::RegExpLiteral(_) = init {
             self.instance_classes
                 .insert(var_name.to_string(), "RegExp".to_string());
+            assigned_instance_class = true;
+        } else if let Expression::ArrayExpression(_) = init {
+            // So `ALLOWED.includes(x)` is known to test a list (see `guards`).
+            self.instance_classes
+                .insert(var_name.to_string(), "Array".to_string());
+            assigned_instance_class = true;
+        } else if let (Expression::ThisExpression(_), Some(class)) = (init, &self.current_class) {
+            // `var self = this` in a method: `self.render(x)` is `Class.render`.
+            self.instance_classes
+                .insert(var_name.to_string(), class.clone());
             assigned_instance_class = true;
         } else if let Expression::NewExpression(new_expr) = init
             && let Expression::Identifier(class_id) = &new_expr.callee
@@ -147,10 +159,13 @@ impl<'a> DomXssVisitor<'a> {
         } else {
             self.form_element_vars.remove(var_name);
         }
-        if self.expr_resolves_to_image(init) {
-            self.image_element_vars.insert(var_name.to_string());
-        } else {
-            self.image_element_vars.remove(var_name);
+        match self.expr_element_tag(init) {
+            Some(tag) => {
+                self.element_tag_vars.insert(var_name.to_string(), tag);
+            }
+            None => {
+                self.element_tag_vars.remove(var_name);
+            }
         }
 
         // `var probe = document.getElementById('probe')` on an element whose
@@ -204,7 +219,7 @@ impl<'a> DomXssVisitor<'a> {
 
         // Check if initializer is a source or tainted
         if let Some(source_expr) = self.get_expr_string(init)
-            && self.sources.contains(source_expr.as_str())
+            && self.is_source(source_expr.as_str())
         {
             self.tainted_vars.insert(var_name.to_string());
             self.var_aliases
@@ -327,6 +342,8 @@ impl<'a> DomXssVisitor<'a> {
                 self.var_aliases.insert(var_name.to_string(), source);
             }
         }
+        self.set_url_lead(var_name, old_url_lead, url_lead);
+        self.untaint_global_alias(var_name);
     }
     /// Find a source in an expression (for alias tracking).
     ///
@@ -337,7 +354,12 @@ impl<'a> DomXssVisitor<'a> {
     pub(super) fn find_source_in_expr(&self, expr: &Expression<'a>) -> Option<String> {
         let _guard = self.enter_recursion()?;
         match expr {
-            Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
+            Expression::Identifier(id) => {
+                self.var_aliases.get(id.name.as_str()).cloned().or_else(|| {
+                    self.is_location_value(id.name.as_str())
+                        .then(|| "location.href".to_string())
+                })
+            }
             Expression::StaticMemberExpression(member) => self.static_member_source(member),
             Expression::ArrayExpression(array) => {
                 // Find first tainted element's source
@@ -406,7 +428,7 @@ impl<'a> DomXssVisitor<'a> {
                 if let Expression::StaticMemberExpression(member) = &call.callee {
                     // Direct source call (e.g., localStorage.getItem(...))
                     if let Some(callee_str) = self.get_member_string(member)
-                        && self.sources.contains(callee_str.as_str())
+                        && self.is_source(callee_str.as_str())
                     {
                         return self
                             .storage_get_source(call, &callee_str)
@@ -426,7 +448,7 @@ impl<'a> DomXssVisitor<'a> {
                         }
                         Argument::StaticMemberExpression(member) => {
                             if let Some(member_str) = self.get_member_string(member)
-                                && self.sources.contains(member_str.as_str())
+                                && self.is_source(member_str.as_str())
                             {
                                 return Some(member_str);
                             }
@@ -563,6 +585,13 @@ impl<'a> DomXssVisitor<'a> {
         if let Some(source) = self.reflected_markup_source_for_member(member) {
             return Some(source);
         }
+        // `window.location.host` is `location.host`: the origin-fixed label,
+        // not the URL-carried `window.location` the object fallback would give.
+        if matches!(member.property.name.as_str(), "host" | "origin")
+            && self.expr_is_location_object(&member.object)
+        {
+            return Some(format!("location.{}", member.property.name));
+        }
         if let Some(full_path) = self.get_member_string(member) {
             if matches!(
                 full_path.as_str(),
@@ -571,11 +600,14 @@ impl<'a> DomXssVisitor<'a> {
             {
                 return Some(source.clone());
             }
-            if self.sources.contains(full_path.as_str()) {
+            if self.is_source(full_path.as_str()) {
                 return Some(full_path);
             }
             if let Some(source) = self.field_taints.get(&full_path) {
                 return Some(source.clone());
+            }
+            if full_path.ends_with(".originalEvent.data") {
+                return Some("event.data".to_string());
             }
         }
         self.find_source_in_expr(&member.object)
@@ -588,7 +620,7 @@ impl<'a> DomXssVisitor<'a> {
             if let Some(source) = self.field_taints.get(&path) {
                 return Some(source.clone());
             }
-            if self.sources.contains(path.as_str()) {
+            if self.is_source(path.as_str()) {
                 return Some(path);
             }
         }

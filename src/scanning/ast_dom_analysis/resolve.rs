@@ -10,7 +10,7 @@ impl<'a> DomXssVisitor<'a> {
     /// Get a string representation of an expression if it's an identifier or member expression
     pub(super) fn get_expr_string(&self, expr: &Expression) -> Option<String> {
         match expr {
-            Expression::Identifier(id) => Some(id.name.to_string()),
+            Expression::Identifier(id) => Some(self.root_name(id.name.as_str()).to_string()),
             Expression::StaticMemberExpression(member) => self.get_member_string(member),
             Expression::ComputedMemberExpression(member) => self.get_computed_member_string(member),
             Expression::PrivateFieldExpression(field) => self.private_field_path(field),
@@ -37,7 +37,9 @@ impl<'a> DomXssVisitor<'a> {
         let _guard = self.enter_recursion()?;
         let property = member.property.name.as_str();
         match &member.object {
-            Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
+            Expression::Identifier(id) => {
+                Some(format!("{}.{}", self.root_name(id.name.as_str()), property))
+            }
             Expression::ThisExpression(_) => Some(self.this_path(property)),
             Expression::PrivateFieldExpression(inner) => self
                 .private_field_path(inner)
@@ -53,6 +55,54 @@ impl<'a> DomXssVisitor<'a> {
                 meta.meta.name, meta.property.name, property
             )),
             _ => None,
+        }
+    }
+    /// The global a variable stands for (see `global_aliases`), or the name
+    /// itself.
+    pub(super) fn root_name<'n>(&self, name: &'n str) -> &'n str {
+        self.global_aliases.get(name).copied().unwrap_or(name)
+    }
+    /// The canonical global `expr` denotes — `window`, `document` or
+    /// `location` in any of their spellings — for binding an alias to it. A
+    /// function's own `self` / `document` is not the global.
+    pub(super) fn global_alias_of(&self, expr: &Expression<'a>) -> Option<&'static str> {
+        let expr = expr.without_parentheses();
+        if let Expression::Identifier(id) = expr {
+            if let Some(global) = self.global_aliases.get(id.name.as_str()) {
+                return Some(global);
+            }
+            if self.local_names.contains(id.name.as_str()) {
+                return None;
+            }
+        }
+        match self.get_expr_string(expr)?.as_str() {
+            "window" | "self" | "globalThis" | "window.window" | "window.self" => Some("window"),
+            "document" | "window.document" | "self.document" => Some("document"),
+            "location" | "window.location" | "document.location" | "self.location" => {
+                Some("location")
+            }
+            _ => None,
+        }
+    }
+    /// Bind or unbind `name` as an alias after `name = value`.
+    pub(super) fn bind_global_alias(&mut self, name: &str, value: &Expression<'a>) {
+        match self.global_alias_of(value) {
+            // `var window = window` and friends alias nothing new.
+            Some(global) if global != name => {
+                self.global_aliases.insert(name.to_string(), global);
+            }
+            _ => {
+                self.global_aliases.remove(name);
+            }
+        }
+    }
+    /// An alias stands for its global (`var l = location` reads as `location`
+    /// wherever `l` does), so the name carries no taint of its own to outlive
+    /// the alias when a block rebinds it.
+    pub(super) fn untaint_global_alias(&mut self, name: &str) {
+        if self.global_aliases.contains_key(name) {
+            self.tainted_vars.remove(name);
+            self.var_aliases.remove(name);
         }
     }
     /// `this.#v` — keyed with its `#` so it never meets a public `this.v`.
@@ -78,7 +128,9 @@ impl<'a> DomXssVisitor<'a> {
         let _guard = self.enter_recursion()?;
         let property = self.get_computed_property_string(member)?;
         match &member.object {
-            Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
+            Expression::Identifier(id) => {
+                Some(format!("{}.{}", self.root_name(id.name.as_str()), property))
+            }
             Expression::ThisExpression(_) => Some(self.this_path(&property)),
             Expression::StaticMemberExpression(inner) => self
                 .get_member_string(inner)
@@ -188,6 +240,8 @@ impl<'a> DomXssVisitor<'a> {
                 Expression::Identifier(class_id) => Some(class_id.name.to_string()),
                 _ => None,
             },
+            // `this.render(x)` in a method of `current_class`.
+            Expression::ThisExpression(_) => self.current_class.clone(),
             Expression::ParenthesizedExpression(paren) => {
                 self.get_summary_object_prefix(&paren.expression)
             }
@@ -309,75 +363,6 @@ impl<'a> DomXssVisitor<'a> {
     pub(super) fn url_sink_is_pinned(&self, sink: &str, expr: &Expression<'a>) -> bool {
         is_navigation_sink(sink) && self.url_scheme_is_pinned(expr)
     }
-    /// True when the URL `expr` evaluates to starts with text that fixes its
-    /// scheme to a non-script one, so no tainted tail can make it
-    /// `javascript:` — `'/search?q=' + q`, `location.origin + path`,
-    /// `` `https://x/?u=${location.href}` ``. Unknown leading text is not
-    /// pinned.
-    pub(super) fn url_scheme_is_pinned(&self, expr: &Expression<'a>) -> bool {
-        let Some(_guard) = self.enter_recursion() else {
-            return false;
-        };
-        // The page's own URL — `top.location = self.location` frame-busting,
-        // or a `new URL(location)` copy with its query rewritten.
-        if self.expr_is_location_object(expr) || self.expr_is_page_url_object(expr) {
-            return true;
-        }
-        match expr {
-            Expression::StringLiteral(s) => literal_pins_url_scheme(&s.value),
-            Expression::TemplateLiteral(t) => {
-                let first = t
-                    .quasis
-                    .first()
-                    .and_then(|q| q.value.cooked.as_ref())
-                    .map(Str::as_str)
-                    .unwrap_or("");
-                if first.is_empty() {
-                    t.expressions
-                        .first()
-                        .is_some_and(|e| self.url_scheme_is_pinned(e))
-                } else {
-                    literal_pins_url_scheme(first)
-                }
-            }
-            Expression::BinaryExpression(b) if b.operator == BinaryOperator::Addition => {
-                self.url_scheme_is_pinned(&b.left)
-            }
-            Expression::ParenthesizedExpression(p) => self.url_scheme_is_pinned(&p.expression),
-            // The page's own URL (or its scheme / path) leads, unmodified.
-            Expression::StaticMemberExpression(member) => {
-                // …also read off a `URL` copy of it (`new URL(location.href).pathname`).
-                matches!(
-                    self.url_object_part_source(member).as_deref(),
-                    Some("location.href" | "location.pathname")
-                ) || self.get_member_string(member).is_some_and(|path| {
-                    let path = path
-                        .trim_start_matches("window.")
-                        .trim_start_matches("self.")
-                        .trim_start_matches("document.");
-                    matches!(
-                        path,
-                        "location.href"
-                            | "location.origin"
-                            | "location.protocol"
-                            | "location.pathname"
-                            | "URL"
-                            | "documentURI"
-                    )
-                })
-            }
-            // `pinned.split(sep)[0]` keeps the leading text.
-            Expression::ComputedMemberExpression(member) => {
-                matches!(&member.expression, Expression::NumericLiteral(n) if n.value == 0.0)
-                    && matches!(&member.object, Expression::CallExpression(call)
-                        if self.get_callee_property_name(&call.callee).as_deref() == Some("split")
-                            && self
-                                .get_callee_object_expr(&call.callee)
-                                .is_some_and(|recv| self.url_scheme_is_pinned(recv)))
-            }
-            _ => false,
-        }
-    }
     /// True when a jQuery `$()` / `jQuery()` argument is pinned into *selector*
     /// mode by a constant leading character (`#id`, `.class`, `tag`, `[attr]`,
     /// …). jQuery only builds DOM nodes (the XSS-relevant path) when the first
@@ -396,32 +381,6 @@ impl<'a> DomXssVisitor<'a> {
             None => false,
         }
     }
-}
-
-/// True when a URL starting with `prefix` has a scheme the rest of the string
-/// cannot change, and it is not a script-running one. The URL parser drops
-/// tab/CR/LF anywhere and leading C0/space, so those are skipped first; then
-/// the first non-scheme character (`/`, `?`, `#`, …) makes it relative, and a
-/// `:` closes the scheme. A prefix that is all scheme characters (`java`) is
-/// not pinned — the tail can finish it.
-fn literal_pins_url_scheme(prefix: &str) -> bool {
-    let cleaned: String = prefix
-        .chars()
-        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
-        .collect();
-    let s = cleaned.trim_start_matches(|c: char| c <= ' ');
-    for (i, c) in s.char_indices() {
-        if c == ':' {
-            return !matches!(
-                s[..i].to_ascii_lowercase().as_str(),
-                "javascript" | "data" | "vbscript"
-            );
-        }
-        if !(c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')) {
-            return true;
-        }
-    }
-    false
 }
 
 /// Sinks where a tainted value is only script when it supplies the URL's

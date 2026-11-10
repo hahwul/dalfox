@@ -7,12 +7,31 @@ use super::*;
 impl<'a> DomXssVisitor<'a> {
     /// Walk through an assignment expression
     pub(super) fn walk_assignment_expression(&mut self, assign: &AssignmentExpression<'a>) {
-        let right_tainted = self.is_tainted(&assign.right);
-        let right_source = if right_tainted {
-            self.find_source_in_expr(&assign.right)
-        } else {
-            None
+        // The property written decides which sanitizers count (see `SinkCtx`).
+        let sink = match &assign.left {
+            AssignmentTarget::StaticMemberExpression(member) => {
+                match self.get_member_string(member) {
+                    Some(path) if is_location_object_path(&path) => "location.href".to_string(),
+                    _ => member.property.name.to_string(),
+                }
+            }
+            AssignmentTarget::ComputedMemberExpression(member) => self
+                .get_computed_property_string(member)
+                .unwrap_or_default(),
+            AssignmentTarget::AssignmentTargetIdentifier(id) if id.name == "location" => {
+                "location.href".to_string()
+            }
+            _ => String::new(),
         };
+        let (right_tainted, right_source) = self.for_sink(&sink, |v| {
+            let tainted = v.is_tainted(&assign.right);
+            (
+                tainted,
+                tainted
+                    .then(|| v.find_source_in_expr(&assign.right))
+                    .flatten(),
+            )
+        });
 
         // An assignment over a numeric built-in shadows it like a
         // `function parseInt(){}` declaration does.
@@ -61,7 +80,7 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 self.analyze_onmessage_assignment(
                     assign.span(),
-                    &member.object,
+                    Some(&member.object),
                     prop_name,
                     &assign.right,
                 );
@@ -103,9 +122,10 @@ impl<'a> DomXssVisitor<'a> {
                 // would surface twice, once as `script.innerHTML` and once
                 // as the generic `innerHTML`. The script-element form is
                 // the correct one for PoC payload selection.
+                let receiver_tag = self.expr_element_tag(&member.object);
                 let is_sink = !script_text_sink
                     && self.is_assignment_sink_property(prop_name)
-                    && !(prop_name == "src" && self.expr_resolves_to_image(&member.object));
+                    && !Self::attr_is_inert_on(prop_name, receiver_tag.as_deref());
 
                 // Also check if the full member path is a sink (e.g., location.href)
                 let full_path_is_sink = if let Some(full_path) = self.get_member_string(member) {
@@ -114,7 +134,7 @@ impl<'a> DomXssVisitor<'a> {
                     false
                 };
 
-                if (is_sink || full_path_is_sink) && self.is_tainted(&assign.right) {
+                if (is_sink || full_path_is_sink) && right_tainted {
                     let sink_name = if full_path_is_sink {
                         self.get_member_string(member)
                             .unwrap_or_else(|| prop_name.to_string())
@@ -122,7 +142,13 @@ impl<'a> DomXssVisitor<'a> {
                         prop_name.to_string()
                     };
 
-                    if !self.url_sink_is_pinned(&sink_name, &assign.right) {
+                    if !self.url_sink_is_pinned(&sink_name, &assign.right)
+                        && !self.frame_src_is_pinned(
+                            prop_name,
+                            receiver_tag.as_deref(),
+                            &assign.right,
+                        )
+                    {
                         self.report_vulnerability_with_source(
                             assign.span(),
                             &sink_name,
@@ -142,12 +168,33 @@ impl<'a> DomXssVisitor<'a> {
                                 .insert(full_path.clone(), "unknown".to_string());
                         }
                     }
-                    // Also propagate to object level
-                    if let Expression::Identifier(obj_id) = &member.object {
+                    // Also propagate to object level — except onto a global:
+                    // `window.cfg = tainted` does not make `window.anything`
+                    // tainted. Nor does a value only this sink's context
+                    // leaves tainted (`item.href = escapeHtml(x)`, see
+                    // `SinkCtx`) taint its neighbours.
+                    if let Expression::Identifier(obj_id) = &member.object
+                        && self.global_alias_of(&member.object).is_none()
+                        && self.is_tainted(&assign.right)
+                    {
                         self.tainted_vars.insert(obj_id.name.to_string());
                         if let Some(source) = right_source.clone() {
                             self.var_aliases.insert(obj_id.name.to_string(), source);
                         }
+                    }
+                }
+                // A `URL` object keeps its scheme through every part but
+                // `href` / `protocol` (see `url_lead`).
+                if let Expression::Identifier(obj_id) = &member.object
+                    && let Some((lead, _)) = self.url_leads.get(obj_id.name.as_str()).copied()
+                {
+                    let name = obj_id.name.as_str();
+                    if matches!(prop_name, "href" | "protocol") {
+                        self.forget_url_lead(name);
+                    } else {
+                        let tainted =
+                            self.tainted_vars.contains(name) || self.global_taints.contains(name);
+                        self.url_leads.insert(name.to_string(), (lead, tainted));
                     }
                 }
             }
@@ -164,7 +211,7 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(property_name) = prop_name.as_deref() {
                     self.analyze_onmessage_assignment(
                         assign.span(),
-                        &member.object,
+                        Some(&member.object),
                         property_name,
                         &assign.right,
                     );
@@ -194,7 +241,10 @@ impl<'a> DomXssVisitor<'a> {
 
                 // Propagate taint to base object for computed assignments:
                 // arr[0] = location.hash; sink(arr[0])
-                if right_tainted && let Expression::Identifier(obj_id) = &member.object {
+                if right_tainted
+                    && let Expression::Identifier(obj_id) = &member.object
+                    && self.global_alias_of(&member.object).is_none()
+                {
                     self.tainted_vars.insert(obj_id.name.to_string());
                     if let Some(source) = right_source.clone() {
                         self.var_aliases.insert(obj_id.name.to_string(), source);
@@ -203,15 +253,39 @@ impl<'a> DomXssVisitor<'a> {
             }
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
+                if !self.local_names.contains(target_name) {
+                    self.analyze_onmessage_assignment(
+                        assign.span(),
+                        None,
+                        target_name,
+                        &assign.right,
+                    );
+                }
+                let old_url_lead = self.identifier_url_lead(target_name);
+                self.bind_global_alias(target_name, &assign.right);
+                let url_lead = match assign.operator {
+                    AssignmentOperator::Assign => self.url_lead(&assign.right),
+                    AssignmentOperator::Addition => {
+                        Self::appended_url_lead(old_url_lead, self.url_lead(&assign.right))
+                    }
+                    _ if Self::assignment_keeps_old_value(assign) => {
+                        old_url_lead.max(self.url_lead(&assign.right))
+                    }
+                    // Arithmetic: a number, which the taint rules handle.
+                    _ => UrlLead::Open,
+                };
                 if self.expr_is_page_url_object(&assign.right) {
                     self.page_url_objects.insert(target_name.to_string());
                 } else {
                     self.page_url_objects.remove(target_name);
                 }
-                if self.expr_resolves_to_image(&assign.right) {
-                    self.image_element_vars.insert(target_name.to_string());
-                } else {
-                    self.image_element_vars.remove(target_name);
+                match self.expr_element_tag(&assign.right) {
+                    Some(tag) => {
+                        self.element_tag_vars.insert(target_name.to_string(), tag);
+                    }
+                    None => {
+                        self.element_tag_vars.remove(target_name);
+                    }
                 }
                 let mut assigned_instance_class = false;
                 self.clear_instance_field_taints(target_name);
@@ -259,7 +333,7 @@ impl<'a> DomXssVisitor<'a> {
                     if let Some(source) = right_source.clone() {
                         self.var_aliases.insert(target_name.to_string(), source);
                     }
-                } else if self.branch_depth == 0 {
+                } else if self.branch_depth == 0 && !Self::assignment_keeps_old_value(assign) {
                     // Reassigning a previously-tainted variable to a clean or
                     // sanitized value clears its taint — e.g.
                     // `x = location.hash; x = DOMPurify.sanitize(x)` or
@@ -277,18 +351,74 @@ impl<'a> DomXssVisitor<'a> {
                     // taint set on a sibling branch
                     // (`if (c) out = taint; else out = 'x'; sink(out)`).
                     self.tainted_vars.remove(target_name);
-                    self.var_aliases.remove(target_name);
+                    if !self.global_taints.contains(target_name) {
+                        self.var_aliases.remove(target_name);
+                    }
                 }
+                self.set_url_lead(target_name, old_url_lead, url_lead);
 
                 // No sink check here: a bare `href = tainted` assigns a plain
                 // (implicit-global) variable, not the `href` property of any
                 // element. The taint is recorded above, so a later real sink
                 // (`a.href = href`) still reports.
             }
-            _ => {}
+            // `[a, b] = value` / `({ a, b } = value)` rebind each name.
+            target => {
+                let taints = right_tainted && !self.expr_is_location_object(&assign.right);
+                for name in Self::destructured_target_names(target) {
+                    self.forget_url_lead(&name);
+                    if taints {
+                        self.tainted_vars.insert(name.clone());
+                        if let Some(source) = right_source.clone() {
+                            self.var_aliases.insert(name, source);
+                        }
+                    }
+                }
+            }
         }
         // Walk the right side
-        self.walk_expression(&assign.right);
+        if !self.walk_prototype_assignment(assign) {
+            self.walk_expression(&assign.right);
+        }
+    }
+    /// The plain names a destructuring assignment target binds, one level deep.
+    fn destructured_target_names(target: &AssignmentTarget<'a>) -> Vec<String> {
+        let name = |target: &AssignmentTargetMaybeDefault<'a>| match target {
+            AssignmentTargetMaybeDefault::AssignmentTargetIdentifier(id) => {
+                Some(id.name.to_string())
+            }
+            _ => None,
+        };
+        match target {
+            AssignmentTarget::ArrayAssignmentTarget(array) => {
+                array.elements.iter().flatten().filter_map(name).collect()
+            }
+            AssignmentTarget::ObjectAssignmentTarget(object) => object
+                .properties
+                .iter()
+                .filter_map(|property| match property {
+                    AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(p) => {
+                        Some(p.binding.name.to_string())
+                    }
+                    AssignmentTargetProperty::AssignmentTargetPropertyProperty(p) => {
+                        name(&p.binding)
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+    /// `x += …` appends to what `x` held, and `x ||= …` / `x &&= …` / `x ??= …`
+    /// may leave it untouched, so a clean right-hand side does not make `x`
+    /// clean. The arithmetic forms (`-=`, `*=`, …) always produce a number.
+    fn assignment_keeps_old_value(assign: &AssignmentExpression<'a>) -> bool {
+        matches!(
+            assign.operator,
+            AssignmentOperator::Addition
+                | AssignmentOperator::LogicalOr
+                | AssignmentOperator::LogicalAnd
+                | AssignmentOperator::LogicalNullish
+        )
     }
     /// Attributes whose value is script or a script-bearing URL when set via
     /// `setAttribute`/`setAttributeNS`/`Reflect.apply` (`name` is lowercased).
@@ -300,6 +430,21 @@ impl<'a> DomXssVisitor<'a> {
                 name,
                 "href" | "xlink:href" | "srcdoc" | "src" | "formaction"
             )
+    }
+    /// `attr` set on an element of `tag` cannot run script: `src` on media
+    /// elements loads a picture, a clip or a caption track, and a `<link>`'s
+    /// `href` a stylesheet or a preload.
+    fn attr_is_inert_on(attr: &str, tag: Option<&str>) -> bool {
+        match (attr, tag) {
+            ("src", Some(tag)) => matches!(tag, "img" | "video" | "audio" | "source" | "track"),
+            ("href", Some("link")) => true,
+            _ => false,
+        }
+    }
+    /// A frame's `src` navigates the frame, so — unlike a script's, which is
+    /// dangerous through its host — a fixed scheme makes it harmless.
+    fn frame_src_is_pinned(&self, attr: &str, tag: Option<&str>, value: &Expression<'a>) -> bool {
+        attr == "src" && matches!(tag, Some("iframe" | "frame")) && self.url_scheme_is_pinned(value)
     }
     /// jQuery methods with no same-named native sink: `.wrap*` /
     /// `.replaceWith` parse an HTML string (native `replaceWith` inserts text),
@@ -416,16 +561,20 @@ impl<'a> DomXssVisitor<'a> {
                     // `action` only counts on a real `<form>` receiver, never by
                     // name alone (see `form.action` in the assignment path).
                     let receiver = self.get_callee_object_expr(&call.callee);
+                    let receiver_tag = receiver.and_then(|recv| self.expr_element_tag(recv));
                     let dangerous = (Self::is_dangerous_attr_name(&name)
-                        && !(name == "src"
-                            && receiver.is_some_and(|recv| self.expr_resolves_to_image(recv))))
+                        && !Self::attr_is_inert_on(&name, receiver_tag.as_deref()))
                         || (name == "action"
                             && receiver.is_some_and(|recv| self.expr_resolves_to_form(recv)));
                     if dangerous && let Some(arg1) = call.arguments.get(1) {
-                        let (tainted, source_hint) = self.argument_taint_and_source(arg1);
-                        let pinned = arg1
-                            .as_expression()
-                            .is_some_and(|e| self.url_sink_is_pinned(&name, e));
+                        let (tainted, source_hint) = self
+                            .for_sink(&format!("setAttribute:{name}"), |v| {
+                                v.argument_taint_and_source(arg1)
+                            });
+                        let pinned = arg1.as_expression().is_some_and(|e| {
+                            self.url_sink_is_pinned(&name, e)
+                                || self.frame_src_is_pinned(&name, receiver_tag.as_deref(), e)
+                        });
                         if tainted && !pinned {
                             self.report_vulnerability_with_source(
                                 call.span(),
@@ -561,10 +710,7 @@ impl<'a> DomXssVisitor<'a> {
         let mut summary_key = self.get_summary_key_for_callee_expr(&call.callee);
         if let Expression::Identifier(id) = &call.callee
             && (summary_key.is_none()
-                || summary_key
-                    .as_ref()
-                    .and_then(|k| self.function_summaries.get(k))
-                    .is_none())
+                || summary_key.as_ref().and_then(|k| self.summary(k)).is_none())
         {
             summary_key = self
                 .bound_function_aliases
@@ -574,26 +720,41 @@ impl<'a> DomXssVisitor<'a> {
         }
         let alias_owned = self.get_alias_for_callee_identifier(call).cloned();
         if let Some(callee_key) = summary_key.as_ref()
-            && let Some(param_sinks) = self.function_summaries.get(callee_key).map(|summary| {
-                summary
-                    .tainted_param_sinks
-                    .iter()
-                    .map(|(idx, sink)| (*idx, sink.clone()))
-                    .collect::<Vec<_>>()
+            && let Some((param_sinks, pinned_sinks)) = self.summary(callee_key).map(|summary| {
+                (
+                    summary.tainted_param_sinks.clone(),
+                    summary.pinned_param_sinks.clone(),
+                )
             })
         {
             for (idx, sink_name) in param_sinks {
                 let (tainted, source_hint) =
                     self.resolve_param_argument_taint(call, alias_owned.as_ref(), idx);
-                if tainted {
-                    self.report_vulnerability_with_source(call.span(), &sink_name, source_hint);
-                    break;
+                if !tainted {
+                    continue;
                 }
+                // The helper navigates to its argument (`a.href = url`, the
+                // anchor-as-URL-parser idiom included): `parse(location.href)`
+                // is as pinned there as the direct write would be, and only
+                // reaches what the helper does with it besides.
+                let pinned = alias_owned.is_none()
+                    && call
+                        .arguments
+                        .get(idx)
+                        .and_then(|arg| arg.as_expression())
+                        .is_some_and(|arg| self.url_sink_is_pinned(&sink_name, arg));
+                let sink_name = match (pinned, pinned_sinks.get(&idx)) {
+                    (false, _) => sink_name,
+                    (true, Some(sink)) => sink.clone(),
+                    (true, None) => continue,
+                };
+                self.report_vulnerability_with_source(call.span(), &sink_name, source_hint);
+                break;
             }
         }
         if let Some(writes) = summary_key
             .as_ref()
-            .and_then(|key| self.function_summaries.get(key))
+            .and_then(|key| self.summary(key))
             .map(|summary| summary.tainted_param_writes.clone())
         {
             for (idx, (fields, globals)) in writes {
@@ -607,6 +768,7 @@ impl<'a> DomXssVisitor<'a> {
                     self.field_taints.insert(path, source.clone());
                 }
                 for name in globals {
+                    self.forget_url_lead(&name);
                     self.var_aliases.insert(name.clone(), source.clone());
                     self.global_taints.insert(name);
                 }
@@ -675,7 +837,8 @@ impl<'a> DomXssVisitor<'a> {
                 if first_arg_only && idx != 0 {
                     continue;
                 }
-                let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                let (is_arg_tainted, source_hint) =
+                    self.for_sink(&func_name, |v| v.argument_taint_and_source(arg));
                 let pinned = arg
                     .as_expression()
                     .is_some_and(|e| self.url_sink_is_pinned(&func_name, e));
@@ -703,7 +866,9 @@ impl<'a> DomXssVisitor<'a> {
             let mut tainted_source: Option<String> = None;
 
             match method.as_str() {
-                "push" | "unshift" => {
+                // `add` too: a `Set` of origins filled from the query string
+                // is no allowlist (see `guards::membership_target`).
+                "push" | "unshift" | "add" => {
                     for arg in &call.arguments {
                         let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
                         if is_arg_tainted {
@@ -774,21 +939,20 @@ impl<'a> DomXssVisitor<'a> {
             let mut target_summary_key = self.get_summary_key_for_callee_expr(target_expr);
             if target_summary_key
                 .as_ref()
-                .and_then(|k| self.function_summaries.get(k))
+                .and_then(|k| self.summary(k))
                 .is_none()
                 && let Some(alias) = target_alias_owned.as_ref()
             {
                 target_summary_key = Some(alias.target.clone());
             }
             if let Some(summary_key) = target_summary_key
-                && let Some(param_sinks) =
-                    self.function_summaries.get(&summary_key).map(|summary| {
-                        summary
-                            .tainted_param_sinks
-                            .iter()
-                            .map(|(idx, sink)| (*idx, sink.clone()))
-                            .collect::<Vec<_>>()
-                    })
+                && let Some(param_sinks) = self.summary(&summary_key).map(|summary| {
+                    summary
+                        .tainted_param_sinks
+                        .iter()
+                        .map(|(idx, sink)| (*idx, sink.clone()))
+                        .collect::<Vec<_>>()
+                })
             {
                 for (idx, sink_name) in param_sinks {
                     let (tainted, source_hint) = self.resolve_wrapper_param_argument_taint(
@@ -899,7 +1063,7 @@ impl<'a> DomXssVisitor<'a> {
 
             if target_summary_key
                 .as_ref()
-                .and_then(|k| self.function_summaries.get(k))
+                .and_then(|k| self.summary(k))
                 .is_none()
                 && let Some(alias) = target_alias_owned.as_ref()
             {
@@ -907,14 +1071,13 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             if let Some(summary_key) = target_summary_key
-                && let Some(param_sinks) =
-                    self.function_summaries.get(&summary_key).map(|summary| {
-                        summary
-                            .tainted_param_sinks
-                            .iter()
-                            .map(|(idx, sink)| (*idx, sink.clone()))
-                            .collect::<Vec<_>>()
-                    })
+                && let Some(param_sinks) = self.summary(&summary_key).map(|summary| {
+                    summary
+                        .tainted_param_sinks
+                        .iter()
+                        .map(|(idx, sink)| (*idx, sink.clone()))
+                        .collect::<Vec<_>>()
+                })
             {
                 for (idx, sink_name) in param_sinks {
                     let (tainted, source_hint) = self.resolve_reflect_apply_param_argument_taint(
@@ -1037,44 +1200,40 @@ impl<'a> DomXssVisitor<'a> {
             && call.arguments.len() >= 2
         {
             let event_source = self.event_listener_source(&member.object, call.arguments.first());
-
-            // The second argument might be a function with event parameter
-            if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
-                // Mark the first parameter as tainted (it's the event object)
-                if let Some(body) = &func.body
-                    && let Some(event_source) = event_source.as_deref()
-                    && self.with_own_this(|v| {
+            let (Some(event_source), Some(handler)) = (
+                event_source.as_deref(),
+                call.arguments.get(1).and_then(|arg| arg.as_expression()),
+            ) else {
+                return false;
+            };
+            // The handler's first parameter is the event object.
+            let handler = self.unwrap_handler(handler);
+            let walked = match handler {
+                Expression::FunctionExpression(func) => func.body.as_ref().is_some_and(|body| {
+                    self.with_own_this(|v| {
                         v.walk_event_handler_param(
                             func.params.items.first(),
                             event_source,
                             &body.statements,
                         )
                     })
-                {
-                    return true;
-                }
-            }
-            // Also handle arrow functions
-            if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
-                && let Some(event_source) = event_source.as_deref()
-                && self.walk_event_handler_param(
+                }),
+                Expression::ArrowFunctionExpression(arrow) => self.walk_event_handler_param(
                     arrow.params.items.first(),
                     event_source,
                     &arrow.body.statements,
-                )
-            {
+                ),
+                _ => false,
+            };
+            if walked {
                 return true;
             }
 
             // Handle named callback references:
             // window.addEventListener('message', handleMessage)
-            if let Some(event_source) = event_source.as_deref()
-                && let Some(Argument::Identifier(handler_id)) = call.arguments.get(1)
-                && let Some(sink_name) = self
-                    .function_summaries
-                    .get(handler_id.name.as_str())
-                    .and_then(|summary| summary.tainted_param_sinks.get(&0))
-                    .cloned()
+            if let Some(sink_name) = self
+                .handler_summary_key(handler)
+                .and_then(|key| self.summary_handler_sink(&key, event_source))
             {
                 self.report_vulnerability_with_source(
                     call.span(),
@@ -1095,10 +1254,17 @@ impl<'a> DomXssVisitor<'a> {
         // constant `#`/`.`/tag prefix — see `jquery_arg_forces_selector`.
         if let Expression::Identifier(id) = &call.callee
             && (id.name == "$" || id.name == "jQuery")
+            // A script that defines its own `$` (minified bundles do) is not
+            // calling jQuery's.
+            // ponytail: summaries are keyed by bare name, so one `$` helper
+            // anywhere in a bundle switches the sink off for all of it.
+            && !self.function_summaries.contains_key(id.name.as_str())
             && let Some(arg0) = call.arguments.first()
             && let Some(arg_expr) = arg0.as_expression()
             && self.is_tainted(arg_expr)
             && !self.jquery_arg_forces_selector(arg_expr)
+            // `$(location).attr('href')` wraps the object; nothing is parsed.
+            && !self.expr_is_location_object(arg_expr)
         {
             let source = self.find_source_in_expr(arg_expr);
             // A sink nested in the argument (`$(eval(location.hash))`) is
@@ -1427,7 +1593,37 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
         }
+        // `(function (w, d) { … })(window, document)`.
+        self.pending_param_aliases = params
+            .items
+            .iter()
+            .zip(&call.arguments)
+            .filter_map(|(param, arg)| {
+                let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+                    return None;
+                };
+                let global = self.global_alias_of(arg.as_expression()?)?;
+                (global != id.name.as_str()).then(|| (id.name.to_string(), global))
+            })
+            .collect();
+        // `(function (App, $) { … })(App, jQuery)`: `App` inside is `App` outside.
+        self.iife_passthrough = params
+            .items
+            .iter()
+            .zip(&call.arguments)
+            .filter_map(|(param, arg)| {
+                let BindingPattern::BindingIdentifier(id) = &param.pattern else {
+                    return None;
+                };
+                // …unless the outer one is itself a parameter.
+                (matches!(arg.as_expression()?, Expression::Identifier(outer) if outer.name == id.name)
+                    && !self.shadow_params.contains(id.name.as_str()))
+                .then(|| id.name.to_string())
+            })
+            .collect();
         self.walk_function_literal_body_seeded(params, statements, &seeds);
+        self.pending_param_aliases.clear();
+        self.iife_passthrough.clear();
         self.walk_callback_argument_bodies(call);
         true
     }
@@ -1503,7 +1699,7 @@ fn is_location_object_path(path: &str) -> bool {
 /// Strips one leading `window.`, `globalThis.`, `self.` or `top.` prefix
 /// (`window.parseInt` → `parseInt`). Other names, including `parent.`, are
 /// returned unchanged.
-fn strip_global_object(name: &str) -> &str {
+pub(super) fn strip_global_object(name: &str) -> &str {
     ["window.", "globalThis.", "self.", "top."]
         .iter()
         .find_map(|p| name.strip_prefix(p))
