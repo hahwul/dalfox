@@ -15,8 +15,12 @@ use super::*;
 /// and the debug estimate in `cmd::scan::analysis` route through this same
 /// function, so all surfaces quote one number.
 ///
-/// Still a lower bound: WAF mutation/encoder expansion and the shared CSP/tech
-/// payloads appended after the cap are not counted, matching the CLI's caveat.
+/// An approximation in both directions. It quotes high where the scan saves
+/// requests: wire-identical repeats (`dedup_wire_identical`, query params) and
+/// DOM payloads whose response the reflection phase already had are not
+/// subtracted. It quotes low where the scan adds them: WAF mutation/encoder
+/// expansion and the shared CSP/tech payloads appended after the cap are not
+/// counted, matching the CLI's caveat.
 pub(crate) fn estimate_param_requests(
     p: &Param,
     scan_args: &ScanArgs,
@@ -70,6 +74,77 @@ pub(crate) fn http_scannable_param_count(target: &Target) -> usize {
         .filter(|p| param_is_http_scannable(p))
         .count()
 }
+/// Drop every payload that puts the same request on the wire as an earlier one,
+/// keeping the first (issue #1661), and stop once `limit` distinct requests are
+/// kept (`0` = no limit). Returns the kept payloads and how many input payloads
+/// were left unexamined past the limit.
+///
+/// For a query parameter a payload and its `url` encoding are one request: the
+/// injector percent-encodes raw bytes with the same table `url_encode` uses and
+/// passes existing `%XX` through, so with the default `url,html` encoders every
+/// query payload used to be sent twice. The key is the encoded value the
+/// injector writes into the URL (the rest of the URL is fixed per parameter),
+/// so only exact wire repeats collapse. Other locations only drop exact
+/// repeats of the same payload: their builders escape `%` (form bodies, JSON,
+/// path segments), so an encoder variant there is a different request and
+/// survives.
+///
+/// The original precedes its encoder variants in every catalog, so the raw form
+/// is normally the one kept — the form the response analysis is written
+/// against. The exception is a param whose probe found `<`/`>` blocked: the
+/// angle prune drops the raw form but keeps its `%3C` twin, and that twin was
+/// how the request reached the wire before this dedup existed. The group's
+/// first slot then takes the twin's string, so the same request is still sent
+/// and analysed as it was.
+///
+/// The limit is the per-parameter payload cap: everything past it would be
+/// truncated anyway, and the unknown-context catalogs run to tens of thousands
+/// of payloads, so walking them whole cost more CPU than the scan of a typical
+/// reflecting parameter.
+pub(crate) fn dedup_wire_identical(
+    payloads: Vec<String>,
+    param: &Param,
+    limit: usize,
+) -> (Vec<String>, usize) {
+    let is_query = param.location == crate::parameter_analysis::Location::Query;
+    let invalid = param.invalid_specials.as_deref().unwrap_or_default();
+    let total = payloads.len();
+    let room = if limit == 0 { total } else { limit.min(total) };
+    let mut slot_of: HashMap<String, usize> = HashMap::with_capacity(room);
+    let mut out: Vec<String> = Vec::with_capacity(room);
+    // Most params carry no pre-encoding; skip its per-payload copy then.
+    let plain = param
+        .pre_encoding_pipeline
+        .as_ref()
+        .is_none_or(|pipeline| pipeline.is_empty())
+        && param.pre_encoding.is_none();
+    for (idx, p) in payloads.into_iter().enumerate() {
+        // Off the query string the payload itself is the key: pre-encoding is
+        // deterministic, and for XML/GraphQL bodies it rebuilds the whole
+        // document, which would make every key a full request body.
+        let key = match (is_query, plain) {
+            (true, true) => crate::scanning::url_inject::query_wire_value(&p),
+            (true, false) => crate::scanning::url_inject::query_wire_value(
+                &crate::encoding::pre_encoding::apply_param_encoding(&p, param),
+            ),
+            (false, _) => p.clone(),
+        };
+        match slot_of.get(&key) {
+            Some(&slot) => {
+                if raw_angle_pruned(&out[slot], invalid) && !raw_angle_pruned(&p, invalid) {
+                    out[slot] = p;
+                }
+            }
+            None if limit > 0 && out.len() == limit => return (out, total - idx),
+            None => {
+                slot_of.insert(key, out.len());
+                out.push(p);
+            }
+        }
+    }
+    (out, 0)
+}
+
 pub(crate) fn generate_param_jobs(
     target: &Target,
     args: &ScanArgs,
@@ -182,24 +257,23 @@ pub(crate) fn generate_param_jobs(
         // the params it was selected for. Capping first lets each surviving base
         // payload keep its full bypass expansion; with no WAF the set is unchanged
         // by expansion, so the self-link amplification is still bounded to `cap`.
+        // Wire repeats are dropped before the cap so they cannot spend its slots.
         let cap = effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
-        if cap > 0 {
-            let refl_dropped = reflection_payloads.len().saturating_sub(cap);
-            let dom_dropped = dom_payloads.len().saturating_sub(cap);
-            reflection_payloads.truncate(cap);
-            dom_payloads.truncate(cap);
-            // Surface the built-in cap (an explicit user cap is the operator's own
-            // deliberate choice, not a silent one) so a trimmed run is never
-            // silent — "No silent caps".
-            if args.max_payloads_per_param == 0 && (refl_dropped > 0 || dom_dropped > 0) {
-                crate::dbg_log!(
-                    "param {}: built-in payload safety cap {} trimmed {} reflection + {} DOM base payload(s); raise with --max-payloads-per-param or --deep-scan",
-                    param.name,
-                    cap,
-                    refl_dropped,
-                    dom_dropped
-                );
-            }
+        let refl_dropped;
+        let dom_dropped;
+        (reflection_payloads, refl_dropped) = dedup_wire_identical(reflection_payloads, param, cap);
+        (dom_payloads, dom_dropped) = dedup_wire_identical(dom_payloads, param, cap);
+        // Surface the built-in cap (an explicit user cap is the operator's own
+        // deliberate choice, not a silent one) so a trimmed run is never
+        // silent — "No silent caps".
+        if args.max_payloads_per_param == 0 && (refl_dropped > 0 || dom_dropped > 0) {
+            crate::dbg_log!(
+                "param {}: built-in payload safety cap {} left {} reflection + {} DOM base payload(s) unsent (wire repeats among them included); raise with --max-payloads-per-param or --deep-scan",
+                param.name,
+                cap,
+                refl_dropped,
+                dom_dropped
+            );
         }
 
         // Apply WAF bypass expansion if a WAF was detected. The two bypass
@@ -280,6 +354,13 @@ pub(crate) fn generate_param_jobs(
             crate::scanning::xss_common::apply_custom_alert_substitution(reflection_payloads, args);
         dom_payloads =
             crate::scanning::xss_common::apply_custom_alert_substitution(dom_payloads, args);
+        // Again when WAF expansion or the shared append ran: both add encoder
+        // variants that can repeat a request already in the set. Skipped
+        // otherwise — the pass costs milliseconds per parameter.
+        if waf_strategy.is_some() || !shared_payloads.is_empty() {
+            reflection_payloads = dedup_wire_identical(reflection_payloads, param, 0).0;
+            dom_payloads = dedup_wire_identical(dom_payloads, param, 0).0;
+        }
 
         // One pb.inc(1) per reflection payload plus one per DOM payload.
         // The previous `len * (1 + len)` formula overcounted by orders of

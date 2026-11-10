@@ -2475,6 +2475,11 @@ struct FetchedInjection {
     body: Option<ReflectionBody>,
     status: u16,
     xml_content_type: bool,
+    /// The DOM-verification verdict for this same response, when the caller
+    /// asked for it and the response is one the DOM phase may reuse instead of
+    /// sending the identical request again (issue #1661). `None` whenever the
+    /// body was not read (inert-data/attachment gates, transport errors).
+    dom: Option<crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome>,
 }
 
 tokio::task_local! {
@@ -2731,12 +2736,14 @@ async fn fetch_injection_response(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
+    want_dom: bool,
 ) -> FetchedInjection {
     if args.skip_xss_scanning {
         return FetchedInjection {
             body: None,
             status: 0,
             xml_content_type: false,
+            dom: None,
         };
     }
 
@@ -2957,6 +2964,7 @@ async fn fetch_injection_response(
                             body: Some(body.0),
                             status: 0,
                             xml_content_type: body.1,
+                            dom: None,
                         };
                     }
                     if fallback_body.is_none() {
@@ -2991,6 +2999,7 @@ async fn fetch_injection_response(
                 body: inject_body.map(|(body, _)| body),
                 status: 0,
                 xml_content_type,
+                dom: None,
             };
         }
         let (body, xml_content_type) = fallback_body
@@ -3000,6 +3009,7 @@ async fn fetch_injection_response(
             body,
             status: 0,
             xml_content_type,
+            dom: None,
         }
     } else {
         // Normal reflection check
@@ -3021,6 +3031,27 @@ async fn fetch_injection_response(
             // Adaptive WAF accounting (per-worker streak + cooldown + telemetry).
             apply_injection_waf_accounting(status_code, target, args, streak).await;
 
+            // DOM-phase reuse (#1661): when the caller will DOM-verify this same
+            // payload later, compute that verdict from this response instead of
+            // having the DOM phase send the identical request again. It mirrors
+            // `check_dom_verification::verify_normal_dom` exactly: a redirect,
+            // an `--ignore-return` status or an attachment is status-only, anything else is
+            // judged on the body — read here *before* the reflection gates drop
+            // it, because the DOM verdict does not apply them.
+            let dom_status_only = want_dom
+                && crate::scanning::check_dom_verification::dom_outcome_is_status_only(
+                    status_code,
+                    &args.ignore_return,
+                    resp.headers(),
+                );
+            let status_only_dom = || {
+                dom_status_only.then(|| {
+                    crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome::status_only(
+                        status_code,
+                    )
+                })
+            };
+
             // `--ignore-return`, inert-data content-types, and the Path-only
             // redirect / non-markup drops. Shared with the `--sxss` branch above.
             if injection_response_suppressed(status_code, resp.headers(), param, args) {
@@ -3028,6 +3059,7 @@ async fn fetch_injection_response(
                     body: None,
                     status: status_code,
                     xml_content_type: false,
+                    dom: status_only_dom(),
                 };
             }
             // Check for redirect context: if the response is a 3xx redirect,
@@ -3059,16 +3091,30 @@ async fn fetch_injection_response(
                     body: Some(ReflectionBody::redirect_location(status_code, location)),
                     status: status_code,
                     xml_content_type: false,
+                    dom: status_only_dom(),
                 };
             }
             let followed_redirect = is_followed_redirect(&resp);
             match crate::utils::http::read_body_counted(resp).await {
                 Ok(body) => {
+                    let dom = if dom_status_only {
+                        status_only_dom()
+                    } else {
+                        want_dom.then(|| {
+                            crate::scanning::check_dom_verification::verify_dom_response_text(
+                                status_code,
+                                &content_type,
+                                &body,
+                                payload,
+                            )
+                        })
+                    };
                     if !response_body_supports_xss(&content_type, &body) {
                         return FetchedInjection {
                             body: None,
                             status: status_code,
                             xml_content_type: false,
+                            dom,
                         };
                     }
                     // Body-aware Path suppression for 4xx/5xx: keep the
@@ -3092,6 +3138,7 @@ async fn fetch_injection_response(
                             body: None,
                             status: status_code,
                             xml_content_type: false,
+                            dom,
                         };
                     }
                     let mut body =
@@ -3101,6 +3148,7 @@ async fn fetch_injection_response(
                         body: Some(body),
                         status: status_code,
                         xml_content_type,
+                        dom,
                     }
                 }
                 Err(e) => {
@@ -3113,6 +3161,7 @@ async fn fetch_injection_response(
                         body: None,
                         status: status_code,
                         xml_content_type: false,
+                        dom: None,
                     }
                 }
             }
@@ -3122,6 +3171,7 @@ async fn fetch_injection_response(
                 body: None,
                 status: 0,
                 xml_content_type: false,
+                dom: None,
             }
         }
     }
@@ -3147,11 +3197,37 @@ pub async fn check_reflection_with_response(
     args: &crate::cmd::scan::ScanArgs,
     streak: &std::sync::atomic::AtomicU32,
 ) -> (Option<ReflectionKind>, Option<ReflectionBody>, u16, bool) {
+    let (kind, body, status, xml_content_type, _) =
+        check_reflection_with_dom_outcome(client, target, param, payload, args, streak, false)
+            .await;
+    (kind, body, status, xml_content_type)
+}
+
+/// [`check_reflection_with_response`] that, when `want_dom`, also returns the
+/// DOM-verification verdict for the same response (see
+/// `FetchedInjection::dom`), so the scan worker's DOM phase can skip a request
+/// it would otherwise send byte-for-byte again (issue #1661).
+pub(crate) async fn check_reflection_with_dom_outcome(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+    streak: &std::sync::atomic::AtomicU32,
+    want_dom: bool,
+) -> (
+    Option<ReflectionKind>,
+    Option<ReflectionBody>,
+    u16,
+    bool,
+    Option<crate::scanning::check_dom_verification::DomVerifyEvidenceOutcome>,
+) {
     let FetchedInjection {
         body,
         status,
         xml_content_type,
-    } = fetch_injection_response(client, target, param, payload, args, streak).await;
+        dom,
+    } = fetch_injection_response(client, target, param, payload, args, streak, want_dom).await;
     if let Some(body) = body {
         let kind = classify_reflection(&body.text, payload);
         let kind = match kind {
@@ -3164,9 +3240,9 @@ pub async fn check_reflection_with_response(
             Some(_) if args.sxss && !sxss_injection_credited(&body.text, payload) => None,
             other => other,
         };
-        (kind, Some(body), status, xml_content_type)
+        (kind, Some(body), status, xml_content_type, dom)
     } else {
-        (None, None, status, xml_content_type)
+        (None, None, status, xml_content_type, dom)
     }
 }
 

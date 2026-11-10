@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-09-13T09:06:09Z",
+  "generated_at": "2026-11-10T14:51:53Z",
   "tool": "perf_budget",
-  "dalfox_version": "3.2.2",
+  "dalfox_version": "3.3.0",
   "scan_args": [
     "--skip-mining",
     "--timeout",
@@ -15,13 +15,13 @@
       "requests": 21,
       "reported_requests": 21,
       "requests_per_param": 21.0,
-      "duration_s": 0.015,
+      "duration_s": 0.026,
       "findings": 1,
       "verified": 1,
       "timed_out": false,
       "bytes_sent": 2175,
       "distinct_payloads": 6,
-      "requests_per_second": 2397.81
+      "requests_per_second": 1469.46
     },
     "reflect_all": {
       "path": "/reflect-all",
@@ -30,13 +30,13 @@
       "requests": 22,
       "reported_requests": 22,
       "requests_per_param": 22.0,
-      "duration_s": 0.01,
+      "duration_s": 0.013,
       "findings": 1,
       "verified": 1,
       "timed_out": false,
       "bytes_sent": 4900,
       "distinct_payloads": 7,
-      "requests_per_second": 5774.28
+      "requests_per_second": 4340.11
     },
     "many": {
       "path": "/many",
@@ -45,28 +45,28 @@
       "requests": 33,
       "reported_requests": 33,
       "requests_per_param": 6.6,
-      "duration_s": 0.025,
+      "duration_s": 0.037,
       "findings": 5,
       "verified": 5,
       "timed_out": false,
       "bytes_sent": 6018,
       "distinct_payloads": 9,
-      "requests_per_second": 1661.05
+      "requests_per_second": 1130.33
     },
     "inert": {
       "path": "/inert",
       "note": "HTML-escaped, nothing exploitable (wasted work)",
       "params": 1,
-      "requests": 622,
-      "reported_requests": 622,
-      "requests_per_param": 622.0,
+      "requests": 456,
+      "reported_requests": 456,
+      "requests_per_param": 456.0,
       "duration_s": 0.036,
       "findings": 0,
       "verified": 0,
       "timed_out": false,
-      "bytes_sent": 135781,
-      "distinct_payloads": 265,
-      "requests_per_second": 20113.83
+      "bytes_sent": 133890,
+      "distinct_payloads": 440,
+      "requests_per_second": 15849.84
     },
     "slow": {
       "path": "/slow",
@@ -75,18 +75,18 @@
       "requests": 21,
       "reported_requests": 21,
       "requests_per_param": 21.0,
-      "duration_s": 0.581,
+      "duration_s": 0.579,
       "findings": 1,
       "verified": 1,
       "timed_out": false,
       "bytes_sent": 2175,
       "distinct_payloads": 6,
-      "requests_per_second": 40.21
+      "requests_per_second": 40.93
     }
   },
   "total": {
-    "requests": 719,
-    "duration_s": 0.667,
+    "requests": 553,
+    "duration_s": 0.691,
     "findings": 8
   }
 }

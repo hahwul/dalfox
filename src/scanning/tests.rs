@@ -6145,3 +6145,130 @@ async fn sxss_upload_filename_is_found_on_a_later_sxss_url() {
         "stored upload filename must verify on /list: {results:?}"
     );
 }
+
+/// Issue #1661: a query payload and its `url` encoding are one wire request, so
+/// only the first survives; other locations escape `%` and keep both.
+#[test]
+fn dedup_wire_identical_collapses_query_encoder_twins_only() {
+    let raw = "<svg onload=alert(1)>".to_string();
+    let twin = crate::encoding::url_encode(&raw);
+    let other = "\"><img src=x>".to_string();
+    let payloads = vec![raw.clone(), twin.clone(), other.clone(), raw.clone()];
+
+    let query = Param::new("q", "a", Location::Query);
+    assert_eq!(
+        dedup_wire_identical(payloads.clone(), &query, 0).0,
+        vec![raw.clone(), other.clone()]
+    );
+
+    // The cap counts distinct requests: a twin does not spend a slot, and the
+    // payloads past the cap are reported as unexamined.
+    assert_eq!(
+        dedup_wire_identical(
+            vec![raw.clone(), twin.clone(), other.clone(), "x".to_string()],
+            &query,
+            1
+        ),
+        (vec![raw.clone()], 2)
+    );
+
+    // Form bodies percent-encode `%`, so the twin is a different request.
+    let body = Param::new("q", "a", Location::Body);
+    assert_eq!(
+        dedup_wire_identical(payloads, &body, 0).0,
+        vec![raw.clone(), twin.clone(), other.clone()]
+    );
+
+    // With `<` blocked, the angle prune drops the raw form but keeps its twin:
+    // the group's slot carries the twin so the request is still sent.
+    let mut blocked = Param::new("q", "a", Location::Query);
+    blocked.invalid_specials = Some(vec!['<', '>']);
+    assert_eq!(
+        dedup_wire_identical(vec![raw.clone(), twin.clone(), other.clone()], &blocked, 0).0,
+        vec![twin, other]
+    );
+}
+
+/// Issue #1661: on an endpoint that HTML-escapes every payload, the DOM phase
+/// used to re-send the requests the reflection phase had just sent. It now
+/// reuses those responses — so no payload request goes out twice — and the
+/// reused verdicts still feed its inert-echo budget, so it stops without
+/// sending a fresh batch of its own.
+#[tokio::test]
+async fn test_run_scanning_escaped_echo_sends_no_wire_repeats() {
+    use axum::{
+        Router,
+        extract::{RawQuery, State},
+        response::Html,
+        routing::get,
+    };
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    type Seen = Arc<std::sync::Mutex<HashMap<String, usize>>>;
+    async fn handler(State(seen): State<Seen>, RawQuery(raw): RawQuery) -> Html<String> {
+        let raw = raw.unwrap_or_default();
+        *seen.lock().unwrap().entry(raw.clone()).or_default() += 1;
+        let q: String = url::form_urlencoded::parse(raw.as_bytes())
+            .find(|(k, _)| k == "q")
+            .map(|(_, v)| v.into_owned())
+            .unwrap_or_default();
+        let escaped = q
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#x27;");
+        Html(format!("<html><body><p>{escaped}</p></body></html>"))
+    }
+
+    let seen: Seen = Arc::default();
+    let app = Router::new()
+        .route("/", get(handler))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let mut target = parse_target(&format!("http://{addr}/?q=a")).expect("parse_target");
+    target.reflection_params.clear();
+    target
+        .reflection_params
+        .push(Param::new("q", "a", Location::Query));
+
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        ScanRunHandles::new(results.clone(), Arc::new(AtomicUsize::new(0))),
+    )
+    .await;
+
+    let seen = seen.lock().unwrap().clone();
+    let repeats: Vec<_> = seen.iter().filter(|(_, n)| **n > 1).collect();
+    assert!(
+        repeats.is_empty(),
+        "wire requests sent more than once: {repeats:?}"
+    );
+    // Reflection phase: ~REFLECTION_INERT_ECHO_BUDGET requests. A DOM phase that
+    // did not count the reused verdicts would send ~INERT_ECHO_BUDGET more.
+    let sent: usize = seen.values().sum();
+    assert!(
+        sent < 400,
+        "DOM phase must stop on the reused echoes; sent {sent}"
+    );
+    assert!(
+        !results
+            .lock()
+            .await
+            .iter()
+            .any(|r| r.result_type == FindingType::Verified),
+        "an escaped echo never verifies"
+    );
+}

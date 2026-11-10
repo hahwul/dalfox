@@ -73,6 +73,22 @@ async fn html_handler(Query(params): Query<HashMap<String, String>>) -> Html<Str
     Html(format!("<div>{}</div>", q))
 }
 
+async fn html_attachment_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=export.html",
+            ),
+        ],
+        format!("<div>{}</div>", q),
+    )
+}
+
 async fn html_uppercase_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
     let q = params.get("q").cloned().unwrap_or_default();
     Html(format!("<div>{}</div>", q.to_uppercase()))
@@ -265,6 +281,7 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
     let app = Router::new()
         .route("/dom/html", get(html_handler))
         .route("/dom/html-upper", get(html_uppercase_handler))
+        .route("/dom/attachment", get(html_attachment_handler))
         .route("/dom/decoded", get(decoded_payload_handler))
         .route("/dom/url-attribute", get(url_attribute_handler))
         .route("/dom/url-attribute-img", get(url_attribute_img_handler))
@@ -566,6 +583,28 @@ async fn test_dom_verification_honors_ignore_return() {
     assert!(!outcome.verified, "an ignored status must not verify");
     assert!(outcome.response_text.is_none());
     assert_eq!(outcome.status, 403, "the status is still threaded out");
+}
+
+/// A `Content-Disposition: attachment` body is downloaded, never rendered, so
+/// it cannot verify — the reflection path and the `--sxss` DOM path already
+/// drop it.
+#[tokio::test]
+async fn test_dom_verification_skips_attachment_download() {
+    let payload = format!(
+        "<svg onload=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/attachment");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome = check_dom_verification_with_evidence(&client, &target, &param, &payload, &args)
+        .await
+        .outcome;
+    assert!(!outcome.verified, "a downloaded attachment must not verify");
+    assert_eq!(outcome.status, 200);
 }
 
 #[tokio::test]
@@ -2413,6 +2452,35 @@ fn test_bare_attr_handler_surviving_is_still_evidence() {
         has_marker_evidence(&payload, &body),
         "handler and marker both survive on the input; this is genuine DOM evidence"
     );
+}
+
+/// xssmaze `/waf-bypass/level3` (a non-exploitable control): the payload
+/// spells `=` as `&#61;` and the server echoes it verbatim into a quoted
+/// value. The breakout makes `onfocus&#61;alert(1)` an attribute *name* —
+/// names are not entity-decoded — so the marker sits on a live `<input>` with
+/// no handler. That is not DOM evidence.
+#[test]
+fn test_bare_attr_entity_encoded_handler_echoed_verbatim_not_evidence() {
+    let marker = crate::scanning::markers::id_marker();
+    let payload = format!("\" onfocus&#61;alert(1) autofocus id={} \"", marker);
+    let body = format!(
+        "<html><body><input type=\"text\" value=\"{}\"></body></html>",
+        payload
+    );
+    assert_eq!(classify_dom_evidence(&payload, &body), None);
+}
+
+/// FN guard for the case above: a server that decodes the entity before
+/// echoing produces a real `onfocus=` handler beside the marker.
+#[test]
+fn test_bare_attr_entity_encoded_handler_decoded_by_server_is_evidence() {
+    let marker = crate::scanning::markers::id_marker();
+    let payload = format!("\" onfocus&#61;alert(1) autofocus id={} \"", marker);
+    let body = format!(
+        "<html><body><input type=\"text\" value=\"\" onfocus=alert(1) autofocus id={} \"\"></body></html>",
+        marker
+    );
+    assert!(has_marker_evidence(&payload, &body));
 }
 
 /// FN guard: a bare attribute payload carrying no handler sink at all (a
